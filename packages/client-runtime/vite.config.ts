@@ -4,6 +4,7 @@ import { defineConfig } from "vite-plus";
 export default defineConfig({
   test: {
     environment: "node",
-    include: ["src/**/*.test.ts"],
+    dir: "../../tests/packages/client-runtime",
+    include: ["**/*.test.ts"],
   },
 });

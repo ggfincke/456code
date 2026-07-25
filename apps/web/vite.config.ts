@@ -7,7 +7,15 @@ import "vite-plus/test/config";
 import { defineConfig } from "vite-plus";
 import pkg from "./package.json" with { type: "json" };
 
+import * as NodeURL from "node:url";
+
 import { loadRepoEnv } from "../../scripts/lib/public-config";
+
+// tsconfigPaths only applies "~/*" to files it considers part of this package,
+// so the relocated tests under repo-root tests/apps/web can't resolve it. An
+// explicit alias mirrors apps/web/tsconfig.json's paths for every importer,
+// which also keeps vi.mock("~/…") ids identical to the ids the sources import.
+const webSrcDir = NodeURL.fileURLToPath(new URL("./src", import.meta.url));
 
 const repoEnv = loadRepoEnv();
 Object.assign(process.env, repoEnv);
@@ -53,7 +61,8 @@ const unitTestProject = {
   extends: true,
   test: {
     name: "unit",
-    include: ["src/**/*.test.{ts,tsx}"],
+    dir: "../../tests/apps/web",
+    include: ["**/*.test.{ts,tsx}"],
     // The web runtime suite exercises auth bootstrap, saved environments,
     // and websocket subscription lifecycles. Under the full monorepo test
     // run, those async tests can exceed Vitest's default 5s budget.
@@ -127,6 +136,7 @@ export default defineConfig(() => {
     resolve: {
       tsconfigPaths: true,
       dedupe: ["react", "react-dom"],
+      alias: [{ find: /^~\//, replacement: `${webSrcDir}/` }],
     },
     experimental: {
       bundledDev,

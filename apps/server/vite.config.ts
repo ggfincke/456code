@@ -46,6 +46,7 @@ export default mergeConfig(
       },
     },
     test: {
+      dir: "../../tests/apps/server",
       // The server suite exercises sqlite, git, temp worktrees, and orchestration
       // runtimes heavily. Running files in parallel introduces load-sensitive flakes.
       fileParallelism: false,

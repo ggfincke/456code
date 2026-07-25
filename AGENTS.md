@@ -2,6 +2,7 @@
 
 ## Task Completion Requirements
 
+- Tests are not colocated with sources. Every test lives under the repo-root `tests/` tree, which mirrors the source layout with the `src` segment dropped — `apps/server/src/service/bootService.ts` is tested by `tests/apps/server/service/bootService.test.ts`. New tests go there too. Each package's `vite.config.ts` points its suite at that tree via `test.dir`, so `vp test run` from a package still runs only that package's tests. `tests/package.json` is a resolution-only workspace package: a module a test imports must be declared there, including modules named solely in `vi.mock("...")`.
 - Keep local verification focused on the files and packages changed. Run the smallest relevant test set; do not run the full workspace test suite as a routine completion step.
   - Use `vp test run <test-files>` for focused built-in Vite+ tests. Use `vp run test` only when the affected package specifically requires its `test` script.
   - Backend changes must include and run focused tests for the changed behavior.

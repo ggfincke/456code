@@ -11,6 +11,9 @@ const publicConfigDefine = {
 };
 
 export default defineConfig({
+  test: {
+    dir: "../../tests/apps/desktop",
+  },
   run: {
     tasks: {
       build: {
