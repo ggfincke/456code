@@ -45,7 +45,8 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   RelayClientInstallFailedError,
-  type RelayClientInstallProgressEvent,
+  type RelayClientStatus,
+  ServerSelfUpdateError,
   OrchestrationReplayEventsError,
   type FilesystemBrowseFailure,
   FilesystemBrowseError,
@@ -78,7 +79,6 @@ import {
 } from "./observability/RpcInstrumentation.ts";
 import * as ProviderRegistry from "./provider/Services/ProviderRegistry.ts";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
-import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
 import * as ServerRuntimeStartup from "./serverRuntimeStartup.ts";
 import * as ServerSettings from "./serverSettings.ts";
@@ -115,8 +115,19 @@ import * as VcsProcess from "./vcs/VcsProcess.ts";
 import * as PairingGrantStore from "./auth/PairingGrantStore.ts";
 import * as SessionStore from "./auth/SessionStore.ts";
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from "./auth/http.ts";
-import * as RelayClient from "@t3tools/shared/relayClient";
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError);
+
+// T3 Connect is not part of this build. The contract-defined cloud and
+// self-update RPCs stay registered so the WS method registry is complete, and
+// report themselves as unavailable instead of pretending to work.
+const SERVER_SELF_UPDATE_UNAVAILABLE = "This server does not support remote updates.";
+const RELAY_CLIENT_UNAVAILABLE_MESSAGE = "This server does not support the relay client.";
+const RELAY_CLIENT_UNAVAILABLE_STATUS = {
+  status: "unsupported",
+  platform: "unsupported",
+  arch: "unsupported",
+  version: "",
+} as const satisfies RelayClientStatus;
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -420,7 +431,6 @@ const makeWsRpcLayer = (
       const portDiscovery = yield* PortScanner.PortDiscovery;
       const providerRegistry = yield* ProviderRegistry.ProviderRegistry;
       const providerMaintenanceRunner = yield* ProviderMaintenanceRunner.ProviderMaintenanceRunner;
-      const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
       const config = yield* ServerConfig.ServerConfig;
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
@@ -447,7 +457,6 @@ const makeWsRpcLayer = (
       const sessions = yield* SessionStore.SessionStore;
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
-      const relayClient = yield* RelayClient.RelayClient;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -1479,10 +1488,14 @@ const makeWsRpcLayer = (
               "rpc.aggregate": "server",
             },
           ),
-        [WS_METHODS.serverUpdateServer]: (input) =>
-          observeRpcEffect(WS_METHODS.serverUpdateServer, serverSelfUpdate.update(input), {
-            "rpc.aggregate": "server",
-          }),
+        [WS_METHODS.serverUpdateServer]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.serverUpdateServer,
+            Effect.fail(new ServerSelfUpdateError({ reason: SERVER_SELF_UPDATE_UNAVAILABLE })),
+            {
+              "rpc.aggregate": "server",
+            },
+          ),
         [WS_METHODS.serverUpsertKeybinding]: (rule) =>
           observeRpcEffect(
             WS_METHODS.serverUpsertKeybinding,
@@ -1557,35 +1570,21 @@ const makeWsRpcLayer = (
             "rpc.aggregate": "server",
           }),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
-          observeRpcEffect(WS_METHODS.cloudGetRelayClientStatus, relayClient.resolve, {
-            "rpc.aggregate": "cloud",
-          }),
+          observeRpcEffect(
+            WS_METHODS.cloudGetRelayClientStatus,
+            Effect.succeed(RELAY_CLIENT_UNAVAILABLE_STATUS),
+            {
+              "rpc.aggregate": "cloud",
+            },
+          ),
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           observeRpcStream(
             WS_METHODS.cloudInstallRelayClient,
-            Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>(
-              (queue) =>
-                relayClient
-                  .installWithProgress((event) => Queue.offer(queue, event).pipe(Effect.asVoid))
-                  .pipe(
-                    Effect.flatMap((status) =>
-                      Queue.offer(queue, {
-                        type: "complete",
-                        status,
-                      }),
-                    ),
-                    Effect.catchTag("RelayClientInstallError", (error) =>
-                      Queue.fail(
-                        queue,
-                        new RelayClientInstallFailedError({
-                          reason: error.reason,
-                          message: error.message,
-                        }),
-                      ),
-                    ),
-                    Effect.andThen(Queue.end(queue)),
-                    Effect.forkScoped,
-                  ),
+            Stream.fail(
+              new RelayClientInstallFailedError({
+                reason: "unsupported_platform",
+                message: RELAY_CLIENT_UNAVAILABLE_MESSAGE,
+              }),
             ),
             { "rpc.aggregate": "cloud" },
           ),
@@ -2086,7 +2085,6 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
-    const serverSelfUpdate = yield* ServerSelfUpdate.ServerSelfUpdate;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -2109,7 +2107,6 @@ export const websocketRpcRouteLayer = Layer.unwrap(
             makeWsRpcLayer(session, previewAutomationBroker).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
-              Layer.provide(Layer.succeed(ServerSelfUpdate.ServerSelfUpdate, serverSelfUpdate)),
               Layer.provide(
                 SourceControlDiscovery.layer.pipe(
                   Layer.provide(

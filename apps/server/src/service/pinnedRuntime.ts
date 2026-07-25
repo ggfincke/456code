@@ -10,16 +10,15 @@ import * as ProcessRunner from "../processRunner.ts";
 /**
  * A pinned runtime is an exact `t3@<version>` npm-installed into
  * <baseDir>/runtime/versions/<version>. The boot service points its systemd
- * unit here, and server self-update installs the target version here before
- * switching over — never `npx t3`, whose cache is ephemeral and whose
- * registry fetch at boot would make startup depend on the network.
+ * unit here — never `npx t3`, whose cache is ephemeral and whose registry
+ * fetch at boot would make startup depend on the network.
  */
 
 const PINNED_RUNTIME_DIR = "runtime";
 const PINNED_RUNTIME_INSTALL_TIMEOUT = Duration.minutes(10);
-// Boot-service setup and remote self-update share this module but can be
-// constructed in separate layers. Serialize the complete check/install/
-// sentinel transaction across all callers in this process.
+// Boot-service setup can be constructed in separate layers. Serialize the
+// complete check/install/sentinel transaction across all callers in this
+// process.
 const pinnedRuntimeInstallLock = Semaphore.makeUnsafe(1);
 
 export interface PinnedRuntimePaths {
@@ -65,7 +64,7 @@ export class PinnedRuntimeInstallError extends Schema.TaggedErrorClass<PinnedRun
  * extracts files before running native builds (node-pty), so a killed
  * install leaves a plausible-looking but broken tree behind.
  */
-export const ensurePinnedRuntimeInstalled = Effect.fn("cloud.pinned_runtime.ensure_installed")(
+export const ensurePinnedRuntimeInstalled = Effect.fn("service.pinned_runtime.ensure_installed")(
   function* (input: {
     readonly baseDir: string;
     readonly version: string;
@@ -147,30 +146,6 @@ export const ensurePinnedRuntimeInstalled = Effect.fn("cloud.pinned_runtime.ensu
 
         return paths;
       }),
-    );
-  },
-);
-
-/** Removes one pinned runtime while holding the same process-wide lock used
- * by install/check/sentinel work, so cleanup cannot race another caller that
- * is materializing or reusing the runtime tree. */
-export const removePinnedRuntimeInstallation = Effect.fn("cloud.pinned_runtime.remove")(
-  function* (input: {
-    readonly baseDir: string;
-    readonly version: string;
-    readonly fs: FileSystem.FileSystem;
-    readonly path: Path.Path;
-  }) {
-    const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version);
-    yield* pinnedRuntimeInstallLock.withPermit(
-      input.fs
-        .remove(paths.versionDir, { recursive: true, force: true })
-        .pipe(
-          Effect.mapError(
-            (cause) =>
-              new PinnedRuntimeInstallError({ step: "removing the pinned runtime", cause }),
-          ),
-        ),
     );
   },
 );

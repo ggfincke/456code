@@ -1,7 +1,12 @@
-import { EnvironmentHttpApi } from "@t3tools/contracts";
+import {
+  EnvironmentAuthHttpApi,
+  EnvironmentMetadataHttpApi,
+  EnvironmentOrchestrationHttpApi,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
+import * as HttpApi from "effect/unstable/httpapi/HttpApi";
 import * as HttpApiBuilder from "effect/unstable/httpapi/HttpApiBuilder";
 
 import * as ServerConfig from "./config.ts";
@@ -49,8 +54,6 @@ import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRun
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor.ts";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor.ts";
 import { ThreadDeletionReactorLive } from "./orchestration/Layers/ThreadDeletionReactor.ts";
-import * as AgentAwarenessRelay from "./relay/AgentAwarenessRelay.ts";
-import { hasCloudPublicConfig } from "./cloud/publicConfig.ts";
 import { ProviderRegistryLive } from "./provider/Layers/ProviderRegistry.ts";
 import * as ServerSettings from "./serverSettings.ts";
 import * as ProjectFaviconResolver from "./project/ProjectFaviconResolver.ts";
@@ -75,12 +78,6 @@ import * as ServerEnvironment from "./environment/ServerEnvironment.ts";
 import { authHttpApiLayer, environmentAuthenticatedAuthLayer } from "./auth/http.ts";
 import * as ServerSecretStore from "./auth/ServerSecretStore.ts";
 import * as EnvironmentAuth from "./auth/EnvironmentAuth.ts";
-import { connectHttpApiLayer, reconcileDesiredCloudLink } from "./cloud/http.ts";
-import { serverRelayBrokerTracingLayer } from "./cloud/relayTracing.ts";
-import * as CloudManagedEndpointRuntime from "./cloud/ManagedEndpointRuntime.ts";
-import * as CloudCliTokenManager from "./cloud/CliTokenManager.ts";
-import * as CloudCliState from "./cloud/CliState.ts";
-import * as ServerSelfUpdate from "./cloud/selfUpdate.ts";
 import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -92,7 +89,6 @@ import {
 } from "./serverRuntimeState.ts";
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
-import * as RelayClient from "@t3tools/shared/relayClient";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
@@ -110,13 +106,6 @@ const PtyAdapterLive = Layer.unwrap(
       const NodePtyAdapter = yield* Effect.promise(() => import("./terminal/NodePtyAdapter.ts"));
       return NodePtyAdapter.layer;
     }
-  }),
-);
-
-const RelayClientLive = Layer.unwrap(
-  Effect.gen(function* () {
-    const config = yield* ServerConfig.ServerConfig;
-    return RelayClient.layerCloudflared({ baseDir: config.baseDir });
   }),
 );
 
@@ -164,7 +153,6 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
-  Layer.provideMerge(AgentAwarenessRelay.layer.pipe(Layer.provide(ServerSecretStore.layer))),
   Layer.provideMerge(RuntimeReceiptBusLive),
 );
 
@@ -274,14 +262,6 @@ const AuthLayerLive = EnvironmentAuth.layer.pipe(
   Layer.provide(ServerSecretStore.layer),
 );
 
-const CloudManagedEndpointRuntimeLive = Layer.mergeAll(
-  RelayClientLive,
-  CloudManagedEndpointRuntime.layer.pipe(
-    Layer.provide(ServerSecretStore.layer),
-    Layer.provide(RelayClientLive),
-  ),
-);
-
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
   Layer.provideMerge(OrchestrationLayerLive),
@@ -323,15 +303,6 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
-  Layer.provideMerge(
-    Layer.mergeAll(
-      CloudCliTokenManager.layer.pipe(
-        Layer.provide(ServerSecretStore.layer),
-        Layer.provide(ExternalLauncher.layer),
-      ),
-      CloudManagedEndpointRuntimeLive,
-    ),
-  ),
 );
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
@@ -349,11 +320,18 @@ const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 );
 
+// The contract's `EnvironmentHttpApi` still carries the T3 Connect group for
+// clients that predate its removal. This server serves only the local groups,
+// so `/api/connect/*` is simply not routed.
+class LocalEnvironmentHttpApi extends HttpApi.make("environment")
+  .add(EnvironmentMetadataHttpApi)
+  .add(EnvironmentAuthHttpApi)
+  .add(EnvironmentOrchestrationHttpApi) {}
+
 export const makeRoutesLayer = Layer.mergeAll(
   Layer.mergeAll(
-    HttpApiBuilder.layer(EnvironmentHttpApi).pipe(
+    HttpApiBuilder.layer(LocalEnvironmentHttpApi).pipe(
       Layer.provide(authHttpApiLayer),
-      Layer.provide(connectHttpApiLayer),
       Layer.provide(orchestrationHttpApiLayer),
       Layer.provide(serverEnvironmentHttpApiLayer),
       Layer.provide(environmentAuthenticatedAuthLayer),
@@ -364,11 +342,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     websocketRpcRouteLayer,
   ),
   McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
-).pipe(
-  Layer.provide(PreviewAutomationBroker.layer),
-  Layer.provide(ServerSelfUpdate.layer),
-  Layer.provide(browserApiCorsLayer),
-);
+).pipe(Layer.provide(PreviewAutomationBroker.layer), Layer.provide(browserApiCorsLayer));
 
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* () {
@@ -455,28 +429,6 @@ export const makeServerLayer = Layer.unwrap(
           ),
         )
       : Layer.empty;
-    const cloudDesiredLinkReconcileLayer = Layer.effectDiscard(
-      Effect.gen(function* () {
-        if (!hasCloudPublicConfig) return;
-        if (!(yield* CloudCliState.readCliDesiredCloudLink)) return;
-        const server = yield* HttpServer.HttpServer;
-        const address = server.address;
-        if (typeof address === "string" || !("port" in address)) return;
-        yield* Effect.forkScoped(
-          Effect.sleep("250 millis").pipe(
-            Effect.andThen(reconcileDesiredCloudLink(`http://127.0.0.1:${address.port}`)),
-            Effect.retry({ times: 4 }),
-            Effect.tap(() => Effect.logInfo("T3 Connect desired link reconciled on startup")),
-            Effect.catch((cause) =>
-              Effect.logWarning("Failed to reconcile T3 Connect desired link on startup", {
-                cause,
-              }),
-            ),
-          ),
-        );
-      }),
-    );
-
     const serverApplicationLayer = Layer.mergeAll(
       HttpRouter.serve(makeRoutesLayer, {
         disableLogger: !config.logWebSocketEvents,
@@ -484,12 +436,10 @@ export const makeServerLayer = Layer.unwrap(
       httpListeningLayer,
       runtimeStateLayer,
       tailscaleServeLayer,
-      cloudDesiredLinkReconcileLayer,
     );
 
     return serverApplicationLayer.pipe(
       Layer.provideMerge(RuntimeServicesLive),
-      Layer.provideMerge(serverRelayBrokerTracingLayer),
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ObservabilityLive),
       Layer.provideMerge(FetchHttpClient.layer),

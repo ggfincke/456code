@@ -225,88 +225,6 @@ export class ServerAuthDpopReplayKeyCalculationError extends Schema.TaggedErrorC
   }
 }
 
-export class ServerAuthLinkedCloudAccountVerificationError extends Schema.TaggedErrorClass<ServerAuthLinkedCloudAccountVerificationError>()(
-  "ServerAuthLinkedCloudAccountVerificationError",
-  {
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Could not verify the linked cloud account.";
-  }
-}
-
-export class ServerAuthLinkedCloudAccountReadError extends Schema.TaggedErrorClass<ServerAuthLinkedCloudAccountReadError>()(
-  "ServerAuthLinkedCloudAccountReadError",
-  {
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Could not read the linked cloud account.";
-  }
-}
-
-export class ServerAuthLinkedCloudAccountMissingError extends Schema.TaggedErrorClass<ServerAuthLinkedCloudAccountMissingError>()(
-  "ServerAuthLinkedCloudAccountMissingError",
-  {},
-) {
-  override get message(): string {
-    return "Cloud linked user is not installed for this environment.";
-  }
-}
-
-export class ServerAuthCloudLinkJwtSigningError extends Schema.TaggedErrorClass<ServerAuthCloudLinkJwtSigningError>()(
-  "ServerAuthCloudLinkJwtSigningError",
-  {
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to sign cloud link JWT.";
-  }
-}
-
-export class ServerAuthCloudMintPublicKeyMissingError extends Schema.TaggedErrorClass<ServerAuthCloudMintPublicKeyMissingError>()(
-  "ServerAuthCloudMintPublicKeyMissingError",
-  {},
-) {
-  override get message(): string {
-    return "Cloud mint public key is not installed for this environment.";
-  }
-}
-
-export class ServerAuthCloudRelayIssuerMissingError extends Schema.TaggedErrorClass<ServerAuthCloudRelayIssuerMissingError>()(
-  "ServerAuthCloudRelayIssuerMissingError",
-  {},
-) {
-  override get message(): string {
-    return "Cloud relay issuer is not installed for this environment.";
-  }
-}
-
-export class ServerAuthCloudHealthJwtSigningError extends Schema.TaggedErrorClass<ServerAuthCloudHealthJwtSigningError>()(
-  "ServerAuthCloudHealthJwtSigningError",
-  {
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to sign cloud health JWT.";
-  }
-}
-
-export class ServerAuthCloudMintJwtSigningError extends Schema.TaggedErrorClass<ServerAuthCloudMintJwtSigningError>()(
-  "ServerAuthCloudMintJwtSigningError",
-  {
-    ...serverAuthInternalErrorContext,
-  },
-) {
-  override get message(): string {
-    return "Failed to sign cloud mint JWT.";
-  }
-}
-
 export const ServerAuthInternalError = Schema.Union([
   ServerAuthBootstrapCredentialValidationError,
   ServerAuthSessionCredentialValidationError,
@@ -322,14 +240,6 @@ export const ServerAuthInternalError = Schema.Union([
   ServerAuthWebSocketTokenIssueError,
   ServerAuthDpopReplayStateRecordError,
   ServerAuthDpopReplayKeyCalculationError,
-  ServerAuthLinkedCloudAccountVerificationError,
-  ServerAuthLinkedCloudAccountReadError,
-  ServerAuthLinkedCloudAccountMissingError,
-  ServerAuthCloudLinkJwtSigningError,
-  ServerAuthCloudMintPublicKeyMissingError,
-  ServerAuthCloudRelayIssuerMissingError,
-  ServerAuthCloudHealthJwtSigningError,
-  ServerAuthCloudMintJwtSigningError,
 ]);
 export type ServerAuthInternalError = typeof ServerAuthInternalError.Type;
 export const isServerAuthInternalError = Schema.is(ServerAuthInternalError);
