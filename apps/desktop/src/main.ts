@@ -33,7 +33,6 @@ import * as ElectronWindow from "./electron/ElectronWindow.ts";
 import * as DesktopApp from "./app/DesktopApp.ts";
 import * as DesktopAppIdentity from "./app/DesktopAppIdentity.ts";
 import * as DesktopConnectionCatalogStore from "./app/DesktopConnectionCatalogStore.ts";
-import * as DesktopClerk from "./app/DesktopClerk.ts";
 import * as DesktopApplicationMenu from "./window/DesktopApplicationMenu.ts";
 import * as DesktopAssets from "./app/DesktopAssets.ts";
 import * as DesktopBackendConfiguration from "./backend/DesktopBackendConfiguration.ts";
@@ -185,22 +184,12 @@ const desktopApplicationLayer = Layer.mergeAll(
   Layer.provideMerge(desktopLocalEnvironmentAuthLayer),
 );
 
-const desktopClerkLayer = DesktopClerk.layer.pipe(
+const desktopRuntimeLayer = desktopApplicationLayer.pipe(
   Layer.provideMerge(desktopEnvironmentLayer),
   Layer.provideMerge(NodeServices.layer),
-  Layer.provideMerge(ElectronApp.layer),
-);
-
-const desktopRuntimeLayer = desktopClerkLayer.pipe(
-  Layer.flatMap((clerkContext) =>
-    desktopApplicationLayer.pipe(
-      Layer.provideMerge(Layer.succeedContext(clerkContext)),
-      Layer.provideMerge(NodeServices.layer),
-      Layer.provideMerge(NodeHttpClient.layerUndici),
-      Layer.provideMerge(NetService.layer),
-      Layer.provideMerge(electronLayer),
-    ),
-  ),
+  Layer.provideMerge(NodeHttpClient.layerUndici),
+  Layer.provideMerge(NetService.layer),
+  Layer.provideMerge(electronLayer),
 );
 
 DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);

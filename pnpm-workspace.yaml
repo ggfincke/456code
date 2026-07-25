@@ -22,12 +22,8 @@ allowBuilds:
   workerd: false
 
 catalog:
-  "@clerk/backend": 3.13.0
   "@clerk/clerk-js": 6.25.7
-  "@clerk/electron": 0.0.18
-  "@clerk/electron-passkeys": 0.0.3
   "@clerk/expo": 4.0.2
-  "@clerk/react": 6.12.7
   "@clerk/shared": 4.25.7
   "@effect/atom-react": 4.0.0-beta.78
   "@effect/openapi-generator": 4.0.0-beta.78
@@ -51,15 +47,11 @@ catalog:
   yaml: ^2.9.0
 
 minimumReleaseAgeExclude:
-  - "@clerk/backend@3.13.0"
   - "@clerk/clerk-js@6.25.7"
-  - "@clerk/electron@0.0.18"
   - "@clerk/expo@4.0.2"
-  - "@clerk/react@6.12.7"
   - "@clerk/shared@4.25.7"
 
 overrides:
-  "@clerk/backend": "catalog:"
   "@clerk/clerk-js": "catalog:"
   "@clerk/clerk-js>@base-org/account": "-"
   "@clerk/clerk-js>@coinbase/wallet-sdk": "-"
@@ -67,10 +59,7 @@ overrides:
   "@clerk/clerk-js>@solana/wallet-adapter-react": "-"
   "@clerk/clerk-js>@solana/wallet-standard": "-"
   "@clerk/clerk-js>@wallet-standard/core": "-"
-  "@clerk/electron": "catalog:"
-  "@clerk/electron-passkeys": "catalog:"
   "@clerk/expo": "catalog:"
-  "@clerk/react": "catalog:"
   "@clerk/shared": "catalog:"
   "@effect/atom-react": "catalog:"
   "@effect/platform-bun": "catalog:"
