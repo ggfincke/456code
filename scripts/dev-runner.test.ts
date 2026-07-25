@@ -80,7 +80,7 @@ it.layer(NodeServices.layer)("dev-runner", (it) => {
           "run",
           "--filter=@t3tools/contracts",
           "--filter=@t3tools/web",
-          "--filter=t3",
+          "--filter=456code",
           "--parallel",
           "dev",
         ]);

@@ -632,7 +632,7 @@ jobs:
           cache: true
           run-install: |
             args:
-              - --filter=t3...
+              - --filter=456code...
               - --filter=@t3tools/web...
               - --filter=@t3tools/scripts...
 
@@ -657,7 +657,7 @@ jobs:
         run: vp run --filter @t3tools/web build
 
       - name: Build CLI package
-        run: vp run --filter t3 build
+        run: vp run --filter 456code build
 
       - name: Publish CLI package
         run: node apps/server/scripts/cli.ts publish --tag "${{ needs.preflight.outputs.cli_dist_tag }}" --app-version "${{ needs.preflight.outputs.version }}" --verbose
