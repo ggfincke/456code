@@ -146,6 +146,12 @@ import {
   SourceControlRepositoryLookupInput,
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
+import {
+  WorkersGetJobInput,
+  WorkersGetJobResult,
+  WorkersListInput,
+  WorkersListResult,
+} from "./workers.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -222,6 +228,10 @@ export const WS_METHODS = {
   // Cloud environment methods
   cloudGetRelayClientStatus: "cloud.getRelayClientStatus",
   cloudInstallRelayClient: "cloud.installRelayClient",
+
+  // Workers (worker-broker) methods
+  workersList: "workers.list",
+  workersGetJob: "workers.getJob",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -698,6 +708,20 @@ export const WsSubscribeAuthAccessRpc = Rpc.make(WS_METHODS.subscribeAuthAccess,
   stream: true,
 });
 
+// availability and per-job read failures are reported in-band on the success payload,
+// so the only rpc-level error is authorization
+export const WsWorkersListRpc = Rpc.make(WS_METHODS.workersList, {
+  payload: WorkersListInput,
+  success: WorkersListResult,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsWorkersGetJobRpc = Rpc.make(WS_METHODS.workersGetJob, {
+  payload: WorkersGetJobInput,
+  success: WorkersGetJobResult,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
@@ -715,6 +739,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerSignalProcessRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
+  WsWorkersListRpc,
+  WsWorkersGetJobRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
