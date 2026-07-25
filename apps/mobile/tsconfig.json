@@ -2,6 +2,18 @@
   "extends": "expo/tsconfig.base",
   "compilerOptions": {
     "allowImportingTsExtensions": true,
-    "strict": true
-  }
+    "strict": true,
+    // the relocated suite resolves packages through tests/node_modules, which pnpm
+    // populates from a different peer-hash store dir than apps/mobile/node_modules.
+    // react-native ships global declarations (fetch/Request/Response/RequestInfo),
+    // so two copies in one program produce non-identical globals -> TS2345. pin the
+    // one copy the app itself uses.
+    "paths": {
+      "react-native": ["./node_modules/react-native"],
+      "react-native/*": ["./node_modules/react-native/*"]
+    }
+  },
+  // expo's base sets no include, so the implicit "**/*" applies; naming it here
+  // is what lets the relocated suite under tests/ be typechecked too
+  "include": ["**/*", "../../tests/apps/mobile"]
 }

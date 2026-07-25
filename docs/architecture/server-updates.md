@@ -1,6 +1,6 @@
 # Server Update Architecture
 
-T3 Code can update a connected server to the exact version of the client that detected version
+456code can update a connected server to the exact version of the client that detected version
 drift. This path exists primarily for remote environments, where the user may not have a terminal
 open on the server machine.
 

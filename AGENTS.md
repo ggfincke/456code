@@ -2,6 +2,7 @@
 
 ## Task Completion Requirements
 
+- Tests are not colocated with sources. Every test lives under the repo-root `tests/` tree, which mirrors the source layout with the `src` segment dropped — `apps/server/src/service/bootService.ts` is tested by `tests/apps/server/service/bootService.test.ts`. New tests go there too. Each package's `vite.config.ts` points its suite at that tree via `test.dir`, so `vp test run` from a package still runs only that package's tests. `tests/package.json` is a resolution-only workspace package: a module a test imports must be declared there, including modules named solely in `vi.mock("...")`.
 - Keep local verification focused on the files and packages changed. Run the smallest relevant test set; do not run the full workspace test suite as a routine completion step.
   - Use `vp test run <test-files>` for focused built-in Vite+ tests. Use `vp run test` only when the affected package specifically requires its `test` script.
   - Backend changes must include and run focused tests for the changed behavior.
@@ -9,7 +10,7 @@
 - Do not run repo-wide `vp check`, `vp run typecheck`, `vp run test`, or equivalent full-suite commands locally unless the user explicitly requests them. CI is responsible for the full verification suite.
 - After frontend feature development or any user-visible frontend behavior change, the primary agent must run one integrated verification pass for each affected client surface after integrating the work:
   - Web: use the `test-t3-app` skill. Launch one isolated environment, authenticate through the printed pairing URL, and verify the affected flow in the controlled browser.
-  - Mobile: use the `test-t3-mobile` skill. Connect one representative iOS Simulator or Android Emulator available on the host to one isolated environment and verify the affected flow. On compatible macOS hosts, prefer iOS for cross-platform changes and stream it through serve-sim in the T3 Code in-app browser or another available agent browser; use Android when it is the affected or viable platform.
+  - Mobile: use the `test-t3-mobile` skill. Connect one representative iOS Simulator or Android Emulator available on the host to one isolated environment and verify the affected flow. On compatible macOS hosts, prefer iOS for cross-platform changes and stream it through serve-sim in the 456code in-app browser or another available agent browser; use Android when it is the affected or viable platform.
   - Subagents must not independently launch dev servers or repeat integrated client verification unless their delegated task explicitly requires it.
   - Stop dev servers, watchers, and other long-running verification processes when the focused verification is complete.
 

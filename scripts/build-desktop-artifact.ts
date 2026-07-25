@@ -1429,7 +1429,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       protocols: [
         {
           name: "456code",
-          schemes: ["t3code", "t3code-dev"],
+          schemes: ["code456", "code456-dev"],
         },
       ],
       ...(macPasskeySigning
