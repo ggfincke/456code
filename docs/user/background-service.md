@@ -1,11 +1,11 @@
-# Running T3 Code in the Background
+# Running 456code in the Background
 
-On a Linux host, T3 Code can run as a background service for your user. It starts when the machine
+On a Linux host, 456code can run as a background service for your user. It starts when the machine
 boots and keeps running after you log out.
 
 ## Manage the Service
 
-Install it with the latest T3 Code release:
+Install it with the latest 456code release:
 
 ```sh
 npx t3@latest service install
@@ -29,7 +29,7 @@ Stop it and remove it from startup:
 npx t3@latest service uninstall
 ```
 
-Updating restarts T3 Code briefly. Let active agent work and terminal commands finish first.
+Updating restarts 456code briefly. Let active agent work and terminal commands finish first.
 
 ## Using It with T3 Connect
 
@@ -37,6 +37,6 @@ T3 Connect may offer to install the service during setup so the host stays reach
 out. This is only an onboarding shortcut: the service and T3 Connect are managed separately.
 
 Signing out of T3 Connect does not remove the service. Use `t3 service uninstall` when you no longer
-want T3 Code to start in the background.
+want 456code to start in the background.
 
 The background service currently requires Linux with systemd.

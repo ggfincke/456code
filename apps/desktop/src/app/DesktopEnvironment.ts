@@ -161,6 +161,8 @@ const make = Effect.fn("desktop.environment.make")(function* (
     isDevelopment && Option.isNone(configuredBaseDir) ? "dev" : "userdata",
   );
   const userDataDirName = isDevelopment ? "t3code-dev" : "t3code";
+  // * keeps the upstream spelling on purpose: this names an existing directory on disk that
+  // predates the fork, so renaming it would strand the data it exists to migrate
   const legacyUserDataDirName = isDevelopment ? "T3 Code (Dev)" : "T3 Code (Alpha)";
   const resourcesPath = input.resourcesPath;
 

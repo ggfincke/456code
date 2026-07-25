@@ -1,7 +1,7 @@
-# Keeping T3 Code in Sync
+# Keeping 456code in Sync
 
-The T3 Code web or desktop app and the server it connects to work best when they use the same
-version. If they do not match, T3 Code shows a warning with the right update option for that server.
+The 456code web or desktop app and the server it connects to work best when they use the same
+version. If they do not match, 456code shows a warning with the right update option for that server.
 
 ## Where to Find the Update
 
@@ -24,20 +24,20 @@ The update does not remove saved threads, settings, or project files.
 
 | Action                     | What to do                                                                                                                                                                  |
 | -------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Update server**          | Select the button and leave T3 Code open. It prepares the matching version, restarts the server, and reconnects automatically. This can take several minutes.               |
-| **Update the desktop app** | Open the T3 Code desktop app on the machine that runs the server and install the app update there. Reopen it if needed.                                                     |
-| **Copy update command**    | Copy the command, open a terminal on the server machine, stop the current T3 Code server, and relaunch it with the copied command and any startup options you normally use. |
+| **Update server**          | Select the button and leave 456code open. It prepares the matching version, restarts the server, and reconnects automatically. This can take several minutes.               |
+| **Update the desktop app** | Open the 456code desktop app on the machine that runs the server and install the app update there. Reopen it if needed.                                                     |
+| **Copy update command**    | Copy the command, open a terminal on the server machine, stop the current 456code server, and relaunch it with the copied command and any startup options you normally use. |
 
-The available action depends on how that server was started. T3 Code does not update connected
+The available action depends on how that server was started. 456code does not update connected
 servers silently in the background.
 
-If the server uses the T3 Code background service, you can also update it directly on the host:
+If the server uses the 456code background service, you can also update it directly on the host:
 
 ```sh
 npx t3@latest service update
 ```
 
-See [Running T3 Code in the Background](./background-service.md) for install, status, and removal
+See [Running 456code in the Background](./background-service.md) for install, status, and removal
 commands.
 
 ## After the Update
