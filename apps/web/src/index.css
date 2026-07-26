@@ -303,6 +303,41 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --stage-bp-bottom: #101f6e;
   }
 
+  /* Solid stage art keeps its color most of the way down and blends only near the bottom edge.
+     The default fade starts at 40% and would wash a flat accent band out to grey. Percentages
+     are tuned for the taller 112px band this variant uses, so the blend lands at roughly the
+     same depth in px as the default does on an 80px one. */
+  /* The overlay must stay clear of the art itself: --stage-fade is the chrome color, black here,
+     so starting it too early does not soften the accent, it erases it. These percentages keep the
+     wave at full color across the 80px band and blend only at the very bottom edge. */
+  .sidebar-stage-backdrop-solid {
+    mask-image: linear-gradient(to bottom, black 0%, black 86%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to bottom, black 0%, black 86%, transparent 100%);
+  }
+
+  .sidebar-stage-backdrop-solid::after {
+    background: linear-gradient(
+      to bottom,
+      transparent 0%,
+      transparent 74%,
+      color-mix(in srgb, var(--stage-fade) 40%, transparent) 88%,
+      color-mix(in srgb, var(--stage-fade) 80%, transparent) 96%,
+      var(--stage-fade) 100%
+    );
+  }
+
+  /* fincke.dev's own --bg and --accent. The field is flat, exactly as on the site: the wave
+     ribbons are the only feature, so nothing else can bloom behind them. */
+  .stage-wave {
+    --stage-wave-field: #151b2b;
+    --stage-wave-accent: #80cbc4;
+  }
+
+  .dark .stage-wave {
+    --stage-wave-field: #0f111a;
+    --stage-wave-accent: #80cbc4;
+  }
+
   .workspace-topbar {
     display: flex;
     height: var(--workspace-topbar-height);

@@ -192,4 +192,8 @@ const desktopRuntimeLayer = desktopApplicationLayer.pipe(
   Layer.provideMerge(electronLayer),
 );
 
+// must run synchronously at module scope: Electron ignores privileged scheme
+// registration once the app ready event has fired
+ElectronProtocol.registerDesktopSchemePrivileges();
+
 DesktopApp.program.pipe(Effect.provide(desktopRuntimeLayer), NodeRuntime.runMain);

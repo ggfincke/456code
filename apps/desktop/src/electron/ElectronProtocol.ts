@@ -24,6 +24,26 @@ export function getDesktopUrl(isDevelopment: boolean): string {
   return `${getDesktopOrigin(isDevelopment)}/`;
 }
 
+// Chromium only treats a custom scheme as a real (standard, secure) origin once it is
+// registered as privileged, and Electron requires that before the app ready event.
+// Without it the renderer's own bundle is opaque-origin, so `'self'` in the desktop CSP
+// matches nothing and every script and stylesheet is blocked -> a permanently blank shell.
+// `@clerk/electron` used to perform this registration; it has to be explicit now.
+export function registerDesktopSchemePrivileges(): void {
+  Electron.protocol.registerSchemesAsPrivileged(
+    [DESKTOP_PRODUCTION_SCHEME, DESKTOP_DEVELOPMENT_SCHEME].map((scheme) => ({
+      scheme,
+      privileges: {
+        standard: true,
+        secure: true,
+        supportFetchAPI: true,
+        corsEnabled: true,
+        stream: true,
+      },
+    })),
+  );
+}
+
 export class ElectronProtocolRegistrationError extends Schema.TaggedErrorClass<ElectronProtocolRegistrationError>()(
   "ElectronProtocolRegistrationError",
   {

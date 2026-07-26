@@ -252,7 +252,7 @@ const expected = {
   nodePtyVersion: require("node-pty/package.json").version,
 };
 const prebuildDir = path.join(pkgDir, "prebuilds", "linux-" + process.arch);
-const marker = path.join(prebuildDir, "t3code-wsl-node-pty.json");
+const marker = path.join(prebuildDir, "456code-wsl-node-pty.json");
 const binary = path.join(prebuildDir, "pty.node");
 if (!fs.existsSync(marker) || !fs.existsSync(binary)) process.exit(${NODE_PTY_PREBUILD_MISSING_EXIT_CODE});
 require("node-pty");
@@ -285,7 +285,7 @@ const NODE_PTY_BUILD_SCRIPT = (linuxServerDir: string) =>
     `prebuild_dir="prebuilds/linux-$arch"`,
     `mkdir -p "$prebuild_dir"`,
     `cp build/Release/pty.node "$prebuild_dir/pty.node"`,
-    `printf '{"arch":"%s","modules":"%s","nodePtyVersion":"%s"}\\n' "$arch" "$modules" "$node_pty_version" > "$prebuild_dir/t3code-wsl-node-pty.json"`,
+    `printf '{"arch":"%s","modules":"%s","nodePtyVersion":"%s"}\\n' "$arch" "$modules" "$node_pty_version" > "$prebuild_dir/456code-wsl-node-pty.json"`,
     `node -e 'require("node-pty")'`,
   ].join("\n");
 
