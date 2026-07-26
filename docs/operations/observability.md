@@ -22,7 +22,7 @@ If you want a log message to show up in the trace file, emit it inside an active
 
 ### Traces
 
-Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.t3/userdata/logs/server.trace.ndjson`).
+Completed spans are written as NDJSON records to `serverTracePath` (by default, `~/.456code/userdata/logs/server.trace.ndjson`).
 
 Important fields in each record:
 
@@ -65,7 +65,7 @@ You do not need any extra env vars. Just run the app normally and inspect `serve
 Examples:
 
 ```bash
-npx t3
+npx 456code
 ```
 
 ```bash
@@ -116,7 +116,7 @@ export T3CODE_TRACE_TIMING_ENABLED=true
 CLI:
 
 ```bash
-npx t3
+npx 456code
 ```
 
 Monorepo web/server dev:
@@ -169,7 +169,7 @@ Resolve the production or explicitly configured trace file once. Runtime state l
 base directory's `userdata` folder:
 
 ```bash
-TRACE_FILE="${T3CODE_HOME:-$HOME/.t3}/userdata/logs/server.trace.ndjson"
+TRACE_FILE="${T3CODE_HOME:-$HOME/.456code}/userdata/logs/server.trace.ndjson"
 ```
 
 Tail it:
@@ -181,7 +181,7 @@ tail -f "$TRACE_FILE"
 For an implicit monorepo dev server, use:
 
 ```bash
-TRACE_FILE="$HOME/.t3/dev/logs/server.trace.ndjson"
+TRACE_FILE="$HOME/.456code/dev/logs/server.trace.ndjson"
 tail -f "$TRACE_FILE"
 ```
 

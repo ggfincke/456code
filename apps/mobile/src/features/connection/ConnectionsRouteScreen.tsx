@@ -95,7 +95,7 @@ export function ConnectionsRouteScreen() {
             </View>
             <Text className="text-center text-sm leading-normal text-foreground-muted">
               No environments connected yet.{"\n"}Tap{" "}
-              <Text className="font-t3-bold text-foreground">+</Text> to add one.
+              <Text className="font-sans-bold text-foreground">+</Text> to add one.
             </Text>
           </View>
         )}

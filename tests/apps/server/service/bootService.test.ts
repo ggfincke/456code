@@ -81,8 +81,8 @@ const makeTestContext = Effect.fn("test.makeTestContext")(function* () {
     path,
     dirs: {
       home: root,
-      baseDir: path.join(root, ".t3"),
-      logsDir: path.join(root, ".t3", "userdata", "logs"),
+      baseDir: path.join(root, ".456code"),
+      logsDir: path.join(root, ".456code", "userdata", "logs"),
       stableEntry,
     },
   };
@@ -91,10 +91,10 @@ const makeTestContext = Effect.fn("test.makeTestContext")(function* () {
 it("renders a systemd unit with absolute paths and append-mode logging", () => {
   const unit = BootService.renderBootServiceUnit({
     nodePath: "/usr/local/bin/node",
-    t3EntryPath: "/home/theo/.t3/runtime/versions/0.0.27/node_modules/t3/dist/bin.mjs",
-    baseDir: "/home/theo/.t3",
-    logPath: "/home/theo/.t3/userdata/logs/boot-service.log",
-    unitPath: "/home/theo/.config/systemd/user/t3code.service",
+    t3EntryPath: "/home/theo/.456code/runtime/versions/0.0.27/node_modules/t3/dist/bin.mjs",
+    baseDir: "/home/theo/.456code",
+    logPath: "/home/theo/.456code/userdata/logs/boot-service.log",
+    unitPath: "/home/theo/.config/systemd/user/456code.service",
   });
 
   assert.equal(
@@ -108,13 +108,13 @@ it("renders a systemd unit with absolute paths and append-mode logging", () => {
       "[Service]",
       "Type=simple",
       "WorkingDirectory=%h",
-      "Environment=T3CODE_HOME=/home/theo/.t3",
-      "Environment=T3_BOOT_SERVICE_UNIT=t3code.service",
-      "ExecStart=/usr/local/bin/node /home/theo/.t3/runtime/versions/0.0.27/node_modules/t3/dist/bin.mjs serve",
+      "Environment=T3CODE_HOME=/home/theo/.456code",
+      "Environment=CODE456_BOOT_SERVICE_UNIT=456code.service",
+      "ExecStart=/usr/local/bin/node /home/theo/.456code/runtime/versions/0.0.27/node_modules/t3/dist/bin.mjs serve",
       "Restart=always",
       "RestartSec=5",
-      "StandardOutput=append:/home/theo/.t3/userdata/logs/boot-service.log",
-      "StandardError=append:/home/theo/.t3/userdata/logs/boot-service.log",
+      "StandardOutput=append:/home/theo/.456code/userdata/logs/boot-service.log",
+      "StandardError=append:/home/theo/.456code/userdata/logs/boot-service.log",
       "",
       "[Install]",
       "WantedBy=default.target",
@@ -133,7 +133,7 @@ it("quotes systemd values containing spaces and escapes percent specifiers", () 
     t3EntryPath: "/home/me/T3 Data/bin.mjs",
     baseDir: "/home/me/T3 Data",
     logPath: "/home/me/100%logs/boot.log",
-    unitPath: "/home/me/.config/systemd/user/t3code.service",
+    unitPath: "/home/me/.config/systemd/user/456code.service",
   });
   assert.include(unit, 'ExecStart="/home/me/my tools/node" "/home/me/T3 Data/bin.mjs" serve');
   assert.include(unit, 'Environment=T3CODE_HOME="/home/me/T3 Data"');
@@ -156,7 +156,7 @@ it("flags package-manager cache entry points as ephemeral", () => {
     ),
   );
   assert.isTrue(
-    BootService.isEphemeralCacheEntry("/home/theo/.bun/install/cache/t3@0.0.27/dist/bin.mjs"),
+    BootService.isEphemeralCacheEntry("/home/theo/.bun/install/cache/456code@0.0.27/dist/bin.mjs"),
   );
   assert.isFalse(BootService.isEphemeralCacheEntry("/usr/local/lib/node_modules/t3/dist/bin.mjs"));
   assert.isFalse(
@@ -166,7 +166,7 @@ it("flags package-manager cache entry points as ephemeral", () => {
   );
   assert.isFalse(
     BootService.isEphemeralCacheEntry(
-      "/home/theo/.t3/runtime/versions/0.0.27/node_modules/t3/dist/bin.mjs",
+      "/home/theo/.456code/runtime/versions/0.0.27/node_modules/t3/dist/bin.mjs",
     ),
   );
 });
@@ -218,15 +218,15 @@ it.layer(NodeServices.layer)("BootService", (it) => {
         commands.map((entry) => [entry.command, ...entry.args].join(" ")),
         [
           "systemctl --user daemon-reload",
-          "systemctl --user enable t3code.service",
+          "systemctl --user enable 456code.service",
           // restart (not enable --now) so repairing a stale unit replaces a
           // running process instead of leaving the old one until reboot.
-          "systemctl --user restart t3code.service",
+          "systemctl --user restart 456code.service",
           "loginctl enable-linger",
         ],
       );
 
-      const unitPath = path.join(dirs.home, ".config", "systemd", "user", "t3code.service");
+      const unitPath = path.join(dirs.home, ".config", "systemd", "user", "456code.service");
       const unit = yield* fs.readFileString(unitPath);
       assert.include(unit, `ExecStart=/usr/local/bin/node ${dirs.stableEntry} serve`);
       assert.include(unit, `Environment=T3CODE_HOME=${dirs.baseDir}`);
@@ -262,11 +262,11 @@ it.layer(NodeServices.layer)("BootService", (it) => {
       const runtimeDir = path.join(dirs.baseDir, "runtime", "versions", "0.0.27");
       assert.equal(
         plan.t3EntryPath,
-        path.join(runtimeDir, "node_modules", "t3", "dist", "bin.mjs"),
+        path.join(runtimeDir, "node_modules", "456code", "dist", "bin.mjs"),
       );
       assert.deepEqual(commands[0], {
         command: "npm",
-        args: ["install", "--prefix", runtimeDir, "--no-fund", "--no-audit", "t3@0.0.27"],
+        args: ["install", "--prefix", runtimeDir, "--no-fund", "--no-audit", "456code@0.0.27"],
       });
       // Success is recorded via a sentinel so interrupted installs re-run.
       assert.isTrue(yield* fs.exists(path.join(runtimeDir, ".install-complete")));
@@ -354,7 +354,7 @@ it.layer(NodeServices.layer)("BootService", (it) => {
       const unitDir = path.join(dirs.home, ".config", "systemd", "user");
       yield* fs.makeDirectory(unitDir, { recursive: true });
       yield* fs.writeFileString(
-        path.join(unitDir, "t3code.service"),
+        path.join(unitDir, "456code.service"),
         "[Service]\nExecStart=/old/node /old/t3 serve\n",
       );
 
@@ -406,7 +406,7 @@ it.layer(NodeServices.layer)("BootService", (it) => {
       assert.isTrue(isUnsupportedError(error));
       assert.lengthOf(commands, 0);
       assert.isFalse(
-        yield* fs.exists(path.join(dirs.home, ".config", "systemd", "user", "t3code.service")),
+        yield* fs.exists(path.join(dirs.home, ".config", "systemd", "user", "456code.service")),
       );
 
       const status = yield* service.status;
@@ -434,14 +434,14 @@ it.layer(NodeServices.layer)("BootService", (it) => {
       // A leftover unit would make status report "installed" even though
       // linger never happened.
       assert.isFalse(
-        yield* fs.exists(path.join(dirs.home, ".config", "systemd", "user", "t3code.service")),
+        yield* fs.exists(path.join(dirs.home, ".config", "systemd", "user", "456code.service")),
       );
       const status = yield* service.status;
       assert.isFalse(status.installed);
       assert.isTrue(
         commands.some(
           ({ command, args }) =>
-            command === "systemctl" && args.join(" ") === "--user disable --now t3code.service",
+            command === "systemctl" && args.join(" ") === "--user disable --now 456code.service",
         ),
       );
     }),
@@ -462,7 +462,7 @@ it.layer(NodeServices.layer)("BootService", (it) => {
       );
       yield* initialService.install;
 
-      const unitPath = path.join(dirs.home, ".config", "systemd", "user", "t3code.service");
+      const unitPath = path.join(dirs.home, ".config", "systemd", "user", "456code.service");
       const previousUnit = yield* fs.readFileString(unitPath);
       const replacementEntry = path.join(dirs.home, "replacement-bin.mjs");
       yield* fs.writeFileString(replacementEntry, "#!/usr/bin/env node\n");
@@ -484,7 +484,7 @@ it.layer(NodeServices.layer)("BootService", (it) => {
       assert.isTrue(
         repairCommands.some(
           ({ command, args }) =>
-            command === "systemctl" && args.join(" ") === "--user restart t3code.service",
+            command === "systemctl" && args.join(" ") === "--user restart 456code.service",
         ),
       );
     }),
@@ -525,7 +525,7 @@ it.layer(NodeServices.layer)("BootService", (it) => {
 
       assert.isTrue(isCommandError(error));
       assert.isTrue(
-        yield* fs.exists(path.join(dirs.home, ".config", "systemd", "user", "t3code.service")),
+        yield* fs.exists(path.join(dirs.home, ".config", "systemd", "user", "456code.service")),
       );
     }),
   );

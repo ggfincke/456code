@@ -6,8 +6,8 @@ const status = {
   supported: true,
   installed: true,
   current: true,
-  unitPath: "/home/me/.config/systemd/user/t3code.service",
-  logPath: "/home/me/.t3/userdata/logs/boot-service.log",
+  unitPath: "/home/me/.config/systemd/user/456code.service",
+  logPath: "/home/me/.456code/userdata/logs/boot-service.log",
 } as const;
 
 it("reports the installed service version and host paths", () => {
@@ -15,9 +15,9 @@ it("reports the installed service version and host paths", () => {
     formatServiceStatus(status, "0.0.29"),
     [
       "456code service",
-      "  Status: installed · t3@0.0.29",
-      "  Unit: /home/me/.config/systemd/user/t3code.service",
-      "  Logs: /home/me/.t3/userdata/logs/boot-service.log",
+      "  Status: installed · 456code@0.0.29",
+      "  Unit: /home/me/.config/systemd/user/456code.service",
+      "  Logs: /home/me/.456code/userdata/logs/boot-service.log",
     ].join("\n"),
   );
 });
@@ -25,7 +25,7 @@ it("reports the installed service version and host paths", () => {
 it("gives a direct repair command for a stale service", () => {
   assert.include(
     formatServiceStatus({ ...status, current: false }, "0.0.29"),
-    "Next: Run `npx t3@latest service update`.",
+    "Next: Run `npx 456code@latest service update`.",
   );
 });
 

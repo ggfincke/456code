@@ -1,5 +1,5 @@
 import {
-  SelectableMarkdownText as T3SelectableMarkdownText,
+  SelectableMarkdownText as NativeSelectableMarkdownText,
   type SelectableMarkdownTextProps,
 } from "@t3tools/mobile-markdown-text/renderer";
 
@@ -17,5 +17,5 @@ export function hasNativeSelectableMarkdownText(): boolean {
 }
 
 export function SelectableMarkdownText(props: MobileSelectableMarkdownTextProps) {
-  return <T3SelectableMarkdownText {...props} highlightCode={highlightCodeSnippet} />;
+  return <NativeSelectableMarkdownText {...props} highlightCode={highlightCodeSnippet} />;
 }

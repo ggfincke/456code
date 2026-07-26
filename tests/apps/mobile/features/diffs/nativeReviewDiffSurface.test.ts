@@ -43,13 +43,13 @@ describe("resolveNativeReviewDiffView", () => {
     expect(resolvedView).not.toBeNull();
     expect(resolvedView).not.toBe(nativeView);
     expect(resolveNativeReviewDiffView()).toBe(resolvedView);
-    expect(expoMocks.requireNativeView).toHaveBeenCalledWith("T3ReviewDiffSurface");
+    expect(expoMocks.requireNativeView).toHaveBeenCalledWith("Code456ReviewDiffSurface");
   });
 
   it("does not fall back to stale legacy native review diff view names", async () => {
     globalThis.expo = {
       getViewConfig: vi.fn().mockImplementation((moduleName: string) => {
-        if (moduleName === "T3ReviewDiffView") {
+        if (moduleName === "Code456ReviewDiffView") {
           return { validAttributes: {}, directEventTypes: {} };
         }
         return null;
@@ -78,7 +78,7 @@ describe("resolveNativeReviewDiffView", () => {
     expect(consoleError).toHaveBeenCalledWith(
       expect.objectContaining({
         _tag: "NativeViewResolutionError",
-        nativeModuleName: "T3ReviewDiffSurface",
+        nativeModuleName: "Code456ReviewDiffSurface",
         cause,
       }),
     );
@@ -93,18 +93,18 @@ describe("isPendingNativeViewRegistration", () => {
 
     expect(
       isPendingNativeViewRegistration(
-        new Error("Unable to find the 'T3ReviewDiffSurface' view for this native tag"),
+        new Error("Unable to find the 'Code456ReviewDiffSurface' view for this native tag"),
       ),
     ).toBe(true);
     expect(
       isPendingNativeViewRegistration(
-        new Error("Unable to find the 'T3ReviewDiffView' view for this native tag"),
+        new Error("Unable to find the 'Code456ReviewDiffView' view for this native tag"),
       ),
     ).toBe(false);
     expect(
       isPendingNativeViewRegistration(
         new Error(
-          "Unable to find the class expo.modules.t3reviewdiff.T3ReviewDiffView view with tag 1150",
+          "Unable to find the class expo.modules.code456reviewdiff.Code456ReviewDiffView view with tag 1150",
         ),
       ),
     ).toBe(true);

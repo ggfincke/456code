@@ -63,25 +63,22 @@ const VARIANT_CONFIG = {
   development: {
     appName: "456code Dev",
     scheme: "code456-dev",
-    iosBundleIdentifier: "com.t3tools.t3code.dev",
-    androidPackage: "com.t3tools.t3code.dev",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: "com.ggfincke.code456.dev",
+    androidPackage: "com.ggfincke.code456.dev",
     assets: DEVELOPMENT_ASSETS,
   },
   preview: {
     appName: "456code Preview",
     scheme: "code456-preview",
-    iosBundleIdentifier: "com.t3tools.t3code.preview",
-    androidPackage: "com.t3tools.t3code.preview",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: "com.ggfincke.code456.preview",
+    androidPackage: "com.ggfincke.code456.preview",
     assets: PREVIEW_ASSETS,
   },
   production: {
     appName: "456code",
     scheme: "code456",
-    iosBundleIdentifier: "com.t3tools.t3code",
-    androidPackage: "com.t3tools.t3code",
-    relyingParty: "clerk.t3.codes",
+    iosBundleIdentifier: "com.ggfincke.code456",
+    androidPackage: "com.ggfincke.code456",
     assets: RELEASE_ASSETS,
   },
 } as const;
@@ -158,7 +155,7 @@ const sharingPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
 
 const config: ExpoConfig = {
   name: variant.appName,
-  slug: "t3-code",
+  slug: "456code",
   platforms: ["ios", "android"],
   scheme: variant.scheme,
   version: "0.1.0",
@@ -186,10 +183,6 @@ const config: ExpoConfig = {
     // does not fall back to a personal team (which cannot sign app groups,
     // Sign in with Apple, or push notification entitlements).
     appleTeamId: "ARK85ZXQ4Z",
-    associatedDomains: [
-      `applinks:${variant.relyingParty}`,
-      `webcredentials:${variant.relyingParty}`,
-    ],
     infoPlist: {
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
@@ -348,7 +341,7 @@ const config: ExpoConfig = {
       projectId: "d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     },
   },
-  owner: "pingdotgg",
+  owner: "ggfincke",
 };
 
 export default config;

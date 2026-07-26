@@ -818,7 +818,7 @@ function ThreadNavigationSidebarPane(
               className="mx-4 mt-2 items-center rounded-lg border border-dashed border-border py-2.5"
               style={({ pressed }) => ({ opacity: pressed ? 0.6 : 1 })}
             >
-              <Text className="text-xs font-t3-medium text-foreground-muted">
+              <Text className="text-xs font-sans-medium text-foreground-muted">
                 Show more ({item.hiddenCount} settled hidden)
               </Text>
             </Pressable>
@@ -1144,7 +1144,7 @@ function ThreadNavigationSidebarPane(
           </Svg>
         </View>
         <View className="h-[50px] flex-row items-end gap-0.5 pr-2 pl-5">
-          <Text className="flex-1 text-[34px] font-t3-bold text-foreground" numberOfLines={1}>
+          <Text className="flex-1 text-[34px] font-sans-bold text-foreground" numberOfLines={1}>
             Threads
           </Text>
           <SidebarHeaderButtonGroup colorScheme={colorScheme}>

@@ -8,9 +8,9 @@ import * as Semaphore from "effect/Semaphore";
 import * as ProcessRunner from "../processRunner.ts";
 
 /**
- * A pinned runtime is an exact `t3@<version>` npm-installed into
+ * A pinned runtime is an exact `456code@<version>` npm-installed into
  * <baseDir>/runtime/versions/<version>. The boot service points its systemd
- * unit here — never `npx t3`, whose cache is ephemeral and whose registry
+ * unit here — never `npx 456code`, whose cache is ephemeral and whose registry
  * fetch at boot would make startup depend on the network.
  */
 
@@ -35,7 +35,7 @@ export function pinnedRuntimePaths(
   const versionDir = path.join(baseDir, PINNED_RUNTIME_DIR, "versions", version);
   return {
     versionDir,
-    entryPath: path.join(versionDir, "node_modules", "t3", "dist", "bin.mjs"),
+    entryPath: path.join(versionDir, "node_modules", "456code", "dist", "bin.mjs"),
     sentinelPath: path.join(versionDir, ".install-complete"),
   };
 }
@@ -58,7 +58,7 @@ export class PinnedRuntimeInstallError extends Schema.TaggedErrorClass<PinnedRun
 }
 
 /**
- * Installs `t3@<version>` into the pinned runtime directory unless a complete
+ * Installs `456code@<version>` into the pinned runtime directory unless a complete
  * install is already there, and returns its paths. The sentinel is written
  * only after npm exits 0; checking the entry file alone is not enough — npm
  * extracts files before running native builds (node-pty), so a killed
@@ -102,7 +102,7 @@ export const ensurePinnedRuntimeInstalled = Effect.fn("service.pinned_runtime.en
           ),
         );
 
-        const installStep = "installing the pinned t3 runtime (this can take a few minutes)";
+        const installStep = "installing the pinned 456code runtime (this can take a few minutes)";
         yield* runner
           .run({
             command: "npm",
@@ -112,7 +112,7 @@ export const ensurePinnedRuntimeInstalled = Effect.fn("service.pinned_runtime.en
               paths.versionDir,
               "--no-fund",
               "--no-audit",
-              `t3@${input.version}`,
+              `456code@${input.version}`,
             ],
             // Native deps (node-pty) can compile from source on slow boxes; the
             // ProcessRunner default of 60s would kill a healthy install.

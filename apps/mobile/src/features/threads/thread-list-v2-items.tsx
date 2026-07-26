@@ -79,7 +79,7 @@ export const ThreadListV2SettledDivider = memo(function ThreadListV2SettledDivid
         props.pane === "sidebar" ? "px-3" : "px-5",
       )}
     >
-      <Text className="text-xs font-t3-medium text-foreground-tertiary">Settled</Text>
+      <Text className="text-xs font-sans-medium text-foreground-tertiary">Settled</Text>
       <View className="h-px flex-1" style={{ backgroundColor: borderColor }} />
     </View>
   );
@@ -226,7 +226,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : null}
         <Text
           className={cn(
-            "flex-1 text-sm font-t3-medium",
+            "flex-1 text-sm font-sans-medium",
             selected ? "text-user-bubble-foreground-muted" : "text-foreground-muted",
           )}
           numberOfLines={1}
@@ -244,7 +244,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
       </View>
       <Text
         className={cn(
-          "mt-1 text-base font-t3-medium",
+          "mt-1 text-base font-sans-medium",
           selected ? "text-user-bubble-foreground" : "text-foreground",
         )}
         numberOfLines={2}

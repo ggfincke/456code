@@ -1,0 +1,11 @@
+{
+  "iconPath": "assets/dev/blueprint-web-apple-touch-180.png",
+  "scripts": [
+    {
+      "name": "Setup Worktree",
+      "command": "vp i && ln -sf $CODE456_PROJECT_ROOT/.env .env",
+      "icon": "configure",
+      "runOnWorktreeCreate": true
+    }
+  ]
+}

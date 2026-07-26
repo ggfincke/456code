@@ -29,14 +29,14 @@ Do not treat unavailable iOS tooling as a blocker when Android is a valid repres
 The development identity on both platforms is:
 
 - App: `456code Dev`
-- Bundle/package identifier: `com.t3tools.t3code.dev`
-- URL scheme: `t3code-dev`
+- Bundle/package identifier: `com.ggfincke.code456.dev`
+- URL scheme: `code456-dev`
 
 Bundle or package presence proves the correct variant, not native compatibility. Reuse it only when the current changes did not alter its Expo SDK, native dependencies, config plugins, entitlements, generated project, or native source.
 
 ## Start one disposable T3 environment
 
-Run backend commands from the repository root. Use the ignored, worktree-local `.t3` directory or create a fresh directory with the host OS's temporary-directory mechanism. An explicit base directory stores state in `<base-dir>/userdata`; never point testing at shared `~/.t3` state.
+Run backend commands from the repository root. Use the ignored, worktree-local `.456code` directory or create a fresh directory with the host OS's temporary-directory mechanism. An explicit base directory stores state in `<base-dir>/userdata`; never point testing at shared `~/.456code` state.
 
 Seed a small number of meaningful Git projects before starting the backend:
 
@@ -72,14 +72,14 @@ Always enter the complete `http://` origin; the mobile host field otherwise assu
 
 Run Metro from `apps/mobile`.
 
-1. Inspect any process on the intended Metro port and its `/status` response. Reuse it only when it is healthy, belongs to this worktree, and matches `APP_VARIANT=development`, `--dev-client`, and scheme `t3code-dev`.
+1. Inspect any process on the intended Metro port and its `/status` response. Reuse it only when it is healthy, belongs to this worktree, and matches `APP_VARIANT=development`, `--dev-client`, and scheme `code456-dev`.
 2. Never kill another worktree's Metro. Use a free explicit port when necessary.
 3. Run `vp run dev:client` on the standard port. For another port, retain the complete development identity:
 
    ```bash
    APP_VARIANT=development vp exec expo start \
      --dev-client \
-     --scheme t3code-dev \
+     --scheme code456-dev \
      --clear \
      --lan \
      --port <metro-port>
@@ -93,16 +93,16 @@ Run Metro from `apps/mobile`.
 
 Use `ios-debugger-agent` to select one UDID and set these XcodeBuildMCP session defaults:
 
-- Workspace: `<repo>/apps/mobile/ios/T3CodeDev.xcworkspace`
-- Scheme: `T3CodeDev`
+- Workspace: `<repo>/apps/mobile/ios/456codeDev.xcworkspace`
+- Scheme: `456codeDev`
 - Configuration: `Debug`
 - Simulator ID: the selected UDID
-- Bundle ID: `com.t3tools.t3code.dev`
+- Bundle ID: `com.ggfincke.code456.dev`
 
 Check the installed client with:
 
 ```bash
-xcrun simctl get_app_container <simulator-udid> com.t3tools.t3code.dev app
+xcrun simctl get_app_container <simulator-udid> com.ggfincke.code456.dev app
 xcrun simctl openurl <simulator-udid> <printed-dev-client-url>
 ```
 
@@ -113,12 +113,12 @@ Accept the iOS confirmation prompt and dismiss the developer menu when it obscur
 Select one running emulator serial from `adb devices` and check the installed client:
 
 ```bash
-adb -s <emulator-serial> shell pm path com.t3tools.t3code.dev
+adb -s <emulator-serial> shell pm path com.ggfincke.code456.dev
 adb -s <emulator-serial> reverse tcp:<metro-port> tcp:<metro-port>
 adb -s <emulator-serial> shell am start -W \
   -a android.intent.action.VIEW \
   -d '<printed-dev-client-url>' \
-  com.t3tools.t3code.dev
+  com.ggfincke.code456.dev
 ```
 
 Do not start, stop, erase, or reconfigure an emulator owned by another task. Track and later stop only processes owned by this test.
@@ -144,7 +144,7 @@ xcrun simctl openurl <simulator-udid> 'code456-dev://connections/new'
 adb -s <emulator-serial> shell am start -W \
   -a android.intent.action.VIEW \
   -d 'code456-dev://connections/new' \
-  com.t3tools.t3code.dev
+  com.ggfincke.code456.dev
 ```
 
 Run only the command for the selected platform.

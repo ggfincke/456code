@@ -21,14 +21,14 @@ import { ensurePinnedRuntimeInstalled, pinnedRuntimePaths } from "./pinnedRuntim
 /**
  * Installs 456code as a per-user boot service. Linux-only for now: systemd
  * user unit + loginctl enable-linger. The service runs a stable or pinned
- * runtime — never an ephemeral `npx t3` cache whose eviction could break
+ * runtime — never an ephemeral `npx 456code` cache whose eviction could break
  * startup.
  */
 
-const BOOT_SERVICE_NAME = "t3code";
+const BOOT_SERVICE_NAME = "456code";
 
 export const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`;
-export const BOOT_SERVICE_UNIT_ENV = "T3_BOOT_SERVICE_UNIT";
+export const BOOT_SERVICE_UNIT_ENV = "CODE456_BOOT_SERVICE_UNIT";
 
 const EPHEMERAL_CACHE_SEGMENTS = [
   "/_npx/", // npx
@@ -39,7 +39,7 @@ const EPHEMERAL_CACHE_SEGMENTS = [
 ];
 
 /**
- * `npx t3` (and pnpm dlx / bunx) run out of ephemeral package-manager
+ * `npx 456code` (and pnpm dlx / bunx) run out of ephemeral package-manager
  * caches that can be evicted at any time — a boot service must never point
  * there. Global installs, repo checkouts, and the pinned runtime below are
  * all stable.
@@ -71,7 +71,7 @@ export function quoteSystemdValue(value: string): string {
 export interface BootServicePlan {
   /** Absolute path of the node binary running this CLI. */
   readonly nodePath: string;
-  /** Absolute path of the pinned t3 entry point the unit will run. */
+  /** Absolute path of the pinned 456code entry point the unit will run. */
   readonly t3EntryPath: string;
   readonly baseDir: string;
   readonly logPath: string;
@@ -249,7 +249,7 @@ export const make = Effect.fn("service.boot_service.make")(function* (input: {
    * install (global bin, repo checkout) is used as-is; an ephemeral cache
    * entry is replaced by `npm install --prefix`-ing the exact running
    * version into <baseDir>/runtime/versions/<v>. A real install (not a copy
-   * of bin.mjs) because t3 ships native deps like node-pty.
+   * of bin.mjs) because 456code ships native deps like node-pty.
    */
   const ensurePinnedRuntime = Effect.gen(function* () {
     if (!isEphemeralCacheEntry(host.cliEntryPath)) {
@@ -412,7 +412,7 @@ export const make = Effect.fn("service.boot_service.make")(function* (input: {
     const unit = yield* fs.readFileString(unitPath);
     // A unit is current only if it matches what install would write now (an
     // older CLI wrote a different runtime/node path) AND the entry point it
-    // references still exists (a pinned runtime under ~/.t3 can be deleted to
+    // references still exists (a pinned runtime under ~/.456code can be deleted to
     // reclaim space). Either mismatch makes connect offer a repair.
     const entryExists = yield* fs.exists(plannedEntryPath);
     const current = unit === renderBootServiceUnit(plan) && entryExists;

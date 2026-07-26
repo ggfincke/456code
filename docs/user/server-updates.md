@@ -34,7 +34,7 @@ servers silently in the background.
 If the server uses the 456code background service, you can also update it directly on the host:
 
 ```sh
-npx t3@latest service update
+npx 456code@latest service update
 ```
 
 See [Running 456code in the Background](./background-service.md) for install, status, and removal
@@ -50,7 +50,7 @@ reconnect or open **Settings** → **Connections** again. If the warning remains
 
 1. Retry the offered action once.
 2. Make sure you updated the machine named in the warning, not only the device you are using.
-3. For a command-line server, relaunch it with `npx t3@<client-version>`, replacing
+3. For a command-line server, relaunch it with `npx 456code@<client-version>`, replacing
    `<client-version>` with the client version shown in the warning.
 
 For remote connection setup and access troubleshooting, see [Remote Access](./remote-access.md).
