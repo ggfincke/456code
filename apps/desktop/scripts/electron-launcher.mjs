@@ -19,7 +19,10 @@ export const APP_DISPLAY_NAME = isDevelopment ? "456code (Dev)" : "456code (Alph
 export const APP_BUNDLE_ID = isDevelopment
   ? `com.ggfincke.456code.dev.${devBundleIdSuffix || "local"}`
   : "com.ggfincke.456code";
-const APP_PROTOCOL_SCHEMES = isDevelopment ? ["t3code-dev"] : ["t3code"];
+// must match DESKTOP_PRODUCTION_SCHEME / DESKTOP_DEVELOPMENT_SCHEME in
+// apps/desktop/src/electron/ElectronProtocol.ts -- these are what LaunchServices
+// and CFBundleURLTypes advertise, so a mismatch registers a scheme nothing serves
+const APP_PROTOCOL_SCHEMES = isDevelopment ? ["code456-dev"] : ["code456"];
 const LAUNCHER_VERSION = 14;
 const defaultIconPath = NodePath.join(desktopDir, "resources", "icon.icns");
 const developmentMacIconPngPath = NodePath.join(
@@ -121,7 +124,7 @@ export function makeDevelopmentLauncherScript({
       ([name, value]) =>
         `if [ -z "\${${name}:-}" ]; then export ${name}=${shellSingleQuote(value)}; fi`,
     ),
-    `exec ${shellSingleQuote(electronBinaryPath)} --t3code-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
+    `exec ${shellSingleQuote(electronBinaryPath)} --456code-dev-root=${shellSingleQuote(desktopRoot)} ${shellSingleQuote(mainEntryPath)} "$@"`,
     "",
   ].join("\n");
 }
@@ -346,7 +349,7 @@ function buildMacLauncher(electronBinaryPath) {
   if (isDevelopment) {
     // Keep Electron's native executable inside the branded bundle. Launching the
     // node_modules copy makes macOS associate the process (and Dock label) with
-    // Electron.app even though this bundle's Info.plist has the T3 Code name.
+    // Electron.app even though this bundle's Info.plist has the 456code name.
     // Its conventional executable name also keeps Electron's default-app runtime
     // in development mode instead of making app.isPackaged report true.
     writeDevelopmentLauncherScript(launcherBinaryPath, runtimeElectronBinaryPath);
