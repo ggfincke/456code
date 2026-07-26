@@ -23,7 +23,10 @@ class Code456ReviewDiffModule : Module() {
       Prop("selectedRowIdsJson") { view: Code456ReviewDiffView, selectedRowIdsJson: String ->
         view.setSelectedRowIdsJson(selectedRowIdsJson)
       }
-      Prop("collapsedCommentIdsJson") { view: Code456ReviewDiffView, collapsedCommentIdsJson: String ->
+      Prop("collapsedCommentIdsJson") {
+          view: Code456ReviewDiffView,
+          collapsedCommentIdsJson: String
+        ->
         view.setCollapsedCommentIdsJson(collapsedCommentIdsJson)
       }
       Prop("appearanceScheme") { view: Code456ReviewDiffView, appearanceScheme: String ->
@@ -54,7 +57,11 @@ class Code456ReviewDiffModule : Module() {
         "onToggleComment",
       )
 
-      AsyncFunction("scrollToFile") { view: Code456ReviewDiffView, fileId: String, animated: Boolean ->
+      AsyncFunction("scrollToFile") {
+          view: Code456ReviewDiffView,
+          fileId: String,
+          animated: Boolean
+        ->
         view.scrollToFile(fileId, animated)
       }
       AsyncFunction("scrollToTop") { view: Code456ReviewDiffView, animated: Boolean ->

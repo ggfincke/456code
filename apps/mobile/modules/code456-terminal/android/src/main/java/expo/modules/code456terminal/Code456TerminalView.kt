@@ -17,7 +17,10 @@ import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
 import kotlin.math.max
 
-class Code456TerminalView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
+class Code456TerminalView(context: Context, appContext: AppContext) : ExpoView(
+  context,
+  appContext
+) {
   private val container = FrameLayout(context)
   private val terminalCanvas = TerminalCanvasView(context)
   private val inputView = EditText(context)

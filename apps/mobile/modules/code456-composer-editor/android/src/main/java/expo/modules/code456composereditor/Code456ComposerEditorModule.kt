@@ -26,7 +26,10 @@ class Code456ComposerEditorModule : Module() {
       Prop("lineHeight") { view: Code456ComposerEditorView, lineHeight: Double ->
         view.setLineHeight(lineHeight.toFloat())
       }
-      Prop("contentInsetVertical") { view: Code456ComposerEditorView, contentInsetVertical: Double ->
+      Prop("contentInsetVertical") {
+          view: Code456ComposerEditorView,
+          contentInsetVertical: Double
+        ->
         view.setContentInsetVertical(contentInsetVertical.toInt())
       }
 
