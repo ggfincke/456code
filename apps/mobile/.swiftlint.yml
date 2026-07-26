@@ -1,14 +1,16 @@
 included:
-  - ios/T3Code
-  - modules/t3-composer-editor/ios
-  - modules/t3-native-controls/ios
-  - modules/t3-terminal/ios
-  - modules/t3-review-diff/ios
+  - ios/456code
+  - ios/456codeDev
+  - ios/456codePreview
+  - modules/code456-composer-editor/ios
+  - modules/code456-native-controls/ios
+  - modules/code456-terminal/ios
+  - modules/code456-review-diff/ios
 
 excluded:
   - ios/Pods
   - ios/build
-  - modules/t3-terminal/Vendor
+  - modules/code456-terminal/Vendor
 
 reporter: xcode
 

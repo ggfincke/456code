@@ -16,7 +16,7 @@
     "@react-navigation/native": "7.3.4",
     "@t3tools/client-runtime": "workspace:*",
     "@t3tools/contracts": "workspace:*",
-    "@t3tools/mobile-markdown-text": "file:../apps/mobile/modules/t3-markdown-text",
+    "@t3tools/mobile-markdown-text": "file:../apps/mobile/modules/code456-markdown-text",
     "@t3tools/shared": "workspace:*",
     "@t3tools/ssh": "workspace:*",
     "@tanstack/react-router": "^1.160.2",
