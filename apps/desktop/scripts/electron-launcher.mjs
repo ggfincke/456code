@@ -28,7 +28,7 @@ const developmentMacIconPngPath = NodePath.join(
   "dev",
   "blueprint-macos-1024.png",
 );
-// oxlint-disable-next-line t3code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
+// oxlint-disable-next-line 456code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 
 function setPlistString(plistPath, key, value) {

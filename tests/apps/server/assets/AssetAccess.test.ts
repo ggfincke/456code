@@ -11,7 +11,7 @@ import * as PlatformError from "effect/PlatformError";
 import * as ServerSecretStore from "../../../../apps/server/src/auth/ServerSecretStore.ts";
 import * as ServerConfig from "../../../../apps/server/src/config.ts";
 import * as ProjectFaviconResolver from "../../../../apps/server/src/project/ProjectFaviconResolver.ts";
-import * as T3ProjectFileLoader from "../../../../apps/server/src/project/T3ProjectFileLoader.ts";
+import * as ProjectFileLoader from "../../../../apps/server/src/project/ProjectFileLoader.ts";
 import * as WorkspacePaths from "../../../../apps/server/src/workspace/WorkspacePaths.ts";
 import {
   ASSET_ROUTE_PREFIX,
@@ -27,7 +27,7 @@ const testLayer = Layer.mergeAll(
   WorkspacePaths.layer,
   ProjectFaviconResolver.layer.pipe(
     Layer.provide(WorkspacePaths.layer),
-    Layer.provide(T3ProjectFileLoader.layer),
+    Layer.provide(ProjectFileLoader.layer),
   ),
   ServerSecretStore.layer.pipe(Layer.provide(configLayer)),
 ).pipe(Layer.provideMerge(NodeServices.layer));

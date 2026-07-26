@@ -1,8 +1,8 @@
 import type {
+  ProjectFileScript,
   ProjectScript,
   ProjectScriptIcon,
   ResolvedKeybindingsConfig,
-  T3ProjectFileScript,
 } from "@t3tools/contracts";
 import {
   isAtomCommandInterrupted,
@@ -109,12 +109,12 @@ export interface NewProjectScriptInput {
 
 export type ProjectScriptActionResult = AtomCommandResult<void, unknown>;
 
-const NO_FILE_SCRIPTS: ReadonlyArray<T3ProjectFileScript> = [];
+const NO_FILE_SCRIPTS: ReadonlyArray<ProjectFileScript> = [];
 
 interface ProjectScriptsControlProps {
   scripts: ReadonlyArray<ProjectScript>;
-  /** Scripts declared in the project's checked-in t3.json, offered for import. */
-  fileScripts?: ReadonlyArray<T3ProjectFileScript>;
+  /** Scripts declared in the project's checked-in 456code.json, offered for import. */
+  fileScripts?: ReadonlyArray<ProjectFileScript>;
   keybindings: ResolvedKeybindingsConfig;
   preferredScriptId?: string | null;
   onRunScript: (script: ProjectScript) => void;
@@ -275,7 +275,7 @@ export default function ProjectScriptsControl({
     void onDeleteScript(editingScriptId);
   }, [editingScriptId, onDeleteScript]);
 
-  const importFileScript = async (fileScript: T3ProjectFileScript) => {
+  const importFileScript = async (fileScript: ProjectFileScript) => {
     const payload: NewProjectScriptInput = {
       name: fileScript.name,
       command: fileScript.command,
@@ -308,7 +308,7 @@ export default function ProjectScriptsControl({
     <>
       {primaryScript && <MenuSeparator />}
       <MenuGroup>
-        <MenuGroupLabel>From t3.json</MenuGroupLabel>
+        <MenuGroupLabel>From 456code.json</MenuGroupLabel>
         {importableScripts.map((fileScript) => (
           <MenuItem
             key={`${fileScript.name} ${fileScript.command}`}

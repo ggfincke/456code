@@ -68,7 +68,7 @@ export default defineConfig({
       "apps/mobile/uniwind-types.d.ts",
     ],
     plugins: ["eslint", "oxc", "react", "unicorn", "typescript"],
-    jsPlugins: ["./oxlint-plugin-t3code/index.ts"],
+    jsPlugins: ["./oxlint-plugin-456code/index.ts"],
     categories: {
       correctness: "warn",
       suspicious: "warn",
@@ -112,10 +112,10 @@ export default defineConfig({
           ],
         },
       ],
-      "t3code/no-global-process-runtime": "error",
-      "t3code/no-inline-schema-compile": "warn",
-      "t3code/no-manual-effect-runtime-in-tests": "error",
-      "t3code/namespace-node-imports": "error",
+      "456code/no-global-process-runtime": "error",
+      "456code/no-inline-schema-compile": "warn",
+      "456code/no-manual-effect-runtime-in-tests": "error",
+      "456code/namespace-node-imports": "error",
     },
     options: {
       // Revisit once Oxlint's tsgolint path can integrate with @effect/tsgo diagnostics.

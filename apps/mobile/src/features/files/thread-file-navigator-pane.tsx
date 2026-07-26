@@ -140,7 +140,7 @@ export function ThreadFileNavigatorPane(props: {
       <View className="border-b border-border" style={{ paddingTop: props.headerInset }}>
         <View className="h-12 flex-row items-center gap-2 px-3">
           <View className="min-w-0 flex-1">
-            <Text className="text-sm font-t3-bold text-foreground">Files</Text>
+            <Text className="text-sm font-sans-bold text-foreground">Files</Text>
             <Text className="text-xs text-foreground-muted" numberOfLines={1}>
               {props.projectName}
             </Text>

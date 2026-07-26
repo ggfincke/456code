@@ -233,7 +233,7 @@ function ConfiguredSettingsRouteScreen() {
       } else {
         Alert.alert(
           "Couldn't finish enabling notifications",
-          "Notification access was granted, but this device could not be registered with T3 Connect. Notifications will start once registration succeeds.",
+          "Notification access was granted, but this device could not be registered with the cloud relay. Notifications will start once registration succeeds.",
         );
       }
       return;
@@ -263,8 +263,8 @@ function ConfiguredSettingsRouteScreen() {
 
   const promptSignIn = useCallback(() => {
     Alert.alert(
-      "Request T3 Connect access",
-      "Live Activity updates require approved T3 Connect access so relay can deliver updates to this device.",
+      "Request cloud relay access",
+      "Live Activity updates require approved cloud access so the relay can deliver updates to this device.",
       [
         { text: "Cancel", style: "cancel" },
         {
@@ -336,7 +336,7 @@ function ConfiguredSettingsRouteScreen() {
     } else {
       Alert.alert(
         "Couldn't finish enabling Live Activities",
-        "This device could not be registered with T3 Connect, so Live Activities won't appear yet. They'll start once registration succeeds.",
+        "This device could not be registered with the cloud relay, so Live Activities won't appear yet. They'll start once registration succeeds.",
       );
     }
   }, [
@@ -453,7 +453,7 @@ function ConfiguredSettingsRouteScreen() {
           <SettingsSection title="Account">
             <SettingsRow
               icon="person.crop.circle"
-              label="T3 Account"
+              label="Account"
               value={accountLabel}
               onPress={openAccount}
             />
@@ -593,7 +593,6 @@ function AppSettingsSection() {
   return (
     <SettingsSection title="App">
       <SettingsRow icon="internaldrive" label="Client Storage" target="SettingsClientStorage" />
-      <SettingsRow icon="doc.text" label="Legal" fullScreenTarget="SettingsLegal" />
       <View className="flex-row items-center gap-4 p-4">
         <SymbolView
           name="info.circle"

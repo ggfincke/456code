@@ -28,7 +28,7 @@ function updateFailureMessage(error: unknown): string {
  * The call-to-action for a version-skewed server, matched to the update path
  * it advertises: a one-click install-and-restart for servers that can update
  * themselves, an update-the-desktop-app hint for desktop-managed backends
- * (running `npx t3` there would start a second server, not update this one),
+ * (running `npx 456code` there would start a second server, not update this one),
  * and copying the manual relaunch command for everything else — so the skew
  * warning always offers a way out.
  */

@@ -90,7 +90,7 @@ import * as PreviewManager from "../../../apps/server/src/preview/Manager.ts";
 import * as PortScanner from "../../../apps/server/src/preview/PortScanner.ts";
 import * as BrowserTraceCollector from "../../../apps/server/src/observability/BrowserTraceCollector.ts";
 import * as ProjectFaviconResolver from "../../../apps/server/src/project/ProjectFaviconResolver.ts";
-import * as T3ProjectFileLoader from "../../../apps/server/src/project/T3ProjectFileLoader.ts";
+import * as ProjectFileLoader from "../../../apps/server/src/project/ProjectFileLoader.ts";
 import * as ProjectSetupScriptRunner from "../../../apps/server/src/project/ProjectSetupScriptRunner.ts";
 import * as RepositoryIdentityResolver from "../../../apps/server/src/project/RepositoryIdentityResolver.ts";
 import * as ServerEnvironment from "../../../apps/server/src/environment/ServerEnvironment.ts";
@@ -496,7 +496,7 @@ const buildAppUnderTest = (options?: {
       ),
       ProjectFaviconResolver.layer.pipe(
         Layer.provide(WorkspacePaths.layer),
-        Layer.provide(T3ProjectFileLoader.layer),
+        Layer.provide(ProjectFileLoader.layer),
       ),
     );
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(

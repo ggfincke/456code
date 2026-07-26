@@ -223,15 +223,15 @@ export function AgentActivity(
     </HStack>
   );
 
-  // The branded T3 mark. `assetName` resolves the template image set bundled in
+  // The branded app mark. `assetName` resolves the template image set bundled in
   // the widget extension's asset catalog. Image views only honor `resizable`
   // directly (frame/foregroundStyle are dropped), so we size it via a container
   // frame the resizable image fills and tint it through the container's
-  // foreground style, which the template image inherits. The 3:2 frame matches
-  // the glyph's aspect ratio so it never distorts.
+  // foreground style, which the template image inherits. The frame aspect must
+  // track Mark.svg's viewBox (105.4118 x 44.5802) so the glyph never distorts.
   const renderLogo = (height: number, color: string) => (
-    <HStack modifiers={[frame({ width: height * 1.5, height }), foregroundStyle(color)]}>
-      <Image assetName="T3Mark" modifiers={[resizable()]} />
+    <HStack modifiers={[frame({ width: height * 2.365, height }), foregroundStyle(color)]}>
+      <Image assetName="Mark" modifiers={[resizable()]} />
     </HStack>
   );
 

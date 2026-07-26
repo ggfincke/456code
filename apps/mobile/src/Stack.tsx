@@ -45,14 +45,9 @@ import { SettingsAppearanceRouteScreen } from "./features/settings/SettingsAppea
 import { SettingsClientStorageRouteScreen } from "./features/settings/SettingsClientStorageRouteScreen";
 import { SettingsAuthRouteScreen } from "./features/settings/SettingsAuthRouteScreen";
 import { SettingsEnvironmentsRouteScreen } from "./features/settings/SettingsEnvironmentsRouteScreen";
-import { SettingsLegalRouteScreen } from "./features/settings/SettingsLegalRouteScreen";
 import { SettingsRouteScreen } from "./features/settings/SettingsRouteScreen";
 import { SettingsWaitlistRouteScreen } from "./features/settings/SettingsWaitlistRouteScreen";
 import { ShowcaseCaptureCoordinator } from "./features/showcase/ShowcaseCaptureCoordinator";
-import {
-  SettingsLegalDocumentCloseHeaderButton,
-  SettingsLegalDocumentExternalHeaderButton,
-} from "./features/settings/components/SettingsLegalDocumentRouteScreen";
 import { useAppShortcuts } from "./features/shortcuts/useAppShortcuts";
 import { useIncomingShare } from "./features/sharing/IncomingShareProvider";
 import {
@@ -122,14 +117,6 @@ const SOLID_HEADER_OPTIONS: AppScreenOptions = {
 const SHEET_SOLID_HEADER_OPTIONS: AppScreenOptions = {
   ...SOLID_HEADER_OPTIONS,
   unstable_navigationItemStyle: undefined,
-};
-
-const LEGAL_DOCUMENT_HEADER_OPTIONS: AppScreenOptions = {
-  ...SHEET_SOLID_HEADER_OPTIONS,
-  headerBackVisible: false,
-  headerLeft: SettingsLegalDocumentCloseHeaderButton,
-  headerRight: () => <SettingsLegalDocumentExternalHeaderButton />,
-  presentation: "fullScreenModal",
 };
 
 const SettingsSheetStack = createNativeStackNavigator({
@@ -265,7 +252,6 @@ const WORKSPACE_OVERLAY_ROUTES = new Set([
   "GitConfirm",
   "GitOverview",
   "NewTaskSheet",
-  "SettingsLegal",
   "SettingsSheet",
   "ThreadReviewComment",
 ]);
@@ -293,7 +279,7 @@ function RootStackLayout(props: {
   const sharePresentationRef = useRef(EMPTY_INCOMING_SHARE_PRESENTATION_STATE);
   useAgentNotificationNavigation();
   useThreadOutboxDrain();
-  // Presents the T3 Connect onboarding sheet after an in-session sign-in.
+  // Presents the cloud-relay onboarding sheet after an in-session sign-in.
   useConnectOnboardingNavigation();
   // Launcher app shortcuts: routes shortcut taps and tracks opened threads.
   useAppShortcuts(props.state);
@@ -356,14 +342,14 @@ function NotFoundScreen() {
       }}
       style={[{ flex: 1 }, screenBgStyle]}
     >
-      <Text className="text-3xl font-t3-bold text-foreground" selectable>
+      <Text className="text-3xl font-sans-bold text-foreground" selectable>
         Route not found
       </Text>
       <Pressable
         style={returnHomeButtonStyle}
         onPress={() => navigation.dispatch(StackActions.replace("Home"))}
       >
-        <Text className="text-base font-t3-bold text-primary-foreground">Return home</Text>
+        <Text className="text-base font-sans-bold text-primary-foreground">Return home</Text>
       </Pressable>
     </ScrollView>
   );
@@ -482,14 +468,6 @@ export const RootStack = createNativeStackNavigator({
             }),
       },
     }),
-    SettingsLegal: createNativeStackScreen({
-      screen: SettingsLegalRouteScreen,
-      linking: "settings/legal",
-      options: {
-        ...LEGAL_DOCUMENT_HEADER_OPTIONS,
-        title: "Legal",
-      },
-    }),
     ConnectOnboarding: createNativeStackScreen({
       screen: ConnectOnboardingRouteScreen,
       linking: "connect-onboarding",
@@ -497,7 +475,7 @@ export const RootStack = createNativeStackNavigator({
         // A root-level Android formSheet does not host the native stack bar;
         // the route renders an embedded AndroidSheetHeader instead.
         ...(Platform.OS === "android" ? { headerShown: false } : SHEET_SOLID_HEADER_OPTIONS),
-        title: "Set up T3 Connect",
+        title: "Set up cloud access",
         gestureEnabled: true,
         presentation: "formSheet",
         sheetAllowedDetents: [0.6, 0.95],

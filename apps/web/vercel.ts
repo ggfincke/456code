@@ -1,7 +1,7 @@
 import { matchers, routes, type Transform, type VercelConfig } from "@vercel/config/v1";
 
 const ROUTER_HOST = "app.t3.codes";
-const HOSTED_WEB_CHANNEL_COOKIE = "t3code_web_channel";
+const HOSTED_WEB_CHANNEL_COOKIE = "456code_web_channel";
 const LATEST_ORIGIN = "https://latest.app.t3.codes";
 const NIGHTLY_ORIGIN = "https://nightly.app.t3.codes";
 const CLEAN_CHANNEL_QUERY_TRANSFORMS = [
@@ -33,7 +33,7 @@ export const config: VercelConfig = {
     "npm install -g vite-plus && vp install --filter '@t3tools/scripts...' --filter '@t3tools/web...'",
   routes: [
     {
-      src: "/__t3code/channel",
+      src: "/__456code/channel",
       has: [matchers.query("channel", "nightly")],
       transforms: CLEAN_CHANNEL_QUERY_TRANSFORMS,
       headers: {
@@ -43,7 +43,7 @@ export const config: VercelConfig = {
       status: 302,
     },
     {
-      src: "/__t3code/channel",
+      src: "/__456code/channel",
       transforms: CLEAN_CHANNEL_QUERY_TRANSFORMS,
       headers: {
         Location: "/",

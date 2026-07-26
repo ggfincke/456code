@@ -52,7 +52,7 @@ flowchart TD
     B -->|desktop-managed| C[Update desktop app on server machine]
     B -->|missing| D[Copy exact manual relaunch command]
     B -->|boot-service or respawn| E[server.updateServer]
-    E --> F[Install exact t3 version in pinned runtime]
+    E --> F[Install exact 456code version in pinned runtime]
     F --> G[Run version preflight]
     G -->|fails| H[Remove failed runtime and keep current server]
     G -->|passes| I{Handoff method}
@@ -66,7 +66,7 @@ flowchart TD
 payload accepts only an exact npm version, including an exact prerelease version; dist-tags such as
 `latest` and `nightly` are rejected.
 
-The update service permits one update at a time. It installs `t3@<version>` under
+The update service permits one update at a time. It installs `456code@<version>` under
 `<baseDir>/runtime/versions/<version>` and writes an install-complete sentinel only after npm exits
 successfully. Boot-service setup and self-update share the same process-wide installation lock, so
 they cannot mutate a pinned runtime concurrently.
@@ -77,13 +77,13 @@ preflight also removes the candidate runtime so retrying the same version perfor
 
 ## Host Service Lifecycle
 
-The systemd user service is a host lifecycle concern, not a T3 Connect resource. The standalone
-`t3 service install`, `uninstall`, `update`, and `status` commands own it. Install and update both
-reconcile the unit through `BootService`; running `npx t3@latest service update` therefore pins and
+The systemd user service is a host lifecycle concern, not a relay resource. The standalone
+`456code service install`, `uninstall`, `update`, and `status` commands own it. Install and update both
+reconcile the unit through `BootService`; running `npx 456code@latest service update` therefore pins and
 activates the latest CLI release without requiring a connected client.
 
-The `t3 connect` onboarding flow may offer service installation, but it calls the same reconciliation
-operation as `t3 service install`. Connect logout only disables cloud access and clears its
+The `456code connect` onboarding flow may offer service installation, but it calls the same reconciliation
+operation as `456code service install`. Connect logout only disables cloud access and clears its
 authorization; it does not uninstall the host service.
 
 ## Process Handoff
@@ -106,7 +106,7 @@ and the next version check determine the result.
 
 ## Release Invariant
 
-The exact client version must exist as the `t3` npm package before a client carrying that version is
+The exact client version must exist as the `456code` npm package before a client carrying that version is
 published. The release workflow therefore makes the GitHub release depend on CLI publication, and
 the hosted web deployment depends on that release. See [Release Checklist](../operations/release.md#server-self-update-release-invariant).
 
@@ -114,8 +114,8 @@ the hosted web deployment depends on that release. See [Release Checklist](../op
 
 - Capability contract: `packages/contracts/src/environment.ts`
 - Update RPC contract: `packages/contracts/src/server.ts` and `packages/contracts/src/rpc.ts`
-- Capability detection and handoff: `apps/server/src/cloud/selfUpdate.ts`
+- Capability advertisement: `apps/server/src/environment/ServerEnvironment.ts`
 - Host service commands: `apps/server/src/cli/service.ts`
-- Pinned runtime installation: `apps/server/src/cloud/pinnedRuntime.ts`
+- Pinned runtime installation: `apps/server/src/service/pinnedRuntime.ts`
 - Client version comparison: `apps/web/src/versionSkew.ts`
 - Shared update action: `apps/web/src/components/ServerUpdateAction.tsx`
