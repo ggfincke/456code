@@ -1,3 +1,5 @@
+// tests/apps/server/mcp/McpHttpServer.test.ts
+// verifies mcp request authentication and response routing
 import { expect, it } from "@effect/vitest";
 import { NodeHttpServer } from "@effect/platform-node";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -23,7 +25,6 @@ const invocation = {
   providerInstanceId: ProviderInstanceId.make("codex"),
   capabilities: new Set(["preview"] as const),
   issuedAt: 1,
-  expiresAt: Number.MAX_SAFE_INTEGER,
 };
 const client = McpSchema.McpServerClient.of({
   clientId: 1,

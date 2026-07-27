@@ -1,3 +1,5 @@
+// apps/web/src/components/Sidebar.tsx
+// renders the legacy project and thread sidebar
 import {
   ArchiveIcon,
   ArrowUpDownIcon,
@@ -452,7 +454,6 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const pr = resolveThreadPr({
     threadBranch: thread.branch,
     gitStatus: gitStatus.data,
-    hasDedicatedWorktree: thread.worktreePath !== null,
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const terminalStatus = terminalStatusFromRunningIds(runningTerminalIds);

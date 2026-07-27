@@ -856,6 +856,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           "provider.kind": routed.adapter.provider,
           ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
         });
+        // turns keep the existing credential alive because running agents cannot accept rotation
+        yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
         const turn = yield* routed.adapter.sendTurn(input);
         yield* directory.upsert({
           threadId: input.threadId,

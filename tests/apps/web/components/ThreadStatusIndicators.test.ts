@@ -1,3 +1,5 @@
+// tests/apps/web/components/ThreadStatusIndicators.test.ts
+// verifies thread and pull request status indicators
 import type { VcsStatusResult } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -35,31 +37,35 @@ describe("resolveThreadPr", () => {
       resolveThreadPr({
         threadBranch: "feature/other",
         gitStatus: status(),
-        hasDedicatedWorktree: false,
       }),
     ).toBeNull();
   });
 
-  it("shows PR indicators for dedicated worktree threads even when branch metadata is stale", () => {
-    const gitStatus = status();
-
+  it("hides PR indicators when a dedicated worktree has switched away from the thread branch", () => {
     expect(
       resolveThreadPr({
-        threadBranch: "feature/old-name",
-        gitStatus,
-        hasDedicatedWorktree: true,
+        threadBranch: "stack/base",
+        gitStatus: status(),
       }),
-    ).toBe(gitStatus.pr);
+    ).toBeNull();
   });
 
-  it("shows PR indicators for dedicated worktree threads even when branch metadata is missing", () => {
-    const gitStatus = status();
-
+  it("hides PR indicators when thread branch metadata is missing", () => {
     expect(
       resolveThreadPr({
         threadBranch: null,
+        gitStatus: status(),
+      }),
+    ).toBeNull();
+  });
+
+  it("shows the PR when the live checkout matches the stored thread branch", () => {
+    const gitStatus = status();
+
+    expect(
+      resolveThreadPr({
+        threadBranch: "feature/current",
         gitStatus,
-        hasDedicatedWorktree: true,
       }),
     ).toBe(gitStatus.pr);
   });

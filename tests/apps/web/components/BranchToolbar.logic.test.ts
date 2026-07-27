@@ -1,3 +1,5 @@
+// tests/apps/web/components/BranchToolbar.logic.test.ts
+// verifies branch toolbar state derivation
 import { EnvironmentId, type VcsRef } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 import {
@@ -9,6 +11,7 @@ import {
   resolveDraftEnvModeAfterBranchChange,
   resolveEffectiveEnvMode,
   resolveEnvModeLabel,
+  resolveBranchToolbarPrBranch,
   resolveBranchToolbarValue,
   resolveLockedWorkspaceLabel,
   resolveLocalCheckoutBranchMismatch,
@@ -170,6 +173,35 @@ describe("resolveBranchToolbarValue", () => {
         currentGitBranch: "main",
       }),
     ).toBe("main");
+  });
+});
+
+describe("resolveBranchToolbarPrBranch", () => {
+  it("uses the explicit thread branch when it matches the displayed branch", () => {
+    expect(
+      resolveBranchToolbarPrBranch({
+        activeThreadBranch: "feature/current",
+        resolvedActiveBranch: "feature/current",
+      }),
+    ).toBe("feature/current");
+  });
+
+  it("hides PR state while an optimistic branch switch is in flight", () => {
+    expect(
+      resolveBranchToolbarPrBranch({
+        activeThreadBranch: "feature/current",
+        resolvedActiveBranch: "feature/next",
+      }),
+    ).toBeNull();
+  });
+
+  it("does not infer PR state without an explicit thread branch", () => {
+    expect(
+      resolveBranchToolbarPrBranch({
+        activeThreadBranch: null,
+        resolvedActiveBranch: "feature/current",
+      }),
+    ).toBeNull();
   });
 });
 

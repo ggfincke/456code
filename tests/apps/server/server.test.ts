@@ -75,6 +75,7 @@ const TEST_EPOCH = DateTime.makeUnsafe("1970-01-01T00:00:00.000Z");
 
 import * as ServerConfig from "../../../apps/server/src/config.ts";
 import { makeRoutesLayer } from "../../../apps/server/src/server.ts";
+import { resolveAvailableEditorsForConfig } from "../../../apps/server/src/ws.ts";
 import * as CheckpointDiffQuery from "../../../apps/server/src/checkpointing/CheckpointDiffQuery.ts";
 import * as GitManager from "../../../apps/server/src/git/GitManager.ts";
 import * as Keybindings from "../../../apps/server/src/keybindings.ts";
@@ -2216,6 +2217,23 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(response.shellResumeCompletionMarker, true);
       assert.equal(response.threadResumeCompletionMarker, true);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("does not block server config when editor discovery never resolves", () =>
+    Effect.gen(function* () {
+      const discoveryInterrupted = yield* Deferred.make<void>();
+      const responseFiber = yield* resolveAvailableEditorsForConfig(
+        Effect.never.pipe(
+          Effect.onInterrupt(() => Deferred.succeed(discoveryInterrupted, undefined)),
+        ),
+      ).pipe(Effect.forkChild);
+
+      yield* TestClock.adjust(Duration.seconds(5));
+
+      const availableEditors = yield* Fiber.join(responseFiber);
+      yield* Deferred.await(discoveryInterrupted);
+      assert.deepEqual(availableEditors, []);
+    }),
   );
 
   it.effect(
