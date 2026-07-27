@@ -77,6 +77,10 @@ import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
 import * as ServerConfig from "./config.ts";
 import * as Keybindings from "./keybindings.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
+import {
+  projectActivityEvent,
+  projectThreadDetailSnapshot,
+} from "./orchestration/ActivityPayloadProjection.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
@@ -1391,6 +1395,7 @@ const makeWsRpcLayer = (
             ).pipe(
               Effect.map((events) => Array.from(events)),
               Effect.flatMap(enrichOrchestrationEvents),
+              Effect.map((events) => events.map(projectActivityEvent)),
               Effect.mapError(
                 (cause) =>
                   new OrchestrationReplayEventsError({
@@ -1891,7 +1896,7 @@ const makeWsRpcLayer = (
                 Stream.filter(isThisThreadDetailEvent),
                 Stream.map((event) => ({
                   kind: "event" as const,
-                  event,
+                  event: projectActivityEvent(event),
                 })),
               );
 
@@ -1926,7 +1931,10 @@ const makeWsRpcLayer = (
                   .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
                   .pipe(
                     Stream.filter(isThisThreadDetailEvent),
-                    Stream.map((event) => ({ kind: "event" as const, event })),
+                    Stream.map((event) => ({
+                      kind: "event" as const,
+                      event: projectActivityEvent(event),
+                    })),
                     Stream.mapError(
                       (cause) =>
                         new OrchestrationGetSnapshotError({
@@ -1978,7 +1986,7 @@ const makeWsRpcLayer = (
               return Stream.concat(
                 Stream.make({
                   kind: "snapshot" as const,
-                  snapshot: snapshot.value,
+                  snapshot: projectThreadDetailSnapshot(snapshot.value),
                 }),
                 afterSnapshot,
               );
