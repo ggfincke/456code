@@ -1,3 +1,6 @@
+// apps/server/src/orchestration/commandInvariants.ts
+// validates orchestration commands against the current read model
+
 import type {
   OrchestrationCommand,
   OrchestrationProject,
@@ -52,6 +55,25 @@ export function requireProject(input: {
     invariantError(
       input.command.type,
       `Project '${input.projectId}' does not exist for command '${input.command.type}'.`,
+    ),
+  );
+}
+
+export function requireActiveProject(input: {
+  readonly readModel: OrchestrationReadModel;
+  readonly command: OrchestrationCommand;
+  readonly projectId: ProjectId;
+}): Effect.Effect<OrchestrationProject, OrchestrationCommandInvariantError> {
+  return requireProject(input).pipe(
+    Effect.flatMap((project) =>
+      project.deletedAt === null
+        ? Effect.succeed(project)
+        : Effect.fail(
+            invariantError(
+              input.command.type,
+              `Project '${input.projectId}' is deleted and cannot handle command '${input.command.type}'.`,
+            ),
+          ),
     ),
   );
 }

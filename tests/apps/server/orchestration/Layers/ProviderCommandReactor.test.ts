@@ -1,3 +1,5 @@
+// tests/apps/server/orchestration/Layers/ProviderCommandReactor.test.ts
+// verifies provider intent execution, routing, and failure recovery
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -9,6 +11,7 @@ import {
   ProviderSession,
   ProviderDriverKind,
   ProviderInstanceId,
+  type ThreadOrigin,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
 import {
@@ -147,6 +150,8 @@ describe("ProviderCommandReactor", () => {
   async function createHarness(input?: {
     readonly baseDir?: string;
     readonly threadModelSelection?: ModelSelection;
+    readonly threadOrigin?: ThreadOrigin;
+    readonly instanceDriverKind?: ProviderDriverKind;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     readonly requiresNewThreadForModelChange?: boolean;
     readonly startSessionEffect?: (
@@ -167,7 +172,7 @@ describe("ProviderCommandReactor", () => {
       model: "gpt-5-codex",
     };
     const startSessionEffect = input?.startSessionEffect;
-    const startSession = vi.fn((_: unknown, input: unknown) => {
+    const startSession = vi.fn((_: unknown, input: unknown, _routingAuthority?: unknown) => {
       const sessionIndex = nextSessionIndex++;
       const resumeCursor =
         typeof input === "object" && input !== null && "resumeCursor" in input
@@ -228,7 +233,7 @@ describe("ProviderCommandReactor", () => {
         ),
       );
     });
-    const sendTurn = vi.fn((_: unknown) =>
+    const sendTurn = vi.fn((_: unknown, _routingAuthority?: unknown) =>
       Effect.succeed({
         threadId: ThreadId.make("thread-1"),
         turnId: asTurnId("turn-1"),
@@ -321,9 +326,11 @@ describe("ProviderCommandReactor", () => {
         }),
       getInstanceInfo: (instanceId) => {
         const raw = String(instanceId);
-        const driverKind = ProviderDriverKind.make(
-          raw.startsWith("claude") ? "claudeAgent" : raw.startsWith("codex") ? "codex" : raw,
-        );
+        const driverKind =
+          input?.instanceDriverKind ??
+          ProviderDriverKind.make(
+            raw.startsWith("claude") ? "claudeAgent" : raw.startsWith("codex") ? "codex" : raw,
+          );
         return Effect.succeed({
           instanceId,
           driverKind,
@@ -417,6 +424,7 @@ describe("ProviderCommandReactor", () => {
         runtimeMode: "approval-required",
         branch: null,
         worktreePath: null,
+        ...(input?.threadOrigin !== undefined ? { origin: input.threadOrigin } : {}),
         createdAt: now,
       }),
     );
@@ -478,6 +486,192 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.threadId).toBe("thread-1");
     expect(thread?.session?.status).toBe("starting");
     expect(thread?.session?.runtimeMode).toBe("approval-required");
+  });
+
+  it("does not start an imported continuation after its instance id moves to another driver", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const providerInstanceId = ProviderInstanceId.make("shared-provider");
+    const harness = await createHarness({
+      threadModelSelection: {
+        instanceId: providerInstanceId,
+        model: "claude-sonnet-4-5",
+      },
+      threadOrigin: {
+        kind: "imported",
+        source: "codex-cli",
+        sourcePath: "/tmp/imported-session.jsonl",
+        contentHash: "imported-content-hash",
+        nativeSessionId: "native-session",
+        providerInstanceId,
+        importedAt: now,
+      },
+      instanceDriverKind: ProviderDriverKind.make("claudeAgent"),
+    });
+    const continuationActivityId = EventId.make("activity-import-continuation");
+    const continuation = {
+      state: "history-only" as const,
+      providerInstanceId,
+      continuationIdentity: {
+        driverKind: ProviderDriverKind.make("codex"),
+        continuationKey: `codex:instance:${providerInstanceId}`,
+      },
+      reason: "Native continuation could not be verified.",
+    };
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-import-continuation"),
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: continuationActivityId,
+          tone: "info",
+          kind: "task.completed",
+          summary: "Imported continuation state recorded.",
+          payload: {
+            type: "import.continuation",
+            driverKind: ProviderDriverKind.make("codex"),
+            continuation,
+          },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-turn-start"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-imported"),
+          role: "user",
+          text: "continue imported work",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: providerInstanceId,
+          model: "claude-sonnet-4-5",
+        },
+        importContinuationConsent: {
+          originContentHash: "imported-content-hash",
+          activityId: continuationActivityId,
+          driverKind: ProviderDriverKind.make("codex"),
+          targetProviderInstanceId: providerInstanceId,
+          continuation,
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return (
+        readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"))?.session
+          ?.status === "error"
+      );
+    });
+    expect(harness.startSession).not.toHaveBeenCalled();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    const readModel = await harness.readModel();
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make("thread-1"));
+    expect(thread?.session?.lastError).toContain(
+      "no longer resolves to its authorized provider continuation source",
+    );
+  });
+
+  it("passes imported continuation authority through provider start and send", async () => {
+    const now = "2026-01-01T00:00:00.000Z";
+    const driverKind = ProviderDriverKind.make("codex");
+    const providerInstanceId = ProviderInstanceId.make("shared-provider");
+    const harness = await createHarness({
+      threadModelSelection: {
+        instanceId: providerInstanceId,
+        model: "gpt-5-codex",
+      },
+      threadOrigin: {
+        kind: "imported",
+        source: "codex-cli",
+        sourcePath: "/tmp/imported-session.jsonl",
+        contentHash: "imported-content-hash",
+        nativeSessionId: "native-session",
+        providerInstanceId,
+        importedAt: now,
+      },
+      instanceDriverKind: driverKind,
+    });
+    const continuationActivityId = EventId.make("activity-import-continuation-authority");
+    const continuation = {
+      state: "history-only" as const,
+      providerInstanceId,
+      continuationIdentity: {
+        driverKind: ProviderDriverKind.make("codex"),
+        continuationKey: "codex:home:/shared-codex",
+      },
+      reason: "Native continuation could not be verified.",
+    };
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.activity.append",
+        commandId: CommandId.make("cmd-import-continuation-authority"),
+        threadId: ThreadId.make("thread-1"),
+        activity: {
+          id: continuationActivityId,
+          tone: "info",
+          kind: "task.completed",
+          summary: "Imported continuation state recorded.",
+          payload: {
+            type: "import.continuation",
+            driverKind,
+            continuation,
+          },
+          turnId: null,
+          createdAt: now,
+        },
+        createdAt: now,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-imported-turn-start-authority"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-imported-authority"),
+          role: "user",
+          text: "continue imported work",
+          attachments: [],
+        },
+        modelSelection: {
+          instanceId: providerInstanceId,
+          model: "gpt-5-codex",
+        },
+        importContinuationConsent: {
+          originContentHash: "imported-content-hash",
+          activityId: continuationActivityId,
+          driverKind,
+          targetProviderInstanceId: providerInstanceId,
+          continuation,
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: now,
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1);
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    const authority = {
+      provider: driverKind,
+      providerInstanceId,
+      continuationIdentity: continuation.continuationIdentity,
+    };
+    expect(harness.startSession.mock.calls[0]?.[2]).toEqual(authority);
+    expect(harness.sendTurn.mock.calls[0]?.[1]).toEqual(authority);
   });
 
   effectIt.effect("projects starting before a slow provider session finishes", () =>

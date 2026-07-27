@@ -1,3 +1,5 @@
+// apps/server/src/orchestration/Layers/CheckpointReactor.ts
+// captures and restores git checkpoints in response to orchestration events
 import {
   CommandId,
   type CheckpointRef,
@@ -567,6 +569,9 @@ const make = Effect.gen(function* () {
     const threadId = event.payload.threadId;
     const thread = yield* resolveThreadDetail(threadId);
     if (!thread) {
+      return;
+    }
+    if (thread.origin !== null && thread.latestTurn === null) {
       return;
     }
 

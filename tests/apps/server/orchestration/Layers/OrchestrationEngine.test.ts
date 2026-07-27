@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/Layers/OrchestrationEngine.test.ts
+// verifies orchestration engine command handling and replay
+
 import {
   CheckpointRef,
   CommandId,
@@ -146,6 +149,7 @@ describe("OrchestrationEngine", () => {
           createdAt: "2026-03-03T00:00:02.000Z",
           updatedAt: "2026-03-03T00:00:03.000Z",
           archivedAt: null,
+          origin: null,
           settledOverride: null,
           settledAt: null,
           deletedAt: null,

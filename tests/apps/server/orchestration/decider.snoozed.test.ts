@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/decider.snoozed.test.ts
+// verifies thread snooze command decisions
+
 import {
   CommandId,
   EventId,
@@ -45,6 +48,7 @@ function makeReadModel(input: {
         createdAt: NOW,
         updatedAt: NOW,
         archivedAt: input.archivedAt ?? null,
+        origin: null,
         settledOverride: null,
         settledAt: null,
         snoozedUntil: input.snoozedUntil ?? null,

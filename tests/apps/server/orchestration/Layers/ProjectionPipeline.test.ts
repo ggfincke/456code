@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/Layers/ProjectionPipeline.test.ts
+// verifies orchestration projection persistence
+
 import {
   CheckpointRef,
   CommandId,
@@ -33,6 +36,7 @@ import {
 import { OrchestrationProjectionSnapshotQueryLive } from "../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { OrchestrationEngineService } from "../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts";
 import { OrchestrationProjectionPipeline } from "../../../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts";
+import { ProjectionSnapshotQuery } from "../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../../../../apps/server/src/config.ts";
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
@@ -1429,6 +1433,46 @@ it.layer(BaseTestLayer)("OrchestrationProjectionPipeline", (it) => {
       assert.deepEqual(settledRows, [
         { state: "completed", completedAt: "2026-01-01T00:01:00.000Z" },
       ]);
+
+      const threadRows = yield* sql<{ readonly latestTurnId: string | null }>`
+        SELECT latest_turn_id AS "latestTurnId"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.deepEqual(threadRows, [{ latestTurnId: turnId }]);
+
+      const staleErrorTurnId = TurnId.make("turn-stale-error");
+      yield* eventStore.append({
+        type: "thread.session-set",
+        eventId: EventId.make("evt-tl5"),
+        aggregateKind: "thread",
+        aggregateId: threadId,
+        occurredAt: "2026-01-01T00:02:00.000Z",
+        commandId: CommandId.make("cmd-tl5"),
+        causationEventId: null,
+        correlationId: CorrelationId.make("cmd-tl5"),
+        metadata: {},
+        payload: {
+          threadId,
+          session: {
+            threadId,
+            status: "error",
+            providerName: "claude",
+            runtimeMode: "full-access",
+            activeTurnId: staleErrorTurnId,
+            lastError: "stale runtime error",
+            updatedAt: "2026-01-01T00:02:00.000Z",
+          },
+        },
+      });
+      yield* projectionPipeline.bootstrap;
+
+      const afterStaleErrorRows = yield* sql<{ readonly latestTurnId: string | null }>`
+        SELECT latest_turn_id AS "latestTurnId"
+        FROM projection_threads
+        WHERE thread_id = ${threadId}
+      `;
+      assert.deepEqual(afterStaleErrorRows, [{ latestTurnId: turnId }]);
     }),
   );
 
@@ -2663,7 +2707,7 @@ it.effect("restores pending turn-start metadata across projection pipeline resta
 
 const engineLayer = it.layer(
   OrchestrationEngineLive.pipe(
-    Layer.provide(OrchestrationProjectionSnapshotQueryLive),
+    Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -2714,6 +2758,95 @@ engineLayer("OrchestrationProjectionPipeline via engine dispatch", (it) => {
         WHERE projector = 'projection.projects'
       `;
       assert.deepEqual(projectorRows, [{ lastAppliedSequence: 1 }]);
+    }),
+  );
+
+  it.effect("projects imported messages in timestamp order and exposes thread provenance", () =>
+    Effect.gen(function* () {
+      const engine = yield* OrchestrationEngineService;
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const createdAt = "2026-01-03T00:00:00.000Z";
+      const importedAt = "2026-01-04T00:00:00.000Z";
+      const importedProjectId = ProjectId.make("project-import-round-trip");
+      const importedThreadId = ThreadId.make("thread-import-round-trip");
+      const origin = {
+        kind: "imported" as const,
+        source: "claude-code" as const,
+        sourcePath: "/tmp/claude-session.jsonl",
+        contentHash: "sha256-content-hash",
+        nativeSessionId: "claude-session-1",
+        providerInstanceId: ProviderInstanceId.make("claudeAgent"),
+        importedAt,
+      };
+
+      yield* engine.dispatch({
+        type: "project.create",
+        commandId: CommandId.make("cmd-import-project-create"),
+        projectId: importedProjectId,
+        title: "Imported project",
+        workspaceRoot: "/tmp/import-round-trip",
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make("cmd-import-thread-create"),
+        threadId: importedThreadId,
+        projectId: importedProjectId,
+        title: "Imported thread",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("claudeAgent"),
+          model: "claude-opus-4-6",
+        },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        origin,
+        createdAt,
+      });
+      yield* engine.dispatch({
+        type: "thread.messages.import",
+        commandId: CommandId.make("cmd-import-messages"),
+        threadId: importedThreadId,
+        messages: [
+          {
+            messageId: MessageId.make("message-z"),
+            role: "assistant",
+            text: "latest",
+            createdAt: "2026-01-03T00:00:02.000Z",
+          },
+          {
+            messageId: MessageId.make("message-b"),
+            role: "assistant",
+            text: "same time, second id",
+            createdAt: "2026-01-03T00:00:01.000Z",
+          },
+          {
+            messageId: MessageId.make("message-a"),
+            role: "user",
+            text: "same time, first id",
+            createdAt: "2026-01-03T00:00:01.000Z",
+          },
+        ],
+        activities: [],
+        createdAt: importedAt,
+      });
+
+      const detail = yield* snapshotQuery.getThreadDetailById(importedThreadId);
+      assert.equal(detail._tag, "Some");
+      if (detail._tag === "Some") {
+        assert.deepEqual(
+          detail.value.messages.map((message) => message.id),
+          [MessageId.make("message-a"), MessageId.make("message-b"), MessageId.make("message-z")],
+        );
+        assert.deepEqual(detail.value.origin, origin);
+      }
+
+      const shell = yield* snapshotQuery.getThreadShellById(importedThreadId);
+      assert.equal(shell._tag, "Some");
+      if (shell._tag === "Some") {
+        assert.deepEqual(shell.value.origin, origin);
+      }
     }),
   );
 

@@ -1,15 +1,20 @@
+// apps/server/src/orchestration/Layers/ProjectionPipeline.ts
+// projects orchestration events into durable read models
+
 import {
   ApprovalRequestId,
   type ChatAttachment,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
+  ThreadOrigin,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
@@ -66,6 +71,8 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   checkpoints: "projection.checkpoints",
   pendingApprovals: "projection.pending-approvals",
 } as const;
+
+const encodeThreadOriginJson = Schema.encodeSync(Schema.fromJsonString(ThreadOrigin));
 
 type ProjectorName =
   (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES];
@@ -603,6 +610,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
+            originJson:
+              event.payload.origin === null ? null : encodeThreadOriginJson(event.payload.origin),
             latestTurnId: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
@@ -781,9 +790,63 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           return;
         }
 
-        case "thread.message-sent":
+        case "thread.message-sent": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          const isImportedTranscriptMessage =
+            existingRow.value.originJson !== null &&
+            existingRow.value.latestTurnId === null &&
+            event.payload.turnId === null &&
+            !event.payload.streaming;
+          if (event.payload.role === "user" || isImportedTranscriptMessage) {
+            const latestUserMessageAt =
+              event.payload.role === "user" &&
+              (existingRow.value.latestUserMessageAt === null ||
+                event.payload.createdAt > existingRow.value.latestUserMessageAt)
+                ? event.payload.createdAt
+                : existingRow.value.latestUserMessageAt;
+            yield* projectionThreadRepository.upsert({
+              ...existingRow.value,
+              latestUserMessageAt,
+              updatedAt: event.occurredAt,
+            });
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            updatedAt: event.occurredAt,
+          });
+          yield* refreshThreadShellSummary(event.payload.threadId);
+          return;
+        }
+
+        case "thread.activity-appended": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          const isImportedTranscriptActivity =
+            existingRow.value.originJson !== null &&
+            existingRow.value.latestTurnId === null &&
+            event.payload.activity.turnId === null &&
+            event.payload.activity.sequence !== undefined;
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            updatedAt: event.occurredAt,
+          });
+          if (!isImportedTranscriptActivity) {
+            yield* refreshThreadShellSummary(event.payload.threadId);
+          }
+          return;
+        }
+
         case "thread.proposed-plan-upserted":
-        case "thread.activity-appended":
         case "thread.approval-response-requested":
         case "thread.user-input-response-requested": {
           const existingRow = yield* projectionThreadRepository.getById({
@@ -807,9 +870,14 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
           if (Option.isNone(existingRow)) {
             return;
           }
+          const latestTurnId =
+            event.payload.session.status === "running" &&
+            event.payload.session.activeTurnId !== null
+              ? event.payload.session.activeTurnId
+              : existingRow.value.latestTurnId;
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
-            latestTurnId: event.payload.session.activeTurnId,
+            latestTurnId,
             updatedAt: event.occurredAt,
           });
           yield* refreshThreadShellSummary(event.payload.threadId);

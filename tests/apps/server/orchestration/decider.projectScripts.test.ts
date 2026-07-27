@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/decider.projectScripts.test.ts
+// verifies project script command decisions
+
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -256,6 +259,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
+          origin: null,
           createdAt: now,
           updatedAt: now,
         },
@@ -353,6 +357,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
+          origin: null,
           createdAt: now,
           updatedAt: now,
         },
@@ -431,6 +436,7 @@ it.layer(NodeServices.layer)("decider project scripts", (it) => {
           runtimeMode: "approval-required",
           branch: null,
           worktreePath: null,
+          origin: null,
           createdAt: now,
           updatedAt: now,
         },

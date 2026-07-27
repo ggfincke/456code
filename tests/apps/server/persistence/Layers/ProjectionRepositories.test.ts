@@ -1,4 +1,7 @@
-import { ProjectId, ThreadId, ProviderInstanceId } from "@t3tools/contracts";
+// tests/apps/server/persistence/Layers/ProjectionRepositories.test.ts
+// verifies projection repository persistence
+
+import { EventId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -7,13 +10,16 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../../../../apps/server/src/persistence/Layers/Sqlite.ts";
 import { ProjectionProjectRepositoryLive } from "../../../../../apps/server/src/persistence/Layers/ProjectionProjects.ts";
+import { ProjectionThreadActivityRepositoryLive } from "../../../../../apps/server/src/persistence/Layers/ProjectionThreadActivities.ts";
 import { ProjectionThreadRepositoryLive } from "../../../../../apps/server/src/persistence/Layers/ProjectionThreads.ts";
 import { ProjectionProjectRepository } from "../../../../../apps/server/src/persistence/Services/ProjectionProjects.ts";
+import { ProjectionThreadActivityRepository } from "../../../../../apps/server/src/persistence/Services/ProjectionThreadActivities.ts";
 import { ProjectionThreadRepository } from "../../../../../apps/server/src/persistence/Services/ProjectionThreads.ts";
 
 const projectionRepositoriesLayer = it.layer(
   Layer.mergeAll(
     ProjectionProjectRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
+    ProjectionThreadActivityRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     ProjectionThreadRepositoryLive.pipe(Layer.provideMerge(SqlitePersistenceMemory)),
     SqlitePersistenceMemory,
   ),
@@ -87,6 +93,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        originJson: null,
         latestTurnId: null,
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-24T00:00:00.000Z",
@@ -149,6 +156,7 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        originJson: null,
         latestTurnId: null,
         createdAt: "2026-03-24T00:00:00.000Z",
         updatedAt: "2026-03-25T00:00:00.000Z",
@@ -193,6 +201,38 @@ projectionRepositoriesLayer("Projection repositories", (it) => {
       assert.strictEqual(updated?.settledAt, null);
       assert.strictEqual(updated?.snoozedUntil, null);
       assert.strictEqual(updated?.snoozedAt, null);
+    }),
+  );
+
+  it.effect("orders activity lifecycle ties before the activity ID fallback", () =>
+    Effect.gen(function* () {
+      const activities = yield* ProjectionThreadActivityRepository;
+      const threadId = ThreadId.make("thread-activity-order");
+      const turnId = TurnId.make("turn-native");
+
+      for (const [activityId, kind] of [
+        [EventId.make("activity-a-completed"), "tool.completed"],
+        [EventId.make("activity-m-progress"), "tool.updated"],
+        [EventId.make("activity-z-started"), "tool.started"],
+      ] as const) {
+        yield* activities.upsert({
+          activityId,
+          threadId,
+          turnId,
+          tone: "info",
+          kind,
+          summary: kind,
+          payload: {},
+          sequence: 7,
+          createdAt: "2026-03-24T00:00:00.000Z",
+        });
+      }
+
+      const persisted = yield* activities.listByThreadId({ threadId });
+      assert.deepStrictEqual(
+        persisted.map((activity) => activity.activityId),
+        ["activity-z-started", "activity-m-progress", "activity-a-completed"],
+      );
     }),
   );
 });

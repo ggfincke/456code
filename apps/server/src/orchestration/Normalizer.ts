@@ -1,3 +1,5 @@
+// apps/server/src/orchestration/Normalizer.ts
+// canonicalizes and validates client orchestration commands before dispatch
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -97,6 +99,13 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       return {
         ...canonicalCommand,
         workspaceRoot: yield* normalizeProjectWorkspaceRoot(canonicalCommand.workspaceRoot),
+      } satisfies OrchestrationCommand;
+    }
+
+    if (canonicalCommand.type === "thread.create") {
+      return {
+        ...canonicalCommand,
+        origin: null as never,
       } satisfies OrchestrationCommand;
     }
 

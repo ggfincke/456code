@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/projector.test.ts
+// verifies in-memory orchestration projections
+
 import {
   CommandId,
   EventId,
@@ -6,8 +9,8 @@ import {
   ThreadId,
   type OrchestrationEvent,
 } from "@t3tools/contracts";
+import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
-import { describe, expect, it } from "vite-plus/test";
 
 import {
   createEmptyReadModel,
@@ -92,6 +95,7 @@ describe("orchestration projector", () => {
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
+        origin: null,
         settledOverride: null,
         settledAt: null,
         snoozedUntil: null,
@@ -105,6 +109,208 @@ describe("orchestration projector", () => {
       },
     ]);
   });
+
+  it.effect("keeps imported history before continued native activities", () =>
+    Effect.gen(function* () {
+      const createdAt = "2026-01-01T00:00:00.000Z";
+      let model = yield* projectEvent(
+        createEmptyReadModel(createdAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-mixed-activity-order",
+          occurredAt: createdAt,
+          commandId: "cmd-thread-mixed-activity-order",
+          payload: {
+            threadId: "thread-mixed-activity-order",
+            projectId: "project-1",
+            title: "Imported then continued",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            origin: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      );
+
+      for (const [eventSequence, activity] of [
+        [
+          2,
+          {
+            id: "imported-activity",
+            tone: "info",
+            kind: "task.progress",
+            summary: "Imported history",
+            payload: {},
+            turnId: null,
+            sequence: 100,
+            createdAt: "2026-01-01T00:00:01.000Z",
+          },
+        ],
+        [
+          3,
+          {
+            id: "native-activity",
+            tone: "info",
+            kind: "task.progress",
+            summary: "Continued native work",
+            payload: {},
+            turnId: "turn-native",
+            sequence: 1,
+            createdAt: "2026-01-01T00:00:02.000Z",
+          },
+        ],
+      ] as const) {
+        model = yield* projectEvent(
+          model,
+          makeEvent({
+            sequence: eventSequence,
+            type: "thread.activity-appended",
+            aggregateKind: "thread",
+            aggregateId: "thread-mixed-activity-order",
+            occurredAt: activity.createdAt,
+            commandId: `cmd-activity-${eventSequence}`,
+            payload: {
+              threadId: "thread-mixed-activity-order",
+              activity,
+            },
+          }),
+        );
+      }
+
+      expect(model.threads[0]?.activities.map((activity) => activity.id)).toEqual([
+        "imported-activity",
+        "native-activity",
+      ]);
+    }),
+  );
+
+  it.effect("retains 500 live activities plus imported continuation authority", () =>
+    Effect.gen(function* () {
+      const importedAt = "2026-01-01T00:00:00.000Z";
+      let model = yield* projectEvent(
+        createEmptyReadModel(importedAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: "thread-import-retention",
+          occurredAt: importedAt,
+          commandId: "cmd-thread-import-retention",
+          payload: {
+            threadId: "thread-import-retention",
+            projectId: "project-1",
+            title: "Imported timeline",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            origin: {
+              kind: "imported",
+              source: "codex-cli",
+              sourcePath: "/tmp/import.jsonl",
+              contentHash: "import-hash",
+              nativeSessionId: "native-import",
+              providerInstanceId: "codex",
+              importedAt,
+            },
+            createdAt: importedAt,
+            updatedAt: importedAt,
+          },
+        }),
+      );
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: "thread.activity-appended",
+          aggregateKind: "thread",
+          aggregateId: "thread-import-retention",
+          occurredAt: "2026-01-01T00:00:00.001Z",
+          commandId: "cmd-import-marker",
+          payload: {
+            threadId: "thread-import-retention",
+            activity: {
+              id: "import-continuation-marker",
+              tone: "info",
+              kind: "task.completed",
+              summary: "Native codex continuation verified",
+              payload: {
+                type: "import.continuation",
+                driverKind: "codex",
+                continuation: {
+                  state: "verified",
+                  providerInstanceId: "codex",
+                  reason: null,
+                },
+              },
+              turnId: null,
+              sequence: 0,
+              createdAt: "2026-01-01T00:00:00.001Z",
+            },
+          },
+        }),
+      );
+
+      for (let index = 0; index < 500; index += 1) {
+        const isApproval = index === 0;
+        const createdAt = `2026-01-01T00:${String(Math.floor(index / 60)).padStart(
+          2,
+          "0",
+        )}:${String(index % 60).padStart(2, "0")}.100Z`;
+        model = yield* projectEvent(
+          model,
+          makeEvent({
+            sequence: index + 3,
+            type: "thread.activity-appended",
+            aggregateKind: "thread",
+            aggregateId: "thread-import-retention",
+            occurredAt: createdAt,
+            commandId: `cmd-live-activity-${index}`,
+            payload: {
+              threadId: "thread-import-retention",
+              activity: {
+                id: isApproval
+                  ? "live-approval"
+                  : `live-activity-${String(index).padStart(3, "0")}`,
+                tone: isApproval ? "approval" : "info",
+                kind: isApproval ? "approval.requested" : "task.progress",
+                summary: isApproval ? "Approve live command" : `Live activity ${index}`,
+                payload: isApproval ? { requestId: "approval-live" } : {},
+                turnId: null,
+                createdAt,
+              },
+            },
+          }),
+        );
+      }
+
+      const activities = model.threads[0]?.activities ?? [];
+      expect(activities).toHaveLength(501);
+      expect(activities.some((activity) => activity.id === "live-approval")).toBe(true);
+      expect(activities.some((activity) => activity.id === "import-continuation-marker")).toBe(
+        true,
+      );
+      expect(
+        activities
+          .filter((activity) => activity.id.startsWith("live-"))
+          .map((activity) => activity.id),
+      ).toHaveLength(500);
+    }),
+  );
 
   it("fails when event payload cannot be decoded by runtime schema", async () => {
     const now = "2026-01-01T00:00:00.000Z";
