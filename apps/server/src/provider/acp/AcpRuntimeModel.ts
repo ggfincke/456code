@@ -1,3 +1,6 @@
+// apps/server/src/provider/acp/AcpRuntimeModel.ts
+// normalizes ACP session state, updates, and replay lifecycle gates
+
 import * as Clock from "effect/Clock";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -460,6 +463,7 @@ export function sessionUpdateIsReplay(params: EffectAcpSchema.SessionNotificatio
 
 export interface SessionLoadGate {
   readonly active: boolean;
+  readonly sessionId: string;
   readonly lastActivityAtMillis: number | undefined;
   readonly idleGap: Duration.Duration;
   readonly initializeResult: EffectAcpSchema.InitializeResponse;

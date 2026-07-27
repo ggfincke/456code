@@ -1,3 +1,5 @@
+// apps/server/src/provider/Services/ProviderService.ts
+// defines the cross-provider session and turn orchestration interface
 /**
  * ProviderService - Service interface for provider sessions, turns, and checkpoints.
  *
@@ -12,6 +14,8 @@
  * @module ProviderService
  */
 import type {
+  ProviderContinuationIdentity,
+  ProviderDriverKind,
   ProviderInterruptTurnInput,
   ProviderInstanceId,
   ProviderRespondToRequestInput,
@@ -33,6 +37,15 @@ import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
 import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
 
 /**
+ * Immutable routing identity that the selected provider adapter must satisfy.
+ */
+export interface ProviderRoutingAuthority {
+  readonly provider: ProviderDriverKind;
+  readonly providerInstanceId: ProviderInstanceId;
+  readonly continuationIdentity: ProviderContinuationIdentity | null;
+}
+
+/**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
  */
 export interface ProviderServiceShape {
@@ -42,6 +55,7 @@ export interface ProviderServiceShape {
   readonly startSession: (
     threadId: ThreadId,
     input: ProviderSessionStartInput,
+    routingAuthority?: ProviderRoutingAuthority,
   ) => Effect.Effect<ProviderSession, ProviderServiceError>;
 
   /**
@@ -49,6 +63,7 @@ export interface ProviderServiceShape {
    */
   readonly sendTurn: (
     input: ProviderSendTurnInput,
+    routingAuthority?: ProviderRoutingAuthority,
   ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
 
   /**

@@ -1,8 +1,5 @@
-/**
- * CursorAdapterLive — Cursor CLI (`agent acp`) via ACP.
- *
- * @module CursorAdapterLive
- */
+// apps/server/src/provider/Layers/CursorAdapter.ts
+// runs Cursor CLI sessions through ACP
 
 import {
   ApprovalRequestId,
@@ -28,14 +25,11 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -77,6 +71,7 @@ import {
 import { type CursorAdapterShape } from "../Services/CursorAdapter.ts";
 import { resolveCursorAcpBaseModelId } from "./CursorProvider.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { makeKeyedSemaphore } from "./KeyedSemaphore.ts";
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 
 const PROVIDER = ProviderDriverKind.make("cursor");
@@ -170,11 +165,17 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseCursorResume(raw: unknown): { sessionId: string } | undefined {
+function parseCursorResume(
+  raw: unknown,
+): { sessionId: string; requireExisting: boolean } | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.schemaVersion !== CURSOR_RESUME_VERSION) return undefined;
   if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) return undefined;
-  return { sessionId: raw.sessionId.trim() };
+  if (Object.hasOwn(raw, "requireExisting") && raw.requireExisting !== true) return undefined;
+  return {
+    sessionId: raw.sessionId,
+    requireExisting: raw.requireExisting === true,
+  };
 }
 
 function normalizeModeSearchText(mode: AcpSessionMode): string {
@@ -333,7 +334,7 @@ export function makeCursorAdapter(
     const makeAcpNativeLoggers = yield* makeAcpNativeLoggerFactory();
 
     const sessions = new Map<ThreadId, CursorSessionContext>();
-    const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+    const threadLocks = yield* makeKeyedSemaphore<string>();
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -364,26 +365,8 @@ export function makeCursorAdapter(
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
 
-    const getThreadSemaphore = (threadId: string) =>
-      SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
-        const existing: Option.Option<Semaphore.Semaphore> = Option.fromNullishOr(
-          current.get(threadId),
-        );
-        return Option.match(existing, {
-          onNone: () =>
-            Semaphore.make(1).pipe(
-              Effect.map((semaphore) => {
-                const next = new Map(current);
-                next.set(threadId, semaphore);
-                return [semaphore, next] as const;
-              }),
-            ),
-          onSome: (semaphore) => Effect.succeed([semaphore, current] as const),
-        });
-      });
-
     const withThreadLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
-      Effect.flatMap(getThreadSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
+      threadLocks.withPermit(threadId, effect);
 
     const logNative = (
       threadId: ThreadId,
@@ -498,7 +481,33 @@ export function makeCursorAdapter(
           const cwd = path.resolve(input.cwd.trim());
           const cursorModelSelection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
+          const parsedResume = parseCursorResume(input.resumeCursor);
+          if (
+            isRecord(input.resumeCursor) &&
+            Object.hasOwn(input.resumeCursor, "requireExisting") &&
+            parsedResume === undefined
+          ) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: "An imported Cursor session requires a valid existing native session id.",
+            });
+          }
+          const resumeSessionId = parsedResume?.sessionId;
           const existing = sessions.get(input.threadId);
+          if (
+            existing &&
+            !existing.stopped &&
+            parseCursorResume(existing.session.resumeCursor)?.requireExisting === true &&
+            parsedResume?.requireExisting !== true
+          ) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue:
+                "An active imported Cursor session must be stopped before starting a fresh native session.",
+            });
+          }
           if (existing && !existing.stopped) {
             yield* stopSessionInternal(existing);
           }
@@ -512,7 +521,6 @@ export function makeCursorAdapter(
           );
           let ctx!: CursorSessionContext;
 
-          const resumeSessionId = parseCursorResume(input.resumeCursor)?.sessionId;
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,
@@ -538,6 +546,7 @@ export function makeCursorAdapter(
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
+            ...(parsedResume?.requireExisting === true ? { requireSessionLoadResponse: true } : {}),
             clientInfo: { name: "code456", version: "0.0.0" },
             ...(mcpSession
               ? {
@@ -762,6 +771,7 @@ export function makeCursorAdapter(
             resumeCursor: {
               schemaVersion: CURSOR_RESUME_VERSION,
               sessionId: started.sessionId,
+              ...(parsedResume?.requireExisting === true ? { requireExisting: true } : {}),
             },
             createdAt: now,
             updatedAt: now,

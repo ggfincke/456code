@@ -1,3 +1,5 @@
+// apps/server/src/provider/testUtils/providerAdapterRegistryMock.ts
+// builds provider adapter registry mocks for focused server tests
 /**
  * Test helpers for constructing a `ProviderAdapterRegistryShape` mock from a
  * kind-keyed adapter map.
@@ -46,10 +48,22 @@ export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapt
     byInstanceId.set(defaultInstanceIdForDriver(driverKind), adapter);
   }
 
-  const getByInstance: ProviderAdapterRegistryShape["getByInstance"] = (instanceId) => {
+  const getRoute: ProviderAdapterRegistryShape["getRoute"] = (instanceId) => {
     const adapter = byInstanceId.get(instanceId);
     return adapter
-      ? Effect.succeed(adapter)
+      ? Effect.succeed({
+          info: {
+            instanceId,
+            driverKind: ProviderDriverKind.make(adapter.provider),
+            displayName: undefined,
+            enabled: true,
+            continuationIdentity: {
+              driverKind: ProviderDriverKind.make(adapter.provider),
+              continuationKey: `${adapter.provider}:instance:${instanceId}`,
+            },
+          },
+          adapter,
+        })
       : Effect.fail(
           new ProviderUnsupportedError({
             provider: ProviderDriverKind.make(instanceId),
@@ -58,27 +72,9 @@ export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapt
   };
 
   return {
-    getByInstance,
-    getInstanceInfo: (instanceId) => {
-      const adapter = byInstanceId.get(instanceId);
-      if (!adapter) {
-        return Effect.fail(
-          new ProviderUnsupportedError({
-            provider: ProviderDriverKind.make(instanceId),
-          }),
-        );
-      }
-      return Effect.succeed({
-        instanceId,
-        driverKind: ProviderDriverKind.make(adapter.provider),
-        displayName: undefined,
-        enabled: true,
-        continuationIdentity: {
-          driverKind: ProviderDriverKind.make(adapter.provider),
-          continuationKey: `${adapter.provider}:instance:${instanceId}`,
-        },
-      });
-    },
+    getRoute,
+    getByInstance: (instanceId) => getRoute(instanceId).pipe(Effect.map((route) => route.adapter)),
+    getInstanceInfo: (instanceId) => getRoute(instanceId).pipe(Effect.map((route) => route.info)),
     listInstances: () => Effect.succeed(Array.from(byInstanceId.keys())),
     listProviders: () =>
       Effect.succeed(

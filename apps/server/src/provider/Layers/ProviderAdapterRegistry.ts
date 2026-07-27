@@ -1,3 +1,5 @@
+// apps/server/src/provider/Layers/ProviderAdapterRegistry.ts
+// resolves provider routes from one live instance registry snapshot
 /**
  * ProviderAdapterRegistryLive — facade over `ProviderInstanceRegistry`.
  *
@@ -33,38 +35,40 @@ import {
 const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(function* () {
   const registry = yield* ProviderInstanceRegistry;
 
-  const getByInstance: ProviderAdapterRegistryShape["getByInstance"] = (instanceId) =>
+  const getRoute: ProviderAdapterRegistryShape["getRoute"] = (instanceId) =>
     registry.getInstance(instanceId).pipe(
-      Effect.flatMap((instance) =>
-        instance === undefined
-          ? Effect.fail(
-              new ProviderUnsupportedError({
-                provider: instanceId,
-              }),
-            )
-          : Effect.succeed(instance.adapter),
-      ),
-    );
-
-  const getInstanceInfo: ProviderAdapterRegistryShape["getInstanceInfo"] = (instanceId) =>
-    registry.getInstance(instanceId).pipe(
-      Effect.flatMap((instance) =>
-        instance === undefined
-          ? Effect.fail(
-              new ProviderUnsupportedError({
-                provider: instanceId,
-              }),
-            )
-          : Effect.succeed({
+      Effect.flatMap((instance) => {
+        if (instance === undefined) {
+          return Effect.fail(
+            new ProviderUnsupportedError({
+              provider: instanceId,
+            }),
+          );
+        }
+        return instance.resolveContinuationIdentity.pipe(
+          Effect.map((continuationIdentity) => ({
+            info: {
               instanceId: instance.instanceId,
               driverKind: instance.driverKind,
               displayName: instance.displayName,
               accentColor: instance.accentColor,
               enabled: instance.enabled,
-              continuationIdentity: instance.continuationIdentity,
-            }),
-      ),
+              continuationIdentity,
+              ...(instance.continuationUnavailableReason === undefined
+                ? {}
+                : { continuationUnavailableReason: instance.continuationUnavailableReason }),
+            },
+            adapter: instance.adapter,
+          })),
+        );
+      }),
     );
+
+  const getByInstance: ProviderAdapterRegistryShape["getByInstance"] = (instanceId) =>
+    getRoute(instanceId).pipe(Effect.map((route) => route.adapter));
+
+  const getInstanceInfo: ProviderAdapterRegistryShape["getInstanceInfo"] = (instanceId) =>
+    getRoute(instanceId).pipe(Effect.map((route) => route.info));
 
   const listInstances: ProviderAdapterRegistryShape["listInstances"] = () =>
     registry.listInstances.pipe(
@@ -89,6 +93,7 @@ const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(fun
     );
 
   return {
+    getRoute,
     getByInstance,
     getInstanceInfo,
     listInstances,

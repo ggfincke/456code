@@ -1,3 +1,5 @@
+// apps/server/src/provider/Layers/ProviderRegistry.ts
+// aggregates provider snapshots and live continuation identities
 /**
  * ProviderRegistryLive — aggregates per-instance snapshot streams into a
  * single materialized list.
@@ -55,8 +57,13 @@ import type { ProviderInstance } from "../ProviderDriver.ts";
 import { makeManualOnlyProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
 import type { ProviderSnapshotSource } from "../builtInProviderCatalog.ts";
 
+interface LiveProviderSnapshotSource extends ProviderSnapshotSource {
+  readonly resolveContinuationIdentity: ProviderInstance["resolveContinuationIdentity"];
+  readonly continuationUnavailableReason?: string;
+}
+
 const loadProviders = (
-  providerSources: ReadonlyArray<ProviderSnapshotSource>,
+  providerSources: ReadonlyArray<LiveProviderSnapshotSource>,
 ): Effect.Effect<ReadonlyArray<ServerProvider>> =>
   Effect.forEach(
     providerSources,
@@ -164,25 +171,34 @@ export const haveProvidersChanged = (
 ): boolean => !Equal.equals(previousProviders, nextProviders);
 
 const correlateSnapshotWithSource = (
-  source: ProviderSnapshotSource,
+  source: LiveProviderSnapshotSource,
   snapshot: ServerProvider,
-): Effect.Effect<ServerProvider> => {
-  if (snapshot.instanceId !== source.instanceId) {
-    return Effect.die(
-      new Error(
-        `Provider snapshot instance mismatch: source '${source.instanceId}' emitted '${snapshot.instanceId}'.`,
-      ),
-    );
-  }
-  if (snapshot.driver !== source.driverKind) {
-    return Effect.die(
-      new Error(
-        `Provider snapshot driver mismatch for instance '${source.instanceId}': source '${source.driverKind}' emitted '${snapshot.driver}'.`,
-      ),
-    );
-  }
-  return Effect.succeed(snapshot);
-};
+): Effect.Effect<ServerProvider> =>
+  Effect.gen(function* () {
+    if (snapshot.instanceId !== source.instanceId) {
+      return yield* Effect.die(
+        new Error(
+          `Provider snapshot instance mismatch: source '${source.instanceId}' emitted '${snapshot.instanceId}'.`,
+        ),
+      );
+    }
+    if (snapshot.driver !== source.driverKind) {
+      return yield* Effect.die(
+        new Error(
+          `Provider snapshot driver mismatch for instance '${source.instanceId}': source '${source.driverKind}' emitted '${snapshot.driver}'.`,
+        ),
+      );
+    }
+    const { continuation: _staleContinuation, ...snapshotWithoutContinuation } = snapshot;
+    if (source.continuationUnavailableReason !== undefined) {
+      return snapshotWithoutContinuation;
+    }
+    const continuationIdentity = yield* source.resolveContinuationIdentity;
+    return {
+      ...snapshotWithoutContinuation,
+      continuation: { groupKey: continuationIdentity.continuationKey },
+    };
+  });
 
 /**
  * Key a snapshot for aggregation and persistence. Snapshot sources
@@ -198,9 +214,13 @@ const snapshotInstanceKey = (provider: ServerProvider): ProviderInstanceId => {
 // after `ProviderInstanceRegistry` rebuilds an instance (e.g. because
 // its settings changed), a fresh source rides the new PubSub instead
 // of a closed one.
-const buildSnapshotSource = (instance: ProviderInstance): ProviderSnapshotSource => ({
+const buildSnapshotSource = (instance: ProviderInstance): LiveProviderSnapshotSource => ({
   instanceId: instance.instanceId,
   driverKind: instance.driverKind,
+  resolveContinuationIdentity: instance.resolveContinuationIdentity,
+  ...(instance.continuationUnavailableReason === undefined
+    ? {}
+    : { continuationUnavailableReason: instance.continuationUnavailableReason }),
   getSnapshot: instance.snapshot.getSnapshot,
   refresh: instance.snapshot.refresh,
   streamChanges: instance.snapshot.streamChanges,
@@ -304,7 +324,7 @@ export const ProviderRegistryLive = Layer.effect(
     // interleave two passes clobbering each other's fiber bookkeeping.
     const syncSemaphore = yield* Semaphore.make(1);
 
-    const getLiveSources: Effect.Effect<ReadonlyArray<ProviderSnapshotSource>> = Ref.get(
+    const getLiveSources: Effect.Effect<ReadonlyArray<LiveProviderSnapshotSource>> = Ref.get(
       liveSubsRef,
     ).pipe(Effect.map((map) => Array.from(map.values(), buildSnapshotSource)));
 
@@ -450,7 +470,7 @@ export const ProviderRegistryLive = Layer.effect(
     );
 
     const refreshOneSource = Effect.fn("refreshOneSource")(function* (
-      providerSource: ProviderSnapshotSource,
+      providerSource: LiveProviderSnapshotSource,
     ) {
       return yield* providerSource.refresh.pipe(
         Effect.flatMap((nextProvider) =>
@@ -704,8 +724,26 @@ export const ProviderRegistryLive = Layer.effect(
       return yield* Ref.get(providersRef);
     });
 
+    const getProviders = Effect.gen(function* () {
+      const instances = yield* Ref.get(liveSubsRef);
+      const providers = yield* Ref.get(providersRef);
+      const liveProviders = yield* Effect.forEach(
+        providers,
+        (provider) => {
+          const instance = instances.get(provider.instanceId);
+          return instance === undefined
+            ? Effect.succeed(provider)
+            : correlateSnapshotWithSource(buildSnapshotSource(instance), provider);
+        },
+        { concurrency: "unbounded" },
+      );
+      return yield* upsertProviders(liveProviders, {
+        persist: false,
+      });
+    });
+
     return {
-      getProviders: Ref.get(providersRef),
+      getProviders,
       refresh: (provider?: ProviderDriverKind) =>
         refresh(provider).pipe(Effect.catchCause(recoverRefreshFailure)),
       refreshInstance: (instanceId: ProviderInstanceId) =>

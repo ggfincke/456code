@@ -1,4 +1,5 @@
-import * as NodeOS from "node:os";
+// apps/server/src/provider/Drivers/CodexHomeLayout.ts
+// resolves and materializes direct or shadow Codex home layouts
 
 import { ProviderDriverKind, type CodexSettings } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -8,12 +9,12 @@ import * as Schema from "effect/Schema";
 import * as PlatformError from "effect/PlatformError";
 
 import { expandHomePath } from "../../pathExpansion.ts";
+import { fileContinuationIdentity, resolveCodexSharedHomePath } from "../continuationIdentity.ts";
 
 export interface CodexHomeLayout {
   readonly mode: "direct" | "authOverlay";
   readonly sharedHomePath: string;
   readonly effectiveHomePath: string | undefined;
-  readonly continuationKey: string;
 }
 
 const KNOWN_SHARED_DIRECTORIES = [
@@ -33,35 +34,33 @@ const PRIVATE_ENTRY_NAMES = new Set(["auth.json", "models_cache.json"]);
 const SHADOW_LOCAL_ENTRY_NAMES = new Set(["log", "memories", "tmp"]);
 const REPLACEABLE_SHARED_RUNTIME_DIRECTORIES = new Set(["mcp-oauth-locks"]);
 
-function resolveHomePath(path: Path.Path, value: string | undefined): string {
-  const expanded =
-    value && value.trim().length > 0
-      ? expandHomePath(value)
-      : path.join(NodeOS.homedir(), ".codex");
-  return path.resolve(expanded);
-}
-
 export const resolveCodexHomeLayout = Effect.fn("resolveCodexHomeLayout")(function* (
   config: CodexSettings,
+  options: {
+    readonly environment?: NodeJS.ProcessEnv;
+    readonly homePath?: string;
+    readonly cwd?: string;
+  } = {},
 ): Effect.fn.Return<CodexHomeLayout, never, Path.Path> {
   const path = yield* Path.Path;
-  const sharedHomePath = resolveHomePath(path, config.homePath);
+  const sharedHomePath = resolveCodexSharedHomePath(config, options);
   const shadowHomePath = config.shadowHomePath.trim();
   if (shadowHomePath.length === 0) {
     return {
       mode: "direct",
       sharedHomePath,
-      effectiveHomePath: config.homePath.trim().length > 0 ? sharedHomePath : undefined,
-      continuationKey: `codex:home:${sharedHomePath}`,
+      effectiveHomePath: sharedHomePath,
     };
   }
 
-  const effectiveHomePath = path.resolve(expandHomePath(shadowHomePath));
+  const effectiveHomePath = path.resolve(
+    options.cwd ?? process.cwd(),
+    expandHomePath(shadowHomePath),
+  );
   return {
     mode: "authOverlay",
     sharedHomePath,
     effectiveHomePath,
-    continuationKey: `codex:home:${sharedHomePath}`,
   };
 });
 
@@ -414,9 +413,6 @@ export const materializeCodexShadowHome = Effect.fn("materializeCodexShadowHome"
   });
 });
 
-export function codexContinuationIdentity(layout: CodexHomeLayout) {
-  return {
-    driverKind: ProviderDriverKind.make("codex"),
-    continuationKey: layout.continuationKey,
-  };
+export function codexContinuationIdentity(canonicalSessionsRoot: string) {
+  return fileContinuationIdentity(ProviderDriverKind.make("codex"), canonicalSessionsRoot);
 }

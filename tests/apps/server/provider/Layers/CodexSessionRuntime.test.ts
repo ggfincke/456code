@@ -1,3 +1,6 @@
+// tests/apps/server/provider/Layers/CodexSessionRuntime.test.ts
+// verifies codex session runtime recovery and lifecycle behavior
+
 import * as NodeAssert from "node:assert/strict";
 
 import { it } from "@effect/vitest";
@@ -396,6 +399,7 @@ describe("openCodexThread", () => {
   it.effect("falls back to thread/start when resume fails recoverably", () =>
     Effect.gen(function* () {
       const calls: Array<{ method: "thread/start" | "thread/resume"; payload: unknown }> = [];
+      let fallbackObserved = false;
       const started = makeThreadOpenResponse("fresh-thread");
       const client = {
         request: <M extends "thread/start" | "thread/resume">(
@@ -423,13 +427,63 @@ describe("openCodexThread", () => {
         requestedModel: "gpt-5.3-codex",
         serviceTier: undefined,
         resumeThreadId: "stale-thread",
+        onResumeFallback: () =>
+          Effect.sync(() => {
+            fallbackObserved = true;
+          }),
       });
 
       NodeAssert.equal(opened.thread.id, "fresh-thread");
+      NodeAssert.equal(fallbackObserved, true);
       NodeAssert.deepStrictEqual(
         calls.map((call) => call.method),
         ["thread/resume", "thread/start"],
       );
+    }),
+  );
+
+  it.effect("does not fall back when a strict imported thread cannot be resumed", () =>
+    Effect.gen(function* () {
+      const calls: Array<"thread/start" | "thread/resume"> = [];
+      let fallbackObserved = false;
+      const resumeError = new CodexErrors.CodexAppServerRequestError({
+        code: -32603,
+        errorMessage: "thread not found",
+      });
+      const client = {
+        request: <M extends "thread/start" | "thread/resume">(
+          method: M,
+          _payload: CodexRpc.ClientRequestParamsByMethod[M],
+        ) => {
+          calls.push(method);
+          return method === "thread/resume"
+            ? Effect.fail(resumeError)
+            : Effect.succeed(
+                makeThreadOpenResponse(
+                  "fresh-thread",
+                ) as CodexRpc.ClientRequestResponsesByMethod[M],
+              );
+        },
+      };
+
+      const error = yield* openCodexThread({
+        client,
+        threadId: ThreadId.make("thread-1"),
+        runtimeMode: "full-access",
+        cwd: "/tmp/project",
+        requestedModel: "gpt-5.3-codex",
+        serviceTier: undefined,
+        resumeThreadId: "imported-thread",
+        requireExisting: true,
+        onResumeFallback: () =>
+          Effect.sync(() => {
+            fallbackObserved = true;
+          }),
+      }).pipe(Effect.flip);
+
+      NodeAssert.strictEqual(error, resumeError);
+      NodeAssert.deepStrictEqual(calls, ["thread/resume"]);
+      NodeAssert.equal(fallbackObserved, false);
     }),
   );
 

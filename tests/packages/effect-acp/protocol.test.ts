@@ -1,3 +1,6 @@
+// tests/packages/effect-acp/protocol.test.ts
+// verifies ACP protocol routing, framing, diagnostics, and termination
+
 import * as Path from "effect/Path";
 import * as AcpError from "../../../packages/effect-acp/src/errors.ts";
 import * as Effect from "effect/Effect";
@@ -250,6 +253,360 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
         },
       });
       assert.notInclude(encodeUnknownJsonString(event), secret);
+    }),
+  );
+
+  it.effect("accepts exact-limit frames and resets the byte count after each newline", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const encoded = yield* encodeJsonl(SessionUpdateNotification, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "session-exact-limit",
+          update: {
+            sessionUpdate: "plan",
+            entries: [
+              {
+                content: "Inspect framing",
+                priority: "high",
+                status: "in_progress",
+              },
+            ],
+          },
+        },
+      });
+      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        maximumIncomingFrameBytes: encoded.byteLength - 1,
+        serverRequestMethods: new Set(),
+      });
+      const notifications =
+        yield* Deferred.make<ReadonlyArray<AcpProtocol.AcpIncomingNotification>>();
+      yield* transport.incoming.pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.flatMap((items) => Deferred.succeed(notifications, items)),
+        Effect.forkScoped,
+      );
+
+      yield* Queue.offer(input, encoded);
+      yield* Queue.offer(input, encoded);
+
+      const received = yield* Deferred.await(notifications);
+      assert.deepEqual(
+        received.map((notification) => notification._tag),
+        ["SessionUpdate", "SessionUpdate"],
+      );
+    }),
+  );
+
+  it.effect("accepts frames whose cumulative wire bytes exactly fill the connection limit", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const encoded = yield* encodeJsonl(SessionUpdateNotification, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "session-exact-connection-limit",
+          update: {
+            sessionUpdate: "plan",
+            entries: [],
+          },
+        },
+      });
+      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        maximumIncomingConnectionBytes: encoded.byteLength * 2,
+        maximumIncomingFrameBytes: encoded.byteLength - 1,
+        serverRequestMethods: new Set(),
+      });
+      const notifications =
+        yield* Deferred.make<ReadonlyArray<AcpProtocol.AcpIncomingNotification>>();
+      yield* transport.incoming.pipe(
+        Stream.take(2),
+        Stream.runCollect,
+        Effect.flatMap((items) => Deferred.succeed(notifications, items)),
+        Effect.forkScoped,
+      );
+
+      yield* Queue.offer(input, encoded);
+      yield* Queue.offer(input, encoded);
+
+      assert.lengthOf(yield* Deferred.await(notifications), 2);
+    }),
+  );
+
+  it.effect("rejects cumulative wire overflow before logging or decoding the overflow frame", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const firstFrame = yield* encodeJsonl(SessionUpdateNotification, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "session-retained-before-connection-limit",
+          update: {
+            sessionUpdate: "plan",
+            entries: [],
+          },
+        },
+      });
+      const secret = "cumulative-overflow-secret";
+      const overflowFrame = yield* encodeJsonl(SessionUpdateNotification, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: secret,
+          update: {
+            sessionUpdate: "plan",
+            entries: [],
+          },
+        },
+      });
+      const events: Array<AcpProtocol.AcpProtocolLogEvent> = [];
+      const firstObserved = yield* Deferred.make<void>();
+      const termination = yield* Deferred.make<AcpError.AcpError>();
+      const notificationCount = yield* Ref.make(0);
+      yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        maximumIncomingConnectionBytes: firstFrame.byteLength + overflowFrame.byteLength - 1,
+        maximumIncomingFrameBytes: Math.max(
+          firstFrame.byteLength - 1,
+          overflowFrame.byteLength - 1,
+        ),
+        serverRequestMethods: new Set(),
+        logIncoming: true,
+        logger: (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        onNotification: () =>
+          Ref.updateAndGet(notificationCount, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 1
+                ? Deferred.succeed(firstObserved, undefined).pipe(Effect.asVoid)
+                : Effect.void,
+            ),
+          ),
+        onTermination: (error) => Deferred.succeed(termination, error).pipe(Effect.asVoid),
+      });
+
+      yield* Queue.offer(input, firstFrame);
+      yield* Deferred.await(firstObserved);
+      yield* Queue.offer(input, overflowFrame);
+
+      const error = yield* Deferred.await(termination);
+      assert.instanceOf(error, AcpError.AcpProtocolParseError);
+      assert.instanceOf(error.cause, RangeError);
+      assert.equal(
+        error.cause.message,
+        `ACP incoming connection exceeds ${
+          firstFrame.byteLength + overflowFrame.byteLength - 1
+        } bytes.`,
+      );
+      assert.equal(yield* Ref.get(notificationCount), 1);
+      assert.notInclude(encodeUnknownJsonString(events), secret);
+      assert.deepEqual(
+        events.filter(({ stage }) => stage === "decode_failed"),
+        [
+          {
+            direction: "incoming",
+            stage: "decode_failed",
+            payload: { operation: "decode-wire-message" },
+          },
+        ],
+      );
+    }),
+  );
+
+  it.effect("retains only the configured sliding window of raw notifications", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const receivedCount = yield* Ref.make(0);
+      const allCallbacksObserved = yield* Deferred.make<void>();
+      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        maximumRetainedNotifications: 2,
+        serverRequestMethods: new Set(),
+        onNotification: () =>
+          Ref.updateAndGet(receivedCount, (count) => count + 1).pipe(
+            Effect.flatMap((count) =>
+              count === 100
+                ? Deferred.succeed(allCallbacksObserved, undefined).pipe(Effect.asVoid)
+                : Effect.void,
+            ),
+          ),
+      });
+
+      for (let index = 0; index < 100; index += 1) {
+        yield* Queue.offer(
+          input,
+          yield* encodeJsonl(SessionUpdateNotification, {
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: `session-${index}`,
+              update: {
+                sessionUpdate: "plan",
+                entries: [],
+              },
+            },
+          }),
+        );
+      }
+      yield* Deferred.await(allCallbacksObserved);
+
+      const retained = yield* transport.incoming.pipe(Stream.take(2), Stream.runCollect);
+      assert.deepEqual(
+        retained.map((notification) =>
+          notification._tag === "SessionUpdate" ? notification.params.sessionId : null,
+        ),
+        ["session-98", "session-99"],
+      );
+    }),
+  );
+
+  it.effect("rejects an oversized terminated frame before logging or decoding its payload", () =>
+    Effect.gen(function* () {
+      const maximumIncomingFrameBytes = 64;
+      const secret = "oversized-wire-secret";
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const events: Array<AcpProtocol.AcpProtocolLogEvent> = [];
+      const termination = yield* Deferred.make<AcpError.AcpError>();
+      const terminationCalls = yield* Ref.make(0);
+      yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        maximumIncomingFrameBytes,
+        serverRequestMethods: new Set(),
+        logIncoming: true,
+        logger: (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        onTermination: (error) =>
+          Ref.update(terminationCalls, (count) => count + 1).pipe(
+            Effect.andThen(Deferred.succeed(termination, error)),
+            Effect.asVoid,
+          ),
+      });
+
+      yield* Queue.offer(
+        input,
+        encoder.encode(`${secret}${"x".repeat(maximumIncomingFrameBytes)}\n`),
+      );
+
+      const error = yield* Deferred.await(termination);
+      assert.instanceOf(error, AcpError.AcpProtocolParseError);
+      assert.equal(error.operation, "decode-wire-message");
+      assert.instanceOf(error.cause, RangeError);
+      assert.equal(yield* Ref.get(terminationCalls), 1);
+      assert.deepEqual(events, [
+        {
+          direction: "incoming",
+          stage: "decode_failed",
+          payload: { operation: "decode-wire-message" },
+        },
+      ]);
+      assert.notInclude(encodeUnknownJsonString(events), secret);
+      assert.notInclude(error.message, secret);
+    }),
+  );
+
+  it.effect("rejects an oversized unterminated frame accumulated across chunks", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const termination = yield* Deferred.make<AcpError.AcpError>();
+      const events: Array<AcpProtocol.AcpProtocolLogEvent> = [];
+      const secret = "split-frame-secret";
+      yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        maximumIncomingFrameBytes: 64,
+        serverRequestMethods: new Set(),
+        logIncoming: true,
+        logger: (event) =>
+          Effect.sync(() => {
+            events.push(event);
+          }),
+        onTermination: (error) => Deferred.succeed(termination, error).pipe(Effect.asVoid),
+      });
+
+      yield* Queue.offer(input, encoder.encode(`${secret}${"x".repeat(22)}`));
+      yield* Queue.offer(input, encoder.encode("y".repeat(25)));
+
+      const error = yield* Deferred.await(termination);
+      assert.instanceOf(error, AcpError.AcpProtocolParseError);
+      assert.instanceOf(error.cause, RangeError);
+      assert.deepEqual(
+        events.filter(({ stage }) => stage === "decode_failed"),
+        [
+          {
+            direction: "incoming",
+            stage: "decode_failed",
+            payload: { operation: "decode-wire-message" },
+          },
+        ],
+      );
+      assert.deepEqual(
+        events.filter(({ stage }) => stage === "raw"),
+        [],
+      );
+      assert.notInclude(encodeUnknownJsonString(events), secret);
+    }),
+  );
+
+  it.effect("preserves a UTF-8 code point split across chunks while counting raw bytes", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const encoded = yield* encodeJsonl(SessionUpdateNotification, {
+        jsonrpc: "2.0",
+        method: "session/update",
+        params: {
+          sessionId: "session-✓",
+          update: {
+            sessionUpdate: "plan",
+            entries: [
+              {
+                content: "Preserve Unicode",
+                priority: "high",
+                status: "in_progress",
+              },
+            ],
+          },
+        },
+      });
+      const marker = encoder.encode("✓");
+      const markerIndex = encoded.findIndex(
+        (byte, index) =>
+          byte === marker[0] &&
+          encoded[index + 1] === marker[1] &&
+          encoded[index + 2] === marker[2],
+      );
+      assert.isAtLeast(markerIndex, 0);
+      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        maximumIncomingFrameBytes: encoded.byteLength - 1,
+        serverRequestMethods: new Set(),
+      });
+      const notification = yield* Deferred.make<AcpProtocol.AcpIncomingNotification>();
+      yield* transport.incoming.pipe(
+        Stream.take(1),
+        Stream.runHead,
+        Effect.flatMap((item) =>
+          item._tag === "Some"
+            ? Deferred.succeed(notification, item.value)
+            : Effect.die("expected one decoded notification"),
+        ),
+        Effect.forkScoped,
+      );
+
+      yield* Queue.offer(input, encoded.slice(0, markerIndex + 1));
+      yield* Queue.offer(input, encoded.slice(markerIndex + 1));
+
+      const received = yield* Deferred.await(notification);
+      assert.equal(received._tag, "SessionUpdate");
+      if (received._tag === "SessionUpdate") {
+        assert.equal(received.params.sessionId, "session-✓");
+      }
     }),
   );
 

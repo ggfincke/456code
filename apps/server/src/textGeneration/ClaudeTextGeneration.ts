@@ -1,3 +1,5 @@
+// apps/server/src/textGeneration/ClaudeTextGeneration.ts
+// runs isolated Claude CLI requests for text generation
 /**
  * ClaudeTextGeneration – Text generation layer using the Claude CLI.
  *
@@ -61,9 +63,10 @@ const decodeClaudeOutputEnvelope = Schema.decodeEffect(Schema.fromJsonString(Cla
 export const makeClaudeTextGeneration = Effect.fn("makeClaudeTextGeneration")(function* (
   claudeSettings: ClaudeSettings,
   environment?: NodeJS.ProcessEnv,
+  sourceCwd?: string,
 ) {
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment, sourceCwd);
 
   const readStreamAsString = <E>(
     operation: string,

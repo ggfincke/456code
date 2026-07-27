@@ -1,3 +1,5 @@
+// apps/server/src/provider/Drivers/ClaudeDriver.ts
+// creates isolated Claude provider instances and source-bound continuation routes
 /**
  * ClaudeDriver — `ProviderDriver` for the Claude Agent SDK runtime.
  *
@@ -35,11 +37,7 @@ import {
 } from "../Layers/ClaudeProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import {
-  defaultProviderContinuationIdentity,
-  type ProviderDriver,
-  type ProviderInstance,
-} from "../ProviderDriver.ts";
+import { type ProviderDriver, type ProviderInstance } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -125,16 +123,24 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
-      const fallbackContinuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: DRIVER_KIND,
-        instanceId,
-      });
       const effectiveConfig = { ...config, enabled } satisfies ClaudeSettings;
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
       });
-      const continuationGroupKey = yield* makeClaudeContinuationGroupKey(effectiveConfig);
+      const resolveContinuationIdentity = makeClaudeContinuationGroupKey(
+        effectiveConfig,
+        processEnv,
+        cwd,
+      ).pipe(
+        Effect.map((continuationKey) => ({
+          driverKind: DRIVER_KIND,
+          continuationKey,
+        })),
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+      );
+      const continuationIdentity = yield* resolveContinuationIdentity;
+      const continuationGroupKey = continuationIdentity.continuationKey;
       const stampIdentity = withInstanceIdentity({
         instanceId,
         displayName,
@@ -145,10 +151,11 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const adapterOptions = {
         instanceId,
         environment: processEnv,
+        sourceCwd: cwd,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       };
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions);
-      const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv);
+      const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv, cwd);
 
       // Per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
@@ -206,10 +213,8 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       return {
         instanceId,
         driverKind: DRIVER_KIND,
-        continuationIdentity: {
-          ...fallbackContinuationIdentity,
-          continuationKey: continuationGroupKey,
-        },
+        continuationIdentity,
+        resolveContinuationIdentity,
         displayName,
         accentColor,
         enabled,

@@ -1,11 +1,5 @@
-/**
- * ClaudeAdapterLive - Scoped live implementation for the Claude Agent provider adapter.
- *
- * Wraps `@anthropic-ai/claude-agent-sdk` query sessions behind the generic
- * provider adapter contract and emits canonical runtime events.
- *
- * @module ClaudeAdapterLive
- */
+// apps/server/src/provider/Layers/ClaudeAdapter.ts
+// adapts Claude Agent SDK sessions into canonical provider runtime events
 import {
   type CanUseTool,
   query,
@@ -94,6 +88,8 @@ const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJ
 const decodeUnknownJsonStringExit = Schema.decodeUnknownExit(Schema.UnknownFromJsonString);
 
 const PROVIDER = ProviderDriverKind.make("claudeAgent");
+const CLAUDE_RESUME_FAILURE_MESSAGE =
+  "Native Claude history could not be resumed. The session was stopped to avoid continuing from a fresh session.";
 type ClaudeTextStreamKind = Extract<RuntimeContentStreamKind, "assistant_text" | "reasoning_text">;
 type ClaudeToolResultStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -120,6 +116,11 @@ interface ClaudeResumeState {
   readonly resume?: string;
   readonly resumeSessionAt?: string;
   readonly turnCount?: number;
+}
+
+interface ClaudeResumeAttempt {
+  readonly sessionId: string;
+  usable: boolean;
 }
 
 interface ClaudeTurnState {
@@ -187,6 +188,7 @@ interface ClaudeSessionContext {
   readonly basePermissionMode: PermissionMode | undefined;
   currentApiModelId: string | undefined;
   resumeSessionId: string | undefined;
+  readonly resumeAttempt: ClaudeResumeAttempt | undefined;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{
@@ -216,6 +218,7 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
 export interface ClaudeAdapterLiveOptions {
   readonly instanceId?: ProviderInstanceId;
   readonly environment?: NodeJS.ProcessEnv;
+  readonly sourceCwd?: string;
   readonly createQuery?: (input: {
     readonly prompt: AsyncIterable<SDKUserMessage>;
     readonly options: ClaudeQueryOptions;
@@ -241,6 +244,21 @@ function hasDurableClaudeSessionId(message: SDKMessage): boolean {
     message.subtype !== "hook_started" &&
     message.subtype !== "hook_progress" &&
     message.subtype !== "hook_response"
+  );
+}
+
+function isClaudeResumeUsableMessage(message: SDKMessage): boolean {
+  if (message.type === "system") {
+    return message.subtype === "init";
+  }
+
+  return (
+    message.type === "stream_event" ||
+    message.type === "user" ||
+    message.type === "assistant" ||
+    message.type === "tool_progress" ||
+    message.type === "tool_use_summary" ||
+    (message.type === "result" && message.subtype === "success")
   );
 }
 
@@ -555,6 +573,21 @@ function asRuntimeRequestId(value: ApprovalRequestId): RuntimeRequestId {
   return RuntimeRequestId.make(value);
 }
 
+function readClaudeResumeSessionIdCandidate(resumeCursor: unknown): string | undefined {
+  if (!resumeCursor || typeof resumeCursor !== "object") {
+    return undefined;
+  }
+  const cursor = resumeCursor as {
+    resume?: unknown;
+    sessionId?: unknown;
+  };
+  const resume =
+    typeof cursor.resume === "string" && cursor.resume.length > 0 ? cursor.resume : null;
+  const sessionId =
+    typeof cursor.sessionId === "string" && cursor.sessionId.length > 0 ? cursor.sessionId : null;
+  return resume ?? sessionId ?? undefined;
+}
+
 function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undefined {
   if (!resumeCursor || typeof resumeCursor !== "object") {
     return undefined;
@@ -572,12 +605,7 @@ function readClaudeResumeState(resumeCursor: unknown): ClaudeResumeState | undef
     threadIdCandidate && !isSyntheticClaudeThreadId(threadIdCandidate)
       ? ThreadId.make(threadIdCandidate)
       : undefined;
-  const resumeCandidate =
-    typeof cursor.resume === "string"
-      ? cursor.resume
-      : typeof cursor.sessionId === "string"
-        ? cursor.sessionId
-        : undefined;
+  const resumeCandidate = readClaudeResumeSessionIdCandidate(resumeCursor);
   const resume = resumeCandidate && isUuid(resumeCandidate) ? resumeCandidate : undefined;
   const resumeSessionAt =
     typeof cursor.resumeSessionAt === "string" ? cursor.resumeSessionAt : undefined;
@@ -1340,9 +1368,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
   const path = yield* Path.Path;
   const serverConfig = yield* ServerConfig;
   const crypto = yield* Crypto.Crypto;
-  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, options?.environment).pipe(
-    Effect.provideService(Path.Path, path),
-  );
+  const claudeEnvironment = yield* makeClaudeEnvironment(
+    claudeSettings,
+    options?.environment,
+    options?.sourceCwd,
+  ).pipe(Effect.provideService(Path.Path, path));
   const claudeSdkExecutablePath = yield* resolveClaudeSdkExecutablePath(
     claudeSettings.binaryPath,
     claudeEnvironment,
@@ -1654,6 +1684,36 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
     const nextThreadId = message.session_id;
+    const resumeAttempt = context.resumeAttempt;
+    if (resumeAttempt && !resumeAttempt.usable) {
+      if (nextThreadId !== resumeAttempt.sessionId) {
+        return yield* new ProviderAdapterProcessError({
+          provider: PROVIDER,
+          threadId: context.session.threadId,
+          detail: CLAUDE_RESUME_FAILURE_MESSAGE,
+          cause: {
+            reason: "resume-session-id-mismatch",
+            expectedSessionId: resumeAttempt.sessionId,
+            receivedSessionId: nextThreadId,
+          },
+        });
+      }
+      if (message.type === "result" && message.subtype !== "success") {
+        return yield* new ProviderAdapterProcessError({
+          provider: PROVIDER,
+          threadId: context.session.threadId,
+          detail: CLAUDE_RESUME_FAILURE_MESSAGE,
+          cause: {
+            reason: "resume-result-failed",
+            resultSubtype: message.subtype,
+          },
+        });
+      }
+      if (!isClaudeResumeUsableMessage(message)) {
+        return;
+      }
+    }
+
     context.resumeSessionId = message.session_id;
     yield* updateResumeCursor(context);
 
@@ -2978,6 +3038,18 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       Stream.takeWhile(() => !context.stopped),
       Stream.runForEach((message) =>
         handleSdkMessage(context, message).pipe(
+          Effect.tap(() =>
+            Effect.sync(() => {
+              const resumeAttempt = context.resumeAttempt;
+              if (
+                resumeAttempt?.usable === false &&
+                message.session_id === resumeAttempt.sessionId &&
+                isClaudeResumeUsableMessage(message)
+              ) {
+                resumeAttempt.usable = true;
+              }
+            }),
+          ),
           Effect.mapError(
             (cause) =>
               new ProviderAdapterProcessError({
@@ -2999,7 +3071,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       return;
     }
 
-    if (Exit.isFailure(exit)) {
+    if (context.resumeAttempt?.usable === false) {
+      const failures = Exit.isFailure(exit)
+        ? exit.cause.reasons.flatMap((reason) => (Cause.isFailReason(reason) ? [reason.error] : []))
+        : [];
+      yield* emitRuntimeError(context, CLAUDE_RESUME_FAILURE_MESSAGE, {
+        failureCount: failures.length,
+        failureTags: failures.map((failure) => failure._tag),
+      });
+      yield* completeTurn(context, "failed", CLAUDE_RESUME_FAILURE_MESSAGE);
+    } else if (Exit.isFailure(exit)) {
       if (isClaudeInterruptedCause(exit.cause)) {
         if (context.turnState) {
           yield* completeTurn(context, "interrupted", "Claude runtime interrupted.");
@@ -3144,6 +3225,16 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         });
       }
 
+      const resumeSessionIdCandidate = readClaudeResumeSessionIdCandidate(input.resumeCursor);
+      if (resumeSessionIdCandidate !== undefined && !isUuid(resumeSessionIdCandidate)) {
+        return yield* new ProviderAdapterValidationError({
+          provider: PROVIDER,
+          operation: "startSession",
+          issue: "Claude resume session id must be a UUID.",
+        });
+      }
+      const resumeState = readClaudeResumeState(input.resumeCursor);
+
       const existingContext = sessions.get(input.threadId);
       if (existingContext) {
         yield* Effect.logWarning("claude.session.replacing", {
@@ -3166,7 +3257,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       }
 
       const startedAt = yield* nowIso;
-      const resumeState = readClaudeResumeState(input.resumeCursor);
       const threadId = input.threadId;
       const existingResumeSessionId = resumeState?.resume;
       const newSessionId = existingResumeSessionId === undefined ? yield* randomUUIDv4 : undefined;
@@ -3594,7 +3684,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           new ProviderAdapterProcessError({
             provider: PROVIDER,
             threadId,
-            detail: "Failed to start Claude runtime session.",
+            detail:
+              existingResumeSessionId !== undefined
+                ? CLAUDE_RESUME_FAILURE_MESSAGE
+                : "Failed to start Claude runtime session.",
             cause,
           }),
       });
@@ -3627,6 +3720,13 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         basePermissionMode: permissionMode,
         currentApiModelId: apiModelId,
         resumeSessionId: sessionId,
+        resumeAttempt:
+          existingResumeSessionId !== undefined
+            ? {
+                sessionId: existingResumeSessionId,
+                usable: false,
+              }
+            : undefined,
         pendingApprovals,
         pendingUserInputs,
         turns: [],

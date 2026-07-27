@@ -1,3 +1,5 @@
+// apps/server/src/provider/Drivers/CursorDriver.ts
+// creates Cursor ACP instances bound to their exact connection source
 /**
  * CursorDriver — `ProviderDriver` for the Cursor Agent (`cursor-agent`) runtime.
  *
@@ -24,6 +26,13 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeCursorTextGeneration } from "../../textGeneration/CursorTextGeneration.ts";
+import { buildCursorAcpSpawnInput } from "../acp/CursorAcpSupport.ts";
+import {
+  acpContinuationEnvironment,
+  acpContinuationRouteIssue,
+  normalizeAcpRuntimeEnvironment,
+  resolveAcpContinuationIdentity,
+} from "../continuationIdentity.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCursorAdapter } from "../Layers/CursorAdapter.ts";
 import {
@@ -33,11 +42,7 @@ import {
 } from "../Layers/CursorProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import {
-  defaultProviderContinuationIdentity,
-  type ProviderDriver,
-  type ProviderInstance,
-} from "../ProviderDriver.ts";
+import { type ProviderDriver, type ProviderInstance } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -80,7 +85,7 @@ const withInstanceIdentity =
     readonly instanceId: ProviderInstance["instanceId"];
     readonly displayName: string | undefined;
     readonly accentColor: string | undefined;
-    readonly continuationGroupKey: string;
+    readonly continuationGroupKey: string | null;
   }) =>
   (snapshot: ServerProviderDraft): ServerProvider => ({
     ...snapshot,
@@ -88,7 +93,9 @@ const withInstanceIdentity =
     driver: DRIVER_KIND,
     ...(input.displayName ? { displayName: input.displayName } : {}),
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
-    continuation: { groupKey: input.continuationGroupKey },
+    ...(input.continuationGroupKey === null
+      ? {}
+      : { continuation: { groupKey: input.continuationGroupKey } }),
   });
 
 export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
@@ -106,20 +113,36 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
       const fileSystem = yield* FileSystem.FileSystem;
       const path = yield* Path.Path;
       const httpClient = yield* HttpClient.HttpClient;
+      const { cwd } = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: DRIVER_KIND,
-        instanceId,
-      });
+      const processEnv = normalizeAcpRuntimeEnvironment(
+        mergeProviderInstanceEnvironment(environment),
+        cwd,
+      );
+      const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
+      const spawnRoute = buildCursorAcpSpawnInput(effectiveConfig, cwd, processEnv);
+      const continuationRoute = {
+        command: spawnRoute.command,
+        args: spawnRoute.args,
+        env: normalizeAcpRuntimeEnvironment(
+          acpContinuationEnvironment(DRIVER_KIND, spawnRoute.env ?? {}, environment),
+          cwd,
+        ),
+      } as const;
+      const continuationUnavailableReason = acpContinuationRouteIssue(continuationRoute);
+      const resolveContinuationIdentity = resolveAcpContinuationIdentity(
+        DRIVER_KIND,
+        continuationRoute,
+      );
+      const continuationIdentity = yield* resolveContinuationIdentity;
       const stampIdentity = withInstanceIdentity({
         instanceId,
         displayName,
         accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
+        continuationGroupKey:
+          continuationUnavailableReason === null ? continuationIdentity.continuationKey : null,
       });
-      const effectiveConfig = { ...config, enabled } satisfies CursorSettings;
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
@@ -178,6 +201,8 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         instanceId,
         driverKind: DRIVER_KIND,
         continuationIdentity,
+        resolveContinuationIdentity,
+        ...(continuationUnavailableReason === null ? {} : { continuationUnavailableReason }),
         displayName,
         accentColor,
         enabled,

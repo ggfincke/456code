@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/ProviderRegistry.test.ts
+// verifies provider snapshot aggregation, refresh, and instance routing
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, it, assert } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -805,6 +807,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             models: [],
             slashCommands: [],
             skills: [],
+            continuation: { groupKey: "codex:instance:codex" },
           } as const satisfies ServerProvider;
           const refreshCalls = yield* Ref.make(0);
           const instance = {
@@ -814,6 +817,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               driverKind: codexDriver,
               continuationKey: "codex:instance:codex",
             },
+            resolveContinuationIdentity: Effect.succeed({
+              driverKind: codexDriver,
+              continuationKey: "codex:instance:codex",
+            }),
             displayName: undefined,
             enabled: true,
             snapshot: {
@@ -858,6 +865,94 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             const registry = yield* ProviderRegistry.ProviderRegistry;
             assert.deepStrictEqual(yield* registry.getProviders, [initialProvider]);
             assert.strictEqual(yield* Ref.get(refreshCalls), 0);
+          }).pipe(Effect.provide(runtimeServices));
+        }),
+      );
+
+      it.effect("restamps provider snapshots when a live continuation source changes", () =>
+        Effect.gen(function* () {
+          const codexDriver = ProviderDriverKind.make("codex");
+          const codexInstanceId = ProviderInstanceId.make("codex");
+          const continuationKey = yield* Ref.make("codex:file:v1:a");
+          const initialProvider = {
+            instanceId: codexInstanceId,
+            driver: codexDriver,
+            status: "ready",
+            enabled: true,
+            installed: true,
+            auth: { status: "authenticated" },
+            checkedAt: "2026-07-26T00:00:00.000Z",
+            version: "1.0.0",
+            models: [],
+            slashCommands: [],
+            skills: [],
+            continuation: { groupKey: "codex:file:v1:stale" },
+          } as const satisfies ServerProvider;
+          const instance = {
+            instanceId: codexInstanceId,
+            driverKind: codexDriver,
+            continuationIdentity: {
+              driverKind: codexDriver,
+              continuationKey: "codex:file:v1:a",
+            },
+            resolveContinuationIdentity: Ref.get(continuationKey).pipe(
+              Effect.map((currentKey) => ({
+                driverKind: codexDriver,
+                continuationKey: currentKey,
+              })),
+            ),
+            displayName: undefined,
+            enabled: true,
+            snapshot: {
+              maintenanceCapabilities: makeManualOnlyProviderMaintenanceCapabilities({
+                provider: codexDriver,
+                packageName: null,
+              }),
+              getSnapshot: Effect.succeed(initialProvider),
+              refresh: Effect.succeed(initialProvider),
+              streamChanges: Stream.empty,
+            },
+            adapter: {} as ProviderInstance["adapter"],
+            textGeneration: {} as ProviderInstance["textGeneration"],
+          } satisfies ProviderInstance;
+          const instanceRegistryLayer = Layer.succeed(
+            ProviderInstanceRegistry.ProviderInstanceRegistry,
+            {
+              getInstance: (instanceId) =>
+                Effect.succeed(instanceId === codexInstanceId ? instance : undefined),
+              listInstances: Effect.succeed([instance]),
+              listUnavailable: Effect.succeed([]),
+              streamChanges: Stream.empty,
+              subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
+            },
+          );
+          const scope = yield* Scope.make();
+          yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void));
+          const runtimeServices = yield* Layer.build(
+            ProviderRegistryLive.pipe(
+              Layer.provideMerge(instanceRegistryLayer),
+              Layer.provideMerge(
+                ServerConfig.layerTest(process.cwd(), {
+                  prefix: "t3-provider-registry-continuation-identity-",
+                }),
+              ),
+              Layer.provideMerge(NodeServices.layer),
+            ),
+          ).pipe(Scope.provide(scope));
+
+          yield* Effect.gen(function* () {
+            const registry = yield* ProviderRegistry.ProviderRegistry;
+            assert.equal(
+              (yield* registry.getProviders)[0]?.continuation?.groupKey,
+              "codex:file:v1:a",
+            );
+
+            yield* Ref.set(continuationKey, "codex:file:v1:b");
+
+            assert.equal(
+              (yield* registry.getProviders)[0]?.continuation?.groupKey,
+              "codex:file:v1:b",
+            );
           }).pipe(Effect.provide(runtimeServices));
         }),
       );
@@ -955,6 +1050,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             ],
             slashCommands: [],
             skills: [],
+            continuation: { groupKey: "cursor:instance:cursor" },
           } as const satisfies ServerProvider;
           const refreshedProvider = {
             ...initialProvider,
@@ -969,6 +1065,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               driverKind: cursorDriver,
               continuationKey: "cursor:instance:cursor",
             },
+            resolveContinuationIdentity: Effect.succeed({
+              driverKind: cursorDriver,
+              continuationKey: "cursor:instance:cursor",
+            }),
             displayName: undefined,
             enabled: true,
             snapshot: {
@@ -1097,6 +1197,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 driverKind: openCodeDriver,
                 continuationKey: "opencode:instance:opencode",
               },
+              resolveContinuationIdentity: Effect.succeed({
+                driverKind: openCodeDriver,
+                continuationKey: "opencode:instance:opencode",
+              }),
               displayName: undefined,
               enabled: true,
               snapshot: {
@@ -1196,6 +1300,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             models: [],
             slashCommands: [],
             skills: [],
+            continuation: { groupKey: "codex:instance:codex" },
           } as const satisfies ServerProvider;
           const instance = {
             instanceId: codexInstanceId,
@@ -1204,6 +1309,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               driverKind: codexDriver,
               continuationKey: "codex:instance:codex",
             },
+            resolveContinuationIdentity: Effect.succeed({
+              driverKind: codexDriver,
+              continuationKey: "codex:instance:codex",
+            }),
             displayName: undefined,
             enabled: true,
             snapshot: {
@@ -1275,6 +1384,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             models: [],
             slashCommands: [],
             skills: [],
+            continuation: { groupKey: "codex:instance:codex" },
           } as const satisfies ServerProvider;
           const claudeProvider = {
             instanceId: claudeInstanceId,
@@ -1288,6 +1398,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             models: [],
             slashCommands: [],
             skills: [],
+            continuation: { groupKey: "claudeAgent:instance:claudeAgent" },
           } as const satisfies ServerProvider;
           const makeInstance = (provider: ServerProvider): ProviderInstance => ({
             instanceId: provider.instanceId,
@@ -1296,6 +1407,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               driverKind: provider.driver,
               continuationKey: `${provider.driver}:instance:${provider.instanceId}`,
             },
+            resolveContinuationIdentity: Effect.succeed({
+              driverKind: provider.driver,
+              continuationKey: `${provider.driver}:instance:${provider.instanceId}`,
+            }),
             displayName: undefined,
             enabled: true,
             snapshot: {

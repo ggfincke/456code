@@ -1,3 +1,5 @@
+// apps/server/src/provider/Services/ProviderAdapterRegistry.ts
+// defines atomic provider route and adapter lookup interfaces
 /**
  * ProviderAdapterRegistry - Lookup boundary for provider adapter implementations.
  *
@@ -19,7 +21,11 @@
  *
  * @module ProviderAdapterRegistry
  */
-import type { ProviderDriverKind, ProviderInstanceId } from "@t3tools/contracts";
+import type {
+  ProviderContinuationIdentity,
+  ProviderDriverKind,
+  ProviderInstanceId,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Effect from "effect/Effect";
 import type * as PubSub from "effect/PubSub";
@@ -28,8 +34,6 @@ import type * as Stream from "effect/Stream";
 
 import type { ProviderAdapterError, ProviderUnsupportedError } from "../Errors.ts";
 import type { ProviderAdapterShape } from "./ProviderAdapter.ts";
-import type { ProviderContinuationIdentity } from "../ProviderDriver.ts";
-
 export interface ProviderInstanceRoutingInfo {
   readonly instanceId: ProviderInstanceId;
   readonly driverKind: ProviderDriverKind;
@@ -37,12 +41,26 @@ export interface ProviderInstanceRoutingInfo {
   readonly accentColor?: string | undefined;
   readonly enabled: boolean;
   readonly continuationIdentity: ProviderContinuationIdentity;
+  readonly continuationUnavailableReason?: string;
+}
+
+export interface ProviderInstanceRoute {
+  readonly info: ProviderInstanceRoutingInfo;
+  readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
 }
 
 /**
  * ProviderAdapterRegistryShape - Service API for adapter lookup.
  */
 export interface ProviderAdapterRegistryShape {
+  /**
+   * Resolve routing metadata and its adapter from one immutable registry
+   * snapshot so settings reloads cannot mix two instance generations.
+   */
+  readonly getRoute: (
+    instanceId: ProviderInstanceId,
+  ) => Effect.Effect<ProviderInstanceRoute, ProviderUnsupportedError>;
+
   /**
    * Resolve the adapter for a specific instance id. Returns
    * `ProviderUnsupportedError` if no such instance is currently registered

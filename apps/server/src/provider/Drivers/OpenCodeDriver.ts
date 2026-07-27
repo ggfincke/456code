@@ -1,3 +1,5 @@
+// apps/server/src/provider/Drivers/OpenCodeDriver.ts
+// creates isolated OpenCode instances bound to local storage or external servers
 /**
  * OpenCodeDriver — `ProviderDriver` for the OpenCode runtime.
  *
@@ -25,6 +27,10 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import {
+  normalizeOpenCodeRuntimeEnvironment,
+  resolveOpenCodeContinuationIdentity,
+} from "../continuationIdentity.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
 import {
@@ -34,11 +40,7 @@ import {
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
 import { OpenCodeRuntime } from "../opencodeRuntime.ts";
-import {
-  defaultProviderContinuationIdentity,
-  type ProviderDriver,
-  type ProviderInstance,
-} from "../ProviderDriver.ts";
+import { type ProviderDriver, type ProviderInstance } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -115,22 +117,34 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const openCodeRuntime = yield* OpenCodeRuntime;
+      const fileSystem = yield* FileSystem.FileSystem;
       const serverConfig = yield* ServerConfig;
       const httpClient = yield* HttpClient.HttpClient;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: DRIVER_KIND,
-        instanceId,
-      });
+      const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
+      const runtimeEnvironment =
+        effectiveConfig.serverUrl.trim().length > 0
+          ? processEnv
+          : normalizeOpenCodeRuntimeEnvironment(processEnv, {
+              cwd: serverConfig.cwd,
+            });
+      const resolveContinuationIdentity = resolveOpenCodeContinuationIdentity(
+        DRIVER_KIND,
+        effectiveConfig,
+        {
+          environment: runtimeEnvironment,
+          cwd: serverConfig.cwd,
+        },
+      ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+      const continuationIdentity = yield* resolveContinuationIdentity;
       const stampIdentity = withInstanceIdentity({
         instanceId,
         displayName,
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
       });
-      const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
@@ -138,15 +152,15 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
 
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
-        environment: processEnv,
+        environment: runtimeEnvironment,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
       });
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, processEnv);
+      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, runtimeEnvironment);
 
       const checkProvider = checkOpenCodeProviderStatus(
         effectiveConfig,
         serverConfig.cwd,
-        processEnv,
+        runtimeEnvironment,
       ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime));
 
       const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
@@ -184,6 +198,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         instanceId,
         driverKind: DRIVER_KIND,
         continuationIdentity,
+        resolveContinuationIdentity,
         displayName,
         accentColor,
         enabled,

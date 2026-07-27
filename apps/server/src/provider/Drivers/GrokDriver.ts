@@ -1,3 +1,5 @@
+// apps/server/src/provider/Drivers/GrokDriver.ts
+// creates Grok ACP instances bound to their exact connection source
 import { GrokSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
 import * as Duration from "effect/Duration";
 import * as Crypto from "effect/Crypto";
@@ -11,6 +13,13 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { makeGrokTextGeneration } from "../../textGeneration/GrokTextGeneration.ts";
+import { buildGrokAcpSpawnInput } from "../acp/GrokAcpSupport.ts";
+import {
+  acpContinuationEnvironment,
+  acpContinuationRouteIssue,
+  normalizeAcpRuntimeEnvironment,
+  resolveAcpContinuationIdentity,
+} from "../continuationIdentity.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeGrokAdapter } from "../Layers/GrokAdapter.ts";
 import {
@@ -20,11 +29,7 @@ import {
 } from "../Layers/GrokProvider.ts";
 import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
 import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import {
-  defaultProviderContinuationIdentity,
-  type ProviderDriver,
-  type ProviderInstance,
-} from "../ProviderDriver.ts";
+import { type ProviderDriver, type ProviderInstance } from "../ProviderDriver.ts";
 import type { ServerProviderDraft } from "../providerSnapshot.ts";
 import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
 import {
@@ -63,7 +68,7 @@ const withInstanceIdentity =
     readonly instanceId: ProviderInstance["instanceId"];
     readonly displayName: string | undefined;
     readonly accentColor: string | undefined;
-    readonly continuationGroupKey: string;
+    readonly continuationGroupKey: string | null;
   }) =>
   (snapshot: ServerProviderDraft): ServerProvider => ({
     ...snapshot,
@@ -71,7 +76,9 @@ const withInstanceIdentity =
     driver: DRIVER_KIND,
     ...(input.displayName ? { displayName: input.displayName } : {}),
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
-    continuation: { groupKey: input.continuationGroupKey },
+    ...(input.continuationGroupKey === null
+      ? {}
+      : { continuation: { groupKey: input.continuationGroupKey } }),
   });
 
 export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
@@ -87,20 +94,36 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
       const crypto = yield* Crypto.Crypto;
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
       const httpClient = yield* HttpClient.HttpClient;
+      const { cwd } = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
-      const continuationIdentity = defaultProviderContinuationIdentity({
-        driverKind: DRIVER_KIND,
-        instanceId,
-      });
+      const processEnv = normalizeAcpRuntimeEnvironment(
+        mergeProviderInstanceEnvironment(environment),
+        cwd,
+      );
+      const effectiveConfig = { ...config, enabled } satisfies GrokSettings;
+      const spawnRoute = buildGrokAcpSpawnInput(effectiveConfig, cwd, processEnv);
+      const continuationRoute = {
+        command: spawnRoute.command,
+        args: spawnRoute.args,
+        env: normalizeAcpRuntimeEnvironment(
+          acpContinuationEnvironment(DRIVER_KIND, spawnRoute.env ?? {}, environment),
+          cwd,
+        ),
+      } as const;
+      const continuationUnavailableReason = acpContinuationRouteIssue(continuationRoute);
+      const resolveContinuationIdentity = resolveAcpContinuationIdentity(
+        DRIVER_KIND,
+        continuationRoute,
+      );
+      const continuationIdentity = yield* resolveContinuationIdentity;
       const stampIdentity = withInstanceIdentity({
         instanceId,
         displayName,
         accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
+        continuationGroupKey:
+          continuationUnavailableReason === null ? continuationIdentity.continuationKey : null,
       });
-      const effectiveConfig = { ...config, enabled } satisfies GrokSettings;
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
@@ -153,6 +176,8 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
         instanceId,
         driverKind: DRIVER_KIND,
         continuationIdentity,
+        resolveContinuationIdentity,
+        ...(continuationUnavailableReason === null ? {} : { continuationUnavailableReason }),
         displayName,
         accentColor,
         enabled,

@@ -1,3 +1,5 @@
+// apps/server/src/provider/Drivers/CodexDriver.ts
+// creates isolated Codex provider instances and source-bound continuation routes
 /**
  * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
  *
@@ -34,6 +36,7 @@ import { ChildProcessSpawner } from "effect/unstable/process";
 import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
 import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
+import { canonicalFileContinuationIdentity } from "../continuationIdentity.ts";
 import { ProviderDriverError } from "../Errors.ts";
 import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
 import { checkCodexProviderStatus, makePendingCodexProvider } from "../Layers/CodexProvider.ts";
@@ -52,11 +55,7 @@ import {
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
 } from "../providerUpdateSettings.ts";
-import {
-  codexContinuationIdentity,
-  materializeCodexShadowHome,
-  resolveCodexHomeLayout,
-} from "./CodexHomeLayout.ts";
+import { materializeCodexShadowHome, resolveCodexHomeLayout } from "./CodexHomeLayout.ts";
 const decodeCodexSettings = Schema.decodeSync(CodexSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("codex");
@@ -116,17 +115,16 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
     Effect.gen(function* () {
       const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+      const fileSystem = yield* FileSystem.FileSystem;
       const httpClient = yield* HttpClient.HttpClient;
+      const path = yield* Path.Path;
+      const { cwd } = yield* ServerConfig;
       const serverSettings = yield* ServerSettingsService;
       const eventLoggers = yield* ProviderEventLoggers;
       const processEnv = mergeProviderInstanceEnvironment(environment);
-      const homeLayout = yield* resolveCodexHomeLayout(config);
-      const continuationIdentity = codexContinuationIdentity(homeLayout);
-      const stampIdentity = withInstanceIdentity({
-        instanceId,
-        displayName,
-        accentColor,
-        continuationGroupKey: continuationIdentity.continuationKey,
+      const homeLayout = yield* resolveCodexHomeLayout(config, {
+        environment: processEnv,
+        cwd,
       });
       yield* materializeCodexShadowHome(homeLayout).pipe(
         Effect.mapError(
@@ -139,6 +137,17 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
             }),
         ),
       );
+      const resolveContinuationIdentity = canonicalFileContinuationIdentity(
+        DRIVER_KIND,
+        path.join(homeLayout.sharedHomePath, "sessions"),
+      ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
+      const continuationIdentity = yield* resolveContinuationIdentity;
+      const stampIdentity = withInstanceIdentity({
+        instanceId,
+        displayName,
+        accentColor,
+        continuationGroupKey: continuationIdentity.continuationKey,
+      });
       const effectiveConfig = {
         ...config,
         enabled,
@@ -203,6 +212,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         instanceId,
         driverKind: DRIVER_KIND,
         continuationIdentity,
+        resolveContinuationIdentity,
         displayName,
         accentColor,
         enabled,

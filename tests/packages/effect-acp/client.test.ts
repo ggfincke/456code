@@ -1,5 +1,9 @@
+// tests/packages/effect-acp/client.test.ts
+// verifies typed ACP client routing, buffering, extensions, and process failures
+
 import * as Path from "effect/Path";
 import * as Cause from "effect/Cause";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -31,6 +35,10 @@ const ExtRequest = jsonRpcRequest("x/test", Schema.Struct({ hello: Schema.String
 const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }));
 const PromptRequest = jsonRpcRequest("session/prompt", AcpSchema.PromptRequest);
 const PromptResponse = jsonRpcResponse(AcpSchema.PromptResponse);
+const SessionUpdateNotification = jsonRpcNotification(
+  "session/update",
+  AcpSchema.SessionNotification,
+);
 const decodePromptRequestLine = Schema.decodeEffect(Schema.fromJsonString(PromptRequest));
 const XAiPromptCompleteNotification = jsonRpcNotification(
   "_x.ai/session/prompt_complete",
@@ -342,6 +350,58 @@ it.layer(NodeServices.layer)("effect-acp client", (it) => {
         assert.deepEqual(yield* Ref.get(typedRequests), [{ message: "hello from typed request" }]);
         assert.deepEqual(yield* Ref.get(typedNotifications), [{ count: 2 }]);
       }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)));
+    }),
+  );
+
+  it.effect("retains only the configured pending-notification window before registration", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const scope = yield* Scope.make();
+      const allNotificationsDecoded = yield* Deferred.make<void>();
+      const acp = yield* AcpClient.make(stdio, {
+        maximumPendingNotifications: 2,
+        maximumRetainedNotifications: 0,
+      }).pipe(Effect.provideService(Scope.Scope, scope));
+      yield* acp.handleUnknownExtNotification(() =>
+        Deferred.succeed(allNotificationsDecoded, undefined).pipe(Effect.asVoid),
+      );
+
+      for (let index = 0; index < 100; index += 1) {
+        yield* Queue.offer(
+          input,
+          yield* encodeJsonl(SessionUpdateNotification, {
+            jsonrpc: "2.0",
+            method: "session/update",
+            params: {
+              sessionId: `session-${index}`,
+              update: {
+                sessionUpdate: "plan",
+                entries: [],
+              },
+            },
+          }),
+        );
+      }
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(XAiQueueChangedNotification, {
+          jsonrpc: "2.0",
+          method: "_x.ai/queue/changed",
+          params: {
+            sessionId: "sentinel",
+            entries: [],
+          },
+        }),
+      );
+      yield* Deferred.await(allNotificationsDecoded);
+
+      const retainedSessionIds = yield* Ref.make<string[]>([]);
+      yield* acp.handleSessionUpdate((notification) =>
+        Ref.update(retainedSessionIds, (sessionIds) => [...sessionIds, notification.sessionId]),
+      );
+
+      assert.deepEqual(yield* Ref.get(retainedSessionIds), ["session-98", "session-99"]);
+      yield* Scope.close(scope, Exit.void);
     }),
   );
 

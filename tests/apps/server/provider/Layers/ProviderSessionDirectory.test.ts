@@ -1,10 +1,12 @@
+// tests/apps/server/provider/Layers/ProviderSessionDirectory.test.ts
+// verifies persisted provider bindings reset at route boundaries
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
-import { ProviderDriverKind, ThreadId } from "@t3tools/contracts";
+import { ProviderDriverKind, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { it, assert } from "@effect/vitest";
 import { assertSome } from "@effect/vitest/utils";
 import * as Effect from "effect/Effect";
@@ -119,6 +121,84 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))("ProviderSessionDirectoryL
           model: "gpt-5-codex",
           activeTurnId: "turn-1",
         });
+      }
+    }));
+
+  it("resets resume state and runtime payload when the provider instance changes", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository;
+      const threadId = ThreadId.make("thread-instance-change");
+
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex_a"),
+        threadId,
+        resumeCursor: { threadId: "provider-thread-a" },
+        runtimePayload: {
+          continuationIdentity: {
+            driverKind: "codex",
+            continuationKey: "codex:file:v1:a",
+          },
+          modelSelection: { model: "model-a" },
+        },
+      });
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex_b"),
+        threadId,
+        runtimePayload: {
+          continuationIdentity: {
+            driverKind: "codex",
+            continuationKey: "codex:file:v1:b",
+          },
+        },
+      });
+
+      const runtime = yield* runtimeRepository.getByThreadId({ threadId });
+      assert.equal(Option.isSome(runtime), true);
+      if (Option.isSome(runtime)) {
+        assert.equal(runtime.value.providerInstanceId, "codex_b");
+        assert.equal(runtime.value.resumeCursor, null);
+        assert.deepEqual(runtime.value.runtimePayload, {
+          continuationIdentity: {
+            driverKind: "codex",
+            continuationKey: "codex:file:v1:b",
+          },
+        });
+      }
+    }));
+
+  it("treats a legacy null instance as the default when deciding whether the route changed", () =>
+    Effect.gen(function* () {
+      const directory = yield* ProviderSessionDirectory;
+      const runtimeRepository = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository;
+      const threadId = ThreadId.make("thread-legacy-instance-change");
+
+      yield* runtimeRepository.upsert({
+        threadId,
+        providerName: "codex",
+        providerInstanceId: null,
+        adapterKey: "codex",
+        runtimeMode: "full-access",
+        status: "stopped",
+        lastSeenAt: "2026-07-26T00:00:00.000Z",
+        resumeCursor: { threadId: "legacy-provider-thread" },
+        runtimePayload: { modelSelection: { model: "legacy-model" } },
+      });
+      yield* directory.upsert({
+        provider: ProviderDriverKind.make("codex"),
+        providerInstanceId: ProviderInstanceId.make("codex_custom"),
+        threadId,
+        runtimePayload: { cwd: "/workspace/custom" },
+      });
+
+      const runtime = yield* runtimeRepository.getByThreadId({ threadId });
+      assert.equal(Option.isSome(runtime), true);
+      if (Option.isSome(runtime)) {
+        assert.equal(runtime.value.providerInstanceId, "codex_custom");
+        assert.equal(runtime.value.resumeCursor, null);
+        assert.deepEqual(runtime.value.runtimePayload, { cwd: "/workspace/custom" });
       }
     }));
 

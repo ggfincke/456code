@@ -1,3 +1,6 @@
+// packages/effect-acp/src/client.ts
+// exposes typed ACP client operations over the bounded patched protocol
+
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Stdio from "effect/Stdio";
@@ -25,11 +28,17 @@ import { makeChildStdio, makeTerminationError } from "./_internal/stdio.ts";
 export interface AcpClientOptions {
   readonly logIncoming?: boolean;
   readonly logOutgoing?: boolean;
+  readonly maximumIncomingConnectionBytes?: number;
+  readonly maximumIncomingFrameBytes?: number;
+  readonly maximumPendingNotifications?: number;
+  readonly maximumRetainedNotifications?: number;
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>;
+  readonly onIncomingConnectionBytes?: (consumedBytes: number) => void;
 }
 
 type AcpClientRaw = {
   readonly notifications: Stream.Stream<AcpProtocol.AcpIncomingNotification>;
+  readonly incomingConnectionBytes: Effect.Effect<number>;
   readonly request: (method: string, payload: unknown) => Effect.Effect<unknown, AcpError.AcpError>;
   readonly notify: (method: string, payload: unknown) => Effect.Effect<void, AcpError.AcpError>;
 };
@@ -315,6 +324,12 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     sessionUpdate: { handlers: [], pending: [] },
     elicitationComplete: { handlers: [], pending: [] },
   };
+  const configuredMaximumPendingNotifications = options.maximumPendingNotifications;
+  const maximumPendingNotifications =
+    configuredMaximumPendingNotifications !== undefined &&
+    Number.isFinite(configuredMaximumPendingNotifications)
+      ? Math.max(0, Math.floor(configuredMaximumPendingNotifications))
+      : 256;
   const extRequestHandlers = new Map<
     string,
     (params: unknown) => Effect.Effect<unknown, AcpError.AcpError>
@@ -355,18 +370,31 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
       );
     });
 
+  const bufferPendingNotification = <A>(
+    registration: BufferedNotificationHandler<A>,
+    notification: A,
+  ) => {
+    if (maximumPendingNotifications === 0) {
+      return;
+    }
+    if (registration.pending.length >= maximumPendingNotifications) {
+      registration.pending.shift();
+    }
+    registration.pending.push(notification);
+  };
+
   const dispatchNotification = (notification: AcpProtocol.AcpIncomingNotification) => {
     switch (notification._tag) {
       case "SessionUpdate": {
         if (notificationHandlers.sessionUpdate.handlers.length === 0) {
-          notificationHandlers.sessionUpdate.pending.push(notification.params);
+          bufferPendingNotification(notificationHandlers.sessionUpdate, notification.params);
           return Effect.void;
         }
         return runNotificationHandlers(notificationHandlers.sessionUpdate, notification.params);
       }
       case "ElicitationComplete": {
         if (notificationHandlers.elicitationComplete.handlers.length === 0) {
-          notificationHandlers.elicitationComplete.pending.push(notification.params);
+          bufferPendingNotification(notificationHandlers.elicitationComplete, notification.params);
           return Effect.void;
         }
         return runNotificationHandlers(
@@ -400,9 +428,21 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
     stdio: stdio,
     ...(terminationError ? { terminationError } : {}),
     serverRequestMethods: new Set(AcpRpcs.ClientRpcs.requests.keys()),
+    ...(options.maximumIncomingConnectionBytes === undefined
+      ? {}
+      : { maximumIncomingConnectionBytes: options.maximumIncomingConnectionBytes }),
+    ...(options.maximumIncomingFrameBytes === undefined
+      ? {}
+      : { maximumIncomingFrameBytes: options.maximumIncomingFrameBytes }),
+    ...(options.maximumRetainedNotifications === undefined
+      ? {}
+      : { maximumRetainedNotifications: options.maximumRetainedNotifications }),
     ...(options.logIncoming !== undefined ? { logIncoming: options.logIncoming } : {}),
     ...(options.logOutgoing !== undefined ? { logOutgoing: options.logOutgoing } : {}),
     ...(options.logger ? { logger: options.logger } : {}),
+    ...(options.onIncomingConnectionBytes
+      ? { onIncomingConnectionBytes: options.onIncomingConnectionBytes }
+      : {}),
     onNotification: dispatchNotification,
     onExtRequest: dispatchExtRequest,
   });
@@ -458,6 +498,7 @@ export const make = Effect.fn("effect-acp/AcpClient.make")(function* (
   return AcpClient.of({
     raw: {
       notifications: transport.incoming,
+      incomingConnectionBytes: transport.incomingConnectionBytes,
       request: transport.request,
       notify: transport.notify,
     },
