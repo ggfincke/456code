@@ -155,7 +155,46 @@ describe("vcsActionState", () => {
     });
   });
 
-  it("clears running presentation state once the action finishes", () => {
+  it.each([
+    {
+      label: "clears running presentation on finish",
+      event: progress({
+        actionId,
+        action,
+        cwd,
+        kind: "action_finished",
+        result,
+      }),
+      expected: {
+        isRunning: false,
+        operation: "run_change_request",
+        actionId,
+        action,
+        currentLabel: null,
+        currentPhaseLabel: null,
+        lastOutputLine: null,
+        error: null,
+      },
+    },
+    {
+      label: "retains terminal error on failure",
+      event: progress({
+        actionId,
+        action,
+        cwd,
+        kind: "action_failed",
+        phase: null,
+        message: "Push failed.",
+      }),
+      expected: {
+        isRunning: false,
+        operation: "run_change_request",
+        actionId,
+        action,
+        error: "Push failed.",
+      },
+    },
+  ])("$label", ({ event, expected }) => {
     const initial = beginVcsActionState({
       operation: "run_change_request",
       label: "Running source control action",
@@ -172,54 +211,7 @@ describe("vcsActionState", () => {
         label: "Pushing...",
       }),
     );
-    const finished = applyVcsActionProgressEvent(
-      pushing,
-      progress({
-        actionId,
-        action,
-        cwd,
-        kind: "action_finished",
-        result,
-      }),
-    );
-
-    expect(finished).toMatchObject({
-      isRunning: false,
-      operation: "run_change_request",
-      actionId,
-      action,
-      currentLabel: null,
-      currentPhaseLabel: null,
-      lastOutputLine: null,
-      error: null,
-    });
-  });
-
-  it("retains a terminal action error for presentation", () => {
-    const initial = beginVcsActionState({
-      operation: "run_change_request",
-      label: "Running source control action",
-      actionId,
-    });
-    const failed = applyVcsActionProgressEvent(
-      initial,
-      progress({
-        actionId,
-        action,
-        cwd,
-        kind: "action_failed",
-        phase: null,
-        message: "Push failed.",
-      }),
-    );
-
-    expect(failed).toMatchObject({
-      isRunning: false,
-      operation: "run_change_request",
-      actionId,
-      action,
-      error: "Push failed.",
-    });
+    expect(applyVcsActionProgressEvent(pushing, event)).toMatchObject(expected);
   });
 
   it("ignores progress after a newer action owns the target", () => {
