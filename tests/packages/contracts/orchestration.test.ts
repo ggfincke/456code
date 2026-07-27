@@ -1,10 +1,21 @@
+// tests/packages/contracts/orchestration.test.ts
+// verifies orchestration schemas, defaults, compatibility, and import request limits
+
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
+import { EventId } from "../../../packages/contracts/src/baseSchemas.ts";
 import {
   DEFAULT_PROVIDER_INTERACTION_MODE,
   DEFAULT_RUNTIME_MODE,
+  ClientOrchestrationCommand,
+  IMPORT_RESULT_MESSAGE_MAX_CHARS,
+  IMPORT_SESSIONS_MAX_ITEMS,
+  IMPORT_SOURCE_PATH_MAX_CHARS,
+  ImportScanCandidate,
+  ImportSessionsRequest,
+  ImportSessionsResult,
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
@@ -19,12 +30,17 @@ import {
   OrchestrationThreadShell,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
+  ThreadMessagesImportCommand,
+  ThreadOrigin,
   ThreadTurnStartCommand,
   ThreadCreatedPayload,
   ThreadTurnDiff,
   ThreadTurnStartRequestedPayload,
 } from "../../../packages/contracts/src/orchestration.ts";
-import { ProviderInstanceId } from "../../../packages/contracts/src/providerInstance.ts";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+} from "../../../packages/contracts/src/providerInstance.ts";
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput);
 const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput);
@@ -53,6 +69,97 @@ const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPaylo
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand);
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload);
+const decodeThreadMessagesImportCommand = Schema.decodeUnknownEffect(ThreadMessagesImportCommand);
+const decodeThreadOrigin = Schema.decodeUnknownEffect(ThreadOrigin);
+const decodeImportSessionsRequest = Schema.decodeUnknownEffect(ImportSessionsRequest);
+const decodeImportSessionsResult = Schema.decodeUnknownEffect(ImportSessionsResult);
+const decodeImportScanCandidate = Schema.decodeUnknownEffect(ImportScanCandidate);
+const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
+
+it.effect("bounds session import request count and source path length", () =>
+  Effect.gen(function* () {
+    const item = {
+      source: "codex-cli",
+      sourcePath: "/tmp/rollout-session.jsonl",
+      providerInstanceId: "codex_personal",
+    };
+    const tooManyItems = yield* decodeImportSessionsRequest({
+      items: Array.from({ length: IMPORT_SESSIONS_MAX_ITEMS + 1 }, () => item),
+    }).pipe(Effect.result);
+    const oversizedPath = yield* decodeImportSessionsRequest({
+      items: [
+        {
+          ...item,
+          sourcePath: `/${"x".repeat(IMPORT_SOURCE_PATH_MAX_CHARS)}`,
+        },
+      ],
+    }).pipe(Effect.result);
+    const missingProvider = yield* decodeImportSessionsRequest({
+      items: [{ ...item, providerInstanceId: null }],
+    }).pipe(Effect.result);
+
+    assert.strictEqual(tooManyItems._tag, "Failure");
+    assert.strictEqual(oversizedPath._tag, "Failure");
+    assert.strictEqual(missingProvider._tag, "Failure");
+  }),
+);
+
+it.effect("bounds session import result count and diagnostic length", () =>
+  Effect.gen(function* () {
+    const failure = {
+      sourcePath: "/tmp/rollout-session.jsonl",
+      message: "Import failed",
+    };
+    const tooManyResults = yield* decodeImportSessionsResult({
+      imported: [],
+      skipped: [],
+      failed: Array.from({ length: IMPORT_SESSIONS_MAX_ITEMS + 1 }, () => failure),
+    }).pipe(Effect.result);
+    const oversizedMessage = yield* decodeImportSessionsResult({
+      imported: [],
+      skipped: [],
+      failed: [
+        {
+          ...failure,
+          message: "x".repeat(IMPORT_RESULT_MESSAGE_MAX_CHARS + 1),
+        },
+      ],
+    }).pipe(Effect.result);
+
+    assert.strictEqual(tooManyResults._tag, "Failure");
+    assert.strictEqual(oversizedMessage._tag, "Failure");
+  }),
+);
+
+it.effect("defaults archived import scan provenance for older scan payloads", () =>
+  Effect.gen(function* () {
+    const candidate = {
+      source: "codex-cli",
+      sourcePath: "/tmp/rollout-session.jsonl",
+      providerInstanceIds: ["codex_personal"],
+      nativeSessionId: "native-session",
+      title: "Imported session",
+      cwd: "/tmp/project",
+      gitBranch: "main",
+      model: "gpt-5.4",
+      messageCount: 2,
+      modifiedAt: "2026-01-01T00:00:00.000Z",
+      alreadyImportedThreadId: "thread-1",
+      alreadyImportedProviderInstanceId: "codex_personal",
+      matchedProjectId: "project-1",
+      resumable: true,
+    };
+
+    const olderPayload = yield* decodeImportScanCandidate(candidate);
+    const archivedPayload = yield* decodeImportScanCandidate({
+      ...candidate,
+      alreadyImportedArchived: true,
+    });
+
+    assert.strictEqual(olderPayload.alreadyImportedArchived, false);
+    assert.strictEqual(archivedPayload.alreadyImportedArchived, true);
+  }),
+);
 
 it.effect("parses turn diff input when fromTurnCount <= toTurnCount", () =>
   Effect.gen(function* () {
@@ -251,6 +358,54 @@ it.effect("preserves explicit provider and runtime mode in thread.turn.start", (
   }),
 );
 
+it.effect("decodes imported continuation consent in thread.turn.start", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadTurnStartCommand({
+      type: "thread.turn.start",
+      commandId: "cmd-turn-import-consent",
+      threadId: "thread-1",
+      message: {
+        messageId: "msg-import-consent",
+        role: "user",
+        text: "continue",
+        attachments: [],
+      },
+      importContinuationConsent: {
+        originContentHash: "content-hash",
+        activityId: "activity-import-continuation",
+        driverKind: "codex",
+        targetProviderInstanceId: "codex",
+        continuation: {
+          state: "verified",
+          providerInstanceId: "codex",
+          continuationIdentity: {
+            driverKind: "codex",
+            continuationKey: "codex:home:/tmp/codex",
+          },
+          reason: null,
+        },
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed.importContinuationConsent, {
+      originContentHash: "content-hash",
+      activityId: EventId.make("activity-import-continuation"),
+      driverKind: ProviderDriverKind.make("codex"),
+      targetProviderInstanceId: ProviderInstanceId.make("codex"),
+      continuation: {
+        state: "verified",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        continuationIdentity: {
+          driverKind: ProviderDriverKind.make("codex"),
+          continuationKey: "codex:home:/tmp/codex",
+        },
+        reason: null,
+      },
+    });
+  }),
+);
+
 it.effect("accepts bootstrap metadata in thread.turn.start", () =>
   Effect.gen(function* () {
     const parsed = yield* decodeThreadTurnStartCommand({
@@ -313,6 +468,116 @@ it.effect("decodes thread.created runtime mode for historical events", () =>
 
     assert.strictEqual(parsed.runtimeMode, DEFAULT_RUNTIME_MODE);
     assert.strictEqual(parsed.modelSelection.instanceId, "codex");
+    assert.strictEqual(parsed.origin, null);
+  }),
+);
+
+it.effect("decodes imported thread provenance", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadOrigin({
+      kind: "imported",
+      source: "codex-cli",
+      sourcePath: " /tmp/session.jsonl ",
+      contentHash: " abc123 ",
+      nativeSessionId: " session-1 ",
+      providerInstanceId: " codex_personal ",
+      importedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.deepStrictEqual(parsed, {
+      kind: "imported",
+      source: "codex-cli",
+      sourcePath: "/tmp/session.jsonl",
+      contentHash: "abc123",
+      nativeSessionId: "session-1",
+      providerInstanceId: ProviderInstanceId.make("codex_personal"),
+      importedAt: "2026-01-01T00:00:00.000Z",
+    });
+  }),
+);
+
+it.effect("strips imported provenance from client thread creation commands", () =>
+  Effect.gen(function* () {
+    const decoded = yield* decodeClientOrchestrationCommand({
+      type: "thread.create",
+      commandId: "client-thread-create",
+      threadId: "thread-client-created",
+      projectId: "project-1",
+      title: "Client-created thread",
+      modelSelection: {
+        provider: "codex",
+        model: "gpt-5.4",
+      },
+      runtimeMode: "full-access",
+      interactionMode: "default",
+      branch: null,
+      worktreePath: null,
+      origin: {
+        kind: "imported",
+        source: "codex-cli",
+        sourcePath: "/tmp/forged-session.jsonl",
+        contentHash: "forged-content-hash",
+        nativeSessionId: "forged-native-session",
+        providerInstanceId: "codex",
+        importedAt: "2026-01-01T00:00:00.000Z",
+      },
+      createdAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(decoded.type, "thread.create");
+    assert.strictEqual("origin" in decoded, false);
+  }),
+);
+
+it.effect("decodes legacy imported provenance without provider instance identity", () =>
+  Effect.gen(function* () {
+    const parsed = yield* decodeThreadOrigin({
+      kind: "imported",
+      source: "codex-cli",
+      sourcePath: "/tmp/session.jsonl",
+      contentHash: "abc123",
+      nativeSessionId: "session-1",
+      importedAt: "2026-01-01T00:00:00.000Z",
+    });
+
+    assert.strictEqual(parsed.providerInstanceId, null);
+  }),
+);
+
+it.effect("decodes thread.messages.import commands", () =>
+  Effect.gen(function* () {
+    const wireCommand = {
+      type: "thread.messages.import",
+      commandId: "cmd-import-1",
+      threadId: "thread-1",
+      messages: [
+        {
+          messageId: "message-1",
+          role: "user",
+          text: "hello",
+          createdAt: "2026-01-01T00:00:00.000Z",
+        },
+      ],
+      activities: [
+        {
+          id: "activity-1",
+          tone: "info",
+          kind: "import.note",
+          summary: "session imported",
+          payload: {},
+          turnId: null,
+          createdAt: "2026-01-01T00:00:01.000Z",
+        },
+      ],
+      createdAt: "2026-01-02T00:00:00.000Z",
+    };
+    const parsed = yield* decodeThreadMessagesImportCommand(wireCommand);
+    const unionParsed = yield* decodeOrchestrationCommand(wireCommand);
+
+    assert.strictEqual(parsed.type, "thread.messages.import");
+    assert.strictEqual(unionParsed.type, "thread.messages.import");
+    assert.strictEqual(parsed.messages[0]?.role, "user");
+    assert.strictEqual(parsed.activities[0]?.kind, "import.note");
   }),
 );
 
@@ -412,8 +677,10 @@ it.effect("defaults settled fields when decoding historical thread data", () =>
 
     assert.strictEqual(thread.settledOverride, null);
     assert.strictEqual(thread.settledAt, null);
+    assert.strictEqual(thread.origin, null);
     assert.strictEqual(shell.settledOverride, null);
     assert.strictEqual(shell.settledAt, null);
+    assert.strictEqual(shell.origin, null);
   }),
 );
 

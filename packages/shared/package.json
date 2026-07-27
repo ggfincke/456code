@@ -95,6 +95,10 @@
       "types": "./src/orchestrationTiming.ts",
       "import": "./src/orchestrationTiming.ts"
     },
+    "./orchestrationActivityOrder": {
+      "types": "./src/orchestrationActivityOrder.ts",
+      "import": "./src/orchestrationActivityOrder.ts"
+    },
     "./remote": {
       "types": "./src/remote.ts",
       "import": "./src/remote.ts"
