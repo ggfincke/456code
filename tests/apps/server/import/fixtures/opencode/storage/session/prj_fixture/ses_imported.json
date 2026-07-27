@@ -1,0 +1,11 @@
+{
+  "id": "ses_imported",
+  "projectID": "prj_fixture",
+  "directory": "/workspace/opencode-fixture",
+  "title": "OpenCode import fixture",
+  "version": "1.2.3",
+  "time": {
+    "created": 1767225600000,
+    "updated": 1767225601000
+  }
+}

@@ -1,3 +1,6 @@
+// tests/apps/server/server.test.ts
+// verifies server routes and websocket assembly
+
 import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
 import * as NodeSocket from "@effect/platform-node/NodeSocket";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -17,6 +20,7 @@ import {
   MessageId,
   ExternalLauncherCommandNotFoundError,
   type OrchestrationThreadShell,
+  type OrchestrationProjectShell,
   TerminalNotRunningError,
   type OrchestrationCommand,
   type OrchestrationEvent,
@@ -162,6 +166,7 @@ const makeDefaultOrchestrationReadModel = () => {
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
+        origin: null,
         settledOverride: null,
         settledAt: null,
         latestTurn: null,
@@ -193,6 +198,7 @@ const makeDefaultOrchestrationThreadShell = (
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
+    origin: null,
     settledOverride: null,
     settledAt: null,
     session: null,
@@ -3196,6 +3202,87 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
+  it.effect("rejects imported continuation consent when the target source identity changed", () =>
+    Effect.gen(function* () {
+      const providerInstanceId = ProviderInstanceId.make("shared-provider");
+      const dispatch = vi.fn((_: OrchestrationCommand) => Effect.succeed({ sequence: 1 }));
+
+      yield* buildAppUnderTest({
+        layers: {
+          providerRegistry: {
+            getProviders: Effect.succeed([
+              {
+                instanceId: providerInstanceId,
+                driver: ProviderDriverKind.make("codex"),
+                continuation: { groupKey: "codex:home:/provider-home-b" },
+                enabled: true,
+                installed: true,
+                version: "1.0.0",
+                status: "ready",
+                auth: { status: "authenticated" },
+                checkedAt: "2026-01-01T00:00:00.000Z",
+                availability: "available",
+                models: [],
+                slashCommands: [],
+                skills: [],
+              },
+            ]),
+          },
+          orchestrationEngine: {
+            dispatch,
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: "thread.turn.start",
+            commandId: CommandId.make("cmd-import-continuation-driver-mismatch"),
+            threadId: ThreadId.make("thread-imported-driver-mismatch"),
+            message: {
+              messageId: MessageId.make("message-imported-driver-mismatch"),
+              role: "user",
+              text: "continue imported work",
+              attachments: [],
+            },
+            modelSelection: {
+              instanceId: providerInstanceId,
+              model: "claude-sonnet-4-5",
+            },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            importContinuationConsent: {
+              originContentHash: "imported-content-hash",
+              activityId: EventId.make("activity-import-continuation"),
+              driverKind: ProviderDriverKind.make("codex"),
+              targetProviderInstanceId: providerInstanceId,
+              continuation: {
+                state: "history-only",
+                providerInstanceId,
+                continuationIdentity: {
+                  driverKind: ProviderDriverKind.make("codex"),
+                  continuationKey: `codex:instance:${providerInstanceId}`,
+                },
+                reason: "Native continuation could not be verified.",
+              },
+            },
+            createdAt: "2026-01-01T00:00:00.000Z",
+          }),
+        ).pipe(Effect.result),
+      );
+
+      assertTrue(result._tag === "Failure");
+      assertTrue(result.failure._tag === "OrchestrationDispatchCommandError");
+      assert.include(
+        result.failure.message,
+        "no longer resolves to the accepted continuation source",
+      );
+      assert.equal(dispatch.mock.calls.length, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
   it.effect("routes websocket rpc projects.writeFile errors", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
@@ -3990,6 +4077,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
             createdAt: now,
             updatedAt: now,
             archivedAt: null,
+            origin: null,
             settledOverride: null,
             settledAt: null,
             latestTurn: null,
@@ -4102,6 +4190,279 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assertTrue(result.failure.cause instanceof Error);
       assert.include(result.failure.cause.message, projectionError.message);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect(
+    "imports through the authenticated websocket handler using the configured server cwd",
+    () =>
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const testRoot = yield* fileSystem.makeTempDirectoryScoped({
+          prefix: "t3-ws-import-handler-",
+        });
+        const codexHome = path.join(testRoot, "codex-home");
+        const sessionDirectory = path.join(codexHome, "sessions", "2026", "01", "01");
+        const workspaceRoot = path.join(testRoot, "workspace");
+        const nativeSessionId = "ws-import-native";
+        const sourcePath = path.join(
+          sessionDirectory,
+          `rollout-2026-01-01T00-00-00-${nativeSessionId}.jsonl`,
+        );
+        yield* fileSystem.makeDirectory(sessionDirectory, { recursive: true });
+        yield* fileSystem.makeDirectory(workspaceRoot, { recursive: true });
+        yield* fileSystem.writeFileString(
+          sourcePath,
+          [
+            `{"timestamp":"2026-01-01T00:00:00.000Z","type":"session_meta","payload":{"id":"${nativeSessionId}","cwd":"${workspaceRoot}","model_provider":"openai"}}`,
+            `{"timestamp":"2026-01-01T00:00:00.000Z","type":"turn_context","payload":{"cwd":"${workspaceRoot}","model":"gpt-test"}}`,
+            '{"timestamp":"2026-01-01T00:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Import over WebSocket"}}',
+          ].join("\n"),
+        );
+
+        const providerInstanceId = ProviderInstanceId.make("codex");
+        const projects: OrchestrationProjectShell[] = [];
+        const threads: OrchestrationThreadShell[] = [];
+        const events: OrchestrationEvent[] = [];
+        const domainEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+        let sequence = 0;
+        const shellSnapshot = () => ({
+          snapshotSequence: sequence,
+          projects: [...projects],
+          threads: [...threads],
+          updatedAt: "2026-01-01T00:00:10.000Z",
+        });
+        const dispatch = (command: OrchestrationCommand) =>
+          Effect.gen(function* () {
+            sequence += 1;
+            if (command.type === "project.create") {
+              projects.push({
+                id: command.projectId,
+                title: command.title,
+                workspaceRoot: command.workspaceRoot,
+                defaultModelSelection: command.defaultModelSelection ?? null,
+                scripts: [],
+                createdAt: command.createdAt,
+                updatedAt: command.createdAt,
+              });
+            } else if (command.type === "thread.create") {
+              const thread: OrchestrationThreadShell = {
+                id: command.threadId,
+                projectId: command.projectId,
+                title: command.title,
+                modelSelection: command.modelSelection,
+                runtimeMode: command.runtimeMode,
+                interactionMode: command.interactionMode,
+                branch: command.branch,
+                worktreePath: command.worktreePath,
+                latestTurn: null,
+                createdAt: command.createdAt,
+                updatedAt: command.createdAt,
+                archivedAt: null,
+                origin: command.origin ?? null,
+                settledOverride: null,
+                settledAt: null,
+                session: null,
+                latestUserMessageAt: null,
+                hasPendingApprovals: false,
+                hasPendingUserInput: false,
+                hasActionableProposedPlan: false,
+              };
+              threads.push(thread);
+              const event: OrchestrationEvent = {
+                sequence,
+                eventId: EventId.make(`event-ws-import-${sequence}`),
+                aggregateKind: "thread",
+                aggregateId: command.threadId,
+                type: "thread.created",
+                occurredAt: command.createdAt,
+                commandId: command.commandId,
+                causationEventId: null,
+                correlationId: command.commandId,
+                metadata: {},
+                payload: {
+                  threadId: command.threadId,
+                  projectId: command.projectId,
+                  title: command.title,
+                  modelSelection: command.modelSelection,
+                  runtimeMode: command.runtimeMode,
+                  interactionMode: command.interactionMode,
+                  branch: command.branch,
+                  worktreePath: command.worktreePath,
+                  origin: command.origin ?? null,
+                  createdAt: command.createdAt,
+                  updatedAt: command.createdAt,
+                },
+              };
+              events.push(event);
+              yield* PubSub.publish(domainEvents, event);
+            }
+            return { sequence };
+          });
+        const settings = {
+          ...DEFAULT_SERVER_SETTINGS,
+          providers: {
+            ...DEFAULT_SERVER_SETTINGS.providers,
+            codex: {
+              ...DEFAULT_SERVER_SETTINGS.providers.codex,
+              enabled: true,
+              homePath: "codex-home",
+            },
+          },
+        };
+
+        yield* buildAppUnderTest({
+          config: { cwd: testRoot },
+          layers: {
+            serverSettings: {
+              getSettings: Effect.succeed(settings),
+            },
+            providerRegistry: {
+              getProviders: Effect.succeed([
+                {
+                  instanceId: providerInstanceId,
+                  driver: ProviderDriverKind.make("codex"),
+                  enabled: true,
+                  installed: true,
+                  version: "1.0.0",
+                  status: "ready",
+                  auth: { status: "authenticated" },
+                  checkedAt: "2026-01-01T00:00:00.000Z",
+                  availability: "available",
+                  models: [
+                    {
+                      slug: "gpt-test",
+                      name: "GPT Test",
+                      isCustom: false,
+                      isDefault: true,
+                      capabilities: null,
+                    },
+                  ],
+                  slashCommands: [],
+                  skills: [],
+                },
+              ]),
+            },
+            orchestrationEngine: {
+              dispatch,
+              readEvents: (afterSequenceExclusive = 0) =>
+                Stream.fromIterable(
+                  events.filter((event) => event.sequence > afterSequenceExclusive),
+                ),
+              streamDomainEvents: Stream.fromPubSub(domainEvents),
+              latestSequence: Effect.sync(() => sequence),
+            },
+            projectionSnapshotQuery: {
+              getShellSnapshot: () => Effect.sync(shellSnapshot),
+              getArchivedShellSnapshot: () =>
+                Effect.sync(() => ({
+                  snapshotSequence: sequence,
+                  projects: [],
+                  threads: [],
+                  updatedAt: "2026-01-01T00:00:10.000Z",
+                })),
+              getProjectShellById: (projectId) =>
+                Effect.sync(() =>
+                  Option.fromNullishOr(projects.find((project) => project.id === projectId)),
+                ),
+              getThreadShellById: (threadId) =>
+                Effect.sync(() =>
+                  Option.fromNullishOr(threads.find((thread) => thread.id === threadId)),
+                ),
+            },
+          },
+        });
+
+        const { response: readExchangeResponse, body: readToken } = yield* exchangeAccessToken(
+          defaultDesktopBootstrapToken,
+          { scope: "orchestration:read" },
+        );
+        assert.equal(readExchangeResponse.status, 200);
+        const readTicketResponse = yield* HttpClient.post("/api/auth/websocket-ticket", {
+          headers: {
+            authorization: `Bearer ${readToken.access_token ?? ""}`,
+          },
+        });
+        const readTicket = (yield* readTicketResponse.json) as { readonly ticket: string };
+        const readWsUrl = `${yield* getWsServerUrl("/ws", {
+          authenticated: false,
+        })}?wsTicket=${encodeURIComponent(readTicket.ticket)}`;
+        const readAccess = yield* Effect.scoped(
+          withWsRpcClient(readWsUrl, (client) =>
+            Effect.gen(function* () {
+              const snapshot = yield* client[ORCHESTRATION_WS_METHODS.subscribeShell]({}).pipe(
+                Stream.runHead,
+              );
+              const scan = yield* client[ORCHESTRATION_WS_METHODS.importScan]({});
+              const deniedImport = yield* client[ORCHESTRATION_WS_METHODS.importSessions]({
+                items: [
+                  {
+                    source: "codex-cli",
+                    sourcePath,
+                    providerInstanceId,
+                  },
+                ],
+              }).pipe(Effect.flip);
+              return { snapshot, scan, deniedImport };
+            }),
+          ),
+        );
+        assert.equal(Option.getOrThrow(readAccess.snapshot).kind, "snapshot");
+        assert.ok(
+          readAccess.scan.candidates.some(
+            (candidate) => candidate.nativeSessionId === nativeSessionId,
+          ),
+        );
+        assert.equal(readAccess.deniedImport._tag, "EnvironmentAuthorizationError");
+        if (readAccess.deniedImport._tag === "EnvironmentAuthorizationError") {
+          assert.equal(readAccess.deniedImport.requiredScope, "orchestration:operate");
+        }
+
+        const operateWsUrl = yield* getWsServerUrl("/ws");
+        const imported = yield* Effect.scoped(
+          withWsRpcClient(operateWsUrl, (client) =>
+            Effect.gen(function* () {
+              const shellUpdateFiber = yield* client[ORCHESTRATION_WS_METHODS.subscribeShell](
+                {},
+              ).pipe(
+                Stream.filter((item) => item.kind === "thread-upserted"),
+                Stream.runHead,
+                Effect.forkScoped,
+              );
+              yield* Effect.sleep(Duration.millis(20)).pipe(TestClock.withLive);
+              const result = yield* client[ORCHESTRATION_WS_METHODS.importSessions]({
+                items: [
+                  {
+                    source: "codex-cli",
+                    sourcePath,
+                    providerInstanceId,
+                  },
+                ],
+              });
+              assert.deepEqual(result.failed, []);
+              assert.equal(result.imported.length, 1);
+              yield* TestClock.adjust(Duration.millis(50));
+              const shellUpdate = Option.getOrThrow(yield* Fiber.join(shellUpdateFiber));
+              return { result, shellUpdate };
+            }),
+          ),
+        );
+
+        assert.equal(imported.shellUpdate.kind, "thread-upserted");
+        if (imported.shellUpdate.kind === "thread-upserted") {
+          assert.equal(imported.shellUpdate.thread.origin?.providerInstanceId, providerInstanceId);
+        }
+        const scan = yield* Effect.scoped(
+          withWsRpcClient(operateWsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.importScan]({}),
+          ),
+        );
+        const importedCandidate = scan.candidates.find(
+          (candidate) => candidate.nativeSessionId === nativeSessionId,
+        );
+        assert.equal(importedCandidate?.alreadyImportedThreadId, threads[0]?.id);
+        assert.equal(importedCandidate?.alreadyImportedProviderInstanceId, providerInstanceId);
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect("marks an empty shell catch-up replay as synchronized when requested", () =>
@@ -5070,153 +5431,85 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
-  it.effect("archives and still closes terminals when session stop fails", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-archive-stop-failure");
-      const effects: string[] = [];
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const now = "2026-01-01T00:00:00.000Z";
+  it.effect.each([{ stopOutcome: "fail" as const }, { stopOutcome: "die" as const }])(
+    "archives and still closes terminals when session stop $stopOutcome",
+    ({ stopOutcome }) =>
+      Effect.gen(function* () {
+        const threadId = ThreadId.make(`thread-archive-stop-${stopOutcome}`);
+        const effects: string[] = [];
+        const dispatchedCommands: Array<OrchestrationCommand> = [];
+        const now = "2026-01-01T00:00:00.000Z";
 
-      yield* buildAppUnderTest({
-        layers: {
-          terminalManager: {
-            close: (input) =>
-              Effect.sync(() => {
-                effects.push(`terminal.close:${input.threadId}`);
-              }),
-          },
-          orchestrationEngine: {
-            dispatch: (command) => {
-              dispatchedCommands.push(command);
-              effects.push(`dispatch:${command.type}`);
-              if (command.type === "thread.session.stop") {
-                return Effect.fail(
-                  new OrchestrationListenerCallbackError({
-                    listener: "domain-event",
-                    detail: "simulated archive stop failure",
-                  }),
-                );
-              }
-              return Effect.succeed({ sequence: dispatchedCommands.length });
+        yield* buildAppUnderTest({
+          layers: {
+            terminalManager: {
+              close: (input) =>
+                Effect.sync(() => {
+                  effects.push(`terminal.close:${input.threadId}`);
+                }),
+            },
+            orchestrationEngine: {
+              dispatch: (command) => {
+                dispatchedCommands.push(command);
+                effects.push(`dispatch:${command.type}`);
+                if (command.type === "thread.session.stop") {
+                  return stopOutcome === "fail"
+                    ? Effect.fail(
+                        new OrchestrationListenerCallbackError({
+                          listener: "domain-event",
+                          detail: "simulated archive stop failure",
+                        }),
+                      )
+                    : Effect.die(new Error("simulated archive stop defect"));
+                }
+                return Effect.succeed({ sequence: dispatchedCommands.length });
+              },
+            },
+            projectionSnapshotQuery: {
+              getThreadShellById: () =>
+                Effect.succeed(
+                  Option.some(
+                    makeDefaultOrchestrationThreadShell({
+                      id: threadId,
+                      updatedAt: now,
+                      session: {
+                        threadId,
+                        status: "ready",
+                        providerName: "claudeAgent",
+                        runtimeMode: "full-access",
+                        activeTurnId: null,
+                        lastError: null,
+                        updatedAt: now,
+                      },
+                    }),
+                  ),
+                ),
             },
           },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.succeed(
-                Option.some(
-                  makeDefaultOrchestrationThreadShell({
-                    id: threadId,
-                    updatedAt: now,
-                    session: {
-                      threadId,
-                      status: "ready",
-                      providerName: "claudeAgent",
-                      runtimeMode: "full-access",
-                      activeTurnId: null,
-                      lastError: null,
-                      updatedAt: now,
-                    },
-                  }),
-                ),
-              ),
-          },
-        },
-      });
+        });
 
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const dispatchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.archive",
-            commandId: CommandId.make("cmd-thread-archive-stop-failure"),
-            threadId,
-          }),
-        ),
-      );
+        const wsUrl = yield* getWsServerUrl("/ws");
+        const dispatchResult = yield* Effect.scoped(
+          withWsRpcClient(wsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+              type: "thread.archive",
+              commandId: CommandId.make(`cmd-thread-archive-stop-${stopOutcome}`),
+              threadId,
+            }),
+          ),
+        );
 
-      assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, [
-        "dispatch:thread.archive",
-        "dispatch:thread.session.stop",
-        `terminal.close:${threadId}`,
-      ]);
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.archive", "thread.session.stop"],
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  );
-
-  it.effect("archives and still closes terminals when session stop defects", () =>
-    Effect.gen(function* () {
-      const threadId = ThreadId.make("thread-archive-stop-defect");
-      const effects: string[] = [];
-      const dispatchedCommands: Array<OrchestrationCommand> = [];
-      const now = "2026-01-01T00:00:00.000Z";
-
-      yield* buildAppUnderTest({
-        layers: {
-          terminalManager: {
-            close: (input) =>
-              Effect.sync(() => {
-                effects.push(`terminal.close:${input.threadId}`);
-              }),
-          },
-          orchestrationEngine: {
-            dispatch: (command) => {
-              dispatchedCommands.push(command);
-              effects.push(`dispatch:${command.type}`);
-              if (command.type === "thread.session.stop") {
-                return Effect.die(new Error("simulated archive stop defect"));
-              }
-              return Effect.succeed({ sequence: dispatchedCommands.length });
-            },
-          },
-          projectionSnapshotQuery: {
-            getThreadShellById: () =>
-              Effect.succeed(
-                Option.some(
-                  makeDefaultOrchestrationThreadShell({
-                    id: threadId,
-                    updatedAt: now,
-                    session: {
-                      threadId,
-                      status: "ready",
-                      providerName: "claudeAgent",
-                      runtimeMode: "full-access",
-                      activeTurnId: null,
-                      lastError: null,
-                      updatedAt: now,
-                    },
-                  }),
-                ),
-              ),
-          },
-        },
-      });
-
-      const wsUrl = yield* getWsServerUrl("/ws");
-      const dispatchResult = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-            type: "thread.archive",
-            commandId: CommandId.make("cmd-thread-archive-stop-defect"),
-            threadId,
-          }),
-        ),
-      );
-
-      assert.equal(dispatchResult.sequence, 1);
-      assert.deepEqual(effects, [
-        "dispatch:thread.archive",
-        "dispatch:thread.session.stop",
-        `terminal.close:${threadId}`,
-      ]);
-      assert.deepEqual(
-        dispatchedCommands.map((command) => command.type),
-        ["thread.archive", "thread.session.stop"],
-      );
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+        assert.equal(dispatchResult.sequence, 1);
+        assert.deepEqual(effects, [
+          "dispatch:thread.archive",
+          "dispatch:thread.session.stop",
+          `terminal.close:${threadId}`,
+        ]);
+        assert.deepEqual(
+          dispatchedCommands.map((command) => command.type),
+          ["thread.archive", "thread.session.stop"],
+        );
+      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 
   it.effect(
