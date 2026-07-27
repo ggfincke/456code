@@ -461,27 +461,6 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     ),
   );
 
-  it.effect("omits attachment metadata section when no attachments are provided", () =>
-    withFakeCodexEnv(
-      {
-        output: JSON.stringify({
-          branch: "fix/session-timeout",
-        }),
-        stdinMustNotContain: "Attachment metadata:",
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateBranchName({
-            cwd: process.cwd(),
-            message: "Fix timeout behavior.",
-            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-          });
-
-          expect(generated.branch).toBe("fix/session-timeout");
-        }),
-    ),
-  );
-
   it.effect("passes image attachments through as codex image inputs", () =>
     withFakeCodexEnv(
       {

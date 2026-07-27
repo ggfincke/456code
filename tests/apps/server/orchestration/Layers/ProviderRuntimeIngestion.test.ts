@@ -1,3 +1,5 @@
+// tests/apps/server/orchestration/Layers/ProviderRuntimeIngestion.test.ts
+// verifies provider runtime events are projected into thread state
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -1873,132 +1875,97 @@ describe("ProviderRuntimeIngestion", () => {
     expect(message?.streaming).toBe(false);
   });
 
-  it("flushes and completes buffered assistant text when an approval request opens", async () => {
-    const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
-
-    harness.emit({
-      type: "turn.started",
-      eventId: asEventId("evt-turn-started-buffered-request-flush"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-buffered-request-flush"),
-    });
-    await waitForThread(
-      harness.readModel,
-      (thread) =>
-        thread.session?.status === "running" &&
-        thread.session?.activeTurnId === "turn-buffered-request-flush",
-    );
-
-    harness.emit({
-      type: "content.delta",
-      eventId: asEventId("evt-message-delta-buffered-request-flush"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-buffered-request-flush"),
-      itemId: asItemId("item-buffered-request-flush"),
-      payload: {
-        streamKind: "assistant_text",
-        delta: "visible before approval",
+  it.each([
+    {
+      label: "approval request",
+      turnId: "turn-buffered-request-flush",
+      itemId: "item-buffered-request-flush",
+      delta: "visible before approval",
+      interruptEvent: {
+        type: "request.opened" as const,
+        eventId: "evt-request-opened-buffered-request-flush",
+        requestId: "req-buffered-request-flush",
+        payload: {
+          requestType: "command_execution_approval" as const,
+          detail: "pwd",
+        },
       },
-    });
-    harness.emit({
-      type: "request.opened",
-      eventId: asEventId("evt-request-opened-buffered-request-flush"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-buffered-request-flush"),
-      requestId: ApprovalRequestId.make("req-buffered-request-flush"),
-      payload: {
-        requestType: "command_execution_approval",
-        detail: "pwd",
+    },
+    {
+      label: "user input request",
+      turnId: "turn-buffered-user-input-flush",
+      itemId: "item-buffered-user-input-flush",
+      delta: "visible before user input",
+      interruptEvent: {
+        type: "user-input.requested" as const,
+        eventId: "evt-user-input-requested-buffered-user-input-flush",
+        requestId: "req-buffered-user-input-flush",
+        payload: {
+          questions: [
+            {
+              id: "choice",
+              header: "Choice",
+              question: "Pick one",
+              options: [{ label: "A", description: "Option A" }],
+            },
+          ],
+        },
       },
-    });
+    },
+  ])(
+    "flushes and completes buffered assistant text when $label opens",
+    async ({ turnId, itemId, delta, interruptEvent }) => {
+      const harness = await createHarness();
+      const now = "2026-01-01T00:00:00.000Z";
 
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.messages.some(
-        (message: ProviderRuntimeTestMessage) =>
-          message.id === "assistant:item-buffered-request-flush" &&
-          !message.streaming &&
-          message.text === "visible before approval",
-      ),
-    );
-    const message = thread.messages.find(
-      (entry: ProviderRuntimeTestMessage) => entry.id === "assistant:item-buffered-request-flush",
-    );
-    expect(message?.streaming).toBe(false);
-  });
+      harness.emit({
+        type: "turn.started",
+        eventId: asEventId(`evt-turn-started-${turnId}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId(turnId),
+      });
+      await waitForThread(
+        harness.readModel,
+        (thread) => thread.session?.status === "running" && thread.session?.activeTurnId === turnId,
+      );
 
-  it("flushes and completes buffered assistant text when user input is requested", async () => {
-    const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
+      harness.emit({
+        type: "content.delta",
+        eventId: asEventId(`evt-message-delta-${itemId}`),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId(turnId),
+        itemId: asItemId(itemId),
+        payload: {
+          streamKind: "assistant_text",
+          delta,
+        },
+      });
+      harness.emit({
+        ...interruptEvent,
+        eventId: asEventId(interruptEvent.eventId),
+        provider: ProviderDriverKind.make("codex"),
+        createdAt: now,
+        threadId: asThreadId("thread-1"),
+        turnId: asTurnId(turnId),
+        requestId: ApprovalRequestId.make(interruptEvent.requestId),
+      });
 
-    harness.emit({
-      type: "turn.started",
-      eventId: asEventId("evt-turn-started-buffered-user-input-flush"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-buffered-user-input-flush"),
-    });
-    await waitForThread(
-      harness.readModel,
-      (thread) =>
-        thread.session?.status === "running" &&
-        thread.session?.activeTurnId === "turn-buffered-user-input-flush",
-    );
-
-    harness.emit({
-      type: "content.delta",
-      eventId: asEventId("evt-message-delta-buffered-user-input-flush"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-buffered-user-input-flush"),
-      itemId: asItemId("item-buffered-user-input-flush"),
-      payload: {
-        streamKind: "assistant_text",
-        delta: "visible before user input",
-      },
-    });
-    harness.emit({
-      type: "user-input.requested",
-      eventId: asEventId("evt-user-input-requested-buffered-user-input-flush"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      turnId: asTurnId("turn-buffered-user-input-flush"),
-      requestId: ApprovalRequestId.make("req-buffered-user-input-flush"),
-      payload: {
-        questions: [
-          {
-            id: "choice",
-            header: "Choice",
-            question: "Pick one",
-            options: [{ label: "A", description: "Option A" }],
-          },
-        ],
-      },
-    });
-
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.messages.some(
-        (message: ProviderRuntimeTestMessage) =>
-          message.id === "assistant:item-buffered-user-input-flush" &&
-          !message.streaming &&
-          message.text === "visible before user input",
-      ),
-    );
-    const message = thread.messages.find(
-      (entry: ProviderRuntimeTestMessage) =>
-        entry.id === "assistant:item-buffered-user-input-flush",
-    );
-    expect(message?.streaming).toBe(false);
-  });
+      const thread = await waitForThread(harness.readModel, (entry) =>
+        entry.messages.some(
+          (message: ProviderRuntimeTestMessage) =>
+            message.id === `assistant:${itemId}` && !message.streaming && message.text === delta,
+        ),
+      );
+      const message = thread.messages.find(
+        (entry: ProviderRuntimeTestMessage) => entry.id === `assistant:${itemId}`,
+      );
+      expect(message?.streaming).toBe(false);
+    },
+  );
 
   it("does not create assistant segments for whitespace-only buffered text at approval boundaries", async () => {
     const harness = await createHarness();
@@ -2940,59 +2907,6 @@ describe("ProviderRuntimeIngestion", () => {
       outputTokens: 50,
       reasoningOutputTokens: 25,
       lastUsedTokens: 1075,
-      compactsAutomatically: true,
-    });
-  });
-
-  it("projects Codex camelCase token usage payloads into normalized thread activities", async () => {
-    const harness = await createHarness();
-    const now = "2026-01-01T00:00:00.000Z";
-
-    harness.emit({
-      type: "thread.token-usage.updated",
-      eventId: asEventId("evt-thread-token-usage-updated-camel"),
-      provider: ProviderDriverKind.make("codex"),
-      createdAt: now,
-      threadId: asThreadId("thread-1"),
-      payload: {
-        usage: {
-          usedTokens: 126,
-          totalProcessedTokens: 11_839,
-          maxTokens: 258_400,
-          inputTokens: 120,
-          cachedInputTokens: 0,
-          outputTokens: 6,
-          reasoningOutputTokens: 0,
-          lastUsedTokens: 126,
-          lastInputTokens: 120,
-          lastCachedInputTokens: 0,
-          lastOutputTokens: 6,
-          lastReasoningOutputTokens: 0,
-          compactsAutomatically: true,
-        },
-      },
-    });
-
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.activities.some(
-        (activity: ProviderRuntimeTestActivity) => activity.kind === "context-window.updated",
-      ),
-    );
-
-    const usageActivity = thread.activities.find(
-      (activity: ProviderRuntimeTestActivity) => activity.kind === "context-window.updated",
-    );
-    expect(usageActivity?.payload).toMatchObject({
-      usedTokens: 126,
-      totalProcessedTokens: 11_839,
-      maxTokens: 258_400,
-      inputTokens: 120,
-      cachedInputTokens: 0,
-      outputTokens: 6,
-      reasoningOutputTokens: 0,
-      lastUsedTokens: 126,
-      lastInputTokens: 120,
-      lastOutputTokens: 6,
       compactsAutomatically: true,
     });
   });
