@@ -20,38 +20,37 @@ describe("toolActivity", () => {
     });
   });
 
-  it("uses structured file paths for read-file tools when available", () => {
+  it.each([
+    {
+      label: "structured file path",
+      data: {
+        kind: "read",
+        locations: [{ path: "/tmp/app.ts" }],
+      },
+      expected: {
+        summary: "Read file",
+        detail: "/tmp/app.ts",
+      },
+    },
+    {
+      label: "no path",
+      data: {
+        kind: "read",
+        rawInput: {},
+      },
+      expected: {
+        summary: "Read file",
+      },
+    },
+  ])("normalizes read-file tools when $label is available", ({ data, expected }) => {
     expect(
       deriveToolActivityPresentation({
         itemType: "dynamic_tool_call",
         title: "Read File",
         detail: "Read File",
-        data: {
-          kind: "read",
-          locations: [{ path: "/tmp/app.ts" }],
-        },
+        data,
         fallbackSummary: "Read File",
       }),
-    ).toEqual({
-      summary: "Read file",
-      detail: "/tmp/app.ts",
-    });
-  });
-
-  it("drops duplicated generic read-file detail when no path is available", () => {
-    expect(
-      deriveToolActivityPresentation({
-        itemType: "dynamic_tool_call",
-        title: "Read File",
-        detail: "Read File",
-        data: {
-          kind: "read",
-          rawInput: {},
-        },
-        fallbackSummary: "Read File",
-      }),
-    ).toEqual({
-      summary: "Read file",
-    });
+    ).toEqual(expected);
   });
 });

@@ -59,81 +59,65 @@ describe("remote", () => {
     });
   });
 
-  it("treats a protocol-relative host as https", () => {
-    expect(
-      resolveRemotePairingTarget({
-        host: "//remote.example.com",
-        pairingCode: "pairing-token",
-      }),
-    ).toEqual({
-      credential: "pairing-token",
-      httpBaseUrl: "https://remote.example.com/",
-      wsBaseUrl: "wss://remote.example.com/",
-    });
-  });
-
-  it("preserves the port when normalizing a protocol-relative host", () => {
-    expect(
-      resolveRemotePairingTarget({
-        host: "//remote.example.com:3000",
-        pairingCode: "pairing-token",
-      }),
-    ).toEqual({
-      credential: "pairing-token",
-      httpBaseUrl: "https://remote.example.com:3000/",
-      wsBaseUrl: "wss://remote.example.com:3000/",
-    });
-  });
-
-  it("normalizes a protocol-relative host from a hosted pairing link", () => {
-    expect(
-      resolveRemotePairingTarget({
+  it.each([
+    {
+      label: "protocol-relative host",
+      input: { host: "//remote.example.com", pairingCode: "pairing-token" },
+      expected: {
+        credential: "pairing-token",
+        httpBaseUrl: "https://remote.example.com/",
+        wsBaseUrl: "wss://remote.example.com/",
+      },
+    },
+    {
+      label: "protocol-relative host with port",
+      input: { host: "//remote.example.com:3000", pairingCode: "pairing-token" },
+      expected: {
+        credential: "pairing-token",
+        httpBaseUrl: "https://remote.example.com:3000/",
+        wsBaseUrl: "wss://remote.example.com:3000/",
+      },
+    },
+    {
+      label: "protocol-relative host from hosted pairing link",
+      input: {
         pairingUrl: "https://app.t3.codes/pair?host=%2F%2Fremote.example.com#token=pairing-token",
-      }),
-    ).toEqual({
-      credential: "pairing-token",
-      httpBaseUrl: "https://remote.example.com/",
-      wsBaseUrl: "wss://remote.example.com/",
-    });
-  });
-
-  it("collapses extra leading slashes instead of producing an empty host", () => {
-    expect(
-      resolveRemotePairingTarget({
-        host: "///example.com",
-        pairingCode: "pairing-token",
-      }),
-    ).toEqual({
-      credential: "pairing-token",
-      httpBaseUrl: "https://example.com/",
-      wsBaseUrl: "wss://example.com/",
-    });
-  });
-
-  it("does not double-prepend https when the host already carries a scheme", () => {
-    expect(
-      resolveRemotePairingTarget({
-        host: "//https://example.com",
-        pairingCode: "pairing-token",
-      }),
-    ).toEqual({
-      credential: "pairing-token",
-      httpBaseUrl: "https://example.com/",
-      wsBaseUrl: "wss://example.com/",
-    });
-  });
-
-  it("preserves host ports when normalizing a bare host input", () => {
-    expect(
-      resolveRemotePairingTarget({
-        host: "myserver.com:3000",
-        pairingCode: "pairing-token",
-      }),
-    ).toEqual({
-      credential: "pairing-token",
-      httpBaseUrl: "https://myserver.com:3000/",
-      wsBaseUrl: "wss://myserver.com:3000/",
-    });
+      },
+      expected: {
+        credential: "pairing-token",
+        httpBaseUrl: "https://remote.example.com/",
+        wsBaseUrl: "wss://remote.example.com/",
+      },
+    },
+    {
+      label: "extra leading slashes",
+      input: { host: "///example.com", pairingCode: "pairing-token" },
+      expected: {
+        credential: "pairing-token",
+        httpBaseUrl: "https://example.com/",
+        wsBaseUrl: "wss://example.com/",
+      },
+    },
+    {
+      label: "already-schemed host after protocol-relative prefix",
+      input: { host: "//https://example.com", pairingCode: "pairing-token" },
+      expected: {
+        credential: "pairing-token",
+        httpBaseUrl: "https://example.com/",
+        wsBaseUrl: "wss://example.com/",
+      },
+    },
+    {
+      label: "bare host with port",
+      input: { host: "myserver.com:3000", pairingCode: "pairing-token" },
+      expected: {
+        credential: "pairing-token",
+        httpBaseUrl: "https://myserver.com:3000/",
+        wsBaseUrl: "wss://myserver.com:3000/",
+      },
+    },
+  ])("normalizes host input: $label", ({ input, expected }) => {
+    expect(resolveRemotePairingTarget(input)).toEqual(expected);
   });
 
   it("rejects unsupported direct pairing URL protocols", () => {

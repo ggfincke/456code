@@ -1,3 +1,5 @@
+// tests/packages/contracts/providerInstance.test.ts
+// verifies provider instance schema and continuation identity contracts
 import { describe, expect, it } from "vite-plus/test";
 import * as Schema from "effect/Schema";
 
@@ -23,23 +25,27 @@ describe("provider slug validation (shared by driver + instance ids)", () => {
 
   for (const { schemaName, decode } of cases) {
     describe(schemaName, () => {
-      it.each(["codex", "codex_personal", "codex-work", "claudeAgent", "x", "abc123", "ollama"])(
-        "accepts %s",
-        (id) => {
-          expect(decode(id)).toBe(id);
-        },
-      );
-
       it.each([
-        ["empty string", ""],
-        ["leading digit", "1codex"],
-        ["leading dash", "-codex"],
-        ["leading underscore", "_codex"],
-        ["whitespace inside", "codex personal"],
-        ["dot inside", "codex.personal"],
-        ["slash inside", "codex/personal"],
-      ])("rejects %s", (_label, value) => {
-        expect(() => decode(value)).toThrow();
+        { label: "accepts codex", value: "codex", expectValid: true },
+        { label: "accepts codex_personal", value: "codex_personal", expectValid: true },
+        { label: "accepts codex-work", value: "codex-work", expectValid: true },
+        { label: "accepts claudeAgent", value: "claudeAgent", expectValid: true },
+        { label: "accepts x", value: "x", expectValid: true },
+        { label: "accepts abc123", value: "abc123", expectValid: true },
+        { label: "accepts ollama", value: "ollama", expectValid: true },
+        { label: "rejects empty string", value: "", expectValid: false },
+        { label: "rejects leading digit", value: "1codex", expectValid: false },
+        { label: "rejects leading dash", value: "-codex", expectValid: false },
+        { label: "rejects leading underscore", value: "_codex", expectValid: false },
+        { label: "rejects whitespace inside", value: "codex personal", expectValid: false },
+        { label: "rejects dot inside", value: "codex.personal", expectValid: false },
+        { label: "rejects slash inside", value: "codex/personal", expectValid: false },
+      ])("$label", ({ value, expectValid }) => {
+        if (expectValid) {
+          expect(decode(value)).toBe(value);
+        } else {
+          expect(() => decode(value)).toThrow();
+        }
       });
 
       it("trims surrounding whitespace before validating", () => {

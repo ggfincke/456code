@@ -7,30 +7,23 @@ import {
 } from "../../../packages/shared/src/filePreview.ts";
 
 describe("workspace file previews", () => {
-  it.each(["report.html", "report.HTM", "document.pdf?download=1"])(
-    "recognizes browser preview path %s",
-    (path) => {
-      expect(isWorkspaceBrowserPreviewPath(path)).toBe(true);
-      expect(isWorkspacePreviewEntryPath(path)).toBe(true);
-    },
-  );
-
   it.each([
-    "icon.png",
-    "photo.JPEG",
-    "animation.gif",
-    "vector.svg#mark",
-    "texture.webp",
-    "image.avif",
-  ])("recognizes image preview path %s", (path) => {
-    expect(isWorkspaceImagePreviewPath(path)).toBe(true);
-    expect(isWorkspacePreviewEntryPath(path)).toBe(true);
+    { kind: "browser", path: "report.html", preview: true, image: false },
+    { kind: "browser", path: "report.HTM", preview: true, image: false },
+    { kind: "browser", path: "document.pdf?download=1", preview: true, image: false },
+    { kind: "image", path: "icon.png", preview: true, image: true },
+    { kind: "image", path: "photo.JPEG", preview: true, image: true },
+    { kind: "image", path: "animation.gif", preview: true, image: true },
+    { kind: "image", path: "vector.svg#mark", preview: true, image: true },
+    { kind: "image", path: "texture.webp", preview: true, image: true },
+    { kind: "image", path: "image.avif", preview: true, image: true },
+    { kind: "reject", path: "README.md", preview: false, image: false },
+    { kind: "reject", path: "src/index.ts", preview: false, image: false },
+    { kind: "reject", path: "image.png.ts", preview: false, image: false },
+    { kind: "reject", path: "png", preview: false, image: false },
+  ])("$kind path $path", ({ path, preview, image }) => {
+    expect(isWorkspacePreviewEntryPath(path)).toBe(preview);
+    expect(isWorkspaceBrowserPreviewPath(path)).toBe(preview && !image);
+    expect(isWorkspaceImagePreviewPath(path)).toBe(image);
   });
-
-  it.each(["README.md", "src/index.ts", "image.png.ts", "png"])(
-    "rejects non-preview path %s",
-    (path) => {
-      expect(isWorkspacePreviewEntryPath(path)).toBe(false);
-    },
-  );
 });
