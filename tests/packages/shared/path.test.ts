@@ -7,28 +7,21 @@ import {
 } from "../../../packages/shared/src/path.ts";
 
 describe("path helpers", () => {
-  it("detects windows drive paths", () => {
-    expect(isWindowsDrivePath("C:\\repo")).toBe(true);
-    expect(isWindowsDrivePath("D:/repo")).toBe(true);
-    expect(isWindowsDrivePath("/repo")).toBe(false);
-  });
-
-  it("detects UNC paths", () => {
-    expect(isUncPath("\\\\server\\share\\repo")).toBe(true);
-    expect(isUncPath("C:\\repo")).toBe(false);
-  });
-
-  it("detects windows absolute paths", () => {
-    expect(isWindowsAbsolutePath("C:\\repo")).toBe(true);
-    expect(isWindowsAbsolutePath("\\\\server\\share\\repo")).toBe(true);
-    expect(isWindowsAbsolutePath("./repo")).toBe(false);
-  });
-
-  it("detects explicit relative paths", () => {
-    expect(isExplicitRelativePath(".")).toBe(true);
-    expect(isExplicitRelativePath("..")).toBe(true);
-    expect(isExplicitRelativePath("./repo")).toBe(true);
-    expect(isExplicitRelativePath("..\\repo")).toBe(true);
-    expect(isExplicitRelativePath("~/repo")).toBe(false);
+  it.each([
+    ["drive C:\\repo", () => isWindowsDrivePath("C:\\repo"), true],
+    ["drive D:/repo", () => isWindowsDrivePath("D:/repo"), true],
+    ["drive /repo", () => isWindowsDrivePath("/repo"), false],
+    ["unc \\\\server\\share\\repo", () => isUncPath("\\\\server\\share\\repo"), true],
+    ["unc C:\\repo", () => isUncPath("C:\\repo"), false],
+    ["absolute C:\\repo", () => isWindowsAbsolutePath("C:\\repo"), true],
+    ["absolute UNC", () => isWindowsAbsolutePath("\\\\server\\share\\repo"), true],
+    ["absolute ./repo", () => isWindowsAbsolutePath("./repo"), false],
+    ["relative .", () => isExplicitRelativePath("."), true],
+    ["relative ..", () => isExplicitRelativePath(".."), true],
+    ["relative ./repo", () => isExplicitRelativePath("./repo"), true],
+    ["relative ..\\repo", () => isExplicitRelativePath("..\\repo"), true],
+    ["relative ~/repo", () => isExplicitRelativePath("~/repo"), false],
+  ] as const)("%s", (_label, run, expected) => {
+    expect(run()).toBe(expected);
   });
 });

@@ -683,76 +683,59 @@ describe("DesktopWindow", () => {
     }),
   );
 
-  it.effect("flushes normal bounds when fullscreen before the debounce completes", () =>
-    Effect.gen(function* () {
-      const fakeWindow = makeFakeBrowserWindow();
-      fakeWindow.getBounds.mockReturnValue({ x: 0, y: 0, width: 1920, height: 1080 });
-      fakeWindow.getNormalBounds.mockReturnValue({ x: 200, y: 130, width: 1400, height: 940 });
-      const createCount = yield* Ref.make(0);
-      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
-      const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
-      const layer = makeTestLayer({
-        window: fakeWindow.window,
-        createCount,
-        mainWindow,
-        mainWindowBoundsUpdates,
-      });
-
-      yield* Effect.gen(function* () {
-        const desktopWindow = yield* DesktopWindow.DesktopWindow;
-        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
-
-        const resize = fakeWindow.windowListeners.get("resize");
-        if (!resize) {
-          return yield* Effect.die("window resize listener was not registered");
-        }
-        resize();
-        yield* TestClock.adjust(250);
+  it.effect.each([
+    {
+      label: "fullscreen",
+      mockState: (fakeWindow: ReturnType<typeof makeFakeBrowserWindow>) => {
+        fakeWindow.getBounds.mockReturnValue({ x: 0, y: 0, width: 1920, height: 1080 });
+        fakeWindow.getNormalBounds.mockReturnValue({ x: 200, y: 130, width: 1400, height: 940 });
         fakeWindow.isFullScreen.mockReturnValue(true);
-
-        yield* desktopWindow.flushMainWindowBounds;
-
-        assert.deepEqual(mainWindowBoundsUpdates, [{ x: 200, y: 130, width: 1400, height: 940 }]);
-        assert.equal(fakeWindow.getBounds.mock.calls.length, 0);
-        assert.equal(fakeWindow.getNormalBounds.mock.calls.length, 1);
-      }).pipe(Effect.provide(layer));
-    }),
-  );
-
-  it.effect("flushes normal bounds when minimized before the debounce completes", () =>
-    Effect.gen(function* () {
-      const fakeWindow = makeFakeBrowserWindow();
-      fakeWindow.getBounds.mockReturnValue({ x: -32_000, y: -32_000, width: 160, height: 28 });
-      fakeWindow.getNormalBounds.mockReturnValue({ x: 180, y: 120, width: 1440, height: 960 });
-      const createCount = yield* Ref.make(0);
-      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
-      const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
-      const layer = makeTestLayer({
-        window: fakeWindow.window,
-        createCount,
-        mainWindow,
-        mainWindowBoundsUpdates,
-      });
-
-      yield* Effect.gen(function* () {
-        const desktopWindow = yield* DesktopWindow.DesktopWindow;
-        yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
-
-        const resize = fakeWindow.windowListeners.get("resize");
-        if (!resize) {
-          return yield* Effect.die("window resize listener was not registered");
-        }
-        resize();
-        yield* TestClock.adjust(250);
+      },
+      expectedBounds: { x: 200, y: 130, width: 1400, height: 940 },
+    },
+    {
+      label: "minimized",
+      mockState: (fakeWindow: ReturnType<typeof makeFakeBrowserWindow>) => {
+        fakeWindow.getBounds.mockReturnValue({ x: -32_000, y: -32_000, width: 160, height: 28 });
+        fakeWindow.getNormalBounds.mockReturnValue({ x: 180, y: 120, width: 1440, height: 960 });
         fakeWindow.isMinimized.mockReturnValue(true);
+      },
+      expectedBounds: { x: 180, y: 120, width: 1440, height: 960 },
+    },
+  ])(
+    "flushes normal bounds when $label before the debounce completes",
+    ({ mockState, expectedBounds }) =>
+      Effect.gen(function* () {
+        const fakeWindow = makeFakeBrowserWindow();
+        mockState(fakeWindow);
+        const createCount = yield* Ref.make(0);
+        const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+        const mainWindowBoundsUpdates: DesktopAppSettings.DesktopWindowBounds[] = [];
+        const layer = makeTestLayer({
+          window: fakeWindow.window,
+          createCount,
+          mainWindow,
+          mainWindowBoundsUpdates,
+        });
 
-        yield* desktopWindow.flushMainWindowBounds;
+        yield* Effect.gen(function* () {
+          const desktopWindow = yield* DesktopWindow.DesktopWindow;
+          yield* desktopWindow.handleBackendReady(new URL("http://127.0.0.1:3773"));
 
-        assert.deepEqual(mainWindowBoundsUpdates, [{ x: 180, y: 120, width: 1440, height: 960 }]);
-        assert.equal(fakeWindow.getBounds.mock.calls.length, 0);
-        assert.equal(fakeWindow.getNormalBounds.mock.calls.length, 1);
-      }).pipe(Effect.provide(layer));
-    }),
+          const resize = fakeWindow.windowListeners.get("resize");
+          if (!resize) {
+            return yield* Effect.die("window resize listener was not registered");
+          }
+          resize();
+          yield* TestClock.adjust(250);
+
+          yield* desktopWindow.flushMainWindowBounds;
+
+          assert.deepEqual(mainWindowBoundsUpdates, [expectedBounds]);
+          assert.equal(fakeWindow.getBounds.mock.calls.length, 0);
+          assert.equal(fakeWindow.getNormalBounds.mock.calls.length, 1);
+        }).pipe(Effect.provide(layer));
+      }),
   );
 
   it.effect("logs display lookup failures before falling back to the default size", () =>

@@ -43,6 +43,26 @@ function parseWebPreferences(input: string): Record<string, unknown> {
 describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
   const parsed = parseWebPreferences(PREVIEW_WEBVIEW_PREFERENCES);
 
+  it.each([
+    {
+      key: "contextIsolation",
+      value: "false",
+      reason: "disables context isolation (so react-grab can see the page's React DevTools hook)",
+    },
+    {
+      key: "sandbox",
+      value: "true",
+      reason: "keeps the renderer sandbox enabled (so the page cannot reach Node APIs)",
+    },
+    {
+      key: "nodeIntegration",
+      value: "false",
+      reason: "disables nodeIntegration (defense in depth — page never gets Node)",
+    },
+  ])("$reason", ({ key, value }) => {
+    expect(parsed[key]).toBe(value);
+  });
+
   it("contains exactly the three security-critical keys", () => {
     expect(Object.keys(parsed).toSorted()).toEqual(
       ["contextIsolation", "nodeIntegration", "sandbox"].toSorted(),
@@ -56,18 +76,6 @@ describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
     for (const value of Object.values(parsed)) {
       expect(value).toMatch(/^(true|false)$/);
     }
-  });
-
-  it("disables context isolation (so react-grab can see the page's React DevTools hook)", () => {
-    expect(parsed["contextIsolation"]).toBe("false");
-  });
-
-  it("keeps the renderer sandbox enabled (so the page cannot reach Node APIs)", () => {
-    expect(parsed["sandbox"]).toBe("true");
-  });
-
-  it("disables nodeIntegration (defense in depth — page never gets Node)", () => {
-    expect(parsed["nodeIntegration"]).toBe("false");
   });
 
   it("contains no whitespace (Electron's parser does not trim)", () => {

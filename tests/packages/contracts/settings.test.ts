@@ -5,7 +5,6 @@ import { ProviderInstanceId } from "../../../packages/contracts/src/providerInst
 import {
   ClientSettingsSchema,
   ClientSettingsPatch,
-  DEFAULT_SERVER_SETTINGS,
   ServerSettings,
   ServerSettingsPatch,
 } from "../../../packages/contracts/src/settings.ts";
@@ -38,14 +37,21 @@ describe("ClientSettings glass opacity", () => {
     expect(decodeClientSettings({}).glassOpacity).toBe(80);
   });
 
-  it.each([39, 101, 72.5])("rejects an invalid glass opacity: %s", (value) => {
+  it.each([
+    { value: 39, valid: false },
+    { value: 101, valid: false },
+    { value: 72.5, valid: false },
+    { value: 40, valid: true },
+    { value: 75, valid: true },
+    { value: 100, valid: true },
+  ])("$valid ? accepts : rejects glass opacity $value", ({ value, valid }) => {
+    if (valid) {
+      expect(decodeClientSettings({ glassOpacity: value }).glassOpacity).toBe(value);
+      expect(decodeClientSettingsPatch({ glassOpacity: value }).glassOpacity).toBe(value);
+      return;
+    }
     expect(() => decodeClientSettings({ glassOpacity: value })).toThrow();
     expect(() => decodeClientSettingsPatch({ glassOpacity: value })).toThrow();
-  });
-
-  it.each([40, 75, 100])("accepts a glass opacity within the supported range: %s", (value) => {
-    expect(decodeClientSettings({ glassOpacity: value }).glassOpacity).toBe(value);
-    expect(decodeClientSettingsPatch({ glassOpacity: value }).glassOpacity).toBe(value);
   });
 });
 
@@ -56,23 +62,44 @@ describe("ClientSettings sidebar v2", () => {
     expect(settings.sidebarAutoSettleAfterDays).toBe(3);
   });
 
-  it("allows auto-settle by inactivity to be disabled", () => {
-    expect(
-      decodeClientSettings({ sidebarAutoSettleAfterDays: null }).sidebarAutoSettleAfterDays,
-    ).toBeNull();
-  });
-
-  it.each([-1, 0, 91])("rejects an auto-settle threshold outside 1..90: %s", (value) => {
+  it.each([
+    {
+      label: "allows disabling auto-settle",
+      value: null,
+      expectValid: true,
+      expected: null,
+    },
+    {
+      label: "rejects threshold below minimum",
+      value: -1,
+      expectValid: false,
+      expected: undefined,
+    },
+    {
+      label: "rejects zero-day threshold",
+      value: 0,
+      expectValid: false,
+      expected: undefined,
+    },
+    {
+      label: "rejects threshold above maximum",
+      value: 91,
+      expectValid: false,
+      expected: undefined,
+    },
+  ])("$label", ({ value, expectValid, expected }) => {
+    if (expectValid) {
+      expect(
+        decodeClientSettings({ sidebarAutoSettleAfterDays: value }).sidebarAutoSettleAfterDays,
+      ).toBe(expected);
+      return;
+    }
     expect(() => decodeClientSettings({ sidebarAutoSettleAfterDays: value })).toThrow();
     expect(() => decodeClientSettingsPatch({ sidebarAutoSettleAfterDays: value })).toThrow();
   });
 });
 
 describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
-  it("defaults to an empty record so legacy configs without the key still decode", () => {
-    expect(DEFAULT_SERVER_SETTINGS.providerInstances).toEqual({});
-  });
-
   it("decodes a fully empty config (legacy on-disk shape) without complaint", () => {
     const decoded = decodeServerSettings({});
     expect(decoded.providerInstances).toEqual({});

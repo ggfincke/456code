@@ -3,26 +3,19 @@ import { describe, expect, it } from "vite-plus/test";
 import { parseActiveThreadPath } from "../../../../../apps/mobile/src/features/keyboard/hardwareKeyboardCommands";
 
 describe("parseActiveThreadPath", () => {
-  it("extracts the active thread from thread subroutes", () => {
-    expect(parseActiveThreadPath("/threads/environment-1/thread-1/files/src/index.ts")).toEqual({
-      environmentId: "environment-1",
-      threadId: "thread-1",
-    });
-  });
-
-  it("decodes route components", () => {
-    expect(parseActiveThreadPath("/threads/local%20machine/thread%2Fone/review")).toEqual({
-      environmentId: "local machine",
-      threadId: "thread/one",
-    });
-  });
-
-  it("ignores non-thread routes", () => {
-    expect(parseActiveThreadPath("/settings")).toBeNull();
-    expect(parseActiveThreadPath("/threads/environment-only")).toBeNull();
-  });
-
-  it("ignores malformed encoded route components", () => {
-    expect(parseActiveThreadPath("/threads/%E0%A4%A/thread-1")).toBeNull();
+  it.each([
+    [
+      "/threads/environment-1/thread-1/files/src/index.ts",
+      { environmentId: "environment-1", threadId: "thread-1" },
+    ],
+    [
+      "/threads/local%20machine/thread%2Fone/review",
+      { environmentId: "local machine", threadId: "thread/one" },
+    ],
+    ["/settings", null],
+    ["/threads/environment-only", null],
+    ["/threads/%E0%A4%A/thread-1", null],
+  ])("parses %s", (pathname, expected) => {
+    expect(parseActiveThreadPath(pathname)).toEqual(expected);
   });
 });

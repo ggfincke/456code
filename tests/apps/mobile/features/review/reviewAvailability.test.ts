@@ -3,45 +3,38 @@ import { describe, expect, it } from "vite-plus/test";
 import { resolveReviewAvailability } from "../../../../../apps/mobile/src/features/review/reviewAvailability";
 
 describe("resolveReviewAvailability", () => {
-  it("keeps section navigation available when another section is cached offline", () => {
-    expect(
-      resolveReviewAvailability({
+  it.each([
+    [
+      "offline with other cached section",
+      {
         hasEnvironmentPresentation: true,
         isEnvironmentConnected: false,
         hasCachedSelectedDiff: false,
         hasAnyCachedDiff: true,
-      }),
-    ).toEqual({
-      showConnectionNotice: true,
-      showSectionToolbar: true,
-    });
-  });
-
-  it("hides section navigation when no review section is available offline", () => {
-    expect(
-      resolveReviewAvailability({
+      },
+      { showConnectionNotice: true, showSectionToolbar: true },
+    ],
+    [
+      "offline with no cached sections",
+      {
         hasEnvironmentPresentation: true,
         isEnvironmentConnected: false,
         hasCachedSelectedDiff: false,
         hasAnyCachedDiff: false,
-      }),
-    ).toEqual({
-      showConnectionNotice: true,
-      showSectionToolbar: false,
-    });
-  });
-
-  it("shows cached selected content and navigation while offline", () => {
-    expect(
-      resolveReviewAvailability({
+      },
+      { showConnectionNotice: true, showSectionToolbar: false },
+    ],
+    [
+      "offline with cached selected content",
+      {
         hasEnvironmentPresentation: true,
         isEnvironmentConnected: false,
         hasCachedSelectedDiff: true,
         hasAnyCachedDiff: true,
-      }),
-    ).toEqual({
-      showConnectionNotice: false,
-      showSectionToolbar: true,
-    });
+      },
+      { showConnectionNotice: false, showSectionToolbar: true },
+    ],
+  ])("%s", (_label, input, expected) => {
+    expect(resolveReviewAvailability(input)).toEqual(expected);
   });
 });

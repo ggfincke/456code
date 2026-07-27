@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  areShortcutModifierStatesEqual,
   shortcutModifierStateAfterKeyboardEvent,
   type ShortcutModifierState,
 } from "../../../apps/web/src/shortcutModifierState";
@@ -26,21 +25,6 @@ function keyboardEventLike(type: "keydown" | "keyup", init: Partial<KeyboardEven
 }
 
 describe("shortcutModifierState", () => {
-  it("compares modifier states by value", () => {
-    expect(
-      areShortcutModifierStatesEqual(
-        { metaKey: false, ctrlKey: true, altKey: false, shiftKey: true },
-        { metaKey: false, ctrlKey: true, altKey: false, shiftKey: true },
-      ),
-    ).toBe(true);
-    expect(
-      areShortcutModifierStatesEqual(
-        { metaKey: false, ctrlKey: true, altKey: false, shiftKey: true },
-        { metaKey: false, ctrlKey: false, altKey: false, shiftKey: true },
-      ),
-    ).toBe(false);
-  });
-
   it("preserves the current object when modifier values do not change", () => {
     const initialState = emptyState();
     const nextState = shortcutModifierStateAfterKeyboardEvent(

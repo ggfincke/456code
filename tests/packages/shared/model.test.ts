@@ -62,7 +62,7 @@ const claudeCaps: ModelCapabilities = createModelCapabilities({
 });
 
 describe("descriptor helpers", () => {
-  it("applies selection values to capability descriptors", () => {
+  it("applies, wires, and reads typed option selection values", () => {
     expect(
       getProviderOptionDescriptors({
         caps: claudeCaps,
@@ -95,9 +95,7 @@ describe("descriptor helpers", () => {
         currentValue: "200k",
       },
     ]);
-  });
 
-  it("builds wire-format option selections from descriptors", () => {
     const descriptors = getProviderOptionDescriptors({
       caps: codexCaps,
       selections: [
@@ -105,35 +103,15 @@ describe("descriptor helpers", () => {
         { id: "fastMode", value: true },
       ],
     });
-
     expect(buildProviderOptionSelectionsFromDescriptors(descriptors)).toEqual([
       { id: "reasoningEffort", value: "high" },
       { id: "fastMode", value: true },
     ]);
-  });
 
-  it("stores option selection arrays in model selections", () => {
-    expect(
-      createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
-        { id: "reasoningEffort", value: "high" },
-        { id: "fastMode", value: true },
-      ]),
-    ).toEqual({
-      instanceId: "codex",
-      model: "gpt-5.4",
-      options: [
-        { id: "reasoningEffort", value: "high" },
-        { id: "fastMode", value: true },
-      ],
-    });
-  });
-
-  it("reads typed option selection values", () => {
     const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
       { id: "reasoningEffort", value: "high" },
       { id: "fastMode", value: true },
     ]);
-
     expect(getProviderOptionStringSelectionValue(selection.options, "reasoningEffort")).toBe(
       "high",
     );

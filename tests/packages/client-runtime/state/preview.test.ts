@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/preview.test.ts
+// verifies preview command concurrency boundaries
+
 import { describe, expect, it } from "vite-plus/test";
 
 import { previewAutomationHostFocusConcurrencyKey } from "../../../../packages/client-runtime/src/state/preview.ts";

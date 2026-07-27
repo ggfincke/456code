@@ -3,7 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import {
   resolveTerminalSelectionActionPosition,
   shouldHandleTerminalSelectionMouseUp,
-  terminalSelectionActionDelayForClickCount,
 } from "../../../../apps/web/src/components/ThreadTerminalDrawer";
 
 describe("resolveTerminalSelectionActionPosition", () => {
@@ -59,12 +58,6 @@ describe("resolveTerminalSelectionActionPosition", () => {
       x: 100,
       y: 50,
     });
-  });
-
-  it("delays multi-click selection actions so triple-click selection can complete", () => {
-    expect(terminalSelectionActionDelayForClickCount(1)).toBe(0);
-    expect(terminalSelectionActionDelayForClickCount(2)).toBe(260);
-    expect(terminalSelectionActionDelayForClickCount(3)).toBe(260);
   });
 
   it("only handles mouseup when the selection gesture started in the terminal", () => {

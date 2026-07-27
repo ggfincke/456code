@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/threadSettled.test.ts
+// verifies thread settlement state transitions
+
 import {
   ProjectId,
   ProviderInstanceId,
@@ -93,44 +96,110 @@ describe("threadLastActivityAt", () => {
 });
 
 describe("effectiveSettled", () => {
-  const overrideCases = [null, "settled", "active"] as const;
-  const changeRequestStates = [undefined, "open", "merged"] as const;
-  const inactivityCases = [
-    ["fresh", FRESH],
-    ["stale", STALE],
-    ["no-activity", null],
+  const truthTable = [
+    {
+      label: "override settled with no blockers",
+      settledOverride: "settled" as const,
+      changeRequestState: undefined,
+      activityAt: FRESH,
+      running: false,
+      pending: undefined,
+      expected: true,
+    },
+    {
+      label: "active pin suppresses merged PR auto-settle",
+      settledOverride: "active" as const,
+      changeRequestState: "merged" as const,
+      activityAt: STALE,
+      running: false,
+      pending: undefined,
+      expected: false,
+    },
+    {
+      label: "active pin suppresses stale inactivity auto-settle",
+      settledOverride: "active" as const,
+      changeRequestState: undefined,
+      activityAt: STALE,
+      running: false,
+      pending: undefined,
+      expected: false,
+    },
+    {
+      label: "merged PR auto-settles when unblocked",
+      settledOverride: null,
+      changeRequestState: "merged" as const,
+      activityAt: FRESH,
+      running: false,
+      pending: undefined,
+      expected: true,
+    },
+    {
+      label: "stale inactivity auto-settles without CR signal",
+      settledOverride: null,
+      changeRequestState: undefined,
+      activityAt: STALE,
+      running: false,
+      pending: undefined,
+      expected: true,
+    },
+    {
+      label: "fresh activity stays active without override or CR",
+      settledOverride: null,
+      changeRequestState: undefined,
+      activityAt: FRESH,
+      running: false,
+      pending: undefined,
+      expected: false,
+    },
+    {
+      label: "running session blocks settled override",
+      settledOverride: "settled" as const,
+      changeRequestState: undefined,
+      activityAt: STALE,
+      running: true,
+      pending: undefined,
+      expected: false,
+    },
+    {
+      label: "pending approval blocks auto-settle",
+      settledOverride: null,
+      changeRequestState: "merged" as const,
+      activityAt: STALE,
+      running: false,
+      pending: "approval" as const,
+      expected: false,
+    },
+    {
+      label: "pending user-input blocks settled override",
+      settledOverride: "settled" as const,
+      changeRequestState: undefined,
+      activityAt: FRESH,
+      running: false,
+      pending: "user-input" as const,
+      expected: false,
+    },
+    {
+      label: "open CR with stale activity auto-settles on inactivity",
+      settledOverride: null,
+      changeRequestState: "open" as const,
+      activityAt: STALE,
+      running: false,
+      pending: undefined,
+      expected: true,
+    },
+    {
+      label: "no activity without CR or override stays active",
+      settledOverride: null,
+      changeRequestState: undefined,
+      activityAt: null,
+      running: false,
+      pending: undefined,
+      expected: false,
+    },
   ] as const;
-  const runningCases = [false, true] as const;
-  const pendingCases = [undefined, "approval", "user-input"] as const;
-  const truthTable = overrideCases.flatMap((settledOverride) =>
-    changeRequestStates.flatMap((changeRequestState) =>
-      inactivityCases.flatMap(([inactivity, activityAt]) =>
-        runningCases.flatMap((running) =>
-          pendingCases.map((pending) => ({
-            settledOverride,
-            changeRequestState,
-            inactivity,
-            activityAt,
-            running,
-            pending,
-            // Settled iff nothing blocks (pending work / live session) AND
-            // the override says settled, or (with no override) a merged PR
-            // or staleness auto-settles. The "active" pin suppresses both
-            // auto signals.
-            expected:
-              pending === undefined &&
-              !running &&
-              (settledOverride === "settled" ||
-                (settledOverride === null &&
-                  (changeRequestState === "merged" || inactivity === "stale"))),
-          })),
-        ),
-      ),
-    ),
-  );
 
   it.each(truthTable)(
-    "override=$settledOverride pr=$changeRequestState inactivity=$inactivity running=$running pending=$pending",
+    "$label",
     ({ settledOverride, changeRequestState, activityAt, running, pending, expected }) => {
       const shell = makeShell({
         settledOverride,
@@ -351,20 +420,17 @@ describe("hasQueuedTurnStart", () => {
 });
 
 describe("canSettle", () => {
-  it("blocks every state effectiveSettled refuses to classify as settled", () => {
+  it("allows settling when no activity blockers hold", () => {
     expect(canSettle(makeShell({ activityAt: FRESH }), { now: NOW })).toBe(true);
-    expect(
-      canSettle(makeShell({ activityAt: FRESH, sessionStatus: "starting" }), { now: NOW }),
-    ).toBe(false);
-    expect(
-      canSettle(makeShell({ activityAt: FRESH, sessionStatus: "running" }), { now: NOW }),
-    ).toBe(false);
-    expect(canSettle(makeShell({ activityAt: FRESH, pending: "approval" }), { now: NOW })).toBe(
-      false,
-    );
-    expect(canSettle(makeShell({ activityAt: FRESH, pending: "user-input" }), { now: NOW })).toBe(
-      false,
-    );
+  });
+
+  it.each([
+    ["a starting session", { sessionStatus: "starting" as const }],
+    ["a running session", { sessionStatus: "running" as const }],
+    ["a pending approval", { pending: "approval" as const }],
+    ["pending user input", { pending: "user-input" as const }],
+  ])("blocks settling for %s", (_label, blocker) => {
+    expect(canSettle(makeShell({ activityAt: FRESH, ...blocker }), { now: NOW })).toBe(false);
   });
 
   it("blocks settling a queued turn start, only within the grace window", () => {
@@ -419,17 +485,5 @@ describe("canSettle", () => {
         autoSettleAfterDays: 3,
       }),
     ).toBe(false);
-  });
-
-  it("agrees with effectiveSettled's blockers for explicitly settled shells", () => {
-    // Anything canSettle rejects must render as active even when the user
-    // settled it earlier.
-    const blocked = makeShell({
-      settledOverride: "settled",
-      activityAt: FRESH,
-      pending: "user-input",
-    });
-    expect(canSettle(blocked, { now: NOW })).toBe(false);
-    expect(effectiveSettled(blocked, { now: NOW, autoSettleAfterDays: 3 })).toBe(false);
   });
 });

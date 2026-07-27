@@ -1,3 +1,6 @@
+// tests/packages/shared/agentAwareness.test.ts
+// verifies projection of thread state into user-facing agent activity
+
 import { describe, expect, it } from "@effect/vitest";
 
 import type {
@@ -132,9 +135,8 @@ describe("projectThreadAwareness", () => {
   });
 
   it("projects ready sessions with no materialized turn as completed", () => {
-    // Quick threads without code changes never get a checkpoint, so the SQL
-    // shell has no latestTurn row and latest_turn_id is cleared when the
-    // session settles; the ready session is the only completion signal left.
+    // partial or legacy shell snapshots can lack the latest turn row
+    // the ready session remains a sufficient completion signal
     const state = projectThreadAwareness({
       environmentId: "env-1" as EnvironmentId,
       project,

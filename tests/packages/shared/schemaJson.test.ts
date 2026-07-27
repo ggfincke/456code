@@ -14,30 +14,34 @@ import {
 const decodeLenientJson = Schema.decodeUnknownSync(fromLenientJson(Schema.Unknown));
 
 describe("schemaJson helpers", () => {
-  it("extracts a balanced JSON object from surrounding text", () => {
-    expect(
-      extractJsonObject(`Sure, here is the JSON:
+  it.each([
+    [
+      "extracts a balanced JSON object from surrounding text",
+      `Sure, here is the JSON:
 \`\`\`json
 {
   "subject": "Update README",
   "body": ""
 }
 \`\`\`
-Done.`),
-    ).toBe(`{
+Done.`,
+      `{
   "subject": "Update README",
   "body": ""
-}`);
-  });
-
-  it("ignores braces inside strings while finding the object boundary", () => {
-    expect(
-      extractJsonObject('prefix {"message":"literal } brace","nested":{"ok":true}} suffix'),
-    ).toBe('{"message":"literal } brace","nested":{"ok":true}}');
-  });
-
-  it("returns trimmed input when no JSON object starts", () => {
-    expect(extractJsonObject("  no structured output  ")).toBe("no structured output");
+}`,
+    ],
+    [
+      "ignores braces inside strings while finding the object boundary",
+      'prefix {"message":"literal } brace","nested":{"ok":true}} suffix',
+      '{"message":"literal } brace","nested":{"ok":true}}',
+    ],
+    [
+      "returns trimmed input when no JSON object starts",
+      "  no structured output  ",
+      "no structured output",
+    ],
+  ])("%s", (_label, input, expected) => {
+    expect(extractJsonObject(input)).toBe(expected);
   });
 
   it("decodes JSON with comments and trailing commas", () => {

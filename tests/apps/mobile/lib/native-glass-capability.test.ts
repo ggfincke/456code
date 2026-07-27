@@ -3,16 +3,12 @@ import { describe, expect, it } from "vite-plus/test";
 import { supportsNativeLiquidGlass } from "../../../../apps/mobile/src/lib/native-glass-capability";
 
 describe("supportsNativeLiquidGlass", () => {
-  it("uses native liquid glass when iOS reports the capability", () => {
-    expect(supportsNativeLiquidGlass("ios", true)).toBe(true);
-  });
-
-  it("keeps pre-glass iOS on the solid fallback", () => {
-    expect(supportsNativeLiquidGlass("ios", false)).toBe(false);
-  });
-
-  it("does not enable iOS liquid-glass layout behavior on other platforms", () => {
-    expect(supportsNativeLiquidGlass("android", true)).toBe(false);
-    expect(supportsNativeLiquidGlass("web", true)).toBe(false);
+  it.each([
+    ["ios", true, true],
+    ["ios", false, false],
+    ["android", true, false],
+    ["web", true, false],
+  ] as const)("platform %s capability=%s → %s", (platform, capability, expected) => {
+    expect(supportsNativeLiquidGlass(platform, capability)).toBe(expected);
   });
 });

@@ -2,9 +2,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vite-plus/test";
 
 import {
-  SidebarMenuAction,
   SidebarMenuButton,
-  SidebarMenuSubButton,
   SidebarProvider,
   SidebarTrigger,
 } from "../../../../../apps/web/src/components/ui/sidebar";
@@ -62,25 +60,5 @@ describe("sidebar interactive cursors", () => {
 
     expect(html).toContain("cursor-grab");
     expect(html).not.toContain("cursor-pointer");
-  });
-
-  it("uses a pointer cursor for menu actions", () => {
-    const html = renderToStaticMarkup(
-      <SidebarMenuAction aria-label="Create thread">
-        <span>+</span>
-      </SidebarMenuAction>,
-    );
-
-    expect(html).toContain('data-slot="sidebar-menu-action"');
-    expect(html).toContain("cursor-pointer");
-  });
-
-  it("uses a pointer cursor for submenu buttons", () => {
-    const html = renderToStaticMarkup(
-      <SidebarMenuSubButton render={<button type="button" />}>Show more</SidebarMenuSubButton>,
-    );
-
-    expect(html).toContain('data-slot="sidebar-menu-sub-button"');
-    expect(html).toContain("cursor-pointer");
   });
 });

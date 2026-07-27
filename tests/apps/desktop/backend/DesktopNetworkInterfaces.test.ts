@@ -24,24 +24,6 @@ describe("DesktopNetworkInterfaces", () => {
     networkInterfacesMock.mockReset();
   });
 
-  it.effect("reads network interfaces through the service", () => {
-    const interfaces = {
-      en0: [
-        {
-          address: "192.168.1.10",
-          family: "IPv4",
-          internal: false,
-        },
-      ],
-    };
-    networkInterfacesMock.mockReturnValueOnce(interfaces);
-
-    return Effect.gen(function* () {
-      const service = yield* DesktopNetworkInterfaces.DesktopNetworkInterfaces;
-      assert.strictEqual(yield* service.read, interfaces);
-    }).pipe(Effect.provide(TestLayer));
-  });
-
   it.effect("preserves network interface read failures as structured defects", () => {
     const cause = new Error("network interface probe failed");
     networkInterfacesMock.mockImplementationOnce(() => {

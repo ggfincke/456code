@@ -17,26 +17,31 @@ afterEach(() => {
 describe("loadRepoEnv", () => {
   it("does not project cloud configuration for an unconfigured clone", () => {
     const env = loadRepoEnv({ baseEnv: {}, repoRoot: makeTemporaryDirectory() });
+    const undefinedKeys = [
+      "T3CODE_CLERK_PUBLISHABLE_KEY",
+      "T3CODE_CLERK_CLI_OAUTH_CLIENT_ID",
+      "EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY",
+      "T3CODE_CLERK_JWT_TEMPLATE",
+      "EXPO_PUBLIC_CLERK_JWT_TEMPLATE",
+      "T3CODE_RELAY_URL",
+      "VITE_T3CODE_RELAY_URL",
+      "T3CODE_MOBILE_OTLP_TRACES_URL",
+      "T3CODE_MOBILE_OTLP_TRACES_DATASET",
+      "T3CODE_MOBILE_OTLP_TRACES_TOKEN",
+      "EXPO_PUBLIC_OTLP_TRACES_URL",
+      "EXPO_PUBLIC_OTLP_TRACES_DATASET",
+      "EXPO_PUBLIC_OTLP_TRACES_TOKEN",
+      "T3CODE_RELAY_CLIENT_OTLP_TRACES_URL",
+      "T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET",
+      "T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN",
+      "VITE_RELAY_OTLP_TRACES_URL",
+      "VITE_RELAY_OTLP_TRACES_DATASET",
+      "VITE_RELAY_OTLP_TRACES_TOKEN",
+    ] as const;
 
-    expect(env.T3CODE_CLERK_PUBLISHABLE_KEY).toBeUndefined();
-    expect(env.T3CODE_CLERK_CLI_OAUTH_CLIENT_ID).toBeUndefined();
-    expect(env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY).toBeUndefined();
-    expect(env.T3CODE_CLERK_JWT_TEMPLATE).toBeUndefined();
-    expect(env.EXPO_PUBLIC_CLERK_JWT_TEMPLATE).toBeUndefined();
-    expect(env.T3CODE_RELAY_URL).toBeUndefined();
-    expect(env.VITE_T3CODE_RELAY_URL).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.T3CODE_MOBILE_OTLP_TRACES_TOKEN).toBeUndefined();
-    expect(env.EXPO_PUBLIC_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.EXPO_PUBLIC_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.EXPO_PUBLIC_OTLP_TRACES_TOKEN).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.T3CODE_RELAY_CLIENT_OTLP_TRACES_TOKEN).toBeUndefined();
-    expect(env.VITE_RELAY_OTLP_TRACES_URL).toBeUndefined();
-    expect(env.VITE_RELAY_OTLP_TRACES_DATASET).toBeUndefined();
-    expect(env.VITE_RELAY_OTLP_TRACES_TOKEN).toBeUndefined();
+    for (const key of undefinedKeys) {
+      expect(env[key]).toBeUndefined();
+    }
   });
 
   it("applies process, root local, and root precedence in that order", () => {
