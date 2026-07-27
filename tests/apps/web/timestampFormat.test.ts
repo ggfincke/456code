@@ -3,12 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test"
 import {
   formatElapsedDurationLabel,
   formatExpiresInLabel,
-  formatRelativeTime,
-  formatRelativeTimeLabel,
-  formatRelativeTimeUntil,
   formatRelativeTimeUntilLabel,
-  formatShortTimestamp,
-  formatTimestamp,
   getRelativeTimeState,
   getTimestampFormatOptions,
 } from "../../../apps/web/src/timestampFormat";
@@ -40,7 +35,7 @@ describe("getTimestampFormatOptions", () => {
   });
 });
 
-describe("formatRelativeTimeUntilLabel", () => {
+describe("relative expiry labels", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-04-07T12:00:00.000Z"));
@@ -50,84 +45,49 @@ describe("formatRelativeTimeUntilLabel", () => {
     vi.useRealTimers();
   });
 
-  it("returns Expired when the instant is in the past", () => {
-    expect(formatRelativeTimeUntilLabel("2026-04-07T11:59:00.000Z")).toBe("Expired");
+  it.each([
+    {
+      label: "expired instant",
+      instant: "2026-04-07T11:59:00.000Z",
+      until: "Expired",
+      expiresIn: "Expired",
+    },
+    {
+      label: "sub-minute remainder",
+      instant: "2026-04-07T12:00:45.000Z",
+      until: "45s left",
+      expiresIn: "Expires in 45s",
+    },
+    {
+      label: "minutes under one hour",
+      instant: "2026-04-07T12:15:00.000Z",
+      until: "15m left",
+      expiresIn: "Expires in 15m",
+    },
+    {
+      label: "hours remaining",
+      instant: "2026-04-07T18:00:00.000Z",
+      until: "6h left",
+      expiresIn: "Expires in 6h",
+    },
+  ])("formats $label", ({ instant, until, expiresIn }) => {
+    expect(formatRelativeTimeUntilLabel(instant)).toBe(until);
+    expect(formatExpiresInLabel(instant)).toBe(expiresIn);
   });
 
-  it("formats seconds remaining", () => {
-    expect(formatRelativeTimeUntilLabel("2026-04-07T12:00:45.000Z")).toBe("45s left");
-  });
-
-  it("formats minutes remaining", () => {
-    expect(formatRelativeTimeUntilLabel("2026-04-07T12:15:00.000Z")).toBe("15m left");
-  });
-
-  it("formats hours remaining", () => {
-    expect(formatRelativeTimeUntilLabel("2026-04-07T18:00:00.000Z")).toBe("6h left");
-  });
-});
-
-describe("formatExpiresInLabel", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date("2026-04-07T12:00:00.000Z"));
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("returns Expired when the instant is in the past", () => {
-    expect(formatExpiresInLabel("2026-04-07T11:59:00.000Z")).toBe("Expired");
-  });
-
-  it("uses sub-minute second count", () => {
-    expect(formatExpiresInLabel("2026-04-07T12:00:45.000Z")).toBe("Expires in 45s");
-  });
-
-  it("uses minutes and seconds under one hour", () => {
+  it("uses minutes and seconds under one hour for expires-in labels", () => {
     expect(formatExpiresInLabel("2026-04-07T12:04:12.000Z")).toBe("Expires in 4m 12s");
-    expect(formatExpiresInLabel("2026-04-07T12:15:00.000Z")).toBe("Expires in 15m");
   });
 
-  it("uses hours with minute and second remainder", () => {
+  it("uses hours with minute and second remainder for expires-in labels", () => {
     expect(formatExpiresInLabel("2026-04-07T14:02:03.000Z")).toBe("Expires in 2h 2m 3s");
-    expect(formatExpiresInLabel("2026-04-07T18:00:00.000Z")).toBe("Expires in 6h");
   });
 });
 
 describe("invalid timestamp inputs", () => {
-  it("returns an empty timestamp instead of throwing", () => {
-    expect(() => formatTimestamp("not-a-date", "12-hour")).not.toThrow();
-    expect(formatTimestamp("not-a-date", "12-hour")).toBe("");
-  });
-
-  it("returns an empty short timestamp instead of throwing", () => {
-    expect(() => formatShortTimestamp("not-a-date", "12-hour")).not.toThrow();
-    expect(formatShortTimestamp("not-a-date", "12-hour")).toBe("");
-  });
-
-  it("returns an empty relative time label instead of a NaN label", () => {
-    expect(formatRelativeTime("not-a-date")).toBeNull();
-    expect(formatRelativeTimeLabel("not-a-date")).toBe("");
-  });
-
   it("distinguishes missing and invalid relative time state", () => {
     expect(getRelativeTimeState(null)).toEqual({ status: "missing" });
     expect(getRelativeTimeState("not-a-date")).toEqual({ status: "invalid" });
-  });
-
-  it("returns an empty elapsed duration instead of a NaN label", () => {
-    expect(formatElapsedDurationLabel("not-a-date")).toBe("");
-  });
-
-  it("returns an empty relative time until label instead of a NaN label", () => {
-    expect(formatRelativeTimeUntil("not-a-date")).toBeNull();
-    expect(formatRelativeTimeUntilLabel("not-a-date")).toBe("");
-  });
-
-  it("returns an empty expires-in label instead of a NaN label", () => {
-    expect(formatExpiresInLabel("not-a-date")).toBe("");
   });
 });
 

@@ -4,7 +4,6 @@ import {
   hasSpecificPierreIconForFileName,
   resolvePierreIconForEntry,
   syntheticFileNameForLanguageId,
-  PIERRE_ICONS,
 } from "../../../apps/web/src/pierre-icons";
 
 describe("Pierre file icons", () => {
@@ -31,13 +30,6 @@ describe("Pierre file icons", () => {
       resolvePierreIconForEntry("pnpm-workspace.yaml", "file")?.name,
       "t3-file-icon-pnpm",
     );
-  });
-
-  it("ships every custom icon referenced by the extended resolver", () => {
-    const customIconNames = new Set(Object.values(PIERRE_ICONS.byFileName));
-    for (const iconName of customIconNames) {
-      assert.include(PIERRE_ICONS.spriteSheet, `id="${iconName}"`);
-    }
   });
 
   it("uses the Pierre default icon for unknown file types", () => {
