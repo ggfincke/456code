@@ -10,6 +10,7 @@ import {
   type ProviderDriverKind,
   type ProviderInstanceId,
   type ServerProvider,
+  type ScopedProjectRef,
   type ScopedThreadRef,
   ThreadImportContinuationActivityPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
@@ -283,6 +284,16 @@ export function handleImportContinuationSendBlock(
     return false;
   }
   onBlocked();
+  return true;
+}
+
+export function startNewThreadForProject(
+  projectRef: ScopedProjectRef | null,
+  handleNewThread: (projectRef: ScopedProjectRef) => Promise<void>,
+): boolean {
+  if (projectRef === null) return false;
+  void handleNewThread(projectRef);
+
   return true;
 }
 

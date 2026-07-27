@@ -35,6 +35,7 @@ import {
   resolveImportContinuationProviderSnapshot,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
+  startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldWriteThreadErrorToCurrentServerThread,
 } from "../../../../apps/web/src/components/ChatView.logic";
@@ -944,6 +945,33 @@ describe("shouldWriteThreadErrorToCurrentServerThread", () => {
         targetThreadId: threadId,
       }),
     ).toBe(false);
+  });
+});
+
+describe("startNewThreadForProject", () => {
+  it("starts a thread through the shared handler for the active project", () => {
+    const calls: Array<{ environmentId: EnvironmentId; projectId: ProjectId }> = [];
+    const projectRef = { environmentId, projectId };
+
+    expect(
+      startNewThreadForProject(projectRef, (nextProjectRef) => {
+        calls.push(nextProjectRef);
+        return Promise.resolve();
+      }),
+    ).toBe(true);
+    expect(calls).toEqual([projectRef]);
+  });
+
+  it("does nothing when the active project is unavailable", () => {
+    let called = false;
+
+    expect(
+      startNewThreadForProject(null, () => {
+        called = true;
+        return Promise.resolve();
+      }),
+    ).toBe(false);
+    expect(called).toBe(false);
   });
 });
 
