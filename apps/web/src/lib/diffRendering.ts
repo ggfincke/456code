@@ -1,3 +1,5 @@
+// apps/web/src/lib/diffRendering.ts
+// parses diffs and derives render metadata
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 
@@ -51,6 +53,25 @@ export type RenderablePatch =
       text: string;
       reason: string;
     };
+
+export interface DiffLineStat {
+  additions: number;
+  deletions: number;
+}
+
+export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLineStat {
+  return files.reduce<DiffLineStat>(
+    (total, file) => {
+      for (const hunk of file.hunks) {
+        total.additions += hunk.additionLines;
+        total.deletions += hunk.deletionLines;
+      }
+
+      return total;
+    },
+    { additions: 0, deletions: 0 },
+  );
+}
 
 interface RenderablePatchOptions {
   /**

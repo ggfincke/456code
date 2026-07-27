@@ -1,5 +1,11 @@
+// tests/apps/web/lib/diffRendering.test.ts
+// verifies diff parsing and render metadata
 import { describe, expect, it } from "vite-plus/test";
-import { buildPatchCacheKey, getRenderablePatch } from "../../../../apps/web/src/lib/diffRendering";
+import {
+  buildPatchCacheKey,
+  getDiffLineStat,
+  getRenderablePatch,
+} from "../../../../apps/web/src/lib/diffRendering";
 
 describe("buildPatchCacheKey", () => {
   it("returns a stable cache key for identical content", () => {
@@ -80,5 +86,35 @@ describe("getRenderablePatch", () => {
     expect(parsed?.kind).toBe("files");
     if (parsed?.kind !== "files") return;
     expect(parsed.files[0]?.hunks[0]?.unifiedLineStart).toBe(47);
+  });
+});
+
+describe("getDiffLineStat", () => {
+  it("totals additions and deletions across every file and hunk", () => {
+    const patch = [
+      "diff --git a/example.ts b/example.ts",
+      "--- a/example.ts",
+      "+++ b/example.ts",
+      "@@ -1,2 +1,3 @@",
+      "-before",
+      "+after",
+      "+added",
+      " context",
+      "@@ -10,2 +11,1 @@",
+      "-removed",
+      " context",
+      "diff --git a/README.md b/README.md",
+      "--- a/README.md",
+      "+++ b/README.md",
+      "@@ -1 +1,2 @@",
+      " title",
+      "+description",
+    ].join("\n");
+
+    const parsed = getRenderablePatch(patch);
+    expect(parsed?.kind).toBe("files");
+    if (parsed?.kind !== "files") return;
+
+    expect(getDiffLineStat(parsed.files)).toEqual({ additions: 3, deletions: 2 });
   });
 });
