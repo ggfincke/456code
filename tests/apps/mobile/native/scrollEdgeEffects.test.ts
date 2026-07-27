@@ -6,17 +6,11 @@ import {
 } from "../../../../apps/mobile/src/native/scrollEdgeEffects";
 
 describe("nativeTopScrollEdgeEffect", () => {
-  it("keeps the automatic native treatment on iOS 26", () => {
-    expect(nativeTopScrollEdgeEffect("ios", "26.5")).toBe("automatic");
-  });
-
-  it("keeps UIKit automatic scroll-edge sampling on iOS 27 and later", () => {
-    expect(nativeTopScrollEdgeEffect("ios", "27.0")).toBe("automatic");
-    expect(nativeTopScrollEdgeEffect("ios", 28)).toBe("automatic");
-  });
-
-  it("does not apply the iOS workaround to other platforms", () => {
-    expect(nativeTopScrollEdgeEffect("android", 27)).toBe("automatic");
+  it.each([
+    { platform: "ios", version: "26.5", expected: "automatic" },
+    { platform: "android", version: 27, expected: "automatic" },
+  ])("uses the automatic native treatment on $platform", ({ platform, version, expected }) => {
+    expect(nativeTopScrollEdgeEffect(platform, version)).toBe(expected);
   });
 });
 

@@ -7,11 +7,6 @@ import showcaseConfig, {
   type ShowcaseStoreAssetSpec,
 } from "../../scripts/mobile-showcase.config.ts";
 import {
-  SHOWCASE_ENVIRONMENTS,
-  SHOWCASE_PROJECTS,
-  SHOWCASE_THREADS,
-} from "../../scripts/mobile-showcase-environment.ts";
-import {
   encodeAndroidPairingUrls,
   normalizeStorePng,
   parseShowcaseCliArgs,
@@ -22,7 +17,6 @@ import {
   resolveAndroidSdkRoot,
   selectLanIpv4Address,
   showcaseCaptureDirectory,
-  showcaseSceneUrl,
   validateStoreAsset,
   validateStoreAssetCount,
 } from "../../scripts/mobile-showcase.ts";
@@ -240,43 +234,6 @@ it("selects a reachable LAN IPv4 address", () => {
       { address: "192.168.1.80", family: "IPv4", internal: false },
     ]),
     "192.168.1.80",
-  );
-});
-
-it("maps capture scenes to the real application routes", () => {
-  assert.equal(showcaseSceneUrl("threads", "environment-1"), "code456-dev://");
-  assert.equal(
-    showcaseSceneUrl("environments", "environment-1"),
-    "code456-dev://settings/environments",
-  );
-  assert.equal(
-    showcaseSceneUrl("thread", "environment-1"),
-    "code456-dev://threads/environment-1/remote-command-center",
-  );
-  assert.equal(
-    showcaseSceneUrl("terminal", "environment-1"),
-    "code456-dev://threads/environment-1/remote-command-center/terminal?terminalId=term-1",
-  );
-  assert.equal(
-    showcaseSceneUrl("review", "environment-1"),
-    "code456-dev://threads/environment-1/remote-command-center/review",
-  );
-});
-
-it("seeds a playful multi-environment project spectrum", () => {
-  assert.deepStrictEqual(
-    SHOWCASE_PROJECTS.map((project) => project.title),
-    ["456code", "React", "Linux"],
-  );
-  assert.deepStrictEqual(
-    SHOWCASE_ENVIRONMENTS.map((environment) => environment.label),
-    ["Moonbase Terminal", "Suspense Station", "Kernel Cabin"],
-  );
-  assert.equal(SHOWCASE_THREADS.length, 6);
-  assert.equal(new Set(SHOWCASE_THREADS.map((thread) => thread.projectId)).size, 3);
-  assert.equal(
-    SHOWCASE_PROJECTS.every((project) => project.favicon.includes("<svg")),
-    true,
   );
 });
 

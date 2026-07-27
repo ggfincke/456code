@@ -34,37 +34,28 @@ function validPayload(overrides?: Record<string, unknown>): Record<string, unkno
 }
 
 describe("isPickedElementPayload", () => {
-  it("accepts a complete, well-typed payload", () => {
-    expect(isPickedElementPayload(validPayload())).toBe(true);
-  });
-
-  it("accepts nullable string fields when null", () => {
-    expect(
-      isPickedElementPayload(
-        validPayload({ pageTitle: null, selector: null, componentName: null, source: null }),
-      ),
-    ).toBe(true);
-  });
-
-  it("accepts an empty stack array", () => {
-    expect(isPickedElementPayload(validPayload({ stack: [] }))).toBe(true);
-  });
-
-  it("accepts stack frames with null fields", () => {
-    expect(
-      isPickedElementPayload(
-        validPayload({
-          stack: [
-            {
-              functionName: null,
-              fileName: null,
-              lineNumber: null,
-              columnNumber: null,
-            },
-          ],
-        }),
-      ),
-    ).toBe(true);
+  it.each([
+    ["complete well-typed payload", validPayload()],
+    [
+      "nullable string fields when null",
+      validPayload({ pageTitle: null, selector: null, componentName: null, source: null }),
+    ],
+    ["empty stack array", validPayload({ stack: [] })],
+    [
+      "stack frames with null fields",
+      validPayload({
+        stack: [
+          {
+            functionName: null,
+            fileName: null,
+            lineNumber: null,
+            columnNumber: null,
+          },
+        ],
+      }),
+    ],
+  ])("accepts %s", (_label, value) => {
+    expect(isPickedElementPayload(value)).toBe(true);
   });
 
   it("rejects null and primitive inputs", () => {
@@ -179,11 +170,8 @@ function validAnnotation(overrides?: Record<string, unknown>): Record<string, un
 }
 
 describe("isPreviewAnnotationPayload", () => {
-  it("accepts a structured annotation draft before screenshot capture", () => {
+  it("accepts structured drafts and rejects guest screenshots", () => {
     expect(isPreviewAnnotationPayload(validAnnotation())).toBe(true);
-  });
-
-  it("rejects screenshots supplied by the guest preload", () => {
     expect(isPreviewAnnotationPayload(validAnnotation({ screenshot: { dataUrl: "bad" } }))).toBe(
       false,
     );

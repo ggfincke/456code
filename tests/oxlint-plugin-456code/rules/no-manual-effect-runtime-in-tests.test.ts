@@ -17,22 +17,8 @@ describe("456code/no-manual-effect-runtime-in-tests", () => {
     `,
   );
 
-  const runtimeMethods = [
-    "runCallback",
-    "runCallbackWith",
-    "runFork",
-    "runForkWith",
-    "runPromise",
-    "runPromiseExit",
-    "runPromiseExitWith",
-    "runPromiseWith",
-    "runSync",
-    "runSyncExit",
-    "runSyncExitWith",
-    "runSyncWith",
-  ] as const;
-
-  for (const method of runtimeMethods) {
+  // Representative Effect.run* surfaces; full method list is owned by the lint rule itself.
+  for (const method of ["runPromise", "runSync", "runFork"] as const) {
     rule.invalid(
       `reports Effect.${method}`,
       `

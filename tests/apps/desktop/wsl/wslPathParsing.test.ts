@@ -32,17 +32,14 @@ describe("parseWslDistroList", () => {
     ]);
   });
 
-  it("returns empty array for empty buffer", () => {
+  it("returns empty for empty, header-only, and malformed-line output", () => {
     expect(parseWslDistroList(Buffer.alloc(0))).toEqual([]);
-  });
 
-  it("returns empty array for header-only output", () => {
-    const output = makeUtf16LeBuffer("  NAME            STATE           VERSION\r\n");
-    expect(parseWslDistroList(output)).toEqual([]);
-  });
+    expect(
+      parseWslDistroList(makeUtf16LeBuffer("  NAME            STATE           VERSION\r\n")),
+    ).toEqual([]);
 
-  it("skips malformed lines", () => {
-    const output = makeUtf16LeBuffer(
+    const malformed = makeUtf16LeBuffer(
       [
         "  NAME            STATE           VERSION",
         "* Ubuntu           Running         2",
@@ -51,8 +48,7 @@ describe("parseWslDistroList", () => {
         "  Debian           Stopped         2",
       ].join("\r\n"),
     );
-    const distros = parseWslDistroList(output);
-    expect(distros).toEqual([
+    expect(parseWslDistroList(malformed)).toEqual([
       { name: "Ubuntu", isDefault: true, version: 2 },
       { name: "Debian", isDefault: false, version: 2 },
     ]);

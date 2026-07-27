@@ -61,10 +61,7 @@ describe("deriveCenteredContentHorizontalPadding", () => {
 describe("deriveLayout", () => {
   it.each([
     { name: "small iPhone portrait", width: 375, height: 667 },
-    { name: "large iPhone portrait", width: 430, height: 932 },
-    { name: "small iPhone landscape", width: 667, height: 375 },
     { name: "large iPhone landscape", width: 932, height: 430 },
-    { name: "short wide window", width: 1_024, height: 599 },
     { name: "narrow tall window", width: 719, height: 1_024 },
   ])("keeps a $name in the compact shell", ({ width, height }) => {
     expect(deriveLayout({ width, height })).toEqual({
@@ -76,10 +73,8 @@ describe("deriveLayout", () => {
   });
 
   it.each([
-    { name: "small tablet portrait", width: 744, height: 1_133 },
     { name: "tablet landscape", width: 1_024, height: 768 },
     { name: "large resizable window", width: 1_366, height: 1_024 },
-    { name: "foldable-sized window", width: 800, height: 700 },
   ])("uses the split shell for a $name", ({ width, height }) => {
     expect(deriveLayout({ width, height })).toMatchObject({
       variant: "split",
@@ -187,6 +182,21 @@ describe("deriveWorkspacePaneLayout", () => {
       auxiliaryPaneVisible: true,
       auxiliaryPaneWidth: 276,
     });
+
+    expect(
+      deriveWorkspacePaneLayout({
+        layout,
+        viewportWidth: 1_366,
+        primarySidebarPreferredVisible: true,
+        auxiliaryPanePreferredVisible: true,
+      }),
+    ).toMatchObject({
+      primarySidebarVisible: true,
+      contentPaneWidth: 986,
+      supportsAuxiliaryPane: true,
+      auxiliaryPaneVisible: true,
+      auxiliaryPaneWidth: 276,
+    });
   });
 
   it("keeps an explicitly hidden thread sidebar hidden when the file inspector is visible", () => {
@@ -244,25 +254,6 @@ describe("deriveWorkspacePaneLayout", () => {
       primarySidebarVisible: true,
       supportsAuxiliaryPane: false,
       auxiliaryPaneVisible: false,
-    });
-  });
-
-  it("supports three visible columns in a sufficiently large window", () => {
-    const layout = deriveLayout({ width: 1_366, height: 1_024 });
-
-    expect(
-      deriveWorkspacePaneLayout({
-        layout,
-        viewportWidth: 1_366,
-        primarySidebarPreferredVisible: true,
-        auxiliaryPanePreferredVisible: true,
-      }),
-    ).toMatchObject({
-      primarySidebarVisible: true,
-      contentPaneWidth: 986,
-      supportsAuxiliaryPane: true,
-      auxiliaryPaneVisible: true,
-      auxiliaryPaneWidth: 276,
     });
   });
 

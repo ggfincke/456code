@@ -64,43 +64,43 @@ const lightEnvironment = {
 } as const;
 
 describe("AgentActivity widget layout", () => {
-  it("tints each row by its own phase using the web sidebar's dark palette", () => {
-    const layout = AgentActivity(
-      {
-        ...props,
-        activeCount: 2,
-        activities: [
-          makeRow({}),
-          makeRow({ threadId: "thread-2", phase: "waiting_for_approval", status: "Approval" }),
-        ],
-      },
-      environment as never,
-    );
-    const banner = JSON.stringify(layout.banner);
-    expect(banner).toContain("#7dd3fc"); // sky-300: running
-    expect(banner).toContain("#fcd34d"); // amber-300: waiting_for_approval
-  });
-
-  it("switches to the web sidebar's light palette when the scheme is light", () => {
-    // macOS (iPhone Mirroring / Mac notification center) renders the activity
-    // on a light background; the dark-material palette is illegible there.
-    const layout = AgentActivity(
-      {
-        ...props,
-        activeCount: 2,
-        activities: [
-          makeRow({}),
-          makeRow({ threadId: "thread-2", phase: "waiting_for_approval", status: "Approval" }),
-        ],
-      },
-      lightEnvironment as never,
-    );
-    const banner = JSON.stringify(layout.banner);
-    expect(banner).toContain("#0284c7"); // sky-600: running
-    expect(banner).toContain("#d97706"); // amber-600: waiting_for_approval
-    expect(banner).not.toContain("#7dd3fc");
-    expect(banner).not.toContain("#fcd34d");
-  });
+  it.each([
+    {
+      scheme: "dark",
+      environment: environment,
+      runningTint: "#7dd3fc",
+      approvalTint: "#fcd34d",
+      forbiddenTints: [] as string[],
+    },
+    {
+      scheme: "light",
+      environment: lightEnvironment,
+      runningTint: "#0284c7",
+      approvalTint: "#d97706",
+      forbiddenTints: ["#7dd3fc", "#fcd34d"],
+    },
+  ])(
+    "tints each row by phase using the web sidebar's $scheme palette",
+    ({ environment: env, runningTint, approvalTint, forbiddenTints }) => {
+      const layout = AgentActivity(
+        {
+          ...props,
+          activeCount: 2,
+          activities: [
+            makeRow({}),
+            makeRow({ threadId: "thread-2", phase: "waiting_for_approval", status: "Approval" }),
+          ],
+        },
+        env as never,
+      );
+      const banner = JSON.stringify(layout.banner);
+      expect(banner).toContain(runningTint);
+      expect(banner).toContain(approvalTint);
+      for (const forbidden of forbiddenTints) {
+        expect(banner).not.toContain(forbidden);
+      }
+    },
+  );
 
   it("orders rows attention-first in the banner", () => {
     const layout = AgentActivity(

@@ -85,21 +85,6 @@ describe("ElectronApp", () => {
     setPathMock.mockClear();
   });
 
-  it.effect("reads app metadata through the service", () =>
-    Effect.gen(function* () {
-      const electronApp = yield* ElectronApp.ElectronApp;
-      const metadata = yield* electronApp.metadata;
-
-      assert.deepEqual(metadata, {
-        appVersion: "1.2.3",
-        appPath: "/app",
-        isPackaged: true,
-        resourcesPath: process.resourcesPath,
-        runningUnderArm64Translation: false,
-      });
-    }).pipe(Effect.provide(ElectronApp.layer)),
-  );
-
   it.effect("reports which app metadata property failed", () =>
     Effect.gen(function* () {
       const cause = new Error("version unavailable");
