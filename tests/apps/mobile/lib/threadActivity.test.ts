@@ -1,3 +1,5 @@
+// tests/apps/mobile/lib/threadActivity.test.ts
+// verifies mobile thread feed ordering and presentation
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -50,6 +52,7 @@ function makeThread(
     checkpoints: [],
     session: null,
     ...input,
+    origin: input.origin ?? null,
     settledOverride: input.settledOverride ?? null,
     settledAt: input.settledAt ?? null,
   };

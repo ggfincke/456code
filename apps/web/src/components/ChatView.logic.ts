@@ -1,11 +1,19 @@
+// apps/web/src/components/ChatView.logic.ts
+// provides pure chat view state, import continuation, and dispatch helpers
 import {
+  type EventId,
   type EnvironmentId,
   isProviderDriverKind,
   ProjectId,
   type ModelSelection,
+  type ProviderContinuationIdentity,
   type ProviderDriverKind,
+  type ProviderInstanceId,
   type ServerProvider,
   type ScopedThreadRef,
+  ThreadImportContinuationActivityPayload,
+  type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
+  type ThreadImportContinuationConsent,
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
@@ -26,6 +34,257 @@ export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
 
 export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
+const isThreadImportContinuationActivityPayload = Schema.is(
+  ThreadImportContinuationActivityPayload,
+);
+
+export type ImportContinuationGate =
+  | {
+      readonly state: "not-required";
+    }
+  | {
+      readonly state: "unknown";
+      readonly unknownKind: "missing" | "invalid";
+      readonly providerInstanceId: null;
+      readonly driverKind: null;
+      readonly providerState: "missing";
+      readonly reason: string;
+    }
+  | {
+      readonly state: "verified" | "history-only";
+      readonly providerInstanceId: ProviderInstanceId;
+      readonly driverKind: ProviderDriverKind;
+      readonly providerState: "ready" | "unavailable";
+      readonly reason: string | null;
+      readonly consent: ThreadImportContinuationConsent;
+    };
+
+type LatestImportContinuationPayload =
+  | {
+      readonly state: "absent" | "invalid";
+    }
+  | {
+      readonly state: "valid";
+      readonly activityId: EventId;
+      readonly payload: ThreadImportContinuationActivityPayloadType;
+    };
+
+function isImportContinuationMarker(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    "type" in payload &&
+    payload.type === "import.continuation"
+  );
+}
+
+function latestImportContinuationPayload(
+  activities: ReadonlyArray<Thread["activities"][number]>,
+): LatestImportContinuationPayload {
+  for (let index = activities.length - 1; index >= 0; index -= 1) {
+    const activity = activities[index];
+    if (!activity) {
+      continue;
+    }
+    const payload = activity.payload;
+    if (!isImportContinuationMarker(payload)) {
+      continue;
+    }
+    return isThreadImportContinuationActivityPayload(payload)
+      ? { state: "valid", activityId: activity.id, payload }
+      : { state: "invalid" };
+  }
+  return { state: "absent" };
+}
+
+export function resolveImportContinuationGate(input: {
+  thread:
+    | Pick<Thread, "activities" | "latestTurn" | "modelSelection" | "origin">
+    | null
+    | undefined;
+  providers: ReadonlyArray<ServerProvider>;
+}): ImportContinuationGate {
+  const thread = input.thread;
+  if (!thread?.origin || thread.latestTurn !== null) {
+    return { state: "not-required" };
+  }
+
+  const latestPayload = latestImportContinuationPayload(thread.activities);
+  if (latestPayload.state !== "valid") {
+    return {
+      state: "unknown",
+      unknownKind: latestPayload.state === "invalid" ? "invalid" : "missing",
+      providerInstanceId: null,
+      driverKind: null,
+      providerState: "missing",
+      reason:
+        latestPayload.state === "invalid"
+          ? "Continuation details for this imported transcript are invalid or require a newer 456code version."
+          : "Continuation details for this imported transcript are missing. Retry the import before sending.",
+    };
+  }
+  const payload = latestPayload.payload;
+  const continuationIdentity = payload.continuation.continuationIdentity;
+  if (continuationIdentity === null) {
+    return {
+      state: "unknown",
+      unknownKind: "invalid",
+      providerInstanceId: null,
+      driverKind: null,
+      providerState: "missing",
+      reason:
+        "Continuation source identity for this imported transcript is missing. Retry the import before sending.",
+    };
+  }
+
+  const providerInstanceId = payload.continuation.providerInstanceId;
+  const provider = resolveImportContinuationProviderSnapshot(
+    input.providers,
+    providerInstanceId,
+    payload.driverKind,
+    continuationIdentity,
+  );
+  const providerReady =
+    provider !== null &&
+    provider.enabled &&
+    provider.installed &&
+    provider.availability !== "unavailable" &&
+    provider.status === "ready";
+
+  return {
+    state: payload.continuation.state,
+    providerInstanceId,
+    driverKind: payload.driverKind,
+    providerState: providerReady ? "ready" : "unavailable",
+    reason: payload.continuation.reason,
+    consent: {
+      originContentHash: thread.origin.contentHash,
+      activityId: latestPayload.activityId,
+      driverKind: payload.driverKind,
+      targetProviderInstanceId: providerInstanceId,
+      continuation: payload.continuation,
+    },
+  };
+}
+
+export function resolveImportContinuationProviderSnapshot(
+  providers: ReadonlyArray<ServerProvider>,
+  providerInstanceId: ProviderInstanceId | null,
+  driverKind: ProviderDriverKind | null,
+  continuationIdentity: ProviderContinuationIdentity | null,
+): ServerProvider | null {
+  if (providerInstanceId === null || driverKind === null || continuationIdentity === null) {
+    return null;
+  }
+  return (
+    providers.find(
+      (provider) =>
+        provider.instanceId === providerInstanceId &&
+        provider.driver === driverKind &&
+        continuationIdentity.driverKind === driverKind &&
+        provider.continuation?.groupKey === continuationIdentity.continuationKey,
+    ) ?? null
+  );
+}
+
+export interface ImportContinuationBannerCopy {
+  readonly action: "consent" | "import-settings" | "provider-settings";
+  readonly actionLabel: string;
+  readonly description: string;
+  readonly isReady: boolean;
+  readonly title: string;
+}
+
+export function resolveImportContinuationBannerCopy(input: {
+  readonly gate: Exclude<ImportContinuationGate, { readonly state: "not-required" }>;
+  readonly providerDisplayName: string;
+  readonly sourceName: string;
+}): ImportContinuationBannerCopy {
+  const { gate, providerDisplayName, sourceName } = input;
+  if (gate.state === "unknown") {
+    return {
+      action: "import-settings",
+      actionLabel: "Repair import",
+      description: `${gate.reason} Sending is blocked to prevent starting the wrong provider session.`,
+      isReady: false,
+      title:
+        gate.unknownKind === "invalid"
+          ? "Imported session needs repair"
+          : "Imported session is incomplete",
+    };
+  }
+
+  const isReady = gate.providerState === "ready";
+  if (gate.state === "verified") {
+    return {
+      action: isReady ? "consent" : "provider-settings",
+      actionLabel: isReady ? `Continue with ${providerDisplayName}` : "Open provider settings",
+      description: isReady
+        ? `Imported from ${sourceName}. Continue with ${providerDisplayName} to resume the verified native session.`
+        : `This import is bound to ${providerDisplayName}, but that exact provider instance is not ready. Sending is blocked so 456code cannot substitute another instance.`,
+      isReady,
+      title: "Resume imported session",
+    };
+  }
+
+  return {
+    action: isReady ? "consent" : "provider-settings",
+    actionLabel: isReady ? `Start fresh with ${providerDisplayName}` : "Open provider settings",
+    description: isReady
+      ? `Imported from ${sourceName} as history only. Starting fresh with ${providerDisplayName} creates a new provider session. The provider will not know or receive the imported transcript.`
+      : `This transcript is history only, and ${providerDisplayName} is not ready. A fresh session cannot start until that exact provider instance is available.`,
+    isReady,
+    title: "Imported transcript is history only",
+  };
+}
+
+export function importContinuationConsentToken(
+  threadKey: string | null,
+  gate: ImportContinuationGate,
+): string | null {
+  if (
+    threadKey === null ||
+    gate.state === "not-required" ||
+    gate.state === "unknown" ||
+    gate.providerState !== "ready"
+  ) {
+    return null;
+  }
+  return JSON.stringify([
+    threadKey,
+    gate.consent.originContentHash,
+    gate.consent.activityId,
+    gate.consent.driverKind,
+    gate.consent.targetProviderInstanceId,
+    gate.consent.continuation.state,
+    gate.consent.continuation.providerInstanceId,
+    gate.consent.continuation.continuationIdentity?.driverKind ?? null,
+    gate.consent.continuation.continuationIdentity?.continuationKey ?? null,
+    gate.consent.continuation.reason,
+  ]);
+}
+
+export function isImportContinuationSendBlocked(
+  gate: ImportContinuationGate,
+  consentToken: string | null,
+  acceptedConsentToken: string | null,
+): boolean {
+  if (gate.state === "not-required") {
+    return false;
+  }
+  return consentToken === null || acceptedConsentToken !== consentToken;
+}
+
+export function handleImportContinuationSendBlock(
+  blocked: boolean,
+  onBlocked: () => void,
+): boolean {
+  if (!blocked) {
+    return false;
+  }
+  onBlocked();
+  return true;
+}
 
 export function resolveThreadMetadataUpdateForNextTurn(input: {
   currentModelSelection: ModelSelection;
@@ -75,6 +334,7 @@ export function buildLocalDraftThread(
     settledOverride: null,
     settledAt: null,
     deletedAt: null,
+    origin: null,
     latestTurn: null,
     branch: draftThread.branch,
     worktreePath: draftThread.worktreePath,
@@ -340,18 +600,22 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
 // rollback / fork behavior — the routing layer is the right place to surface
 // "driver not installed" errors, not the lock state.
 //
-// `selectedProvider` takes the same open-string shape because the composer
-// now tracks the picker selection as a `ProviderInstanceId` (e.g.
-// `codex_personal`). Custom instance ids that don't directly match a
-// registered driver resolve to `null` here, which matches the existing
-// "unknown driver -> unlocked" semantics. Callers that want the lock to track
-// a custom instance's underlying driver kind should resolve the instance id
-// upstream and pass the correlated kind.
+// `selectedProvider` and `threadProvider` can carry configured instance ids
+// (e.g. `codex_personal`), so resolve them through the exact provider snapshot
+// before falling back to an open driver-kind slug.
 export function deriveLockedProvider(input: {
   thread: Thread | null | undefined;
   selectedProvider: string | null;
   threadProvider: string | null;
+  providers: ReadonlyArray<Pick<ServerProvider, "driver" | "instanceId">>;
+  importContinuationGate?: ImportContinuationGate;
 }): ProviderDriverKind | null {
+  if (
+    input.importContinuationGate?.state === "verified" ||
+    input.importContinuationGate?.state === "history-only"
+  ) {
+    return input.importContinuationGate.driverKind;
+  }
   if (!threadHasStarted(input.thread)) {
     return null;
   }
@@ -359,14 +623,15 @@ export function deriveLockedProvider(input: {
   if (sessionProvider && isProviderDriverKind(sessionProvider)) {
     return sessionProvider;
   }
-  const narrowedThreadProvider =
-    input.threadProvider && isProviderDriverKind(input.threadProvider)
-      ? input.threadProvider
-      : null;
-  const narrowedSelectedProvider =
-    input.selectedProvider && isProviderDriverKind(input.selectedProvider)
-      ? input.selectedProvider
-      : null;
+  const resolveDriverKind = (selection: string | null): ProviderDriverKind | null => {
+    if (selection === null) {
+      return null;
+    }
+    const configured = input.providers.find((provider) => provider.instanceId === selection);
+    return configured?.driver ?? (isProviderDriverKind(selection) ? selection : null);
+  };
+  const narrowedThreadProvider = resolveDriverKind(input.threadProvider);
+  const narrowedSelectedProvider = resolveDriverKind(input.selectedProvider);
   return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
 }
 

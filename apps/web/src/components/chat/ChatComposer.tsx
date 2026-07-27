@@ -1,3 +1,5 @@
+// apps/web/src/components/chat/ChatComposer.tsx
+// renders composer input, provider controls, and guarded submission actions
 import type {
   ApprovalRequestId,
   EnvironmentId,
@@ -522,6 +524,7 @@ export interface ChatComposerProps {
   isConnecting: boolean;
   isSendBusy: boolean;
   isPreparingWorktree: boolean;
+  importContinuationSendBlocked: boolean;
   environmentUnavailable: {
     readonly label: string;
     readonly connection: EnvironmentConnectionPresentation;
@@ -633,6 +636,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isConnecting,
     isSendBusy,
     isPreparingWorktree,
+    importContinuationSendBlocked,
     environmentUnavailable,
     activePendingApproval,
     pendingApprovals,
@@ -1219,7 +1223,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     phase === "running" ||
     isSendBusy ||
     isConnecting ||
-    noProviderAvailable ||
+    (noProviderAvailable && !importContinuationSendBlocked) ||
     projectSelectionRequired ||
     environmentUnavailable !== null ||
     !composerSendState.hasSendableContent;
@@ -1763,7 +1767,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     if (
       isSendBusy ||
       isConnecting ||
-      noProviderAvailable ||
+      (noProviderAvailable && !importContinuationSendBlocked) ||
       environmentUnavailable !== null ||
       phase === "running"
     ) {
@@ -1779,6 +1783,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerSendState.hasSendableContent,
     environmentUnavailable,
     isConnecting,
+    importContinuationSendBlocked,
     isMobileViewport,
     isSendBusy,
     noProviderAvailable,
@@ -1788,7 +1793,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const submitComposer = useCallback(
     (event?: { preventDefault: () => void }) => {
-      if (noProviderAvailable) {
+      if (noProviderAvailable && !importContinuationSendBlocked) {
         event?.preventDefault();
         return;
       }
@@ -1797,7 +1802,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         blurMobileComposerAfterSend();
       }
     },
-    [blurMobileComposerAfterSend, noProviderAvailable, onSend, shouldBlurMobileComposerOnSubmit],
+    [
+      blurMobileComposerAfterSend,
+      importContinuationSendBlocked,
+      noProviderAvailable,
+      onSend,
+      shouldBlurMobileComposerOnSubmit,
+    ],
   );
   const expandMobileComposer = useCallback(() => {
     if (composerBlurFrameRef.current !== null) {
@@ -2334,7 +2345,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       isConnecting={isConnecting}
                       isEnvironmentUnavailable={
                         environmentUnavailable !== null ||
-                        noProviderAvailable ||
+                        (noProviderAvailable && !importContinuationSendBlocked) ||
                         projectSelectionRequired
                       }
                       isPreparingWorktree={false}
@@ -2368,7 +2379,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   ? activePendingProgress.customAnswer ||
                     "Type your own answer, or leave this blank to use the selected option"
                   : prompt.trim() ||
-                    (noProviderAvailable ? "Enable a provider in Settings" : "Ask anything...")}
+                    (noProviderAvailable
+                      ? importContinuationSendBlocked
+                        ? "Review the imported session notice before sending"
+                        : "Enable a provider in Settings"
+                      : "Ask anything...")}
               </button>
               <button
                 type="button"
@@ -2575,7 +2590,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                         : projectSelectionRequired
                           ? "Choose a project above to start a thread"
                           : noProviderAvailable
-                            ? "Enable a provider in Settings to send a message"
+                            ? importContinuationSendBlocked
+                              ? "Review the imported session notice before sending"
+                              : "Enable a provider in Settings to send a message"
                             : phase === "disconnected"
                               ? "Ask for follow-up changes or attach images"
                               : "Ask anything, @tag files/folders, $use skills, or / for commands"
@@ -2597,7 +2614,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     isConnecting={isConnecting}
                     isEnvironmentUnavailable={
                       environmentUnavailable !== null ||
-                      noProviderAvailable ||
+                      (noProviderAvailable && !importContinuationSendBlocked) ||
                       projectSelectionRequired
                     }
                     isPreparingWorktree={false}
@@ -2727,7 +2744,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   isConnecting={isConnecting}
                   isEnvironmentUnavailable={
                     environmentUnavailable !== null ||
-                    noProviderAvailable ||
+                    (noProviderAvailable && !importContinuationSendBlocked) ||
                     projectSelectionRequired
                   }
                   isPreparingWorktree={isPreparingWorktree}

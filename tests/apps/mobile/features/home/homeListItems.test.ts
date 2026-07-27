@@ -1,3 +1,5 @@
+// tests/apps/mobile/features/home/homeListItems.test.ts
+// verifies bounded mobile home list layout behavior
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -47,6 +49,7 @@ function makeThread(id: string, projectId: ProjectId): EnvironmentThreadShell {
     createdAt: "2026-06-01T00:00:00.000Z",
     updatedAt: "2026-06-01T00:00:00.000Z",
     archivedAt: null,
+    origin: null,
     settledOverride: null,
     settledAt: null,
     session: null,
@@ -202,31 +205,27 @@ describe("buildHomeListLayout", () => {
     });
   });
 
-  it("hides threads and the show-more row for collapsed groups", () => {
-    const layout = buildHomeListLayout({
+  it("hides collapsed groups and suspends collapse/pagination while searching", () => {
+    const collapsed = buildHomeListLayout({
       groups: [makeGroup("alpha", 12), makeGroup("beta", 2)],
       displayStates: displayStates({
         alpha: nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "toggle-collapsed"),
       }),
     });
+    expect(itemTypes(collapsed.items)).toEqual(["header", "header", "thread", "thread"]);
+    expect(collapsed.items[0]).toMatchObject({ type: "header", collapsed: true, isFirst: true });
+    expect(collapsed.items[1]).toMatchObject({ type: "header", collapsed: false, isFirst: false });
+    expect(collapsed.stickyHeaderIndices).toEqual([0, 1]);
 
-    expect(itemTypes(layout.items)).toEqual(["header", "header", "thread", "thread"]);
-    expect(layout.items[0]).toMatchObject({ type: "header", collapsed: true, isFirst: true });
-    expect(layout.items[1]).toMatchObject({ type: "header", collapsed: false, isFirst: false });
-    expect(layout.stickyHeaderIndices).toEqual([0, 1]);
-  });
-
-  it("suspends collapse and pagination while searching", () => {
-    const layout = buildHomeListLayout({
+    const searching = buildHomeListLayout({
       groups: [makeGroup("alpha", 12)],
       displayStates: displayStates({
         alpha: nextGroupDisplayState(DEFAULT_GROUP_DISPLAY_STATE, "toggle-collapsed"),
       }),
       showAllThreads: true,
     });
-
-    expect(layout.items.filter((item) => item.type === "thread")).toHaveLength(12);
-    expect(layout.items.some((item) => item.type === "show-more")).toBe(false);
+    expect(searching.items.filter((item) => item.type === "thread")).toHaveLength(12);
+    expect(searching.items.some((item) => item.type === "show-more")).toBe(false);
   });
 
   it("keeps sticky indices aligned across multiple expanded groups", () => {

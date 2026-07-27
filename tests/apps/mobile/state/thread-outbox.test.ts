@@ -1,3 +1,6 @@
+// tests/apps/mobile/state/thread-outbox.test.ts
+// verifies durable queued-message persistence and delivery decisions
+
 import { describe, expect, it } from "@effect/vitest";
 import {
   CommandId,
@@ -6,6 +9,7 @@ import {
   ProjectId,
   ProviderInstanceId,
   ThreadId,
+  TurnId,
 } from "@t3tools/contracts";
 import { AtomRegistry } from "effect/unstable/reactivity";
 
@@ -15,6 +19,7 @@ import {
   groupQueuedThreadMessages,
   isQueuedThreadCreationSendable,
   modelSelectionsEqual,
+  requiresWebImportContinuation,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxFailureAction,
   resolveQueuedThreadSettings,
@@ -125,6 +130,44 @@ describe("thread outbox", () => {
       modelSelectionsEqual(base, {
         ...base,
         options: [{ id: "reasoningEffort", value: "xhigh" }],
+      }),
+    ).toBe(false);
+  });
+
+  it("holds imported first-turn messages until web continuation consent completes", () => {
+    const importedOrigin = {
+      kind: "imported" as const,
+      source: "codex-cli" as const,
+      sourcePath: "/tmp/imported.jsonl",
+      contentHash: "content-hash",
+      nativeSessionId: "native-session",
+      providerInstanceId: ProviderInstanceId.make("codex"),
+      importedAt: "2026-07-26T00:00:00.000Z",
+    };
+
+    expect(
+      requiresWebImportContinuation({
+        origin: importedOrigin,
+        latestTurn: null,
+      }),
+    ).toBe(true);
+    expect(
+      requiresWebImportContinuation({
+        origin: importedOrigin,
+        latestTurn: {
+          turnId: TurnId.make("turn-1"),
+          state: "completed",
+          requestedAt: "2026-07-26T00:00:01.000Z",
+          startedAt: "2026-07-26T00:00:02.000Z",
+          completedAt: "2026-07-26T00:00:03.000Z",
+          assistantMessageId: null,
+        },
+      }),
+    ).toBe(false);
+    expect(
+      requiresWebImportContinuation({
+        origin: null,
+        latestTurn: null,
       }),
     ).toBe(false);
   });

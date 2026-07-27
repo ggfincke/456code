@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-thread-outbox-drain.ts
+// drains durable queued messages when authoritative thread state permits
+
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentProject,
@@ -25,6 +28,7 @@ import { ensureThreadOutboxLoaded, removeThreadOutboxMessage } from "./thread-ou
 import {
   isQueuedThreadCreationSendable,
   modelSelectionsEqual,
+  requiresWebImportContinuation,
   resolveThreadOutboxDeliveryAction,
   resolveThreadOutboxFailureAction,
   resolveQueuedThreadSettings,
@@ -301,6 +305,9 @@ export function useThreadOutboxDrain(): void {
       }
 
       const creation = nextQueuedMessage.creation;
+      if (creation === undefined && requiresWebImportContinuation(thread)) {
+        continue;
+      }
       const environment = connectedEnvironments.find(
         (candidate) => candidate.environmentId === nextQueuedMessage.environmentId,
       );

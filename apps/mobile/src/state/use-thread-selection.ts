@@ -1,3 +1,5 @@
+// apps/mobile/src/state/use-thread-selection.ts
+// resolves the active mobile thread and project selection
 import { useRoute, type RouteProp } from "@react-navigation/native";
 import { useMemo, useRef } from "react";
 import {
@@ -58,6 +60,7 @@ function threadDetailToShell(
     createdAt: thread.createdAt,
     updatedAt: thread.updatedAt,
     archivedAt: thread.archivedAt,
+    origin: thread.origin,
     settledOverride: thread.settledOverride,
     settledAt: thread.settledAt,
     snoozedUntil: thread.snoozedUntil ?? null,

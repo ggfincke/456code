@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/threadDetail.ts
+// reduces thread detail projection state
+
 import type {
   OrchestrationCheckpointSummary,
   OrchestrationLatestTurn,
@@ -53,6 +56,7 @@ export function mergeEnvironmentThread(
     interactionMode: shell.interactionMode,
     branch: shell.branch,
     worktreePath: shell.worktreePath,
+    origin: shell.origin,
     latestTurn: shell.latestTurn,
     createdAt: shell.createdAt,
     updatedAt: shell.updatedAt,

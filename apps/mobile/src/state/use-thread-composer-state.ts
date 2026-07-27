@@ -1,3 +1,5 @@
+// apps/mobile/src/state/use-thread-composer-state.ts
+// manages mobile thread composer drafts and guarded message enqueueing
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useEffect, useMemo } from "react";
 
@@ -39,6 +41,7 @@ import { setPendingConnectionError } from "../state/use-remote-environment-regis
 import { useSelectedThreadDetail } from "../state/use-thread-detail";
 import { useThreadSelection } from "../state/use-thread-selection";
 import { enqueueThreadOutboxMessage } from "./thread-outbox";
+import { requiresWebImportContinuation } from "./thread-outbox-model";
 import { useThreadOutboxMessages } from "./use-thread-outbox";
 
 export function appendReviewCommentToDraft(input: {
@@ -131,9 +134,15 @@ export function useThreadComposerState() {
   const activeThreadBusy =
     !!selectedThread &&
     (selectedThread.session?.status === "running" || selectedThread.session?.status === "starting");
+  const sendBlockedReason = requiresWebImportContinuation(selectedThreadShell)
+    ? "Continue this imported session in the web app after reviewing its provider continuation."
+    : null;
 
   const onSendMessage = useCallback(async () => {
     if (!selectedThreadShell) {
+      return null;
+    }
+    if (sendBlockedReason !== null) {
       return null;
     }
 
@@ -169,7 +178,7 @@ export function useThreadComposerState() {
       );
       return null;
     }
-  }, [selectedThreadDetail, selectedThreadShell]);
+  }, [selectedThreadDetail, selectedThreadShell, sendBlockedReason]);
 
   const onChangeDraftMessage = useCallback(
     (value: string) => {
@@ -299,6 +308,7 @@ export function useThreadComposerState() {
     runtimeMode,
     interactionMode,
     activeThreadBusy,
+    sendBlockedReason,
     onChangeDraftMessage,
     onPickDraftImages,
     onPasteIntoDraft,

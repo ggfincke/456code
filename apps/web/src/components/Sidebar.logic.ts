@@ -1,3 +1,6 @@
+// apps/web/src/components/Sidebar.logic.ts
+// derives sidebar thread grouping and presentation
+
 import * as React from "react";
 import type { ContextMenuItem } from "@t3tools/contracts";
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from "@t3tools/contracts/settings";
@@ -44,6 +47,12 @@ type LogicalSidebarProject = SidebarProject & {
 };
 
 export type ThreadTraversalDirection = "previous" | "next";
+
+export function isImportedShelfThread(
+  thread: Pick<SidebarThreadSummary, "latestTurn" | "origin">,
+): boolean {
+  return thread.origin !== null && thread.latestTurn === null;
+}
 
 export async function archiveSelectedThreadEntries<
   TEntry extends { readonly threadKey: string },

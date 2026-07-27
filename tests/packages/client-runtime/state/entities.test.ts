@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/entities.test.ts
+// verifies normalized client entity state
+
 import {
   EnvironmentId,
   ProjectId,
@@ -11,6 +14,12 @@ import * as Option from "effect/Option";
 import { AsyncResult, Atom, AtomRegistry } from "effect/unstable/reactivity";
 
 import { PrimaryConnectionTarget } from "../../../../packages/client-runtime/src/connection/model.ts";
+import {
+  parseScopedProjectKey,
+  parseScopedThreadKey,
+  scopeProjectRef,
+  scopeThreadRef,
+} from "../../../../packages/client-runtime/src/environment/scoped.ts";
 import {
   InvalidScopedProjectKeyError,
   InvalidScopedProjectRefCollectionKeyError,
@@ -35,32 +44,45 @@ const PROJECT_ID = ProjectId.make("project-1");
 const OTHER_PROJECT_ID = ProjectId.make("project-2");
 const THREAD_ID = ThreadId.make("thread-1");
 const OTHER_THREAD_ID = ThreadId.make("thread-2");
+const IMPORTED_ORIGIN = {
+  kind: "imported",
+  source: "codex-cli",
+  sourcePath: "/imports/codex/rollout.jsonl",
+  contentHash: "content-hash",
+  nativeSessionId: "223e4567-e89b-12d3-a456-426614174000",
+  providerInstanceId: ProviderInstanceId.make("codex"),
+  importedAt: "2026-06-01T00:30:00.000Z",
+} as const;
 
 describe("scoped entity keys", () => {
-  it("preserves an invalid project key as structured error data", () => {
-    const key = "missing-project-key-separator";
-    let error: unknown;
+  it("parses valid scoped keys and preserves invalid keys as structured errors", () => {
+    const environmentId = EnvironmentId.make("environment-test");
+    expect(parseScopedProjectKey("environment-test:project-1")).toEqual(
+      scopeProjectRef(environmentId, ProjectId.make("project-1")),
+    );
+    expect(parseScopedThreadKey("environment-test:thread-1")).toEqual(
+      scopeThreadRef(environmentId, ThreadId.make("thread-1")),
+    );
+    expect(parseScopedProjectKey("bad-key")).toBeNull();
+    expect(parseScopedThreadKey("bad-key")).toBeNull();
 
+    const projectKey = "missing-project-key-separator";
+    let projectError: unknown;
     try {
-      parseProjectKey(key);
+      parseProjectKey(projectKey);
     } catch (cause) {
-      error = cause;
+      projectError = cause;
     }
+    expect(projectError).toEqual(new InvalidScopedProjectKeyError({ key: projectKey }));
 
-    expect(error).toEqual(new InvalidScopedProjectKeyError({ key }));
-  });
-
-  it("preserves an invalid thread key as structured error data", () => {
-    const key = "missing-thread-key-separator";
-    let error: unknown;
-
+    const threadKey = "missing-thread-key-separator";
+    let threadError: unknown;
     try {
-      parseThreadKey(key);
+      parseThreadKey(threadKey);
     } catch (cause) {
-      error = cause;
+      threadError = cause;
     }
-
-    expect(error).toEqual(new InvalidScopedThreadKeyError({ key }));
+    expect(threadError).toEqual(new InvalidScopedThreadKeyError({ key: threadKey }));
   });
 
   it("preserves malformed project reference collection input and its cause", () => {
@@ -99,6 +121,7 @@ const THREAD_SHELL = {
   createdAt: "2026-06-01T00:00:00.000Z",
   updatedAt: "2026-06-01T00:00:00.000Z",
   archivedAt: null,
+  origin: null,
   settledOverride: null,
   settledAt: null,
   session: null,
@@ -220,6 +243,7 @@ describe("environment entity projections", () => {
       title: "Current thread",
       branch: "current-branch",
       worktreePath: "/repo/current-worktree",
+      origin: IMPORTED_ORIGIN,
     };
 
     const merged = mergeEnvironmentThread(detail, shell);
@@ -228,6 +252,7 @@ describe("environment entity projections", () => {
       title: "Current thread",
       branch: "current-branch",
       worktreePath: "/repo/current-worktree",
+      origin: IMPORTED_ORIGIN,
     });
     expect(merged?.messages).toBe(messages);
   });

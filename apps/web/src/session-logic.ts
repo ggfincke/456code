@@ -1,3 +1,6 @@
+// apps/web/src/session-logic.ts
+// derives stable session and transcript presentation state
+
 import * as Option from "effect/Option";
 import * as Arr from "effect/Array";
 import {
@@ -12,6 +15,7 @@ import {
   type ThreadId,
   type TurnId,
 } from "@t3tools/contracts";
+import { compareOrchestrationThreadActivities } from "@t3tools/shared/orchestrationActivityOrder";
 
 import type {
   ChatMessage,
@@ -140,7 +144,7 @@ export type TimelineEntry =
     };
 
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean {
-  if (entry.tone === "tool" || entry.tone === "thinking" || entry.tone === "error") {
+  if (entry.tone === "tool" || entry.tone === "error") {
     return true;
   }
   if (entry.command !== undefined && entry.command.trim().length > 0) {
@@ -356,7 +360,7 @@ export function derivePendingApprovals(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingApproval[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingApproval>();
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareOrchestrationThreadActivities);
 
   for (const activity of ordered) {
     const payload =
@@ -462,7 +466,7 @@ export function derivePendingUserInputs(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingUserInput[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingUserInput>();
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareOrchestrationThreadActivities);
 
   for (const activity of ordered) {
     const payload =
@@ -511,7 +515,7 @@ export function deriveActivePlanState(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
   latestTurnId: TurnId | undefined,
 ): ActivePlanState | null {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareOrchestrationThreadActivities);
   const allPlanActivities = ordered.filter((activity) => activity.kind === "turn.plan.updated");
   // Prefer plan from the current turn; fall back to the most recent plan from any turn
   // so that TodoWrite tasks persist across follow-up messages.
@@ -627,7 +631,7 @@ export function hasActionableProposedPlan(
 export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): WorkLogEntry[] {
-  const ordered = [...activities].toSorted(compareActivitiesByOrder);
+  const ordered = [...activities].toSorted(compareOrchestrationThreadActivities);
   const entries: DerivedWorkLogEntry[] = [];
   for (const activity of ordered) {
     if (activity.kind === "tool.started") continue;
@@ -687,9 +691,14 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     isTaskActivity && typeof payload?.summary === "string" && payload.summary.length > 0
       ? payload.summary
       : null;
+  const taskTextDetail =
+    isTaskActivity && typeof payload?.text === "string" && payload.text.length > 0
+      ? payload.text
+      : null;
   const taskDetailAsLabel =
     isTaskActivity &&
     !taskSummary &&
+    !taskTextDetail &&
     typeof payload?.detail === "string" &&
     payload.detail.length > 0
       ? payload.detail
@@ -701,7 +710,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
       typeof payload.detail === "string" &&
       payload.detail.length > 0
       ? stripTrailingExitCode(payload.detail).output
-      : null
+      : taskTextDetail
     : extractToolDetail(payload, title ?? activity.summary);
   const toolCallId = isTaskActivity ? null : extractToolCallId(payload);
   const entry: DerivedWorkLogEntry = {
@@ -1296,45 +1305,8 @@ function extractChangedFiles(payload: Record<string, unknown> | null): string[] 
   return changedFiles;
 }
 
-function compareActivitiesByOrder(
-  left: OrchestrationThreadActivity,
-  right: OrchestrationThreadActivity,
-): number {
-  if (left.sequence !== undefined && right.sequence !== undefined) {
-    if (left.sequence !== right.sequence) {
-      return left.sequence - right.sequence;
-    }
-  } else if (left.sequence !== undefined) {
-    return 1;
-  } else if (right.sequence !== undefined) {
-    return -1;
-  }
-
-  const createdAtComparison = left.createdAt.localeCompare(right.createdAt);
-  if (createdAtComparison !== 0) {
-    return createdAtComparison;
-  }
-
-  const lifecycleRankComparison =
-    compareActivityLifecycleRank(left.kind) - compareActivityLifecycleRank(right.kind);
-  if (lifecycleRankComparison !== 0) {
-    return lifecycleRankComparison;
-  }
-
-  return left.id.localeCompare(right.id);
-}
-
-function compareActivityLifecycleRank(kind: string): number {
-  if (kind.endsWith(".started") || kind === "tool.started") {
-    return 0;
-  }
-  if (kind.endsWith(".progress") || kind.endsWith(".updated")) {
-    return 1;
-  }
-  if (kind.endsWith(".completed") || kind.endsWith(".resolved")) {
-    return 2;
-  }
-  return 1;
+function timelineEntryKindRank(entry: TimelineEntry): number {
+  return entry.kind === "message" ? 0 : entry.kind === "proposed-plan" ? 1 : 2;
 }
 
 export function deriveTimelineEntries(
@@ -1360,9 +1332,18 @@ export function deriveTimelineEntries(
     createdAt: entry.createdAt,
     entry,
   }));
-  return [...messageRows, ...proposedPlanRows, ...workRows].toSorted((a, b) =>
-    a.createdAt.localeCompare(b.createdAt),
-  );
+  const rows = [...messageRows, ...proposedPlanRows, ...workRows];
+  const sourceOrder = new Map(rows.map((entry, index) => [entry, index]));
+  return rows.toSorted((left, right) => {
+    const timestampOrder = left.createdAt.localeCompare(right.createdAt);
+    if (timestampOrder !== 0) {
+      return timestampOrder;
+    }
+    const kindOrder = timelineEntryKindRank(left) - timelineEntryKindRank(right);
+    return kindOrder !== 0
+      ? kindOrder
+      : (sourceOrder.get(left) ?? 0) - (sourceOrder.get(right) ?? 0);
+  });
 }
 
 export function inferCheckpointTurnCountByTurnId(

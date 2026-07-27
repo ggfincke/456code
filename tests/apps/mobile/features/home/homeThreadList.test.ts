@@ -1,3 +1,5 @@
+// tests/apps/mobile/features/home/homeThreadList.test.ts
+// verifies mobile home thread grouping and ordering
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -45,6 +47,7 @@ function makeThread(
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
     ...input,
+    origin: input.origin ?? null,
     settledOverride: input.settledOverride ?? null,
     settledAt: input.settledAt ?? null,
   };

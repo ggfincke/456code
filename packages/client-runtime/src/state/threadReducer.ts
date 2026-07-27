@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/threadReducer.ts
+// applies thread events to client state
+
 import { pipe } from "effect/Function";
 import * as Arr from "effect/Array";
 import * as O from "effect/Order";
@@ -9,9 +12,9 @@ import type {
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
-  OrchestrationThreadActivity,
   TurnId,
 } from "@t3tools/contracts";
+import { compareOrchestrationThreadActivities } from "@t3tools/shared/orchestrationActivityOrder";
 
 export type ThreadDetailReducerResult =
   | { readonly kind: "updated"; readonly thread: OrchestrationThread }
@@ -28,12 +31,6 @@ const checkpointOrder = O.mapInput(
   (cp: OrchestrationThread["checkpoints"][number]) =>
     cp.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER,
 );
-
-const activityOrder = O.combineAll<OrchestrationThreadActivity>([
-  O.mapInput(O.Number, (a) => a.sequence ?? Number.MAX_SAFE_INTEGER),
-  O.mapInput(O.String, (a) => a.createdAt),
-  O.mapInput(O.String, (a) => a.id),
-]);
 
 /**
  * Apply a single orchestration event to an `OrchestrationThread`, returning
@@ -68,6 +65,7 @@ export function applyThreadDetailEvent(
           interactionMode: event.payload.interactionMode,
           branch: event.payload.branch,
           worktreePath: event.payload.worktreePath,
+          origin: event.payload.origin ?? null,
           latestTurn: null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
@@ -509,7 +507,7 @@ export function applyThreadDetailEvent(
         thread.activities,
         Arr.filter((activity) => activity.id !== event.payload.activity.id),
         Arr.append(event.payload.activity),
-        Arr.sort(activityOrder),
+        Arr.sort(compareOrchestrationThreadActivities),
       );
 
       return {

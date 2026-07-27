@@ -1,3 +1,6 @@
+// tests/apps/web/components/CommandPalette.logic.test.ts
+// verifies command palette derivation and actions
+
 import { describe, expect, it, vi } from "vite-plus/test";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import type { Thread } from "../../../../apps/web/src/types";
@@ -52,6 +55,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     proposedPlans: [],
     createdAt: "2026-03-01T00:00:00.000Z",
     archivedAt: null,
+    origin: null,
     settledOverride: null,
     settledAt: null,
     deletedAt: null,

@@ -1,3 +1,5 @@
+// tests/apps/web/session-logic.test.ts
+// verifies orchestration activities, work logs, and timeline derivation
 import {
   EventId,
   MessageId,
@@ -369,6 +371,40 @@ describe("deriveActivePlanState", () => {
       steps: [{ step: "Write tests", status: "completed" }],
     });
   });
+
+  it("treats a continued native plan as later than high-sequence imported history", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "imported-plan",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "turn.plan.updated",
+        summary: "Imported plan",
+        tone: "info",
+        sequence: 100,
+        payload: {
+          plan: [{ step: "Imported step", status: "completed" }],
+        },
+      }),
+      makeActivity({
+        id: "native-plan",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "turn.plan.updated",
+        summary: "Native plan",
+        tone: "info",
+        turnId: "turn-native",
+        sequence: 1,
+        payload: {
+          plan: [{ step: "Native step", status: "inProgress" }],
+        },
+      }),
+    ];
+
+    expect(deriveActivePlanState(activities, undefined)).toEqual({
+      createdAt: "2026-02-23T00:00:02.000Z",
+      turnId: "turn-native",
+      steps: [{ step: "Native step", status: "inProgress" }],
+    });
+  });
 });
 
 describe("findLatestProposedPlan", () => {
@@ -580,66 +616,51 @@ describe("workEntryIndicatesToolFailure", () => {
     label: "Read",
   };
 
-  it("is true for error tone", () => {
-    expect(
-      workEntryIndicatesToolFailure({
+  it.each([
+    ["error tone", { ...base, tone: "error" as const, detail: "nothing special" }, true],
+    [
+      "failed lifecycle",
+      { ...base, tone: "tool" as const, toolLifecycleStatus: "failed" as const },
+      true,
+    ],
+    [
+      "file-not-found completed output",
+      {
         ...base,
-        tone: "error",
-        detail: "nothing special",
-      }),
-    ).toBe(true);
-  });
-
-  it("is true when lifecycle says failed even if detail is empty", () => {
-    expect(
-      workEntryIndicatesToolFailure({
-        ...base,
-        tone: "tool",
-        toolLifecycleStatus: "failed",
-      }),
-    ).toBe(true);
-  });
-
-  it("detects file-not-found style tool output with completed lifecycle", () => {
-    expect(
-      workEntryIndicatesToolFailure({
-        ...base,
-        tone: "tool",
-        toolLifecycleStatus: "completed",
+        tone: "tool" as const,
+        toolLifecycleStatus: "completed" as const,
         detail: "File not found: C:\\foo\\nonexistent.ts",
-      }),
-    ).toBe(true);
-  });
-
-  it("detects glob no files and PowerShell command errors", () => {
-    expect(
-      workEntryIndicatesToolFailure({
-        ...base,
-        label: "Glob",
-        tone: "tool",
-        detail: "No files found",
-      }),
-    ).toBe(true);
-    expect(
-      workEntryIndicatesToolFailure({
+      },
+      true,
+    ],
+    [
+      "glob no files",
+      { ...base, label: "Glob", tone: "tool" as const, detail: "No files found" },
+      true,
+    ],
+    [
+      "PowerShell command error",
+      {
         ...base,
         label: "Bash",
-        tone: "tool",
+        tone: "tool" as const,
         detail:
           "The term 'this_is_not_a_command' is not recognized as the name of a cmdlet, function, script file, or operable program.",
-      }),
-    ).toBe(true);
-  });
-
-  it("is false for successful completed tools", () => {
-    expect(
-      workEntryIndicatesToolFailure({
+      },
+      true,
+    ],
+    [
+      "successful completed tool",
+      {
         ...base,
-        tone: "tool",
-        toolLifecycleStatus: "completed",
+        tone: "tool" as const,
+        toolLifecycleStatus: "completed" as const,
         detail: "Found 3 matching files",
-      }),
-    ).toBe(false);
+      },
+      false,
+    ],
+  ])("is %s → %s", (_label, entry, expected) => {
+    expect(workEntryIndicatesToolFailure(entry)).toBe(expected);
   });
 
   it("treats successful tool rows as success candidates", () => {
@@ -738,6 +759,33 @@ describe("deriveWorkLogEntries", () => {
 
     const entries = deriveWorkLogEntries(activities);
     expect(entries.map((entry) => entry.id)).toEqual(["task-progress", "task-complete"]);
+  });
+
+  it("keeps imported work before continued native work after provider sequence resets", () => {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: "imported-activity",
+        createdAt: "2026-02-23T00:00:01.000Z",
+        kind: "task.progress",
+        summary: "Imported history",
+        tone: "info",
+        sequence: 100,
+      }),
+      makeActivity({
+        id: "native-activity",
+        createdAt: "2026-02-23T00:00:02.000Z",
+        kind: "task.progress",
+        summary: "Continued native work",
+        tone: "info",
+        turnId: "turn-native",
+        sequence: 1,
+      }),
+    ];
+
+    expect(deriveWorkLogEntries(activities).map((entry) => entry.id)).toEqual([
+      "imported-activity",
+      "native-activity",
+    ]);
   });
 
   it("uses payload summary as label for task entries when available", () => {
@@ -1536,6 +1584,55 @@ describe("deriveTimelineEntries", () => {
         implementationThreadId: null,
       },
     });
+  });
+
+  it("uses an explicit stable kind and source-order tie breaker for equal timestamps", () => {
+    const timestamp = "2026-02-23T00:00:01.000Z";
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make("message-z"),
+          role: "assistant",
+          text: "same-time message",
+          createdAt: timestamp,
+          turnId: null,
+          updatedAt: timestamp,
+          streaming: false,
+        },
+      ],
+      [
+        {
+          id: "plan-z",
+          turnId: TurnId.make("turn-z"),
+          planMarkdown: "# Same-time plan",
+          implementedAt: null,
+          implementationThreadId: null,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        },
+      ],
+      [
+        {
+          id: "work-z",
+          createdAt: timestamp,
+          label: "First work entry",
+          tone: "tool",
+        },
+        {
+          id: "work-a",
+          createdAt: timestamp,
+          label: "Second work entry",
+          tone: "tool",
+        },
+      ],
+    );
+
+    expect(entries.map((entry) => `${entry.kind}:${entry.id}`)).toEqual([
+      "message:message-z",
+      "proposed-plan:plan-z",
+      "work:work-z",
+      "work:work-a",
+    ]);
   });
 });
 
