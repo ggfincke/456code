@@ -1,0 +1,6 @@
+{"timestamp":"2026-04-05T06:07:08Z","type":"session_meta","payload":{"id":"codex-attachments-1","cwd":"/workspace/attachments","git":{"branch":"feature/attachments"},"model_provider":"openai"}}
+{"timestamp":"2026-04-05T06:07:09Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Compare the attachments"},{"type":"input_image","image_url":"data:image/png;base64,private-codex-image"},{"type":"input_image","image_url":"/private/codex-local.png"}]}}
+{"timestamp":"2026-04-05T06:07:10Z","type":"event_msg","payload":{"type":"user_message","message":"Compare the attachments","images":["data:image/png;base64,private-codex-image"],"local_images":["/private/codex-local.png"]}}
+{"timestamp":"2026-04-05T06:07:11Z","type":"response_item","payload":{"type":"function_call","name":"inspect_image","call_id":"image-call-1","arguments":"{}"}}
+{"timestamp":"2026-04-05T06:07:12Z","type":"response_item","payload":{"type":"function_call_output","call_id":"image-call-1","output":[{"type":"input_text","text":"image inspected"},{"type":"input_image","image_url":"data:image/png;base64,private-tool-output-image"}]}}
+{"timestamp":"2026-04-05T06:07:13Z","type":"event_msg","payload":{"type":"agent_message","message":"Compared."}}

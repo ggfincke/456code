@@ -1,3 +1,5 @@
+// apps/server/src/provider/Layers/ProviderService.ts
+// implements dynamic provider routing and session recovery
 /**
  * ProviderServiceLive - Cross-provider orchestration layer.
  *
@@ -12,6 +14,7 @@
 import {
   ModelSelection,
   NonNegativeInt,
+  ProviderContinuationIdentity,
   ThreadId,
   ProviderInterruptTurnInput,
   ProviderRespondToRequestInput,
@@ -21,6 +24,7 @@ import {
   ProviderStopSessionInput,
   type ProviderInstanceId,
   type ProviderDriverKind,
+  type ProviderContinuationIdentity as ProviderContinuationIdentityType,
   type ProviderRuntimeEvent,
   type ProviderSession,
 } from "@t3tools/contracts";
@@ -56,6 +60,7 @@ import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
+const isProviderContinuationIdentity = Schema.is(ProviderContinuationIdentity);
 
 /**
  * Hook for tests that want to override the canonical event logger pulled
@@ -122,6 +127,7 @@ function toRuntimeStatus(session: ProviderSession): "starting" | "running" | "st
 function toRuntimePayloadFromSession(
   session: ProviderSession,
   extra?: {
+    readonly continuationIdentity?: ProviderContinuationIdentityType;
     readonly modelSelection?: unknown;
     readonly lastRuntimeEvent?: string;
     readonly lastRuntimeEventAt?: string;
@@ -132,6 +138,9 @@ function toRuntimePayloadFromSession(
     model: session.model ?? null,
     activeTurnId: session.activeTurnId ?? null,
     lastError: session.lastError ?? null,
+    ...(extra?.continuationIdentity !== undefined
+      ? { continuationIdentity: extra.continuationIdentity }
+      : {}),
     ...(extra?.modelSelection !== undefined ? { modelSelection: extra.modelSelection } : {}),
     ...(extra?.lastRuntimeEvent !== undefined ? { lastRuntimeEvent: extra.lastRuntimeEvent } : {}),
     ...(extra?.lastRuntimeEventAt !== undefined
@@ -160,6 +169,24 @@ function readPersistedCwd(
   if (typeof rawCwd !== "string") return undefined;
   const trimmed = rawCwd.trim();
   return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readPersistedContinuationIdentity(
+  runtimePayload: ProviderSessionDirectory.ProviderRuntimeBinding["runtimePayload"],
+): ProviderContinuationIdentityType | undefined {
+  if (!runtimePayload || typeof runtimePayload !== "object" || Array.isArray(runtimePayload)) {
+    return undefined;
+  }
+  const raw =
+    "continuationIdentity" in runtimePayload ? runtimePayload.continuationIdentity : undefined;
+  return isProviderContinuationIdentity(raw) ? raw : undefined;
+}
+
+function continuationIdentitiesEqual(
+  left: ProviderContinuationIdentityType,
+  right: ProviderContinuationIdentityType,
+): boolean {
+  return left.driverKind === right.driverKind && left.continuationKey === right.continuationKey;
 }
 
 const dieOnMissingBindingInstanceId = (
@@ -256,10 +283,87 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           ),
         );
 
+  const validateAdapterRoute = (input: {
+    readonly operation: string;
+    readonly instanceId: ProviderInstanceId;
+    readonly expectedProvider: ProviderDriverKind;
+    readonly route: ProviderAdapterRegistry.ProviderInstanceRoute;
+    readonly persistedContinuationIdentity?: ProviderContinuationIdentityType;
+    readonly routingAuthority?: ProviderService.ProviderRoutingAuthority;
+  }): Effect.Effect<void, ProviderValidationError> => {
+    if (
+      input.routingAuthority !== undefined &&
+      input.routingAuthority.providerInstanceId !== input.instanceId
+    ) {
+      return Effect.fail(
+        toValidationError(
+          input.operation,
+          `Provider route authority targets instance '${input.routingAuthority.providerInstanceId}', not '${input.instanceId}'.`,
+        ),
+      );
+    }
+    if (
+      input.routingAuthority !== undefined &&
+      input.routingAuthority.provider !== input.expectedProvider
+    ) {
+      return Effect.fail(
+        toValidationError(
+          input.operation,
+          `Provider route authority expects driver '${input.routingAuthority.provider}', but the expected route uses '${input.expectedProvider}'.`,
+        ),
+      );
+    }
+    if (
+      input.route.info.instanceId !== input.instanceId ||
+      input.route.info.driverKind !== input.expectedProvider ||
+      input.route.adapter.provider !== input.expectedProvider
+    ) {
+      return Effect.fail(
+        toValidationError(
+          input.operation,
+          `Provider instance '${input.instanceId}' is currently backed by driver '${input.route.info.driverKind}' with adapter '${input.route.adapter.provider}', not the ${input.routingAuthority === undefined ? "expected" : "authorized"} driver '${input.expectedProvider}'.`,
+        ),
+      );
+    }
+    if (!input.route.info.enabled) {
+      return Effect.fail(
+        toValidationError(
+          input.operation,
+          `Provider instance '${input.instanceId}' is disabled in 456code settings.`,
+        ),
+      );
+    }
+    const authorityIdentity = input.routingAuthority?.continuationIdentity;
+    if (input.routingAuthority !== undefined && authorityIdentity === null) {
+      return Effect.fail(
+        toValidationError(
+          input.operation,
+          `Provider route authority for instance '${input.instanceId}' has no immutable continuation identity.`,
+        ),
+      );
+    }
+    const expectedIdentities = [
+      input.persistedContinuationIdentity,
+      authorityIdentity ?? undefined,
+    ].filter((identity): identity is ProviderContinuationIdentityType => identity !== undefined);
+    for (const identity of expectedIdentities) {
+      if (!continuationIdentitiesEqual(identity, input.route.info.continuationIdentity)) {
+        return Effect.fail(
+          toValidationError(
+            input.operation,
+            `Provider instance '${input.instanceId}' continuation source changed from '${identity.continuationKey}' to '${input.route.info.continuationIdentity.continuationKey}'.`,
+          ),
+        );
+      }
+    }
+    return Effect.void;
+  };
+
   const upsertSessionBinding = (
     session: ProviderSession,
     threadId: ThreadId,
     extra?: {
+      readonly continuationIdentity?: ProviderContinuationIdentityType;
       readonly modelSelection?: unknown;
       readonly lastRuntimeEvent?: string;
       readonly lastRuntimeEventAt?: string;
@@ -280,6 +384,19 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         runtimePayload: toRuntimePayloadFromSession(session, extra),
       });
     });
+
+  const requireContinuationRoute = (
+    operation: string,
+    route: ProviderAdapterRegistry.ProviderInstanceRoute,
+  ): Effect.Effect<void, ProviderValidationError> =>
+    route.info.continuationUnavailableReason === undefined
+      ? Effect.void
+      : Effect.fail(
+          toValidationError(
+            operation,
+            `Provider instance '${route.info.instanceId}' cannot safely continue sessions because ${route.info.continuationUnavailableReason}.`,
+          ),
+        );
 
   const processRuntimeEvent = (
     source: {
@@ -353,8 +470,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   ).pipe(Effect.forkScoped);
 
   const recoverSessionForThread = Effect.fn("recoverSessionForThread")(function* (input: {
+    readonly route: ProviderAdapterRegistry.ProviderInstanceRoute;
     readonly binding: ProviderSessionDirectory.ProviderRuntimeBinding;
     readonly operation: string;
+    readonly routingAuthority?: ProviderService.ProviderRoutingAuthority;
   }) {
     const bindingInstanceId = yield* requireBindingInstanceId(input.operation, input.binding);
     yield* Effect.annotateCurrentSpan({
@@ -364,26 +483,46 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       "provider.thread_id": input.binding.threadId,
     });
     return yield* Effect.gen(function* () {
-      const adapter = yield* registry.getByInstance(bindingInstanceId);
+      yield* requireContinuationRoute(input.operation, input.route);
+      const persistedContinuationIdentity = readPersistedContinuationIdentity(
+        input.binding.runtimePayload,
+      );
+      yield* validateAdapterRoute({
+        operation: input.operation,
+        instanceId: bindingInstanceId,
+        expectedProvider: input.binding.provider,
+        route: input.route,
+        ...(persistedContinuationIdentity === undefined ? {} : { persistedContinuationIdentity }),
+        ...(input.routingAuthority !== undefined
+          ? { routingAuthority: input.routingAuthority }
+          : {}),
+      });
       const hasResumeCursor =
         input.binding.resumeCursor !== null && input.binding.resumeCursor !== undefined;
-      const hasActiveSession = yield* adapter.hasSession(input.binding.threadId);
+      const hasActiveSession = yield* input.route.adapter.hasSession(input.binding.threadId);
       if (hasActiveSession) {
-        const activeSessions = yield* adapter.listSessions();
+        const activeSessions = yield* input.route.adapter.listSessions();
         const existing = activeSessions.find(
           (session) => session.threadId === input.binding.threadId,
         );
         if (existing) {
+          if (existing.provider !== input.route.adapter.provider) {
+            return yield* toValidationError(
+              input.operation,
+              `Adapter/provider mismatch while adopting recovered thread '${input.binding.threadId}'. Expected '${input.route.adapter.provider}', received '${existing.provider}'.`,
+            );
+          }
           yield* upsertSessionBinding(
             { ...existing, providerInstanceId: bindingInstanceId },
             input.binding.threadId,
+            { continuationIdentity: input.route.info.continuationIdentity },
           );
           yield* analytics.record("provider.session.recovered", {
             provider: existing.provider,
             strategy: "adopt-existing",
             hasResumeCursor: existing.resumeCursor !== undefined,
           });
-          return { adapter, session: existing } as const;
+          return { adapter: input.route.adapter, session: existing } as const;
         }
       }
 
@@ -398,7 +537,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload);
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId);
-      const resumed = yield* adapter
+      const resumed = yield* input.route.adapter
         .startSession({
           threadId: input.binding.threadId,
           provider: input.binding.provider,
@@ -409,24 +548,25 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           runtimeMode: input.binding.runtimeMode ?? "full-access",
         })
         .pipe(Effect.onError(() => clearMcpSession(input.binding.threadId)));
-      if (resumed.provider !== adapter.provider) {
+      if (resumed.provider !== input.route.adapter.provider) {
         yield* clearMcpSession(input.binding.threadId);
         return yield* toValidationError(
           input.operation,
-          `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${adapter.provider}', received '${resumed.provider}'.`,
+          `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${input.route.adapter.provider}', received '${resumed.provider}'.`,
         );
       }
 
       yield* upsertSessionBinding(
         { ...resumed, providerInstanceId: bindingInstanceId },
         input.binding.threadId,
+        { continuationIdentity: input.route.info.continuationIdentity },
       );
       yield* analytics.record("provider.session.recovered", {
         provider: resumed.provider,
         strategy: "resume-thread",
         hasResumeCursor: resumed.resumeCursor !== undefined,
       });
-      return { adapter, session: resumed } as const;
+      return { adapter: input.route.adapter, session: resumed } as const;
     }).pipe(
       withMetrics({
         counter: providerSessionsTotal,
@@ -441,6 +581,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     readonly threadId: ThreadId;
     readonly operation: string;
     readonly allowRecovery: boolean;
+    readonly routingAuthority?: ProviderService.ProviderRoutingAuthority;
   }) {
     const bindingOption = yield* directory.getBinding(input.threadId);
     const binding = Option.getOrUndefined(bindingOption);
@@ -451,12 +592,21 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
       );
     }
     const instanceId = yield* requireBindingInstanceId(input.operation, binding);
-    const adapter = yield* registry.getByInstance(instanceId);
+    const route = yield* registry.getRoute(instanceId);
+    const persistedContinuationIdentity = readPersistedContinuationIdentity(binding.runtimePayload);
+    yield* validateAdapterRoute({
+      operation: input.operation,
+      instanceId,
+      expectedProvider: binding.provider,
+      route,
+      ...(persistedContinuationIdentity === undefined ? {} : { persistedContinuationIdentity }),
+      ...(input.routingAuthority !== undefined ? { routingAuthority: input.routingAuthority } : {}),
+    });
 
-    const hasRequestedSession = yield* adapter.hasSession(input.threadId);
+    const hasRequestedSession = yield* route.adapter.hasSession(input.threadId);
     if (hasRequestedSession) {
       return {
-        adapter,
+        adapter: route.adapter,
         instanceId,
         threadId: input.threadId,
         isActive: true,
@@ -465,7 +615,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
 
     if (!input.allowRecovery) {
       return {
-        adapter,
+        adapter: route.adapter,
         instanceId,
         threadId: input.threadId,
         isActive: false,
@@ -473,8 +623,10 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     }
 
     const recovered = yield* recoverSessionForThread({
+      route,
       binding,
       operation: input.operation,
+      ...(input.routingAuthority !== undefined ? { routingAuthority: input.routingAuthority } : {}),
     });
     return {
       adapter: recovered.adapter,
@@ -520,7 +672,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   });
 
   const startSession: ProviderServiceMethod<"startSession"> = Effect.fn("startSession")(
-    function* (threadId, rawInput) {
+    function* (threadId, rawInput, routingAuthority) {
       const parsed = yield* decodeInputOrValidationError({
         operation: "ProviderService.startSession",
         schema: ProviderSessionStartInput,
@@ -539,7 +691,8 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         "provider.runtime_mode": parsed.runtimeMode,
       });
       return yield* Effect.gen(function* () {
-        const instanceInfo = yield* registry.getInstanceInfo(resolvedInstanceId);
+        const route = yield* registry.getRoute(resolvedInstanceId);
+        const instanceInfo = route.info;
         const resolvedProvider = instanceInfo.driverKind;
         metricProvider = resolvedProvider;
         if (parsed.provider !== undefined && parsed.provider !== resolvedProvider) {
@@ -560,6 +713,18 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           );
         }
         const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId));
+        const persistedContinuationIdentity =
+          persistedBinding?.providerInstanceId === resolvedInstanceId
+            ? readPersistedContinuationIdentity(persistedBinding.runtimePayload)
+            : undefined;
+        yield* validateAdapterRoute({
+          operation: "ProviderService.startSession",
+          instanceId: resolvedInstanceId,
+          expectedProvider: resolvedProvider,
+          route,
+          ...(persistedContinuationIdentity === undefined ? {} : { persistedContinuationIdentity }),
+          ...(routingAuthority !== undefined ? { routingAuthority } : {}),
+        });
         const effectiveResumeCursor =
           input.resumeCursor ??
           (persistedBinding?.providerInstanceId === resolvedInstanceId
@@ -570,6 +735,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           (persistedBinding?.providerInstanceId === resolvedInstanceId
             ? readPersistedCwd(persistedBinding.runtimePayload)
             : undefined);
+        if (
+          route.info.continuationUnavailableReason !== undefined &&
+          (routingAuthority !== undefined || effectiveResumeCursor !== undefined)
+        ) {
+          return yield* toValidationError(
+            "ProviderService.startSession",
+            `Provider instance '${route.info.instanceId}' cannot safely continue sessions because ${route.info.continuationUnavailableReason}.`,
+          );
+        }
         yield* Effect.annotateCurrentSpan({
           "provider.kind": resolvedProvider,
           "provider.resume_cursor.source":
@@ -589,7 +763,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
                 : "none",
           "provider.cwd.effective": effectiveCwd ?? "",
         });
-        const adapter = yield* registry.getByInstance(resolvedInstanceId);
+        const adapter = route.adapter;
         yield* prepareMcpSession(threadId, resolvedInstanceId);
         const session = yield* adapter
           .startSession({
@@ -617,6 +791,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
           currentInstanceId: resolvedInstanceId,
         });
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
+          continuationIdentity: route.info.continuationIdentity,
           modelSelection: input.modelSelection,
         });
         yield* analytics.record("provider.session.started", {
@@ -642,80 +817,83 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     },
   );
 
-  const sendTurn: ProviderServiceMethod<"sendTurn"> = Effect.fn("sendTurn")(function* (rawInput) {
-    const parsed = yield* decodeInputOrValidationError({
-      operation: "ProviderService.sendTurn",
-      schema: ProviderSendTurnInput,
-      payload: rawInput,
-    });
-
-    const input = {
-      ...parsed,
-      attachments: parsed.attachments ?? [],
-    };
-    if (!input.input && input.attachments.length === 0) {
-      return yield* toValidationError(
-        "ProviderService.sendTurn",
-        "Either input text or at least one attachment is required",
-      );
-    }
-    yield* Effect.annotateCurrentSpan({
-      "provider.operation": "send-turn",
-      "provider.thread_id": input.threadId,
-      "provider.interaction_mode": input.interactionMode,
-      "provider.attachment_count": input.attachments.length,
-    });
-    let metricProvider = "unknown";
-    let metricModel = input.modelSelection?.model;
-    return yield* Effect.gen(function* () {
-      const routed = yield* resolveRoutableSession({
-        threadId: input.threadId,
+  const sendTurn: ProviderServiceMethod<"sendTurn"> = Effect.fn("sendTurn")(
+    function* (rawInput, routingAuthority) {
+      const parsed = yield* decodeInputOrValidationError({
         operation: "ProviderService.sendTurn",
-        allowRecovery: true,
+        schema: ProviderSendTurnInput,
+        payload: rawInput,
       });
-      metricProvider = routed.adapter.provider;
-      metricModel = input.modelSelection?.model;
+
+      const input = {
+        ...parsed,
+        attachments: parsed.attachments ?? [],
+      };
+      if (!input.input && input.attachments.length === 0) {
+        return yield* toValidationError(
+          "ProviderService.sendTurn",
+          "Either input text or at least one attachment is required",
+        );
+      }
       yield* Effect.annotateCurrentSpan({
-        "provider.kind": routed.adapter.provider,
-        ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
+        "provider.operation": "send-turn",
+        "provider.thread_id": input.threadId,
+        "provider.interaction_mode": input.interactionMode,
+        "provider.attachment_count": input.attachments.length,
       });
-      const turn = yield* routed.adapter.sendTurn(input);
-      yield* directory.upsert({
-        threadId: input.threadId,
-        provider: routed.adapter.provider,
-        providerInstanceId: routed.instanceId,
-        status: "running",
-        ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
-        runtimePayload: {
-          ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
-          activeTurnId: turn.turnId,
-          lastRuntimeEvent: "provider.sendTurn",
-          lastRuntimeEventAt: yield* nowIso,
-        },
-      });
-      yield* analytics.record("provider.turn.sent", {
-        provider: routed.adapter.provider,
-        model: input.modelSelection?.model,
-        interactionMode: input.interactionMode,
-        attachmentCount: input.attachments.length,
-        hasInput: typeof input.input === "string" && input.input.trim().length > 0,
-      });
-      return turn;
-    }).pipe(
-      withMetrics({
-        counter: providerTurnsTotal,
-        timer: providerTurnDuration,
-        attributes: () =>
-          providerTurnMetricAttributes({
-            provider: metricProvider,
-            model: metricModel,
-            extra: {
-              operation: "send",
-            },
-          }),
-      }),
-    );
-  });
+      let metricProvider = "unknown";
+      let metricModel = input.modelSelection?.model;
+      return yield* Effect.gen(function* () {
+        const routed = yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: "ProviderService.sendTurn",
+          allowRecovery: true,
+          ...(routingAuthority !== undefined ? { routingAuthority } : {}),
+        });
+        metricProvider = routed.adapter.provider;
+        metricModel = input.modelSelection?.model;
+        yield* Effect.annotateCurrentSpan({
+          "provider.kind": routed.adapter.provider,
+          ...(input.modelSelection?.model ? { "provider.model": input.modelSelection.model } : {}),
+        });
+        const turn = yield* routed.adapter.sendTurn(input);
+        yield* directory.upsert({
+          threadId: input.threadId,
+          provider: routed.adapter.provider,
+          providerInstanceId: routed.instanceId,
+          status: "running",
+          ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+          runtimePayload: {
+            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
+            activeTurnId: turn.turnId,
+            lastRuntimeEvent: "provider.sendTurn",
+            lastRuntimeEventAt: yield* nowIso,
+          },
+        });
+        yield* analytics.record("provider.turn.sent", {
+          provider: routed.adapter.provider,
+          model: input.modelSelection?.model,
+          interactionMode: input.interactionMode,
+          attachmentCount: input.attachments.length,
+          hasInput: typeof input.input === "string" && input.input.trim().length > 0,
+        });
+        return turn;
+      }).pipe(
+        withMetrics({
+          counter: providerTurnsTotal,
+          timer: providerTurnDuration,
+          attributes: () =>
+            providerTurnMetricAttributes({
+              provider: metricProvider,
+              model: metricModel,
+              extra: {
+                operation: "send",
+              },
+            }),
+        }),
+      );
+    },
+  );
 
   const interruptTurn: ProviderServiceMethod<"interruptTurn"> = Effect.fn("interruptTurn")(
     function* (rawInput) {

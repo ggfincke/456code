@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/ProviderAdapterRegistry.test.ts
+// verifies live provider adapter registry routing and refresh behavior
 import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
@@ -26,6 +28,7 @@ const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make("claudeAgent");
 const OPENCODE_DRIVER = ProviderDriverKind.make("opencode");
 const CURSOR_DRIVER = ProviderDriverKind.make("cursor");
+let currentClaudeContinuationKey = "claudeAgent:instance:claudeAgent";
 
 const fakeCodexAdapter: CodexAdapter.CodexAdapterShape = {
   provider: CODEX_DRIVER,
@@ -105,13 +108,21 @@ const makeFakeInstance = (
   adapter: ProviderInstance["adapter"],
 ): ProviderInstance => {
   const driverKind = ProviderDriverKind.make(driverKindString);
+  const continuationIdentity = {
+    driverKind,
+    continuationKey: `${driverKind}:instance:${defaultInstanceIdForDriver(driverKind)}`,
+  };
   return {
     instanceId: defaultInstanceIdForDriver(driverKind),
     driverKind,
-    continuationIdentity: {
-      driverKind,
-      continuationKey: `${driverKind}:instance:${defaultInstanceIdForDriver(driverKind)}`,
-    },
+    continuationIdentity,
+    resolveContinuationIdentity:
+      driverKind === CLAUDE_AGENT_DRIVER
+        ? Effect.sync(() => ({
+            driverKind,
+            continuationKey: currentClaudeContinuationKey,
+          }))
+        : Effect.succeed(continuationIdentity),
     displayName: undefined,
     enabled: true,
     snapshot: {
@@ -175,6 +186,13 @@ it.layer(layer)("ProviderAdapterRegistryLive", (it) => {
           continuationKey: "claudeAgent:instance:claudeAgent",
         },
       });
+
+      currentClaudeContinuationKey = "claudeAgent:file:v1:reconfigured";
+      const reconfiguredInfo = yield* registry.getInstanceInfo(claudeInstanceId);
+      assert.strictEqual(
+        reconfiguredInfo.continuationIdentity.continuationKey,
+        currentClaudeContinuationKey,
+      );
 
       const instances = yield* registry.listInstances();
       assert.deepStrictEqual(instances, [

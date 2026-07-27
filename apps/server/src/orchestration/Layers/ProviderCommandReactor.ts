@@ -1,3 +1,5 @@
+// apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+// executes persisted provider intents against provider runtimes
 import {
   type ChatAttachment,
   CommandId,
@@ -10,6 +12,7 @@ import {
   ThreadId,
   type ProviderSession,
   type RuntimeMode,
+  type ThreadImportContinuationAuthority,
   type TurnId,
 } from "@t3tools/contracts";
 import { isTemporaryWorktreeBranch, WORKTREE_BRANCH_PREFIX } from "@t3tools/shared/git";
@@ -358,6 +361,7 @@ const make = Effect.gen(function* () {
     threadId: ThreadId,
     createdAt: string,
     options?: {
+      readonly importContinuationAuthority?: ThreadImportContinuationAuthority;
       readonly modelSelection?: ModelSelection;
       readonly pendingTurnStart?: boolean;
     },
@@ -433,7 +437,49 @@ const make = Effect.gen(function* () {
         detail: `Requested provider instance '${desiredInstanceId}' uses unknown provider driver '${desiredDriverKind}'. The driver is not installed in this build.`,
       });
     }
-    const preferredProvider: ProviderDriverKind = desiredDriverKind;
+    const importContinuationAuthority = options?.importContinuationAuthority;
+    if (
+      importContinuationAuthority !== undefined &&
+      (desiredInstanceId !== importContinuationAuthority.targetProviderInstanceId ||
+        desiredDriverKind !== importContinuationAuthority.driverKind ||
+        importContinuationAuthority.continuationIdentity === null ||
+        desiredInfo.continuationIdentity.driverKind !==
+          importContinuationAuthority.continuationIdentity.driverKind ||
+        desiredInfo.continuationIdentity.continuationKey !==
+          importContinuationAuthority.continuationIdentity.continuationKey)
+    ) {
+      return yield* new ProviderAdapterRequestError({
+        provider: importContinuationAuthority.driverKind,
+        method: "thread.turn.start",
+        detail: `Imported thread '${threadId}' no longer resolves to its authorized provider continuation source.`,
+      });
+    }
+    const preferredProvider: ProviderDriverKind =
+      importContinuationAuthority?.driverKind ?? desiredDriverKind;
+    const revalidateImportContinuationAuthority = Effect.fn(
+      "revalidateImportContinuationAuthority",
+    )(function* () {
+      if (importContinuationAuthority === undefined) {
+        return;
+      }
+      const currentInfo = yield* providerService.getInstanceInfo(
+        importContinuationAuthority.targetProviderInstanceId,
+      );
+      const authorityIdentity = importContinuationAuthority.continuationIdentity;
+      if (
+        authorityIdentity !== null &&
+        currentInfo.driverKind === importContinuationAuthority.driverKind &&
+        currentInfo.continuationIdentity.driverKind === authorityIdentity.driverKind &&
+        currentInfo.continuationIdentity.continuationKey === authorityIdentity.continuationKey
+      ) {
+        return;
+      }
+      return yield* new ProviderAdapterRequestError({
+        provider: importContinuationAuthority.driverKind,
+        method: "thread.turn.start",
+        detail: `Imported thread '${threadId}' no longer resolves to its authorized provider continuation source.`,
+      });
+    });
     if (options?.pendingTurnStart === true && thread.session?.status !== "running") {
       yield* setThreadSession({
         threadId,
@@ -497,14 +543,27 @@ const make = Effect.gen(function* () {
       readonly resumeCursor?: unknown;
       readonly provider?: ProviderDriverKind;
     }) =>
-      providerService.startSession(threadId, {
-        threadId,
-        ...(preferredProvider ? { provider: preferredProvider } : {}),
-        providerInstanceId: desiredInstanceId,
-        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-        modelSelection: desiredModelSelection,
-        ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
-        runtimeMode: desiredRuntimeMode,
+      Effect.gen(function* () {
+        yield* revalidateImportContinuationAuthority();
+        return yield* providerService.startSession(
+          threadId,
+          {
+            threadId,
+            provider: preferredProvider,
+            providerInstanceId: desiredInstanceId,
+            ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+            modelSelection: desiredModelSelection,
+            ...(input?.resumeCursor !== undefined ? { resumeCursor: input.resumeCursor } : {}),
+            runtimeMode: desiredRuntimeMode,
+          },
+          importContinuationAuthority === undefined
+            ? undefined
+            : {
+                provider: importContinuationAuthority.driverKind,
+                providerInstanceId: importContinuationAuthority.targetProviderInstanceId,
+                continuationIdentity: importContinuationAuthority.continuationIdentity,
+              },
+        );
       });
 
     const bindSessionToThread = (session: ProviderSession) =>
@@ -612,6 +671,7 @@ const make = Effect.gen(function* () {
     readonly threadId: ThreadId;
     readonly messageText: string;
     readonly attachments?: ReadonlyArray<ChatAttachment>;
+    readonly importContinuationAuthority?: ThreadImportContinuationAuthority;
     readonly modelSelection?: ModelSelection;
     readonly interactionMode?: "default" | "plan";
     readonly createdAt: string;
@@ -623,6 +683,9 @@ const make = Effect.gen(function* () {
       );
     }
     yield* ensureSessionForThread(input.threadId, input.createdAt, {
+      ...(input.importContinuationAuthority !== undefined
+        ? { importContinuationAuthority: input.importContinuationAuthority }
+        : {}),
       ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
       pendingTurnStart: true,
     });
@@ -865,6 +928,9 @@ const make = Effect.gen(function* () {
       threadId: event.payload.threadId,
       messageText: message.text,
       ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+      ...(event.payload.importContinuationAuthority !== undefined
+        ? { importContinuationAuthority: event.payload.importContinuationAuthority }
+        : {}),
       ...(event.payload.modelSelection !== undefined
         ? { modelSelection: event.payload.modelSelection }
         : {}),
@@ -880,7 +946,17 @@ const make = Effect.gen(function* () {
     }
 
     yield* providerService
-      .sendTurn(sendTurnRequest.value)
+      .sendTurn(
+        sendTurnRequest.value,
+        event.payload.importContinuationAuthority === undefined
+          ? undefined
+          : {
+              provider: event.payload.importContinuationAuthority.driverKind,
+              providerInstanceId:
+                event.payload.importContinuationAuthority.targetProviderInstanceId,
+              continuationIdentity: event.payload.importContinuationAuthority.continuationIdentity,
+            },
+      )
       .pipe(Effect.catchCause(recoverTurnStartFailure), Effect.forkScoped);
   });
 

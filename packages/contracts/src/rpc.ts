@@ -1,3 +1,6 @@
+// packages/contracts/src/rpc.ts
+// defines typed rpc request and response contracts
+
 import * as Schema from "effect/Schema";
 import * as Rpc from "effect/unstable/rpc/Rpc";
 import * as RpcGroup from "effect/unstable/rpc/RpcGroup";
@@ -626,6 +629,18 @@ export const WsOrchestrationDispatchCommandRpc = Rpc.make(
   },
 );
 
+export const WsOrchestrationImportScanRpc = Rpc.make(ORCHESTRATION_WS_METHODS.importScan, {
+  payload: OrchestrationRpcSchemas.importScan.input,
+  success: OrchestrationRpcSchemas.importScan.output,
+  error: Schema.Union([OrchestrationGetSnapshotError, EnvironmentAuthorizationError]),
+});
+
+export const WsOrchestrationImportSessionsRpc = Rpc.make(ORCHESTRATION_WS_METHODS.importSessions, {
+  payload: OrchestrationRpcSchemas.importSessions.input,
+  success: OrchestrationRpcSchemas.importSessions.output,
+  error: Schema.Union([OrchestrationDispatchCommandError, EnvironmentAuthorizationError]),
+});
+
 export const WsOrchestrationGetTurnDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getTurnDiff, {
   payload: OrchestrationGetTurnDiffInput,
   success: OrchestrationRpcSchemas.getTurnDiff.output,
@@ -789,6 +804,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubscribeServerLifecycleRpc,
   WsSubscribeAuthAccessRpc,
   WsOrchestrationDispatchCommandRpc,
+  WsOrchestrationImportScanRpc,
+  WsOrchestrationImportSessionsRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
   WsOrchestrationReplayEventsRpc,

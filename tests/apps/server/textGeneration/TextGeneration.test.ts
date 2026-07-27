@@ -1,3 +1,5 @@
+// tests/apps/server/textGeneration/TextGeneration.test.ts
+// verifies text generation routes through exact provider instances
 import { it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
 import * as PubSub from "effect/PubSub";
@@ -35,6 +37,10 @@ const makeStubInstance = (
       driverKind: instanceId as unknown as ProviderInstance["driverKind"],
       continuationKey: `${instanceId}:test`,
     },
+    resolveContinuationIdentity: Effect.succeed({
+      driverKind: instanceId as unknown as ProviderInstance["driverKind"],
+      continuationKey: `${instanceId}:test`,
+    }),
     displayName: undefined,
     enabled: true,
     snapshot: {} as ProviderInstance["snapshot"],

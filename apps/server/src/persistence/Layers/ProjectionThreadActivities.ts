@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Layers/ProjectionThreadActivities.ts
+// persists projected thread activity rows
+
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 import * as SqlSchema from "effect/unstable/sql/SqlSchema";
 import { NonNegativeInt } from "@t3tools/contracts";
@@ -90,9 +93,16 @@ const makeProjectionThreadActivityRepository = Effect.gen(function* () {
         FROM projection_thread_activities
         WHERE thread_id = ${threadId}
         ORDER BY
-          CASE WHEN sequence IS NULL THEN 0 ELSE 1 END ASC,
-          sequence ASC,
+          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN 0 ELSE 1 END ASC,
+          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN sequence ELSE NULL END ASC,
           created_at ASC,
+          CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
+          sequence ASC,
+          CASE
+            WHEN substr(kind, -8) = '.started' OR kind = 'tool.started' THEN 0
+            WHEN substr(kind, -10) = '.completed' OR substr(kind, -9) = '.resolved' THEN 2
+            ELSE 1
+          END ASC,
           activity_id ASC
       `,
   });

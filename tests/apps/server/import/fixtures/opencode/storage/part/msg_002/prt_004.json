@@ -1,0 +1,32 @@
+{
+  "id": "prt_004",
+  "sessionID": "ses_imported",
+  "messageID": "msg_002",
+  "type": "tool",
+  "callID": "call_001",
+  "tool": "bash",
+  "state": {
+    "status": "completed",
+    "input": {
+      "command": "vp test run importer"
+    },
+    "output": "focused tests passed",
+    "title": "Run focused importer tests",
+    "metadata": {},
+    "time": {
+      "start": 1767225600000,
+      "end": 1767225600000
+    },
+    "attachments": [
+      {
+        "id": "file_private",
+        "sessionID": "ses_imported",
+        "messageID": "msg_002",
+        "type": "file",
+        "mime": "image/png",
+        "filename": "private-tool-image.png",
+        "url": "file:///private/opencode-tool-image.png"
+      }
+    ]
+  }
+}

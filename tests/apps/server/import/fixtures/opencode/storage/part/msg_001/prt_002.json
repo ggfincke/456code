@@ -1,0 +1,9 @@
+{
+  "id": "prt_002",
+  "sessionID": "ses_imported",
+  "messageID": "msg_001",
+  "type": "file",
+  "mime": "image/png",
+  "filename": "private-user-image.png",
+  "url": "file:///private/opencode-user-image.png"
+}

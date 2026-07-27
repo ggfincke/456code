@@ -1,3 +1,5 @@
+// apps/web/src/components/SidebarV2.tsx
+// renders project-grouped thread navigation and lifecycle shelves
 import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
 import {
@@ -26,6 +28,7 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
+  ImportIcon,
   EllipsisIcon,
   MessageSquareIcon,
   PlusIcon,
@@ -99,11 +102,13 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
+import { importSourceDisplayName } from "../importSourcePresentation";
 import { cn } from "~/lib/utils";
 import {
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
+  isImportedShelfThread,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
   resolveAdjacentThreadId,
@@ -288,6 +293,14 @@ function SidebarV2ThreadTooltip({
               <div className="min-w-0 wrap-break-word text-foreground/90">{modelLabel}</div>
             </div>
           ) : null}
+          {thread.origin ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <ImportIcon className="size-4 shrink-0 stroke-muted-foreground" aria-hidden />
+              <div className="min-w-0 wrap-break-word text-foreground/90">
+                Imported from {importSourceDisplayName(thread.origin.source)}
+              </div>
+            </div>
+          ) : null}
           {thread.session?.lastError ? (
             <div className="flex min-w-0 items-center gap-2 text-red-600 dark:text-red-400">
               <CircleAlertIcon className="size-4 shrink-0 stroke-current" />
@@ -355,9 +368,8 @@ function SnoozePopoverButton(props: {
 const SidebarV2Row = memo(function SidebarV2Row(props: {
   thread: SidebarThreadSummary;
   variant: "card" | "slim";
-  // Slim rows are either settled (action: un-settle) or merely quiet
-  // (seen Ready threads — action: settle).
-  variantAction: "settle" | "unsettle" | "unsnooze";
+  // slim rows can expose one lifecycle action or stay informational
+  variantAction: "none" | "settle" | "unsettle" | "unsnooze";
   // False on environments whose server predates thread.settle/unsettle:
   // the lifecycle affordances hide entirely rather than fail on click.
   settlementSupported: boolean;
@@ -632,7 +644,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   // Snooze is offered only where it can succeed: capability-gated and never
   // on blocked-on-you work or queued turns (the server rejects both).
   const showSnoozeButton =
-    props.snoozeSupported && canSnooze(thread, { now: new Date().toISOString() });
+    variantAction !== "none" &&
+    props.snoozeSupported &&
+    canSnooze(thread, { now: new Date().toISOString() });
   // If the thread becomes blocked while the popover is open, the button
   // unmounts without firing onOpenChange(false). Deriving the flag keeps a
   // stale true from permanently hiding the status label / pinning the
@@ -810,7 +824,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                     <AlarmClockOffIcon className="size-3" />
                   </button>
                 )
-              ) : !props.settlementSupported ? null : variantAction === "unsettle" ? (
+              ) : variantAction === "none" || !props.settlementSupported ? null : variantAction ===
+                "unsettle" ? (
                 <button
                   type="button"
                   aria-label="Un-settle thread"
@@ -1359,68 +1374,79 @@ export default function SidebarV2() {
   // merging, no optimistic holds. Archived threads remain hidden here —
   // archive keeps its original "remove from sidebar" meaning.
   const serverConfigs = useAtomValue(environmentServerConfigsAtom);
-  const { activeThreads, snoozedThreads, settledThreads, snoozeNow } = useMemo(() => {
-    const now = `${nowMinute}:00.000Z`;
-    // Snooze classification uses a REAL clock, not the quantized minute:
-    // wake times are second-precise and a woken thread must not linger on
-    // the shelf for the rest of the minute. snoozeWakeTick re-runs this
-    // memo exactly at the next wake boundary.
-    void snoozeWakeTick;
-    const preciseNow = new Date().toISOString();
-    const visible = threads.filter(
-      (thread) =>
-        thread.archivedAt === null &&
-        (scopedProjectKeys === null ||
-          scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
-    );
-    const active: EnvironmentThreadShell[] = [];
-    const snoozed: EnvironmentThreadShell[] = [];
-    const settled: EnvironmentThreadShell[] = [];
-    for (const thread of visible) {
-      // Threads on servers without the settlement capability (old server,
-      // or descriptor not loaded yet) never classify as settled: the user
-      // could neither un-settle nor pin them, so auto-settling them would
-      // strand rows in a tail with no working affordances.
-      const supportsSettlement =
-        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement === true;
-      const supportsSnooze =
-        serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
-      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
-      const changeRequestState = changeRequestStateByKey.get(threadKey) ?? null;
-      // Snooze outranks settled classification: an explicitly snoozed thread
-      // belongs to the shelf even if it would also auto-settle (the shelf's
-      // wake time is a stronger statement about when it matters again).
-      if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
-        snoozed.push(thread);
-      } else if (
-        supportsSettlement &&
-        effectiveSettled(thread, { now, autoSettleAfterDays, changeRequestState })
-      ) {
-        settled.push(thread);
-      } else {
-        active.push(thread);
+  const { activeThreads, importedThreads, snoozedThreads, settledThreads, snoozeNow } =
+    useMemo(() => {
+      const now = `${nowMinute}:00.000Z`;
+      // Snooze classification uses a REAL clock, not the quantized minute:
+      // wake times are second-precise and a woken thread must not linger on
+      // the shelf for the rest of the minute. snoozeWakeTick re-runs this
+      // memo exactly at the next wake boundary.
+      void snoozeWakeTick;
+      const preciseNow = new Date().toISOString();
+      const visible = threads.filter(
+        (thread) =>
+          thread.archivedAt === null &&
+          (scopedProjectKeys === null ||
+            scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
+      );
+      const active: EnvironmentThreadShell[] = [];
+      const imported: EnvironmentThreadShell[] = [];
+      const snoozed: EnvironmentThreadShell[] = [];
+      const settled: EnvironmentThreadShell[] = [];
+      for (const thread of visible) {
+        if (isImportedShelfThread(thread)) {
+          imported.push(thread);
+          continue;
+        }
+        // Threads on servers without the settlement capability (old server,
+        // or descriptor not loaded yet) never classify as settled: the user
+        // could neither un-settle nor pin them, so auto-settling them would
+        // strand rows in a tail with no working affordances.
+        const supportsSettlement =
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
+          true;
+        const supportsSnooze =
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
+        const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+        const changeRequestState = changeRequestStateByKey.get(threadKey) ?? null;
+        // Snooze outranks settled classification: an explicitly snoozed thread
+        // belongs to the shelf even if it would also auto-settle (the shelf's
+        // wake time is a stronger statement about when it matters again).
+        if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow })) {
+          snoozed.push(thread);
+        } else if (
+          supportsSettlement &&
+          effectiveSettled(thread, { now, autoSettleAfterDays, changeRequestState })
+        ) {
+          settled.push(thread);
+        } else {
+          active.push(thread);
+        }
       }
-    }
-    return {
-      activeThreads: sortThreadsForSidebarV2(active),
-      // Soonest wake first: "what comes back next" is the shelf's question.
-      snoozedThreads: snoozed.toSorted(
-        (left, right) =>
-          firstValidTimestampMs(left.snoozedUntil ?? null) -
-          firstValidTimestampMs(right.snoozedUntil ?? null),
-      ),
-      settledThreads: sortSettledThreadsForSidebarV2(settled),
-      snoozeNow: preciseNow,
-    };
-  }, [
-    autoSettleAfterDays,
-    changeRequestStateByKey,
-    nowMinute,
-    scopedProjectKeys,
-    serverConfigs,
-    snoozeWakeTick,
-    threads,
-  ]);
+      return {
+        activeThreads: sortThreadsForSidebarV2(active),
+        importedThreads: imported.toSorted(
+          (left, right) =>
+            right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id),
+        ),
+        // Soonest wake first: "what comes back next" is the shelf's question.
+        snoozedThreads: snoozed.toSorted(
+          (left, right) =>
+            firstValidTimestampMs(left.snoozedUntil ?? null) -
+            firstValidTimestampMs(right.snoozedUntil ?? null),
+        ),
+        settledThreads: sortSettledThreadsForSidebarV2(settled),
+        snoozeNow: preciseNow,
+      };
+    }, [
+      autoSettleAfterDays,
+      changeRequestStateByKey,
+      nowMinute,
+      scopedProjectKeys,
+      serverConfigs,
+      snoozeWakeTick,
+      threads,
+    ]);
 
   // Arm a timeout for the earliest upcoming wake so the shelf empties the
   // moment a snooze expires instead of on the next minute tick. Sorted
@@ -1504,9 +1530,26 @@ export default function SidebarV2() {
     return routeThread === undefined ? [] : [routeThread];
   }, [routeThreadKey, snoozedShelfExpanded, snoozedThreads]);
 
+  const [importedShelfExpanded, setImportedShelfExpanded] = useState(false);
+  const toggleImportedShelf = useCallback(() => setImportedShelfExpanded((value) => !value), []);
+  const visibleImportedThreads = useMemo(() => {
+    if (importedShelfExpanded) return importedThreads;
+    if (routeThreadKey === null) return [];
+    const routeThread = importedThreads.find(
+      (thread) =>
+        scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id)) === routeThreadKey,
+    );
+    return routeThread === undefined ? [] : [routeThread];
+  }, [importedShelfExpanded, importedThreads, routeThreadKey]);
+
   const orderedThreads = useMemo(
-    () => [...activeThreads, ...visibleSnoozedThreads, ...renderedSettledThreads],
-    [activeThreads, visibleSnoozedThreads, renderedSettledThreads],
+    () => [
+      ...activeThreads,
+      ...visibleImportedThreads,
+      ...visibleSnoozedThreads,
+      ...renderedSettledThreads,
+    ],
+    [activeThreads, visibleImportedThreads, visibleSnoozedThreads, renderedSettledThreads],
   );
   const orderedThreadKeys = useMemo(
     () =>
@@ -1836,8 +1879,10 @@ export default function SidebarV2() {
         const thread = threadByKeyRef.current.get(threadKey);
         return thread ? [thread] : [];
       });
+      const includesImportedShelfThread = snoozableThreads.some(isImportedShelfThread);
       const canSnoozeSelection = snoozableThreads.every(
         (thread) =>
+          !isImportedShelfThread(thread) &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true &&
           canSnooze(thread, { now: selectionNow }),
       );
@@ -1845,7 +1890,7 @@ export default function SidebarV2() {
       const clicked = await settlePromise(() =>
         api.contextMenu.show(
           [
-            { id: "settle", label: `Settle (${count})` },
+            ...(!includesImportedShelfThread ? [{ id: "settle", label: `Settle (${count})` }] : []),
             ...(canSnoozeSelection
               ? [
                   {
@@ -1969,14 +2014,17 @@ export default function SidebarV2() {
         }
         const thread = threadByKeyRef.current.get(threadKey);
         if (!thread) return;
+        const isImportedShelf = isImportedShelfThread(thread);
         // Un-settle works on every settled row: for explicit settles it
         // clears the override, for auto-settled rows it pins the thread
         // active until real activity clears the pin. Environments without
         // the settlement capability get no lifecycle items at all.
         const supportsSettlement =
+          !isImportedShelf &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
-          true;
+            true;
         const supportsSnooze =
+          !isImportedShelf &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true;
         const isSettled = settledThreadKeysRef.current.has(threadKey);
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey);
@@ -2369,15 +2417,13 @@ export default function SidebarV2() {
               {(() => {
                 const renderThreadRow = (
                   thread: EnvironmentThreadShell,
-                  section: "active" | "snoozed" | "settled",
+                  section: "active" | "imported" | "snoozed" | "settled",
                 ) => {
                   const threadKey = scopedThreadKey(
                     scopeThreadRef(thread.environmentId, thread.id),
                   );
-                  // Settled and snoozed are the ONLY things that collapse a
-                  // row: every other thread is a full card. Density comes
-                  // from users (or the auto rules) actually parking work,
-                  // not from the sidebar second-guessing what still matters.
+                  // shelved rows collapse to the slim variant; active work
+                  // stays a full card
                   const isCard = section === "active";
                   const rowVariant = isCard ? "card" : "slim";
                   return (
@@ -2395,11 +2441,13 @@ export default function SidebarV2() {
                       // settles clear the override, auto-settled rows get
                       // pinned active); cards settle.
                       variantAction={
-                        section === "snoozed"
-                          ? "unsnooze"
-                          : section === "settled"
-                            ? "unsettle"
-                            : "settle"
+                        section === "imported"
+                          ? "none"
+                          : section === "snoozed"
+                            ? "unsnooze"
+                            : section === "settled"
+                              ? "unsettle"
+                              : "settle"
                       }
                       settlementSupported={
                         serverConfigs.get(thread.environmentId)?.environment.capabilities
@@ -2452,6 +2500,38 @@ export default function SidebarV2() {
                 const items: ReactNode[] = activeThreads.map((thread) =>
                   renderThreadRow(thread, "active"),
                 );
+                if (importedThreads.length > 0) {
+                  items.push(
+                    <li
+                      key="imported-shelf-header"
+                      data-thread-selection-safe
+                      className="list-none"
+                    >
+                      <button
+                        type="button"
+                        onClick={toggleImportedShelf}
+                        aria-expanded={importedShelfExpanded}
+                        data-testid="sidebar-v2-imported-shelf-toggle"
+                        className="mb-1 mt-3 flex min-h-11 w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left"
+                      >
+                        <span className="min-w-0 wrap-break-word text-xs font-medium text-muted-foreground/60">
+                          Imported ({importedThreads.length})
+                        </span>
+                        <span className="h-px flex-1 bg-sidebar-border/60" />
+                        <ChevronDownIcon
+                          aria-hidden
+                          className={cn(
+                            "size-3 text-muted-foreground/60 transition-transform motion-reduce:transition-none",
+                            importedShelfExpanded && "rotate-180",
+                          )}
+                        />
+                      </button>
+                    </li>,
+                  );
+                  for (const thread of visibleImportedThreads) {
+                    items.push(renderThreadRow(thread, "imported"));
+                  }
+                }
                 // Snoozed shelf: between the inbox and Settled — out of the
                 // way, never gone. The header always renders while anything
                 // is snoozed (the count is the whole footprint when
@@ -2531,7 +2611,11 @@ export default function SidebarV2() {
               ) : null}
             </ul>
           </TooltipProvider>
-          {activeThreads.length + snoozedThreads.length + settledThreads.length === 0 ? (
+          {activeThreads.length +
+            importedThreads.length +
+            snoozedThreads.length +
+            settledThreads.length ===
+          0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
               {projects.length === 0 ? (
                 <>

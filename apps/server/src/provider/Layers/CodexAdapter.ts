@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/CodexAdapter.ts
+// implements codex provider session behavior
+
 /**
  * CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
  *
@@ -1259,6 +1262,20 @@ function mapToRuntimeEvents(
           message,
           ...(!willRetry ? { class: "provider_error" as const } : {}),
           ...(event.payload !== undefined ? { detail: event.payload } : {}),
+        },
+      },
+    ];
+  }
+
+  if (event.method === "thread/resumeFallback") {
+    return [
+      {
+        type: "runtime.warning",
+        ...runtimeEventBase(event, canonicalThreadId),
+        payload: {
+          message:
+            event.message ??
+            "resume fell back to a fresh provider thread; native history was not found",
         },
       },
     ];

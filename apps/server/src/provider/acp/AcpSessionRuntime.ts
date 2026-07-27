@@ -1,3 +1,6 @@
+// apps/server/src/provider/acp/AcpSessionRuntime.ts
+// owns one scoped ACP process and its session request and event lifecycle
+
 import * as Cause from "effect/Cause";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -61,6 +64,7 @@ export interface AcpSessionRuntimeOptions {
   readonly spawn: AcpSpawnInput;
   readonly cwd: string;
   readonly resumeSessionId?: string;
+  readonly requireSessionLoadResponse?: boolean;
   readonly sessionLoadTimeout?: Duration.Input;
   readonly sessionLoadReplayIdleGap?: Duration.Input;
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest["clientCapabilities"];
@@ -355,6 +359,8 @@ export const make = (
 
     const acpContext = yield* Layer.build(
       EffectAcpClient.layerChildProcess(child, {
+        maximumPendingNotifications: 0,
+        maximumRetainedNotifications: 0,
         ...(options.protocolLogging?.logIncoming !== undefined
           ? { logIncoming: options.protocolLogging.logIncoming }
           : {}),
@@ -370,7 +376,11 @@ export const make = (
     yield* acp.handleSessionUpdate((notification) =>
       Effect.gen(function* () {
         const gate = yield* Ref.get(sessionLoadGateRef);
-        if (Option.isSome(gate) && gate.value.active) {
+        if (
+          Option.isSome(gate) &&
+          gate.value.active &&
+          notification.sessionId === gate.value.sessionId
+        ) {
           const lastActivityAtMillis = yield* Clock.currentTimeMillis;
           yield* Ref.set(
             sessionLoadGateRef,
@@ -573,6 +583,7 @@ export const make = (
           sessionLoadGateRef,
           Option.some({
             active: true,
+            sessionId: options.resumeSessionId,
             lastActivityAtMillis: undefined,
             idleGap: sessionLoadReplayIdleGap,
             initializeResult,
@@ -587,14 +598,18 @@ export const make = (
             status: "started",
           });
 
-          const idleFiber = yield* waitForSessionLoadReplayIdle({
-            gateRef: sessionLoadGateRef,
-          }).pipe(Effect.forkIn(runtimeScope));
-          const loaded = yield* Effect.raceFirst(
-            acp.agent.loadSession(loadPayload),
-            Fiber.join(idleFiber),
-          ).pipe(
-            Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)),
+          const loadSession = options.requireSessionLoadResponse
+            ? acp.agent.loadSession(loadPayload)
+            : Effect.gen(function* () {
+                const idleFiber = yield* waitForSessionLoadReplayIdle({
+                  gateRef: sessionLoadGateRef,
+                }).pipe(Effect.forkIn(runtimeScope));
+                return yield* Effect.raceFirst(
+                  acp.agent.loadSession(loadPayload),
+                  Fiber.join(idleFiber),
+                ).pipe(Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)));
+              });
+          const loaded = yield* loadSession.pipe(
             Effect.timeoutOption(sessionLoadTimeout),
             Effect.flatMap((result) =>
               Option.match(result, {

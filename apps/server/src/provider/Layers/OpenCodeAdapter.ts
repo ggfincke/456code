@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/OpenCodeAdapter.ts
+// adapts opencode sdk sessions into provider runtime events
+
 import {
   EventId,
   type OpenCodeSettings,
@@ -30,6 +33,7 @@ import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { makeKeyedSemaphore } from "./KeyedSemaphore.ts";
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -65,10 +69,14 @@ const OPENCODE_RESUME_VERSION = 1 as const;
 /**
  * Decode a persisted resume cursor into the upstream `ses_…` id. Anything
  * that isn't a current-version cursor with a non-empty id means "no resume"
- * rather than an error. Re-adopting the session id IS the resume mechanism —
- * OpenCode scopes a conversation's history by session id.
+ * rather than an error. Imported cursors can require that id to keep existing;
+ * ordinary adapter-generated cursors retain the recoverable fresh fallback.
+ * Re-adopting the session id IS the resume mechanism — OpenCode scopes a
+ * conversation's history by session id.
  */
-function parseOpenCodeResume(raw: unknown): { readonly sessionId: string } | undefined {
+function parseOpenCodeResume(
+  raw: unknown,
+): { readonly sessionId: string; readonly requireExisting: boolean } | undefined {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     return undefined;
   }
@@ -79,7 +87,13 @@ function parseOpenCodeResume(raw: unknown): { readonly sessionId: string } | und
   if (typeof record.sessionId !== "string" || record.sessionId.trim().length === 0) {
     return undefined;
   }
-  return { sessionId: record.sessionId.trim() };
+  if (Object.hasOwn(record, "requireExisting") && record.requireExisting !== true) {
+    return undefined;
+  }
+  return {
+    sessionId: record.sessionId,
+    requireExisting: record.requireExisting === true,
+  };
 }
 
 /**
@@ -586,6 +600,7 @@ export function makeOpenCodeAdapter(
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined;
     const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>();
     const sessions = new Map<ThreadId, OpenCodeSessionContext>();
+    const threadLocks = yield* makeKeyedSemaphore<ThreadId>();
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
       Effect.mapError(
         (cause) =>
@@ -620,6 +635,9 @@ export function makeOpenCodeAdapter(
             : {}),
         })),
       );
+
+    const withThreadLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
+      threadLocks.withPermit(threadId, effect);
 
     // Layer-level finalizer: when the adapter layer shuts down, stop every
     // session. Each session's `Scope.close` tears down its spawned OpenCode
@@ -1184,14 +1202,41 @@ export function makeOpenCodeAdapter(
       }
     });
 
-    const startSession: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
+    const startSessionUnlocked: OpenCodeAdapterShape["startSession"] = Effect.fn("startSession")(
       function* (input) {
         const binaryPath = openCodeSettings.binaryPath;
         const serverUrl = openCodeSettings.serverUrl;
         const serverPassword = openCodeSettings.serverPassword;
         const directory = input.cwd ?? serverConfig.cwd;
-        const resumeSessionId = parseOpenCodeResume(input.resumeCursor)?.sessionId;
+        const parsedResume = parseOpenCodeResume(input.resumeCursor);
+        if (
+          typeof input.resumeCursor === "object" &&
+          input.resumeCursor !== null &&
+          !Array.isArray(input.resumeCursor) &&
+          Object.hasOwn(input.resumeCursor, "requireExisting") &&
+          parsedResume === undefined
+        ) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue: "An imported OpenCode session requires a valid existing native session id.",
+          });
+        }
+        const resumeSessionId = parsedResume?.sessionId;
         const existing = sessions.get(input.threadId);
+        if (
+          existing &&
+          !(yield* Ref.get(existing.stopped)) &&
+          parseOpenCodeResume(existing.session.resumeCursor)?.requireExisting === true &&
+          parsedResume?.requireExisting !== true
+        ) {
+          return yield* new ProviderAdapterValidationError({
+            provider: PROVIDER,
+            operation: "startSession",
+            issue:
+              "An active imported OpenCode session must be stopped before starting a fresh native session.",
+          });
+        }
         if (existing) {
           yield* stopOpenCodeContext(existing);
           sessions.delete(input.threadId);
@@ -1231,18 +1276,47 @@ export function makeOpenCodeAdapter(
                 );
               }
               // Resume: re-adopt the session named by the durable cursor —
-              // OpenCode scopes history by session id. The probe recovers only
-              // a confirmed not-found (start fresh); transport/auth/server
-              // errors propagate instead of masking as a new empty session.
+              // OpenCode scopes history by session id. An ordinary cursor
+              // recovers a confirmed not-found by starting fresh; an imported
+              // requireExisting cursor fails instead. Transport/auth/server
+              // errors always propagate instead of masking as an empty session.
               const resolved = yield* Effect.gen(function* () {
                 const adopted = resumeSessionId
                   ? yield* runOpenCodeSdk("session.get", () =>
                       client.session.get({ sessionID: resumeSessionId }),
                     ).pipe(
-                      Effect.map((response) => response.data),
+                      Effect.flatMap((response) => {
+                        const data = response.data;
+                        if (!data) {
+                          return Effect.fail(
+                            new OpenCodeRuntimeError({
+                              operation: "session.get",
+                              detail: `OpenCode session.get returned no session payload for '${resumeSessionId}'.`,
+                            }),
+                          );
+                        }
+                        if (data.id !== resumeSessionId) {
+                          return Effect.fail(
+                            new OpenCodeRuntimeError({
+                              operation: "session.get",
+                              detail: `OpenCode session.get returned session '${data.id}' while resuming '${resumeSessionId}'.`,
+                            }),
+                          );
+                        }
+                        return Effect.succeed(data);
+                      }),
                       Effect.catchIf(
                         (cause) => isOpenCodeNotFound(cause),
-                        () => Effect.void,
+                        (cause) =>
+                          parsedResume.requireExisting
+                            ? Effect.fail(
+                                new OpenCodeRuntimeError({
+                                  operation: "session.get",
+                                  detail: `OpenCode native history '${resumeSessionId}' could not be resumed because that session no longer exists.`,
+                                  cause,
+                                }),
+                              )
+                            : Effect.void,
                       ),
                     )
                   : undefined;
@@ -1265,7 +1339,7 @@ export function makeOpenCodeAdapter(
                       permission: buildOpenCodePermissionRules(input.runtimeMode),
                     }),
                   );
-                  return { openCodeSession: reusable, created: false };
+                  return reusable;
                 }
 
                 // The session lives under a different cwd (e.g. the thread
@@ -1292,7 +1366,7 @@ export function makeOpenCodeAdapter(
                       permission: buildOpenCodePermissionRules(input.runtimeMode),
                     }),
                   );
-                  return { openCodeSession: forked, created: true };
+                  return forked;
                 }
 
                 if (resumeSessionId) {
@@ -1311,15 +1385,14 @@ export function makeOpenCodeAdapter(
                     detail: "OpenCode session.create returned no session payload.",
                   });
                 }
-                return { openCodeSession: createdSession.data, created: true };
+                return createdSession.data;
               });
 
               return {
                 sessionScope,
                 server,
                 client,
-                openCodeSession: resolved.openCodeSession,
-                created: resolved.created,
+                openCodeSession: resolved,
               };
             }).pipe(Effect.provideService(Scope.Scope, sessionScope)),
           );
@@ -1329,24 +1402,6 @@ export function makeOpenCodeAdapter(
           }
           return startedExit.value;
         });
-
-        // Guard against a concurrent startSession call that may have raced
-        // and already inserted a session while we were awaiting async work.
-        const raceWinner = sessions.get(input.threadId);
-        if (raceWinner) {
-          // Another call won the race — clean up. Only abort the remote
-          // session if we created it here; a resumed one is shared upstream
-          // state the winner is now using.
-          if (started.created) {
-            yield* runOpenCodeSdk("session.abort", () =>
-              started.client.session.abort({
-                sessionID: started.openCodeSession.id,
-              }),
-            ).pipe(Effect.ignore);
-          }
-          yield* Scope.close(started.sessionScope, Exit.void).pipe(Effect.ignore);
-          return raceWinner.session;
-        }
 
         const createdAt = yield* nowIso;
         const session: ProviderSession = {
@@ -1363,6 +1418,7 @@ export function makeOpenCodeAdapter(
           resumeCursor: {
             schemaVersion: OPENCODE_RESUME_VERSION,
             sessionId: started.openCodeSession.id,
+            ...(parsedResume?.requireExisting === true ? { requireExisting: true } : {}),
           },
           createdAt,
           updatedAt: createdAt,
@@ -1408,6 +1464,8 @@ export function makeOpenCodeAdapter(
         return session;
       },
     );
+    const startSession: OpenCodeAdapterShape["startSession"] = (input) =>
+      withThreadLock(input.threadId, startSessionUnlocked(input));
 
     const sendTurn: OpenCodeAdapterShape["sendTurn"] = Effect.fn("sendTurn")(function* (input) {
       const context = yield* ensureSessionContext(sessions, input.threadId);
@@ -1599,7 +1657,7 @@ export function makeOpenCodeAdapter(
       ).pipe(Effect.mapError(toRequestError));
     });
 
-    const stopSession: OpenCodeAdapterShape["stopSession"] = Effect.fn("stopSession")(
+    const stopSessionUnlocked: OpenCodeAdapterShape["stopSession"] = Effect.fn("stopSession")(
       function* (threadId) {
         const context = sessions.get(threadId);
         if (!context) {
@@ -1624,6 +1682,8 @@ export function makeOpenCodeAdapter(
         });
       },
     );
+    const stopSession: OpenCodeAdapterShape["stopSession"] = (threadId) =>
+      withThreadLock(threadId, stopSessionUnlocked(threadId));
 
     const listSessions: OpenCodeAdapterShape["listSessions"] = () =>
       Effect.sync(() => [...sessions.values()].map((context) => context.session));

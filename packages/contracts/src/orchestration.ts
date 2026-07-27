@@ -1,3 +1,5 @@
+// packages/contracts/src/orchestration.ts
+// defines orchestration commands, events, projections, and import rpc schemas
 import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
@@ -20,10 +22,16 @@ import {
   TrimmedNonEmptyString,
   TurnId,
 } from "./baseSchemas.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+import {
+  ProviderContinuationIdentity,
+  ProviderDriverKind,
+  ProviderInstanceId,
+} from "./providerInstance.ts";
 
 export const ORCHESTRATION_WS_METHODS = {
   dispatchCommand: "orchestration.dispatchCommand",
+  importScan: "orchestration.importScan",
+  importSessions: "orchestration.importSessions",
   getTurnDiff: "orchestration.getTurnDiff",
   getFullThreadDiff: "orchestration.getFullThreadDiff",
   replayEvents: "orchestration.replayEvents",
@@ -31,6 +39,69 @@ export const ORCHESTRATION_WS_METHODS = {
   subscribeShell: "orchestration.subscribeShell",
   subscribeThread: "orchestration.subscribeThread",
 } as const;
+
+export const ThreadImportSource = Schema.Literals([
+  "codex-cli",
+  "claude-code",
+  "opencode",
+  "cursor",
+  "grok",
+]);
+export type ThreadImportSource = typeof ThreadImportSource.Type;
+
+export const ThreadImportContinuation = Schema.Union([
+  Schema.Struct({
+    state: Schema.Literal("verified"),
+    providerInstanceId: ProviderInstanceId,
+    continuationIdentity: ProviderContinuationIdentity,
+    reason: Schema.Null,
+  }),
+  Schema.Struct({
+    state: Schema.Literal("history-only"),
+    providerInstanceId: ProviderInstanceId,
+    // null means no exact provider route was available and consent must fail closed
+    continuationIdentity: Schema.NullOr(ProviderContinuationIdentity),
+    reason: TrimmedNonEmptyString,
+  }),
+]);
+export type ThreadImportContinuation = typeof ThreadImportContinuation.Type;
+
+export const ThreadImportContinuationActivityPayload = Schema.Struct({
+  type: Schema.Literal("import.continuation"),
+  driverKind: ProviderDriverKind,
+  continuation: ThreadImportContinuation,
+});
+export type ThreadImportContinuationActivityPayload =
+  typeof ThreadImportContinuationActivityPayload.Type;
+
+export const ThreadImportContinuationConsent = Schema.Struct({
+  originContentHash: TrimmedNonEmptyString,
+  activityId: EventId,
+  driverKind: ProviderDriverKind,
+  targetProviderInstanceId: ProviderInstanceId,
+  continuation: ThreadImportContinuation,
+});
+export type ThreadImportContinuationConsent = typeof ThreadImportContinuationConsent.Type;
+
+export const ThreadImportContinuationAuthority = Schema.Struct({
+  driverKind: ProviderDriverKind,
+  targetProviderInstanceId: ProviderInstanceId,
+  continuationIdentity: Schema.NullOr(ProviderContinuationIdentity),
+});
+export type ThreadImportContinuationAuthority = typeof ThreadImportContinuationAuthority.Type;
+
+export const ThreadOrigin = Schema.Struct({
+  kind: Schema.Literal("imported"),
+  source: ThreadImportSource,
+  sourcePath: TrimmedNonEmptyString,
+  contentHash: TrimmedNonEmptyString,
+  nativeSessionId: Schema.NullOr(TrimmedNonEmptyString),
+  providerInstanceId: Schema.NullOr(ProviderInstanceId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  importedAt: IsoDateTime,
+});
+export type ThreadOrigin = typeof ThreadOrigin.Type;
 
 export const ProviderApprovalPolicy = Schema.Literals([
   "untrusted",
@@ -357,6 +428,7 @@ export const OrchestrationThread = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  origin: Schema.NullOr(ThreadOrigin).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -413,6 +485,7 @@ export const OrchestrationThreadShell = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
+  origin: Schema.NullOr(ThreadOrigin).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -554,6 +627,23 @@ const ThreadCreateCommand = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  origin: Schema.optional(ThreadOrigin),
+  createdAt: IsoDateTime,
+});
+
+const ClientThreadCreateCommand = Schema.Struct({
+  type: Schema.Literal("thread.create"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  projectId: ProjectId,
+  title: TrimmedNonEmptyString,
+  modelSelection: ModelSelection,
+  runtimeMode: RuntimeMode,
+  interactionMode: ProviderInteractionMode.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
+  ),
+  branch: Schema.NullOr(TrimmedNonEmptyString),
+  worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   createdAt: IsoDateTime,
 });
 
@@ -683,6 +773,7 @@ export const ThreadTurnStartCommand = Schema.Struct({
   ),
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  importContinuationConsent: Schema.optional(ThreadImportContinuationConsent),
   createdAt: IsoDateTime,
 });
 
@@ -702,6 +793,7 @@ const ClientThreadTurnStartCommand = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   bootstrap: Schema.optional(ThreadTurnStartBootstrap),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  importContinuationConsent: Schema.optional(ThreadImportContinuationConsent),
   createdAt: IsoDateTime,
 });
 
@@ -775,7 +867,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ProjectCreateCommand,
   ProjectMetaUpdateCommand,
   ProjectDeleteCommand,
-  ThreadCreateCommand,
+  ClientThreadCreateCommand,
   ThreadDeleteCommand,
   ThreadArchiveCommand,
   ThreadUnarchiveCommand,
@@ -852,6 +944,23 @@ const ThreadActivityAppendCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadMessagesImportCommand = Schema.Struct({
+  type: Schema.Literal("thread.messages.import"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  messages: Schema.Array(
+    Schema.Struct({
+      messageId: MessageId,
+      role: Schema.Literals(["user", "assistant"]),
+      text: Schema.String,
+      createdAt: IsoDateTime,
+    }),
+  ),
+  activities: Schema.Array(OrchestrationThreadActivity),
+  createdAt: IsoDateTime,
+});
+export type ThreadMessagesImportCommand = typeof ThreadMessagesImportCommand.Type;
+
 const ThreadRevertCompleteCommand = Schema.Struct({
   type: Schema.Literal("thread.revert.complete"),
   commandId: CommandId,
@@ -867,6 +976,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadProposedPlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
+  ThreadMessagesImportCommand,
   ThreadRevertCompleteCommand,
 ]);
 export type InternalOrchestrationCommand = typeof InternalOrchestrationCommand.Type;
@@ -948,6 +1058,7 @@ export const ThreadCreatedPayload = Schema.Struct({
   ),
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
+  origin: Schema.NullOr(ThreadOrigin).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1042,6 +1153,7 @@ export const ThreadTurnStartRequestedPayload = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_PROVIDER_INTERACTION_MODE)),
   ),
   sourceProposedPlan: Schema.optional(SourceProposedPlanReference),
+  importContinuationAuthority: Schema.optional(ThreadImportContinuationAuthority),
   createdAt: IsoDateTime,
 });
 
@@ -1371,10 +1483,112 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
+export const IMPORT_SCAN_MAX_CANDIDATES = 2_000;
+export const IMPORT_SCAN_MAX_ERRORS = 100;
+export const IMPORT_SESSIONS_MAX_ITEMS = 100;
+export const IMPORT_SOURCE_PATH_MAX_CHARS = 4_096;
+export const IMPORT_TITLE_MAX_CHARS = 512;
+export const IMPORT_METADATA_MAX_CHARS = 512;
+export const IMPORT_WORKSPACE_ROOT_MAX_CHARS = 4_096;
+export const IMPORT_RESULT_MESSAGE_MAX_CHARS = 2_048;
+
+const ImportSourcePath = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(IMPORT_SOURCE_PATH_MAX_CHARS),
+);
+const ImportTitle = TrimmedNonEmptyString.check(Schema.isMaxLength(IMPORT_TITLE_MAX_CHARS));
+const ImportMetadata = TrimmedNonEmptyString.check(Schema.isMaxLength(IMPORT_METADATA_MAX_CHARS));
+const ImportWorkspaceRoot = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(IMPORT_WORKSPACE_ROOT_MAX_CHARS),
+);
+const ImportResultMessage = TrimmedNonEmptyString.check(
+  Schema.isMaxLength(IMPORT_RESULT_MESSAGE_MAX_CHARS),
+);
+
+export const ImportScanCandidate = Schema.Struct({
+  source: ThreadImportSource,
+  sourcePath: ImportSourcePath,
+  providerInstanceIds: Schema.Array(ProviderInstanceId),
+  nativeSessionId: Schema.NullOr(ImportMetadata),
+  title: Schema.NullOr(ImportTitle),
+  cwd: Schema.NullOr(ImportWorkspaceRoot),
+  gitBranch: Schema.NullOr(ImportMetadata),
+  model: Schema.NullOr(ImportMetadata),
+  messageCount: NonNegativeInt,
+  modifiedAt: Schema.NullOr(IsoDateTime),
+  alreadyImportedThreadId: Schema.NullOr(ThreadId),
+  alreadyImportedProviderInstanceId: Schema.NullOr(ProviderInstanceId).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  alreadyImportedArchived: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  matchedProjectId: Schema.NullOr(ProjectId),
+  resumable: Schema.Boolean,
+});
+export type ImportScanCandidate = typeof ImportScanCandidate.Type;
+
+export const ImportScanResult = Schema.Struct({
+  candidates: Schema.Array(ImportScanCandidate).check(
+    Schema.isMaxLength(IMPORT_SCAN_MAX_CANDIDATES),
+  ),
+  scannedAt: IsoDateTime,
+  errors: Schema.Array(
+    Schema.Struct({
+      sourcePath: Schema.NullOr(ImportSourcePath),
+      message: ImportResultMessage,
+    }),
+  ).check(Schema.isMaxLength(IMPORT_SCAN_MAX_ERRORS + 1)),
+});
+export type ImportScanResult = typeof ImportScanResult.Type;
+
+export const ImportSessionsRequest = Schema.Struct({
+  items: Schema.Array(
+    Schema.Struct({
+      source: ThreadImportSource,
+      sourcePath: ImportSourcePath,
+      providerInstanceId: ProviderInstanceId,
+    }),
+  ).check(Schema.isMaxLength(IMPORT_SESSIONS_MAX_ITEMS)),
+});
+export type ImportSessionsRequest = typeof ImportSessionsRequest.Type;
+
+export const ImportSessionsResult = Schema.Struct({
+  imported: Schema.Array(
+    Schema.Struct({
+      sourcePath: ImportSourcePath,
+      threadId: ThreadId,
+      projectId: ProjectId,
+      messageCount: NonNegativeInt,
+      activityCount: NonNegativeInt,
+      continuation: ThreadImportContinuation,
+    }),
+  ).check(Schema.isMaxLength(IMPORT_SESSIONS_MAX_ITEMS)),
+  skipped: Schema.Array(
+    Schema.Struct({
+      sourcePath: ImportSourcePath,
+      reason: ImportResultMessage,
+      threadId: Schema.NullOr(ThreadId),
+    }),
+  ).check(Schema.isMaxLength(IMPORT_SESSIONS_MAX_ITEMS)),
+  failed: Schema.Array(
+    Schema.Struct({
+      sourcePath: ImportSourcePath,
+      message: ImportResultMessage,
+    }),
+  ).check(Schema.isMaxLength(IMPORT_SESSIONS_MAX_ITEMS)),
+});
+export type ImportSessionsResult = typeof ImportSessionsResult.Type;
+
 export const OrchestrationRpcSchemas = {
   dispatchCommand: {
     input: ClientOrchestrationCommand,
     output: DispatchResult,
+  },
+  importScan: {
+    input: Schema.Struct({}),
+    output: ImportScanResult,
+  },
+  importSessions: {
+    input: ImportSessionsRequest,
+    output: ImportSessionsResult,
   },
   getTurnDiff: {
     input: OrchestrationGetTurnDiffInput,

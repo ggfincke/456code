@@ -1,3 +1,6 @@
+// apps/server/src/ws.ts
+// serves authenticated websocket rpc handlers for server capabilities
+
 import * as Cause from "effect/Cause";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -11,6 +14,7 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import {
   DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL,
+  DEFAULT_MODEL_BY_PROVIDER,
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
   AuthReviewWriteScope,
@@ -22,6 +26,8 @@ import {
   type AuthEnvironmentScope,
   AuthSessionId,
   CommandId,
+  type ClientOrchestrationCommand,
+  defaultInstanceIdForDriver,
   type DiscoveredLocalServerList,
   EventId,
   type OrchestrationCommand,
@@ -29,6 +35,7 @@ import {
   type GitManagerServiceError,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
+  type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
   type OrchestrationThreadStreamItem,
@@ -63,6 +70,7 @@ import {
 } from "@t3tools/contracts";
 import { clamp } from "effect/Number";
 import { HttpRouter, HttpServerRequest, HttpServerRespondable } from "effect/unstable/http";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import { RpcSerialization, RpcServer } from "effect/unstable/rpc";
 
 import * as CheckpointDiffQuery from "./checkpointing/CheckpointDiffQuery.ts";
@@ -72,6 +80,38 @@ import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
+import * as ImportContinuation from "./import/continuationContract.ts";
+
+// prefer a continuation implementation provided by the server layer graph
+// (see server.ts providing ImportContinuationLive onto the ws route layer);
+// harness graphs without one fall back to an inert bind so imports still work
+const ImportContinuationFromContext = Layer.effect(
+  ImportContinuation.ImportContinuationDeps,
+  Effect.serviceOption(ImportContinuation.ImportContinuationDeps).pipe(
+    Effect.map(
+      Option.getOrElse(() =>
+        ImportContinuation.ImportContinuationDeps.of({
+          bind: (request) =>
+            Effect.succeed({
+              state: "history-only",
+              providerInstanceId: request.providerInstanceId,
+              continuationIdentity: null,
+              reason: "continuation module not wired",
+            }),
+        }),
+      ),
+    ),
+  ),
+);
+import * as ImportDiscovery from "./import/discovery.ts";
+import * as ImportSessions from "./import/importService.ts";
+import {
+  AcpImportError,
+  loadAcpImportSessionsBatch,
+  scanAndLoadAcpImportCatalog,
+} from "./import/acpImport.ts";
+import { partitionAcpImportBytePolicy } from "./import/resourceLimits.ts";
+import { resolveAcpImportSourceCatalog, resolveSourceCatalog } from "./import/sourceCatalog.ts";
 import {
   observeRpcEffect as instrumentRpcEffect,
   observeRpcStream as instrumentRpcStream,
@@ -131,6 +171,90 @@ const RELAY_CLIENT_UNAVAILABLE_STATUS = {
 } as const satisfies RelayClientStatus;
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+
+interface ImportedThreadShellIndex {
+  readonly find: (
+    lookup: ImportSessions.ImportedThreadLookup,
+  ) => ImportSessions.ImportedThreadMatch | null;
+  readonly findById: (threadId: ThreadId) => ImportSessions.ImportedThreadMatch | null;
+  readonly addThread: (
+    thread: OrchestrationShellSnapshot["threads"][number],
+    archived: boolean,
+  ) => void;
+}
+
+function importedSourcePathKey(source: string, sourcePath: string): string {
+  return JSON.stringify([source, sourcePath]);
+}
+
+function importedNativeSessionKey(
+  source: string,
+  providerInstanceId: string | null,
+  nativeSessionId: string,
+): string {
+  return JSON.stringify([source, providerInstanceId, nativeSessionId]);
+}
+
+function makeImportedThreadShellIndex(
+  activeSnapshot: OrchestrationShellSnapshot,
+  archivedSnapshot: OrchestrationShellSnapshot,
+): ImportedThreadShellIndex {
+  const bySourcePath = new Map<string, ImportSessions.ImportedThreadMatch>();
+  const byNativeSession = new Map<string, ImportSessions.ImportedThreadMatch>();
+  const byThreadId = new Map<ThreadId, ImportSessions.ImportedThreadMatch>();
+  const addThread: ImportedThreadShellIndex["addThread"] = (thread, archived) => {
+    if (thread.origin === null) {
+      return;
+    }
+    const match = {
+      threadId: thread.id,
+      projectId: thread.projectId,
+      contentHash: thread.origin.contentHash,
+      source: thread.origin.source,
+      sourcePath: thread.origin.sourcePath,
+      nativeSessionId: thread.origin.nativeSessionId,
+      providerInstanceId: thread.origin.providerInstanceId,
+      modelSelection: thread.modelSelection,
+      archived,
+    } satisfies ImportSessions.ImportedThreadMatch;
+    byThreadId.set(thread.id, match);
+    const sourcePathKey = importedSourcePathKey(thread.origin.source, thread.origin.sourcePath);
+    if (!bySourcePath.has(sourcePathKey)) {
+      bySourcePath.set(sourcePathKey, match);
+    }
+    if (thread.origin.nativeSessionId !== null) {
+      const nativeSessionKey = importedNativeSessionKey(
+        thread.origin.source,
+        thread.origin.providerInstanceId,
+        thread.origin.nativeSessionId,
+      );
+      if (!byNativeSession.has(nativeSessionKey)) {
+        byNativeSession.set(nativeSessionKey, match);
+      }
+    }
+  };
+  for (const thread of activeSnapshot.threads) {
+    addThread(thread, false);
+  }
+  for (const thread of archivedSnapshot.threads) {
+    addThread(thread, true);
+  }
+  return {
+    addThread,
+    findById: (threadId) => byThreadId.get(threadId) ?? null,
+    find: (lookup) =>
+      bySourcePath.get(importedSourcePathKey(lookup.source, lookup.sourcePath)) ??
+      (lookup.nativeSessionId === null
+        ? null
+        : (byNativeSession.get(
+            importedNativeSessionKey(
+              lookup.source,
+              lookup.providerInstanceId,
+              lookup.nativeSessionId,
+            ),
+          ) ?? null)),
+  };
+}
 
 function unexpectedCompatibilityError(error: never): never {
   throw new Error(`Unhandled compatibility error: ${String(error)}`);
@@ -299,6 +423,8 @@ const SHELL_RESUME_MAX_GAP = 1_000;
 
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
+  [ORCHESTRATION_WS_METHODS.importScan, AuthOrchestrationReadScope],
+  [ORCHESTRATION_WS_METHODS.importSessions, AuthOrchestrationOperateScope],
   [ORCHESTRATION_WS_METHODS.getTurnDiff, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.getFullThreadDiff, AuthOrchestrationReadScope],
   [ORCHESTRATION_WS_METHODS.replayEvents, AuthOrchestrationReadScope],
@@ -438,6 +564,7 @@ const makeWsRpcLayer = (
       const lifecycleEvents = yield* ServerLifecycleEvents.ServerLifecycleEvents;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
+      const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
@@ -1079,6 +1206,32 @@ const makeWsRpcLayer = (
           );
       };
 
+      const prevalidateImportContinuationProvider = (
+        command: ClientOrchestrationCommand,
+      ): Effect.Effect<void, OrchestrationDispatchCommandError> =>
+        Effect.gen(function* () {
+          if (command.type !== "thread.turn.start" || !command.importContinuationConsent) {
+            return;
+          }
+          const consent = command.importContinuationConsent;
+          const providers = yield* providerRegistry.getProviders;
+          const target = providers.find(
+            (provider) => provider.instanceId === consent.targetProviderInstanceId,
+          );
+          const continuationIdentity = consent.continuation.continuationIdentity;
+          if (
+            continuationIdentity !== null &&
+            target?.driver === consent.driverKind &&
+            continuationIdentity.driverKind === consent.driverKind &&
+            target.continuation?.groupKey === continuationIdentity.continuationKey
+          ) {
+            return;
+          }
+          return yield* new OrchestrationDispatchCommandError({
+            message: `Imported continuation provider instance '${consent.targetProviderInstanceId}' no longer resolves to the accepted continuation source.`,
+          });
+        });
+
       const loadServerConfig = Effect.gen(function* () {
         const keybindingsConfig = yield* keybindings.loadConfigState;
         const providers = yield* providerRegistry.getProviders;
@@ -1123,6 +1276,7 @@ const makeWsRpcLayer = (
           observeRpcEffect(
             ORCHESTRATION_WS_METHODS.dispatchCommand,
             Effect.gen(function* () {
+              yield* prevalidateImportContinuationProvider(command);
               const normalizedCommand = yield* normalizeDispatchCommand(command);
               const shouldStopSessionAfterArchive =
                 normalizedCommand.type === "thread.archive"
@@ -1341,6 +1495,359 @@ const makeWsRpcLayer = (
                 synchronizedThenLive,
               );
             }),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.importScan]: (_input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.importScan,
+            Effect.gen(function* () {
+              const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+              const [snapshot, archivedSnapshot, settings] = yield* Effect.all([
+                projectionSnapshotQuery.getShellSnapshot(),
+                projectionSnapshotQuery.getArchivedShellSnapshot(),
+                serverSettings.getSettings,
+              ]);
+              const importedThreadIndex = makeImportedThreadShellIndex(snapshot, archivedSnapshot);
+              const discovery = yield* ImportDiscovery.make.pipe(
+                Effect.provideService(
+                  ImportDiscovery.ImportDiscoveryDeps,
+                  ImportDiscovery.ImportDiscoveryDeps.of({
+                    findThreadByContentHash: (lookup) =>
+                      Effect.succeed(importedThreadIndex.find(lookup)),
+                    findProjectByWorkspaceRoot: (normalizedRoot) =>
+                      Effect.succeed(
+                        snapshot.projects.find(
+                          (project) => project.workspaceRoot === normalizedRoot,
+                        )?.id ?? null,
+                      ),
+                    normalizeWorkspaceRoot: (workspaceRoot) =>
+                      workspacePaths.normalizeWorkspaceRoot(workspaceRoot),
+                    scanAcpSource: (descriptor, maximumSessionsToLoad) =>
+                      scanAndLoadAcpImportCatalog(
+                        descriptor.connection,
+                        maximumSessionsToLoad,
+                      ).pipe(
+                        Effect.provideService(
+                          ChildProcessSpawner.ChildProcessSpawner,
+                          childProcessSpawner,
+                        ),
+                      ),
+                  }),
+                ),
+              );
+              return yield* discovery.scan(settings, { cwd: config.cwd });
+            }).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationGetSnapshotError({
+                    message: "Failed to load session import scan context",
+                    cause,
+                  }),
+              ),
+            ),
+            { "rpc.aggregate": "orchestration" },
+          ),
+        [ORCHESTRATION_WS_METHODS.importSessions]: (input) =>
+          observeRpcEffect(
+            ORCHESTRATION_WS_METHODS.importSessions,
+            Effect.gen(function* () {
+              const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
+              const [providers, settings] = yield* Effect.all([
+                providerRegistry.getProviders,
+                serverSettings.getSettings,
+              ]);
+              const requestedSources = new Set(input.items.map((item) => item.source));
+              const needsFileCatalog =
+                requestedSources.has("codex-cli") ||
+                requestedSources.has("claude-code") ||
+                requestedSources.has("opencode");
+              const needsAcpCatalog =
+                requestedSources.has("cursor") || requestedSources.has("grok");
+              const [sourceCatalog, acpSourceCatalog] = yield* Effect.all(
+                [
+                  needsFileCatalog
+                    ? resolveSourceCatalog(settings, { cwd: config.cwd })
+                    : Effect.succeed({ descriptors: [], errors: [] }),
+                  needsAcpCatalog
+                    ? resolveAcpImportSourceCatalog(settings, { cwd: config.cwd })
+                    : Effect.succeed({ descriptors: [], errors: [] }),
+                ],
+                { concurrency: "unbounded" },
+              );
+              const fallbackModelSelection =
+                ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection();
+              let [activeImportSnapshot, archivedImportSnapshot] = yield* Effect.all([
+                projectionSnapshotQuery.getShellSnapshot(),
+                projectionSnapshotQuery.getArchivedShellSnapshot(),
+              ]);
+              let importedThreadIndex = makeImportedThreadShellIndex(
+                activeImportSnapshot,
+                archivedImportSnapshot,
+              );
+              let importedProjectByWorkspaceRoot = new Map(
+                activeImportSnapshot.projects.map((project) => [project.workspaceRoot, project.id]),
+              );
+              let importedThreadIndexDirty = false;
+              const refreshImportedThreadIndex = Effect.gen(function* () {
+                [activeImportSnapshot, archivedImportSnapshot] = yield* Effect.all([
+                  projectionSnapshotQuery.getShellSnapshot(),
+                  projectionSnapshotQuery.getArchivedShellSnapshot(),
+                ]);
+                importedThreadIndex = makeImportedThreadShellIndex(
+                  activeImportSnapshot,
+                  archivedImportSnapshot,
+                );
+                importedProjectByWorkspaceRoot = new Map(
+                  activeImportSnapshot.projects.map((project) => [
+                    project.workspaceRoot,
+                    project.id,
+                  ]),
+                );
+                importedThreadIndexDirty = false;
+              });
+              const dispatchImportCommand = (command: OrchestrationCommand) =>
+                dispatchNormalizedCommand(command).pipe(
+                  Effect.tapError(() =>
+                    command.type === "project.create" ||
+                    command.type === "thread.create" ||
+                    command.type === "thread.archive" ||
+                    command.type === "thread.delete"
+                      ? Effect.sync(() => {
+                          importedThreadIndexDirty = true;
+                        })
+                      : Effect.void,
+                  ),
+                  Effect.tap(() => {
+                    if (command.type === "thread.archive" || command.type === "thread.delete") {
+                      return Effect.sync(() => {
+                        importedThreadIndexDirty = true;
+                      });
+                    }
+                    if (command.type === "project.create") {
+                      return projectionSnapshotQuery.getProjectShellById(command.projectId).pipe(
+                        Effect.flatMap(
+                          Option.match({
+                            onNone: () =>
+                              Effect.sync(() => {
+                                importedThreadIndexDirty = true;
+                              }),
+                            onSome: (project) =>
+                              Effect.sync(() => {
+                                importedProjectByWorkspaceRoot.set(
+                                  project.workspaceRoot,
+                                  project.id,
+                                );
+                              }),
+                          }),
+                        ),
+                        Effect.catch(() =>
+                          Effect.sync(() => {
+                            importedThreadIndexDirty = true;
+                          }),
+                        ),
+                      );
+                    }
+                    return command.type === "thread.create"
+                      ? projectionSnapshotQuery.getThreadShellById(command.threadId).pipe(
+                          Effect.flatMap(
+                            Option.match({
+                              onNone: () =>
+                                Effect.sync(() => {
+                                  importedThreadIndexDirty = true;
+                                }),
+                              onSome: (thread) =>
+                                Effect.sync(() => {
+                                  importedThreadIndex.addThread(thread, false);
+                                }),
+                            }),
+                          ),
+                          Effect.catch(() =>
+                            Effect.sync(() => {
+                              importedThreadIndexDirty = true;
+                            }),
+                          ),
+                        )
+                      : Effect.void;
+                  }),
+                );
+              const importService = yield* ImportSessions.make.pipe(
+                Effect.provideService(
+                  ImportSessions.ImportServiceDeps,
+                  ImportSessions.ImportServiceDeps.of({
+                    dispatch: dispatchImportCommand,
+                    findThreadByContentHash: (lookup) =>
+                      Effect.suspend(() =>
+                        importedThreadIndexDirty
+                          ? refreshImportedThreadIndex.pipe(
+                              Effect.map(() => importedThreadIndex.find(lookup)),
+                            )
+                          : Effect.succeed(importedThreadIndex.find(lookup)),
+                      ),
+                    findThreadById: (threadId) =>
+                      Effect.suspend(() =>
+                        importedThreadIndexDirty
+                          ? refreshImportedThreadIndex.pipe(
+                              Effect.map(() => importedThreadIndex.findById(threadId)),
+                            )
+                          : Effect.succeed(importedThreadIndex.findById(threadId)),
+                      ),
+                    findProjectByWorkspaceRoot: (normalizedRoot) =>
+                      Effect.suspend(() =>
+                        importedThreadIndexDirty
+                          ? refreshImportedThreadIndex.pipe(
+                              Effect.map(
+                                () => importedProjectByWorkspaceRoot.get(normalizedRoot) ?? null,
+                              ),
+                            )
+                          : Effect.succeed(
+                              importedProjectByWorkspaceRoot.get(normalizedRoot) ?? null,
+                            ),
+                      ),
+                    isImportFinalized: (threadId) =>
+                      projectionSnapshotQuery.getSnapshot().pipe(
+                        Effect.map((snapshot) => {
+                          const thread = snapshot.threads.find(
+                            (candidate) =>
+                              candidate.id === threadId && candidate.deletedAt === null,
+                          );
+                          return (
+                            thread?.activities.some(
+                              (activity) =>
+                                typeof activity.payload === "object" &&
+                                activity.payload !== null &&
+                                "type" in activity.payload &&
+                                activity.payload.type === "import.continuation",
+                            ) ?? false
+                          );
+                        }),
+                      ),
+                    normalizeWorkspaceRoot: (workspaceRoot) =>
+                      workspacePaths.normalizeWorkspaceRoot(workspaceRoot),
+                    resolveImportTarget: (driver, requestedInstanceId, compatibleInstanceIds) => {
+                      const compatibleIds = new Set(compatibleInstanceIds);
+                      const eligibleProviders = providers.filter(
+                        (candidate) =>
+                          candidate.driver === driver &&
+                          compatibleIds.has(candidate.instanceId) &&
+                          candidate.enabled &&
+                          candidate.installed &&
+                          candidate.availability !== "unavailable",
+                      );
+                      if (requestedInstanceId !== null && !compatibleIds.has(requestedInstanceId)) {
+                        return Effect.succeed(null);
+                      }
+                      const defaultInstanceId = defaultInstanceIdForDriver(driver);
+                      const provider =
+                        requestedInstanceId === null
+                          ? (eligibleProviders.find(
+                              (candidate) => candidate.instanceId === defaultInstanceId,
+                            ) ?? eligibleProviders[0])
+                          : eligibleProviders.find(
+                              (candidate) => candidate.instanceId === requestedInstanceId,
+                            );
+                      if (provider === undefined) return Effect.succeed(null);
+                      const model =
+                        provider.models.find((candidate) => candidate.isDefault)?.slug ??
+                        provider.models[0]?.slug ??
+                        DEFAULT_MODEL_BY_PROVIDER[driver] ??
+                        fallbackModelSelection.model;
+                      return Effect.succeed({
+                        defaultModelSelection: {
+                          instanceId: provider.instanceId,
+                          model,
+                        },
+                        availableModels: provider.models.map((candidate) => candidate.slug),
+                      });
+                    },
+                    threadExistsInShell: (threadId) =>
+                      projectionSnapshotQuery
+                        .getThreadShellById(threadId)
+                        .pipe(Effect.map(Option.isSome)),
+                    fallbackModelSelection,
+                    sourceDescriptors: sourceCatalog.descriptors,
+                    loadAcpSessionsBatch: ({
+                      source,
+                      sourcePaths,
+                      providerInstanceId,
+                      maximumBytes,
+                      wireUsage,
+                    }) => {
+                      const descriptor = acpSourceCatalog.descriptors.find(
+                        (candidate) =>
+                          candidate.source === source &&
+                          candidate.providerInstanceId === providerInstanceId,
+                      );
+                      if (descriptor === undefined) {
+                        const error = new AcpImportError(
+                          "invalid-source",
+                          `No configured ${source} import source exists for provider instance '${providerInstanceId}'.`,
+                        );
+                        return Effect.succeed(
+                          sourcePaths.map((sourcePath) => ({
+                            sourcePath,
+                            descriptor: null,
+                            session: null,
+                            error,
+                          })),
+                        );
+                      }
+                      const boundedBytePolicy = partitionAcpImportBytePolicy(
+                        maximumBytes,
+                        descriptor.connection.policy,
+                      );
+                      if (boundedBytePolicy === null) {
+                        const error = new AcpImportError(
+                          "limit-exceeded",
+                          `The remaining ACP import byte budget is too small to load provider instance '${providerInstanceId}'.`,
+                        );
+                        return Effect.succeed(
+                          sourcePaths.map((sourcePath) => ({
+                            sourcePath,
+                            descriptor: null,
+                            session: null,
+                            error,
+                          })),
+                        );
+                      }
+                      return loadAcpImportSessionsBatch(
+                        {
+                          ...descriptor.connection,
+                          policy: {
+                            ...descriptor.connection.policy,
+                            ...boundedBytePolicy,
+                          },
+                          wireUsage,
+                        },
+                        sourcePaths,
+                      ).pipe(
+                        Effect.provideService(
+                          ChildProcessSpawner.ChildProcessSpawner,
+                          childProcessSpawner,
+                        ),
+                      );
+                    },
+                  }),
+                ),
+                Effect.provide(ImportContinuationFromContext),
+              );
+              return yield* importService.importSessions(input);
+            }).pipe(
+              Effect.timeoutOption(ImportSessions.IMPORT_REQUEST_DEADLINE_MS),
+              Effect.flatMap(
+                Option.match({
+                  onNone: () =>
+                    Effect.fail(
+                      new OrchestrationDispatchCommandError({
+                        message: `Session import initialization and execution exceeded ${ImportSessions.IMPORT_REQUEST_DEADLINE_MS}ms`,
+                      }),
+                    ),
+                  onSome: Effect.succeed,
+                }),
+              ),
+              Effect.mapError((cause) =>
+                toDispatchCommandError(cause, "Failed to initialize session import"),
+              ),
+            ),
             { "rpc.aggregate": "orchestration" },
           ),
         [ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot]: (_input) =>

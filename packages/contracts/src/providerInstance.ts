@@ -1,3 +1,5 @@
+// packages/contracts/src/providerInstance.ts
+// defines provider driver, instance, and continuation identity schemas
 /**
  * Provider-instance contracts.
  *
@@ -81,6 +83,16 @@ export const isProviderDriverKind = (value: unknown): value is ProviderDriverKin
  */
 export const ProviderInstanceId = slugSchema.pipe(Schema.brand("ProviderInstanceId"));
 export type ProviderInstanceId = typeof ProviderInstanceId.Type;
+
+/**
+ * Stable identity of the provider-owned storage or connection that can
+ * continue native sessions.
+ */
+export const ProviderContinuationIdentity = Schema.Struct({
+  driverKind: ProviderDriverKind,
+  continuationKey: TrimmedNonEmptyString,
+});
+export type ProviderContinuationIdentity = typeof ProviderContinuationIdentity.Type;
 
 /**
  * Lightweight reference identifying which driver implements an instance.

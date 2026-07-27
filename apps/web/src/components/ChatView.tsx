@@ -1,3 +1,5 @@
+// apps/web/src/components/ChatView.tsx
+// renders thread timelines, composer state, and guarded provider dispatch
 import {
   type ApprovalRequestId,
   DEFAULT_MODEL,
@@ -55,7 +57,7 @@ import {
   useState,
 } from "react";
 import { flushSync } from "react-dom";
-import { useNavigate } from "@tanstack/react-router";
+import { Link, useNavigate } from "@tanstack/react-router";
 import { useShallow } from "zustand/react/shallow";
 import {
   isAtomCommandInterrupted,
@@ -144,6 +146,7 @@ import {
   CheckCircle2Icon,
   ChevronDownIcon,
   GitBranchIcon,
+  ImportIcon,
   TriangleAlertIcon,
   WifiOffIcon,
 } from "lucide-react";
@@ -160,7 +163,7 @@ import {
 } from "~/projectScripts";
 import { newDraftId, newMessageId, newThreadId } from "~/lib/utils";
 import { getProviderModelCapabilities, resolveSelectableProvider } from "../providerModels";
-import { NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
+import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "../providerInstances";
 import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { resolveAppModelSelectionForInstance } from "../modelSelection";
@@ -250,7 +253,10 @@ import {
   createLocalDispatchSnapshot,
   deriveComposerSendState,
   dismissBranchMismatchForSession,
+  handleImportContinuationSendBlock,
   hasServerAcknowledgedLocalDispatch,
+  importContinuationConsentToken,
+  isImportContinuationSendBlocked,
   isBranchMismatchDismissedForSession,
   shouldShowBranchMismatchBanner,
   getStartedThreadModelChangeBlockReason,
@@ -262,6 +268,9 @@ import {
   deriveLockedProvider,
   readFileAsDataUrl,
   reconcileMountedTerminalThreadIds,
+  resolveImportContinuationBannerCopy,
+  resolveImportContinuationGate,
+  resolveImportContinuationProviderSnapshot,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   revokeBlobPreviewUrl,
@@ -295,6 +304,7 @@ import {
   serverUpdateGuidance,
 } from "../versionSkew";
 import { useAssetUrls } from "../assets/assetUrls";
+import { importSourceDisplayName } from "../importSourcePresentation";
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   "[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]";
@@ -302,6 +312,7 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = [];
 const EMPTY_PROVIDERS: ServerProvider[] = [];
 const EMPTY_PROVIDER_SKILLS: ServerProvider["skills"] = [];
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {};
+
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean) {
   const transitionGroupRef = useRef<HTMLDivElement | null>(null);
   const composerAnchorRef = useRef<HTMLDivElement | null>(null);
@@ -1515,6 +1526,8 @@ function ChatViewContent(props: ChatViewProps) {
     return openTerminalThreadKeys.filter((nextThreadKey) => existingThreadKeys.has(nextThreadKey));
   }, [draftThreadKeys, openTerminalThreadKeys, serverThreadKeys]);
   const activeLatestTurn = activeThread?.latestTurn ?? null;
+  const [acceptedImportConsentToken, setAcceptedImportConsentToken] = useState<string | null>(null);
+  const [importBlockedAnnouncementCount, setImportBlockedAnnouncementCount] = useState(0);
   const sourcePlanThreadRef = useMemo(() => {
     const sourceThreadId = activeLatestTurn?.sourceProposedPlan?.threadId;
     if (!activeThread || !sourceThreadId || sourceThreadId === activeThread.id) {
@@ -1800,11 +1813,6 @@ function ChatViewContent(props: ChatViewProps) {
     activeThread?.modelSelection.instanceId ??
     activeProject?.defaultModelSelection?.instanceId ??
     null;
-  const lockedProvider = deriveLockedProvider({
-    thread: activeThread,
-    selectedProvider: selectedProviderByThreadId,
-    threadProvider,
-  });
   // Once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
   const serverConfig = activeThread
@@ -1919,6 +1927,95 @@ function ChatViewContent(props: ChatViewProps) {
     versionMismatchServerLabel,
   ]);
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS;
+  const importContinuationGate = useMemo(
+    () =>
+      resolveImportContinuationGate({
+        thread: activeThread,
+        providers: providerStatuses,
+      }),
+    [activeThread, providerStatuses],
+  );
+  const lockedProvider = deriveLockedProvider({
+    thread: activeThread,
+    selectedProvider: selectedProviderByThreadId,
+    threadProvider,
+    providers: providerStatuses,
+    importContinuationGate,
+  });
+  const currentImportConsentToken = importContinuationConsentToken(
+    routeThreadKey,
+    importContinuationGate,
+  );
+  const importConsentGiven =
+    currentImportConsentToken !== null && acceptedImportConsentToken === currentImportConsentToken;
+  const importContinuationConsent =
+    importConsentGiven &&
+    (importContinuationGate.state === "verified" || importContinuationGate.state === "history-only")
+      ? importContinuationGate.consent
+      : undefined;
+  const importContinuationSendBlocked = isImportContinuationSendBlocked(
+    importContinuationGate,
+    currentImportConsentToken,
+    acceptedImportConsentToken,
+  );
+  const importProviderInstanceId =
+    importContinuationGate.state === "verified" || importContinuationGate.state === "history-only"
+      ? importContinuationGate.providerInstanceId
+      : null;
+  const importProviderDriverKind =
+    importContinuationGate.state === "verified" || importContinuationGate.state === "history-only"
+      ? importContinuationGate.driverKind
+      : null;
+  const importProviderContinuationIdentity =
+    importContinuationGate.state === "verified" || importContinuationGate.state === "history-only"
+      ? importContinuationGate.consent.continuation.continuationIdentity
+      : null;
+  const importProviderSnapshot = useMemo(
+    () =>
+      resolveImportContinuationProviderSnapshot(
+        providerStatuses,
+        importProviderInstanceId,
+        importProviderDriverKind,
+        importProviderContinuationIdentity,
+      ),
+    [
+      importProviderContinuationIdentity,
+      importProviderDriverKind,
+      importProviderInstanceId,
+      providerStatuses,
+    ],
+  );
+  const importProviderEntry = useMemo(
+    () =>
+      importProviderSnapshot === null
+        ? null
+        : (deriveProviderInstanceEntries([importProviderSnapshot])[0] ?? null),
+    [importProviderSnapshot],
+  );
+  const importProviderDisplayName =
+    importProviderEntry?.displayName ?? importProviderInstanceId ?? "the configured provider";
+  const composerProviderStatuses = useMemo(() => {
+    if (importContinuationGate.state === "not-required") {
+      return providerStatuses;
+    }
+    if (importProviderInstanceId === null) {
+      return EMPTY_PROVIDERS;
+    }
+    return importProviderSnapshot === null ? EMPTY_PROVIDERS : [importProviderSnapshot];
+  }, [importContinuationGate.state, importProviderInstanceId, importProviderSnapshot]);
+  const verifiedImportProviderInstanceId =
+    importContinuationGate.state === "verified" ? importContinuationGate.providerInstanceId : null;
+  const focusImportContinuationBanner = useCallback(() => {
+    setImportBlockedAnnouncementCount((count) => count + 1);
+    if (typeof document === "undefined") {
+      return;
+    }
+    window.requestAnimationFrame(() => {
+      document
+        .querySelector<HTMLElement>('[data-import-continuation-action="true"]')
+        ?.focus({ preventScroll: true });
+    });
+  }, []);
   const unlockedSelectedProvider = resolveSelectableProvider(
     providerStatuses,
     selectedProviderByThreadId ?? threadProvider,
@@ -4050,8 +4147,8 @@ function ChatViewContent(props: ChatViewProps) {
     updateThreadMetadata,
   ]);
   // The stack renders items[0] front-most and tucks the rest behind hover, so
-  // ordering is priority: system banners, then the branch-mismatch notice,
-  // and the informational parked-thread banner last — it must never cover another.
+  // ordering is priority: a blocking import decision stays focusable at the
+  // front, followed by system banners, branch mismatch, and parked state.
   const parkedThreadBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
     if (!activeThreadSnoozed && !activeThreadSettled) {
       return null;
@@ -4093,6 +4190,69 @@ function ChatViewContent(props: ChatViewProps) {
     isUnsnoozing,
     isUnsettling,
   ]);
+  const importConsentBannerItem = useMemo<ComposerBannerStackItem | null>(() => {
+    if (
+      importContinuationGate.state === "not-required" ||
+      (importConsentGiven && importContinuationGate.providerState === "ready")
+    ) {
+      return null;
+    }
+
+    const sourceName = activeThread?.origin
+      ? importSourceDisplayName(activeThread.origin.source)
+      : "an external provider";
+    const bannerCopy = resolveImportContinuationBannerCopy({
+      gate: importContinuationGate,
+      providerDisplayName: importProviderDisplayName,
+      sourceName,
+    });
+
+    return {
+      id: `import-consent:${routeThreadKey}`,
+      variant: bannerCopy.isReady ? "info" : "warning",
+      icon: <ImportIcon />,
+      title: bannerCopy.title,
+      description: bannerCopy.description,
+      actions:
+        bannerCopy.action === "consent" && currentImportConsentToken !== null ? (
+          <Button
+            size="xs"
+            variant="outline"
+            data-import-continuation-action="true"
+            onClick={() => {
+              setAcceptedImportConsentToken(currentImportConsentToken);
+              scheduleComposerFocus();
+            }}
+          >
+            {bannerCopy.actionLabel}
+          </Button>
+        ) : bannerCopy.action === "import-settings" ? (
+          <Button
+            render={<Link to="/settings/import" data-import-continuation-action="true" />}
+            size="xs"
+            variant="outline"
+          >
+            {bannerCopy.actionLabel}
+          </Button>
+        ) : (
+          <Button
+            render={<Link to="/settings/providers" data-import-continuation-action="true" />}
+            size="xs"
+            variant="outline"
+          >
+            {bannerCopy.actionLabel}
+          </Button>
+        ),
+    };
+  }, [
+    activeThread?.origin,
+    currentImportConsentToken,
+    importConsentGiven,
+    importContinuationGate,
+    importProviderDisplayName,
+    routeThreadKey,
+    scheduleComposerFocus,
+  ]);
   const handleRestoreThreadBranch = useCallback(() => {
     if (gitStatusQuery.data?.hasWorkingTreeChanges) {
       setBranchRestoreConfirmOpen(true);
@@ -4101,11 +4261,13 @@ function ChatViewContent(props: ChatViewProps) {
     void handleSwitchCheckoutToThread();
   }, [gitStatusQuery.data?.hasWorkingTreeChanges, handleSwitchCheckoutToThread]);
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() => {
+    const importConsentItems = importConsentBannerItem === null ? [] : [importConsentBannerItem];
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem];
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey) {
-      return [...systemComposerBannerItems, ...parkedThreadItems];
+      return [...importConsentItems, ...systemComposerBannerItems, ...parkedThreadItems];
     }
     return [
+      ...importConsentItems,
       ...systemComposerBannerItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
@@ -4151,6 +4313,7 @@ function ChatViewContent(props: ChatViewProps) {
   }, [
     activeBranchMismatchKey,
     handleRestoreThreadBranch,
+    importConsentBannerItem,
     isRestoringThreadBranch,
     localCheckoutBranchMismatch,
     parkedThreadBannerItem,
@@ -4450,6 +4613,14 @@ function ChatViewContent(props: ChatViewProps) {
       sendInFlightRef.current
     )
       return;
+    if (
+      handleImportContinuationSendBlock(
+        importContinuationSendBlocked,
+        focusImportContinuationBanner,
+      )
+    ) {
+      return;
+    }
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
       return;
@@ -4770,6 +4941,7 @@ function ChatViewContent(props: ChatViewProps) {
           runtimeMode,
           interactionMode,
           ...(bootstrap ? { bootstrap } : {}),
+          ...(importContinuationConsent ? { importContinuationConsent } : {}),
           createdAt: messageCreatedAt,
         },
       });
@@ -5027,6 +5199,14 @@ function ChatViewContent(props: ChatViewProps) {
       ) {
         return;
       }
+      if (
+        handleImportContinuationSendBlock(
+          importContinuationSendBlocked,
+          focusImportContinuationBanner,
+        )
+      ) {
+        return;
+      }
 
       const trimmed = text.trim();
       if (!trimmed) {
@@ -5121,6 +5301,7 @@ function ChatViewContent(props: ChatViewProps) {
             titleSeed: activeThread.title,
             runtimeMode,
             interactionMode: nextInteractionMode,
+            ...(importContinuationConsent ? { importContinuationConsent } : {}),
             ...(nextInteractionMode === "default" && activeProposedPlan
               ? {
                   sourceProposedPlan: {
@@ -5166,6 +5347,9 @@ function ChatViewContent(props: ChatViewProps) {
       activeThread,
       activeProposedPlan,
       beginLocalDispatch,
+      focusImportContinuationBanner,
+      importContinuationConsent,
+      importContinuationSendBlocked,
       isConnecting,
       isSendBusy,
       isServerThread,
@@ -5347,6 +5531,12 @@ function ChatViewContent(props: ChatViewProps) {
       if (!activeThread) {
         return null;
       }
+      if (
+        verifiedImportProviderInstanceId !== null &&
+        instanceId !== verifiedImportProviderInstanceId
+      ) {
+        return "This imported session is locked to its verified provider instance until its first native turn.";
+      }
       const reason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
         hasStartedSession: activeThread.session !== null,
@@ -5356,12 +5546,19 @@ function ChatViewContent(props: ChatViewProps) {
       });
       return reason ? `${reason.description} Start a new thread to use this model.` : null;
     },
-    [activeThread, providerStatuses],
+    [activeThread, providerStatuses, verifiedImportProviderInstanceId],
   );
 
   const onProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
       if (!activeThread) return;
+      if (
+        verifiedImportProviderInstanceId !== null &&
+        instanceId !== verifiedImportProviderInstanceId
+      ) {
+        scheduleComposerFocus();
+        return;
+      }
       // Look up the configured instance so model normalization and custom
       // model lookup stay scoped to that exact instance. Unknown instance ids
       // are rejected by returning early; the server remains authoritative too.
@@ -5428,6 +5625,7 @@ function ChatViewContent(props: ChatViewProps) {
     [
       activeThread,
       lockedProvider,
+      verifiedImportProviderInstanceId,
       scheduleComposerFocus,
       setComposerDraftModelSelection,
       setStickyComposerModelSelection,
@@ -5754,6 +5952,13 @@ function ChatViewContent(props: ChatViewProps) {
                 className="chat-composer-horizontal-inset w-full"
               >
                 <div className="pointer-events-auto relative z-10">
+                  <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+                    {importBlockedAnnouncementCount > 0 ? (
+                      <span key={importBlockedAnnouncementCount}>
+                        Sending is blocked. Review the imported session notice before continuing.
+                      </span>
+                    ) : null}
+                  </div>
                   {isDraftHeroState ? (
                     <div className="absolute inset-x-0 bottom-full z-0">
                       <div
@@ -5810,6 +6015,7 @@ function ChatViewContent(props: ChatViewProps) {
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
                             isPreparingWorktree={isPreparingWorktree}
+                            importContinuationSendBlocked={importContinuationSendBlocked}
                             environmentUnavailable={activeEnvironmentUnavailableState}
                             activePendingApproval={activePendingApproval}
                             pendingApprovals={pendingApprovals}
@@ -5829,7 +6035,7 @@ function ChatViewContent(props: ChatViewProps) {
                             runtimeMode={runtimeMode}
                             interactionMode={interactionMode}
                             lockedProvider={lockedProvider}
-                            providerStatuses={providerStatuses as ServerProvider[]}
+                            providerStatuses={composerProviderStatuses as ServerProvider[]}
                             activeProjectDefaultModelSelection={
                               activeProject?.defaultModelSelection
                             }

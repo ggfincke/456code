@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/decider.delete.test.ts
+// verifies delete command decisions
+
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
@@ -71,6 +74,7 @@ const seedReadModel = Effect.gen(function* () {
       runtimeMode: "approval-required",
       branch: null,
       worktreePath: null,
+      origin: null,
       createdAt: now,
       updatedAt: now,
     },
@@ -99,6 +103,7 @@ const seedReadModel = Effect.gen(function* () {
       runtimeMode: "approval-required",
       branch: null,
       worktreePath: null,
+      origin: null,
       createdAt: now,
       updatedAt: now,
     },

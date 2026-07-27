@@ -1,0 +1,6 @@
+{"timestamp":"2026-02-01T10:00:00Z","type":"session_meta","payload":{"id":"codex-mixed-1","cwd":"/workspace/mixed","model_provider":"openai"}}
+{"timestamp":"2026-02-01T10:00:01Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Imported prefix question"}]}}
+{"timestamp":"2026-02-01T10:00:02Z","type":"response_item","payload":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Imported prefix answer"}]}}
+{"timestamp":"2026-02-01T10:00:03Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Continue   here"}]}}
+{"timestamp":"2026-02-01T10:00:04Z","type":"event_msg","payload":{"type":"user_message","message":" Continue here "}}
+{"timestamp":"2026-02-01T10:00:05Z","type":"event_msg","payload":{"type":"agent_message","message":"Live suffix answer"}}

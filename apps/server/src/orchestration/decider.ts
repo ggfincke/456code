@@ -1,18 +1,26 @@
+// apps/server/src/orchestration/decider.ts
+// validates orchestration commands and produces domain events
+
 import {
   EventId,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
+  type OrchestrationThread,
+  ThreadImportContinuationActivityPayload,
+  type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
 import type * as PlatformError from "effect/PlatformError";
+import * as Schema from "effect/Schema";
 
 import { OrchestrationCommandInvariantError } from "./Errors.ts";
 import {
   listThreadsByProjectId,
   requireActiveProjectWorkspaceRootAbsent,
+  requireActiveProject,
   requireProject,
   requireProjectAbsent,
   requireThread,
@@ -28,6 +36,80 @@ const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 // window is a failed/stale start, not pending work. Mirrors the client's
 // QUEUED_TURN_START_GRACE_MS in client-runtime threadSettled.ts.
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000;
+const isThreadImportContinuationActivityPayload = Schema.is(
+  ThreadImportContinuationActivityPayload,
+);
+
+type LatestImportContinuationActivity =
+  | { readonly state: "missing" | "invalid" }
+  | {
+      readonly state: "valid";
+      readonly activityId: EventId;
+      readonly payload: ThreadImportContinuationActivityPayloadType;
+    };
+
+function isImportContinuationMarker(payload: unknown): boolean {
+  return (
+    typeof payload === "object" &&
+    payload !== null &&
+    "type" in payload &&
+    payload.type === "import.continuation"
+  );
+}
+
+function latestImportContinuationActivity(
+  thread: Pick<OrchestrationThread, "activities">,
+): LatestImportContinuationActivity {
+  for (let index = thread.activities.length - 1; index >= 0; index -= 1) {
+    const activity = thread.activities[index];
+    if (!activity || !isImportContinuationMarker(activity.payload)) {
+      continue;
+    }
+    return isThreadImportContinuationActivityPayload(activity.payload)
+      ? {
+          state: "valid",
+          activityId: activity.id,
+          payload: activity.payload,
+        }
+      : { state: "invalid" };
+  }
+  return { state: "missing" };
+}
+
+function importContinuationConsentMatches(
+  command: Extract<OrchestrationCommand, { readonly type: "thread.turn.start" }>,
+  thread: OrchestrationThread,
+): boolean {
+  const origin = thread.origin;
+  const consent = command.importContinuationConsent;
+  if (origin === null || consent === undefined) {
+    return false;
+  }
+  const marker = latestImportContinuationActivity(thread);
+  if (marker.state !== "valid") {
+    return false;
+  }
+  const expected = marker.payload.continuation;
+  const expectedIdentity = expected.continuationIdentity;
+  const consentIdentity = consent.continuation.continuationIdentity;
+  const effectiveProviderInstanceId =
+    command.modelSelection?.instanceId ?? thread.modelSelection.instanceId;
+  return (
+    expectedIdentity !== null &&
+    consentIdentity !== null &&
+    consent.originContentHash === origin.contentHash &&
+    consent.activityId === marker.activityId &&
+    consent.driverKind === marker.payload.driverKind &&
+    expectedIdentity.driverKind === marker.payload.driverKind &&
+    consent.targetProviderInstanceId === effectiveProviderInstanceId &&
+    consent.targetProviderInstanceId === expected.providerInstanceId &&
+    consent.continuation.state === expected.state &&
+    consent.continuation.providerInstanceId === expected.providerInstanceId &&
+    consentIdentity.driverKind === expectedIdentity.driverKind &&
+    consentIdentity.continuationKey === expectedIdentity.continuationKey &&
+    consent.continuation.reason === expected.reason
+  );
+}
 
 /**
  * Blocked-on-you work derived from the thread's retained activities: an
@@ -345,7 +427,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
     }
 
     case "thread.create": {
-      yield* requireProject({
+      yield* requireActiveProject({
         readModel,
         command,
         projectId: command.projectId,
@@ -372,6 +454,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           interactionMode: command.interactionMode,
           branch: command.branch,
           worktreePath: command.worktreePath,
+          origin: command.origin ?? null,
           createdAt: command.createdAt,
           updatedAt: command.createdAt,
         },
@@ -716,6 +799,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      const requiresImportContinuationConsent =
+        targetThread.origin !== null && targetThread.latestTurn === null;
+      if (
+        requiresImportContinuationConsent &&
+        !importContinuationConsentMatches(command, targetThread)
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Imported thread '${command.threadId}' requires consent for its current continuation state before starting its first turn.`,
+        });
+      }
       const sourceProposedPlan = command.sourceProposedPlan;
       const sourceThread = sourceProposedPlan
         ? yield* requireThread({
@@ -779,6 +873,17 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           runtimeMode: targetThread.runtimeMode,
           interactionMode: targetThread.interactionMode,
           ...(sourceProposedPlan !== undefined ? { sourceProposedPlan } : {}),
+          ...(requiresImportContinuationConsent && command.importContinuationConsent !== undefined
+            ? {
+                importContinuationAuthority: {
+                  driverKind: command.importContinuationConsent.driverKind,
+                  targetProviderInstanceId:
+                    command.importContinuationConsent.targetProviderInstanceId,
+                  continuationIdentity:
+                    command.importContinuationConsent.continuation.continuationIdentity,
+                },
+              }
+            : {}),
           createdAt: command.createdAt,
         },
       };
@@ -938,6 +1043,83 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           createdAt: command.createdAt,
         },
       };
+    }
+
+    case "thread.messages.import": {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (thread.deletedAt !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is deleted and cannot import messages.`,
+        });
+      }
+      if (thread.origin === null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is not imported and cannot import messages.`,
+        });
+      }
+      if (thread.latestTurn !== null) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has an existing turn and cannot import messages.`,
+        });
+      }
+      if (latestImportContinuationActivity(thread).state !== "missing") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has finalized its import and cannot import more messages.`,
+        });
+      }
+      if (command.messages.length === 0 && command.activities.length === 0) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: "An import batch must contain at least one message or activity.",
+        });
+      }
+
+      const events: PlannedOrchestrationEvent[] = [];
+      for (const message of command.messages) {
+        events.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.message-sent",
+          payload: {
+            threadId: command.threadId,
+            messageId: message.messageId,
+            role: message.role,
+            text: message.text,
+            turnId: null,
+            streaming: false,
+            createdAt: message.createdAt,
+            updatedAt: message.createdAt,
+          },
+        });
+      }
+      for (const activity of command.activities) {
+        events.push({
+          ...(yield* withEventBase({
+            aggregateKind: "thread",
+            aggregateId: command.threadId,
+            occurredAt: command.createdAt,
+            commandId: command.commandId,
+          })),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: command.threadId,
+            activity,
+          },
+        });
+      }
+      return events;
     }
 
     case "thread.session.set": {

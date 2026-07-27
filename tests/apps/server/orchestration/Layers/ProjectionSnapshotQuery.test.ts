@@ -1,5 +1,9 @@
+// tests/apps/server/orchestration/Layers/ProjectionSnapshotQuery.test.ts
+// verifies orchestration projection snapshot loading
+
 import {
   CheckpointRef,
+  CommandId,
   EventId,
   MessageId,
   ProjectId,
@@ -14,9 +18,14 @@ import * as Layer from "effect/Layer";
 import * as SqlClient from "effect/unstable/sql/SqlClient";
 
 import { SqlitePersistenceMemory } from "../../../../../apps/server/src/persistence/Layers/Sqlite.ts";
+import ProjectionThreadCommandActivityIndexesMigration from "../../../../../apps/server/src/persistence/Migrations/036_ProjectionThreadCommandActivityIndexes.ts";
 import * as RepositoryIdentityResolver from "../../../../../apps/server/src/project/RepositoryIdentityResolver.ts";
+import { decideOrchestrationCommand } from "../../../../../apps/server/src/orchestration/decider.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts";
+import {
+  COMMAND_THREAD_ACTIVITY_QUERY_SQL,
+  OrchestrationProjectionSnapshotQueryLive,
+} from "../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts";
 import { ProjectionSnapshotQuery } from "../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
@@ -24,6 +33,17 @@ const asTurnId = (value: string): TurnId => TurnId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
 const asEventId = (value: string): EventId => EventId.make(value);
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value);
+
+const clearProjectionTables = (sql: SqlClient.SqlClient) =>
+  Effect.gen(function* () {
+    yield* sql`DELETE FROM projection_thread_messages`;
+    yield* sql`DELETE FROM projection_thread_activities`;
+    yield* sql`DELETE FROM projection_thread_proposed_plans`;
+    yield* sql`DELETE FROM projection_turns`;
+    yield* sql`DELETE FROM projection_threads`;
+    yield* sql`DELETE FROM projection_projects`;
+    yield* sql`DELETE FROM projection_state`;
+  });
 
 const projectionSnapshotLayer = it.layer(
   OrchestrationProjectionSnapshotQueryLive.pipe(
@@ -39,10 +59,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_state`;
-      yield* sql`DELETE FROM projection_thread_proposed_plans`;
-      yield* sql`DELETE FROM projection_turns`;
+      yield* clearProjectionTables(sql);
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -293,6 +310,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
+          origin: null,
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -407,6 +425,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           runtimeMode: "full-access",
           branch: null,
           worktreePath: null,
+          origin: null,
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",
@@ -455,9 +474,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_state`;
+      yield* clearProjectionTables(sql);
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -575,9 +592,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_state`;
+      yield* clearProjectionTables(sql);
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -686,9 +701,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         const snapshotQuery = yield* ProjectionSnapshotQuery;
         const sql = yield* SqlClient.SqlClient;
 
-        yield* sql`DELETE FROM projection_projects`;
-        yield* sql`DELETE FROM projection_threads`;
-        yield* sql`DELETE FROM projection_turns`;
+        yield* clearProjectionTables(sql);
 
         yield* sql`
         INSERT INTO projection_projects (
@@ -818,9 +831,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_turns`;
+      yield* clearProjectionTables(sql);
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -970,10 +981,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_thread_activities`;
-      yield* sql`DELETE FROM projection_state`;
+      yield* clearProjectionTables(sql);
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -1082,6 +1090,39 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
             '{"source":"sequence-1"}',
             1,
             '2026-04-01T00:00:05.000Z'
+          ),
+          (
+            'activity-a-completed',
+            'thread-1',
+            'turn-native',
+            'info',
+            'tool.completed',
+            'completed',
+            '{}',
+            7,
+            '2026-04-01T00:00:05.500Z'
+          ),
+          (
+            'activity-m-progress',
+            'thread-1',
+            'turn-native',
+            'info',
+            'tool.updated',
+            'progress',
+            '{}',
+            7,
+            '2026-04-01T00:00:05.500Z'
+          ),
+          (
+            'activity-z-started',
+            'thread-1',
+            'turn-native',
+            'info',
+            'tool.started',
+            'started',
+            '{}',
+            7,
+            '2026-04-01T00:00:05.500Z'
           )
       `;
 
@@ -1094,15 +1135,6 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       }
 
       assert.deepEqual(snapshot.threads[0]?.activities ?? [], [
-        {
-          id: asEventId("activity-unsequenced"),
-          tone: "info",
-          kind: "runtime.note",
-          summary: "unsequenced first",
-          payload: { source: "unsequenced" },
-          turnId: null,
-          createdAt: "2026-04-01T00:00:06.000Z",
-        },
         {
           id: asEventId("activity-sequence-1"),
           tone: "info",
@@ -1123,164 +1155,59 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           sequence: 2,
           createdAt: "2026-04-01T00:00:04.000Z",
         },
+        {
+          id: asEventId("activity-z-started"),
+          tone: "info",
+          kind: "tool.started",
+          summary: "started",
+          payload: {},
+          turnId: asTurnId("turn-native"),
+          sequence: 7,
+          createdAt: "2026-04-01T00:00:05.500Z",
+        },
+        {
+          id: asEventId("activity-m-progress"),
+          tone: "info",
+          kind: "tool.updated",
+          summary: "progress",
+          payload: {},
+          turnId: asTurnId("turn-native"),
+          sequence: 7,
+          createdAt: "2026-04-01T00:00:05.500Z",
+        },
+        {
+          id: asEventId("activity-a-completed"),
+          tone: "info",
+          kind: "tool.completed",
+          summary: "completed",
+          payload: {},
+          turnId: asTurnId("turn-native"),
+          sequence: 7,
+          createdAt: "2026-04-01T00:00:05.500Z",
+        },
+        {
+          id: asEventId("activity-unsequenced"),
+          tone: "info",
+          kind: "runtime.note",
+          summary: "unsequenced first",
+          payload: { source: "unsequenced" },
+          turnId: null,
+          createdAt: "2026-04-01T00:00:06.000Z",
+        },
       ]);
     }),
   );
 
-  it.effect("uses projection_threads.latest_turn_id for targeted thread latest turn queries", () =>
-    Effect.gen(function* () {
-      const snapshotQuery = yield* ProjectionSnapshotQuery;
-      const sql = yield* SqlClient.SqlClient;
+  it.effect(
+    "uses projection_threads.latest_turn_id for targeted thread queries and bulk snapshots",
+    () =>
+      Effect.gen(function* () {
+        const snapshotQuery = yield* ProjectionSnapshotQuery;
+        const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_turns`;
+        yield* clearProjectionTables(sql);
 
-      yield* sql`
-        INSERT INTO projection_projects (
-          project_id,
-          title,
-          workspace_root,
-          default_model_selection_json,
-          scripts_json,
-          created_at,
-          updated_at,
-          deleted_at
-        )
-        VALUES (
-          'project-1',
-          'Project 1',
-          '/tmp/project-1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          '[]',
-          '2026-04-02T00:00:00.000Z',
-          '2026-04-02T00:00:01.000Z',
-          NULL
-        )
-      `;
-
-      yield* sql`
-        INSERT INTO projection_threads (
-          thread_id,
-          project_id,
-          title,
-          model_selection_json,
-          runtime_mode,
-          interaction_mode,
-          branch,
-          worktree_path,
-          latest_turn_id,
-          latest_user_message_at,
-          pending_approval_count,
-          pending_user_input_count,
-          has_actionable_proposed_plan,
-          created_at,
-          updated_at,
-          archived_at,
-          deleted_at
-        )
-        VALUES (
-          'thread-1',
-          'project-1',
-          'Thread 1',
-          '{"provider":"codex","model":"gpt-5-codex"}',
-          'full-access',
-          'default',
-          NULL,
-          NULL,
-          'turn-running',
-          '2026-04-02T00:00:04.000Z',
-          0,
-          0,
-          0,
-          '2026-04-02T00:00:02.000Z',
-          '2026-04-02T00:00:03.000Z',
-          NULL,
-          NULL
-        )
-      `;
-
-      yield* sql`
-        INSERT INTO projection_turns (
-          thread_id,
-          turn_id,
-          pending_message_id,
-          source_proposed_plan_thread_id,
-          source_proposed_plan_id,
-          assistant_message_id,
-          state,
-          requested_at,
-          started_at,
-          completed_at,
-          checkpoint_turn_count,
-          checkpoint_ref,
-          checkpoint_status,
-          checkpoint_files_json
-        )
-        VALUES
-          (
-            'thread-1',
-            'turn-completed',
-            'message-user-1',
-            NULL,
-            NULL,
-            'message-assistant-1',
-            'completed',
-            '2026-04-02T00:00:05.000Z',
-            '2026-04-02T00:00:06.000Z',
-            '2026-04-02T00:00:20.000Z',
-            5,
-            'checkpoint-5',
-            'ready',
-            '[]'
-          ),
-          (
-            'thread-1',
-            'turn-running',
-            'message-user-2',
-            NULL,
-            NULL,
-            NULL,
-            'running',
-            '2026-04-02T00:00:30.000Z',
-            '2026-04-02T00:00:30.000Z',
-            NULL,
-            NULL,
-            NULL,
-            NULL,
-            '[]'
-          )
-      `;
-
-      const threadShell = yield* snapshotQuery.getThreadShellById(ThreadId.make("thread-1"));
-      assert.equal(threadShell._tag, "Some");
-      if (threadShell._tag === "Some") {
-        assert.equal(threadShell.value.latestTurn?.turnId, asTurnId("turn-running"));
-        assert.equal(threadShell.value.latestTurn?.state, "running");
-        assert.equal(threadShell.value.latestTurn?.startedAt, "2026-04-02T00:00:30.000Z");
-      }
-
-      const threadDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
-      assert.equal(threadDetail._tag, "Some");
-      if (threadDetail._tag === "Some") {
-        assert.equal(threadDetail.value.latestTurn?.turnId, asTurnId("turn-running"));
-        assert.equal(threadDetail.value.latestTurn?.state, "running");
-        assert.equal(threadDetail.value.latestTurn?.startedAt, "2026-04-02T00:00:30.000Z");
-      }
-    }),
-  );
-
-  it.effect("uses projection_threads.latest_turn_id for bulk command and shell snapshots", () =>
-    Effect.gen(function* () {
-      const snapshotQuery = yield* ProjectionSnapshotQuery;
-      const sql = yield* SqlClient.SqlClient;
-
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_turns`;
-      yield* sql`DELETE FROM projection_state`;
-
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_projects (
           project_id,
           title,
@@ -1303,7 +1230,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         )
       `;
 
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_threads (
           thread_id,
           project_id,
@@ -1344,7 +1271,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
         )
       `;
 
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_turns (
           thread_id,
           turn_id,
@@ -1396,7 +1323,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           )
       `;
 
-      yield* sql`
+        yield* sql`
         INSERT INTO projection_state (projector, last_applied_sequence, updated_at)
         VALUES
           (${ORCHESTRATION_PROJECTOR_NAMES.projects}, 3, '2026-04-03T00:00:40.000Z'),
@@ -1408,18 +1335,34 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           (${ORCHESTRATION_PROJECTOR_NAMES.checkpoints}, 3, '2026-04-03T00:00:40.000Z')
       `;
 
-      const commandReadModel = yield* snapshotQuery.getCommandReadModel();
-      assert.equal(commandReadModel.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
-      assert.equal(commandReadModel.threads[0]?.latestTurn?.state, "running");
+        const threadShell = yield* snapshotQuery.getThreadShellById(ThreadId.make("thread-1"));
+        assert.equal(threadShell._tag, "Some");
+        if (threadShell._tag === "Some") {
+          assert.equal(threadShell.value.latestTurn?.turnId, asTurnId("turn-running"));
+          assert.equal(threadShell.value.latestTurn?.state, "running");
+          assert.equal(threadShell.value.latestTurn?.startedAt, "2026-04-03T00:00:30.000Z");
+        }
 
-      const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
-      assert.equal(shellSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
-      assert.equal(shellSnapshot.threads[0]?.latestTurn?.state, "running");
+        const threadDetail = yield* snapshotQuery.getThreadDetailById(ThreadId.make("thread-1"));
+        assert.equal(threadDetail._tag, "Some");
+        if (threadDetail._tag === "Some") {
+          assert.equal(threadDetail.value.latestTurn?.turnId, asTurnId("turn-running"));
+          assert.equal(threadDetail.value.latestTurn?.state, "running");
+          assert.equal(threadDetail.value.latestTurn?.startedAt, "2026-04-03T00:00:30.000Z");
+        }
 
-      const fullSnapshot = yield* snapshotQuery.getSnapshot();
-      assert.equal(fullSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
-      assert.equal(fullSnapshot.threads[0]?.latestTurn?.state, "running");
-    }),
+        const commandReadModel = yield* snapshotQuery.getCommandReadModel();
+        assert.equal(commandReadModel.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
+        assert.equal(commandReadModel.threads[0]?.latestTurn?.state, "running");
+
+        const shellSnapshot = yield* snapshotQuery.getShellSnapshot();
+        assert.equal(shellSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
+        assert.equal(shellSnapshot.threads[0]?.latestTurn?.state, "running");
+
+        const fullSnapshot = yield* snapshotQuery.getSnapshot();
+        assert.equal(fullSnapshot.threads[0]?.latestTurn?.turnId, asTurnId("turn-running"));
+        assert.equal(fullSnapshot.threads[0]?.latestTurn?.state, "running");
+      }),
   );
 
   it.effect("keeps deleted project and thread tombstones in the command read model", () =>
@@ -1427,10 +1370,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_turns`;
-      yield* sql`DELETE FROM projection_state`;
+      yield* clearProjectionTables(sql);
 
       yield* sql`
         INSERT INTO projection_projects (
@@ -1549,6 +1489,642 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
       assert.equal(shellSnapshot.threads.length, 0);
     }),
   );
+
+  it.effect("restores blocking request activities for command decisions after restart", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* clearProjectionTables(sql);
+
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-blocking-restart',
+          'Blocking Restart',
+          '/tmp/blocking-restart',
+          '{"instanceId":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-07-26T00:00:00.000Z',
+          '2026-07-26T00:00:01.000Z',
+          NULL
+        )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'thread-open-approval',
+            'project-blocking-restart',
+            'Open approval',
+            '{"instanceId":"codex","model":"gpt-5-codex"}',
+            'approval-required',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            1,
+            0,
+            0,
+            '2026-07-26T00:00:02.000Z',
+            '2026-07-26T00:00:03.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-open-input',
+            'project-blocking-restart',
+            'Open user input',
+            '{"instanceId":"codex","model":"gpt-5-codex"}',
+            'approval-required',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            1,
+            0,
+            '2026-07-26T00:00:04.000Z',
+            '2026-07-26T00:00:05.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-stale-cleared',
+            'project-blocking-restart',
+            'Stale request cleared',
+            '{"instanceId":"codex","model":"gpt-5-codex"}',
+            'approval-required',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-07-26T00:00:06.000Z',
+            '2026-07-26T00:00:07.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-old-request-pruned',
+            'project-blocking-restart',
+            'Old request pruned',
+            '{"instanceId":"codex","model":"gpt-5-codex"}',
+            'approval-required',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-07-26T00:00:08.000Z',
+            '2026-07-26T00:00:09.000Z',
+            NULL,
+            NULL
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-import-marker',
+            'thread-open-approval',
+            NULL,
+            'info',
+            'task.completed',
+            'Continuation marker',
+            '{"type":"import.continuation","driverKind":"codex","continuation":{"state":"history-only","providerInstanceId":"codex","reason":"history only"}}',
+            0,
+            '2026-07-26T00:00:02.100Z'
+          ),
+          (
+            'activity-approval-request',
+            'thread-open-approval',
+            NULL,
+            'approval',
+            'approval.requested',
+            'Approval requested',
+            '{"requestId":"approval-open"}',
+            1,
+            '2026-07-26T00:00:02.200Z'
+          ),
+          (
+            'activity-input-request',
+            'thread-open-input',
+            NULL,
+            'info',
+            'user-input.requested',
+            'User input requested',
+            '{"requestId":"input-open"}',
+            0,
+            '2026-07-26T00:00:04.100Z'
+          ),
+          (
+            'activity-stale-request',
+            'thread-stale-cleared',
+            NULL,
+            'approval',
+            'approval.requested',
+            'Approval requested',
+            '{"requestId":"approval-stale"}',
+            0,
+            '2026-07-26T00:00:06.100Z'
+          ),
+          (
+            'activity-stale-failure',
+            'thread-stale-cleared',
+            NULL,
+            'error',
+            'provider.approval.respond.failed',
+            'Approval response failed',
+            '{"requestId":"approval-stale","detail":"Stale pending approval request: approval-stale"}',
+            1,
+            '2026-07-26T00:00:06.200Z'
+          )
+      `;
+
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-pruned-import-marker',
+            'thread-old-request-pruned',
+            NULL,
+            'info',
+            'task.completed',
+            'Continuation marker',
+            '{"type":"import.continuation","driverKind":"codex","continuation":{"state":"history-only","providerInstanceId":"codex","reason":"history only"}}',
+            0,
+            '2026-07-26T00:00:08.050Z'
+          ),
+          (
+            'activity-pruned-request',
+            'thread-old-request-pruned',
+            NULL,
+            'approval',
+            'approval.requested',
+            'Approval requested',
+            '{"requestId":"approval-pruned"}',
+            0,
+            '2026-07-26T00:00:08.100Z'
+          )
+      `;
+      yield* sql`
+        WITH RECURSIVE activity_numbers(value) AS (
+          SELECT 1
+          UNION ALL
+          SELECT value + 1
+          FROM activity_numbers
+          WHERE value < 500
+        )
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        SELECT
+          'activity-pruned-note-' || printf('%03d', value),
+          'thread-old-request-pruned',
+          NULL,
+          'info',
+          'runtime.note',
+          'Later activity',
+          '{}',
+          value,
+          printf('2026-07-26T00:%02d:%02d.000Z', value / 60, value % 60)
+        FROM activity_numbers
+      `;
+
+      const readModel = yield* snapshotQuery.getCommandReadModel();
+      const approvalThread = readModel.threads.find(
+        (thread) => thread.id === ThreadId.make("thread-open-approval"),
+      );
+      const inputThread = readModel.threads.find(
+        (thread) => thread.id === ThreadId.make("thread-open-input"),
+      );
+      const clearedThread = readModel.threads.find(
+        (thread) => thread.id === ThreadId.make("thread-stale-cleared"),
+      );
+      const prunedThread = readModel.threads.find(
+        (thread) => thread.id === ThreadId.make("thread-old-request-pruned"),
+      );
+      assert.deepEqual(
+        approvalThread?.activities.map((activity) => activity.id),
+        [asEventId("activity-import-marker"), asEventId("activity-approval-request")],
+      );
+      assert.deepEqual(
+        inputThread?.activities.map((activity) => activity.id),
+        [asEventId("activity-input-request")],
+      );
+      assert.deepEqual(
+        clearedThread?.activities.map((activity) => activity.id),
+        [asEventId("activity-stale-request"), asEventId("activity-stale-failure")],
+      );
+      assert.deepEqual(
+        prunedThread?.activities.map((activity) => activity.id),
+        [asEventId("activity-pruned-import-marker")],
+      );
+
+      const settleError = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.settle",
+          commandId: CommandId.make("cmd-settle-after-restart"),
+          threadId: ThreadId.make("thread-open-approval"),
+        },
+        readModel,
+      }).pipe(Effect.flip);
+      assert.equal(settleError._tag, "OrchestrationCommandInvariantError");
+
+      const snoozeError = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.snooze",
+          commandId: CommandId.make("cmd-snooze-after-restart"),
+          threadId: ThreadId.make("thread-open-input"),
+          snoozedUntil: "2099-01-01T00:00:00.000Z",
+        },
+        readModel,
+      }).pipe(Effect.flip);
+      assert.equal(snoozeError._tag, "OrchestrationCommandInvariantError");
+
+      const clearedDecision = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.settle",
+          commandId: CommandId.make("cmd-settle-cleared-after-restart"),
+          threadId: ThreadId.make("thread-stale-cleared"),
+        },
+        readModel,
+      });
+      const clearedEvents = Array.isArray(clearedDecision) ? clearedDecision : [clearedDecision];
+      assert.equal(clearedEvents[0]?.type, "thread.settled");
+
+      const prunedDecision = yield* decideOrchestrationCommand({
+        command: {
+          type: "thread.settle",
+          commandId: CommandId.make("cmd-settle-pruned-after-restart"),
+          threadId: ThreadId.make("thread-old-request-pruned"),
+        },
+        readModel,
+      });
+      const prunedEvents = Array.isArray(prunedDecision) ? prunedDecision : [prunedDecision];
+      assert.equal(prunedEvents[0]?.type, "thread.settled");
+    }),
+  );
+
+  it.effect("upgrades existing activities and uses bounded command read-model indexes", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* clearProjectionTables(sql);
+      yield* sql`DROP INDEX IF EXISTS idx_projection_thread_activities_command_window`;
+      yield* sql`DROP INDEX IF EXISTS idx_projection_thread_activities_command_relevant`;
+      yield* sql`DROP INDEX IF EXISTS idx_projection_thread_activities_import_continuation`;
+      yield* sql`
+        WITH RECURSIVE activity_numbers(value) AS (
+          SELECT 1
+          UNION ALL
+          SELECT value + 1
+          FROM activity_numbers
+          WHERE value < 1000
+        )
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        SELECT
+          'activity-upgrade-bulk-' || printf('%04d', value),
+          'thread-upgrade',
+          NULL,
+          'info',
+          'runtime.note',
+          'Imported history',
+          '{}',
+          value,
+          printf('2026-07-26T00:%02d:%02d.000Z', value / 60, value % 60)
+        FROM activity_numbers
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-upgrade-request',
+            'thread-upgrade',
+            NULL,
+            'approval',
+            'approval.requested',
+            'Approval requested',
+            '{"requestId":"approval-upgrade"}',
+            1001,
+            '2026-07-26T01:00:01.000Z'
+          ),
+          (
+            'activity-upgrade-marker',
+            'thread-upgrade',
+            NULL,
+            'info',
+            'task.completed',
+            'Continuation marker',
+            '{"type":"import.continuation"}',
+            1002,
+            '2026-07-26T01:00:02.000Z'
+          )
+      `;
+
+      yield* ProjectionThreadCommandActivityIndexesMigration;
+
+      const retainedRows = yield* sql.unsafe<{ readonly activityId: string }>(
+        COMMAND_THREAD_ACTIVITY_QUERY_SQL,
+      );
+      assert.deepEqual(
+        retainedRows.map((row) => row.activityId),
+        ["activity-upgrade-request", "activity-upgrade-marker"],
+      );
+
+      const planRows = yield* sql.unsafe<{ readonly detail: string }>(
+        `EXPLAIN QUERY PLAN ${COMMAND_THREAD_ACTIVITY_QUERY_SQL}`,
+      );
+      const plan = planRows.map((row) => row.detail).join("\n");
+
+      assert.match(
+        plan,
+        /SCAN activity USING INDEX idx_projection_thread_activities_command_relevant/u,
+      );
+      assert.match(
+        plan,
+        /SEARCH recent USING INDEX idx_projection_thread_activities_command_window \(thread_id=\?\)/u,
+      );
+      assert.match(
+        plan,
+        /SCAN marker USING INDEX idx_projection_thread_activities_import_continuation/u,
+      );
+      assert.match(
+        plan,
+        /SEARCH latest_marker USING INDEX idx_projection_thread_activities_import_continuation \(thread_id=\?\)/u,
+      );
+      assert.equal(
+        planRows.filter((row) => row.detail === "USE TEMP B-TREE FOR ORDER BY").length,
+        1,
+      );
+    }),
+  );
+
+  it.effect("matches canonical retention across out-of-order inserts and upserts", () =>
+    Effect.gen(function* () {
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* clearProjectionTables(sql);
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-canonical-approval',
+            'thread-canonical-window',
+            NULL,
+            'approval',
+            'approval.requested',
+            'Approval requested',
+            '{"requestId":"approval-canonical"}',
+            501,
+            '2026-07-26T01:00:01.000Z'
+          ),
+          (
+            'activity-canonical-marker-latest',
+            'thread-canonical-window',
+            NULL,
+            'info',
+            'task.completed',
+            'Latest continuation marker',
+            '{"type":"import.continuation"}',
+            600,
+            '2026-07-26T01:00:02.000Z'
+          )
+      `;
+      yield* sql`
+        WITH RECURSIVE activity_numbers(value) AS (
+          SELECT 1
+          UNION ALL
+          SELECT value + 1
+          FROM activity_numbers
+          WHERE value < 500
+        )
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        SELECT
+          'activity-canonical-note-' || printf('%03d', value),
+          'thread-canonical-window',
+          NULL,
+          'info',
+          'runtime.note',
+          'Imported history',
+          '{}',
+          value,
+          printf('2026-07-26T00:%02d:%02d.000Z', value / 60, value % 60)
+        FROM activity_numbers
+        ORDER BY value DESC
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES (
+          'activity-canonical-marker-old',
+          'thread-canonical-window',
+          NULL,
+          'info',
+          'task.completed',
+          'Older continuation marker',
+          '{"type":"import.continuation"}',
+          599,
+          '2026-07-26T01:00:03.000Z'
+        )
+      `;
+
+      const initialRows = yield* sql.unsafe<{ readonly activityId: string }>(
+        COMMAND_THREAD_ACTIVITY_QUERY_SQL,
+      );
+      assert.deepEqual(
+        initialRows.map((row) => row.activityId),
+        ["activity-canonical-approval", "activity-canonical-marker-latest"],
+      );
+
+      const rowIdsBefore = yield* sql<{
+        readonly activityId: string;
+        readonly rowId: number;
+      }>`
+        SELECT activity_id AS "activityId", rowid AS "rowId"
+        FROM projection_thread_activities
+        WHERE activity_id IN (
+          'activity-canonical-approval',
+          'activity-canonical-marker-latest'
+        )
+        ORDER BY activity_id
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-canonical-approval',
+            'thread-canonical-window',
+            NULL,
+            'approval',
+            'approval.requested',
+            'Approval requested',
+            '{"requestId":"approval-canonical"}',
+            0,
+            '2026-07-26T01:00:01.000Z'
+          ),
+          (
+            'activity-canonical-marker-latest',
+            'thread-canonical-window',
+            NULL,
+            'info',
+            'task.completed',
+            'Latest continuation marker',
+            '{"type":"import.continuation"}',
+            598,
+            '2026-07-26T01:00:02.000Z'
+          )
+        ON CONFLICT (activity_id)
+        DO UPDATE SET sequence = excluded.sequence
+      `;
+      const rowIdsAfter = yield* sql<{
+        readonly activityId: string;
+        readonly rowId: number;
+      }>`
+        SELECT activity_id AS "activityId", rowid AS "rowId"
+        FROM projection_thread_activities
+        WHERE activity_id IN (
+          'activity-canonical-approval',
+          'activity-canonical-marker-latest'
+        )
+        ORDER BY activity_id
+      `;
+      assert.deepEqual(rowIdsAfter, rowIdsBefore);
+
+      const updatedRows = yield* sql.unsafe<{ readonly activityId: string }>(
+        COMMAND_THREAD_ACTIVITY_QUERY_SQL,
+      );
+      assert.deepEqual(
+        updatedRows.map((row) => row.activityId),
+        ["activity-canonical-marker-old"],
+      );
+    }),
+  );
 });
 
 it.effect(
@@ -1580,10 +2156,7 @@ it.effect(
       const snapshotQuery = yield* ProjectionSnapshotQuery;
       const sql = yield* SqlClient.SqlClient;
 
-      yield* sql`DELETE FROM projection_projects`;
-      yield* sql`DELETE FROM projection_threads`;
-      yield* sql`DELETE FROM projection_turns`;
-      yield* sql`DELETE FROM projection_state`;
+      yield* clearProjectionTables(sql);
 
       yield* sql`
         INSERT INTO projection_projects (

@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/threadReducer.test.ts
+// verifies thread detail event reduction
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -21,6 +24,16 @@ const baseEventFields = {
   metadata: {},
 } as const;
 
+const importedOrigin = {
+  kind: "imported",
+  source: "claude-code",
+  sourcePath: "/imports/claude/session.jsonl",
+  contentHash: "content-hash",
+  nativeSessionId: "123e4567-e89b-12d3-a456-426614174000",
+  providerInstanceId: ProviderInstanceId.make("claude"),
+  importedAt: "2026-04-01T00:30:00.000Z",
+} as const;
+
 const baseThread: OrchestrationThread = {
   id: ThreadId.make("thread-1"),
   projectId: ProjectId.make("project-1"),
@@ -34,6 +47,7 @@ const baseThread: OrchestrationThread = {
   createdAt: "2026-04-01T00:00:00.000Z",
   updatedAt: "2026-04-01T00:00:00.000Z",
   archivedAt: null,
+  origin: null,
   settledOverride: null,
   settledAt: null,
   deletedAt: null,
@@ -88,6 +102,7 @@ describe("applyThreadDetailEvent", () => {
           interactionMode: "default",
           branch: "main",
           worktreePath: null,
+          origin: importedOrigin,
           createdAt: "2026-04-01T01:00:00.000Z",
           updatedAt: "2026-04-01T01:00:00.000Z",
         },
@@ -98,6 +113,7 @@ describe("applyThreadDetailEvent", () => {
         expect(result.thread.id).toBe("thread-2");
         expect(result.thread.title).toBe("New Thread");
         expect(result.thread.branch).toBe("main");
+        expect(result.thread.origin).toEqual(importedOrigin);
         expect(result.thread.messages).toEqual([]);
         expect(result.thread.session).toBeNull();
       }
@@ -250,8 +266,8 @@ describe("applyThreadDetailEvent", () => {
   });
 
   describe("thread.message-sent", () => {
-    it("appends a new message", () => {
-      const result = applyThreadDetailEvent(baseThread, {
+    it("appends, streams, and updates latestTurn for message sends", () => {
+      const appended = applyThreadDetailEvent(baseThread, {
         ...baseEventFields,
         sequence: 6,
         occurredAt: "2026-04-01T06:00:00.000Z",
@@ -269,15 +285,12 @@ describe("applyThreadDetailEvent", () => {
           updatedAt: "2026-04-01T06:00:00.000Z",
         },
       });
-
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.messages).toHaveLength(1);
-        expect(result.thread.messages[0]?.text).toBe("Hello, world!");
+      expect(appended.kind).toBe("updated");
+      if (appended.kind === "updated") {
+        expect(appended.thread.messages).toHaveLength(1);
+        expect(appended.thread.messages[0]?.text).toBe("Hello, world!");
       }
-    });
 
-    it("appends text for streaming messages", () => {
       const threadWithMessage: OrchestrationThread = {
         ...baseThread,
         messages: [
@@ -292,8 +305,7 @@ describe("applyThreadDetailEvent", () => {
           },
         ],
       };
-
-      const result = applyThreadDetailEvent(threadWithMessage, {
+      const streamed = applyThreadDetailEvent(threadWithMessage, {
         ...baseEventFields,
         sequence: 7,
         occurredAt: "2026-04-01T06:01:00.000Z",
@@ -311,16 +323,13 @@ describe("applyThreadDetailEvent", () => {
           updatedAt: "2026-04-01T06:01:00.000Z",
         },
       });
-
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.messages).toHaveLength(1);
-        expect(result.thread.messages[0]?.text).toBe("Hello, world!");
+      expect(streamed.kind).toBe("updated");
+      if (streamed.kind === "updated") {
+        expect(streamed.thread.messages).toHaveLength(1);
+        expect(streamed.thread.messages[0]?.text).toBe("Hello, world!");
       }
-    });
 
-    it("updates latestTurn for assistant messages with a turn", () => {
-      const result = applyThreadDetailEvent(baseThread, {
+      const completed = applyThreadDetailEvent(baseThread, {
         ...baseEventFields,
         sequence: 8,
         occurredAt: "2026-04-01T07:00:00.000Z",
@@ -338,12 +347,11 @@ describe("applyThreadDetailEvent", () => {
           updatedAt: "2026-04-01T07:00:00.000Z",
         },
       });
-
-      expect(result.kind).toBe("updated");
-      if (result.kind === "updated") {
-        expect(result.thread.latestTurn?.turnId).toBe("turn-1");
-        expect(result.thread.latestTurn?.state).toBe("completed");
-        expect(result.thread.latestTurn?.assistantMessageId).toBe("msg-3");
+      expect(completed.kind).toBe("updated");
+      if (completed.kind === "updated") {
+        expect(completed.thread.latestTurn?.turnId).toBe("turn-1");
+        expect(completed.thread.latestTurn?.state).toBe("completed");
+        expect(completed.thread.latestTurn?.assistantMessageId).toBe("msg-3");
       }
     });
 
@@ -622,6 +630,51 @@ describe("applyThreadDetailEvent", () => {
       if (result.kind === "updated") {
         expect(result.thread.activities).toHaveLength(130);
         expect(result.thread.activities[0]?.id).toBe("activity-0");
+      }
+    });
+
+    it("keeps imported history before continued native activities", () => {
+      const importedActivity = {
+        id: EventId.make("imported-activity"),
+        tone: "info" as const,
+        kind: "task.progress",
+        summary: "Imported history",
+        payload: {},
+        turnId: null,
+        sequence: 100,
+        createdAt: "2026-04-01T11:00:00.000Z",
+      };
+      const result = applyThreadDetailEvent(
+        { ...baseThread, activities: [importedActivity] },
+        {
+          ...baseEventFields,
+          sequence: 13,
+          occurredAt: "2026-04-01T11:01:00.000Z",
+          aggregateKind: "thread",
+          aggregateId: ThreadId.make("thread-1"),
+          type: "thread.activity-appended",
+          payload: {
+            threadId: ThreadId.make("thread-1"),
+            activity: {
+              id: EventId.make("native-activity"),
+              tone: "info",
+              kind: "task.progress",
+              summary: "Continued native work",
+              payload: {},
+              turnId: TurnId.make("turn-native"),
+              sequence: 1,
+              createdAt: "2026-04-01T11:01:00.000Z",
+            },
+          },
+        },
+      );
+
+      expect(result.kind).toBe("updated");
+      if (result.kind === "updated") {
+        expect(result.thread.activities.map((activity) => activity.id)).toEqual([
+          "imported-activity",
+          "native-activity",
+        ]);
       }
     });
   });

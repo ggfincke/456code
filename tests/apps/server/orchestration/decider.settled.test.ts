@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/decider.settled.test.ts
+// verifies thread settlement command decisions
+
 import {
   CommandId,
   EventId,
@@ -42,6 +45,7 @@ function makeReadModel(
         createdAt: NOW,
         updatedAt: NOW,
         archivedAt,
+        origin: null,
         settledOverride,
         settledAt: settledOverride === "settled" ? SETTLED_AT : null,
         deletedAt: null,

@@ -1,3 +1,5 @@
+// apps/server/src/provider/Layers/ClaudeProvider.ts
+// builds and refreshes Claude provider snapshots
 import {
   type ClaudeSettings,
   type ModelCapabilities,
@@ -710,7 +712,7 @@ const probeClaudeCapabilities = (
 ) => {
   const abort = new AbortController();
   return Effect.gen(function* () {
-    const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+    const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment, cwd);
     const executablePath = yield* resolveClaudeSdkExecutablePath(
       claudeSettings.binaryPath,
       claudeEnvironment,
@@ -766,8 +768,9 @@ const runClaudeCommand = Effect.fn("runClaudeCommand")(function* (
   claudeSettings: ClaudeSettings,
   args: ReadonlyArray<string>,
   environment?: NodeJS.ProcessEnv,
+  cwd?: string,
 ) {
-  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment);
+  const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment, cwd);
   const spawnCommand = yield* resolveSpawnCommand(claudeSettings.binaryPath, args, {
     env: claudeEnvironment,
   });
@@ -818,6 +821,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     claudeSettings,
     ["--version"],
     resolvedEnvironment,
+    cwd,
   ).pipe(Effect.timeoutOption(DEFAULT_TIMEOUT_MS), Effect.result);
 
   if (Result.isFailure(versionProbe)) {

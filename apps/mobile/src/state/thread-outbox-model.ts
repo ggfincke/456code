@@ -1,5 +1,11 @@
+// apps/mobile/src/state/thread-outbox-model.ts
+// defines durable queued-message delivery decisions and retry policy
+
 import { isTransportConnectionErrorMessage } from "@t3tools/client-runtime/errors";
-import type { EnvironmentShellStatus } from "@t3tools/client-runtime/state/shell";
+import type {
+  EnvironmentShellStatus,
+  EnvironmentThreadShell,
+} from "@t3tools/client-runtime/state/shell";
 import {
   CommandId,
   EnvironmentId,
@@ -103,6 +109,12 @@ export function modelSelectionsEqual(left: ModelSelectionType, right: ModelSelec
     left.model === right.model &&
     JSON.stringify(left.options ?? null) === JSON.stringify(right.options ?? null)
   );
+}
+
+export function requiresWebImportContinuation(
+  thread: Pick<EnvironmentThreadShell, "latestTurn" | "origin"> | null | undefined,
+): boolean {
+  return thread?.origin !== null && thread?.origin !== undefined && thread.latestTurn === null;
 }
 
 export function encodeQueuedThreadMessage(message: QueuedThreadMessage): unknown {

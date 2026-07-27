@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/CodexAdapter.test.ts
+// verifies Codex adapter event translation and runtime behavior
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeAssert from "node:assert/strict";
 import * as NodeFS from "node:fs";
@@ -288,6 +290,28 @@ validationLayer("CodexAdapterLive validation", (it) => {
       });
     }),
   );
+
+  it.effect("passes strict imported resume cursors into the session runtime", () =>
+    Effect.gen(function* () {
+      validationRuntimeFactory.factory.mockClear();
+      const adapter = yield* CodexAdapter;
+
+      yield* adapter.startSession({
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-imported"),
+        runtimeMode: "approval-required",
+        resumeCursor: {
+          threadId: "native-imported-thread",
+          requireExisting: true,
+        },
+      });
+
+      NodeAssert.deepStrictEqual(validationRuntimeFactory.factory.mock.calls[0]?.[0].resumeCursor, {
+        threadId: "native-imported-thread",
+        requireExisting: true,
+      });
+    }),
+  );
 });
 
 const sessionRuntimeFactory = makeRuntimeFactory();
@@ -360,14 +384,14 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     }),
   );
 
-  it.effect("passes configured launch args into the session runtime", () => {
-    const runtimeFactory = makeRuntimeFactory();
-    const layer = Layer.effect(
+  it.effect("forwards configured and env override launch args into the session runtime", () => {
+    const configuredFactory = makeRuntimeFactory();
+    const configuredLayer = Layer.effect(
       CodexAdapter,
       Effect.gen(function* () {
         const codexConfig = decodeCodexSettings({ launchArgs: "--strict-config --enable foo" });
         return yield* makeCodexAdapter(codexConfig, {
-          makeRuntime: runtimeFactory.factory,
+          makeRuntime: configuredFactory.factory,
         });
       }),
     ).pipe(
@@ -377,29 +401,14 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
       Layer.provideMerge(NodeServices.layer),
     );
 
-    return Effect.gen(function* () {
-      const adapter = yield* CodexAdapter;
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("sess-launch-args"),
-        runtimeMode: "full-access",
-      });
-
-      const runtime = runtimeFactory.lastRuntime;
-      NodeAssert.ok(runtime);
-      NodeAssert.equal(runtime.options.launchArgs, "--strict-config --enable foo");
-    }).pipe(Effect.provide(layer));
-  });
-
-  it.effect("uses T3CODE_CODEX_LAUNCH_ARGS for the session runtime", () => {
-    const runtimeFactory = makeRuntimeFactory();
-    const layer = Layer.effect(
+    const envFactory = makeRuntimeFactory();
+    const envLayer = Layer.effect(
       CodexAdapter,
       Effect.gen(function* () {
         const codexConfig = decodeCodexSettings({ launchArgs: "--enable settings-feature" });
         return yield* makeCodexAdapter(codexConfig, {
           environment: { T3CODE_CODEX_LAUNCH_ARGS: " --strict-config --enable env-feature " },
-          makeRuntime: runtimeFactory.factory,
+          makeRuntime: envFactory.factory,
         });
       }),
     ).pipe(
@@ -410,17 +419,35 @@ sessionErrorLayer("CodexAdapterLive session errors", (it) => {
     );
 
     return Effect.gen(function* () {
-      const adapter = yield* CodexAdapter;
-      yield* adapter.startSession({
+      const configuredAdapter = yield* CodexAdapter;
+      yield* configuredAdapter.startSession({
         provider: ProviderDriverKind.make("codex"),
-        threadId: asThreadId("sess-launch-args-env"),
+        threadId: asThreadId("sess-launch-args"),
         runtimeMode: "full-access",
       });
-
-      const runtime = runtimeFactory.lastRuntime;
-      NodeAssert.ok(runtime);
-      NodeAssert.equal(runtime.options.launchArgs, "--strict-config --enable env-feature");
-    }).pipe(Effect.provide(layer));
+      NodeAssert.ok(configuredFactory.lastRuntime);
+      NodeAssert.equal(
+        configuredFactory.lastRuntime.options.launchArgs,
+        "--strict-config --enable foo",
+      );
+    }).pipe(
+      Effect.provide(configuredLayer),
+      Effect.andThen(
+        Effect.gen(function* () {
+          const envAdapter = yield* CodexAdapter;
+          yield* envAdapter.startSession({
+            provider: ProviderDriverKind.make("codex"),
+            threadId: asThreadId("sess-launch-args-env"),
+            runtimeMode: "full-access",
+          });
+          NodeAssert.ok(envFactory.lastRuntime);
+          NodeAssert.equal(
+            envFactory.lastRuntime.options.launchArgs,
+            "--strict-config --enable env-feature",
+          );
+        }).pipe(Effect.provide(envLayer)),
+      ),
+    );
   });
 
   it.effect("maps codex model options for the adapter's bound custom instance id", () => {
@@ -758,6 +785,39 @@ lifecycleLayer("CodexAdapterLive lifecycle", (it) => {
       }
       NodeAssert.equal(firstEvent.value.turnId, "turn-1");
       NodeAssert.equal(firstEvent.value.payload.message, "Reconnecting... 2/5");
+    }),
+  );
+
+  it.effect("maps imported resume fallback to a visible canonical runtime warning", () =>
+    Effect.gen(function* () {
+      const { adapter, runtime } = yield* startLifecycleRuntime();
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild);
+
+      yield* runtime.emit({
+        id: asEventId("evt-resume-fallback"),
+        kind: "notification",
+        provider: ProviderDriverKind.make("codex"),
+        threadId: asThreadId("thread-1"),
+        createdAt: "2026-01-01T00:00:00.000Z",
+        method: "thread/resumeFallback",
+        message: "Imported native history was unavailable; Codex started a fresh thread.",
+      } satisfies ProviderEvent);
+
+      const firstEvent = yield* Fiber.join(firstEventFiber);
+
+      NodeAssert.equal(firstEvent._tag, "Some");
+      if (firstEvent._tag !== "Some") {
+        return;
+      }
+      NodeAssert.equal(firstEvent.value.type, "runtime.warning");
+      if (firstEvent.value.type !== "runtime.warning") {
+        return;
+      }
+      NodeAssert.equal(firstEvent.value.threadId, "thread-1");
+      NodeAssert.equal(
+        firstEvent.value.payload.message,
+        "Imported native history was unavailable; Codex started a fresh thread.",
+      );
     }),
   );
 

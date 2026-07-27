@@ -1,3 +1,6 @@
+// apps/server/src/orchestration/projector.ts
+// applies orchestration events to in-memory read models
+
 import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
@@ -5,6 +8,7 @@ import {
   OrchestrationSession,
   OrchestrationThread,
 } from "@t3tools/contracts";
+import { compareOrchestrationThreadActivities } from "@t3tools/shared/orchestrationActivityOrder";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -165,21 +169,30 @@ function retainThreadProposedPlansAfterRevert(
   );
 }
 
-function compareThreadActivities(
-  left: OrchestrationThread["activities"][number],
-  right: OrchestrationThread["activities"][number],
-): number {
-  if (left.sequence !== undefined && right.sequence !== undefined) {
-    if (left.sequence !== right.sequence) {
-      return left.sequence - right.sequence;
-    }
-  } else if (left.sequence !== undefined) {
-    return 1;
-  } else if (right.sequence !== undefined) {
-    return -1;
-  }
+function isImportContinuationActivity(
+  activity: OrchestrationThread["activities"][number],
+): boolean {
+  return (
+    typeof activity.payload === "object" &&
+    activity.payload !== null &&
+    "type" in activity.payload &&
+    activity.payload.type === "import.continuation"
+  );
+}
 
-  return left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id);
+function retainThreadActivities(
+  activities: ReadonlyArray<OrchestrationThread["activities"][number]>,
+): ReadonlyArray<OrchestrationThread["activities"][number]> {
+  const latestImportContinuation = activities.findLast(isImportContinuationActivity);
+  const retainedActivities = activities
+    .filter((activity) => !isImportContinuationActivity(activity))
+    .slice(-500);
+  if (latestImportContinuation === undefined) {
+    return retainedActivities;
+  }
+  return [latestImportContinuation, ...retainedActivities].toSorted(
+    compareOrchestrationThreadActivities,
+  );
 }
 
 export function createEmptyReadModel(nowIso: string): OrchestrationReadModel {
@@ -290,6 +303,7 @@ export function projectEvent(
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
+            origin: payload.origin,
             settledOverride: null,
             settledAt: null,
             snoozedUntil: null,
@@ -734,14 +748,12 @@ export function projectEvent(
           const activities = [
             ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
             payload.activity,
-          ]
-            .toSorted(compareThreadActivities)
-            .slice(-500);
+          ].toSorted(compareOrchestrationThreadActivities);
 
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              activities,
+              activities: retainThreadActivities(activities),
               updatedAt: event.occurredAt,
             }),
           };

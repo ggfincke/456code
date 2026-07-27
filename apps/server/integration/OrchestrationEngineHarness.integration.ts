@@ -1,3 +1,5 @@
+// apps/server/integration/OrchestrationEngineHarness.integration.ts
+// provides a persisted orchestration runtime harness for integration tests
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from "node:child_process";
 
@@ -222,6 +224,8 @@ export interface OrchestrationIntegrationHarness {
 interface MakeOrchestrationIntegrationHarnessOptions {
   readonly provider?: ProviderDriverKind;
   readonly realCodex?: boolean;
+  readonly rootDir?: string;
+  readonly startReactor?: boolean;
 }
 
 export const makeOrchestrationIntegrationHarness = (
@@ -244,16 +248,20 @@ export const makeOrchestrationIntegrationHarness = (
           makeAdapterRegistryMock({ [adapterHarness.provider]: adapterHarness.adapter }),
         )
       : null;
-    const rootDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "t3-orchestration-integration-",
-    });
+    const rootDir =
+      options?.rootDir ??
+      (yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-orchestration-integration-",
+      }));
     const workspaceDir = path.join(rootDir, "workspace");
     const { stateDir, dbPath } = yield* deriveServerPaths(rootDir, undefined).pipe(
       Effect.provideService(Path.Path, path),
     );
     yield* fileSystem.makeDirectory(workspaceDir, { recursive: true });
     yield* fileSystem.makeDirectory(stateDir, { recursive: true });
-    yield* initializeGitWorkspace(workspaceDir);
+    if (!(yield* fileSystem.exists(path.join(workspaceDir, ".git")))) {
+      yield* initializeGitWorkspace(workspaceDir);
+    }
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath);
     const orchestrationLayer = OrchestrationEngineLive.pipe(
@@ -406,14 +414,16 @@ export const makeOrchestrationIntegrationHarness = (
     ).pipe(Effect.orDie);
 
     const scope = yield* Scope.make("sequential");
-    yield* tryRuntimePromise("start OrchestrationReactor", () =>
-      runtime.runPromise(reactor.start().pipe(Scope.provide(scope))),
-    ).pipe(Effect.orDie);
     const receiptHistory = yield* Ref.make<ReadonlyArray<OrchestrationRuntimeReceipt>>([]);
-    yield* Stream.runForEach(runtimeReceiptBus.streamEventsForTest, (receipt) =>
-      Ref.update(receiptHistory, (history) => [...history, receipt]).pipe(Effect.asVoid),
-    ).pipe(Effect.forkIn(scope));
-    yield* Effect.sleep(10);
+    if (options?.startReactor !== false) {
+      yield* tryRuntimePromise("start OrchestrationReactor", () =>
+        runtime.runPromise(reactor.start().pipe(Scope.provide(scope))),
+      ).pipe(Effect.orDie);
+      yield* Stream.runForEach(runtimeReceiptBus.streamEventsForTest, (receipt) =>
+        Ref.update(receiptHistory, (history) => [...history, receipt]).pipe(Effect.asVoid),
+      ).pipe(Effect.forkIn(scope));
+      yield* Effect.sleep(10);
+    }
 
     const waitForThread: OrchestrationIntegrationHarness["waitForThread"] = (
       threadId,

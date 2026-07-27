@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/ThreadComposer.tsx
+// renders and controls the mobile thread message composer
 import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
 import type {
   EnvironmentId,
@@ -69,6 +71,7 @@ import {
 } from "../../lib/providerOptions";
 import { useComposerPathSearch } from "../../state/use-composer-path-search";
 import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";
+import { composerConnectionStatus, type ComposerStatusPillState } from "./threadComposerStatus";
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
@@ -101,6 +104,7 @@ export interface ThreadComposerProps {
   readonly serverConfig: ServerConfig | null;
   readonly queueCount: number;
   readonly activeThreadBusy: boolean;
+  readonly sendBlockedReason: string | null;
   readonly environmentId: EnvironmentId;
   readonly projectCwd: string | null;
   readonly editorRef?: RefObject<ComposerEditorHandle | null>;
@@ -180,61 +184,31 @@ export function ComposerSurface(props: {
   );
 }
 
-type ComposerStatusPillState = {
-  readonly kind: "unavailable" | "reconnecting" | "syncing";
-  readonly label: string;
-};
-
-function composerConnectionStatus(input: {
-  readonly connectionError: string | null;
-  readonly connectionState: RemoteClientConnectionState;
-  readonly environmentLabel: string | null;
-  readonly threadSyncPhase?: "loading" | "syncing" | null;
-}): ComposerStatusPillState | null {
-  const environmentLabel = input.environmentLabel ?? "Environment";
-
-  switch (input.connectionState) {
-    case "connecting":
-    case "reconnecting":
-      return {
-        kind: "reconnecting",
-        label:
-          input.connectionError === null
-            ? `Reconnecting to ${environmentLabel}...`
-            : `Failed to connect. Retrying ${environmentLabel}...`,
-      };
-    case "offline":
-      return { kind: "unavailable", label: "You are offline" };
-    case "error":
-      return {
-        kind: "unavailable",
-        label: input.connectionError
-          ? `Failed to connect to ${environmentLabel}: ${input.connectionError}`
-          : `Failed to connect to ${environmentLabel}`,
-      };
-    case "available":
-      return { kind: "unavailable", label: `${environmentLabel} is not connected` };
-    case "connected":
-      break;
-  }
-
-  // Connected: the pill is the single loading/sync indicator. One stable
-  // label per open — "Loading" when starting from scratch, "Syncing" when
-  // cached messages are already visible.
-  switch (input.threadSyncPhase) {
-    case "loading":
-      return { kind: "syncing", label: "Loading messages..." };
-    case "syncing":
-      return { kind: "syncing", label: "Syncing messages..." };
-    default:
-      return null;
-  }
-}
-
 const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(props: {
   readonly onPress: () => void;
   readonly status: ComposerStatusPillState;
 }) {
+  if (props.status.kind === "blocked") {
+    return (
+      <Animated.View
+        className="absolute inset-x-0 bottom-full items-center pb-2"
+        entering={FadeInDown.duration(180)}
+        exiting={FadeOutDown.duration(140)}
+        pointerEvents="box-none"
+      >
+        <View
+          accessibilityLiveRegion="polite"
+          className="max-w-full flex-row items-center gap-2 rounded-2xl bg-white/95 px-3 py-2 shadow-sm dark:bg-neutral-900/95"
+        >
+          <View className="h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+          <Text className="max-w-[300px] text-sm font-sans-bold leading-snug text-foreground">
+            {props.status.label}
+          </Text>
+        </View>
+      </Animated.View>
+    );
+  }
+
   const isReconnecting = props.status.kind !== "unavailable";
 
   return (
@@ -279,7 +253,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
   const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
   const isExpanded = isFocused;
-  const canSend = hasContent;
+  const canSend = hasContent && props.sendBlockedReason === null;
 
   const onPressImage = useCallback(
     (uri: string) => {
@@ -310,9 +284,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.selectedThread.session?.status === "starting";
 
   const sendLabel =
-    props.connectionState !== "connected" || props.activeThreadBusy || props.queueCount > 0
-      ? "Queue"
-      : "Send";
+    props.sendBlockedReason !== null
+      ? "Sending blocked"
+      : props.connectionState !== "connected" || props.activeThreadBusy || props.queueCount > 0
+        ? "Queue"
+        : "Send";
   const currentModelSelection = props.selectedThread.modelSelection;
   const currentRuntimeMode = props.selectedThread.runtimeMode;
   const currentInteractionMode = props.selectedThread.interactionMode ?? "default";
@@ -320,6 +296,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     connectionError: props.connectionError,
     connectionState: props.connectionState,
     environmentLabel: props.environmentLabel,
+    sendBlockedReason: props.sendBlockedReason,
     threadSyncPhase: props.threadSyncPhase,
   });
   const toolbarFadeOpaque = isDarkMode ? "rgba(0,0,0,0.95)" : "rgba(255,255,255,0.95)";
@@ -515,6 +492,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
   const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props;
 
   const handleSend = useCallback(async () => {
+    if (props.sendBlockedReason !== null) {
+      return;
+    }
     const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
     if (inFlightThreadIdsRef.current.has(threadKey)) return;
     inFlightThreadIdsRef.current.add(threadKey);
@@ -533,6 +513,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     onSendMessage,
     props.environmentId,
     props.environmentLabel,
+    props.sendBlockedReason,
     props.selectedThread.id,
     props.selectedThread.title,
   ]);

@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/ThreadDetailScreen.tsx
+// renders the mobile thread timeline and composer surface
 import { type EnvironmentConnectionPhase } from "@t3tools/client-runtime/connection";
 import type { EnvironmentThreadStatus } from "@t3tools/client-runtime/state/threads";
 import { useKeyboardChatComposerInset, useKeyboardScrollToEnd } from "@legendapp/list/keyboard";
@@ -62,6 +64,7 @@ export interface ThreadDetailScreenProps {
   /** Message sync status for the selected thread (drives the composer status pill). */
   readonly threadSyncStatus?: EnvironmentThreadStatus;
   readonly activeThreadBusy: boolean;
+  readonly sendBlockedReason: string | null;
   readonly environmentId: EnvironmentId;
   readonly projectWorkspaceRoot: string | null;
   readonly threadCwd: string | null;
@@ -430,6 +433,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               serverConfig={props.serverConfig}
               queueCount={props.selectedThreadQueueCount}
               activeThreadBusy={props.activeThreadBusy}
+              sendBlockedReason={props.sendBlockedReason}
               environmentId={props.environmentId}
               projectCwd={props.projectWorkspaceRoot}
               bottomInset={composerBottomInset}

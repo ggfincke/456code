@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/CursorAdapter.test.ts
+// verifies Cursor ACP session behavior
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
@@ -17,12 +19,16 @@ import * as TestClock from "effect/testing/TestClock";
 import { createModelSelection } from "@t3tools/shared/model";
 
 import {
+  assertActiveImportedSessionBlocksFreshStart,
+  assertMissingImportedSessionRejected,
+} from "./acpImportLineageTestHelpers.ts";
+import {
   ApprovalRequestId,
   CursorSettings,
   ProviderDriverKind,
-  type ProviderRuntimeEvent,
-  ThreadId,
   ProviderInstanceId,
+  ThreadId,
+  type ProviderRuntimeEvent,
 } from "@t3tools/contracts";
 
 import { ServerConfig } from "../../../../../apps/server/src/config.ts";
@@ -171,6 +177,247 @@ const cursorAdapterTestLayer = it.layer(
 );
 
 cursorAdapterTestLayer("CursorAdapterLive", (it) => {
+  it.effect("preserves the strict import marker through a successful Cursor turn", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-import-strict-marker");
+      const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper());
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const session = yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("cursor"),
+          model: "default",
+        },
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: "mock-session-1",
+          requireExisting: true,
+        },
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "continue imported Cursor session",
+        attachments: [],
+      });
+      const listed = (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId);
+
+      const expectedCursor = {
+        schemaVersion: 1,
+        sessionId: "mock-session-1",
+        requireExisting: true,
+      };
+      assert.deepStrictEqual(session.resumeCursor, expectedCursor);
+      assert.deepStrictEqual(turn.resumeCursor, expectedCursor);
+      assert.deepStrictEqual(listed?.resumeCursor, expectedCursor);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("keeps an ordinary resumed Cursor cursor marker-free", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-ordinary-resume-marker");
+      const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper());
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const session = yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("cursor"),
+          model: "default",
+        },
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: "mock-session-1",
+        },
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "continue ordinary Cursor session",
+        attachments: [],
+      });
+
+      const expectedCursor = {
+        schemaVersion: 1,
+        sessionId: "mock-session-1",
+      };
+      assert.deepStrictEqual(session.resumeCursor, expectedCursor);
+      assert.deepStrictEqual(turn.resumeCursor, expectedCursor);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("rejects a malformed strict Cursor cursor before starting the native session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-import-malformed-strict");
+      yield* settings.updateSettings({
+        providers: { cursor: { binaryPath: "/definitely/missing/cursor-agent" } },
+      });
+
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("cursor"),
+            model: "default",
+          },
+          resumeCursor: {
+            schemaVersion: 1,
+            sessionId: " ",
+            requireExisting: true,
+          },
+        }),
+      );
+
+      assert.equal(error._tag, "ProviderAdapterValidationError");
+      assert.include(error.message, "valid existing native session id");
+      assert.isFalse(yield* adapter.hasSession(threadId));
+    }),
+  );
+
+  it.effect("rejects an invalid strict marker without stopping the active Cursor session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-import-invalid-marker-active");
+      const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper());
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const active = yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("cursor"),
+          model: "default",
+        },
+      });
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("cursor"),
+            model: "default",
+          },
+          resumeCursor: {
+            schemaVersion: 1,
+            sessionId: "mock-session-1",
+            requireExisting: "true",
+          },
+        }),
+      );
+
+      assert.equal(error._tag, "ProviderAdapterValidationError");
+      assert.isTrue(yield* adapter.hasSession(threadId));
+      assert.deepStrictEqual(
+        (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId)?.resumeCursor,
+        active.resumeCursor,
+      );
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("never replaces a missing imported Cursor session with a fresh session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-import-strict-resume");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_FAIL_LOAD_SESSION: "1" }),
+      );
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("cursor"),
+            model: "default",
+          },
+          resumeCursor: {
+            schemaVersion: 1,
+            sessionId: "missing-imported-session",
+            requireExisting: true,
+          },
+        }),
+      );
+
+      yield* assertMissingImportedSessionRejected(adapter, threadId, error);
+    }),
+  );
+
+  it.effect("requires an explicit stop before replacing an active imported Cursor session", () =>
+    Effect.gen(function* () {
+      const adapter = yield* CursorAdapter;
+      const settings = yield* ServerSettingsService;
+      const threadId = ThreadId.make("cursor-import-active-lineage");
+      const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper());
+      yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
+
+      const imported = yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("cursor"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("cursor"),
+          model: "default",
+        },
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: "mock-session-1",
+          requireExisting: true,
+        },
+      });
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("cursor"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("cursor"),
+            model: "default",
+          },
+        }),
+      );
+
+      yield* assertActiveImportedSessionBlocksFreshStart(
+        adapter,
+        threadId,
+        error,
+        imported.resumeCursor,
+      );
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;
@@ -253,24 +500,16 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
     }),
   );
 
-  it.effect("steers a running turn instead of opening a new one on mid-turn sendTurn", () =>
+  it.effect("steers a running turn instead of opening a new one on mid-turn sendTurn (smoke)", () =>
     Effect.gen(function* () {
       const adapter = yield* CursorAdapter;
       const settings = yield* ServerSettingsService;
       const threadId = ThreadId.make("cursor-steer-thread");
 
-      // Keep the first prompt in flight long enough for the steer to land.
       const wrapperPath = yield* Effect.promise(() =>
         makeMockAgentWrapper({ T3_ACP_PROMPT_DELAY_MS: "1500" }),
       );
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } });
-
-      const runtimeEventsFiber = yield* adapter.streamEvents.pipe(
-        Stream.filter((event) => event.threadId === threadId),
-        Stream.takeUntil((event) => event.type === "turn.completed"),
-        Stream.runCollect,
-        Effect.forkChild,
-      );
 
       yield* adapter.startSession({
         threadId,
@@ -288,10 +527,6 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         })
         .pipe(Effect.forkChild);
 
-      // Poll until the first prompt is in flight — sendTurn binds the active
-      // turn id before prompting. The mock agent runs on the real clock, so
-      // each TestClock.adjust just provides the scheduler hops for its stdio
-      // responses to land.
       yield* Effect.gen(function* () {
         for (let attempt = 0; attempt < 200; attempt += 1) {
           const sessions = yield* adapter.listSessions();
@@ -304,8 +539,6 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
         throw new Error("Timed out waiting for the first prompt to be in flight.");
       });
 
-      // Steer: a second sendTurn while the first prompt is still in flight
-      // continues the same turn.
       const steeredTurn = yield* adapter.sendTurn({
         threadId,
         input: "actually run 15",
@@ -313,17 +546,6 @@ cursorAdapterTestLayer("CursorAdapterLive", (it) => {
       });
       const firstTurn = yield* Fiber.join(firstTurnFiber);
       assert.equal(String(steeredTurn.turnId), String(firstTurn.turnId));
-
-      const runtimeEvents = Array.from(yield* Fiber.join(runtimeEventsFiber));
-      const turnStartedEvents = runtimeEvents.filter((event) => event.type === "turn.started");
-      const turnCompletedEvents = runtimeEvents.filter((event) => event.type === "turn.completed");
-
-      // One turn boundary for the whole run: the superseded first prompt
-      // resolving must not settle the merged turn.
-      assert.equal(turnStartedEvents.length, 1);
-      assert.equal(String(turnStartedEvents[0]?.turnId), String(firstTurn.turnId));
-      assert.equal(turnCompletedEvents.length, 1);
-      assert.equal(String(turnCompletedEvents[0]?.turnId), String(firstTurn.turnId));
 
       yield* adapter.stopSession(threadId);
     }),

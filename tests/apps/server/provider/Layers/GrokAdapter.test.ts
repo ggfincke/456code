@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/GrokAdapter.test.ts
+// verifies Grok ACP session behavior
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from "node:path";
 import * as NodeOS from "node:os";
@@ -15,6 +17,10 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as TestClock from "effect/testing/TestClock";
 
+import {
+  assertActiveImportedSessionBlocksFreshStart,
+  assertMissingImportedSessionRejected,
+} from "./acpImportLineageTestHelpers.ts";
 import {
   ApprovalRequestId,
   GrokSettings,
@@ -39,7 +45,10 @@ const mockAgentPath = NodePath.join(
 );
 const mockAgentCommand = process.execPath;
 
-async function makeMockGrokWrapper(extraEnv?: Record<string, string>) {
+async function makeMockGrokWrapper(
+  extraEnv?: Record<string, string>,
+  options?: { initialDelaySeconds?: number },
+) {
   const dir = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-acp-mock-"));
   const wrapperPath = NodePath.join(dir, "fake-grok.sh");
   const envExports = Object.entries(extraEnv ?? {})
@@ -47,6 +56,7 @@ async function makeMockGrokWrapper(extraEnv?: Record<string, string>) {
     .join("\n");
   const script = `#!/bin/sh
 ${envExports}
+${options?.initialDelaySeconds ? `sleep ${JSON.stringify(String(options.initialDelaySeconds))}` : ""}
 exec ${JSON.stringify(mockAgentCommand)} ${JSON.stringify(mockAgentPath)} "$@"
 `;
   await NodeFSP.writeFile(wrapperPath, script, "utf8");
@@ -129,6 +139,196 @@ it("requires a settlement to match the live Grok turn", () => {
 });
 
 it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
+  it.effect("preserves the strict import marker through a successful Grok turn", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-import-strict-marker");
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      const session = yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: "mock-session-1",
+          requireExisting: true,
+        },
+      });
+      const turn = yield* adapter.sendTurn({
+        threadId,
+        input: "continue imported Grok session",
+        attachments: [],
+      });
+      const listed = (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId);
+
+      const expectedCursor = {
+        schemaVersion: 1,
+        sessionId: "mock-session-1",
+        requireExisting: true,
+      };
+      assert.deepStrictEqual(session.resumeCursor, expectedCursor);
+      assert.deepStrictEqual(turn.resumeCursor, expectedCursor);
+      assert.deepStrictEqual(listed?.resumeCursor, expectedCursor);
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("rejects a malformed strict Grok cursor before starting the native session", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-import-malformed-strict");
+      const adapter = yield* makeTestAdapter("/definitely/missing/grok");
+
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("grok"),
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("grok"),
+            model: "grok-build",
+          },
+          resumeCursor: {
+            schemaVersion: 1,
+            sessionId: " ",
+            requireExisting: true,
+          },
+        }),
+      );
+
+      assert.equal(error._tag, "ProviderAdapterValidationError");
+      assert.include(error.message, "valid existing native session id");
+      assert.isFalse(yield* adapter.hasSession(threadId));
+    }),
+  );
+
+  it.effect("rejects an invalid strict marker without stopping the active Grok session", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-import-invalid-marker-active");
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      const active = yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+      });
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("grok"),
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("grok"),
+            model: "grok-build",
+          },
+          resumeCursor: {
+            schemaVersion: 1,
+            sessionId: "mock-session-1",
+            requireExisting: "true",
+          },
+        }),
+      );
+
+      assert.equal(error._tag, "ProviderAdapterValidationError");
+      assert.isTrue(yield* adapter.hasSession(threadId));
+      assert.deepStrictEqual(
+        (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId)?.resumeCursor,
+        active.resumeCursor,
+      );
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
+  it.effect("never replaces a missing imported Grok session with a fresh session", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-import-strict-resume");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_FAIL_LOAD_SESSION: "1" }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("grok"),
+          cwd: process.cwd(),
+          runtimeMode: "approval-required",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("grok"),
+            model: "grok-build",
+          },
+          resumeCursor: {
+            schemaVersion: 1,
+            sessionId: "missing-imported-session",
+            requireExisting: true,
+          },
+        }),
+      );
+
+      yield* assertMissingImportedSessionRejected(adapter, threadId, error);
+    }),
+  );
+
+  it.effect("requires an explicit stop before replacing an active imported Grok session", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-import-active-lineage");
+      const wrapperPath = yield* Effect.promise(() => makeMockGrokWrapper());
+      const adapter = yield* makeTestAdapter(wrapperPath);
+
+      const imported = yield* adapter.startSession({
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "approval-required",
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+        resumeCursor: {
+          schemaVersion: 1,
+          sessionId: "mock-session-1",
+          requireExisting: true,
+        },
+      });
+      const error = yield* Effect.flip(
+        adapter.startSession({
+          threadId,
+          provider: ProviderDriverKind.make("grok"),
+          cwd: process.cwd(),
+          runtimeMode: "full-access",
+          modelSelection: {
+            instanceId: ProviderInstanceId.make("grok"),
+            model: "grok-build",
+          },
+        }),
+      );
+
+      yield* assertActiveImportedSessionBlocksFreshStart(
+        adapter,
+        threadId,
+        error,
+        imported.resumeCursor,
+      );
+
+      yield* adapter.stopSession(threadId);
+    }),
+  );
+
   it.effect("starts a session and maps mock ACP prompt flow to runtime events", () =>
     Effect.gen(function* () {
       const threadId = ThreadId.make("grok-mock-thread");
@@ -221,6 +421,43 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
 
       const exitLog = yield* waitForFileContent(exitLogPath);
       assert.include(exitLog, "SIGTERM");
+    }),
+  );
+
+  it.effect("serializes concurrent Grok starts and closes both same-thread ACP sessions", () =>
+    Effect.gen(function* () {
+      const threadId = ThreadId.make("grok-concurrent-start-session");
+      const tempDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "grok-adapter-concurrent-exit-log-")),
+      );
+      const exitLogPath = NodePath.join(tempDir, "exit.log");
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_EXIT_LOG_PATH: exitLogPath }, { initialDelaySeconds: 0.2 }),
+      );
+      const adapter = yield* makeTestAdapter(wrapperPath);
+      const startInput = {
+        threadId,
+        provider: ProviderDriverKind.make("grok"),
+        cwd: process.cwd(),
+        runtimeMode: "full-access" as const,
+        modelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+      };
+
+      const [firstSession, secondSession] = yield* Effect.all(
+        [adapter.startSession(startInput), adapter.startSession(startInput)],
+        { concurrency: "unbounded" },
+      );
+
+      assert.equal(firstSession.threadId, threadId);
+      assert.equal(secondSession.threadId, threadId);
+
+      yield* adapter.stopSession(threadId);
+
+      const exitLog = yield* waitForFileContent(exitLogPath);
+      assert.equal(exitLog.match(/SIGTERM/g)?.length ?? 0, 2);
     }),
   );
 
@@ -974,13 +1211,17 @@ it.layer(grokAdapterTestLayer)("GrokAdapterLive", (it) => {
         resumeCursor: { schemaVersion: 1, sessionId: "mock-session-1" },
       });
 
-      yield* adapter.sendTurn({
+      const turn = yield* adapter.sendTurn({
         threadId,
         input: "after resume",
         attachments: [],
       });
 
       assert.deepStrictEqual(session.resumeCursor, {
+        schemaVersion: 1,
+        sessionId: "mock-session-1",
+      });
+      assert.deepStrictEqual(turn.resumeCursor, {
         schemaVersion: 1,
         sessionId: "mock-session-1",
       });

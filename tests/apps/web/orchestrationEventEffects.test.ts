@@ -1,3 +1,6 @@
+// tests/apps/web/orchestrationEventEffects.test.ts
+// verifies orchestration event side effects
+
 import {
   CheckpointRef,
   EventId,
@@ -55,6 +58,7 @@ describe("deriveOrchestrationBatchEffects", () => {
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        origin: null,
         createdAt: "2026-02-27T00:00:00.000Z",
         updatedAt: "2026-02-27T00:00:00.000Z",
       }),
@@ -92,6 +96,7 @@ describe("deriveOrchestrationBatchEffects", () => {
         interactionMode: "default",
         branch: null,
         worktreePath: null,
+        origin: null,
         createdAt: "2026-02-27T00:00:02.000Z",
         updatedAt: "2026-02-27T00:00:02.000Z",
       }),

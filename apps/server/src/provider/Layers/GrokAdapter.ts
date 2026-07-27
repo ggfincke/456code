@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/GrokAdapter.ts
+// runs Grok CLI sessions through ACP
+
 import {
   ApprovalRequestId,
   type GrokSettings,
@@ -19,15 +22,12 @@ import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
 import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
-import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
-import * as SynchronizedRef from "effect/SynchronizedRef";
 import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
 import * as EffectAcpErrors from "effect-acp/errors";
 import type * as EffectAcpSchema from "effect-acp/schema";
@@ -68,6 +68,7 @@ import {
 } from "../acp/XAiAcpExtension.ts";
 import { type GrokAdapterShape } from "../Services/GrokAdapter.ts";
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from "./EventNdjsonLogger.ts";
+import { makeKeyedSemaphore } from "./KeyedSemaphore.ts";
 
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString);
 
@@ -172,11 +173,17 @@ const resolveSessionCallbackTurnId = (
   return ctx ? resolveCallbackTurnId(ctx) : undefined;
 };
 
-function parseGrokResume(raw: unknown): { sessionId: string } | undefined {
+function parseGrokResume(
+  raw: unknown,
+): { sessionId: string; requireExisting: boolean } | undefined {
   if (!isRecord(raw)) return undefined;
   if (raw.schemaVersion !== GROK_RESUME_VERSION) return undefined;
   if (typeof raw.sessionId !== "string" || !raw.sessionId.trim()) return undefined;
-  return { sessionId: raw.sessionId.trim() };
+  if (Object.hasOwn(raw, "requireExisting") && raw.requireExisting !== true) return undefined;
+  return {
+    sessionId: raw.sessionId,
+    requireExisting: raw.requireExisting === true,
+  };
 }
 
 function selectPermissionOptionId(
@@ -242,7 +249,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     const makeAcpNativeLoggers = yield* makeAcpNativeLoggerFactory();
 
     const sessions = new Map<ThreadId, GrokSessionContext>();
-    const threadLocksRef = yield* SynchronizedRef.make(new Map<string, Semaphore.Semaphore>());
+    const threadLocks = yield* makeKeyedSemaphore<string>();
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>();
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -273,26 +280,8 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid);
 
-    const getThreadSemaphore = (threadId: string) =>
-      SynchronizedRef.modifyEffect(threadLocksRef, (current) => {
-        const existing: Option.Option<Semaphore.Semaphore> = Option.fromNullishOr(
-          current.get(threadId),
-        );
-        return Option.match(existing, {
-          onNone: () =>
-            Semaphore.make(1).pipe(
-              Effect.map((semaphore) => {
-                const next = new Map(current);
-                next.set(threadId, semaphore);
-                return [semaphore, next] as const;
-              }),
-            ),
-          onSome: (semaphore) => Effect.succeed([semaphore, current] as const),
-        });
-      });
-
     const withThreadLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
-      Effect.flatMap(getThreadSemaphore(threadId), (semaphore) => semaphore.withPermit(effect));
+      threadLocks.withPermit(threadId, effect);
 
     const settlePromptInFlight = (
       threadId: ThreadId,
@@ -549,7 +538,33 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           const cwd = path.resolve(input.cwd.trim());
           const grokModelSelection =
             input.modelSelection?.instanceId === boundInstanceId ? input.modelSelection : undefined;
+          const parsedResume = parseGrokResume(input.resumeCursor);
+          if (
+            isRecord(input.resumeCursor) &&
+            Object.hasOwn(input.resumeCursor, "requireExisting") &&
+            parsedResume === undefined
+          ) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue: "An imported Grok session requires a valid existing native session id.",
+            });
+          }
+          const resumeSessionId = parsedResume?.sessionId;
           const existing = sessions.get(input.threadId);
+          if (
+            existing &&
+            !existing.stopped &&
+            parseGrokResume(existing.session.resumeCursor)?.requireExisting === true &&
+            parsedResume?.requireExisting !== true
+          ) {
+            return yield* new ProviderAdapterValidationError({
+              provider: PROVIDER,
+              operation: "startSession",
+              issue:
+                "An active imported Grok session must be stopped before starting a fresh native session.",
+            });
+          }
           if (existing && !existing.stopped) {
             yield* stopSessionInternal(existing);
           }
@@ -562,7 +577,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             sessionScopeTransferred ? Effect.void : Scope.close(sessionScope, Exit.void),
           );
 
-          const resumeSessionId = parseGrokResume(input.resumeCursor)?.sessionId;
           const acpNativeLoggers = makeAcpNativeLoggers({
             nativeEventLogger,
             provider: PROVIDER,
@@ -576,6 +590,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
+            ...(parsedResume?.requireExisting === true ? { requireSessionLoadResponse: true } : {}),
             clientInfo: { name: "code456", version: "0.0.0" },
             ...(mcpSession
               ? {
@@ -758,6 +773,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             resumeCursor: {
               schemaVersion: GROK_RESUME_VERSION,
               sessionId: started.sessionId,
+              ...(parsedResume?.requireExisting === true ? { requireExisting: true } : {}),
             },
             createdAt: now,
             updatedAt: now,

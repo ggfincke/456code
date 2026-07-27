@@ -1,3 +1,6 @@
+// apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
+// loads orchestration projection snapshots
+
 import {
   ChatAttachment,
   CheckpointRef,
@@ -11,6 +14,7 @@ import {
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
   ProjectScript,
+  ThreadOrigin,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
@@ -78,6 +82,7 @@ const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan;
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    originJson: Schema.NullOr(Schema.fromJsonString(ThreadOrigin)),
   }),
 );
 const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
@@ -139,6 +144,133 @@ const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
   latestCheckpointTurnCount: Schema.NullOr(NonNegativeInt),
   toCheckpointRef: Schema.NullOr(CheckpointRef),
 });
+
+export const COMMAND_THREAD_ACTIVITY_QUERY_SQL = `
+  WITH retained_command_activities AS (
+    SELECT
+      activity_id,
+      thread_id,
+      turn_id,
+      tone,
+      kind,
+      summary,
+      payload_json,
+      sequence,
+      created_at
+    FROM projection_thread_activities AS activity
+      INDEXED BY idx_projection_thread_activities_command_relevant
+    WHERE activity.kind IN (
+        'approval.requested',
+        'approval.resolved',
+        'user-input.requested',
+        'user-input.resolved',
+        'provider.approval.respond.failed',
+        'provider.user-input.respond.failed'
+      )
+      AND activity.rowid IN (
+        SELECT recent.rowid
+        FROM projection_thread_activities AS recent
+          INDEXED BY idx_projection_thread_activities_command_window
+        WHERE recent.thread_id = activity.thread_id
+          AND (
+            json_valid(recent.payload_json) = 0
+            OR COALESCE(json_extract(recent.payload_json, '$.type'), '') <> 'import.continuation'
+          )
+        ORDER BY
+          CASE
+            WHEN recent.turn_id IS NULL AND recent.sequence IS NOT NULL THEN 0
+            ELSE 1
+          END DESC,
+          CASE
+            WHEN recent.turn_id IS NULL AND recent.sequence IS NOT NULL THEN recent.sequence
+            ELSE NULL
+          END DESC,
+          recent.created_at DESC,
+          CASE WHEN recent.sequence IS NULL THEN 1 ELSE 0 END DESC,
+          recent.sequence DESC,
+          CASE
+            WHEN substr(recent.kind, -8) = '.started' OR recent.kind = 'tool.started' THEN 0
+            WHEN substr(recent.kind, -10) = '.completed'
+              OR substr(recent.kind, -9) = '.resolved'
+              THEN 2
+            ELSE 1
+          END DESC,
+          recent.activity_id DESC
+        LIMIT 500
+      )
+    UNION ALL
+    SELECT
+      activity_id,
+      thread_id,
+      turn_id,
+      tone,
+      kind,
+      summary,
+      payload_json,
+      sequence,
+      created_at
+    FROM projection_thread_activities AS marker
+      INDEXED BY idx_projection_thread_activities_import_continuation
+    WHERE json_valid(marker.payload_json) = 1
+      AND json_extract(marker.payload_json, '$.type') = 'import.continuation'
+      AND marker.rowid = (
+        SELECT latest_marker.rowid
+        FROM projection_thread_activities AS latest_marker
+          INDEXED BY idx_projection_thread_activities_import_continuation
+        WHERE latest_marker.thread_id = marker.thread_id
+          AND json_valid(latest_marker.payload_json) = 1
+          AND json_extract(latest_marker.payload_json, '$.type') = 'import.continuation'
+        ORDER BY
+          CASE
+            WHEN latest_marker.turn_id IS NULL AND latest_marker.sequence IS NOT NULL THEN 0
+            ELSE 1
+          END DESC,
+          CASE
+            WHEN latest_marker.turn_id IS NULL AND latest_marker.sequence IS NOT NULL
+              THEN latest_marker.sequence
+            ELSE NULL
+          END DESC,
+          latest_marker.created_at DESC,
+          CASE WHEN latest_marker.sequence IS NULL THEN 1 ELSE 0 END DESC,
+          latest_marker.sequence DESC,
+          CASE
+            WHEN substr(latest_marker.kind, -8) = '.started'
+              OR latest_marker.kind = 'tool.started'
+              THEN 0
+            WHEN substr(latest_marker.kind, -10) = '.completed'
+              OR substr(latest_marker.kind, -9) = '.resolved'
+              THEN 2
+            ELSE 1
+          END DESC,
+          latest_marker.activity_id DESC
+        LIMIT 1
+      )
+  )
+  SELECT
+    activity_id AS "activityId",
+    thread_id AS "threadId",
+    turn_id AS "turnId",
+    tone,
+    kind,
+    summary,
+    payload_json AS "payload",
+    sequence,
+    created_at AS "createdAt"
+  FROM retained_command_activities
+  ORDER BY
+    thread_id ASC,
+    CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN 0 ELSE 1 END ASC,
+    CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN sequence ELSE NULL END ASC,
+    created_at ASC,
+    CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
+    sequence ASC,
+    CASE
+      WHEN substr(kind, -8) = '.started' OR kind = 'tool.started' THEN 0
+      WHEN substr(kind, -10) = '.completed' OR substr(kind, -9) = '.resolved' THEN 2
+      ELSE 1
+    END ASC,
+    activity_id ASC
+`;
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -330,6 +462,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          origin_json AS "originJson",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -362,6 +495,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          origin_json AS "originJson",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -396,6 +530,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          origin_json AS "originJson",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -473,10 +608,25 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_thread_activities
         ORDER BY
           thread_id ASC,
-          sequence ASC,
+          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN 0 ELSE 1 END ASC,
+          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN sequence ELSE NULL END ASC,
           created_at ASC,
+          CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
+          sequence ASC,
+          CASE
+            WHEN substr(kind, -8) = '.started' OR kind = 'tool.started' THEN 0
+            WHEN substr(kind, -10) = '.completed' OR substr(kind, -9) = '.resolved' THEN 2
+            ELSE 1
+          END ASC,
           activity_id ASC
       `,
+  });
+
+  // preserve the latest import marker plus the live projector's 500 non-marker window
+  const listCommandThreadActivityRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadActivityDbRowSchema,
+    execute: () => sql.unsafe(COMMAND_THREAD_ACTIVITY_QUERY_SQL),
   });
 
   const listThreadSessionRows = SqlSchema.findAll({
@@ -762,6 +912,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           interaction_mode AS "interactionMode",
           branch,
           worktree_path AS "worktreePath",
+          origin_json AS "originJson",
           latest_turn_id AS "latestTurnId",
           created_at AS "createdAt",
           updated_at AS "updatedAt",
@@ -842,8 +993,16 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         FROM projection_thread_activities
         WHERE thread_id = ${threadId}
         ORDER BY
-          sequence ASC,
+          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN 0 ELSE 1 END ASC,
+          CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN sequence ELSE NULL END ASC,
           created_at ASC,
+          CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
+          sequence ASC,
+          CASE
+            WHEN substr(kind, -8) = '.started' OR kind = 'tool.started' THEN 0
+            WHEN substr(kind, -10) = '.completed' OR substr(kind, -9) = '.resolved' THEN 2
+            ELSE 1
+          END ASC,
           activity_id ASC
       `,
   });
@@ -1198,6 +1357,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 interactionMode: row.interactionMode,
                 branch: row.branch,
                 worktreePath: row.worktreePath,
+                origin: row.originJson,
                 latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                 createdAt: row.createdAt,
                 updatedAt: row.updatedAt,
@@ -1264,6 +1424,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
               ),
             ),
           ),
+          listCommandThreadActivityRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                "ProjectionSnapshotQuery.getCommandReadModel:listCommandThreadActivities:query",
+                "ProjectionSnapshotQuery.getCommandReadModel:listCommandThreadActivities:decodeRows",
+              ),
+            ),
+          ),
           listThreadSessionRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1292,7 +1460,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       )
       .pipe(
         Effect.flatMap(
-          ([projectRows, threadRows, proposedPlanRows, sessionRows, latestTurnRows, stateRows]) =>
+          ([
+            projectRows,
+            threadRows,
+            proposedPlanRows,
+            commandThreadActivityRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+          ]) =>
             Effect.sync(() => {
               let updatedAt: string | null = null;
               const projects: OrchestrationProject[] = [];
@@ -1328,6 +1504,13 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   continue;
                 }
                 updatedAt = maxIso(updatedAt, row.updatedAt);
+              }
+              for (let index = 0; index < commandThreadActivityRows.length; index += 1) {
+                const row = commandThreadActivityRows[index];
+                if (!row) {
+                  continue;
+                }
+                updatedAt = maxIso(updatedAt, row.createdAt);
               }
               for (let index = 0; index < sessionRows.length; index += 1) {
                 const row = sessionRows[index];
@@ -1366,6 +1549,10 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 latestTurnByThread.set(row.threadId, mapLatestTurn(row));
               }
               const proposedPlansByThread = new Map<string, Array<OrchestrationProposedPlan>>();
+              const commandActivitiesByThread = new Map<
+                string,
+                Array<OrchestrationThreadActivity>
+              >();
               const sessionByThread = new Map<string, OrchestrationSession>();
 
               for (let index = 0; index < sessionRows.length; index += 1) {
@@ -1385,6 +1572,24 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                 threadProposedPlans.push(mapProposedPlanRow(row));
                 proposedPlansByThread.set(row.threadId, threadProposedPlans);
               }
+              for (let index = 0; index < commandThreadActivityRows.length; index += 1) {
+                const row = commandThreadActivityRows[index];
+                if (!row) {
+                  continue;
+                }
+                const threadActivities = commandActivitiesByThread.get(row.threadId) ?? [];
+                threadActivities.push({
+                  id: row.activityId,
+                  tone: row.tone,
+                  kind: row.kind,
+                  summary: row.summary,
+                  payload: row.payload,
+                  turnId: row.turnId,
+                  ...(row.sequence !== null ? { sequence: row.sequence } : {}),
+                  createdAt: row.createdAt,
+                });
+                commandActivitiesByThread.set(row.threadId, threadActivities);
+              }
 
               for (let index = 0; index < threadRows.length; index += 1) {
                 const row = threadRows[index];
@@ -1400,6 +1605,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   interactionMode: row.interactionMode,
                   branch: row.branch,
                   worktreePath: row.worktreePath,
+                  origin: row.originJson,
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -1411,7 +1617,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
-                  activities: [],
+                  activities: commandActivitiesByThread.get(row.threadId) ?? [],
                   checkpoints: [],
                   session: sessionByThread.get(row.threadId) ?? null,
                 });
@@ -1533,6 +1739,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                       interactionMode: row.interactionMode,
                       branch: row.branch,
                       worktreePath: row.worktreePath,
+                      origin: row.originJson,
                       latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                       createdAt: row.createdAt,
                       updatedAt: row.updatedAt,
@@ -1671,6 +1878,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
                   interactionMode: row.interactionMode,
                   branch: row.branch,
                   worktreePath: row.worktreePath,
+                  origin: row.originJson,
                   latestTurn: latestTurnByThread.get(row.threadId) ?? null,
                   createdAt: row.createdAt,
                   updatedAt: row.updatedAt,
@@ -1915,6 +2123,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         interactionMode: threadRow.value.interactionMode,
         branch: threadRow.value.branch,
         worktreePath: threadRow.value.worktreePath,
+        origin: threadRow.value.originJson,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,
@@ -2013,6 +2222,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
         interactionMode: threadRow.value.interactionMode,
         branch: threadRow.value.branch,
         worktreePath: threadRow.value.worktreePath,
+        origin: threadRow.value.originJson,
         latestTurn: Option.isSome(latestTurnRow) ? mapLatestTurn(latestTurnRow.value) : null,
         createdAt: threadRow.value.createdAt,
         updatedAt: threadRow.value.updatedAt,

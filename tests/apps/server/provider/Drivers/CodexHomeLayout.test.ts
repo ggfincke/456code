@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Drivers/CodexHomeLayout.test.ts
+// verifies direct and shadow Codex home resolution and materialization
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -54,7 +56,25 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
           mode: "direct",
           sharedHomePath: homePath,
           effectiveHomePath: homePath,
-          continuationKey: `codex:home:${homePath}`,
+        });
+      }),
+    );
+
+    it.effect("normalizes environment CODEX_HOME for the runtime and identity boundary", () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const cwd = path.resolve("/server/workspace");
+        const resolvedHome = path.join(cwd, ".codex-env");
+
+        const layout = yield* resolveCodexHomeLayout(decodeCodexSettings({}), {
+          environment: { CODEX_HOME: ".codex-env" },
+          cwd,
+        });
+
+        expect(layout).toMatchObject({
+          mode: "direct",
+          sharedHomePath: resolvedHome,
+          effectiveHomePath: resolvedHome,
         });
       }),
     );
@@ -77,7 +97,6 @@ it.layer(NodeServices.layer)("CodexHomeLayout", (it) => {
           mode: "authOverlay",
           sharedHomePath: sharedHome,
           effectiveHomePath: shadowHome,
-          continuationKey: `codex:home:${sharedHome}`,
         });
       }),
     );

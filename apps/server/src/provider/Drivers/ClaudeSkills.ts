@@ -1,3 +1,5 @@
+// apps/server/src/provider/Drivers/ClaudeSkills.ts
+// discovers Claude skills from the same config boundary as its runtime
 /**
  * ClaudeSkills — filesystem discovery of Claude Code skills for the `$` picker.
  *
@@ -69,7 +71,8 @@ const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(funct
   const path = yield* Path.Path;
   const homePath = config.homePath.trim();
   if (homePath.length > 0) {
-    return path.resolve(expandHomePath(homePath));
+    const expandedHomePath = expandHomePath(homePath);
+    return cwd ? path.resolve(cwd, expandedHomePath) : path.resolve(expandedHomePath);
   }
   // No tilde expansion here: the spawned CLI receives this env var verbatim
   // (env vars are never shell-expanded), so a literal `~` must stay literal
@@ -80,7 +83,9 @@ const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(funct
   if (environmentConfigDir.length > 0) {
     return cwd ? path.resolve(cwd, environmentConfigDir) : path.resolve(environmentConfigDir);
   }
-  return path.join(NodeOS.homedir(), ".claude");
+  const environmentHome = environment.HOME?.trim() || NodeOS.homedir();
+  const resolvedHome = cwd ? path.resolve(cwd, environmentHome) : path.resolve(environmentHome);
+  return path.join(resolvedHome, ".claude");
 });
 
 /**

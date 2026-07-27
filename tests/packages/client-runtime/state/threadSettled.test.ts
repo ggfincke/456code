@@ -49,6 +49,7 @@ function makeShell(input: {
     createdAt: "2026-04-01T00:00:00.000Z",
     updatedAt: NOW,
     archivedAt: null,
+    origin: null,
     settledOverride: input.settledOverride ?? null,
     settledAt: input.settledOverride === "settled" ? NOW : null,
     session:

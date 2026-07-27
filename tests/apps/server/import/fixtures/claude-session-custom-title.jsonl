@@ -1,0 +1,5 @@
+{"type":"user","sessionId":"claude-title-1","cwd":"/workspace/title","gitBranch":"main","timestamp":"2026-03-04T05:06:07Z","message":{"content":"Name this session"}}
+{"type":"ai-title","sessionId":"claude-title-1","content":"Generated title"}
+{"type":"custom-title","sessionId":"claude-title-1","customTitle":"Chosen title"}
+{"type":"ai-title","sessionId":"claude-title-1","aiTitle":"Later generated title"}
+{"type":"assistant","sessionId":"claude-title-1","cwd":"/workspace/title","gitBranch":"main","timestamp":"2026-03-04T05:06:08Z","message":{"model":"claude-opus-4-6","content":[{"type":"text","text":"Done."}]}}

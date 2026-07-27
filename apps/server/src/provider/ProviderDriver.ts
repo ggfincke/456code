@@ -1,3 +1,5 @@
+// apps/server/src/provider/ProviderDriver.ts
+// defines provider driver and instantiated runtime interfaces
 /**
  * ProviderDriver / ProviderInstance — driver SPI as plain values.
  *
@@ -22,6 +24,7 @@
  * @module provider/ProviderDriver
  */
 import type {
+  ProviderContinuationIdentity,
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
@@ -65,27 +68,14 @@ export interface ProviderInstance {
   readonly instanceId: ProviderInstanceId;
   readonly driverKind: ProviderDriverKind;
   readonly continuationIdentity: ProviderContinuationIdentity;
+  readonly resolveContinuationIdentity: Effect.Effect<ProviderContinuationIdentity>;
+  readonly continuationUnavailableReason?: string;
   readonly displayName: string | undefined;
   readonly accentColor?: string | undefined;
   readonly enabled: boolean;
   readonly snapshot: ServerProviderShape;
   readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
   readonly textGeneration: TextGeneration.TextGeneration["Service"];
-}
-
-export interface ProviderContinuationIdentity {
-  readonly driverKind: ProviderDriverKind;
-  readonly continuationKey: string;
-}
-
-export function defaultProviderContinuationIdentity(input: {
-  readonly driverKind: ProviderDriverKind;
-  readonly instanceId: ProviderInstanceId;
-}): ProviderContinuationIdentity {
-  return {
-    driverKind: input.driverKind,
-    continuationKey: `${input.driverKind}:instance:${input.instanceId}`,
-  };
 }
 
 /**

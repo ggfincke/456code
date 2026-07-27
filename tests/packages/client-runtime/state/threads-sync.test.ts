@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/threads-sync.test.ts
+// verifies thread synchronization state
+
 import {
   EnvironmentId,
   EventId,
@@ -69,6 +72,7 @@ const BASE_THREAD: OrchestrationThread = {
   createdAt: "2026-04-01T00:00:00.000Z",
   updatedAt: "2026-04-01T00:00:00.000Z",
   archivedAt: null,
+  origin: null,
   settledOverride: null,
   settledAt: null,
   deletedAt: null,

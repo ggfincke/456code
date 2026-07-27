@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/SettingsSidebarNav.tsx
+// renders settings navigation
+
 import { useCallback, type ComponentType } from "react";
 import {
   ArchiveIcon,
@@ -5,6 +8,7 @@ import {
   BotIcon,
   FlaskConicalIcon,
   GitBranchIcon,
+  ImportIcon,
   KeyboardIcon,
   Link2Icon,
   Settings2Icon,
@@ -28,6 +32,7 @@ export type SettingsSectionPath =
   | "/settings/source-control"
   | "/settings/connections"
   | "/settings/beta"
+  | "/settings/import"
   | "/settings/archived";
 
 export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
@@ -41,6 +46,7 @@ export const SETTINGS_NAV_ITEMS: ReadonlyArray<{
   { label: "Source Control", to: "/settings/source-control", icon: GitBranchIcon },
   { label: "Connections", to: "/settings/connections", icon: Link2Icon },
   { label: "Beta", to: "/settings/beta", icon: FlaskConicalIcon },
+  { label: "Import sessions", to: "/settings/import", icon: ImportIcon },
   { label: "Archive", to: "/settings/archived", icon: ArchiveIcon },
 ];
 

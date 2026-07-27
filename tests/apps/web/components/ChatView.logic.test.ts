@@ -1,8 +1,13 @@
+// tests/apps/web/components/ChatView.logic.test.ts
+// verifies chat view state, imported continuation gates, and dispatch helpers
 import {
   EnvironmentId,
+  EventId,
   MessageId,
   ProjectId,
+  ProviderDriverKind,
   ProviderInstanceId,
+  type ServerProvider,
   ThreadId,
   TurnId,
 } from "@t3tools/contracts";
@@ -12,17 +17,22 @@ import type { Thread } from "../../../../apps/web/src/types";
 import {
   MAX_HIDDEN_MOUNTED_PREVIEW_THREADS,
   MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
-  branchMismatchKey,
-  buildExpiredTerminalContextToastCopy,
   buildThreadTurnInterruptInput,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
+  deriveLockedProvider,
   dismissBranchMismatchForSession,
   getStartedThreadModelChangeBlockReason,
+  handleImportContinuationSendBlock,
   hasServerAcknowledgedLocalDispatch,
+  importContinuationConsentToken,
+  isImportContinuationSendBlocked,
   isBranchMismatchDismissedForSession,
   reconcileMountedTerminalThreadIds,
   reconcileRetainedMountedThreadIds,
+  resolveImportContinuationBannerCopy,
+  resolveImportContinuationGate,
+  resolveImportContinuationProviderSnapshot,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
   shouldShowBranchMismatchBanner,
@@ -54,6 +64,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
+    origin: null,
     settledOverride: null,
     settledAt: null,
     deletedAt: null,
@@ -83,6 +94,520 @@ const readySession = {
   lastError: null,
   updatedAt: "2026-03-29T00:00:10.000Z",
 };
+
+const importedOrigin = {
+  kind: "imported" as const,
+  source: "codex-cli" as const,
+  sourcePath: "/tmp/.codex/sessions/imported.jsonl",
+  contentHash: "content-hash",
+  nativeSessionId: "native-session",
+  providerInstanceId: ProviderInstanceId.make("codex_personal"),
+  importedAt: now,
+};
+
+function makeProvider(instanceId: string, overrides: Partial<ServerProvider> = {}): ServerProvider {
+  return {
+    instanceId: ProviderInstanceId.make(instanceId),
+    driver: ProviderDriverKind.make("codex"),
+    displayName: instanceId === "codex_personal" ? "Personal Codex" : "Codex",
+    enabled: true,
+    installed: true,
+    version: "1.0.0",
+    status: "ready",
+    auth: { status: "authenticated" },
+    checkedAt: now,
+    continuation: { groupKey: "codex:test-source" },
+    models: [],
+    slashCommands: [],
+    skills: [],
+    ...overrides,
+  };
+}
+
+function importContinuationActivity(
+  continuation:
+    | {
+        readonly state: "verified";
+        readonly providerInstanceId: ReturnType<typeof ProviderInstanceId.make>;
+        readonly continuationIdentity?: null;
+        readonly reason: null;
+      }
+    | {
+        readonly state: "history-only";
+        readonly providerInstanceId: ReturnType<typeof ProviderInstanceId.make>;
+        readonly continuationIdentity?: null;
+        readonly reason: string;
+      },
+  driverKind = ProviderDriverKind.make("codex"),
+) {
+  return {
+    id: EventId.make(`event-import-${continuation.state}`),
+    tone: "info" as const,
+    kind: "task.completed",
+    summary: "Imported continuation state recorded.",
+    payload: {
+      type: "import.continuation",
+      driverKind,
+      continuation: {
+        ...continuation,
+        continuationIdentity:
+          continuation.continuationIdentity === null
+            ? null
+            : {
+                driverKind,
+                continuationKey: `${driverKind}:test-source`,
+              },
+      },
+    },
+    turnId: null,
+    createdAt: now,
+  };
+}
+
+describe("resolveImportContinuationGate", () => {
+  it("fails closed when the newest continuation marker cannot be decoded", () => {
+    const providerInstanceId = ProviderInstanceId.make("codex_personal");
+    const gate = resolveImportContinuationGate({
+      thread: makeThread({
+        origin: importedOrigin,
+        activities: [
+          importContinuationActivity({
+            state: "verified",
+            providerInstanceId,
+            reason: null,
+          }),
+          {
+            id: EventId.make("event-summary-only"),
+            tone: "info",
+            kind: "task.completed",
+            summary: "Resume linked to codex_personal.",
+            payload: {},
+            turnId: null,
+            createdAt: now,
+          },
+          {
+            id: EventId.make("event-forward-version"),
+            tone: "info",
+            kind: "task.completed",
+            summary: "A newer continuation authority marker.",
+            payload: {
+              type: "import.continuation",
+              version: 2,
+            },
+            turnId: null,
+            createdAt: now,
+          },
+        ],
+      }),
+      providers: [makeProvider("codex_personal")],
+    });
+
+    expect(gate).toMatchObject({
+      state: "unknown",
+      unknownKind: "invalid",
+      providerInstanceId: null,
+      providerState: "missing",
+    });
+    expect(gate).toHaveProperty(
+      "reason",
+      "Continuation details for this imported transcript are invalid or require a newer 456code version.",
+    );
+    expect(importContinuationConsentToken("environment-local:thread-1", gate)).toBeNull();
+    expect(isImportContinuationSendBlocked(gate, null, null)).toBe(true);
+    if (gate.state !== "unknown") {
+      throw new Error("expected invalid imported continuation gate");
+    }
+    expect(
+      resolveImportContinuationBannerCopy({
+        gate,
+        providerDisplayName: "the configured provider",
+        sourceName: "Codex",
+      }),
+    ).toEqual({
+      action: "import-settings",
+      actionLabel: "Repair import",
+      description:
+        "Continuation details for this imported transcript are invalid or require a newer 456code version. Sending is blocked to prevent starting the wrong provider session.",
+      isReady: false,
+      title: "Imported session needs repair",
+    });
+  });
+
+  it("routes a missing completion marker to import repair instead of provider settings", () => {
+    const gate = resolveImportContinuationGate({
+      thread: makeThread({
+        origin: importedOrigin,
+        activities: [],
+      }),
+      providers: [makeProvider("codex")],
+    });
+
+    expect(gate).toMatchObject({
+      state: "unknown",
+      unknownKind: "missing",
+      providerInstanceId: null,
+      providerState: "missing",
+    });
+    if (gate.state !== "unknown") {
+      throw new Error("expected missing imported continuation gate");
+    }
+    expect(
+      resolveImportContinuationBannerCopy({
+        gate,
+        providerDisplayName: "Codex",
+        sourceName: "Codex",
+      }),
+    ).toEqual({
+      action: "import-settings",
+      actionLabel: "Repair import",
+      description:
+        "Continuation details for this imported transcript are missing. Retry the import before sending. Sending is blocked to prevent starting the wrong provider session.",
+      isReady: false,
+      title: "Imported session is incomplete",
+    });
+  });
+
+  it("requires consent for the exact ready provider instance from the typed payload", () => {
+    const providerInstanceId = ProviderInstanceId.make("codex_personal");
+    const gate = resolveImportContinuationGate({
+      thread: makeThread({
+        origin: importedOrigin,
+        activities: [
+          importContinuationActivity({
+            state: "verified",
+            providerInstanceId,
+            reason: null,
+          }),
+        ],
+      }),
+      providers: [makeProvider("codex"), makeProvider("codex_personal")],
+    });
+    const token = importContinuationConsentToken("environment-local:thread-1", gate);
+
+    expect(gate).toEqual({
+      state: "verified",
+      providerInstanceId,
+      driverKind: "codex",
+      providerState: "ready",
+      reason: null,
+      consent: {
+        originContentHash: importedOrigin.contentHash,
+        activityId: EventId.make("event-import-verified"),
+        driverKind: "codex",
+        targetProviderInstanceId: providerInstanceId,
+        continuation: {
+          state: "verified",
+          providerInstanceId,
+          continuationIdentity: {
+            driverKind: "codex",
+            continuationKey: "codex:test-source",
+          },
+          reason: null,
+        },
+      },
+    });
+    expect(token).toBe(
+      JSON.stringify([
+        "environment-local:thread-1",
+        importedOrigin.contentHash,
+        "event-import-verified",
+        "codex",
+        "codex_personal",
+        "verified",
+        "codex_personal",
+        "codex",
+        "codex:test-source",
+        null,
+      ]),
+    );
+    expect(isImportContinuationSendBlocked(gate, token, null)).toBe(true);
+    expect(isImportContinuationSendBlocked(gate, token, token)).toBe(false);
+  });
+
+  it("fails closed when an imported marker has no immutable continuation source", () => {
+    const gate = resolveImportContinuationGate({
+      thread: makeThread({
+        origin: importedOrigin,
+        activities: [
+          importContinuationActivity({
+            state: "history-only",
+            providerInstanceId: ProviderInstanceId.make("codex_personal"),
+            continuationIdentity: null,
+            reason: "No exact provider route was available.",
+          }),
+        ],
+      }),
+      providers: [makeProvider("codex_personal")],
+    });
+
+    expect(gate).toEqual({
+      state: "unknown",
+      unknownKind: "invalid",
+      providerInstanceId: null,
+      driverKind: null,
+      providerState: "missing",
+      reason:
+        "Continuation source identity for this imported transcript is missing. Retry the import before sending.",
+    });
+    expect(importContinuationConsentToken("environment-local:thread-1", gate)).toBeNull();
+  });
+
+  it("blocks dispatch and invokes the continuation feedback action for a guarded send", () => {
+    let feedbackCount = 0;
+    let dispatchCount = 0;
+
+    if (
+      !handleImportContinuationSendBlock(true, () => {
+        feedbackCount += 1;
+      })
+    ) {
+      dispatchCount += 1;
+    }
+
+    expect(feedbackCount).toBe(1);
+    expect(dispatchCount).toBe(0);
+  });
+
+  it("does not treat a missing, disabled, or wrong-driver exact instance as ready", () => {
+    const providerInstanceId = ProviderInstanceId.make("codex_personal");
+    const thread = makeThread({
+      origin: importedOrigin,
+      activities: [
+        importContinuationActivity({
+          state: "verified",
+          providerInstanceId,
+          reason: null,
+        }),
+      ],
+    });
+
+    for (const providers of [
+      [],
+      [makeProvider("codex_personal", { enabled: false, status: "disabled" })],
+      [
+        makeProvider("codex_personal", {
+          driver: ProviderDriverKind.make("claudeAgent"),
+        }),
+      ],
+    ]) {
+      const gate = resolveImportContinuationGate({ thread, providers });
+      expect(gate).toMatchObject({
+        state: "verified",
+        providerInstanceId,
+        providerState: "unavailable",
+      });
+      expect(importContinuationConsentToken("environment-local:thread-1", gate)).toBeNull();
+      expect(isImportContinuationSendBlocked(gate, null, null)).toBe(true);
+    }
+  });
+
+  it("uses the imported model target for history-only starts and releases the gate after a native turn", () => {
+    const providerInstanceId = ProviderInstanceId.make("codex_personal");
+    const activities = [
+      importContinuationActivity({
+        state: "history-only" as const,
+        providerInstanceId,
+        reason: "The native session could not be verified.",
+      }),
+    ];
+    const importedThread = makeThread({
+      origin: importedOrigin,
+      modelSelection: {
+        instanceId: providerInstanceId,
+        model: "gpt-5.4",
+      },
+      activities,
+    });
+
+    const gate = resolveImportContinuationGate({
+      thread: importedThread,
+      providers: [makeProvider("codex_personal")],
+    });
+    expect(gate).toEqual({
+      state: "history-only",
+      providerInstanceId,
+      driverKind: "codex",
+      providerState: "ready",
+      reason: "The native session could not be verified.",
+      consent: {
+        originContentHash: importedOrigin.contentHash,
+        activityId: EventId.make("event-import-history-only"),
+        driverKind: "codex",
+        targetProviderInstanceId: providerInstanceId,
+        continuation: {
+          state: "history-only",
+          providerInstanceId,
+          continuationIdentity: {
+            driverKind: "codex",
+            continuationKey: "codex:test-source",
+          },
+          reason: "The native session could not be verified.",
+        },
+      },
+    });
+    const alternateProviderInstanceId = ProviderInstanceId.make("codex_work");
+    const alternateGate = resolveImportContinuationGate({
+      thread: {
+        ...importedThread,
+        modelSelection: {
+          instanceId: alternateProviderInstanceId,
+          model: "gpt-5.4",
+        },
+      },
+      providers: [makeProvider("codex_personal")],
+    });
+    expect(importContinuationConsentToken("environment-local:thread-1", alternateGate)).toBe(
+      importContinuationConsentToken("environment-local:thread-1", gate),
+    );
+    expect(
+      resolveImportContinuationGate({
+        thread: { ...importedThread, latestTurn: completedTurn },
+        providers: [makeProvider("codex_personal")],
+      }),
+    ).toEqual({ state: "not-required" });
+  });
+});
+
+describe("resolveImportContinuationProviderSnapshot", () => {
+  it("excludes a reused instance id when its live driver differs from the marker", () => {
+    const providerInstanceId = ProviderInstanceId.make("codex_personal");
+    const wrongDriverProvider = makeProvider("codex_personal", {
+      driver: ProviderDriverKind.make("claudeAgent"),
+      displayName: "Claude Personal",
+      continuation: { groupKey: "claudeAgent:test-source" },
+    });
+
+    expect(
+      resolveImportContinuationProviderSnapshot(
+        [wrongDriverProvider],
+        providerInstanceId,
+        ProviderDriverKind.make("codex"),
+        {
+          driverKind: ProviderDriverKind.make("codex"),
+          continuationKey: "codex:test-source",
+        },
+      ),
+    ).toBeNull();
+    expect(
+      resolveImportContinuationProviderSnapshot(
+        [wrongDriverProvider],
+        providerInstanceId,
+        ProviderDriverKind.make("claudeAgent"),
+        {
+          driverKind: ProviderDriverKind.make("claudeAgent"),
+          continuationKey: "claudeAgent:test-source",
+        },
+      ),
+    ).toBe(wrongDriverProvider);
+  });
+
+  it("excludes a same-driver instance when its continuation source changed", () => {
+    const providerInstanceId = ProviderInstanceId.make("codex_personal");
+    const reconfiguredProvider = makeProvider("codex_personal", {
+      continuation: { groupKey: "codex:other-home" },
+    });
+
+    expect(
+      resolveImportContinuationProviderSnapshot(
+        [reconfiguredProvider],
+        providerInstanceId,
+        ProviderDriverKind.make("codex"),
+        {
+          driverKind: ProviderDriverKind.make("codex"),
+          continuationKey: "codex:test-source",
+        },
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("deriveLockedProvider", () => {
+  it("locks an imported transcript with messages to the custom instance driver", () => {
+    const customInstanceId = ProviderInstanceId.make("codex_personal");
+    const importedThread = makeThread({
+      modelSelection: {
+        instanceId: customInstanceId,
+        model: "gpt-5.4",
+      },
+      origin: importedOrigin,
+      messages: [
+        {
+          id: MessageId.make("imported-message"),
+          role: "user",
+          text: "Imported history",
+          turnId: null,
+          createdAt: now,
+          updatedAt: now,
+          streaming: false,
+        },
+      ],
+    });
+
+    expect(
+      deriveLockedProvider({
+        thread: importedThread,
+        selectedProvider: customInstanceId,
+        threadProvider: customInstanceId,
+        providers: [makeProvider("codex_personal")],
+      }),
+    ).toBe(ProviderDriverKind.make("codex"));
+  });
+
+  it("locks history-only starts to the exact marker driver instead of a cross-driver fallback", () => {
+    const requestedInstanceId = ProviderInstanceId.make("claude_personal");
+    const fallbackInstanceId = ProviderInstanceId.make("codex");
+    const importedThread = makeThread({
+      modelSelection: {
+        instanceId: fallbackInstanceId,
+        model: "gpt-5.4",
+      },
+      origin: importedOrigin,
+      messages: [
+        {
+          id: MessageId.make("imported-message"),
+          role: "user",
+          text: "Imported history",
+          turnId: null,
+          createdAt: now,
+          updatedAt: now,
+          streaming: false,
+        },
+      ],
+    });
+    const providers = [
+      makeProvider("codex"),
+      makeProvider("claude_personal", {
+        driver: ProviderDriverKind.make("claudeAgent"),
+      }),
+    ];
+    const importContinuationGate = resolveImportContinuationGate({
+      thread: {
+        ...importedThread,
+        activities: [
+          importContinuationActivity(
+            {
+              state: "history-only",
+              providerInstanceId: requestedInstanceId,
+              reason: "The native session could not be verified.",
+            },
+            ProviderDriverKind.make("claudeAgent"),
+          ),
+        ],
+      },
+      providers,
+    });
+
+    expect(
+      deriveLockedProvider({
+        thread: importedThread,
+        selectedProvider: fallbackInstanceId,
+        threadProvider: fallbackInstanceId,
+        providers,
+        importContinuationGate,
+      }),
+    ).toBe(ProviderDriverKind.make("claudeAgent"));
+  });
+});
 
 describe("resolveThreadMetadataUpdateForNextTurn", () => {
   const modelSelection = {
@@ -209,19 +734,6 @@ describe("deriveComposerSendState", () => {
   });
 });
 
-describe("buildExpiredTerminalContextToastCopy", () => {
-  it("formats empty and omission guidance", () => {
-    expect(buildExpiredTerminalContextToastCopy(1, "empty")).toEqual({
-      title: "Expired terminal context won't be sent",
-      description: "Remove it or re-add it to include terminal output.",
-    });
-    expect(buildExpiredTerminalContextToastCopy(2, "omitted")).toEqual({
-      title: "Expired terminal contexts omitted from message",
-      description: "Re-add it if you want that terminal output included.",
-    });
-  });
-});
-
 describe("getStartedThreadModelChangeBlockReason", () => {
   const providers = [
     {
@@ -233,10 +745,10 @@ describe("getStartedThreadModelChangeBlockReason", () => {
     },
   ];
 
-  it("allows model changes before a provider session has started", () => {
-    expect(
-      getStartedThreadModelChangeBlockReason({
-        providers,
+  it.each([
+    [
+      "allows model changes before a provider session has started",
+      {
         hasStartedSession: false,
         currentModelSelection: {
           instanceId: ProviderInstanceId.make("grok"),
@@ -246,14 +758,12 @@ describe("getStartedThreadModelChangeBlockReason", () => {
           instanceId: ProviderInstanceId.make("grok"),
           model: "grok-other",
         },
-      }),
-    ).toBeNull();
-  });
-
-  it("allows unchanged model selections for restricted providers", () => {
-    expect(
-      getStartedThreadModelChangeBlockReason({
-        providers,
+      },
+      null,
+    ],
+    [
+      "allows unchanged model selections for restricted providers",
+      {
         hasStartedSession: true,
         currentModelSelection: {
           instanceId: ProviderInstanceId.make("grok"),
@@ -263,14 +773,12 @@ describe("getStartedThreadModelChangeBlockReason", () => {
           instanceId: ProviderInstanceId.make("grok"),
           model: "grok-build",
         },
-      }),
-    ).toBeNull();
-  });
-
-  it("blocks started-session model changes when either provider requires a new thread", () => {
-    expect(
-      getStartedThreadModelChangeBlockReason({
-        providers,
+      },
+      null,
+    ],
+    [
+      "blocks started-session model changes when either provider requires a new thread",
+      {
         hasStartedSession: true,
         currentModelSelection: {
           instanceId: ProviderInstanceId.make("codex"),
@@ -280,12 +788,15 @@ describe("getStartedThreadModelChangeBlockReason", () => {
           instanceId: ProviderInstanceId.make("grok"),
           model: "grok-build",
         },
-      }),
-    ).toEqual({
-      title: "Start a new chat to change models",
-      description:
-        "This provider does not allow switching models after a conversation has started.",
-    });
+      },
+      {
+        title: "Start a new chat to change models",
+        description:
+          "This provider does not allow switching models after a conversation has started.",
+      },
+    ],
+  ])("%s", (_label, input, expected) => {
+    expect(getStartedThreadModelChangeBlockReason({ providers, ...input })).toEqual(expected);
   });
 });
 
@@ -293,19 +804,6 @@ describe("resolveSendEnvMode", () => {
   it("keeps worktree mode only for git repositories", () => {
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: true })).toBe("worktree");
     expect(resolveSendEnvMode({ requestedEnvMode: "worktree", isGitRepo: false })).toBe("local");
-  });
-});
-
-describe("branchMismatchKey", () => {
-  it("builds a key from thread id and both branches", () => {
-    expect(branchMismatchKey("thread-1", { threadBranch: "feat/a", currentBranch: "feat/b" })).toBe(
-      "thread-1:feat/a:feat/b",
-    );
-  });
-
-  it("returns null without a thread or mismatch", () => {
-    expect(branchMismatchKey(null, { threadBranch: "a", currentBranch: "b" })).toBeNull();
-    expect(branchMismatchKey("thread-1", null)).toBeNull();
   });
 });
 
@@ -331,13 +829,17 @@ describe("shouldShowBranchMismatchBanner", () => {
     );
   });
 
-  it("never shows when dismissed or without a mismatch", () => {
-    expect(
-      shouldShowBranchMismatchBanner({ ...base, composerHasContent: true, isDismissed: true }),
-    ).toBe(false);
-    expect(
-      shouldShowBranchMismatchBanner({ ...base, composerHasContent: true, hasMismatch: false }),
-    ).toBe(false);
+  it.each([
+    {
+      label: "dismissed",
+      input: { ...base, composerHasContent: true, isDismissed: true },
+    },
+    {
+      label: "without mismatch",
+      input: { ...base, composerHasContent: true, hasMismatch: false },
+    },
+  ])("never shows when $label", ({ input }) => {
+    expect(shouldShowBranchMismatchBanner(input)).toBe(false);
   });
 });
 

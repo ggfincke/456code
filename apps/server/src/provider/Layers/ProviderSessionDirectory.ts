@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/ProviderSessionDirectory.ts
+// persists provider session bindings without crossing instance boundaries
+
 import { defaultInstanceIdForDriver, ProviderDriverKind, type ThreadId } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -125,6 +128,12 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
         issue: "providerInstanceId is required for provider session runtime bindings.",
       });
     }
+    const existingProviderInstanceId =
+      existingRuntime?.providerInstanceId ??
+      (existingRuntime === undefined ? undefined : defaultInstanceIdForDriver(binding.provider));
+    const providerInstanceChanged =
+      existingRuntime !== undefined && existingProviderInstanceId !== providerInstanceId;
+    const routeChanged = providerChanged || providerInstanceChanged;
     yield* repository
       .upsert({
         threadId: resolvedThreadId,
@@ -132,16 +141,21 @@ const makeProviderSessionDirectory = Effect.gen(function* () {
         providerInstanceId,
         adapterKey:
           binding.adapterKey ??
-          (providerChanged ? binding.provider : (existingRuntime?.adapterKey ?? binding.provider)),
-        runtimeMode: binding.runtimeMode ?? existingRuntime?.runtimeMode ?? "full-access",
-        status: binding.status ?? existingRuntime?.status ?? "running",
+          (routeChanged ? binding.provider : (existingRuntime?.adapterKey ?? binding.provider)),
+        runtimeMode:
+          binding.runtimeMode ??
+          (routeChanged ? "full-access" : (existingRuntime?.runtimeMode ?? "full-access")),
+        status:
+          binding.status ?? (routeChanged ? "running" : (existingRuntime?.status ?? "running")),
         lastSeenAt: now,
         resumeCursor:
           binding.resumeCursor !== undefined
             ? binding.resumeCursor
-            : (existingRuntime?.resumeCursor ?? null),
+            : routeChanged
+              ? null
+              : (existingRuntime?.resumeCursor ?? null),
         runtimePayload: mergeRuntimePayload(
-          existingRuntime?.runtimePayload ?? null,
+          routeChanged ? null : (existingRuntime?.runtimePayload ?? null),
           binding.runtimePayload,
         ),
       })

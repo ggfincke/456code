@@ -1,0 +1,8 @@
+{
+  "id": "prt_006",
+  "sessionID": "ses_imported",
+  "messageID": "msg_002",
+  "type": "patch",
+  "hash": "fixture-patch",
+  "files": ["/private/opencode-one.ts", "/private/opencode-two.ts"]
+}

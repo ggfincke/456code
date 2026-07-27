@@ -1,3 +1,6 @@
+// apps/server/src/server.ts
+// assembles the server runtime and HTTP routes
+
 import {
   EnvironmentAuthHttpApi,
   EnvironmentMetadataHttpApi,
@@ -19,6 +22,7 @@ import {
 } from "./http.ts";
 import { fixPath } from "./os-jank.ts";
 import { websocketRpcRouteLayer } from "./ws.ts";
+import { ImportContinuationLive } from "./import/continuation.ts";
 import * as ExternalLauncher from "./process/externalLauncher.ts";
 import { layerConfig as SqlitePersistenceLayerLive } from "./persistence/Layers/Sqlite.ts";
 import * as ServerLifecycleEvents from "./serverLifecycleEvents.ts";
@@ -441,6 +445,10 @@ export const makeServerLayer = Layer.unwrap(
     );
 
     return serverApplicationLayer.pipe(
+      // the ws import handlers read ImportContinuationDeps from context when
+      // present (inert fallback otherwise); providing it here keeps provider
+      // services out of makeRoutesLayer requirements so test graphs stay small
+      Layer.provide(ImportContinuationLive),
       Layer.provideMerge(RuntimeServicesLive),
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ObservabilityLive),

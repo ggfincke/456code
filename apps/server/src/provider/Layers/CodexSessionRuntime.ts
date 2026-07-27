@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/CodexSessionRuntime.ts
+// manages codex app-server session lifecycles
+
 import {
   ApprovalRequestId,
   DEFAULT_MODEL,
@@ -66,6 +69,7 @@ export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | un
 
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
+  requireExisting: Schema.optionalKey(Schema.Literal(true)),
 });
 const CodexUserInputAnswerObject = Schema.Struct({
   answers: Schema.Array(Schema.String),
@@ -259,6 +263,13 @@ function readResumeCursorThreadId(
   resumeCursor: ProviderSession["resumeCursor"],
 ): string | undefined {
   return isCodexResumeCursorSchema(resumeCursor) ? resumeCursor.threadId : undefined;
+}
+
+function makeCodexResumeCursor(threadId: string, requireExisting: boolean): CodexResumeCursor {
+  return {
+    threadId,
+    ...(requireExisting ? { requireExisting: true as const } : {}),
+  };
 }
 
 function runtimeModeToThreadConfig(input: RuntimeMode): {
@@ -462,6 +473,8 @@ export const openCodexThread = (input: {
   readonly requestedModel: string | undefined;
   readonly serviceTier: CodexServiceTier | undefined;
   readonly resumeThreadId: string | undefined;
+  readonly requireExisting?: boolean;
+  readonly onResumeFallback?: () => Effect.Effect<void, CodexErrors.CodexAppServerError>;
 }): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
   const resumeThreadId = input.resumeThreadId;
   const startParams = buildThreadStartParams({
@@ -481,14 +494,19 @@ export const openCodexThread = (input: {
       ...startParams,
     })
     .pipe(
-      Effect.catchIf(isRecoverableThreadResumeError, (error) =>
-        Effect.logWarning("codex app-server thread resume fell back to fresh start", {
-          threadId: input.threadId,
-          requestedRuntimeMode: input.runtimeMode,
-          resumeThreadId,
-          recoverable: true,
-          cause: error,
-        }).pipe(Effect.andThen(input.client.request("thread/start", startParams))),
+      Effect.catchIf(
+        (error) => input.requireExisting !== true && isRecoverableThreadResumeError(error),
+        (error) =>
+          Effect.logWarning("codex app-server thread resume fell back to fresh start", {
+            threadId: input.threadId,
+            requestedRuntimeMode: input.runtimeMode,
+            resumeThreadId,
+            recoverable: true,
+            cause: error,
+          }).pipe(
+            Effect.andThen(input.onResumeFallback?.() ?? Effect.void),
+            Effect.andThen(input.client.request("thread/start", startParams)),
+          ),
       ),
     );
 };
@@ -769,6 +787,7 @@ export const makeCodexSessionRuntime = (
     );
     const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
+    const requireExistingResume = options.resumeCursor?.requireExisting === true;
     const randomUUIDv4 = (purpose: CodexErrors.CodexAppServerIdentifierPurpose) =>
       crypto.randomUUIDv4.pipe(
         Effect.mapError(
@@ -908,7 +927,7 @@ export const makeCodexSessionRuntime = (
             return Effect.void;
           }
           return updateSession(sessionRef, {
-            resumeCursor: { threadId: payload.thread.id },
+            resumeCursor: makeCodexResumeCursor(payload.thread.id, requireExistingResume),
           });
         }),
       ),
@@ -1227,6 +1246,14 @@ export const makeCodexSessionRuntime = (
         requestedModel,
         serviceTier: options.serviceTier,
         resumeThreadId: readResumeCursorThreadId(options.resumeCursor),
+        requireExisting: requireExistingResume,
+        onResumeFallback: () =>
+          emitEvent({
+            kind: "notification",
+            threadId: options.threadId,
+            method: "thread/resumeFallback",
+            message: "resume fell back to a fresh provider thread; native history was not found",
+          }),
       });
 
       const providerThreadId = opened.thread.id;
@@ -1235,7 +1262,7 @@ export const makeCodexSessionRuntime = (
         status: "ready",
         cwd: opened.cwd,
         model: opened.model,
-        resumeCursor: { threadId: providerThreadId },
+        resumeCursor: makeCodexResumeCursor(providerThreadId, requireExistingResume),
         updatedAt: yield* nowIso,
       } satisfies ProviderSession;
       yield* Ref.set(sessionRef, session);
@@ -1323,7 +1350,12 @@ export const makeCodexSessionRuntime = (
             threadId: options.threadId,
             turnId,
             ...(resumedProviderThreadId
-              ? { resumeCursor: { threadId: resumedProviderThreadId } }
+              ? {
+                  resumeCursor: makeCodexResumeCursor(
+                    resumedProviderThreadId,
+                    requireExistingResume,
+                  ),
+                }
               : {}),
           } satisfies ProviderTurnStartResult;
         }),

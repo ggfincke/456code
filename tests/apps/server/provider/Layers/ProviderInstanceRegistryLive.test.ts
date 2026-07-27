@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/ProviderInstanceRegistryLive.test.ts
+// verifies live multi-instance driver construction and provider isolation
 /**
  * Multi-instance validation slices for `ProviderInstanceRegistryLive`.
  *
@@ -32,6 +34,8 @@ import {
   type OpenCodeSettings,
   ProviderDriverKind,
   type ProviderInstanceConfigMap,
+  type ProviderInstanceEnvironment,
+  ProviderInstanceEnvironmentVariableName,
   ProviderInstanceId,
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
@@ -176,14 +180,14 @@ describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
       expect(personalSnapshot.driver).toBe(codexDriverKind);
       expect(personalSnapshot.enabled).toBe(false);
       expect(personalSnapshot.continuation?.groupKey).toBe(
-        "codex:home:/home/julius/.codex_personal",
+        personal?.continuationIdentity.continuationKey,
       );
 
       const workSnapshot = yield* work!.snapshot.getSnapshot;
       expect(workSnapshot.instanceId).toBe(workId);
       expect(workSnapshot.driver).toBe(codexDriverKind);
       expect(workSnapshot.enabled).toBe(false);
-      expect(workSnapshot.continuation?.groupKey).toBe("codex:home:/home/julius/.codex");
+      expect(workSnapshot.continuation?.groupKey).toBe(work?.continuationIdentity.continuationKey);
 
       // Nothing goes to the unavailable bucket — both drivers are registered.
       const unavailable = yield* registry.listUnavailable;
@@ -380,35 +384,112 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
       expect(codexSnapshot.instanceId).toBe(codexId);
       expect(codexSnapshot.driver).toBe(codexDriverKind);
       expect(codexSnapshot.enabled).toBe(false);
-      expect(codexSnapshot.continuation?.groupKey).toBe("codex:home:/home/julius/.codex");
+      expect(codexSnapshot.continuation?.groupKey).toBe(
+        codex?.continuationIdentity.continuationKey,
+      );
 
       const claudeSnapshot = yield* claude!.snapshot.getSnapshot;
       expect(claudeSnapshot.instanceId).toBe(claudeId);
       expect(claudeSnapshot.driver).toBe(claudeDriverKind);
       expect(claudeSnapshot.enabled).toBe(false);
-      expect(claudeSnapshot.continuation?.groupKey).toBe("claude:home:/home/julius/.claude-work");
+      expect(claudeSnapshot.continuation?.groupKey).toBe(
+        claude?.continuationIdentity.continuationKey,
+      );
 
       const cursorSnapshot = yield* cursor!.snapshot.getSnapshot;
       expect(cursorSnapshot.instanceId).toBe(cursorId);
       expect(cursorSnapshot.driver).toBe(cursorDriverKind);
       expect(cursorSnapshot.enabled).toBe(false);
       expect(cursorSnapshot.continuation?.groupKey).toBe(
-        `${cursorDriverKind}:instance:${cursorId}`,
+        cursor?.continuationIdentity.continuationKey,
       );
 
       const grokSnapshot = yield* grok!.snapshot.getSnapshot;
       expect(grokSnapshot.instanceId).toBe(grokId);
       expect(grokSnapshot.driver).toBe(grokDriverKind);
       expect(grokSnapshot.enabled).toBe(false);
-      expect(grokSnapshot.continuation?.groupKey).toBe(`${grokDriverKind}:instance:${grokId}`);
+      expect(grokSnapshot.continuation?.groupKey).toBe(grok?.continuationIdentity.continuationKey);
 
       const openCodeSnapshot = yield* openCode!.snapshot.getSnapshot;
       expect(openCodeSnapshot.instanceId).toBe(openCodeId);
       expect(openCodeSnapshot.driver).toBe(openCodeDriverKind);
       expect(openCodeSnapshot.enabled).toBe(false);
       expect(openCodeSnapshot.continuation?.groupKey).toBe(
-        `${openCodeDriverKind}:instance:${openCodeId}`,
+        openCode?.continuationIdentity.continuationKey,
       );
+    }).pipe(Effect.provide(testLayer)),
+  );
+
+  it.live("changes all five same-instance identities when their source config changes", () =>
+    Effect.gen(function* () {
+      const ids = {
+        codex: ProviderInstanceId.make("codex_source"),
+        claude: ProviderInstanceId.make("claude_source"),
+        cursor: ProviderInstanceId.make("cursor_source"),
+        grok: ProviderInstanceId.make("grok_source"),
+        openCode: ProviderInstanceId.make("opencode_source"),
+      };
+      const sourceEnvironment = (name: string, value: string): ProviderInstanceEnvironment => [
+        {
+          name: ProviderInstanceEnvironmentVariableName.make(name),
+          value,
+          sensitive: true,
+        },
+      ];
+      const configMap = (suffix: "a" | "b"): ProviderInstanceConfigMap => ({
+        [ids.codex]: {
+          driver: ProviderDriverKind.make("codex"),
+          enabled: false,
+          config: makeCodexConfig({ homePath: `/accounts/${suffix}/.codex` }),
+        },
+        [ids.claude]: {
+          driver: ProviderDriverKind.make("claudeAgent"),
+          enabled: false,
+          config: makeClaudeConfig({ homePath: `/accounts/${suffix}/.claude` }),
+        },
+        [ids.cursor]: {
+          driver: ProviderDriverKind.make("cursor"),
+          enabled: false,
+          environment: sourceEnvironment("CURSOR_API_KEY", `cursor-secret-${suffix}`),
+          config: makeCursorConfig({ apiEndpoint: `https://cursor-${suffix}.example` }),
+        },
+        [ids.grok]: {
+          driver: ProviderDriverKind.make("grok"),
+          enabled: false,
+          environment: sourceEnvironment("XAI_API_KEY", `grok-secret-${suffix}`),
+          config: makeGrokConfig({}),
+        },
+        [ids.openCode]: {
+          driver: ProviderDriverKind.make("opencode"),
+          enabled: false,
+          config: makeOpenCodeConfig({ serverUrl: `https://opencode-${suffix}.example` }),
+        },
+      });
+      const drivers = [
+        CodexDriver,
+        ClaudeDriver,
+        CursorDriver,
+        GrokDriver,
+        OpenCodeDriver,
+      ] as const;
+      const first = yield* makeProviderInstanceRegistry({
+        drivers,
+        configMap: configMap("a"),
+      });
+      const second = yield* makeProviderInstanceRegistry({
+        drivers,
+        configMap: configMap("b"),
+      });
+
+      for (const instanceId of Object.values(ids)) {
+        const firstInstance = yield* first.registry.getInstance(instanceId);
+        const secondInstance = yield* second.registry.getInstance(instanceId);
+        expect(firstInstance?.continuationIdentity).not.toEqual(
+          secondInstance?.continuationIdentity,
+        );
+        expect(firstInstance?.continuationIdentity.continuationKey).not.toContain("secret-a");
+        expect(secondInstance?.continuationIdentity.continuationKey).not.toContain("secret-b");
+      }
     }).pipe(Effect.provide(testLayer)),
   );
 });

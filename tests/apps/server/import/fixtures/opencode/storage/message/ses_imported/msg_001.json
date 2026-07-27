@@ -1,0 +1,13 @@
+{
+  "id": "msg_001",
+  "sessionID": "ses_imported",
+  "role": "user",
+  "time": {
+    "created": 1767225600000
+  },
+  "agent": "build",
+  "model": {
+    "providerID": "openai",
+    "modelID": "gpt-5.2"
+  }
+}

@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Services/ProjectionThreads.ts
+// defines the projected thread repository service
+
 /**
  * ProjectionThreadRepository - Projection repository interface for threads.
  *
@@ -32,6 +35,7 @@ export const ProjectionThread = Schema.Struct({
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(Schema.String),
   worktreePath: Schema.NullOr(Schema.String),
+  originJson: Schema.NullOr(Schema.String),
   latestTurnId: Schema.NullOr(TurnId),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,

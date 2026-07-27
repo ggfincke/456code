@@ -1,3 +1,5 @@
+// apps/mobile/src/features/threads/ThreadRouteScreen.tsx
+// composes the selected mobile thread route and its controls
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import {
   StackActions,
@@ -767,6 +769,7 @@ function ThreadRouteContent(
           connectionStateLabel={routeConnectionState}
           threadSyncStatus={selectedThreadDetailState.status}
           activeThreadBusy={composer.activeThreadBusy}
+          sendBlockedReason={composer.sendBlockedReason}
           environmentId={selectedThread.environmentId}
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           threadCwd={selectedThreadCwd}

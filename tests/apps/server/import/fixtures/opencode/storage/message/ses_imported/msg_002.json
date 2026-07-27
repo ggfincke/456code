@@ -1,0 +1,29 @@
+{
+  "id": "msg_002",
+  "sessionID": "ses_imported",
+  "role": "assistant",
+  "time": {
+    "created": 1767225600000,
+    "completed": 1767225601000
+  },
+  "parentID": "msg_001",
+  "providerID": "openai",
+  "modelID": "gpt-5.2",
+  "agent": "build",
+  "mode": "build",
+  "path": {
+    "cwd": "/workspace/opencode-fixture",
+    "root": "/workspace/opencode-fixture"
+  },
+  "cost": 0,
+  "tokens": {
+    "input": 1,
+    "output": 1,
+    "reasoning": 1,
+    "cache": {
+      "read": 0,
+      "write": 0
+    }
+  },
+  "finish": "stop"
+}

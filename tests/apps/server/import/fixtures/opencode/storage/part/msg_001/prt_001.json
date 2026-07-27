@@ -1,0 +1,11 @@
+{
+  "id": "prt_001",
+  "sessionID": "ses_imported",
+  "messageID": "msg_001",
+  "type": "text",
+  "text": "Build the OpenCode importer.",
+  "time": {
+    "start": 1767225600000,
+    "end": 1767225600000
+  }
+}

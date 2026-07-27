@@ -1,3 +1,5 @@
+// tests/apps/mobile/features/archive/archivedThreadList.test.ts
+// verifies archived mobile thread grouping and presentation
 import type { ArchivedSnapshotEntry } from "@t3tools/client-runtime/state/threads";
 import type { OrchestrationProjectShell, OrchestrationThreadShell } from "@t3tools/contracts";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
@@ -41,6 +43,7 @@ function makeThread(
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
     ...input,
+    origin: input.origin ?? null,
     settledOverride: input.settledOverride ?? null,
     settledAt: input.settledAt ?? null,
   };

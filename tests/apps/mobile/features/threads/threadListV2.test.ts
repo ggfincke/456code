@@ -1,3 +1,5 @@
+// tests/apps/mobile/features/threads/threadListV2.test.ts
+// verifies mobile thread list ordering and status presentation
 import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -33,6 +35,7 @@ function makeThread(
     hasPendingUserInput: false,
     hasActionableProposedPlan: false,
     ...input,
+    origin: input.origin ?? null,
   };
 }
 

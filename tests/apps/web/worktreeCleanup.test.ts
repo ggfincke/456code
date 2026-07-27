@@ -1,3 +1,6 @@
+// tests/apps/web/worktreeCleanup.test.ts
+// verifies worktree cleanup state transitions
+
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
@@ -33,6 +36,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread {
     createdAt: "2026-02-13T00:00:00.000Z",
     updatedAt: "2026-02-13T00:00:00.000Z",
     archivedAt: null,
+    origin: null,
     settledOverride: null,
     settledAt: null,
     deletedAt: null,
