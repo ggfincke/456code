@@ -269,6 +269,10 @@ describe("buildCodexDeveloperInstructions", () => {
     });
 
     NodeAssert.ok(instructions.startsWith(CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS));
+    NodeAssert.match(instructions, /proposal_preview_upsert/);
+    NodeAssert.match(instructions, /MUST call it.*before emitting the final/);
+    NodeAssert.match(instructions, /Do not finalize the plan until the call succeeds/);
+    NodeAssert.match(instructions, /does not edit the user's worktree or index/);
     NodeAssert.match(instructions, /as gpt-5\.3-codex with medium reasoning effort/);
   });
 

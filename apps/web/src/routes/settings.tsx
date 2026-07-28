@@ -1,3 +1,5 @@
+// apps/web/src/routes/settings.tsx
+// declares settings routes and navigation metadata
 import { RotateCcwIcon } from "lucide-react";
 import {
   Outlet,
@@ -52,6 +54,12 @@ function SettingsContentLayout() {
       if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         event.preventDefault();
+
+        const activeElement = document.activeElement;
+        if (activeElement instanceof HTMLElement) {
+          activeElement.blur();
+        }
+
         navigateBackWithinApp();
       }
     };

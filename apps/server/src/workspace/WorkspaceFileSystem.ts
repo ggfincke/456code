@@ -1,13 +1,10 @@
+// apps/server/src/workspace/WorkspaceFileSystem.ts
+// owns contained utf-8 workspace file reads and writes
+
 // @effect-diagnostics nodeBuiltinImport:off
-/**
- * WorkspaceFileSystem - Effect service contract for workspace file mutations.
- *
- * Owns workspace-root-relative file read/write operations and their associated
- * safety checks and cache invalidation hooks.
- *
- * @module WorkspaceFileSystem
- */
+import * as NodeFS from "node:fs";
 import * as NodeFSP from "node:fs/promises";
+import * as NodePath from "node:path";
 
 import type {
   ProjectReadFileInput,
@@ -99,6 +96,85 @@ export const WorkspaceFileSystemError = Schema.Union([
   WorkspaceBinaryFileError,
 ]);
 export type WorkspaceFileSystemError = typeof WorkspaceFileSystemError.Type;
+const isWorkspaceFileSystemOperationError = Schema.is(WorkspaceFileSystemOperationError);
+
+function sameFileIdentity(
+  left: Pick<NodeFS.BigIntStats, "dev" | "ino">,
+  right: Pick<NodeFS.BigIntStats, "dev" | "ino">,
+): boolean {
+  return left.dev === right.dev && left.ino === right.ino;
+}
+
+function isCanonicalDescendant(workspaceRoot: string, candidate: string): boolean {
+  const relative = NodePath.relative(workspaceRoot, candidate);
+  return (
+    relative.length > 0 &&
+    relative !== ".." &&
+    !relative.startsWith(`..${NodePath.sep}`) &&
+    !NodePath.isAbsolute(relative)
+  );
+}
+
+function changedDuringRead(input: {
+  readonly workspaceRoot: string;
+  readonly relativePath: string;
+  readonly resolvedPath: string;
+}): WorkspaceFileSystemOperationError {
+  return new WorkspaceFileSystemOperationError({
+    ...input,
+    operationPath: input.resolvedPath,
+    operation: "read",
+    cause: new Error("Workspace file changed while it was being read."),
+  });
+}
+
+async function revalidateOpenedWorkspaceFile(input: {
+  readonly workspaceRoot: string;
+  readonly relativePath: string;
+  readonly absolutePath: string;
+  readonly realWorkspaceRoot: string;
+  readonly realTargetPath: string;
+  readonly workspaceStat: NodeFS.BigIntStats;
+  readonly fileStat: NodeFS.BigIntStats;
+  readonly openedStat: NodeFS.BigIntStats;
+}): Promise<void> {
+  let currentWorkspaceRoot: string;
+  let currentTargetPath: string;
+  let currentWorkspaceStat: NodeFS.BigIntStats;
+  let currentTargetStat: NodeFS.BigIntStats;
+  try {
+    [currentWorkspaceRoot, currentTargetPath, currentWorkspaceStat, currentTargetStat] =
+      await Promise.all([
+        NodeFSP.realpath(input.workspaceRoot),
+        NodeFSP.realpath(input.absolutePath),
+        NodeFSP.stat(input.realWorkspaceRoot, { bigint: true }),
+        NodeFSP.lstat(input.realTargetPath, { bigint: true }),
+      ]);
+  } catch {
+    throw changedDuringRead({
+      workspaceRoot: input.workspaceRoot,
+      relativePath: input.relativePath,
+      resolvedPath: input.realTargetPath,
+    });
+  }
+
+  if (
+    currentWorkspaceRoot !== input.realWorkspaceRoot ||
+    !currentWorkspaceStat.isDirectory() ||
+    !sameFileIdentity(currentWorkspaceStat, input.workspaceStat) ||
+    currentTargetPath !== input.realTargetPath ||
+    !currentTargetStat.isFile() ||
+    !sameFileIdentity(currentTargetStat, input.fileStat) ||
+    !sameFileIdentity(currentTargetStat, input.openedStat) ||
+    !isCanonicalDescendant(currentWorkspaceRoot, currentTargetPath)
+  ) {
+    throw changedDuringRead({
+      workspaceRoot: input.workspaceRoot,
+      relativePath: input.relativePath,
+      resolvedPath: input.realTargetPath,
+    });
+  }
+}
 
 /** Service tag for workspace file operations. */
 export class WorkspaceFileSystem extends Context.Service<
@@ -152,6 +228,18 @@ export const make = Effect.gen(function* () {
           cause,
         }),
     });
+    const workspaceStat = yield* Effect.tryPromise({
+      try: () => NodeFSP.stat(realWorkspaceRoot, { bigint: true }),
+      catch: (cause) =>
+        new WorkspaceFileSystemOperationError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedPath: target.absolutePath,
+          operationPath: realWorkspaceRoot,
+          operation: "stat",
+          cause,
+        }),
+    });
     const realTargetPath = yield* Effect.tryPromise({
       try: () => NodeFSP.realpath(target.absolutePath),
       catch: (cause) =>
@@ -161,6 +249,18 @@ export const make = Effect.gen(function* () {
           resolvedPath: target.absolutePath,
           operationPath: target.absolutePath,
           operation: "realpath-target",
+          cause,
+        }),
+    });
+    const fileStat = yield* Effect.tryPromise({
+      try: () => NodeFSP.lstat(realTargetPath, { bigint: true }),
+      catch: (cause) =>
+        new WorkspaceFileSystemOperationError({
+          workspaceRoot: input.cwd,
+          relativePath: input.relativePath,
+          resolvedPath: realTargetPath,
+          operationPath: realTargetPath,
+          operation: "stat",
           cause,
         }),
     });
@@ -177,10 +277,21 @@ export const make = Effect.gen(function* () {
         resolvedPath: realTargetPath,
       });
     }
+    if (!workspaceStat.isDirectory() || !fileStat.isFile()) {
+      return yield* new WorkspacePathNotFileError({
+        workspaceRoot: input.cwd,
+        relativePath: input.relativePath,
+        resolvedPath: realTargetPath,
+      });
+    }
 
     return yield* Effect.acquireUseRelease(
       Effect.tryPromise({
-        try: () => NodeFSP.open(realTargetPath, "r"),
+        try: () => {
+          const noFollow = NodeFS.constants.O_NOFOLLOW ?? 0;
+          const nonBlock = NodeFS.constants.O_NONBLOCK ?? 0;
+          return NodeFSP.open(realTargetPath, NodeFS.constants.O_RDONLY | noFollow | nonBlock);
+        },
         catch: (cause) =>
           new WorkspaceFileSystemOperationError({
             workspaceRoot: input.cwd,
@@ -193,8 +304,8 @@ export const make = Effect.gen(function* () {
       }),
       (handle) =>
         Effect.gen(function* () {
-          const stat = yield* Effect.tryPromise({
-            try: () => handle.stat(),
+          const initialStat = yield* Effect.tryPromise({
+            try: () => handle.stat({ bigint: true }),
             catch: (cause) =>
               new WorkspaceFileSystemOperationError({
                 workspaceRoot: input.cwd,
@@ -205,29 +316,121 @@ export const make = Effect.gen(function* () {
                 cause,
               }),
           });
-          if (!stat.isFile()) {
+          if (!initialStat.isFile()) {
             return yield* new WorkspacePathNotFileError({
               workspaceRoot: input.cwd,
               relativePath: input.relativePath,
               resolvedPath: realTargetPath,
             });
           }
+          if (!sameFileIdentity(initialStat, fileStat)) {
+            return yield* changedDuringRead({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: realTargetPath,
+            });
+          }
+          yield* Effect.tryPromise({
+            try: () =>
+              revalidateOpenedWorkspaceFile({
+                workspaceRoot: input.cwd,
+                relativePath: input.relativePath,
+                absolutePath: target.absolutePath,
+                realWorkspaceRoot,
+                realTargetPath,
+                workspaceStat,
+                fileStat,
+                openedStat: initialStat,
+              }),
+            catch: (cause) =>
+              isWorkspaceFileSystemOperationError(cause)
+                ? cause
+                : changedDuringRead({
+                    workspaceRoot: input.cwd,
+                    relativePath: input.relativePath,
+                    resolvedPath: realTargetPath,
+                  }),
+          });
 
-          const bytesToRead = Math.min(stat.size, PROJECT_READ_FILE_MAX_BYTES);
-          const buffer = Buffer.alloc(bytesToRead);
-          const { bytesRead } = yield* Effect.tryPromise({
-            try: () => handle.read(buffer, 0, bytesToRead, 0),
+          const byteLength = Number(initialStat.size);
+          if (!Number.isSafeInteger(byteLength)) {
+            return yield* changedDuringRead({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: realTargetPath,
+            });
+          }
+          const truncated = byteLength > PROJECT_READ_FILE_MAX_BYTES;
+          const expectedBytes = Math.min(byteLength, PROJECT_READ_FILE_MAX_BYTES);
+          const readLimit = truncated ? expectedBytes : expectedBytes + 1;
+          const buffer = Buffer.alloc(readLimit);
+          let bytesRead = 0;
+          while (bytesRead < readLimit) {
+            const result = yield* Effect.tryPromise({
+              try: () => handle.read(buffer, bytesRead, readLimit - bytesRead, bytesRead),
+              catch: (cause) =>
+                new WorkspaceFileSystemOperationError({
+                  workspaceRoot: input.cwd,
+                  relativePath: input.relativePath,
+                  resolvedPath: realTargetPath,
+                  operationPath: realTargetPath,
+                  operation: "read",
+                  cause,
+                }),
+            });
+            if (result.bytesRead === 0) {
+              break;
+            }
+            bytesRead += result.bytesRead;
+          }
+          const finalStat = yield* Effect.tryPromise({
+            try: () => handle.stat({ bigint: true }),
             catch: (cause) =>
               new WorkspaceFileSystemOperationError({
                 workspaceRoot: input.cwd,
                 relativePath: input.relativePath,
                 resolvedPath: realTargetPath,
                 operationPath: realTargetPath,
-                operation: "read",
+                operation: "stat",
                 cause,
               }),
           });
-          const fileBytes = buffer.subarray(0, bytesRead);
+          if (
+            bytesRead !== expectedBytes ||
+            !sameFileIdentity(finalStat, initialStat) ||
+            finalStat.size !== initialStat.size ||
+            finalStat.mtimeNs !== initialStat.mtimeNs ||
+            finalStat.ctimeNs !== initialStat.ctimeNs
+          ) {
+            return yield* changedDuringRead({
+              workspaceRoot: input.cwd,
+              relativePath: input.relativePath,
+              resolvedPath: realTargetPath,
+            });
+          }
+          yield* Effect.tryPromise({
+            try: () =>
+              revalidateOpenedWorkspaceFile({
+                workspaceRoot: input.cwd,
+                relativePath: input.relativePath,
+                absolutePath: target.absolutePath,
+                realWorkspaceRoot,
+                realTargetPath,
+                workspaceStat,
+                fileStat,
+                openedStat: finalStat,
+              }),
+            catch: (cause) =>
+              isWorkspaceFileSystemOperationError(cause)
+                ? cause
+                : changedDuringRead({
+                    workspaceRoot: input.cwd,
+                    relativePath: input.relativePath,
+                    resolvedPath: realTargetPath,
+                  }),
+          });
+
+          const fileBytes = buffer.subarray(0, expectedBytes);
           if (fileBytes.includes(0)) {
             return yield* new WorkspaceBinaryFileError({
               workspaceRoot: input.cwd,
@@ -236,11 +439,25 @@ export const make = Effect.gen(function* () {
             });
           }
 
+          const contents = yield* Effect.try({
+            try: () =>
+              new TextDecoder("utf-8", { fatal: true }).decode(
+                fileBytes,
+                truncated ? { stream: true } : undefined,
+              ),
+            catch: () =>
+              new WorkspaceBinaryFileError({
+                workspaceRoot: input.cwd,
+                relativePath: input.relativePath,
+                resolvedPath: realTargetPath,
+              }),
+          });
+
           return {
             relativePath: target.relativePath,
-            contents: new TextDecoder("utf-8").decode(fileBytes),
-            byteLength: stat.size,
-            truncated: stat.size > PROJECT_READ_FILE_MAX_BYTES,
+            contents,
+            byteLength,
+            truncated,
           };
         }),
       (handle) =>

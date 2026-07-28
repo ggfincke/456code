@@ -1,3 +1,6 @@
+// apps/web/src/components/files/FilePreviewPanel.tsx
+// renders editable workspace files & safe rendered document previews
+
 import type {
   EditorId,
   EnvironmentId,
@@ -35,6 +38,7 @@ import { type DraftId, useComposerDraftStore } from "~/composerDraftStore";
 import { buildFileReviewComment } from "~/reviewCommentContext";
 import { assetEnvironment } from "~/state/assets";
 import { useEnvironmentHttpBaseUrl, usePrimaryEnvironmentId } from "~/state/environments";
+import { useServerConfigs } from "~/state/entities";
 import { previewEnvironment } from "~/state/preview";
 import { projectEnvironment } from "~/state/projects";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -54,14 +58,21 @@ import { installFileEditorDismissal } from "./fileEditorDismissal";
 import { LocalCommentAnnotation } from "./LocalCommentAnnotation";
 import { projectFileCacheKey } from "./fileContentRevision";
 import { fileBreadcrumbs } from "./filePath";
-import { isMarkdownPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
-import { FileSaveCoordinator } from "./fileSaveCoordinator";
+import { isMarkdownPreviewFile, isMdxPreviewFile, setMarkdownTaskChecked } from "./filePreviewMode";
+import {
+  FileSaveCoordinator,
+  type FileSavePendingOwner,
+  updateFileSavePendingOwners,
+} from "./fileSaveCoordinator";
 import {
   confirmProjectFileQueryData,
+  confirmProjectMdxFileQueryData,
   getOptimisticProjectFileQueryData,
   setProjectFileQueryData,
   useProjectFileQuery,
+  useProjectMdxDocumentQuery,
 } from "./projectFilesQueryState";
+import { SafeDocumentRenderer } from "./SafeDocumentRenderer";
 
 interface FilePreviewPanelProps {
   environmentId: EnvironmentId;
@@ -74,7 +85,7 @@ interface FilePreviewPanelProps {
   availableEditors: ReadonlyArray<EditorId>;
   revealLine: number | null;
   revealRequestId: number;
-  onOpenFile: (relativePath: string) => void;
+  onOpenFile: (relativePath: string, line?: number) => void;
   onPendingChange: (relativePath: string, pending: boolean) => void;
 }
 
@@ -284,13 +295,14 @@ interface EditableFileSurfaceProps {
   environmentId: EnvironmentId;
   cwd: string;
   relativePath: string;
+  threadRef: ScopedThreadRef;
   composerDraftTarget: ScopedThreadRef | DraftId;
   contents: string;
   resolvedTheme: "light" | "dark";
   revealRequestId: number;
   wordWrap: boolean;
   onPostRender: FilePostRender;
-  onPendingChange: (relativePath: string, pending: boolean) => void;
+  onPendingChange: (relativePath: string, owner: FileSavePendingOwner, pending: boolean) => void;
 }
 
 interface FileSelectionOverride {
@@ -298,32 +310,48 @@ interface FileSelectionOverride {
   range: SelectedLineRange | null;
 }
 
+interface MdxPreviewNotice {
+  readonly kind: "error" | "status";
+  readonly message: string;
+  readonly retry: boolean;
+}
+
 function useFileSaveCoordinator({
   environmentId,
   cwd,
   relativePath,
+  threadRef,
   onPendingChange,
 }: Pick<
   EditableFileSurfaceProps,
-  "environmentId" | "cwd" | "relativePath" | "onPendingChange"
+  "environmentId" | "cwd" | "relativePath" | "threadRef" | "onPendingChange"
 >): FileSaveCoordinator {
   const writeFile = useAtomCommand(projectEnvironment.writeFile);
-  const coordinator = useMemo(
-    () =>
-      new FileSaveCoordinator({
-        debounceMs: FILE_SAVE_DEBOUNCE_MS,
-        onPendingChange: (pending) => onPendingChange(relativePath, pending),
-        persist: (nextContents) =>
-          writeFile({
+  const coordinator = useMemo(() => {
+    const owner = Symbol("file-save-coordinator");
+    return new FileSaveCoordinator({
+      debounceMs: FILE_SAVE_DEBOUNCE_MS,
+      onPendingChange: (pending) => onPendingChange(relativePath, owner, pending),
+      persist: (nextContents) =>
+        writeFile({
+          environmentId,
+          input: { cwd, relativePath, contents: nextContents },
+        }),
+      onConfirmed: (confirmedContents) => {
+        if (isMdxPreviewFile(relativePath)) {
+          confirmProjectMdxFileQueryData(
             environmentId,
-            input: { cwd, relativePath, contents: nextContents },
-          }),
-        onConfirmed: (confirmedContents) => {
-          confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents);
-        },
-      }),
-    [cwd, environmentId, onPendingChange, relativePath, writeFile],
-  );
+            cwd,
+            threadRef.threadId,
+            relativePath,
+            confirmedContents,
+          );
+          return;
+        }
+        confirmProjectFileQueryData(environmentId, cwd, relativePath, confirmedContents);
+      },
+    });
+  }, [cwd, environmentId, onPendingChange, relativePath, threadRef.threadId, writeFile]);
 
   useEffect(() => () => coordinator.dispose(), [coordinator]);
   return coordinator;
@@ -333,6 +361,7 @@ function EditableFileSurface({
   environmentId,
   cwd,
   relativePath,
+  threadRef,
   composerDraftTarget,
   contents,
   resolvedTheme,
@@ -359,6 +388,7 @@ function EditableFileSurface({
     environmentId,
     cwd,
     relativePath,
+    threadRef,
     onPendingChange,
   });
   const editor = useMemo(
@@ -605,13 +635,12 @@ function RenderedMarkdownSurface({
   | "revealRequestId"
   | "wordWrap"
   | "onPostRender"
-> & {
-  threadRef: ScopedThreadRef;
-}) {
+>) {
   const saveCoordinator = useFileSaveCoordinator({
     environmentId,
     cwd,
     relativePath,
+    threadRef,
     onPendingChange,
   });
 
@@ -662,6 +691,7 @@ export default function FilePreviewPanel({
   const { resolvedTheme } = useTheme();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
+  const serverConfigs = useServerConfigs();
   const environmentHttpBaseUrl = useEnvironmentHttpBaseUrl(environmentId);
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
@@ -672,16 +702,63 @@ export default function FilePreviewPanel({
   const isImage = relativePath !== null && isWorkspaceImagePreviewPath(relativePath);
   const file = useProjectFileQuery(environmentId, cwd, relativePath, !isImage);
   const [explorerOpen, setExplorerOpen] = useState(initialExplorerOpen);
-  const [markdownView, setMarkdownView] = useState<{
+  const [renderedView, setRenderedView] = useState<{
     path: string | null;
     revealRequestId: number | null;
   }>({ path: null, revealRequestId: null });
+  const pendingOwnersByPathRef = useRef<ReadonlyMap<string, ReadonlySet<FileSavePendingOwner>>>(
+    new Map(),
+  );
+  const [pendingOwnersByPath, setPendingOwnersByPath] = useState(pendingOwnersByPathRef.current);
   const breadcrumbRef = useRef<HTMLDivElement>(null);
   const isMarkdown = relativePath ? isMarkdownPreviewFile(relativePath) : false;
-  const renderMarkdown =
-    isMarkdown &&
-    markdownView.path === relativePath &&
-    (revealLine === null || markdownView.revealRequestId === revealRequestId);
+  const isMdx = relativePath ? isMdxPreviewFile(relativePath) : false;
+  const isRenderedDocument = isMarkdown || isMdx;
+  const renderRequested =
+    isRenderedDocument &&
+    renderedView.path === relativePath &&
+    (revealLine === null || renderedView.revealRequestId === revealRequestId);
+  const renderMarkdown = isMarkdown && renderRequested;
+  const renderMdx = isMdx && renderRequested;
+  const currentFilePending = relativePath !== null && pendingOwnersByPath.has(relativePath);
+  const supportsSafeMdx =
+    serverConfigs.get(environmentId)?.environment.capabilities.safeMdxDocument === true;
+  const mdxQueryEnabled =
+    renderMdx && supportsSafeMdx && !currentFilePending && file.data?.truncated !== true;
+  const mdxDocument = useProjectMdxDocumentQuery(
+    environmentId,
+    threadRef.threadId,
+    relativePath ?? "",
+    mdxQueryEnabled,
+  );
+  const mdxDocumentMatchesSource =
+    relativePath !== null &&
+    file.data !== null &&
+    mdxDocument.data?.transportVersion === 1 &&
+    mdxDocument.data.relativePath === relativePath &&
+    mdxDocument.data.source === file.data.contents;
+  const mdxDocumentReady =
+    mdxQueryEnabled &&
+    !mdxDocument.isPending &&
+    mdxDocument.error === null &&
+    mdxDocumentMatchesSource;
+  const renderedViewLabel = renderRequested
+    ? isMdx
+      ? "Show MDX source"
+      : "Show markdown source"
+    : isMdx
+      ? "Show rendered MDX"
+      : "Show rendered markdown";
+  const mdxToggleDisabled =
+    isMdx && (!supportsSafeMdx || currentFilePending || file.data?.truncated === true);
+  const renderedViewTooltip =
+    isMdx && !supportsSafeMdx
+      ? "This server does not support safe MDX rendering"
+      : isMdx && file.data?.truncated === true
+        ? "Files larger than 1 MB cannot be rendered as MDX"
+        : isMdx && currentFilePending
+          ? "Saving before rendering MDX"
+          : renderedViewLabel;
   const canOpenInBrowser =
     relativePath !== null && isPreviewSupportedInRuntime() && isBrowserPreviewFile(relativePath);
   const absolutePath = relativePath ? resolvePathLinkTarget(relativePath, cwd) : null;
@@ -690,6 +767,22 @@ export default function FilePreviewPanel({
     [projectName, relativePath],
   );
   const onFilePostRender = useFileLineReveal(relativePath, revealLine, revealRequestId);
+  const handlePendingChange = useCallback(
+    (path: string, owner: FileSavePendingOwner, pending: boolean) => {
+      const current = pendingOwnersByPathRef.current;
+      const wasPending = current.has(path);
+      const next = updateFileSavePendingOwners(current, path, owner, pending);
+      if (next === current) return;
+
+      pendingOwnersByPathRef.current = next;
+      setPendingOwnersByPath(next);
+      const isPending = next.has(path);
+      if (wasPending !== isPending) {
+        onPendingChange(path, isPending);
+      }
+    },
+    [onPendingChange],
+  );
 
   useEffect(() => {
     const currentCrumb = breadcrumbRef.current?.querySelector<HTMLElement>(
@@ -733,6 +826,51 @@ export default function FilePreviewPanel({
       );
     })();
   }, [absolutePath, createAssetUrl, environmentHttpBaseUrl, openPreview, threadRef]);
+  const retryMdxPreview = useCallback(() => {
+    file.refresh();
+    mdxDocument.refresh();
+  }, [file.refresh, mdxDocument.refresh]);
+
+  let mdxPreviewNotice: MdxPreviewNotice | null = null;
+  if (renderMdx && !mdxDocumentReady) {
+    if (currentFilePending) {
+      mdxPreviewNotice = {
+        kind: "status",
+        message: "Saving the latest source before rendering MDX.",
+        retry: false,
+      };
+    } else if (!supportsSafeMdx) {
+      mdxPreviewNotice = {
+        kind: "error",
+        message: "This server does not support safe MDX rendering.",
+        retry: false,
+      };
+    } else if (file.data?.truncated === true) {
+      mdxPreviewNotice = {
+        kind: "error",
+        message: "MDX files larger than 1 MB cannot be rendered.",
+        retry: false,
+      };
+    } else if (mdxDocument.error !== null) {
+      mdxPreviewNotice = {
+        kind: "error",
+        message: mdxDocument.error,
+        retry: true,
+      };
+    } else if (mdxDocument.isPending || mdxDocument.data === null) {
+      mdxPreviewNotice = {
+        kind: "status",
+        message: "Rendering MDX from the saved source.",
+        retry: false,
+      };
+    } else {
+      mdxPreviewNotice = {
+        kind: "error",
+        message: "The rendered MDX does not match the visible source.",
+        retry: true,
+      };
+    }
+  }
 
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden bg-background">
@@ -780,30 +918,34 @@ export default function FilePreviewPanel({
               enableShortcut={false}
             />
           ) : null}
-          {isMarkdown ? (
+          {isRenderedDocument ? (
             <Tooltip>
               <TooltipTrigger
                 render={
                   <Toggle
-                    className="shrink-0"
-                    pressed={renderMarkdown}
+                    className={cn("shrink-0", mdxToggleDisabled && "opacity-50")}
+                    pressed={renderRequested}
+                    aria-disabled={mdxToggleDisabled}
                     onPressedChange={(pressed) => {
-                      setMarkdownView({
+                      if (mdxToggleDisabled) return;
+                      setRenderedView({
                         path: pressed ? relativePath : null,
                         revealRequestId: pressed ? revealRequestId : null,
                       });
                     }}
-                    aria-label={renderMarkdown ? "Show markdown source" : "Show rendered markdown"}
+                    aria-label={renderedViewLabel}
                     variant="ghost"
                     size="sm"
                   >
-                    {renderMarkdown ? <Code2 className="size-3.5" /> : <Eye className="size-3.5" />}
+                    {renderRequested ? (
+                      <Code2 className="size-3.5" />
+                    ) : (
+                      <Eye className="size-3.5" />
+                    )}
                   </Toggle>
                 }
               />
-              <TooltipPopup>
-                {renderMarkdown ? "Show markdown source" : "Show rendered markdown"}
-              </TooltipPopup>
+              <TooltipPopup>{renderedViewTooltip}</TooltipPopup>
             </Tooltip>
           ) : null}
           {canOpenInBrowser ? (
@@ -882,7 +1024,16 @@ export default function FilePreviewPanel({
                 relativePath={relativePath}
                 threadRef={threadRef}
                 contents={file.data.contents}
-                onPendingChange={onPendingChange}
+                onPendingChange={handlePendingChange}
+              />
+            ) : isMdx && renderMdx && mdxDocumentReady && mdxDocument.data !== null ? (
+              <SafeDocumentRenderer
+                document={mdxDocument.data.document}
+                source={mdxDocument.data.source}
+                documentPath={mdxDocument.data.relativePath}
+                environmentId={environmentId}
+                threadId={threadRef.threadId}
+                onOpenFile={onOpenFile}
               />
             ) : file.data.truncated ? (
               <Virtualizer
@@ -911,19 +1062,47 @@ export default function FilePreviewPanel({
                 />
               </Virtualizer>
             ) : (
-              <EditableFileSurface
+              <div
                 key={`${relativePath}:${resolvedTheme}`}
-                environmentId={environmentId}
-                cwd={cwd}
-                relativePath={relativePath}
-                composerDraftTarget={composerDraftTarget}
-                contents={file.data.contents}
-                resolvedTheme={resolvedTheme}
-                revealRequestId={revealRequestId}
-                wordWrap={wordWrap}
-                onPostRender={onFilePostRender}
-                onPendingChange={onPendingChange}
-              />
+                className="flex min-h-0 flex-1 flex-col overflow-hidden"
+              >
+                {isMdx && renderMdx && mdxPreviewNotice ? (
+                  <div
+                    className={cn(
+                      "flex shrink-0 items-center justify-between gap-3 border-b px-3 py-2 text-xs",
+                      mdxPreviewNotice.kind === "error"
+                        ? "border-destructive/25 bg-destructive/8 text-destructive"
+                        : "border-border/60 bg-muted/25 text-muted-foreground",
+                    )}
+                    role={mdxPreviewNotice.kind === "error" ? "alert" : "status"}
+                    aria-live={mdxPreviewNotice.kind === "error" ? "assertive" : "polite"}
+                  >
+                    <span>{mdxPreviewNotice.message}</span>
+                    {mdxPreviewNotice.retry ? (
+                      <button
+                        type="button"
+                        className="shrink-0 rounded border border-current/30 px-2 py-1 font-medium hover:bg-current/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onClick={retryMdxPreview}
+                      >
+                        Retry
+                      </button>
+                    ) : null}
+                  </div>
+                ) : null}
+                <EditableFileSurface
+                  environmentId={environmentId}
+                  cwd={cwd}
+                  relativePath={relativePath}
+                  threadRef={threadRef}
+                  composerDraftTarget={composerDraftTarget}
+                  contents={file.data.contents}
+                  resolvedTheme={resolvedTheme}
+                  revealRequestId={revealRequestId}
+                  wordWrap={wordWrap}
+                  onPostRender={onFilePostRender}
+                  onPendingChange={handlePendingChange}
+                />
+              </div>
             )
           ) : null}
         </div>

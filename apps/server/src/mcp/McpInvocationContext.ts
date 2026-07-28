@@ -1,22 +1,25 @@
+// apps/server/src/mcp/McpInvocationContext.ts
+// tracks authenticated model context for one request
 import {
   type EnvironmentId,
   PreviewAutomationUnavailableError,
   type ProviderInstanceId,
   type ThreadId,
+  type TurnId,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 
-export type McpCapability = "preview";
+export type McpCapability = "preview" | "proposal";
 
 export interface McpInvocationScope {
   readonly environmentId: EnvironmentId;
   readonly threadId: ThreadId;
   readonly providerSessionId: string;
   readonly providerInstanceId: ProviderInstanceId;
+  readonly activeTurnId?: TurnId;
   readonly capabilities: ReadonlySet<McpCapability>;
   readonly issuedAt: number;
-  readonly expiresAt: number;
 }
 
 export class McpInvocationContext extends Context.Service<

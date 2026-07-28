@@ -1,3 +1,5 @@
+// tests/apps/server/checkpointing/CheckpointStore.test.ts
+// verifies checkpoint capture and exact diff behavior across VCS drivers
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from "node:path";
 
@@ -49,6 +51,16 @@ function writeTextFile(
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     yield* fileSystem.writeFileString(filePath, contents);
+  });
+}
+
+function writeBytes(
+  filePath: string,
+  contents: Uint8Array,
+): Effect.Effect<void, PlatformError.PlatformError, FileSystem.FileSystem> {
+  return Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    yield* fileSystem.writeFile(filePath, contents);
   });
 }
 
@@ -110,6 +122,65 @@ it.layer(TestLayer)("CheckpointStore.layer", (it) => {
         const checkpointStore = yield* CheckpointStore.CheckpointStore;
 
         expect(yield* checkpointStore.isGitRepository(tmp)).toBe(true);
+      }),
+    );
+  });
+
+  describe("captureCheckpoint", () => {
+    it.effect("captures raw working-tree bytes without invoking required Git filters", () =>
+      Effect.gen(function* () {
+        const tmp = yield* makeTmpDir();
+        yield* initRepoWithCommit(tmp);
+        const checkpointStore = yield* CheckpointStore.CheckpointStore;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const filteredPath = NodePath.join(tmp, "filtered.txt");
+
+        yield* writeTextFile(
+          NodePath.join(tmp, ".gitattributes"),
+          "filtered.txt filter=sentinel text eol=crlf\n",
+        );
+        yield* writeTextFile(NodePath.join(tmp, ".gitignore"), "preserved.ignored\n");
+        yield* writeTextFile(filteredPath, "committed\n");
+        yield* git(tmp, ["add", ".gitattributes", ".gitignore", "filtered.txt"]);
+        yield* git(tmp, ["commit", "-m", "add filtered fixture"]);
+        yield* git(tmp, ["config", "filter.sentinel.clean", "false"]);
+        yield* git(tmp, ["config", "filter.sentinel.smudge", "false"]);
+        yield* git(tmp, ["config", "filter.sentinel.required", "true"]);
+        yield* writeBytes(filteredPath, Buffer.from("working\r\nbytes\r\n"));
+
+        const indexPath = NodePath.join(tmp, ".git", "index");
+        const indexBefore = yield* fileSystem.readFile(indexPath);
+        const checkpointRef = checkpointRefForThreadTurn(
+          ThreadId.make("thread-checkpoint-raw-bytes"),
+          1,
+        );
+        yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef,
+        });
+
+        expect(yield* git(tmp, ["rev-parse", `${checkpointRef}:filtered.txt`])).toBe(
+          yield* git(tmp, ["hash-object", "--no-filters", "filtered.txt"]),
+        );
+        expect(yield* fileSystem.readFile(indexPath)).toEqual(indexBefore);
+
+        yield* writeBytes(filteredPath, Buffer.from("later\r\nmutation\r\n"));
+        yield* writeTextFile(NodePath.join(tmp, "remove-me.txt"), "untracked\n");
+        yield* writeTextFile(NodePath.join(tmp, "preserved.ignored"), "ignored state\n");
+        expect(
+          yield* checkpointStore.restoreCheckpoint({
+            cwd: tmp,
+            checkpointRef,
+          }),
+        ).toBe(true);
+        expect(yield* fileSystem.readFile(filteredPath)).toEqual(
+          Buffer.from("working\r\nbytes\r\n"),
+        );
+        expect(yield* fileSystem.exists(NodePath.join(tmp, "remove-me.txt"))).toBe(false);
+        expect(yield* fileSystem.readFileString(NodePath.join(tmp, "preserved.ignored"))).toBe(
+          "ignored state\n",
+        );
+        expect(yield* git(tmp, ["diff", "--cached", "--no-ext-diff", "--no-textconv"])).toBe("");
       }),
     );
   });

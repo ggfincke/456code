@@ -5,6 +5,7 @@ import {
   type CheckpointRef,
   EventId,
   MessageId,
+  type OrchestrationProposedPlanId,
   type ProjectId,
   ThreadId,
   TurnId,
@@ -35,6 +36,7 @@ import { RuntimeReceiptBus } from "../Services/RuntimeReceiptBus.ts";
 import type { CheckpointStoreError } from "../../checkpointing/Errors.ts";
 import type { OrchestrationDispatchError } from "../Errors.ts";
 import { isGitRepository } from "../../git/Utils.ts";
+import { ProposalImplementationAttemptService } from "../../proposal/ProposalImplementationAttemptService.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
 
@@ -59,6 +61,50 @@ function sameId(left: string | null | undefined, right: string | null | undefine
     return false;
   }
   return left === right;
+}
+
+interface ImplementationSource {
+  readonly threadId: ThreadId;
+  readonly planId: OrchestrationProposedPlanId;
+}
+
+interface PendingImplementationRequest {
+  readonly requestedAt: string;
+  readonly sourceProposedPlan?: ImplementationSource;
+}
+
+function matchingImplementationRequest(
+  thread: {
+    readonly latestTurn: {
+      readonly turnId: TurnId;
+      readonly requestedAt: string;
+      readonly sourceProposedPlan?: ImplementationSource | undefined;
+    } | null;
+  },
+  turnId: TurnId,
+  pending: PendingImplementationRequest | undefined,
+):
+  | {
+      readonly requestedAt: string;
+      readonly sourceProposedPlan: ImplementationSource;
+    }
+  | undefined {
+  if (
+    thread.latestTurn !== null &&
+    sameId(thread.latestTurn.turnId, turnId) &&
+    thread.latestTurn.sourceProposedPlan !== undefined
+  ) {
+    return {
+      requestedAt: thread.latestTurn.requestedAt,
+      sourceProposedPlan: thread.latestTurn.sourceProposedPlan,
+    };
+  }
+  return pending?.sourceProposedPlan === undefined
+    ? undefined
+    : {
+        requestedAt: pending.requestedAt,
+        sourceProposedPlan: pending.sourceProposedPlan,
+      };
 }
 
 function checkpointStatusFromRuntime(status: string | undefined): "ready" | "missing" | "error" {
@@ -87,6 +133,10 @@ const make = Effect.gen(function* () {
   const receiptBus = yield* RuntimeReceiptBus;
   const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster;
+  const proposalImplementationAttempts = Option.getOrUndefined(
+    yield* Effect.serviceOption(ProposalImplementationAttemptService),
+  );
+  const pendingImplementationRequests = new Map<string, PendingImplementationRequest>();
 
   const appendRevertFailureActivity = (input: {
     readonly threadId: ThreadId;
@@ -528,6 +578,110 @@ const make = Effect.gen(function* () {
     },
   );
 
+  const beginImplementationAttemptFromTurnStart = Effect.fn(
+    "beginImplementationAttemptFromTurnStart",
+  )(function* (event: Extract<ProviderRuntimeEvent, { type: "turn.started" }>) {
+    if (!proposalImplementationAttempts) {
+      return;
+    }
+    const turnId = toTurnId(event.turnId);
+    if (!turnId) {
+      return;
+    }
+    const thread = yield* resolveThreadDetail(event.threadId);
+    if (!thread) {
+      return;
+    }
+    if (thread.session?.activeTurnId && !sameId(thread.session.activeTurnId, turnId)) {
+      return;
+    }
+    const implementationRequest = matchingImplementationRequest(
+      thread,
+      turnId,
+      pendingImplementationRequests.get(thread.id),
+    );
+    if (!implementationRequest) {
+      return;
+    }
+    const projects = yield* resolveThreadProjects(thread.projectId);
+    const cwd = yield* resolveCheckpointCwd({
+      threadId: thread.id,
+      thread,
+      projects,
+      preferSessionRuntime: false,
+    });
+    if (!cwd) {
+      return;
+    }
+
+    const checkpointTurnCount = thread.checkpoints.reduce(
+      (maxTurnCount, checkpoint) => Math.max(maxTurnCount, checkpoint.checkpointTurnCount),
+      0,
+    );
+    yield* proposalImplementationAttempts.begin({
+      implementationThreadId: thread.id,
+      implementationTurnId: turnId,
+      cwd,
+      baselineCheckpointRef: checkpointRefForThreadTurn(thread.id, checkpointTurnCount),
+      ...(implementationRequest.sourceProposedPlan === undefined
+        ? {}
+        : { sourceProposedPlan: implementationRequest.sourceProposedPlan }),
+      createdAt: implementationRequest.requestedAt,
+    });
+    pendingImplementationRequests.delete(thread.id);
+  });
+
+  const completeImplementationAttemptFromCheckpoint = Effect.fn(
+    "completeImplementationAttemptFromCheckpoint",
+  )(function* (event: Extract<OrchestrationEvent, { type: "thread.turn-diff-completed" }>) {
+    if (!proposalImplementationAttempts || event.payload.status !== "ready") {
+      return;
+    }
+    const thread = yield* resolveThreadDetail(event.payload.threadId);
+    if (!thread) {
+      return;
+    }
+    const projects = yield* resolveThreadProjects(thread.projectId);
+    const cwd = yield* resolveCheckpointCwd({
+      threadId: thread.id,
+      thread,
+      projects,
+      preferSessionRuntime: true,
+    });
+    if (!cwd) {
+      return;
+    }
+
+    const implementationRequest = matchingImplementationRequest(
+      thread,
+      event.payload.turnId,
+      pendingImplementationRequests.get(thread.id),
+    );
+    if (implementationRequest) {
+      yield* proposalImplementationAttempts.begin({
+        implementationThreadId: thread.id,
+        implementationTurnId: event.payload.turnId,
+        cwd,
+        baselineCheckpointRef: checkpointRefForThreadTurn(
+          thread.id,
+          Math.max(0, event.payload.checkpointTurnCount - 1),
+        ),
+        ...(implementationRequest.sourceProposedPlan === undefined
+          ? {}
+          : { sourceProposedPlan: implementationRequest.sourceProposedPlan }),
+        createdAt: implementationRequest.requestedAt,
+      });
+      pendingImplementationRequests.delete(thread.id);
+    }
+    yield* proposalImplementationAttempts.complete({
+      implementationThreadId: thread.id,
+      implementationTurnId: event.payload.turnId,
+      cwd,
+      actualCheckpointRef: event.payload.checkpointRef,
+      completedAt: event.payload.completedAt,
+    });
+  });
+
   const refreshLocalGitStatusFromTurnCompletion = Effect.fn(
     "refreshLocalGitStatusFromTurnCompletion",
   )(function* (event: Extract<ProviderRuntimeEvent, { type: "turn.completed" }>) {
@@ -744,6 +898,14 @@ const make = Effect.gen(function* () {
 
   const processDomainEvent = Effect.fn("processDomainEvent")(function* (event: OrchestrationEvent) {
     if (event.type === "thread.turn-start-requested" || event.type === "thread.message-sent") {
+      if (event.type === "thread.turn-start-requested") {
+        pendingImplementationRequests.set(event.payload.threadId, {
+          requestedAt: event.payload.createdAt,
+          ...(event.payload.sourceProposedPlan === undefined
+            ? {}
+            : { sourceProposedPlan: event.payload.sourceProposedPlan }),
+        });
+      }
       yield* ensurePreTurnBaselineFromDomainTurnStart(event);
       return;
     }
@@ -782,6 +944,15 @@ const make = Effect.gen(function* () {
           ),
         ),
       );
+      yield* completeImplementationAttemptFromCheckpoint(event).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("proposal implementation attempt completion failed", {
+            threadId: event.payload.threadId,
+            turnId: event.payload.turnId,
+            detail: error.message,
+          }),
+        ),
+      );
     }
   });
 
@@ -790,6 +961,15 @@ const make = Effect.gen(function* () {
   ) {
     if (event.type === "turn.started") {
       yield* ensurePreTurnBaselineFromTurnStart(event);
+      yield* beginImplementationAttemptFromTurnStart(event).pipe(
+        Effect.catch((error) =>
+          Effect.logWarning("proposal implementation attempt start failed", {
+            threadId: event.threadId,
+            turnId: event.turnId ?? null,
+            detail: error.message,
+          }),
+        ),
+      );
       return;
     }
 

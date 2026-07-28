@@ -1,6 +1,8 @@
+// tests/apps/server/mcp/McpSessionRegistry.test.ts
+// verifies mcp credential lifetime and revocation
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/unstable/http";
 
@@ -23,8 +25,7 @@ const makeRegistry = (now: () => number, httpServer = fakeHttpServer) =>
   McpSessionRegistry.__testing
     .make({
       now,
-      idleTimeoutMs: 100,
-      maximumLifetimeMs: 1_000,
+      livenessWindowMs: 100,
     })
     .pipe(
       Effect.provideService(HttpServer.HttpServer, httpServer),
@@ -47,6 +48,15 @@ it.effect("stores only a token hash, resolves the bearer token, and revokes by t
 
     const resolved = yield* registry.resolve(token);
     expect(resolved?.threadId).toBe(threadId);
+    expect(resolved?.capabilities).toEqual(new Set(["preview", "proposal"]));
+    expect(resolved?.activeTurnId).toBeUndefined();
+
+    const turnId = TurnId.make("turn-1");
+    yield* registry.bindActiveTurn(threadId, turnId);
+    expect((yield* registry.resolve(token))?.activeTurnId).toBe(turnId);
+
+    yield* registry.bindActiveTurn(threadId);
+    expect((yield* registry.resolve(token))?.activeTurnId).toBeUndefined();
 
     yield* registry.revokeThread(threadId);
     expect(yield* registry.resolve(token)).toBeUndefined();
@@ -75,7 +85,7 @@ it.effect("builds MCP endpoints from the bound server host", () =>
   }),
 );
 
-it.effect("expires credentials after inactivity", () =>
+it.effect("expires credentials once their session stops showing signs of life", () =>
   Effect.gen(function* () {
     let timestamp = 1_000;
     const registry = yield* makeRegistry(() => timestamp);
@@ -85,6 +95,45 @@ it.effect("expires credentials after inactivity", () =>
     });
     const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, "");
     timestamp += 101;
+    expect(yield* registry.resolve(token)).toBeUndefined();
+  }),
+);
+
+it.effect("keeps a credential alive across turns that never touch an MCP tool", () =>
+  Effect.gen(function* () {
+    let timestamp = 1_000;
+    const registry = yield* makeRegistry(() => timestamp);
+    const threadId = ThreadId.make("thread-3");
+    const issued = yield* registry.issue({
+      threadId,
+      providerInstanceId: ProviderInstanceId.make("claude"),
+    });
+    const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, "");
+
+    // each turn refreshes the credential before the liveness window lapses
+    for (let turn = 0; turn < 10; turn += 1) {
+      timestamp += 99;
+      yield* registry.touch(threadId);
+    }
+
+    expect((yield* registry.resolve(token))?.threadId).toBe(threadId);
+  }),
+);
+
+it.effect("does not keep credentials of other threads alive", () =>
+  Effect.gen(function* () {
+    let timestamp = 1_000;
+    const registry = yield* makeRegistry(() => timestamp);
+    const issued = yield* registry.issue({
+      threadId: ThreadId.make("thread-4"),
+      providerInstanceId: ProviderInstanceId.make("codex"),
+    });
+    const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, "");
+
+    timestamp += 99;
+    yield* registry.touch(ThreadId.make("thread-unrelated"));
+    timestamp += 2;
+
     expect(yield* registry.resolve(token)).toBeUndefined();
   }),
 );

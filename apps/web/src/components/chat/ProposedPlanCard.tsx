@@ -1,9 +1,18 @@
-import { memo, useState, useId } from "react";
+// apps/web/src/components/chat/ProposedPlanCard.tsx
+// renders proposed plans, exact preview identity, and export actions
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
+import type {
+  EnvironmentId,
+  OrchestrationProposedPlanId,
+  ProposalGeneration,
+  ScopedThreadRef,
+} from "@t3tools/contracts";
+import { EllipsisIcon } from "lucide-react";
+import { memo, useEffect, useId, useRef, useState } from "react";
+
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
   buildProposedPlanMarkdownFilename,
@@ -12,13 +21,17 @@ import {
   proposedPlanTitle,
   stripDisplayedPlanMarkdown,
 } from "../../proposedPlan";
-import ChatMarkdown from "../ChatMarkdown";
-import { EllipsisIcon } from "lucide-react";
-import { Button } from "../ui/button";
-import { Input } from "../ui/input";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
+import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { cn } from "~/lib/utils";
+import { useServerConfigs } from "~/state/entities";
+import { projectEnvironment } from "~/state/projects";
+import { useEnvironmentQuery } from "~/state/query";
+import { useAtomCommand } from "~/state/use-atom-command";
+import { useRightPanelStore } from "~/rightPanelStore";
+
+import ChatMarkdown from "../ChatMarkdown";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import {
   Dialog,
   DialogDescription,
@@ -28,18 +41,19 @@ import {
   DialogPopup,
   DialogTitle,
 } from "../ui/dialog";
+import { Input } from "../ui/input";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { stackedThreadToast, toastManager } from "../ui/toast";
-import { projectEnvironment } from "~/state/projects";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { useAtomCommand } from "~/state/use-atom-command";
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
+  planId,
   planMarkdown,
   environmentId,
   threadRef,
   cwd,
   workspaceRoot,
 }: {
+  planId: OrchestrationProposedPlanId;
   planMarkdown: string;
   environmentId: EnvironmentId;
   threadRef?: ScopedThreadRef | undefined;
@@ -50,6 +64,136 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
   const [savePath, setSavePath] = useState("");
   const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
+  const serverConfig = useServerConfigs().get(environmentId) ?? null;
+  const proposalPreviewAvailable = serverConfig?.environment.capabilities.proposalPreview === true;
+  const cartographerAvailable = serverConfig?.environment.capabilities.cartographerEmbed === true;
+  const planProposalQuery = useEnvironmentQuery(
+    proposalPreviewAvailable && threadRef
+      ? projectEnvironment.findProposalByPlan({
+          environmentId,
+          input: {
+            sourceThreadId: threadRef.threadId,
+            planId,
+          },
+        })
+      : null,
+  );
+  const exactPlanProposal =
+    threadRef &&
+    planProposalQuery.data?.proposal.sourceThreadId === threadRef.threadId &&
+    planProposalQuery.data.revision.planId === planId
+      ? planProposalQuery.data
+      : null;
+  const canOpenExplorer =
+    threadRef !== undefined && (proposalPreviewAvailable || cartographerAvailable);
+  const revisionKey =
+    exactPlanProposal === null
+      ? null
+      : `${exactPlanProposal.proposal.proposalId}:${exactPlanProposal.revision.revision}`;
+  const latestGenerationQuery = useEnvironmentQuery(
+    exactPlanProposal !== null && threadRef && cartographerAvailable
+      ? projectEnvironment.latestProposalGeneration({
+          environmentId,
+          input: {
+            threadId: threadRef.threadId,
+            proposalId: exactPlanProposal.proposal.proposalId,
+            revision: exactPlanProposal.revision.revision,
+          },
+        })
+      : null,
+  );
+  const startProposalGeneration = useAtomCommand(projectEnvironment.startProposalGeneration, {
+    reportFailure: false,
+  });
+  const generationStartRef = useRef<string | null>(null);
+  const [startedGeneration, setStartedGeneration] = useState<{
+    readonly key: string;
+    readonly generation: ProposalGeneration;
+  } | null>(null);
+
+  useEffect(() => {
+    if (
+      exactPlanProposal === null ||
+      !threadRef ||
+      !cartographerAvailable ||
+      revisionKey === null ||
+      latestGenerationQuery.isPending ||
+      latestGenerationQuery.error !== null ||
+      latestGenerationQuery.data !== null ||
+      generationStartRef.current === revisionKey
+    ) {
+      return;
+    }
+    generationStartRef.current = revisionKey;
+    void startProposalGeneration({
+      environmentId,
+      input: {
+        threadId: threadRef.threadId,
+        proposalId: exactPlanProposal.proposal.proposalId,
+        revision: exactPlanProposal.revision.revision,
+      },
+    }).then((result) => {
+      if (result._tag !== "Success") return;
+      setStartedGeneration({ key: revisionKey, generation: result.value });
+      latestGenerationQuery.refresh();
+    });
+  }, [
+    cartographerAvailable,
+    environmentId,
+    exactPlanProposal,
+    latestGenerationQuery.data,
+    latestGenerationQuery.error,
+    latestGenerationQuery.isPending,
+    latestGenerationQuery.refresh,
+    revisionKey,
+    startProposalGeneration,
+    threadRef,
+  ]);
+
+  const generationSeed =
+    latestGenerationQuery.data ??
+    (startedGeneration?.key === revisionKey ? startedGeneration.generation : null);
+  const generationQuery = useEnvironmentQuery(
+    generationSeed !== null && threadRef
+      ? projectEnvironment.getProposalGeneration({
+          environmentId,
+          input: {
+            threadId: threadRef.threadId,
+            generationId: generationSeed.generationId,
+          },
+        })
+      : null,
+  );
+  const generation = generationQuery.data ?? generationSeed;
+  useEffect(() => {
+    if (
+      generation === null ||
+      (generation.state !== "queued" &&
+        generation.state !== "preparing" &&
+        generation.state !== "analyzing")
+    ) {
+      return;
+    }
+    const intervalId = window.setInterval(generationQuery.refresh, 1_500);
+    return () => window.clearInterval(intervalId);
+  }, [generation, generationQuery.refresh]);
+
+  const generationIsActive =
+    generation?.state === "queued" ||
+    generation?.state === "preparing" ||
+    generation?.state === "analyzing";
+  const previewIdentity =
+    exactPlanProposal !== null
+      ? generationIsActive
+        ? `Analyzing revision ${exactPlanProposal.revision.revision} against workspace snapshot ${exactPlanProposal.revision.baseSnapshot.workingTreeOid}.`
+        : `Preview of proposal revision ${exactPlanProposal.revision.revision} against workspace snapshot ${exactPlanProposal.revision.baseSnapshot.workingTreeOid}.`
+      : planProposalQuery.error !== null
+        ? "Exact proposal preview is unavailable."
+        : planProposalQuery.isPending
+          ? "Loading the exact proposal preview."
+          : proposalPreviewAvailable && threadRef
+            ? "No immutable proposal revision is linked to this exact plan."
+            : null;
   const writeProjectFile = useAtomCommand(projectEnvironment.writeFile, {
     reportFailure: false,
   });
@@ -82,6 +226,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
 
   const handleCopyPlan = () => {
     copyToClipboard(saveContents);
+  };
+
+  const handleOpenExplorer = () => {
+    if (!threadRef || !canOpenExplorer) return;
+    useRightPanelStore.getState().openExplorer(threadRef, planId);
   };
 
   const openSaveDialog = () => {
@@ -170,6 +319,30 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         </Menu>
       </div>
       <div className="mt-4">
+        {previewIdentity !== null || canOpenExplorer ? (
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/70 bg-muted/30 px-3 py-2.5">
+            {previewIdentity !== null ? (
+              <p
+                className="min-w-0 flex-1 break-words text-xs leading-relaxed text-muted-foreground"
+                data-proposal-preview-identity
+              >
+                {previewIdentity}
+              </p>
+            ) : (
+              <span />
+            )}
+            {canOpenExplorer ? (
+              <Button
+                size="sm"
+                variant="outline"
+                data-scroll-anchor-ignore
+                onClick={handleOpenExplorer}
+              >
+                Open Explorer
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
           {canCollapse && !expanded ? (
             <ChatMarkdown

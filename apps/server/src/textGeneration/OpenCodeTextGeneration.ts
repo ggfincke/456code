@@ -1,3 +1,5 @@
+// apps/server/src/textGeneration/OpenCodeTextGeneration.ts
+// generates source control text through opencode
 import * as Effect from "effect/Effect";
 import * as Exit from "effect/Exit";
 import * as Fiber from "effect/Fiber";
@@ -530,6 +532,7 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         stagedSummary: input.stagedSummary,
         stagedPatch: input.stagedPatch,
         includeBranch: input.includeBranch === true,
+        policy: input.policy,
       });
       const generated = yield* runOpenCodeJson({
         operation: "generateCommitMessage",
@@ -556,6 +559,8 @@ export const makeOpenCodeTextGeneration = Effect.fn("makeOpenCodeTextGeneration"
         commitSummary: input.commitSummary,
         diffSummary: input.diffSummary,
         diffPatch: input.diffPatch,
+        policy: input.policy,
+        changeRequestTemplate: input.changeRequestTemplate,
       });
       const generated = yield* runOpenCodeJson({
         operation: "generatePrContent",

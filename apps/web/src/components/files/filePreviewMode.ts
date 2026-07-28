@@ -1,4 +1,9 @@
-export const isMarkdownPreviewFile = (path: string): boolean => /\.(?:md|mdx)$/i.test(path);
+// apps/web/src/components/files/filePreviewMode.ts
+// classifies rendered file modes & updates markdown task markers
+
+export const isMarkdownPreviewFile = (path: string): boolean => /\.md$/i.test(path);
+
+export const isMdxPreviewFile = (path: string): boolean => /\.mdx$/i.test(path);
 
 export function setMarkdownTaskChecked(
   markdown: string,

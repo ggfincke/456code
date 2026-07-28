@@ -1,3 +1,5 @@
+// apps/web/src/state/entities.ts
+// loads and combines environment thread entities
 import { useAtomValue } from "@effect/atom-react";
 import type {
   EnvironmentProject,
@@ -152,10 +154,31 @@ export function useThreadStatus(ref: ScopedThreadRef | null): EnvironmentThreadS
   );
 }
 
-/** Detail collections composed with shell-authoritative thread/workspace metadata. */
-export function useThread(ref: ScopedThreadRef | null): EnvironmentThread | null {
+export function resolveThreadDetailRef(
+  ref: ScopedThreadRef | null,
+  options: {
+    shellExists: boolean;
+    waitForShell: boolean;
+  },
+): ScopedThreadRef | null {
+  return ref !== null && (!options.waitForShell || options.shellExists) ? ref : null;
+}
+
+// combines detail collections with shell-authoritative thread metadata
+export function useThread(
+  ref: ScopedThreadRef | null,
+  options?: {
+    // waits until a reserved draft id exists in the server shell index
+    waitForShell?: boolean;
+  },
+): EnvironmentThread | null {
   const shell = useThreadShell(ref);
-  const detail = useThreadDetail(ref);
+  const detail = useThreadDetail(
+    resolveThreadDetailRef(ref, {
+      shellExists: shell !== null,
+      waitForShell: options?.waitForShell === true,
+    }),
+  );
   return useMemo(() => mergeEnvironmentThread(detail, shell), [detail, shell]);
 }
 

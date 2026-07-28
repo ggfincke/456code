@@ -1,9 +1,15 @@
+// tests/apps/web/components/files/fileSaveCoordinator.test.ts
+// verifies debounced file persistence and pending ownership
+
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
 import * as Cause from "effect/Cause";
 import { AsyncResult } from "effect/unstable/reactivity";
 
-import { FileSaveCoordinator } from "../../../../../apps/web/src/components/files/fileSaveCoordinator";
+import {
+  FileSaveCoordinator,
+  updateFileSavePendingOwners,
+} from "../../../../../apps/web/src/components/files/fileSaveCoordinator";
 
 function deferred() {
   let resolve!: (result: AtomCommandResult<void, never>) => void;
@@ -90,5 +96,31 @@ describe("FileSaveCoordinator", () => {
     await Promise.resolve();
     expect(onPendingChange).toHaveBeenCalledWith(true);
     expect(onPendingChange).not.toHaveBeenCalledWith(false);
+  });
+
+  it("keeps a path pending until every overlapping coordinator settles", () => {
+    const firstOwner = Symbol("first");
+    const secondOwner = Symbol("second");
+    let pending: ReadonlyMap<string, ReadonlySet<symbol>> = new Map();
+
+    pending = updateFileSavePendingOwners(pending, "docs/guide.mdx", firstOwner, true);
+    pending = updateFileSavePendingOwners(pending, "docs/guide.mdx", secondOwner, true);
+    pending = updateFileSavePendingOwners(pending, "docs/guide.mdx", firstOwner, false);
+    expect(pending.get("docs/guide.mdx")).toEqual(new Set([secondOwner]));
+
+    pending = updateFileSavePendingOwners(pending, "docs/guide.mdx", secondOwner, false);
+    expect(pending.has("docs/guide.mdx")).toBe(false);
+  });
+
+  it("retires an older failed owner when the newest coordinator saves successfully", () => {
+    const failedOwner = Symbol("failed");
+    const successfulOwner = Symbol("successful");
+    let pending: ReadonlyMap<string, ReadonlySet<symbol>> = new Map();
+
+    pending = updateFileSavePendingOwners(pending, "docs/guide.mdx", failedOwner, true);
+    pending = updateFileSavePendingOwners(pending, "docs/guide.mdx", successfulOwner, true);
+    pending = updateFileSavePendingOwners(pending, "docs/guide.mdx", successfulOwner, false);
+
+    expect(pending.has("docs/guide.mdx")).toBe(false);
   });
 });

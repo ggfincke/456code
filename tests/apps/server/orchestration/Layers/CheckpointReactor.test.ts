@@ -58,6 +58,10 @@ import {
   type ProviderServiceShape,
 } from "../../../../../apps/server/src/provider/Services/ProviderService.ts";
 import { checkpointRefForThreadTurn } from "../../../../../apps/server/src/checkpointing/Utils.ts";
+import {
+  ProposalImplementationAttemptService,
+  type BeginImplementationAttemptInput,
+} from "../../../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts";
 import { ServerConfig } from "../../../../../apps/server/src/config.ts";
 import * as WorkspaceEntries from "../../../../../apps/server/src/workspace/WorkspaceEntries.ts";
 import * as WorkspacePaths from "../../../../../apps/server/src/workspace/WorkspacePaths.ts";
@@ -295,6 +299,15 @@ describe("CheckpointReactor", () => {
     readonly gitStatusRefreshCalls?: Array<string>;
     readonly threadOrigin?: ThreadOrigin;
     readonly checkpointStoreCalls?: Array<string>;
+    readonly implementationAttemptSelection?: {
+      readonly revisions: ReadonlyArray<{
+        readonly revision: number;
+        readonly createdAt: string;
+      }>;
+      readonly beginInputs: Array<BeginImplementationAttemptInput>;
+      readonly consumedRevisions: Array<number>;
+    };
+    readonly startReactor?: boolean;
   }) {
     const cwd = createGitRepository();
     tempDirs.push(cwd);
@@ -380,6 +393,29 @@ describe("CheckpointReactor", () => {
                 }),
             }),
           );
+    const implementationAttemptSelection = options?.implementationAttemptSelection;
+    const implementationAttemptLayer =
+      implementationAttemptSelection === undefined
+        ? Layer.empty
+        : Layer.succeed(
+            ProposalImplementationAttemptService,
+            ProposalImplementationAttemptService.of({
+              begin: (input) =>
+                Effect.sync(() => {
+                  implementationAttemptSelection.beginInputs.push(input);
+                  const revision = implementationAttemptSelection.revisions
+                    .filter((entry) => entry.createdAt <= input.createdAt)
+                    .toSorted((left, right) => left.createdAt.localeCompare(right.createdAt))
+                    .at(-1);
+                  if (revision) {
+                    implementationAttemptSelection.consumedRevisions.push(revision.revision);
+                  }
+                  return null;
+                }),
+              complete: () => Effect.succeed(null),
+              latestForProposal: () => Effect.succeed(null),
+            }),
+          );
 
     const layer = CheckpointReactorLive.pipe(
       Layer.provideMerge(orchestrationLayer),
@@ -398,6 +434,7 @@ describe("CheckpointReactor", () => {
       Layer.provideMerge(VcsProcess.layer),
       Layer.provideMerge(ServerConfigLayer),
       Layer.provideMerge(NodeServices.layer),
+      Layer.provideMerge(implementationAttemptLayer),
     );
 
     runtime = ManagedRuntime.make(layer);
@@ -408,7 +445,14 @@ describe("CheckpointReactor", () => {
       Effect.service(CheckpointStore.CheckpointStore),
     );
     scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    const reactorScope = scope;
+    const startReactor = async () => {
+      await Effect.runPromise(reactor.start().pipe(Scope.provide(reactorScope)));
+      await Effect.runPromise(Effect.sleep("10 millis"));
+    };
+    if (options?.startReactor ?? true) {
+      await startReactor();
+    }
     const drain = () => Effect.runPromise(reactor.drain);
 
     const createdAt = "2026-01-01T00:00:00.000Z";
@@ -475,7 +519,76 @@ describe("CheckpointReactor", () => {
       provider,
       cwd,
       drain,
+      startReactor,
     };
+  }
+
+  async function persistImplementationTurn(
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    input: {
+      readonly requestedAt: string;
+      readonly providerStartedAt: string;
+      readonly turnId: TurnId;
+    },
+  ) {
+    const threadId = ThreadId.make("thread-1");
+    const planId = "plan-thread-1";
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.proposed-plan.upsert",
+        commandId: CommandId.make("cmd-plan-upsert-implementation"),
+        threadId,
+        proposedPlan: {
+          id: planId,
+          turnId: null,
+          planMarkdown: "# Implementation plan",
+          implementedAt: null,
+          implementationThreadId: null,
+          createdAt: "2026-01-01T00:00:00.000Z",
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-implementation"),
+        threadId,
+        message: {
+          messageId: MessageId.make("message-implementation"),
+          role: "user",
+          text: "implement this plan",
+          attachments: [],
+        },
+        sourceProposedPlan: {
+          threadId,
+          planId,
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: input.requestedAt,
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-set-implementation"),
+        threadId,
+        session: {
+          threadId,
+          status: "running",
+          providerName: "codex",
+          runtimeMode: "approval-required",
+          activeTurnId: input.turnId,
+          lastError: null,
+          updatedAt: input.providerStartedAt,
+        },
+        createdAt: input.providerStartedAt,
+      }),
+    );
+    await waitForThread(harness.readModel, (thread) => thread.latestTurn?.turnId === input.turnId);
+    return { threadId, planId };
   }
 
   it("captures pre-turn baseline on turn.started and post-turn checkpoint on turn.completed", async () => {
@@ -552,6 +665,103 @@ describe("CheckpointReactor", () => {
         "README.md",
       ),
     ).toBe("v2\n");
+  });
+
+  it("binds implementation revision selection to the user request time", async () => {
+    const requestedAt = "2026-01-01T00:01:00.000Z";
+    const providerStartedAt = "2026-01-01T00:02:00.000Z";
+    const beginInputs: BeginImplementationAttemptInput[] = [];
+    const consumedRevisions: number[] = [];
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      implementationAttemptSelection: {
+        revisions: [
+          { revision: 1, createdAt: "2026-01-01T00:00:30.000Z" },
+          { revision: 2, createdAt: "2026-01-01T00:01:30.000Z" },
+        ],
+        beginInputs,
+        consumedRevisions,
+      },
+    });
+    const threadId = ThreadId.make("thread-1");
+    const turnId = asTurnId("turn-implementation");
+    const { planId } = await persistImplementationTurn(harness, {
+      requestedAt,
+      providerStartedAt,
+      turnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 0));
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-implementation"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: providerStartedAt,
+      threadId,
+      turnId,
+    });
+    await harness.drain();
+
+    expect(beginInputs).toHaveLength(1);
+    expect(beginInputs[0]).toMatchObject({
+      implementationThreadId: threadId,
+      implementationTurnId: turnId,
+      sourceProposedPlan: {
+        threadId,
+        planId,
+      },
+      createdAt: requestedAt,
+    });
+    expect(consumedRevisions).toEqual([1]);
+  });
+
+  it("uses the persisted request time when a fresh reactor observes runtime start", async () => {
+    const requestedAt = "2026-01-01T00:01:00.000Z";
+    const providerStartedAt = "2026-01-01T00:02:00.000Z";
+    const beginInputs: BeginImplementationAttemptInput[] = [];
+    const consumedRevisions: number[] = [];
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      startReactor: false,
+      implementationAttemptSelection: {
+        revisions: [
+          { revision: 1, createdAt: "2026-01-01T00:00:30.000Z" },
+          { revision: 2, createdAt: "2026-01-01T00:01:30.000Z" },
+        ],
+        beginInputs,
+        consumedRevisions,
+      },
+    });
+    const turnId = asTurnId("turn-implementation");
+    const { threadId, planId } = await persistImplementationTurn(harness, {
+      requestedAt,
+      providerStartedAt,
+      turnId,
+    });
+    await harness.startReactor();
+
+    harness.provider.emit({
+      type: "turn.started",
+      eventId: EventId.make("evt-turn-started-implementation-after-restart"),
+      provider: ProviderDriverKind.make("codex"),
+      createdAt: providerStartedAt,
+      threadId,
+      turnId,
+    });
+    await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 0));
+    await harness.drain();
+
+    expect(beginInputs).toHaveLength(1);
+    expect(beginInputs[0]).toMatchObject({
+      implementationThreadId: threadId,
+      implementationTurnId: turnId,
+      sourceProposedPlan: {
+        threadId,
+        planId,
+      },
+      createdAt: requestedAt,
+    });
+    expect(consumedRevisions).toEqual([1]);
   });
 
   it("refreshes local git status state on turn completion using the session cwd", async () => {

@@ -1,3 +1,5 @@
+// apps/web/src/components/BranchToolbar.logic.ts
+// derives branch toolbar state and branch actions
 import type { EnvironmentId, VcsRef, ProjectId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { toSortableTimestamp } from "../lib/threadSort";
@@ -154,6 +156,13 @@ export function resolveBranchToolbarValue(input: {
     return activeThreadBranch ?? currentGitBranch;
   }
   return currentGitBranch ?? activeThreadBranch;
+}
+
+export function resolveBranchToolbarPrBranch(input: {
+  activeThreadBranch: string | null;
+  resolvedActiveBranch: string | null;
+}): string | null {
+  return input.activeThreadBranch === input.resolvedActiveBranch ? input.activeThreadBranch : null;
 }
 
 export function resolveLocalCheckoutBranchMismatch(input: {

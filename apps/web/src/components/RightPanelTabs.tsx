@@ -1,6 +1,18 @@
+// apps/web/src/components/RightPanelTabs.tsx
+// renders right-panel tabs, surface creation, and empty-state availability
 import type { ContextMenuItem, PreviewSessionSnapshot } from "@t3tools/contracts";
 import { getTerminalLabel } from "@t3tools/shared/terminalLabels";
-import { Bot, ClipboardList, FileDiff, Files, Globe2, Plus, TerminalSquare, X } from "lucide-react";
+import {
+  Bot,
+  ClipboardList,
+  FileDiff,
+  Files,
+  Globe2,
+  Network,
+  Plus,
+  TerminalSquare,
+  X,
+} from "lucide-react";
 import {
   type MouseEvent as ReactMouseEvent,
   type ReactElement,
@@ -45,9 +57,11 @@ interface RightPanelTabsProps {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddWorkers: () => void;
+  onAddExplorer?: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  explorerAvailable?: boolean;
   children: ReactNode;
 }
 
@@ -55,7 +69,10 @@ const SURFACE_DISABLED_REASONS = {
   browser: "Browser previews are only available in the 456code desktop app.",
   files: "Files are only available when a project is open.",
   diff: "Diff is only available for server threads in Git repositories.",
+  explorer:
+    "Explorer requires proposal previews or Cartographer support for an open server project.",
 } as const;
+const NOOP_SURFACE_ACTION = () => undefined;
 
 type TabContextMenuAction = "copy-path" | "close" | "close-others" | "close-to-right" | "close-all";
 
@@ -93,9 +110,11 @@ function RightPanelEmptyState(props: {
   onAddDiff: () => void;
   onAddFiles: () => void;
   onAddWorkers: () => void;
+  onAddExplorer: () => void;
   browserAvailable: boolean;
   diffAvailable: boolean;
   filesAvailable: boolean;
+  explorerAvailable: boolean;
 }) {
   const actions = [
     {
@@ -129,6 +148,14 @@ function RightPanelEmptyState(props: {
       available: props.diffAvailable,
       disabledReason: SURFACE_DISABLED_REASONS.diff,
       onClick: props.onAddDiff,
+    },
+    {
+      label: "Explorer",
+      description: "Inspect proposal narrative, code, and architecture.",
+      icon: Network,
+      available: props.explorerAvailable,
+      disabledReason: SURFACE_DISABLED_REASONS.explorer,
+      onClick: props.onAddExplorer,
     },
     {
       label: "Workers",
@@ -217,6 +244,8 @@ function surfaceTitle(
       return "Plan";
     case "workers":
       return "Workers";
+    case "explorer":
+      return "Explorer";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -280,6 +309,8 @@ function SurfaceIcon({
       return <ClipboardList className="size-3.5 shrink-0" />;
     case "workers":
       return <Bot className="size-3.5 shrink-0" />;
+    case "explorer":
+      return <Network className="size-3.5 shrink-0" />;
   }
 }
 
@@ -488,6 +519,14 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
                     <Bot />
                     Workers
                   </SurfaceMenuItem>
+                  <SurfaceMenuItem
+                    available={props.explorerAvailable === true}
+                    disabledReason={SURFACE_DISABLED_REASONS.explorer}
+                    onClick={props.onAddExplorer ?? NOOP_SURFACE_ACTION}
+                  >
+                    <Network />
+                    Explorer
+                  </SurfaceMenuItem>
                 </MenuPopup>
               </Menu>
             ) : null}
@@ -503,9 +542,11 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddDiff={props.onAddDiff}
             onAddFiles={props.onAddFiles}
             onAddWorkers={props.onAddWorkers}
+            onAddExplorer={props.onAddExplorer ?? NOOP_SURFACE_ACTION}
             browserAvailable={props.browserAvailable}
             diffAvailable={props.diffAvailable}
             filesAvailable={props.filesAvailable}
+            explorerAvailable={props.explorerAvailable === true}
           />
         ) : (
           props.children

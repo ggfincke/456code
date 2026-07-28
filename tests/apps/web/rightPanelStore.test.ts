@@ -1,5 +1,7 @@
+// tests/apps/web/rightPanelStore.test.ts
+// verifies thread-scoped right-panel surface persistence and transitions
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { type EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { type EnvironmentId, type OrchestrationProposedPlanId, ThreadId } from "@t3tools/contracts";
 import { beforeEach, describe, expect, it } from "vite-plus/test";
 
 import {
@@ -142,7 +144,55 @@ describe("rightPanelStore", () => {
     });
   });
 
-  it("replaces the standalone explorer with peer file surfaces", () => {
+  it("keeps Explorer as a validated singleton only while a workspace is available", () => {
+    expect(
+      migratePersistedRightPanelState({
+        byThreadKey: {
+          "env-1:thread-A": {
+            isOpen: true,
+            activeSurfaceId: "explorer",
+            surfaces: [
+              { id: "explorer", kind: "explorer" },
+              { id: "explorer:spoofed", kind: "explorer" },
+            ],
+          },
+        },
+      }),
+    ).toEqual({
+      byThreadKey: {
+        "env-1:thread-A": {
+          isOpen: true,
+          activeSurfaceId: "explorer",
+          surfaces: [{ id: "explorer", kind: "explorer", planId: null }],
+        },
+      },
+    });
+
+    useRightPanelStore.getState().open(refA, "explorer");
+    useRightPanelStore.getState().open(refA, "explorer");
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "explorer",
+      surfaces: [{ id: "explorer", kind: "explorer", planId: null }],
+    });
+
+    useRightPanelStore.getState().openExplorer(refA, "plan-current" as OrchestrationProposedPlanId);
+    useRightPanelStore.getState().openExplorer(refA, "plan-revised" as OrchestrationProposedPlanId);
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: true,
+      activeSurfaceId: "explorer",
+      surfaces: [{ id: "explorer", kind: "explorer", planId: "plan-revised" }],
+    });
+
+    useRightPanelStore.getState().reconcileFileSurfaces(refA, false);
+    expect(selectThreadRightPanelState(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      isOpen: false,
+      activeSurfaceId: null,
+      surfaces: [],
+    });
+  });
+
+  it("replaces the standalone file browser with peer file surfaces", () => {
     useRightPanelStore.getState().open(refA, "files");
     useRightPanelStore.getState().openFile(refA, "src/index.ts");
     useRightPanelStore.getState().openFile(refA, "src/index.ts");

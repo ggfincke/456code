@@ -1,4 +1,37 @@
+// apps/web/src/components/files/fileSaveCoordinator.ts
+// coordinates debounced file saves and aggregate pending ownership
+
 import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
+
+export type FileSavePendingOwner = symbol;
+
+export function updateFileSavePendingOwners(
+  current: ReadonlyMap<string, ReadonlySet<FileSavePendingOwner>>,
+  relativePath: string,
+  owner: FileSavePendingOwner,
+  pending: boolean,
+): ReadonlyMap<string, ReadonlySet<FileSavePendingOwner>> {
+  const currentOwners = current.get(relativePath) ?? new Set<FileSavePendingOwner>();
+  if (currentOwners.has(owner) === pending) return current;
+
+  const next = new Map(current);
+  const nextOwners = new Set(currentOwners);
+  if (pending) {
+    nextOwners.add(owner);
+    next.set(relativePath, nextOwners);
+  } else {
+    const latestOwner = Array.from(currentOwners).at(-1);
+    // a successful newest save supersedes older failed writes for the same path
+    if (latestOwner === owner) {
+      next.delete(relativePath);
+      return next;
+    }
+    nextOwners.delete(owner);
+    if (nextOwners.size === 0) next.delete(relativePath);
+    else next.set(relativePath, nextOwners);
+  }
+  return next;
+}
 
 export interface FileSaveCoordinatorOptions<A, E> {
   readonly debounceMs: number;

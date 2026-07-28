@@ -1,3 +1,5 @@
+// packages/contracts/src/keybindings.ts
+// defines keybinding schemas and command identifiers
 import * as Schema from "effect/Schema";
 import { TrimmedString } from "./baseSchemas.ts";
 
@@ -63,6 +65,7 @@ const STATIC_KEYBINDING_COMMANDS = [
   "preview.zoomOut",
   "preview.resetZoom",
   "commandPalette.toggle",
+  "composer.stash",
   "chat.new",
   "chat.newLocal",
   "editor.openFavorite",

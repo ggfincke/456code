@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/projectCommands.ts
+// creates environment-scoped project query & command atoms
+
 import { type EnvironmentId, type ProjectReadFileResult, WS_METHODS } from "@t3tools/contracts";
 import * as Crypto from "effect/Crypto";
 import { Atom } from "effect/unstable/reactivity";
@@ -44,6 +47,7 @@ export function createProjectEnvironmentAtoms<R, E>(
 ) {
   const projectScheduler = createAtomCommandScheduler();
   const fileScheduler = createAtomCommandScheduler();
+  const proposalScheduler = createAtomCommandScheduler();
   const optimisticFileFamily = Atom.family((key: string) =>
     Atom.make<OptimisticProjectFile | null>(null).pipe(
       Atom.withLabel(`environment-data:projects:optimistic-file:${key}`),
@@ -70,6 +74,60 @@ export function createProjectEnvironmentAtoms<R, E>(
       label: "environment-data:projects:read-file",
       tag: WS_METHODS.projectsReadFile,
       staleTimeMs: 30_000,
+      idleTtlMs: 5 * 60_000,
+    }),
+    readMdxDocument: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:projects:read-mdx-document",
+      tag: WS_METHODS.projectsReadMdxDocument,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    listProposals: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:proposals:list",
+      tag: WS_METHODS.proposalsList,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    getProposal: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:proposals:get",
+      tag: WS_METHODS.proposalsGet,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    getProposalDiff: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:proposals:diff",
+      tag: WS_METHODS.proposalsDiff,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    getProposalNarrative: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:proposals:narrative",
+      tag: WS_METHODS.proposalsNarrative,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    findProposalByPlan: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:proposals:find-by-plan",
+      tag: WS_METHODS.proposalsFindByPlan,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    getProposalGeneration: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:proposals:generation",
+      tag: WS_METHODS.proposalsGetGeneration,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    latestProposalGeneration: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:proposals:latest-generation",
+      tag: WS_METHODS.proposalsLatestGeneration,
+      staleTimeMs: 0,
+      idleTtlMs: 5 * 60_000,
+    }),
+    latestProposalImplementationAttempt: createEnvironmentRpcQueryAtomFamily(runtime, {
+      label: "environment-data:proposals:latest-implementation-attempt",
+      tag: WS_METHODS.proposalsLatestImplementationAttempt,
+      staleTimeMs: 0,
       idleTtlMs: 5 * 60_000,
     }),
     optimisticFile: (target: OptimisticProjectFileTarget) =>
@@ -100,6 +158,36 @@ export function createProjectEnvironmentAtoms<R, E>(
         mode: "serial",
         key: ({ environmentId, input }) =>
           JSON.stringify([environmentId, input.cwd, input.relativePath]),
+      },
+    }),
+    startProposalGeneration: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:proposals:start-generation",
+      tag: WS_METHODS.proposalsStartGeneration,
+      scheduler: proposalScheduler,
+      concurrency: {
+        mode: "latest",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.proposalId]),
+      },
+    }),
+    issueCartographerEmbed: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cartographer:issue-embed",
+      tag: WS_METHODS.cartographerIssueEmbed,
+      scheduler: proposalScheduler,
+      concurrency: {
+        mode: "latest",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.generationId ?? null]),
+      },
+    }),
+    closeCartographerEmbed: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:cartographer:close-embed",
+      tag: WS_METHODS.cartographerCloseEmbed,
+      scheduler: proposalScheduler,
+      concurrency: {
+        mode: "serial",
+        key: ({ environmentId, input }) =>
+          JSON.stringify([environmentId, input.threadId, input.sessionId]),
       },
     }),
   };

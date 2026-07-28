@@ -1,3 +1,5 @@
+// tests/apps/server/textGeneration/TextGenerationPrompts.test.ts
+// verifies shared source control prompt generation
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -52,6 +54,23 @@ describe("buildCommitMessagePrompt", () => {
 
     expect(result.prompt).toContain("Branch: (detached)");
   });
+
+  it("includes policy instructions", () => {
+    const result = buildCommitMessagePrompt({
+      branch: "main",
+      stagedSummary: "M a.ts",
+      stagedPatch: "diff",
+      includeBranch: false,
+      policy: {
+        kind: "custom",
+        commitInstructions: "Use a terse repository-specific subject.",
+        inferRepositoryConventions: false,
+      },
+    });
+
+    expect(result.prompt).toContain("Additional instructions:");
+    expect(result.prompt).toContain("Use a terse repository-specific subject.");
+  });
 });
 
 describe("buildPrContentPrompt", () => {
@@ -72,6 +91,30 @@ describe("buildPrContentPrompt", () => {
     expect(result.prompt).toContain("3 files changed");
     expect(result.prompt).toContain("Diff patch:");
     expect(result.prompt).toContain("export function login()");
+    expect(result.prompt).toContain("include headings '## Summary' and '## Testing'");
+  });
+
+  it("follows a repository PR template instead of the default body headings", () => {
+    const result = buildPrContentPrompt({
+      baseBranch: "main",
+      headBranch: "feature/auth",
+      commitSummary: "feat: add login page",
+      diffSummary: "3 files changed",
+      diffPatch: "diff",
+      changeRequestTemplate: "<!-- remove me -->\n## What changed\n\n## Verification",
+      policy: {
+        kind: "custom",
+        changeRequestInstructions: "Keep the title in sentence case.",
+        inferRepositoryConventions: false,
+      },
+    });
+
+    expect(result.prompt).toContain("Keep the title in sentence case.");
+    expect(result.prompt).toContain("follow the repository change request template structure");
+    expect(result.prompt).toContain("drop HTML comments from the template");
+    expect(result.prompt).toContain("Repository change request template:");
+    expect(result.prompt).toContain("<!-- remove me -->\n## What changed\n\n## Verification");
+    expect(result.prompt).not.toContain("include headings '## Summary' and '## Testing'");
   });
 });
 

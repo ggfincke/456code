@@ -1,13 +1,19 @@
+// apps/web/src/components/files/projectFilesQueryState.ts
+// coordinates project file source, optimistic edits & MDX document queries
+
 import { useAtomRefresh, useAtomValue } from "@effect/atom-react";
+import type { OptimisticProjectFile } from "@t3tools/client-runtime/state/projects";
 import type {
   EnvironmentId,
   ProjectListEntriesResult,
+  ProjectReadMdxDocumentResult,
   ProjectReadFileResult,
+  ThreadId,
 } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 
 import { appAtomRegistry } from "~/rpc/atomRegistry";
 import { projectEnvironment } from "~/state/projects";
@@ -17,6 +23,9 @@ const EMPTY_PROJECT_FILE_PATH = "";
 const EMPTY_PROJECT_FILE_QUERY_ATOM = Atom.make(
   AsyncResult.initial<ProjectReadFileResult, never>(false),
 ).pipe(Atom.withLabel("project-file-query:empty"));
+const EMPTY_PROJECT_MDX_DOCUMENT_QUERY_ATOM = Atom.make(
+  AsyncResult.initial<ProjectReadMdxDocumentResult, never>(false),
+).pipe(Atom.withLabel("project-mdx-document-query:empty"));
 function optimisticFileAtom(environmentId: EnvironmentId, cwd: string, relativePath: string) {
   return projectEnvironment.optimisticFile({ environmentId, cwd, relativePath });
 }
@@ -40,6 +49,17 @@ export function getProjectFileQueryAtom(
   return projectEnvironment.readFile({
     environmentId,
     input: { cwd, relativePath: relativePath ?? EMPTY_PROJECT_FILE_PATH },
+  });
+}
+
+export function getProjectMdxDocumentQueryAtom(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  relativePath: string,
+) {
+  return projectEnvironment.readMdxDocument({
+    environmentId,
+    input: { threadId, relativePath },
   });
 }
 
@@ -96,6 +116,20 @@ export function confirmProjectFileQueryData(
   return true;
 }
 
+export function confirmProjectMdxFileQueryData(
+  environmentId: EnvironmentId,
+  cwd: string,
+  threadId: ThreadId,
+  relativePath: string,
+  contents: string,
+): boolean {
+  const confirmed = confirmProjectFileQueryData(environmentId, cwd, relativePath, contents);
+  if (!confirmed) return false;
+
+  appAtomRegistry.refresh(getProjectMdxDocumentQueryAtom(environmentId, threadId, relativePath));
+  return true;
+}
+
 export function resolveProjectFileQueryData(
   environmentId: EnvironmentId,
   cwd: string,
@@ -112,6 +146,30 @@ export function clearProjectFileQueryData(
   relativePath: string,
 ): void {
   appAtomRegistry.set(optimisticFileAtom(environmentId, cwd, relativePath), null);
+}
+
+export function isConfirmedProjectFileQuerySuperseded(
+  optimisticFile: OptimisticProjectFile | null,
+  queryResult: AsyncResult.AsyncResult<ProjectReadFileResult, unknown>,
+): boolean {
+  return (
+    optimisticFile?.confirmedAgainst !== undefined &&
+    optimisticFile.confirmedAgainst !== queryResult &&
+    queryResult._tag === "Success" &&
+    !queryResult.waiting
+  );
+}
+
+export function clearConfirmedProjectFileQueryData(
+  environmentId: EnvironmentId,
+  cwd: string,
+  relativePath: string,
+  confirmedFile: OptimisticProjectFile,
+): boolean {
+  const atom = optimisticFileAtom(environmentId, cwd, relativePath);
+  if (appAtomRegistry.get(atom) !== confirmedFile) return false;
+  appAtomRegistry.set(atom, null);
+  return true;
 }
 
 function errorMessage<A>(result: AsyncResult.AsyncResult<A, unknown>): string | null {
@@ -149,13 +207,43 @@ export function useProjectFileQuery(
   const refreshAtom = useAtomRefresh(atom);
   const refresh = useCallback(() => refreshAtom(), [refreshAtom]);
   const data = Option.getOrNull(AsyncResult.value(result));
-  const optimisticResult = useAtomValue(
-    optimisticFileAtom(environmentId, cwd, relativePath ?? EMPTY_PROJECT_FILE_PATH),
+  const optimisticAtom = optimisticFileAtom(
+    environmentId,
+    cwd,
+    relativePath ?? EMPTY_PROJECT_FILE_PATH,
   );
+  const optimisticResult = useAtomValue(optimisticAtom);
   const optimisticFile = relativePath === null ? null : optimisticResult;
+  const confirmedFileSuperseded = isConfirmedProjectFileQuerySuperseded(optimisticFile, result);
+
+  useEffect(() => {
+    if (!confirmedFileSuperseded || optimisticFile === null || relativePath === null) return;
+    clearConfirmedProjectFileQueryData(environmentId, cwd, relativePath, optimisticFile);
+  }, [confirmedFileSuperseded, cwd, environmentId, optimisticFile, relativePath]);
 
   return {
-    data: optimisticFile?.data ?? data,
+    data: confirmedFileSuperseded ? data : (optimisticFile?.data ?? data),
+    error: errorMessage(result),
+    isPending: result.waiting,
+    refresh,
+  };
+}
+
+export function useProjectMdxDocumentQuery(
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  relativePath: string,
+  enabled = true,
+): ProjectQueryState<ProjectReadMdxDocumentResult> {
+  const atom = enabled
+    ? getProjectMdxDocumentQueryAtom(environmentId, threadId, relativePath)
+    : EMPTY_PROJECT_MDX_DOCUMENT_QUERY_ATOM;
+  const result = useAtomValue(atom);
+  const refreshAtom = useAtomRefresh(atom);
+  const refresh = useCallback(() => refreshAtom(), [refreshAtom]);
+
+  return {
+    data: Option.getOrNull(AsyncResult.value(result)),
     error: errorMessage(result),
     isPending: result.waiting,
     refresh,
