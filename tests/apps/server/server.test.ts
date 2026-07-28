@@ -11,6 +11,7 @@ import {
   AuthAccessTokenType,
   AuthEnvironmentBootstrapTokenType,
   AuthTokenExchangeGrantType,
+  CartographerEmbedSessionId,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,
@@ -18,6 +19,7 @@ import {
   GitCommandError,
   KeybindingRule,
   MessageId,
+  ImplementationAttemptId,
   ExternalLauncherCommandNotFoundError,
   type OrchestrationThreadShell,
   type OrchestrationProjectShell,
@@ -27,10 +29,14 @@ import {
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
   ProjectId,
+  PROPOSAL_SNAPSHOT_POLICY_V1,
+  ProposalId,
+  ProposalRevisionId,
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
   ThreadId,
+  TurnId,
   WS_METHODS,
   WsRpcGroup,
   EditorId,
@@ -116,6 +122,10 @@ import * as ProcessDiagnostics from "../../../apps/server/src/diagnostics/Proces
 import * as ProcessResourceMonitor from "../../../apps/server/src/diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "../../../apps/server/src/diagnostics/TraceDiagnostics.ts";
 import * as WorkerBrokerStore from "../../../apps/server/src/workers/WorkerBrokerStore.ts";
+import * as CartographerEmbedBroker from "../../../apps/server/src/cartographer/CartographerEmbedBroker.ts";
+import * as ProposalGenerationService from "../../../apps/server/src/proposal/ProposalGenerationService.ts";
+import * as ProposalImplementationAttemptService from "../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts";
+import * as ProposalService from "../../../apps/server/src/proposal/ProposalService.ts";
 import * as Data from "effect/Data";
 
 const defaultProjectId = ProjectId.make("project-default");
@@ -352,6 +362,14 @@ const buildAppUnderTest = (options?: {
     repositoryIdentityResolver?: Partial<
       RepositoryIdentityResolver.RepositoryIdentityResolver["Service"]
     >;
+    cartographerEmbedBroker?: Partial<CartographerEmbedBroker.CartographerEmbedBroker["Service"]>;
+    proposalGenerationService?: Partial<
+      ProposalGenerationService.ProposalGenerationService["Service"]
+    >;
+    proposalImplementationAttemptService?: Partial<
+      ProposalImplementationAttemptService.ProposalImplementationAttemptService["Service"]
+    >;
+    proposalService?: Partial<ProposalService.ProposalService["Service"]>;
   };
 }) =>
   Effect.gen(function* () {
@@ -650,6 +668,42 @@ const buildAppUnderTest = (options?: {
                 job: Option.none(),
                 error: Option.none(),
               }),
+          }),
+          Layer.mock(CartographerEmbedBroker.CartographerEmbedBroker)({
+            issue: () => Effect.die("CartographerEmbedBroker not stubbed in this test"),
+            exchangeTicket: () => Effect.die("CartographerEmbedBroker not stubbed in this test"),
+            resolveProxyTarget: () =>
+              Effect.die("CartographerEmbedBroker not stubbed in this test"),
+            releaseSession: () => Effect.void,
+            closeThread: () => Effect.void,
+            closeAll: Effect.void,
+            ...options?.layers?.cartographerEmbedBroker,
+          }),
+          Layer.mock(ProposalGenerationService.ProposalGenerationService)({
+            start: () => Effect.die("ProposalGenerationService not stubbed in this test"),
+            get: () => Effect.die("ProposalGenerationService not stubbed in this test"),
+            latest: () => Effect.succeed(null),
+            resolveEmbedTarget: () =>
+              Effect.die("ProposalGenerationService not stubbed in this test"),
+            cancelThread: () => Effect.void,
+            ...options?.layers?.proposalGenerationService,
+          }),
+          Layer.mock(ProposalImplementationAttemptService.ProposalImplementationAttemptService)({
+            begin: () =>
+              Effect.die("ProposalImplementationAttemptService not stubbed in this test"),
+            complete: () =>
+              Effect.die("ProposalImplementationAttemptService not stubbed in this test"),
+            latestForProposal: () => Effect.succeed(null),
+            ...options?.layers?.proposalImplementationAttemptService,
+          }),
+          Layer.mock(ProposalService.ProposalService)({
+            upsert: () => Effect.die("ProposalService not stubbed in this test"),
+            list: () => Effect.succeed({ proposals: [] }),
+            get: () => Effect.die("ProposalService not stubbed in this test"),
+            diff: () => Effect.die("ProposalService not stubbed in this test"),
+            narrative: () => Effect.succeed(null),
+            findLatestByPlan: () => Effect.succeed(null),
+            ...options?.layers?.proposalService,
           }),
         ),
       ),
@@ -1650,12 +1704,22 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       assert.equal(pairingResponse.status, 200);
       assert.equal(wsTicketResponse.status, 200);
       const wsUrl = `${yield* getWsServerUrl("/ws", { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`;
-      const rpcError = yield* Effect.flip(
-        Effect.scoped(withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverGetConfig]({}))),
+      const rpcErrors = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all({
+            serverConfig: client[WS_METHODS.serverGetConfig]({}).pipe(Effect.flip),
+            mdxDocument: client[WS_METHODS.projectsReadMdxDocument]({
+              threadId: defaultThreadId,
+              relativePath: "overview.mdx",
+            }).pipe(Effect.flip),
+          }),
+        ),
       );
-      assert.equal(rpcError._tag, "EnvironmentAuthorizationError");
-      if (rpcError._tag === "EnvironmentAuthorizationError") {
-        assert.equal(rpcError.requiredScope, "orchestration:read");
+      for (const rpcError of Object.values(rpcErrors)) {
+        assert.equal(rpcError._tag, "EnvironmentAuthorizationError");
+        if (rpcError._tag === "EnvironmentAuthorizationError") {
+          assert.equal(rpcError.requiredScope, "orchestration:read");
+        }
       }
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
@@ -2957,6 +3021,259 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         byteLength: 26,
         truncated: false,
       });
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("reads MDX only from the authenticated thread workspace context", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const projectRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-project-mdx-root-",
+      });
+      const worktreeRoot = yield* fs.makeTempDirectoryScoped({
+        prefix: "t3-ws-project-mdx-worktree-",
+      });
+      yield* fs.writeFileString(path.join(projectRoot, "overview.mdx"), "# Project root\n");
+      yield* fs.writeFileString(path.join(worktreeRoot, "overview.mdx"), "# Worktree root\n");
+
+      const worktreeThreadId = ThreadId.make("thread-mdx-worktree");
+      const projectThreadId = ThreadId.make("thread-mdx-project");
+      const project: OrchestrationProjectShell = {
+        id: defaultProjectId,
+        title: "MDX Project",
+        workspaceRoot: projectRoot,
+        defaultModelSelection,
+        scripts: [],
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      };
+      const threads = [
+        makeDefaultOrchestrationThreadShell({
+          id: worktreeThreadId,
+          worktreePath: worktreeRoot,
+        }),
+        makeDefaultOrchestrationThreadShell({
+          id: projectThreadId,
+          worktreePath: null,
+        }),
+      ];
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(projectId === project.id ? Option.some(project) : Option.none()),
+            getThreadShellById: (threadId) =>
+              Effect.succeed(
+                Option.fromNullishOr(threads.find((thread) => thread.id === threadId)),
+              ),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all({
+            worktree: client[WS_METHODS.projectsReadMdxDocument]({
+              threadId: worktreeThreadId,
+              relativePath: "overview.mdx",
+            }),
+            project: client[WS_METHODS.projectsReadMdxDocument]({
+              threadId: projectThreadId,
+              relativePath: "overview.mdx",
+            }),
+            missing: client[WS_METHODS.projectsReadMdxDocument]({
+              threadId: ThreadId.make("thread-mdx-missing"),
+              relativePath: "overview.mdx",
+            }).pipe(Effect.result),
+          }),
+        ),
+      );
+
+      assert.equal(response.worktree.source, "# Worktree root\n");
+      assert.equal(response.project.source, "# Project root\n");
+      assert.equal(response.worktree.transportVersion, 1);
+      if (
+        response.missing._tag !== "Failure" ||
+        response.missing.failure._tag !== "ProjectReadMdxDocumentError"
+      ) {
+        assert.fail("Expected a ProjectReadMdxDocumentError");
+      }
+      assert.equal(response.missing.failure.failure, "workspace_context_not_found");
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  );
+
+  it.effect("serves scoped proposal state and releases exact Cartographer sessions", () =>
+    Effect.gen(function* () {
+      const proposalId = ProposalId.make("proposal-rpc");
+      const revisionId = ProposalRevisionId.make("revision-rpc");
+      const source = "{globalThis.__proposalNarrativeExecuted = true}";
+      const timestamp = "2026-07-27T12:00:00.000Z";
+      const proposal = {
+        proposalId,
+        environmentId: testEnvironmentDescriptor.environmentId,
+        projectId: defaultProjectId,
+        sourceThreadId: defaultThreadId,
+        producer: {
+          providerSessionId: "provider-session-rpc",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+        },
+        repository: {
+          _tag: "local-git" as const,
+          canonicalKey: "local:/tmp/default-project",
+        },
+        worktree: {
+          rootPath: "/tmp/default-project",
+          gitDir: "/tmp/default-project/.git",
+          gitCommonDir: "/tmp/default-project/.git",
+        },
+        latestRevision: 1,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const revision = {
+        proposalId,
+        revisionId,
+        revision: 1,
+        baseSnapshot: {
+          headCommitOid: "a".repeat(40),
+          workingTreeOid: "b".repeat(40),
+          retainedRef: "refs/t3/proposals/proposal-rpc/revisions/1/base",
+          fileCount: 1,
+          byteCount: 1,
+          policy: PROPOSAL_SNAPSHOT_POLICY_V1,
+        },
+        proposedTreeOid: "c".repeat(40),
+        proposedRetainedRef: "refs/t3/proposals/proposal-rpc/revisions/1/proposed",
+        manifest: {
+          version: "v1" as const,
+          operations: [
+            {
+              _tag: "add" as const,
+              path: "src/proposed.ts",
+              after: {
+                sha256: "d".repeat(64),
+                byteLength: 1,
+                gitBlobOid: "e".repeat(40),
+                mode: "100644" as const,
+              },
+            },
+          ],
+          operationCount: 1,
+          changedFileCount: 1,
+          changedContentBytes: 1,
+        },
+        manifestSha256: "f".repeat(64),
+        diffSha256: "1".repeat(64),
+        diffByteLength: 1,
+        narrativeSha256: "2".repeat(64),
+        narrativeByteLength: Buffer.byteLength(source, "utf8"),
+        planId: "plan-rpc",
+        createdAt: timestamp,
+      };
+      const attempt = {
+        attemptId: ImplementationAttemptId.make("attempt-rpc"),
+        proposalId,
+        revisionId,
+        revision: 1,
+        sourceThreadId: defaultThreadId,
+        implementationThreadId: defaultThreadId,
+        implementationTurnId: TurnId.make("turn-rpc"),
+        planId: "plan-rpc",
+        baselineTreeOid: "b".repeat(40),
+        actualTreeOid: "c".repeat(40),
+        outcome: "matched" as const,
+        matchedOperationCount: 1,
+        intendedOperationCount: 1,
+        createdAt: timestamp,
+        completedAt: timestamp,
+      };
+      const project: OrchestrationProjectShell = {
+        id: defaultProjectId,
+        title: "Default Project",
+        workspaceRoot: "/tmp/default-project",
+        defaultModelSelection,
+        scripts: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      const thread = makeDefaultOrchestrationThreadShell();
+      const embedSessionId = CartographerEmbedSessionId.make("cartographer-session-rpc");
+      let releasedEmbedSession: string | null = null;
+      Reflect.set(globalThis, "__proposalNarrativeExecuted", false);
+
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: (requestedProjectId) =>
+              Effect.succeed(
+                requestedProjectId === defaultProjectId ? Option.some(project) : Option.none(),
+              ),
+            getThreadShellById: (requestedThreadId) =>
+              Effect.succeed(
+                requestedThreadId === defaultThreadId ? Option.some(thread) : Option.none(),
+              ),
+          },
+          proposalService: {
+            get: () => Effect.succeed({ proposal, revision, revisions: [revision] }),
+            narrative: () =>
+              Effect.succeed({
+                proposalId,
+                revisionId,
+                revision: 1,
+                source,
+                sourceSha256: "2".repeat(64),
+              }),
+            findLatestByPlan: () => Effect.succeed({ proposal, revision }),
+          },
+          proposalImplementationAttemptService: {
+            latestForProposal: () => Effect.succeed(attempt),
+          },
+          cartographerEmbedBroker: {
+            releaseSession: (threadId, sessionId) =>
+              Effect.sync(() => {
+                assert.equal(threadId, defaultThreadId);
+                releasedEmbedSession = sessionId;
+              }),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const response = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.all({
+            narrative: client[WS_METHODS.proposalsNarrative]({ proposalId, revision: 1 }),
+            linked: client[WS_METHODS.proposalsFindByPlan]({
+              sourceThreadId: defaultThreadId,
+              planId: "plan-rpc",
+            }),
+            attempt: client[WS_METHODS.proposalsLatestImplementationAttempt]({
+              sourceThreadId: defaultThreadId,
+              proposalId,
+              revision: 1,
+            }),
+            closeEmbed: client[WS_METHODS.cartographerCloseEmbed]({
+              threadId: defaultThreadId,
+              sessionId: embedSessionId,
+            }),
+          }),
+        ),
+      );
+
+      assert.equal(Reflect.get(globalThis, "__proposalNarrativeExecuted"), false);
+      assert.equal(response.narrative?.document.source, source);
+      assertTrue(
+        response.narrative?.document.document.diagnostics.some(
+          (diagnostic) => diagnostic.severity === "error",
+        ) === true,
+      );
+      assert.equal(response.linked?.revision.revisionId, revisionId);
+      assert.equal(response.attempt?.outcome, "matched");
+      assert.equal(releasedEmbedSession, embedSessionId);
+      Reflect.deleteProperty(globalThis, "__proposalNarrativeExecuted");
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   );
 

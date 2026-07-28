@@ -82,6 +82,11 @@ import {
   ProjectWriteFileResult,
 } from "./project.ts";
 import {
+  ProjectReadMdxDocumentError,
+  ProjectReadMdxDocumentInput,
+  ProjectReadMdxDocumentResult,
+} from "./mdx.ts";
+import {
   TerminalAttachInput,
   TerminalAttachStreamEvent,
   TerminalClearInput,
@@ -155,6 +160,30 @@ import {
   WorkersListInput,
   WorkersListResult,
 } from "./workers.ts";
+import {
+  ProposalDiffResult,
+  ProposalError,
+  ProposalGetResult,
+  ProposalListInput,
+  ProposalListResult,
+  ProposalNarrativeDocumentResult,
+  ProposalPlanLookupInput,
+  ProposalPlanLookupResult,
+  ProposalRevisionSelector,
+} from "./proposal.ts";
+import {
+  CartographerCloseEmbedInput,
+  CartographerEmbedError,
+  CartographerIssueEmbedInput,
+  CartographerIssueEmbedResult,
+  ImplementationAttempt,
+  ImplementationAttemptLatestInput,
+  ProposalGeneration,
+  ProposalGenerationError,
+  ProposalGenerationGetInput,
+  ProposalGenerationLatestInput,
+  ProposalGenerationStartInput,
+} from "./cartographer.ts";
 
 export const WS_METHODS = {
   // Project registry methods
@@ -163,8 +192,22 @@ export const WS_METHODS = {
   projectsRemove: "projects.remove",
   projectsListEntries: "projects.listEntries",
   projectsReadFile: "projects.readFile",
+  projectsReadMdxDocument: "projects.readMdxDocument",
   projectsSearchEntries: "projects.searchEntries",
   projectsWriteFile: "projects.writeFile",
+
+  // Immutable proposal and architecture preview methods
+  proposalsList: "proposals.list",
+  proposalsGet: "proposals.get",
+  proposalsDiff: "proposals.diff",
+  proposalsNarrative: "proposals.narrative",
+  proposalsFindByPlan: "proposals.findByPlan",
+  proposalsStartGeneration: "proposals.startGeneration",
+  proposalsGetGeneration: "proposals.getGeneration",
+  proposalsLatestGeneration: "proposals.latestGeneration",
+  proposalsLatestImplementationAttempt: "proposals.latestImplementationAttempt",
+  cartographerIssueEmbed: "cartographer.issueEmbed",
+  cartographerCloseEmbed: "cartographer.closeEmbed",
 
   // Shell methods
   shellOpenInEditor: "shell.openInEditor",
@@ -402,10 +445,88 @@ export const WsProjectsReadFileRpc = Rpc.make(WS_METHODS.projectsReadFile, {
   error: Schema.Union([ProjectReadFileError, EnvironmentAuthorizationError]),
 });
 
+export const WsProjectsReadMdxDocumentRpc = Rpc.make(WS_METHODS.projectsReadMdxDocument, {
+  payload: ProjectReadMdxDocumentInput,
+  success: ProjectReadMdxDocumentResult,
+  error: Schema.Union([
+    ProjectReadMdxDocumentError,
+    ProjectReadFileError,
+    EnvironmentAuthorizationError,
+  ]),
+});
+
 export const WsProjectsWriteFileRpc = Rpc.make(WS_METHODS.projectsWriteFile, {
   payload: ProjectWriteFileInput,
   success: ProjectWriteFileResult,
   error: Schema.Union([ProjectWriteFileError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsListRpc = Rpc.make(WS_METHODS.proposalsList, {
+  payload: ProposalListInput,
+  success: ProposalListResult,
+  error: Schema.Union([ProposalError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsGetRpc = Rpc.make(WS_METHODS.proposalsGet, {
+  payload: ProposalRevisionSelector,
+  success: ProposalGetResult,
+  error: Schema.Union([ProposalError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsDiffRpc = Rpc.make(WS_METHODS.proposalsDiff, {
+  payload: ProposalRevisionSelector,
+  success: ProposalDiffResult,
+  error: Schema.Union([ProposalError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsNarrativeRpc = Rpc.make(WS_METHODS.proposalsNarrative, {
+  payload: ProposalRevisionSelector,
+  success: Schema.NullOr(ProposalNarrativeDocumentResult),
+  error: Schema.Union([ProposalError, ProjectReadMdxDocumentError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsFindByPlanRpc = Rpc.make(WS_METHODS.proposalsFindByPlan, {
+  payload: ProposalPlanLookupInput,
+  success: Schema.NullOr(ProposalPlanLookupResult),
+  error: Schema.Union([ProposalError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsStartGenerationRpc = Rpc.make(WS_METHODS.proposalsStartGeneration, {
+  payload: ProposalGenerationStartInput,
+  success: ProposalGeneration,
+  error: Schema.Union([ProposalError, ProposalGenerationError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsGetGenerationRpc = Rpc.make(WS_METHODS.proposalsGetGeneration, {
+  payload: ProposalGenerationGetInput,
+  success: ProposalGeneration,
+  error: Schema.Union([ProposalGenerationError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsLatestGenerationRpc = Rpc.make(WS_METHODS.proposalsLatestGeneration, {
+  payload: ProposalGenerationLatestInput,
+  success: Schema.NullOr(ProposalGeneration),
+  error: Schema.Union([ProposalGenerationError, EnvironmentAuthorizationError]),
+});
+
+export const WsProposalsLatestImplementationAttemptRpc = Rpc.make(
+  WS_METHODS.proposalsLatestImplementationAttempt,
+  {
+    payload: ImplementationAttemptLatestInput,
+    success: Schema.NullOr(ImplementationAttempt),
+    error: Schema.Union([ProposalError, EnvironmentAuthorizationError]),
+  },
+);
+
+export const WsCartographerIssueEmbedRpc = Rpc.make(WS_METHODS.cartographerIssueEmbed, {
+  payload: CartographerIssueEmbedInput,
+  success: CartographerIssueEmbedResult,
+  error: Schema.Union([CartographerEmbedError, EnvironmentAuthorizationError]),
+});
+
+export const WsCartographerCloseEmbedRpc = Rpc.make(WS_METHODS.cartographerCloseEmbed, {
+  payload: CartographerCloseEmbedInput,
+  error: Schema.Union([CartographerEmbedError, EnvironmentAuthorizationError]),
 });
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -761,8 +882,20 @@ export const WsRpcGroup = RpcGroup.make(
   WsSourceControlPublishRepositoryRpc,
   WsProjectsListEntriesRpc,
   WsProjectsReadFileRpc,
+  WsProjectsReadMdxDocumentRpc,
   WsProjectsSearchEntriesRpc,
   WsProjectsWriteFileRpc,
+  WsProposalsListRpc,
+  WsProposalsGetRpc,
+  WsProposalsDiffRpc,
+  WsProposalsNarrativeRpc,
+  WsProposalsFindByPlanRpc,
+  WsProposalsStartGenerationRpc,
+  WsProposalsGetGenerationRpc,
+  WsProposalsLatestGenerationRpc,
+  WsProposalsLatestImplementationAttemptRpc,
+  WsCartographerIssueEmbedRpc,
+  WsCartographerCloseEmbedRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,

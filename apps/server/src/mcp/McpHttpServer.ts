@@ -3,6 +3,7 @@
 import * as Cause from "effect/Cause";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
 import * as Sink from "effect/Sink";
@@ -24,6 +25,20 @@ import {
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
 } from "./toolkits/preview/tools.ts";
+import { ProposalToolkitHandlersLive } from "./toolkits/proposal/handlers.ts";
+import { ProposalToolkit } from "./toolkits/proposal/tools.ts";
+
+export const MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
+
+export function mcpRequestBodyLimitLayer(
+  maxBytes: number = MCP_MAX_REQUEST_BODY_BYTES,
+): Layer.Layer<never> {
+  return HttpRouter.middleware()((httpEffect) =>
+    httpEffect.pipe(
+      Effect.provideService(HttpServerRequest.MaxBodySize, FileSystem.Size(maxBytes)),
+    ),
+  ).layer;
+}
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
@@ -216,10 +231,17 @@ export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewSnapshotRegistrationLive,
 );
 
+export const ProposalToolkitRegistrationLive = McpServer.toolkit(ProposalToolkit).pipe(
+  Layer.provide(ProposalToolkitHandlersLive),
+);
+
 const McpTransportLive = McpServer.layerHttp({
   name: "456code",
   version: packageJson.version,
   path: "/mcp",
-}).pipe(Layer.provide(McpAuthMiddlewareLive));
+}).pipe(Layer.provide([McpAuthMiddlewareLive, mcpRequestBodyLimitLayer()]));
 
-export const layer = PreviewToolkitRegistrationLive.pipe(Layer.provideMerge(McpTransportLive));
+export const layer = Layer.mergeAll(
+  PreviewToolkitRegistrationLive,
+  ProposalToolkitRegistrationLive,
+).pipe(Layer.provideMerge(McpTransportLive));

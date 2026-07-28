@@ -57,6 +57,7 @@ import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
 } from "../../../../../apps/server/src/persistence/Layers/Sqlite.ts";
+import * as McpSessionRegistry from "../../../../../apps/server/src/mcp/McpSessionRegistry.ts";
 import * as ServerSettings from "../../../../../apps/server/src/serverSettings.ts";
 import * as AnalyticsService from "../../../../../apps/server/src/telemetry/AnalyticsService.ts";
 import { makeAdapterRegistryMock } from "../../../../../apps/server/src/provider/testUtils/providerAdapterRegistryMock.ts";
@@ -932,6 +933,49 @@ it.effect("ProviderServiceLive resets authority when switching same-driver insta
 );
 
 const routing = makeProviderServiceLayer();
+
+routing.layer("binds MCP proposal authority to the exact returned turn", (it) => {
+  it.effect("clears the previous turn before send and binds the returned turn afterward", () => {
+    const bindings: Array<readonly [ThreadId, TurnId | undefined]> = [];
+    const bindSpy = vi
+      .spyOn(McpSessionRegistry, "bindActiveMcpTurn")
+      .mockImplementation((threadId, turnId) =>
+        Effect.sync(() => {
+          bindings.push([threadId, turnId]);
+        }),
+      );
+
+    return Effect.gen(function* () {
+      routing.codex.sendTurn.mockClear();
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-mcp-turn-binding");
+      yield* provider.startSession(threadId, {
+        provider: CODEX_DRIVER,
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      const turn = yield* provider.sendTurn({
+        threadId,
+        input: "bind this proposal turn",
+        attachments: [],
+      });
+
+      assert.deepEqual(bindings, [
+        [threadId, undefined],
+        [threadId, turn.turnId],
+      ]);
+      yield* provider.stopSession({ threadId });
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() => {
+          bindSpy.mockRestore();
+          routing.codex.sendTurn.mockClear();
+        }),
+      ),
+    );
+  });
+});
 
 it.effect("ProviderServiceLive writes canonical events to the emitting thread segment", () =>
   Effect.gen(function* () {

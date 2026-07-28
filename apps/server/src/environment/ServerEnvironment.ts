@@ -1,3 +1,6 @@
+// apps/server/src/environment/ServerEnvironment.ts
+// derives and persists the server environment descriptor
+
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from "@t3tools/contracts";
 import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Context from "effect/Context";
@@ -140,6 +143,9 @@ export const make = Effect.gen(function* () {
       connectionProbe: true,
       threadSettlement: true,
       threadSnooze: true,
+      safeMdxDocument: true,
+      proposalPreview: true,
+      ...(process.env.T3CODE_CARTOGRAPHER_CLI?.trim().length ? { cartographerEmbed: true } : {}),
     },
   };
 

@@ -1,12 +1,16 @@
-import * as NodeCrypto from "node:crypto";
+// apps/server/src/vcs/GitVcsDriver.ts
+// implements Git-backed workspace, ref, worktree, commit, and checkpoint operations
+// @effect-diagnostics nodeBuiltinImport:off
+
+import * as NodeFSP from "node:fs/promises";
+import * as NodeOS from "node:os";
+import * as NodePath from "node:path";
 
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Path from "effect/Path";
 import { ChildProcessSpawner } from "effect/unstable/process";
 
 import {
@@ -28,6 +32,12 @@ import {
   type VcsStatusInput,
   type VcsStatusResult,
 } from "@t3tools/contracts";
+import {
+  captureExactGitSnapshot,
+  EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,
+  EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT,
+  restoreExactGitTree,
+} from "./ExactGitSnapshot.ts";
 import { makeGitVcsDriverCore } from "./GitVcsDriverCore.ts";
 import * as VcsDriver from "./VcsDriver.ts";
 import * as VcsProcess from "./VcsProcess.ts";
@@ -392,8 +402,6 @@ const gitCommand = (
   });
 
 export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
   const vcsProcess = yield* VcsProcess.VcsProcess;
   const capabilities = {
     kind: "git" as const,
@@ -620,6 +628,26 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       allowNonZeroExit: true,
     }).pipe(Effect.map((result) => result.exitCode === 0));
 
+  const resolveWorktreeRoot = (cwd: string) =>
+    execute({
+      operation: "GitVcsDriver.checkpoints.resolveWorktreeRoot",
+      cwd,
+      args: ["rev-parse", "--show-toplevel"],
+    }).pipe(
+      Effect.flatMap((result) => {
+        const root = result.stdout.trim();
+        return root.length > 0
+          ? Effect.succeed(root)
+          : new VcsProcessExitError({
+              operation: "GitVcsDriver.checkpoints.resolveWorktreeRoot",
+              command: "git rev-parse --show-toplevel",
+              cwd,
+              exitCode: 0,
+              detail: "git rev-parse returned no worktree root.",
+            });
+      }),
+    );
+
   const resolveCheckpointCommit = (cwd: string, checkpointRef: string) =>
     execute({
       operation: "GitVcsDriver.checkpoints.resolveCheckpointCommit",
@@ -636,78 +664,64 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       }),
     );
 
-  const resolveGitCommonDir = (cwd: string) =>
-    Effect.gen(function* () {
-      const result = yield* execute({
-        operation: "GitVcsDriver.checkpoints.resolveGitCommonDir",
-        cwd,
-        args: ["rev-parse", "--git-common-dir"],
-      });
-      const gitCommonDir = result.stdout.trim();
-      return path.isAbsolute(gitCommonDir) ? gitCommonDir : path.resolve(cwd, gitCommonDir);
-    });
-
   const checkpoints: VcsDriver.VcsCheckpointOps = {
     captureCheckpoint: Effect.fn("GitVcsDriver.checkpoints.captureCheckpoint")(function* (input) {
       const operation = "GitVcsDriver.checkpoints.captureCheckpoint";
-      const gitCommonDir = yield* resolveGitCommonDir(input.cwd);
-      const tempIndexPath = path.join(
-        gitCommonDir,
-        `t3-checkpoint-index-${NodeCrypto.randomUUID()}`,
-      );
+      const worktreeRoot = yield* resolveWorktreeRoot(input.cwd);
+      const tempDirectory = yield* Effect.tryPromise({
+        try: () => NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "456code-checkpoint-")),
+        catch: (cause) =>
+          new VcsProcessExitError({
+            operation,
+            command: "create checkpoint storage",
+            cwd: input.cwd,
+            exitCode: 1,
+            detail:
+              cause instanceof Error ? cause.message : "Could not create exact checkpoint storage.",
+          }),
+      });
+      const tempIndexPath = NodePath.join(tempDirectory, "index");
       const commitEnv: NodeJS.ProcessEnv = {
         ...process.env,
-        GIT_INDEX_FILE: tempIndexPath,
         GIT_AUTHOR_NAME: "456code",
         GIT_AUTHOR_EMAIL: "456code@users.noreply.github.com",
         GIT_COMMITTER_NAME: "456code",
         GIT_COMMITTER_EMAIL: "456code@users.noreply.github.com",
       };
 
-      const cleanupTempIndex = fileSystem
-        .remove(tempIndexPath, { force: true })
-        .pipe(Effect.ignore);
+      const cleanupTempDirectory = Effect.tryPromise({
+        try: () => NodeFSP.rm(tempDirectory, { force: true, recursive: true }),
+        catch: () => undefined,
+      }).pipe(Effect.ignore);
 
       yield* Effect.gen(function* () {
-        const headExists = yield* hasHeadCommit(input.cwd);
-        if (headExists) {
-          yield* execute({
-            operation,
-            cwd: input.cwd,
-            args: ["read-tree", "HEAD"],
-            env: commitEnv,
-          });
-        }
-
-        yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["add", "-A", "--", "."],
-          env: commitEnv,
+        const snapshot = yield* Effect.tryPromise({
+          try: (signal) =>
+            captureExactGitSnapshot({
+              repositoryRoot: worktreeRoot,
+              indexPath: tempIndexPath,
+              signal,
+              limits: {
+                maxFileCount: EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT,
+                maxByteCount: EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,
+              },
+            }),
+          catch: (cause) =>
+            new VcsProcessExitError({
+              operation,
+              command: "capture exact Git snapshot",
+              cwd: input.cwd,
+              exitCode: 1,
+              detail:
+                cause instanceof Error ? cause.message : "Exact Git checkpoint capture failed.",
+            }),
         });
-
-        const writeTreeResult = yield* execute({
-          operation,
-          cwd: input.cwd,
-          args: ["write-tree"],
-          env: commitEnv,
-        });
-        const treeOid = writeTreeResult.stdout.trim();
-        if (treeOid.length === 0) {
-          return yield* new VcsProcessExitError({
-            operation,
-            command: "git write-tree",
-            cwd: input.cwd,
-            exitCode: 0,
-            detail: "git write-tree returned an empty tree oid.",
-          });
-        }
 
         const message = `t3 checkpoint ref=${input.checkpointRef}`;
         const commitTreeResult = yield* execute({
           operation,
           cwd: input.cwd,
-          args: ["commit-tree", treeOid, "-m", message],
+          args: ["commit-tree", snapshot.treeOid, "-m", message],
           env: commitEnv,
         });
         const commitOid = commitTreeResult.stdout.trim();
@@ -726,7 +740,7 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
           cwd: input.cwd,
           args: ["update-ref", input.checkpointRef, commitOid],
         });
-      }).pipe(Effect.ensuring(cleanupTempIndex));
+      }).pipe(Effect.ensuring(cleanupTempDirectory));
     }),
 
     hasCheckpointRef: (input) =>
@@ -738,32 +752,71 @@ export const makeVcsDriverShape = Effect.fn("makeGitVcsDriverShape")(function* (
       const operation = "GitVcsDriver.checkpoints.restoreCheckpoint";
 
       let commitOid = yield* resolveCheckpointCommit(input.cwd, input.checkpointRef);
+      let usedHeadFallback = false;
 
       if (!commitOid && input.fallbackToHead === true) {
         commitOid = yield* resolveHeadCommit(input.cwd);
+        usedHeadFallback = commitOid !== null;
       }
 
       if (!commitOid) {
         return false;
       }
 
-      yield* execute({
-        operation,
-        cwd: input.cwd,
-        args: ["restore", "--source", commitOid, "--worktree", "--staged", "--", "."],
-      });
-      yield* execute({
-        operation,
-        cwd: input.cwd,
-        args: ["clean", "-fd", "--", "."],
-      });
+      if (usedHeadFallback) {
+        yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["restore", "--source", commitOid, "--worktree", "--staged", "--", "."],
+        });
+        yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["clean", "-fd", "--", "."],
+        });
+      } else {
+        const worktreeRoot = yield* resolveWorktreeRoot(input.cwd);
+        const treeResult = yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["rev-parse", "--verify", `${commitOid}^{tree}`],
+        });
+        const treeOid = treeResult.stdout.trim();
+        yield* Effect.tryPromise({
+          try: (signal) =>
+            restoreExactGitTree({
+              repositoryRoot: worktreeRoot,
+              treeOid,
+              signal,
+              limits: {
+                maxFileCount: EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT,
+                maxByteCount: EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,
+              },
+            }),
+          catch: (cause) =>
+            new VcsProcessExitError({
+              operation,
+              command: "restore exact Git checkpoint",
+              cwd: input.cwd,
+              exitCode: 1,
+              detail:
+                cause instanceof Error ? cause.message : "Exact Git checkpoint restore failed.",
+            }),
+        });
+      }
 
       const headExists = yield* hasHeadCommit(input.cwd);
       if (headExists) {
         yield* execute({
           operation,
           cwd: input.cwd,
-          args: ["reset", "--quiet", "--", "."],
+          args: usedHeadFallback ? ["reset", "--quiet", "--", "."] : ["read-tree", "HEAD"],
+        });
+      } else if (!usedHeadFallback) {
+        yield* execute({
+          operation,
+          cwd: input.cwd,
+          args: ["read-tree", commitOid],
         });
       }
 

@@ -1,3 +1,6 @@
+// packages/contracts/src/environment.ts
+// defines execution environment identity, capabilities, and scoped references
+
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
@@ -51,6 +54,12 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
       servers that must be relaunched manually (dev checkouts, Windows
       foreground runs, pre-update servers). */
   serverSelfUpdate: Schema.optionalKey(ServerSelfUpdateCapability),
+  /** Server can compile repository .mdx files into the closed SafeDocument transport. */
+  safeMdxDocument: Schema.optionalKey(Schema.Boolean),
+  /** Server supports immutable proposal revisions and exact proposed diffs. */
+  proposalPreview: Schema.optionalKey(Schema.Boolean),
+  /** Server can supervise and authenticate an embedded Cartographer atlas. */
+  cartographerEmbed: Schema.optionalKey(Schema.Boolean),
 });
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type;
 

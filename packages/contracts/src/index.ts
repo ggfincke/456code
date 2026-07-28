@@ -1,3 +1,6 @@
+// packages/contracts/src/index.ts
+// exports the public shared transport contracts
+
 export * from "./baseSchemas.ts";
 export * from "./auth.ts";
 export * from "./environment.ts";
@@ -21,6 +24,9 @@ export * from "./orchestration.ts";
 export * from "./projectFile.ts";
 export * from "./editor.ts";
 export * from "./project.ts";
+export * from "./mdx.ts";
+export * from "./proposal.ts";
+export * from "./cartographer.ts";
 export * from "./filesystem.ts";
 export * from "./assets.ts";
 export * from "./review.ts";

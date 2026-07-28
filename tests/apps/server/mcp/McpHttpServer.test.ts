@@ -8,7 +8,13 @@ import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Stream from "effect/Stream";
 import { McpSchema, McpServer } from "effect/unstable/ai";
-import { HttpBody, HttpClient, HttpRouter, HttpServerResponse } from "effect/unstable/http";
+import {
+  HttpBody,
+  HttpClient,
+  HttpRouter,
+  HttpServerRequest,
+  HttpServerResponse,
+} from "effect/unstable/http";
 
 import * as McpHttpServer from "../../../../apps/server/src/mcp/McpHttpServer.ts";
 import * as McpInvocationContext from "../../../../apps/server/src/mcp/McpInvocationContext.ts";
@@ -51,6 +57,43 @@ it("normalizes empty successful notification responses to accepted", () => {
   );
   expect(resultResponse.status).toBe(200);
 });
+
+it.effect("bounds MCP HTTP request bodies before JSON decoding", () =>
+  Effect.scoped(
+    Effect.gen(function* () {
+      const bodyLimit = 128;
+      yield* HttpRouter.add(
+        "POST",
+        "/bounded-mcp",
+        Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const accepted = yield* request.text.pipe(
+            Effect.as(true),
+            Effect.orElseSucceed(() => false),
+          );
+          return accepted
+            ? HttpServerResponse.empty({ status: 204 })
+            : HttpServerResponse.empty({ status: 413 });
+        }),
+      ).pipe(
+        HttpRouter.serve,
+        Layer.provide(McpHttpServer.mcpRequestBodyLimitLayer(bodyLimit)),
+        Layer.build,
+      );
+      const httpClient = yield* HttpClient.HttpClient;
+
+      const accepted = yield* httpClient.post("/bounded-mcp", {
+        body: HttpBody.text("x".repeat(bodyLimit), "text/plain"),
+      });
+      expect(accepted.status).toBe(204);
+
+      const rejected = yield* httpClient.post("/bounded-mcp", {
+        body: HttpBody.text("x".repeat(bodyLimit + 1), "text/plain"),
+      });
+      expect(rejected.status).toBe(413);
+    }),
+  ).pipe(Effect.provide(NodeHttpServer.layerTest)),
+);
 
 it.effect("returns bounded structural preview snapshot failures", () =>
   Effect.scoped(

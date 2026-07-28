@@ -2,7 +2,7 @@
 // verifies mcp credential lifetime and revocation
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
-import { EnvironmentId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import { HttpServer } from "effect/unstable/http";
 
@@ -48,6 +48,15 @@ it.effect("stores only a token hash, resolves the bearer token, and revokes by t
 
     const resolved = yield* registry.resolve(token);
     expect(resolved?.threadId).toBe(threadId);
+    expect(resolved?.capabilities).toEqual(new Set(["preview", "proposal"]));
+    expect(resolved?.activeTurnId).toBeUndefined();
+
+    const turnId = TurnId.make("turn-1");
+    yield* registry.bindActiveTurn(threadId, turnId);
+    expect((yield* registry.resolve(token))?.activeTurnId).toBe(turnId);
+
+    yield* registry.bindActiveTurn(threadId);
+    expect((yield* registry.resolve(token))?.activeTurnId).toBeUndefined();
 
     yield* registry.revokeThread(threadId);
     expect(yield* registry.resolve(token)).toBeUndefined();

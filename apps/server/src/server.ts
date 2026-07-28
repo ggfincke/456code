@@ -95,6 +95,11 @@ import {
 import { orchestrationHttpApiLayer } from "./orchestration/http.ts";
 import * as NetService from "@t3tools/shared/Net";
 import { disableTailscaleServe, ensureTailscaleServe } from "@t3tools/tailscale";
+import * as CartographerEmbedBroker from "./cartographer/CartographerEmbedBroker.ts";
+import { cartographerEmbedRouteLayer } from "./cartographer/CartographerHttp.ts";
+import * as ProposalGenerationService from "./proposal/ProposalGenerationService.ts";
+import * as ProposalImplementationAttemptService from "./proposal/ProposalImplementationAttemptService.ts";
+import * as ProposalService from "./proposal/ProposalService.ts";
 
 // Effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
@@ -244,6 +249,18 @@ const PreviewLayerLive = Layer.empty.pipe(
   Layer.provideMerge(PortScannerLayerLive),
 );
 
+const ProposalPreviewLayerLive = Layer.mergeAll(
+  ProposalGenerationService.layer.pipe(
+    Layer.provideMerge(ProposalService.layer),
+    Layer.provideMerge(ProcessRunner.layer),
+  ),
+  ProposalImplementationAttemptService.layer.pipe(
+    Layer.provideMerge(ProposalService.layer),
+    Layer.provideMerge(ProcessRunner.layer),
+  ),
+  CartographerEmbedBroker.layer,
+);
+
 const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer));
 
 const WorkspaceFileSystemLayerLive = WorkspaceFileSystem.layer.pipe(
@@ -305,6 +322,7 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(WorkspaceLayerLive),
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolver.layer),
+  Layer.provideMerge(ProposalPreviewLayerLive),
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
@@ -344,6 +362,7 @@ export const makeRoutesLayer = Layer.mergeAll(
     ),
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
+    cartographerEmbedRouteLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),

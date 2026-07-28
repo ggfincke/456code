@@ -49,8 +49,11 @@ import {
   type ProjectFileOperation,
   ProjectListEntriesError,
   ProjectReadFileError,
+  ProjectReadMdxDocumentError,
   ProjectSearchEntriesError,
   ProjectWriteFileError,
+  ProposalError,
+  CartographerEmbedError,
   RelayClientInstallFailedError,
   type RelayClientStatus,
   ServerSelfUpdateError,
@@ -85,6 +88,11 @@ import { normalizeDispatchCommand } from "./orchestration/Normalizer.ts";
 import * as OrchestrationEngine from "./orchestration/Services/OrchestrationEngine.ts";
 import * as ProjectionSnapshotQuery from "./orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as ImportContinuation from "./import/continuationContract.ts";
+import * as WorkspaceMdxDocument from "./mdx/WorkspaceMdxDocument.ts";
+import * as CartographerEmbedBroker from "./cartographer/CartographerEmbedBroker.ts";
+import * as ProposalGenerationService from "./proposal/ProposalGenerationService.ts";
+import * as ProposalImplementationAttemptService from "./proposal/ProposalImplementationAttemptService.ts";
+import * as ProposalService from "./proposal/ProposalService.ts";
 
 // prefer a continuation implementation provided by the server layer graph
 // (see server.ts providing ImportContinuationLive onto the ws route layer);
@@ -467,8 +475,20 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.sourceControlPublishRepository, AuthOrchestrationOperateScope],
   [WS_METHODS.projectsListEntries, AuthOrchestrationReadScope],
   [WS_METHODS.projectsReadFile, AuthOrchestrationReadScope],
+  [WS_METHODS.projectsReadMdxDocument, AuthOrchestrationReadScope],
   [WS_METHODS.projectsSearchEntries, AuthOrchestrationReadScope],
   [WS_METHODS.projectsWriteFile, AuthOrchestrationOperateScope],
+  [WS_METHODS.proposalsList, AuthOrchestrationReadScope],
+  [WS_METHODS.proposalsGet, AuthOrchestrationReadScope],
+  [WS_METHODS.proposalsDiff, AuthOrchestrationReadScope],
+  [WS_METHODS.proposalsNarrative, AuthOrchestrationReadScope],
+  [WS_METHODS.proposalsFindByPlan, AuthOrchestrationReadScope],
+  [WS_METHODS.proposalsStartGeneration, AuthOrchestrationOperateScope],
+  [WS_METHODS.proposalsGetGeneration, AuthOrchestrationReadScope],
+  [WS_METHODS.proposalsLatestGeneration, AuthOrchestrationReadScope],
+  [WS_METHODS.proposalsLatestImplementationAttempt, AuthOrchestrationReadScope],
+  [WS_METHODS.cartographerIssueEmbed, AuthOrchestrationOperateScope],
+  [WS_METHODS.cartographerCloseEmbed, AuthOrchestrationOperateScope],
   [WS_METHODS.shellOpenInEditor, AuthOrchestrationOperateScope],
   [WS_METHODS.filesystemBrowse, AuthOrchestrationReadScope],
   [WS_METHODS.assetsCreateUrl, AuthOrchestrationReadScope],
@@ -554,6 +574,8 @@ function toAuthAccessStreamEvent(
 const makeWsRpcLayer = (
   currentSession: EnvironmentAuth.AuthenticatedSession,
   previewAutomationBroker: PreviewAutomationBroker.PreviewAutomationBroker["Service"],
+  cartographerEmbedBroker: CartographerEmbedBroker.CartographerEmbedBroker["Service"],
+  authenticatedOrigin: string | undefined,
 ) =>
   WsRpcGroup.toLayer(
     Effect.gen(function* () {
@@ -580,6 +602,10 @@ const makeWsRpcLayer = (
       const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const proposalService = yield* ProposalService.ProposalService;
+      const proposalGenerationService = yield* ProposalGenerationService.ProposalGenerationService;
+      const proposalImplementationAttemptService =
+        yield* ProposalImplementationAttemptService.ProposalImplementationAttemptService;
       const projectSetupScriptRunner = yield* ProjectSetupScriptRunner.ProjectSetupScriptRunner;
       const repositoryIdentityResolver =
         yield* RepositoryIdentityResolver.RepositoryIdentityResolver;
@@ -2199,6 +2225,370 @@ const makeWsRpcLayer = (
             ),
             { "rpc.aggregate": "workspace" },
           ),
+        [WS_METHODS.projectsReadMdxDocument]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.projectsReadMdxDocument,
+            Effect.gen(function* () {
+              const contextNotFound = () =>
+                new ProjectReadMdxDocumentError({
+                  threadId: input.threadId,
+                  relativePath: input.relativePath,
+                  failure: "workspace_context_not_found",
+                });
+              const thread = yield* projectionSnapshotQuery
+                .getThreadShellById(input.threadId)
+                .pipe(Effect.mapError(() => contextNotFound()));
+              if (Option.isNone(thread)) {
+                return yield* contextNotFound();
+              }
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(thread.value.projectId)
+                .pipe(Effect.mapError(() => contextNotFound()));
+              if (Option.isNone(project)) {
+                return yield* contextNotFound();
+              }
+
+              const workspaceRoot = thread.value.worktreePath ?? project.value.workspaceRoot;
+              return yield* WorkspaceMdxDocument.readWorkspaceMdxDocument({
+                ...input,
+                workspaceRoot,
+              }).pipe(
+                Effect.mapError((cause) =>
+                  cause._tag === "ProjectReadMdxDocumentError"
+                    ? cause
+                    : new ProjectReadFileError({
+                        cwd: workspaceRoot,
+                        relativePath: input.relativePath,
+                        ...projectFileFailureContext(cause),
+                        cause,
+                      }),
+                ),
+              );
+            }),
+            { "rpc.aggregate": "workspace" },
+          ),
+        [WS_METHODS.proposalsList]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsList,
+            Effect.gen(function* () {
+              const environmentId = yield* serverEnvironment.getEnvironmentId;
+              if (input.environmentId !== environmentId) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.list",
+                  code: "identity-mismatch",
+                  detail: "The requested proposal environment does not match this server.",
+                });
+              }
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(input.projectId)
+                .pipe(
+                  Effect.mapError(
+                    () =>
+                      new ProposalError({
+                        operation: "WsProposals.list",
+                        code: "identity-mismatch",
+                        detail: "The requested proposal project could not be verified.",
+                      }),
+                  ),
+                );
+              if (Option.isNone(project)) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.list",
+                  code: "identity-mismatch",
+                  detail: "The requested proposal project was not found.",
+                });
+              }
+              if (input.sourceThreadId !== undefined) {
+                const thread = yield* projectionSnapshotQuery
+                  .getThreadShellById(input.sourceThreadId)
+                  .pipe(
+                    Effect.mapError(
+                      () =>
+                        new ProposalError({
+                          operation: "WsProposals.list",
+                          code: "identity-mismatch",
+                          detail: "The requested proposal thread could not be verified.",
+                        }),
+                    ),
+                  );
+                if (Option.isNone(thread) || thread.value.projectId !== input.projectId) {
+                  return yield* new ProposalError({
+                    operation: "WsProposals.list",
+                    code: "identity-mismatch",
+                    detail: "The requested proposal thread does not belong to this project.",
+                  });
+                }
+              }
+              return yield* proposalService.list(input);
+            }),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.proposalsGet]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsGet,
+            Effect.gen(function* () {
+              const selected = yield* proposalService.get(input);
+              const environmentId = yield* serverEnvironment.getEnvironmentId;
+              if (selected.proposal.environmentId !== environmentId) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.get",
+                  code: "identity-mismatch",
+                  detail: "The proposal does not belong to this server environment.",
+                  proposalId: input.proposalId,
+                });
+              }
+              return selected;
+            }),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.proposalsDiff]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsDiff,
+            Effect.gen(function* () {
+              const selected = yield* proposalService.get(input);
+              const environmentId = yield* serverEnvironment.getEnvironmentId;
+              if (selected.proposal.environmentId !== environmentId) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.diff",
+                  code: "identity-mismatch",
+                  detail: "The proposal does not belong to this server environment.",
+                  proposalId: input.proposalId,
+                });
+              }
+              return yield* proposalService.diff(input);
+            }),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.proposalsNarrative]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsNarrative,
+            Effect.gen(function* () {
+              const selected = yield* proposalService.get(input);
+              const environmentId = yield* serverEnvironment.getEnvironmentId;
+              if (selected.proposal.environmentId !== environmentId) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.narrative",
+                  code: "identity-mismatch",
+                  detail: "The proposal does not belong to this server environment.",
+                  proposalId: input.proposalId,
+                });
+              }
+              const narrative = yield* proposalService.narrative(input);
+              if (narrative === null) return null;
+              const document = yield* WorkspaceMdxDocument.compileSafeDocumentSource({
+                threadId: selected.proposal.sourceThreadId,
+                relativePath: "proposal-narrative.mdx",
+                source: narrative.source,
+              });
+              return {
+                proposalId: narrative.proposalId,
+                revisionId: narrative.revisionId,
+                revision: narrative.revision,
+                sourceSha256: narrative.sourceSha256,
+                document,
+              };
+            }),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.proposalsFindByPlan]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsFindByPlan,
+            Effect.gen(function* () {
+              const thread = yield* projectionSnapshotQuery
+                .getThreadShellById(input.sourceThreadId)
+                .pipe(
+                  Effect.mapError(
+                    () =>
+                      new ProposalError({
+                        operation: "WsProposals.findByPlan",
+                        code: "identity-mismatch",
+                        detail: "The proposal source thread could not be verified.",
+                      }),
+                  ),
+                );
+              if (Option.isNone(thread)) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.findByPlan",
+                  code: "identity-mismatch",
+                  detail: "The proposal source thread was not found.",
+                });
+              }
+              const linked = yield* proposalService.findLatestByPlan(input);
+              if (linked === null) return null;
+              const environmentId = yield* serverEnvironment.getEnvironmentId;
+              if (
+                linked.proposal.environmentId !== environmentId ||
+                linked.proposal.projectId !== thread.value.projectId
+              ) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.findByPlan",
+                  code: "identity-mismatch",
+                  detail: "The linked proposal is outside the authenticated thread scope.",
+                  proposalId: linked.proposal.proposalId,
+                });
+              }
+              return linked;
+            }),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.proposalsStartGeneration]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsStartGeneration,
+            Effect.gen(function* () {
+              const thread = yield* projectionSnapshotQuery.getThreadShellById(input.threadId).pipe(
+                Effect.mapError(
+                  () =>
+                    new ProposalError({
+                      operation: "WsProposals.startGeneration",
+                      code: "identity-mismatch",
+                      detail: "The proposal thread could not be verified.",
+                      proposalId: input.proposalId,
+                    }),
+                ),
+              );
+              const selected = yield* proposalService.get({
+                proposalId: input.proposalId,
+                ...(input.revision === undefined ? {} : { revision: input.revision }),
+              });
+              const environmentId = yield* serverEnvironment.getEnvironmentId;
+              if (
+                Option.isNone(thread) ||
+                selected.proposal.environmentId !== environmentId ||
+                selected.proposal.projectId !== thread.value.projectId ||
+                selected.proposal.sourceThreadId !== input.threadId
+              ) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.startGeneration",
+                  code: "identity-mismatch",
+                  detail: "The proposal revision is outside the authenticated thread scope.",
+                  proposalId: input.proposalId,
+                });
+              }
+              return yield* proposalGenerationService.start(input);
+            }),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.proposalsGetGeneration]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsGetGeneration,
+            proposalGenerationService.get(input),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.proposalsLatestGeneration]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsLatestGeneration,
+            proposalGenerationService.latest(input),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.proposalsLatestImplementationAttempt]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.proposalsLatestImplementationAttempt,
+            Effect.gen(function* () {
+              const selected = yield* proposalService.get({
+                proposalId: input.proposalId,
+                ...(input.revision === undefined ? {} : { revision: input.revision }),
+              });
+              const environmentId = yield* serverEnvironment.getEnvironmentId;
+              if (
+                selected.proposal.environmentId !== environmentId ||
+                selected.proposal.sourceThreadId !== input.sourceThreadId
+              ) {
+                return yield* new ProposalError({
+                  operation: "WsProposals.latestImplementationAttempt",
+                  code: "identity-mismatch",
+                  detail: "The proposal revision is outside the authenticated thread scope.",
+                  proposalId: input.proposalId,
+                });
+              }
+              return yield* proposalImplementationAttemptService.latestForProposal(input).pipe(
+                Effect.mapError(
+                  () =>
+                    new ProposalError({
+                      operation: "WsProposals.latestImplementationAttempt",
+                      code: "persistence-failed",
+                      detail: "The proposal implementation status could not be read.",
+                      proposalId: input.proposalId,
+                    }),
+                ),
+              );
+            }),
+            { "rpc.aggregate": "proposal" },
+          ),
+        [WS_METHODS.cartographerIssueEmbed]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerIssueEmbed,
+            Effect.gen(function* () {
+              if (authenticatedOrigin === undefined || input.parentOrigin !== authenticatedOrigin) {
+                return yield* new CartographerEmbedError({
+                  failure: "start_failed",
+                  message:
+                    "The Cartographer parent origin does not match the authenticated client.",
+                });
+              }
+              const contextNotFound = () =>
+                new CartographerEmbedError({
+                  failure: "workspace_context_not_found" as const,
+                  message: "The Cartographer workspace context was not found.",
+                });
+              const thread = yield* projectionSnapshotQuery
+                .getThreadShellById(input.threadId)
+                .pipe(Effect.mapError(contextNotFound));
+              if (Option.isNone(thread)) {
+                return yield* contextNotFound();
+              }
+              const project = yield* projectionSnapshotQuery
+                .getProjectShellById(thread.value.projectId)
+                .pipe(Effect.mapError(contextNotFound));
+              if (Option.isNone(project)) {
+                return yield* contextNotFound();
+              }
+              const generationTarget =
+                input.generationId === undefined
+                  ? null
+                  : yield* proposalGenerationService.resolveEmbedTarget(
+                      input.threadId,
+                      input.generationId,
+                    );
+              const workspaceRoot =
+                generationTarget === null
+                  ? (thread.value.worktreePath ?? project.value.workspaceRoot)
+                  : generationTarget.proposedRoot;
+              return yield* cartographerEmbedBroker.issue({
+                threadId: input.threadId,
+                ...(generationTarget === null
+                  ? {}
+                  : {
+                      generationId: generationTarget.generation.generationId,
+                      baseGraphPath: generationTarget.baseGraphPath,
+                      proposedGraphPath: generationTarget.proposedGraphPath,
+                      impactPath: generationTarget.impactPath,
+                    }),
+                workspaceRoot,
+                parentOrigin: authenticatedOrigin,
+                theme: input.theme,
+              });
+            }),
+            { "rpc.aggregate": "cartographer" },
+          ),
+        [WS_METHODS.cartographerCloseEmbed]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerCloseEmbed,
+            Effect.gen(function* () {
+              const contextNotFound = () =>
+                new CartographerEmbedError({
+                  failure: "workspace_context_not_found" as const,
+                  message: "The Cartographer workspace context was not found.",
+                });
+              const thread = yield* projectionSnapshotQuery
+                .getThreadShellById(input.threadId)
+                .pipe(Effect.mapError(contextNotFound));
+              if (Option.isNone(thread)) {
+                return yield* contextNotFound();
+              }
+              yield* cartographerEmbedBroker.releaseSession(input.threadId, input.sessionId);
+            }),
+            { "rpc.aggregate": "cartographer" },
+          ),
         [WS_METHODS.projectsWriteFile]: (input) =>
           observeRpcEffect(
             WS_METHODS.projectsWriteFile,
@@ -2623,6 +3013,7 @@ const makeWsRpcLayer = (
 export const websocketRpcRouteLayer = Layer.unwrap(
   Effect.gen(function* () {
     const previewAutomationBroker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
+    const cartographerEmbedBroker = yield* CartographerEmbedBroker.CartographerEmbedBroker;
     return HttpRouter.add(
       "GET",
       "/ws",
@@ -2642,7 +3033,12 @@ export const websocketRpcRouteLayer = Layer.unwrap(
           disableTracing: true,
         }).pipe(
           Effect.provide(
-            makeWsRpcLayer(session, previewAutomationBroker).pipe(
+            makeWsRpcLayer(
+              session,
+              previewAutomationBroker,
+              cartographerEmbedBroker,
+              request.headers.origin,
+            ).pipe(
               Layer.provideMerge(RpcSerialization.layerJson),
               Layer.provide(ProviderMaintenanceRunner.layer),
               Layer.provide(

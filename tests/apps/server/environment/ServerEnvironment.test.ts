@@ -1,3 +1,6 @@
+// tests/apps/server/environment/ServerEnvironment.test.ts
+// verifies stable server identity and advertised environment capabilities
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { expect, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
@@ -68,6 +71,7 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
       expect(first.environmentId).toBe(second.environmentId);
       expect(second.capabilities.repositoryIdentity).toBe(true);
       expect(second.capabilities.connectionProbe).toBe(true);
+      expect(second.capabilities.safeMdxDocument).toBe(true);
     }),
   );
 
