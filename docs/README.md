@@ -1,3 +1,6 @@
+<!-- docs/README.md -->
+<!-- indexes the maintained 456code documentation -->
+
 # Documentation
 
 - [Getting started](./getting-started/quick-start.md)
@@ -12,7 +15,9 @@
   - [Remote access](./user/remote-access.md)
   - [Keeping 456code in sync](./user/server-updates.md)
   - [Keybindings](./user/keybindings.md)
-- [Integrations](./integrations/source-control-providers.md)
+- Integrations
+  - [Source-control providers](./integrations/source-control-providers.md)
+  - [Cartographer proposal previews](./integrations/cartographer.md)
 - [Mobile](./mobile/app.md)
 - [Operations](./operations/ci.md)
 - [Providers](./providers/codex.md)

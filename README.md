@@ -1,3 +1,6 @@
+<!-- README.md -->
+<!-- introduces 456code installation, documentation, and contribution entrypoints -->
+
 # 456code
 
 456code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, and OpenCode, more coming soon).
@@ -52,6 +55,7 @@ There's no public docs site yet, checkout the miscellaneous markdown files in [d
 - [Getting started](./docs/getting-started/quick-start.md)
 - [Remote access](./docs/user/remote-access.md)
 - [Keeping 456code in sync](./docs/user/server-updates.md)
+- [Cartographer proposal previews](./docs/integrations/cartographer.md)
 - [Architecture overview](./docs/architecture/overview.md)
 - [Provider guides](./docs/providers/codex.md)
 - [Operations](./docs/operations/ci.md)
