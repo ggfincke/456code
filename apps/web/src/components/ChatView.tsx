@@ -393,6 +393,11 @@ const PreviewPanel = lazy(() =>
 const DiffPanel = lazy(() => import("./DiffPanel"));
 const WorkersPanel = lazy(() => import("../workers/WorkersPanel"));
 const FilePreviewPanel = lazy(() => import("./files/FilePreviewPanel"));
+const ConnectedExplorerPanel = lazy(() =>
+  import("./explorer/ConnectedExplorerPanel").then((module) => ({
+    default: module.ConnectedExplorerPanel,
+  })),
+);
 const EMPTY_PENDING_FILE_SURFACE_IDS: ReadonlySet<string> = new Set();
 const TYPE_TO_FOCUS_EDITABLE_SELECTOR = [
   "input",
@@ -1824,6 +1829,8 @@ function ChatViewContent(props: ChatViewProps) {
   const serverConfig = activeThread
     ? (activeEnvironment?.serverConfig ?? null)
     : (primaryEnvironment?.serverConfig ?? null);
+  const proposalPreviewAvailable = serverConfig?.environment.capabilities.proposalPreview === true;
+  const cartographerAvailable = serverConfig?.environment.capabilities.cartographerEmbed === true;
   const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
   const versionMismatchDismissKey =
     versionMismatch && activeThread
@@ -3116,12 +3123,25 @@ function ChatViewContent(props: ChatViewProps) {
     if (!activeThreadRef) return;
     useRightPanelStore.getState().open(activeThreadRef, "workers");
   }, [activeThreadRef]);
+  const explorerAvailable =
+    activeProject !== null && isServerThread && (proposalPreviewAvailable || cartographerAvailable);
+  const addExplorerSurface = useCallback(() => {
+    if (!activeThreadRef || !explorerAvailable) return;
+    useRightPanelStore.getState().open(activeThreadRef, "explorer");
+  }, [activeThreadRef, explorerAvailable]);
   const openFileSurface = useCallback(
-    (relativePath: string) => {
+    (relativePath: string, line?: number) => {
       if (!activeThreadRef || !activeProject) return;
-      useRightPanelStore.getState().openFile(activeThreadRef, relativePath);
+      useRightPanelStore.getState().openFile(activeThreadRef, relativePath, line);
     },
     [activeProject, activeThreadRef],
+  );
+  const selectExplorerFile = useCallback(
+    (relativePath: string | null) => {
+      if (relativePath === null) return;
+      openFileSurface(relativePath);
+    },
+    [openFileSurface],
   );
   const togglePreviewPanel = useCallback(() => {
     if (!activeThreadRef || !isPreviewSupportedInRuntime()) return;
@@ -5781,6 +5801,27 @@ function ChatViewContent(props: ChatViewProps) {
       <Suspense fallback={null}>
         <WorkersPanel environmentId={activeThreadRef.environmentId} />
       </Suspense>
+    ) : activeRightPanelSurface?.kind === "explorer" ? (
+      <Suspense
+        fallback={
+          <div
+            className="flex min-h-0 flex-1 items-center justify-center px-6 py-8 text-center text-xs text-muted-foreground"
+            role="status"
+          >
+            Loading Explorer…
+          </div>
+        }
+      >
+        <ConnectedExplorerPanel
+          threadRef={activeThreadRef}
+          projectId={activeThread.projectId}
+          proposalPlanId={activeRightPanelSurface.planId}
+          proposalPreviewAvailable={proposalPreviewAvailable}
+          cartographerAvailable={cartographerAvailable}
+          onOpenFile={openFileSurface}
+          onSelectFile={selectExplorerFile}
+        />
+      </Suspense>
     ) : activeRightPanelSurface?.kind === "plan" ? (
       <PlanSidebar
         activePlan={activePlan}
@@ -6220,9 +6261,11 @@ function ChatViewContent(props: ChatViewProps) {
           onAddDiff={addDiffSurface}
           onAddFiles={addFilesSurface}
           onAddWorkers={addWorkersSurface}
+          onAddExplorer={addExplorerSurface}
           browserAvailable={isPreviewSupportedInRuntime()}
           diffAvailable={isServerThread && isGitRepo}
           filesAvailable={activeProject !== null}
+          explorerAvailable={explorerAvailable}
         >
           {rightPanelContent}
         </RightPanelTabs>
@@ -6248,9 +6291,11 @@ function ChatViewContent(props: ChatViewProps) {
             onAddDiff={addDiffSurface}
             onAddFiles={addFilesSurface}
             onAddWorkers={addWorkersSurface}
+            onAddExplorer={addExplorerSurface}
             browserAvailable={isPreviewSupportedInRuntime()}
             diffAvailable={isServerThread && isGitRepo}
             filesAvailable={activeProject !== null}
+            explorerAvailable={explorerAvailable}
           >
             {rightPanelContent}
           </RightPanelTabs>

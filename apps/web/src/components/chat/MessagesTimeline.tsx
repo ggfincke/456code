@@ -1,3 +1,5 @@
+// apps/web/src/components/chat/MessagesTimeline.tsx
+// renders virtualized thread timeline rows and shared row interactions
 import {
   type EnvironmentId,
   type MessageId,
@@ -1081,6 +1083,7 @@ function ProposedPlanTimelineRow({
   return (
     <div className="min-w-0 px-1 py-0.5">
       <ProposedPlanCard
+        planId={row.proposedPlan.id}
         planMarkdown={row.proposedPlan.planMarkdown}
         environmentId={ctx.activeThreadEnvironmentId}
         threadRef={ctx.threadRef ?? undefined}

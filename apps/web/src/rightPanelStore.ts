@@ -1,3 +1,5 @@
+// apps/web/src/rightPanelStore.ts
+// owns thread-scoped right-panel surface identity and persistence
 /**
  * Thread-scoped right-panel surface state.
  *
@@ -8,7 +10,7 @@
  * workspace paths, and diff/plan/files remain singleton surfaces.
  */
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { OrchestrationProposedPlanId, ScopedThreadRef } from "@t3tools/contracts";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 
@@ -22,6 +24,7 @@ export const RIGHT_PANEL_KINDS = [
   "preview",
   "terminal",
   "workers",
+  "explorer",
 ] as const;
 export type RightPanelKind = (typeof RIGHT_PANEL_KINDS)[number];
 
@@ -46,10 +49,15 @@ export type RightPanelSurface =
       revealRequestId: number;
     }
   | { id: "plan"; kind: "plan" }
-  | { id: "workers"; kind: "workers" };
+  | { id: "workers"; kind: "workers" }
+  | {
+      id: "explorer";
+      kind: "explorer";
+      planId: OrchestrationProposedPlanId | null;
+    };
 
 const RIGHT_PANEL_STORAGE_KEY = "456code:right-panel-state:v2";
-const RIGHT_PANEL_STORAGE_VERSION = 7;
+const RIGHT_PANEL_STORAGE_VERSION = 8;
 
 export interface ThreadRightPanelState {
   isOpen: boolean;
@@ -61,6 +69,7 @@ interface RightPanelStoreState {
   byThreadKey: Record<string, ThreadRightPanelState>;
   open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
+  openExplorer: (ref: ScopedThreadRef, planId: OrchestrationProposedPlanId | null) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   splitTerminal: (
@@ -103,6 +112,8 @@ const singletonSurface = (
       return { id: "plan", kind };
     case "workers":
       return { id: "workers", kind };
+    case "explorer":
+      return { id: "explorer", kind, planId: null };
   }
 };
 
@@ -130,6 +141,29 @@ const terminalSurface = (terminalId: string): RightPanelSurface => ({
   terminalIds: [terminalId],
   activeTerminalId: terminalId,
 });
+
+const explorerSurface = (
+  planId: OrchestrationProposedPlanId | null,
+): Extract<RightPanelSurface, { kind: "explorer" }> => ({
+  id: "explorer",
+  kind: "explorer",
+  planId,
+});
+
+const upsertExplorerSurface = (
+  current: ThreadRightPanelState,
+  planId: OrchestrationProposedPlanId | null,
+): ThreadRightPanelState => {
+  const surface = explorerSurface(planId);
+  const existing = current.surfaces.some((entry) => entry.id === surface.id);
+  return {
+    isOpen: true,
+    activeSurfaceId: surface.id,
+    surfaces: existing
+      ? current.surfaces.map((entry) => (entry.id === surface.id ? surface : entry))
+      : [...current.surfaces, surface],
+  };
+};
 
 const upsertSurface = (
   current: ThreadRightPanelState,
@@ -181,6 +215,16 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                 threadState && typeof threadState === "object" ? threadState : null;
               const surfaces = Array.isArray(validThreadState?.surfaces)
                 ? validThreadState.surfaces.flatMap<RightPanelSurface>((surface) => {
+                    if (surface.kind === "explorer") {
+                      if (surface.id !== "explorer") return [];
+                      const planId =
+                        "planId" in surface &&
+                        typeof surface.planId === "string" &&
+                        surface.planId.trim().length > 0
+                          ? (surface.planId as OrchestrationProposedPlanId)
+                          : null;
+                      return [explorerSurface(planId)];
+                    }
                     if (surface.kind === "file") {
                       const revealLine =
                         typeof surface.revealLine === "number" &&
@@ -257,6 +301,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
             }
+            if (kind === "explorer") {
+              return upsertExplorerSurface(current, null);
+            }
             return upsertSurface(current, singletonSurface(kind));
           }),
         })),
@@ -270,14 +317,20 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             return upsertSurface({ ...current, surfaces: withoutPlaceholder }, surface);
           }),
         })),
+      openExplorer: (ref, planId) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
+            upsertExplorerSurface(current, planId),
+          ),
+        })),
       openFile: (ref, relativePath, line) =>
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
-            const withoutStandaloneExplorer = current.surfaces.filter(
+            const withoutFileBrowser = current.surfaces.filter(
               (surface) => surface.kind !== "files",
             );
             const surfaceId = `file:${relativePath}` as const;
-            const existing = withoutStandaloneExplorer.find(
+            const existing = withoutFileBrowser.find(
               (surface): surface is Extract<RightPanelSurface, { kind: "file" }> =>
                 surface.id === surfaceId && surface.kind === "file",
             );
@@ -290,10 +343,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
               isOpen: true,
               activeSurfaceId: surface.id,
               surfaces: existing
-                ? withoutStandaloneExplorer.map((entry) =>
-                    entry.id === surface.id ? surface : entry,
-                  )
-                : [...withoutStandaloneExplorer, surface],
+                ? withoutFileBrowser.map((entry) => (entry.id === surface.id ? surface : entry))
+                : [...withoutFileBrowser, surface],
             };
           }),
         })),
@@ -473,7 +524,8 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) => {
             if (workspaceAvailable) return current;
             const surfaces = current.surfaces.filter(
-              (surface) => surface.kind !== "files" && surface.kind !== "file",
+              (surface) =>
+                surface.kind !== "files" && surface.kind !== "file" && surface.kind !== "explorer",
             );
             if (surfaces.length === current.surfaces.length) return current;
             const activeStillExists = surfaces.some(
@@ -520,6 +572,9 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
             if (kind === "preview") {
               const existing = current.surfaces.find((surface) => surface.kind === "preview");
               return upsertSurface(current, existing ?? browserSurface(null));
+            }
+            if (kind === "explorer") {
+              return upsertExplorerSurface(current, null);
             }
             return upsertSurface(current, singletonSurface(kind));
           }),

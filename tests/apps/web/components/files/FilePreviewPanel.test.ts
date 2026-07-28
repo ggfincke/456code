@@ -1,3 +1,6 @@
+// tests/apps/web/components/files/FilePreviewPanel.test.ts
+// verifies file preview helpers & comment range behavior
+
 import { describe, expect, it } from "vite-plus/test";
 
 import {
@@ -6,6 +9,7 @@ import {
   remapFileCommentAnnotations,
 } from "../../../../../apps/web/src/components/files/fileCommentAnnotations";
 import {
+  isMdxPreviewFile,
   isMarkdownPreviewFile,
   setMarkdownTaskChecked,
 } from "../../../../../apps/web/src/components/files/filePreviewMode";
@@ -58,14 +62,18 @@ describe("file comment annotations", () => {
 });
 
 describe("isMarkdownPreviewFile", () => {
-  it("recognizes markdown and MDX files case-insensitively", () => {
+  it("classifies markdown and MDX separately, case-insensitively", () => {
     expect(isMarkdownPreviewFile("README.md")).toBe(true);
-    expect(isMarkdownPreviewFile("docs/guide.MDX")).toBe(true);
+    expect(isMarkdownPreviewFile("docs/guide.MDX")).toBe(false);
+    expect(isMdxPreviewFile("README.md")).toBe(false);
+    expect(isMdxPreviewFile("docs/guide.MDX")).toBe(true);
   });
 
-  it("does not treat other text files as markdown", () => {
+  it("does not treat other text files as markdown or MDX", () => {
     expect(isMarkdownPreviewFile("docs/guide.txt")).toBe(false);
     expect(isMarkdownPreviewFile("docs/markdown.ts")).toBe(false);
+    expect(isMdxPreviewFile("docs/guide.txt")).toBe(false);
+    expect(isMdxPreviewFile("docs/component.mdx.ts")).toBe(false);
   });
 });
 
