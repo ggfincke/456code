@@ -1,3 +1,6 @@
+// apps/web/src/hooks/useHandleNewThread.ts
+// starts draft threads with project and machine defaults
+
 import { useAtomValue } from "@effect/atom-react";
 import {
   scopedProjectKey,
@@ -180,11 +183,7 @@ export function useNewThreadHandler() {
               });
             }
           }
-          // The workspace context must also ride along here: when projectRef
-          // targets a different physical member of the logical project,
-          // createDraftThreadState treats the remap as a project change and
-          // would otherwise wipe branch/worktree and force "local" mode,
-          // undoing the write above.
+          // carry workspace context across physical members of a logical project
           setLogicalProjectDraftThreadId(
             logicalProjectKey,
             projectRef,
