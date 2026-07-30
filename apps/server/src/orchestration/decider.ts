@@ -1099,6 +1099,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
             text: message.text,
             turnId: null,
             streaming: false,
+            provenance: "import",
             createdAt: message.createdAt,
             updatedAt: message.createdAt,
           },

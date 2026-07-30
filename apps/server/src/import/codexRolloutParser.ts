@@ -11,6 +11,17 @@ import type {
   ParseInput,
 } from "./types.ts";
 import { deterministicId } from "./ids.ts";
+import { codexSemanticTitle } from "./importTitle.ts";
+import {
+  addWarning,
+  appendParsingWarningActivity,
+  applyStrictlyIncreasingTimestamps,
+  incrementJsonlRecordCount,
+  iterateJsonlPhysicalLines,
+  materializeWarnings,
+  truncateUtf8,
+  type WarningState,
+} from "./parserSupport.ts";
 import { IMPORT_NORMALIZED_SESSION_MAX_RECORDS } from "./resourceLimits.ts";
 
 interface PendingToolCall {
@@ -30,12 +41,6 @@ interface StreamMessageCandidate {
   stream: "event" | "response";
 }
 
-interface WarningState {
-  details: string[];
-  omittedCount: number;
-  totalCount: number;
-}
-
 interface NormalizedWebSearchAction {
   detail: string;
   input: Record<string, unknown>;
@@ -51,10 +56,8 @@ interface AttachmentReferenceOccurrences {
 type AttachmentRepresentation = keyof AttachmentReferenceOccurrences;
 
 const summaryLimit = 120;
-const warningDetailLimit = 100;
-const warningTextLimit = 512;
-const maxPhysicalLines = 50_000;
-const maxJsonlRecords = 50_000;
+const maxPhysicalLines = 100_000;
+const maxJsonlRecords = 100_000;
 const maxFieldBytes = 1_048_576;
 const maxCwdCharacters = 4_096;
 const maxMetadataCharacters = 512;
@@ -64,19 +67,13 @@ const maxToolNames = 100;
 const maxWebSearchQueries = 100;
 const maxCollectionItems = 10_000;
 const maxNestedCollectionNodes = 20_000;
-const maximumDateTimestamp = 8_640_000_000_000_000;
 const textEncoder = new TextEncoder();
 const omittedAttachmentDetail = "Attachment payloads are not included in imported transcripts.";
 const ignoredResponseItemTypes = new Set(["agent_message", "reasoning"]);
 const ignoredResponseMessageRoles = new Set(["developer", "system"]);
+const rolloutNativeSessionIdPattern =
+  /-([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.jsonl$/iu;
 const safeNativeSessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
-
-class JsonlParseLimitError extends Error {
-  constructor(limitKind: "physical-line" | "record") {
-    super(`session import ${limitKind} limit exceeded: maximum is 50000`);
-    this.name = "JsonlParseLimitError";
-  }
-}
 
 class NormalizedRecordLimitError extends Error {
   constructor() {
@@ -111,47 +108,8 @@ function summarize(value: string): string {
   return truncate(firstLine, summaryLimit);
 }
 
-function addWarning(state: WarningState, message: string): void {
-  state.totalCount += 1;
-  if (state.details.length < warningDetailLimit) {
-    state.details.push(truncate(message, warningTextLimit));
-    return;
-  }
-  state.omittedCount += 1;
-}
-
-function materializeWarnings(state: WarningState): string[] {
-  if (state.omittedCount === 0) {
-    return [...state.details];
-  }
-  return [
-    ...state.details,
-    `${state.omittedCount} additional parsing warnings omitted after the first ${warningDetailLimit}`,
-  ];
-}
-
-function truncateUtf8(value: string, maxBytes = maxFieldBytes): string {
-  const suffix = "…";
-  const byteBudget = maxBytes - textEncoder.encode(suffix).byteLength;
-  let byteLength = 0;
-  let truncatedEnd = 0;
-  for (let index = 0; index < value.length; ) {
-    const codePoint = value.codePointAt(index)!;
-    const codeUnits = codePoint > 0xffff ? 2 : 1;
-    byteLength += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-    index += codeUnits;
-    if (byteLength <= byteBudget) {
-      truncatedEnd = index;
-    }
-    if (byteLength > maxBytes) {
-      return `${value.slice(0, truncatedEnd)}${suffix}`;
-    }
-  }
-  return value;
-}
-
 function boundTextField(value: string, fieldDescription: string, warnings: WarningState): string {
-  const bounded = truncateUtf8(value);
+  const bounded = truncateUtf8(value, maxFieldBytes);
   if (bounded === value) {
     return value;
   }
@@ -190,11 +148,8 @@ function safeNativeSessionId(
   sourceIndex: number,
   warnings: WarningState,
 ): string | null {
-  if (
-    value === null ||
-    value.length > maxMetadataCharacters ||
-    !safeNativeSessionIdPattern.test(value)
-  ) {
+  const nativeSessionId = codexNativeSessionId(value);
+  if (nativeSessionId === null) {
     if (value !== null) {
       addWarning(
         warnings,
@@ -203,7 +158,55 @@ function safeNativeSessionId(
     }
     return null;
   }
-  return value;
+  return nativeSessionId;
+}
+
+export function codexNativeSessionId(value: unknown): string | null {
+  const nativeSessionId = asString(value);
+  return nativeSessionId !== null &&
+    nativeSessionId.length <= maxMetadataCharacters &&
+    safeNativeSessionIdPattern.test(nativeSessionId)
+    ? nativeSessionId
+    : null;
+}
+
+export function codexRolloutNativeSessionId(sourcePath: string): string | null {
+  const fileName = sourcePath.split(/[\\/]/u).at(-1) ?? "";
+  return fileName.match(rolloutNativeSessionIdPattern)?.[1] ?? null;
+}
+
+function isLegacyCodexHeader(value: Record<string, unknown>): boolean {
+  return (
+    value.type === undefined &&
+    value.payload === undefined &&
+    value.record_type === undefined &&
+    "id" in value &&
+    "timestamp" in value &&
+    "instructions" in value
+  );
+}
+
+export function codexLegacyHeaderNativeSessionId(
+  value: Record<string, unknown>,
+  sourcePath: string,
+): string | null | undefined {
+  if (!isLegacyCodexHeader(value)) {
+    return undefined;
+  }
+  const nativeSessionId = codexNativeSessionId(value.id);
+  const expectedNativeSessionId = codexRolloutNativeSessionId(sourcePath);
+  return nativeSessionId !== null &&
+    nativeSessionId === expectedNativeSessionId &&
+    normalizeTimestamp(value.timestamp) !== null
+    ? nativeSessionId
+    : null;
+}
+
+export function codexRolloutMetadataOwnerSessionId(
+  sourcePath: string,
+  metadataOwnerSessionId: string | null,
+): string | null {
+  return codexRolloutNativeSessionId(sourcePath) ?? metadataOwnerSessionId;
 }
 
 function boundStableIdentifier(
@@ -236,31 +239,6 @@ function normalizeTimestamp(value: unknown): string | null {
     return new Date(value).toISOString();
   } catch {
     return null;
-  }
-}
-
-function* iteratePhysicalLines(content: string): Generator<{ line: string; sourceIndex: number }> {
-  let lineStart = 0;
-  let sourceIndex = 0;
-
-  while (lineStart < content.length) {
-    if (sourceIndex >= maxPhysicalLines) {
-      throw new JsonlParseLimitError("physical-line");
-    }
-
-    const newlineIndex = content.indexOf("\n", lineStart);
-    const lineEnd = newlineIndex === -1 ? content.length : newlineIndex;
-    const contentEnd =
-      lineEnd > lineStart && content.charCodeAt(lineEnd - 1) === 13 ? lineEnd - 1 : lineEnd;
-    yield {
-      line: content.slice(lineStart, contentEnd),
-      sourceIndex,
-    };
-    sourceIndex += 1;
-    if (newlineIndex === -1) {
-      return;
-    }
-    lineStart = newlineIndex + 1;
   }
 }
 
@@ -1041,21 +1019,6 @@ function fileChangeRecords(
   return changes;
 }
 
-function applyStrictlyIncreasingTimestamps(records: ImportedRecord[]): void {
-  let previousTimestamp: number | null = null;
-
-  for (const record of records) {
-    const currentTimestamp = Date.parse(record.createdAt);
-    if (previousTimestamp !== null && currentTimestamp <= previousTimestamp) {
-      previousTimestamp = Math.min(previousTimestamp + 1, maximumDateTimestamp);
-      record.createdAt = new Date(previousTimestamp).toISOString();
-      continue;
-    }
-
-    previousTimestamp = currentTimestamp;
-  }
-}
-
 function appendOmittedAttachmentActivity(
   records: ImportedRecord[],
   omittedAttachmentCount: number,
@@ -1081,34 +1044,6 @@ function appendOmittedAttachmentActivity(
       detail: omittedAttachmentDetail,
     },
     createdAt: activityCreatedAt,
-    sourceIndex,
-  });
-}
-
-function appendParsingWarningActivity(
-  records: ImportedRecord[],
-  warnings: WarningState,
-  sourceIndex: number,
-): void {
-  const createdAt = records.at(-1)?.createdAt;
-  if (warnings.totalCount === 0 || createdAt === undefined) {
-    return;
-  }
-
-  const noun = warnings.totalCount === 1 ? "warning" : "warnings";
-  const summary = `Imported with ${warnings.totalCount} parsing ${noun}`;
-  pushImportedRecord(records, {
-    kind: "activity",
-    tone: "error",
-    activityKind: "task.completed",
-    summary,
-    payload: {
-      summary,
-      detail: materializeWarnings(warnings).join("\n"),
-      importWarningCount: warnings.totalCount,
-      omittedWarningCount: warnings.omittedCount,
-    },
-    createdAt,
     sourceIndex,
   });
 }
@@ -1173,12 +1108,20 @@ export function parseCodexRollout(input: ParseInput): ImportedSession {
   const incompleteToolActivities = new Set<ImportedActivityRecord>();
   const attachmentOccurrences = new Map<string, AttachmentReferenceOccurrences>();
   const warnedUnknownResponseItemTypes = new Set<string>();
+  const expectedNativeSessionId = codexRolloutNativeSessionId(input.sourcePath);
+  let metadataOwnerSessionId: string | null = null;
+  let dialect: "legacy" | "modern" | null = null;
+  let legacyHeaderAccepted = false;
+  let legacyTimestamp: string | null = null;
   let hasMetadata = false;
   let lastOmittedAttachmentAt: string | null = null;
   let lastSourceIndex = -1;
   let parsedRecordCount = 0;
 
-  for (const { line: rawLine, sourceIndex } of iteratePhysicalLines(input.content)) {
+  for (const { line: rawLine, sourceIndex } of iterateJsonlPhysicalLines(
+    input.content,
+    maxPhysicalLines,
+  )) {
     lastSourceIndex = sourceIndex;
     if (rawLine.trim().length === 0) {
       continue;
@@ -1195,13 +1138,79 @@ export function parseCodexRollout(input: ParseInput): ImportedSession {
       addWarning(warnings, `line ${sourceIndex + 1}: expected a JSON object`);
       continue;
     }
-    parsedRecordCount += 1;
-    if (parsedRecordCount > maxJsonlRecords) {
-      throw new JsonlParseLimitError("record");
-    }
+    parsedRecordCount = incrementJsonlRecordCount(parsedRecordCount, maxJsonlRecords);
     const line = parsedValue;
-    const type = asString(line.type);
-    const payload = isRecord(line.payload) ? line.payload : null;
+
+    if (dialect === null) {
+      const legacyHeaderNativeSessionId = codexLegacyHeaderNativeSessionId(line, input.sourcePath);
+      if (legacyHeaderNativeSessionId !== undefined) {
+        dialect = "legacy";
+        const nativeSessionId = safeNativeSessionId(asString(line.id), sourceIndex, warnings);
+        const timestamp = normalizeTimestamp(line.timestamp);
+        if (expectedNativeSessionId === null) {
+          addWarning(
+            warnings,
+            `line ${sourceIndex + 1}: legacy session header could not be matched to a rollout filename`,
+          );
+          continue;
+        }
+        if (
+          legacyHeaderNativeSessionId === null &&
+          (nativeSessionId === null || nativeSessionId !== expectedNativeSessionId)
+        ) {
+          if (nativeSessionId !== null) {
+            addWarning(
+              warnings,
+              `line ${sourceIndex + 1}: legacy session header id did not match the rollout filename`,
+            );
+          }
+          continue;
+        }
+        if (legacyHeaderNativeSessionId === null || timestamp === null) {
+          addWarning(
+            warnings,
+            `line ${sourceIndex + 1}: legacy session header timestamp was invalid`,
+          );
+          continue;
+        }
+
+        hasMetadata = true;
+        legacyHeaderAccepted = true;
+        legacyTimestamp = timestamp;
+        metadataOwnerSessionId = legacyHeaderNativeSessionId;
+        meta.nativeSessionId = legacyHeaderNativeSessionId;
+        if (isRecord(line.git)) {
+          meta.gitBranch = boundMetadataField(
+            asString(line.git.branch),
+            `line ${sourceIndex + 1}: git branch`,
+            warnings,
+          );
+        }
+        continue;
+      }
+      dialect = "modern";
+    }
+
+    let type: string | null;
+    let payload: Record<string, unknown> | null;
+    let recordTimestamp: unknown;
+    if (dialect === "legacy") {
+      if (
+        !legacyHeaderAccepted ||
+        line.record_type === "state" ||
+        line.record_type !== undefined ||
+        line.payload !== undefined
+      ) {
+        continue;
+      }
+      type = "response_item";
+      payload = asString(line.type) === null ? null : line;
+      recordTimestamp = legacyTimestamp;
+    } else {
+      type = asString(line.type);
+      payload = isRecord(line.payload) ? line.payload : null;
+      recordTimestamp = line.timestamp;
+    }
 
     if (type === "session_meta") {
       if (payload === null) {
@@ -1209,11 +1218,26 @@ export function parseCodexRollout(input: ParseInput): ImportedSession {
         continue;
       }
 
-      hasMetadata = true;
       const nativeSessionId = asString(payload.id);
       if (nativeSessionId !== null) {
-        meta.nativeSessionId = safeNativeSessionId(nativeSessionId, sourceIndex, warnings);
+        const safeSessionId = safeNativeSessionId(nativeSessionId, sourceIndex, warnings);
+        const ownerSessionId = codexRolloutMetadataOwnerSessionId(
+          input.sourcePath,
+          metadataOwnerSessionId,
+        );
+        if (safeSessionId !== null && ownerSessionId !== null && safeSessionId !== ownerSessionId) {
+          addWarning(
+            warnings,
+            `line ${sourceIndex + 1}: session metadata for a different rollout was ignored`,
+          );
+          continue;
+        }
+        if (safeSessionId !== null && metadataOwnerSessionId === null) {
+          metadataOwnerSessionId = safeSessionId;
+          meta.nativeSessionId = safeSessionId;
+        }
       }
+      hasMetadata = true;
       meta.cwd = safeCwd(asString(payload.cwd), sourceIndex, warnings) ?? meta.cwd;
       if (isRecord(payload.git)) {
         meta.gitBranch =
@@ -1264,10 +1288,10 @@ export function parseCodexRollout(input: ParseInput): ImportedSession {
         warnings,
       ) > 0
     ) {
-      lastOmittedAttachmentAt = normalizeTimestamp(line.timestamp) ?? lastOmittedAttachmentAt;
+      lastOmittedAttachmentAt = normalizeTimestamp(recordTimestamp) ?? lastOmittedAttachmentAt;
     }
 
-    const createdAt = normalizeTimestamp(line.timestamp);
+    const createdAt = normalizeTimestamp(recordTimestamp);
     if (createdAt === null) {
       addWarning(warnings, `line ${sourceIndex + 1}: invalid timestamp skipped`);
       continue;
@@ -1275,13 +1299,17 @@ export function parseCodexRollout(input: ParseInput): ImportedSession {
     if (type === "event_msg") {
       if (itemType === "user_message" || itemType === "agent_message") {
         const role = itemType === "user_message" ? "user" : "assistant";
-        const message = makeMessage(
-          role,
-          extractCodexMessageText(payload.message, `event ${itemType}`, sourceIndex, warnings),
-          createdAt,
+        const text = extractCodexMessageText(
+          payload.message,
+          `event ${itemType}`,
           sourceIndex,
           warnings,
         );
+        if (itemType === "user_message" && meta.title === null) {
+          const title = codexSemanticTitle(text);
+          meta.title = title === null ? null : truncate(title, maxMetadataCharacters);
+        }
+        const message = makeMessage(role, text, createdAt, sourceIndex, warnings);
         if (message !== null) {
           pushEventRecord(message);
         }
@@ -1534,7 +1562,7 @@ export function parseCodexRollout(input: ParseInput): ImportedSession {
     lastOmittedAttachmentAt,
     lastSourceIndex + 1,
   );
-  appendParsingWarningActivity(records, warnings, lastSourceIndex + 2);
+  appendParsingWarningActivity(records, warnings, lastSourceIndex + 2, pushImportedRecord);
   if (records.length > IMPORT_NORMALIZED_SESSION_MAX_RECORDS) {
     throw new NormalizedRecordLimitError();
   }

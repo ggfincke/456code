@@ -9,6 +9,7 @@ import * as NodePath from "node:path";
 
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 
 export { resolveOpenCodeStorageRoot } from "../provider/continuationIdentity.ts";
@@ -16,6 +17,7 @@ export { resolveOpenCodeStorageRoot } from "../provider/continuationIdentity.ts"
 import {
   type OpenCodeStoredFile,
   type OpenCodeStoredMessageBundle,
+  openCodeSessionIdentityStatus,
   parseOpenCodeSessionBundle,
 } from "./openCodeSessionParser.ts";
 import {
@@ -30,6 +32,7 @@ import {
   makeImportByteBudget,
   makeImportCountBudget,
   readBoundedUtf8File,
+  readBoundedUtf8FilePrefix,
   takeImportCount,
 } from "./resourceLimits.ts";
 import type { ImportedSession } from "./types.ts";
@@ -39,12 +42,24 @@ interface LoadedStoredFile extends OpenCodeStoredFile {
   readonly mtimeMs: number;
 }
 
+const decodeUnknownJsonString = Schema.decodeUnknownOption(Schema.UnknownFromJsonString);
+
 export interface LoadedOpenCodeSession {
   readonly session: ImportedSession;
   readonly contentHash: string;
   readonly modifiedAt: string;
   readonly sizeBytes: number;
   readonly fileCount: number;
+}
+
+export interface OpenCodeSessionCatalogMetadata {
+  readonly isSubagent: boolean;
+  readonly nativeSessionId: string;
+  readonly cwd: string | null;
+  readonly title: string | null;
+  readonly modifiedAt: string;
+  readonly resumable: boolean;
+  readonly warning: string | null;
 }
 
 export interface OpenCodeDiscoveryOptions {
@@ -77,6 +92,21 @@ export class OpenCodeStorageError extends Schema.TaggedErrorClass<OpenCodeStorag
 
 function isMissingPathError(error: unknown): boolean {
   return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function nonEmptyString(value: unknown): string | null {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+}
+
+function boundedCatalogText(value: string | null, maximumChars: number): string | null {
+  if (value === null) {
+    return null;
+  }
+  return value.length <= maximumChars ? value : `${value.slice(0, maximumChars - 1)}…`;
 }
 
 function errorDetail(error: unknown): string {
@@ -411,6 +441,92 @@ export const discoverOpenCodeSessionMetadataFiles = Effect.fn(
     }
   }
   return candidates;
+});
+
+export const readOpenCodeSessionCatalogMetadata = Effect.fn(
+  "OpenCodeStorage.readOpenCodeSessionCatalogMetadata",
+)(function* (sourcePath: string, validation: ImportSourceValidation) {
+  const canonicalSourcePath = validation.canonicalPath;
+  const nativeSessionId = NodePath.basename(canonicalSourcePath, ".json");
+  const prefix = yield* readBoundedUtf8FilePrefix(canonicalSourcePath, 64 * 1024, validation).pipe(
+    Effect.mapError(
+      (cause) =>
+        new OpenCodeStorageError({
+          operation: "read",
+          sourcePath,
+          detail: `Could not read OpenCode session metadata: ${errorDetail(cause)}`,
+          cause,
+        }),
+    ),
+  );
+  const fallbackModifiedAt = DateTime.formatIso(DateTime.makeUnsafe(prefix.mtimeMs));
+  if (prefix.truncated) {
+    return {
+      isSubagent: false,
+      nativeSessionId,
+      cwd: null,
+      title: null,
+      modifiedAt: fallbackModifiedAt,
+      resumable: false,
+      warning: "OpenCode session metadata exceeded the 64 KiB catalog probe",
+    } satisfies OpenCodeSessionCatalogMetadata;
+  }
+
+  const decoded = decodeUnknownJsonString(prefix.content);
+  if (Option.isNone(decoded)) {
+    return {
+      isSubagent: false,
+      nativeSessionId,
+      cwd: null,
+      title: null,
+      modifiedAt: fallbackModifiedAt,
+      resumable: false,
+      warning: "OpenCode session metadata is not valid JSON",
+    } satisfies OpenCodeSessionCatalogMetadata;
+  }
+  const parsed = decoded.value;
+  if (!isRecord(parsed)) {
+    return {
+      isSubagent: false,
+      nativeSessionId,
+      cwd: null,
+      title: null,
+      modifiedAt: fallbackModifiedAt,
+      resumable: false,
+      warning: "OpenCode session metadata is not a JSON object",
+    } satisfies OpenCodeSessionCatalogMetadata;
+  }
+
+  const storedSessionId = nonEmptyString(parsed.id);
+  const storedProjectId = nonEmptyString(parsed.projectID);
+  const enclosingProjectId = NodePath.basename(NodePath.dirname(canonicalSourcePath));
+  const identity = openCodeSessionIdentityStatus({
+    storedSessionId,
+    storedProjectId,
+    sessionId: nativeSessionId,
+    enclosingProjectId,
+  });
+  const time = isRecord(parsed.time) ? parsed.time : null;
+  const updatedAtMs =
+    typeof time?.updated === "number" && Number.isFinite(time.updated)
+      ? time.updated
+      : prefix.mtimeMs;
+  const updatedAt = DateTime.make(updatedAtMs).pipe(
+    Option.getOrElse(() => DateTime.makeUnsafe(prefix.mtimeMs)),
+  );
+  return {
+    isSubagent: nonEmptyString(parsed.parentID) !== null,
+    nativeSessionId,
+    cwd: boundedCatalogText(nonEmptyString(parsed.directory), 4_096),
+    title: boundedCatalogText(nonEmptyString(parsed.title), 512),
+    modifiedAt: DateTime.formatIso(updatedAt),
+    resumable: identity.valid,
+    warning: identity.valid
+      ? null
+      : !identity.sessionIdMatches
+        ? "OpenCode session id does not match the metadata filename"
+        : "OpenCode session project id does not match its enclosing storage directory",
+  } satisfies OpenCodeSessionCatalogMetadata;
 });
 
 export const loadOpenCodeSessionFromMetadata = Effect.fn(

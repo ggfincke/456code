@@ -80,15 +80,78 @@ describe("parseCodexRollout", () => {
       source: "codex-cli",
       sourcePath: "/home/test/.codex/sessions/rollout.jsonl",
       contentHash: "codex-hash",
-      nativeSessionId: "codex-session-1",
+      nativeSessionId: "019fab93-5678-7abc-8def-0123456789ab",
       cwd: "/workspace/latest",
       gitBranch: "feature/import",
       model: "gpt-5.4",
-      title: null,
+      title: "Fix the parser",
       firstActivityAt: "2026-01-02T03:04:08.000Z",
       lastActivityAt: "2026-01-02T03:04:12.000Z",
     });
     expect(session.records[0]?.createdAt).toBe("2026-01-02T03:04:08.000Z");
+  });
+
+  it("uses the semantic Codex request for the title without removing wrapper messages", () => {
+    const nativeSessionId = "019fab93-1234-7abc-8def-1234567890ab";
+    const sourcePath =
+      `/home/test/.codex/sessions/2026/07/29/` +
+      `rollout-2026-07-29T10-00-00-${nativeSessionId}.jsonl`;
+    const wrapper = [
+      "# Files mentioned by the user:",
+      "",
+      "## My request for Codex:",
+      "Import all provider sessions",
+    ].join("\n");
+    const content = [
+      {
+        timestamp: "2026-07-29T10:00:00Z",
+        type: "session_meta",
+        payload: { id: nativeSessionId, cwd: "/workspace" },
+      },
+      {
+        timestamp: "2026-07-29T10:00:01Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "<recommended_plugins>" }],
+        },
+      },
+      {
+        timestamp: "2026-07-29T10:00:02Z",
+        type: "event_msg",
+        payload: {
+          type: "user_message",
+          message: "<environment_context>Generated runtime metadata.</environment_context>",
+        },
+      },
+      {
+        timestamp: "2026-07-29T10:00:03Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: wrapper },
+      },
+      {
+        timestamp: "2026-07-29T10:00:04Z",
+        type: "event_msg",
+        payload: { type: "agent_message", message: "Imported." },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n");
+
+    const session = parseCodexRollout({ content, sourcePath, contentHash: "title-hash" });
+
+    expect(session.meta.title).toBe("Import all provider sessions");
+    expect(
+      session.records
+        .filter((record) => record.kind === "message")
+        .map((record) => `${record.role}:${record.text}`),
+    ).toEqual([
+      "user:<recommended_plugins>",
+      "user:<environment_context>Generated runtime metadata.</environment_context>",
+      `user:${wrapper}`,
+      "assistant:Imported.",
+    ]);
   });
 
   it("falls back to response_item messages when the event stream has none", () => {
@@ -103,6 +166,156 @@ describe("parseCodexRollout", () => {
       { kind: "message", role: "assistant", text: "Imported answer", sourceIndex: 2 },
     ]);
     expect(session.meta.model).toBeNull();
+  });
+
+  it("imports the legacy compact dialect without mixing wrapped rollout records", () => {
+    const nativeSessionId = "cdaa53f0-08fe-4544-b9e2-667699bc3a1f";
+    const sourcePath =
+      `/home/test/.codex/sessions/2025/08/25/` +
+      `rollout-2025-08-25T22-17-56-${nativeSessionId}.jsonl`;
+    const content = [
+      {
+        id: nativeSessionId,
+        timestamp: "2025-08-25T22:17:56.879Z",
+        instructions: "legacy instructions are metadata, not transcript text",
+        git: { branch: "legacy-import" },
+      },
+      { record_type: "state" },
+      {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "Import this legacy session" }],
+      },
+      {
+        type: "function_call",
+        name: "shell",
+        call_id: "legacy-call",
+        arguments: '{"command":"vp test"}',
+      },
+      {
+        type: "function_call_output",
+        call_id: "legacy-call",
+        output: "focused tests passed",
+      },
+      {
+        timestamp: "2025-08-25T22:17:57.000Z",
+        type: "response_item",
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "Do not duplicate this hybrid row" }],
+        },
+      },
+      {
+        type: "message",
+        role: "assistant",
+        content: [{ type: "output_text", text: "Legacy session imported" }],
+      },
+      { type: "legacy_unknown", private: "not retained" },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n");
+    const input = { content, sourcePath, contentHash: "legacy-compact-hash" };
+
+    const session = parseCodexRollout(input);
+
+    expect(session.meta).toEqual({
+      source: "codex-cli",
+      sourcePath,
+      contentHash: "legacy-compact-hash",
+      nativeSessionId,
+      cwd: null,
+      gitBranch: "legacy-import",
+      model: null,
+      title: null,
+      firstActivityAt: "2025-08-25T22:17:56.879Z",
+      lastActivityAt: "2025-08-25T22:17:56.882Z",
+    });
+    expect(
+      session.records.map((record) =>
+        record.kind === "message"
+          ? `${record.role}:${record.text}`
+          : `${record.activityKind}:${record.summary}`,
+      ),
+    ).toEqual([
+      "user:Import this legacy session",
+      "tool.completed:shell(...)",
+      "assistant:Legacy session imported",
+      "task.completed:Imported with 1 parsing warning",
+    ]);
+    expect(session.records.map((record) => record.sourceIndex)).toEqual([2, 3, 6, 9]);
+    expect(session.records.map((record) => record.createdAt)).toEqual([
+      "2025-08-25T22:17:56.879Z",
+      "2025-08-25T22:17:56.880Z",
+      "2025-08-25T22:17:56.881Z",
+      "2025-08-25T22:17:56.882Z",
+    ]);
+    expect(session.records[1]).toMatchObject({
+      kind: "activity",
+      payload: {
+        status: "completed",
+        detail: "focused tests passed",
+        data: {
+          toolCallId: "legacy-call",
+          command: "vp test",
+          rawOutput: { content: "focused tests passed" },
+        },
+      },
+    });
+    expect(session.warnings).toEqual(['unknown response item type "legacy_unknown" skipped']);
+    expect(JSON.stringify(session)).not.toContain("Do not duplicate this hybrid row");
+    expect(JSON.stringify(session)).not.toContain("legacy instructions are metadata");
+    expect(JSON.stringify(session)).not.toContain("not retained");
+    expect(parseCodexRollout(input)).toEqual(session);
+  });
+
+  it("keeps canonical rollout identity and metadata when parent metadata is embedded later", () => {
+    const childSessionId = "019fab93-1234-7abc-8def-1234567890ab";
+    const parentSessionId = "019faacd-fe92-7fe0-a7a8-0bb220c0e893";
+    const sourcePath = `/home/test/.codex/sessions/2026/07/28/rollout-2026-07-28T20-00-00-${childSessionId}.jsonl`;
+    const content = [
+      {
+        timestamp: "2026-07-28T20:00:00Z",
+        type: "session_meta",
+        payload: {
+          id: childSessionId,
+          cwd: "/workspace/child",
+          git: { branch: "child-branch" },
+        },
+      },
+      {
+        timestamp: "2026-07-28T20:00:01Z",
+        type: "session_meta",
+        payload: {
+          id: parentSessionId,
+          cwd: "/workspace/parent",
+          git: { branch: "parent-branch" },
+        },
+      },
+      {
+        timestamp: "2026-07-28T20:00:02Z",
+        type: "event_msg",
+        payload: { type: "user_message", message: "Run the delegated task" },
+      },
+    ]
+      .map((record) => JSON.stringify(record))
+      .join("\n");
+
+    const session = parseCodexRollout({
+      content,
+      sourcePath,
+      contentHash: "child-agent-rollout-hash",
+    });
+
+    expect(session.meta).toMatchObject({
+      sourcePath,
+      nativeSessionId: childSessionId,
+      cwd: "/workspace/child",
+      gitBranch: "child-branch",
+    });
+    expect(session.warnings).toContain(
+      "line 2: session metadata for a different rollout was ignored",
+    );
   });
 
   it("silently omits current Codex developer and system response messages", () => {
@@ -1115,7 +1328,7 @@ describe("parseCodexRollout", () => {
   it("rejects JSONL beyond the hard physical-line cap", () => {
     expect(() =>
       parseCodexRollout({
-        content: `${"{}\n".repeat(50_000)}{}`,
+        content: `${"{}\n".repeat(100_000)}{}`,
         sourcePath: "/too-many-lines.jsonl",
         contentHash: "too-many-lines-hash",
       }),

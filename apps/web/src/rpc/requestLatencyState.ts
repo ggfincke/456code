@@ -1,5 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
-import { WS_METHODS } from "@t3tools/contracts";
+import { ORCHESTRATION_WS_METHODS, WS_METHODS } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
 import { appAtomRegistry } from "./atomRegistry";
@@ -22,7 +22,10 @@ interface PendingRpcAckRequest {
 }
 
 const pendingRpcAckRequests = new Map<string, PendingRpcAckRequest>();
-const untrackedRpcAckTags = new Set<string>([WS_METHODS.previewAutomationConnect]);
+const untrackedRpcAckMethods = [
+  WS_METHODS.previewAutomationConnect,
+  ORCHESTRATION_WS_METHODS.importSessions,
+] as const;
 
 const slowRpcAckRequestsAtom = Atom.make<ReadonlyArray<SlowRpcAckRequest>>([]).pipe(
   Atom.keepAlive,
@@ -38,7 +41,10 @@ function getSlowRpcAckRequestsValue(): ReadonlyArray<SlowRpcAckRequest> {
 }
 
 function shouldTrackRpcAck(tag: string): boolean {
-  return !tag.includes("subscribe") && !untrackedRpcAckTags.has(tag);
+  return (
+    !tag.includes("subscribe") &&
+    !untrackedRpcAckMethods.some((method) => tag === method || tag.startsWith(`${method} · `))
+  );
 }
 
 export function getSlowRpcAckRequests(): ReadonlyArray<SlowRpcAckRequest> {

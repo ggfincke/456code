@@ -134,6 +134,10 @@ function sizedAcpSession(input: {
 
 function runImport(input: {
   readonly sourcePath: string;
+  readonly sourcePaths?: ReadonlyArray<string>;
+  readonly source?: Extract<ImportSource, "codex-cli" | "claude-code">;
+  readonly scanRoot?: string;
+  readonly sourceLayout?: ImportFileSourceDescriptor["layout"];
   readonly existingThreadId?: ThreadId;
   readonly existingContentHash?: string;
   readonly existingArchived?: boolean;
@@ -150,6 +154,7 @@ function runImport(input: {
   readonly deleteProjectBeforeFirstThreadCreate?: boolean;
   readonly maximumRequestBytes?: number;
   readonly maximumRequestRecords?: number;
+  readonly resolveImportWorkspaceRoot?: ImportServiceDepsShape["resolveImportWorkspaceRoot"];
 }) {
   const commands: OrchestrationCommand[] = [];
   const continuations: ContinuationRequest[] = [];
@@ -157,19 +162,24 @@ function runImport(input: {
     readonly requestedInstanceId: ProviderInstanceId | null;
     readonly compatibleInstanceIds: ReadonlyArray<ProviderInstanceId>;
   }> = [];
-  const defaultInstanceId = ProviderInstanceId.make("codex");
+  const source = input.source ?? "codex-cli";
+  const driverKind = ProviderDriverKind.make(source === "codex-cli" ? "codex" : "claudeAgent");
+  const defaultInstanceId = ProviderInstanceId.make(source === "codex-cli" ? "codex" : "claude");
   const compatibleInstanceIds = input.compatibleInstanceIds ?? [defaultInstanceId];
   const inferredScanRoot = NodePath.resolve(NodePath.dirname(input.sourcePath), "..", "..", "..");
-  const scanRoot = NodePath.basename(inferredScanRoot).startsWith("456code-import-service-")
-    ? inferredScanRoot
-    : NodeOS.tmpdir();
+  const scanRoot =
+    input.scanRoot ??
+    (NodePath.basename(inferredScanRoot).startsWith("456code-import-service-")
+      ? inferredScanRoot
+      : NodeOS.tmpdir());
   const sourceDescriptors: ImportFileSourceDescriptor[] = compatibleInstanceIds.map(
     (providerInstanceId) => ({
-      source: "codex-cli",
-      driverKind: ProviderDriverKind.make("codex"),
+      source,
+      driverKind,
       providerInstanceId,
       scanRoot,
-      continuationIdentity: fileContinuationIdentity(ProviderDriverKind.make("codex"), scanRoot),
+      ...(input.sourceLayout === undefined ? {} : { layout: input.sourceLayout }),
+      continuationIdentity: fileContinuationIdentity(driverKind, scanRoot),
     }),
   );
   let activeProjectId = input.existingProjectId ?? null;
@@ -234,6 +244,9 @@ function runImport(input: {
         findProjectByWorkspaceRoot: () => Effect.succeed(activeProjectId),
         isImportFinalized: () => Effect.succeed(input.existingFinalized ?? true),
         normalizeWorkspaceRoot: (root) => Effect.succeed(root),
+        ...(input.resolveImportWorkspaceRoot === undefined
+          ? {}
+          : { resolveImportWorkspaceRoot: input.resolveImportWorkspaceRoot }),
         resolveImportTarget: (_driver, requestedInstanceId, compatibleIds) =>
           Effect.sync(() => {
             targetResolutions.push({
@@ -286,9 +299,12 @@ function runImport(input: {
     Effect.flatMap((service) =>
       Effect.gen(function* () {
         const result = yield* service.importSessions({
-          items: Array.from({ length: input.itemCount ?? 1 }, () => ({
-            source: "codex-cli",
-            sourcePath: input.sourcePath,
+          items: (
+            input.sourcePaths ??
+            Array.from({ length: input.itemCount ?? 1 }, () => input.sourcePath)
+          ).map((sourcePath) => ({
+            source,
+            sourcePath,
             providerInstanceId:
               input.providerInstanceId === undefined ? defaultInstanceId : input.providerInstanceId,
           })),
@@ -621,19 +637,65 @@ describe("ImportService", () => {
     }),
   );
 
-  it.effect("rejects oversized direct imports before parsing or dispatch", () =>
+  it.effect("imports selected files beyond the former 25 MiB ceiling", () =>
+    Effect.gen(function* () {
+      const sourcePath = yield* Effect.promise(() => temporaryFile(`${rollout(1)}\n`));
+      yield* Effect.promise(() => NodeFSP.truncate(sourcePath, 25 * 1024 * 1024 + 1));
+      const run = yield* runImport({ sourcePath });
+
+      expect(run.result.failed).toEqual([]);
+      expect(run.result.imported).toEqual([
+        expect.objectContaining({
+          sourcePath,
+          messageCount: 1,
+        }),
+      ]);
+    }),
+  );
+
+  it.effect("rejects selected files beyond the 256 MiB peak-memory ceiling", () =>
     Effect.gen(function* () {
       const sourcePath = yield* Effect.promise(() => temporaryFile(""));
-      yield* Effect.promise(() => NodeFSP.truncate(sourcePath, 25 * 1024 * 1024 + 1));
+      yield* Effect.promise(() => NodeFSP.truncate(sourcePath, 256 * 1024 * 1024 + 1));
       const run = yield* runImport({ sourcePath });
 
       expect(run.commands).toEqual([]);
       expect(run.result.failed).toEqual([
         expect.objectContaining({
           sourcePath,
-          message: expect.stringContaining("file exceeds 26214400 bytes"),
+          message: expect.stringContaining("file exceeds 268435456 bytes"),
         }),
       ]);
+    }),
+  );
+
+  it.effect("applies raw and normalized budgets independently to each selected file", () =>
+    Effect.gen(function* () {
+      const directory = yield* Effect.promise(() => temporaryDirectory());
+      const sessionDirectory = NodePath.join(directory, "2026", "01", "01");
+      const firstPath = NodePath.join(sessionDirectory, "rollout-first.jsonl");
+      const secondPath = NodePath.join(sessionDirectory, "rollout-second.jsonl");
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(sessionDirectory, { recursive: true });
+        await Promise.all([
+          NodeFSP.writeFile(
+            firstPath,
+            `${rollout(1).replace('"id":"native"', '"id":"first"')}\n${" ".repeat(3_000)}`,
+          ),
+          NodeFSP.writeFile(
+            secondPath,
+            `${rollout(1).replace('"id":"native"', '"id":"second"')}\n${" ".repeat(3_000)}`,
+          ),
+        ]);
+      });
+      const run = yield* runImport({
+        sourcePath: firstPath,
+        sourcePaths: [firstPath, secondPath],
+        maximumRequestBytes: 4_096,
+      });
+
+      expect(run.result.failed).toEqual([]);
+      expect(run.result.imported).toHaveLength(2);
     }),
   );
 
@@ -784,6 +846,162 @@ describe("ImportService", () => {
           threadId: existingThreadId,
         },
       ]);
+    }),
+  );
+
+  it.effect("groups missing-workspace imports into one history-only project", () =>
+    Effect.gen(function* () {
+      const scanRoot = yield* Effect.promise(() => temporaryDirectory());
+      const sessionDirectory = NodePath.join(scanRoot, "2026", "01", "01");
+      const firstSourcePath = NodePath.join(sessionDirectory, "rollout-first.jsonl");
+      const secondSourcePath = NodePath.join(sessionDirectory, "rollout-second.jsonl");
+      const firstWorkspaceRoot = NodePath.join(scanRoot, "missing", "first");
+      const secondWorkspaceRoot = NodePath.join(scanRoot, "missing", "second");
+      const holdingWorkspaceRoot = NodePath.join(scanRoot, "state", "imported-history");
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(sessionDirectory, { recursive: true });
+        await Promise.all([
+          NodeFSP.writeFile(
+            firstSourcePath,
+            rollout(1, firstWorkspaceRoot).replace('"id":"native"', '"id":"native-first"'),
+          ),
+          NodeFSP.writeFile(
+            secondSourcePath,
+            rollout(1, secondWorkspaceRoot).replace('"id":"native"', '"id":"native-second"'),
+          ),
+        ]);
+      });
+
+      const run = yield* runImport({
+        sourcePath: firstSourcePath,
+        sourcePaths: [firstSourcePath, secondSourcePath],
+        scanRoot,
+        resolveImportWorkspaceRoot: (request) =>
+          Effect.succeed({
+            workspaceRoot: holdingWorkspaceRoot,
+            ...(request.recordedWorkspaceRoot === null
+              ? {}
+              : { originalWorkspaceRoot: request.recordedWorkspaceRoot }),
+          }),
+      });
+      const projectCreates = run.commands.filter((command) => command.type === "project.create");
+      const threadCreates = run.commands.filter((command) => command.type === "thread.create");
+
+      expect(run.result.failed).toEqual([]);
+      expect(run.result.imported).toHaveLength(2);
+      expect(projectCreates).toHaveLength(1);
+      expect(projectCreates[0]).toMatchObject({
+        title: "Imported history",
+        workspaceRoot: holdingWorkspaceRoot,
+      });
+      expect(new Set(threadCreates.map((command) => command.projectId))).toEqual(
+        new Set([projectCreates[0]?.projectId]),
+      );
+      expect(threadCreates.map((command) => command.origin?.originalWorkspaceRoot)).toEqual([
+        firstWorkspaceRoot,
+        secondWorkspaceRoot,
+      ]);
+      expect(run.continuations).toEqual([]);
+      expect(run.result.imported.map((item) => item.continuation)).toEqual([
+        expect.objectContaining({
+          state: "history-only",
+          reason: "the original workspace is unavailable",
+        }),
+        expect.objectContaining({
+          state: "history-only",
+          reason: "the original workspace is unavailable",
+        }),
+      ]);
+    }),
+  );
+
+  it.effect("imports Codex archive rollouts by native id without binding continuation", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => temporaryDirectory());
+      const archiveRoot = NodePath.join(root, "archived_sessions");
+      const sourcePath = NodePath.join(
+        archiveRoot,
+        "rollout-2026-01-01T00-00-00-123e4567-e89b-12d3-a456-426614174000.jsonl",
+      );
+      const nativeSessionId = "123e4567-e89b-12d3-a456-426614174000";
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(archiveRoot, { recursive: true });
+        await NodeFSP.writeFile(
+          sourcePath,
+          rollout(1).replace('"id":"native"', `"id":"${nativeSessionId}"`),
+        );
+      });
+      const canonicalSourcePath = yield* Effect.promise(() => NodeFSP.realpath(sourcePath));
+
+      const run = yield* runImport({
+        sourcePath,
+        scanRoot: archiveRoot,
+        sourceLayout: "codex-archive",
+      });
+      const threadCreate = run.commands.find((command) => command.type === "thread.create");
+
+      expect(run.result.failed).toEqual([]);
+      expect(run.continuations).toEqual([]);
+      expect(threadCreate?.origin).toMatchObject({
+        source: "codex-cli",
+        sourcePath: canonicalSourcePath,
+        nativeSessionId,
+      });
+      expect(run.result.imported[0]?.continuation).toEqual({
+        state: "history-only",
+        providerInstanceId: ProviderInstanceId.make("codex"),
+        continuationIdentity: null,
+        reason: "the source is not resumable",
+      });
+    }),
+  );
+
+  it.effect("rejects Claude child transcripts at the service boundary", () =>
+    Effect.gen(function* () {
+      const scanRoot = yield* Effect.promise(() => temporaryDirectory());
+      const parentSessionId = "123e4567-e89b-12d3-a456-426614174000";
+      const subagentsRoot = NodePath.join(scanRoot, "workspace", parentSessionId, "subagents");
+      const firstPath = NodePath.join(subagentsRoot, "agent-first.jsonl");
+      const secondPath = NodePath.join(subagentsRoot, "agent-second.jsonl");
+      const childTranscript = (agentId: string, text: string) =>
+        JSON.stringify({
+          type: "user",
+          uuid: `child-${agentId}`,
+          parentUuid: null,
+          sessionId: parentSessionId,
+          agentId,
+          isSidechain: true,
+          cwd: "/workspace/imported",
+          timestamp: "2026-01-01T00:00:00Z",
+          message: { content: text },
+        });
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(subagentsRoot, { recursive: true });
+        await Promise.all([
+          NodeFSP.writeFile(firstPath, childTranscript("first", "First child task")),
+          NodeFSP.writeFile(secondPath, childTranscript("second", "Second child task")),
+        ]);
+      });
+
+      const run = yield* runImport({
+        source: "claude-code",
+        sourcePath: firstPath,
+        sourcePaths: [firstPath, secondPath],
+        scanRoot,
+      });
+
+      expect(run.commands).toEqual([]);
+      expect(run.continuations).toEqual([]);
+      expect(run.result.imported).toEqual([]);
+      expect(run.result.failed.map((failure) => failure.sourcePath)).toEqual([
+        firstPath,
+        secondPath,
+      ]);
+      for (const failure of run.result.failed) {
+        expect(failure.message).toContain(
+          "the file does not use a recognized session transcript layout",
+        );
+      }
     }),
   );
 
@@ -1312,8 +1530,10 @@ describe("ImportService", () => {
   it.effect("does not append a history-only marker when a different binding was preserved", () =>
     Effect.gen(function* () {
       const sourcePath = yield* Effect.promise(() => temporaryFile(rollout(1)));
+      const existingThreadId = ThreadId.make("finalized-existing-thread");
       const run = yield* runImport({
         sourcePath,
+        existingThreadId,
         continuationOutcome: {
           state: "history-only",
           providerInstanceId: ProviderInstanceId.make("codex"),
@@ -1326,12 +1546,41 @@ describe("ImportService", () => {
         [],
       );
       expect(run.commands.filter((command) => command.type === "thread.meta.update")).toEqual([]);
-      expect(run.result.imported[0]?.continuation).toEqual({
-        state: "history-only",
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        continuationIdentity: null,
-        reason: IMPORT_CONTINUATION_PRESERVED_BINDING_REASON,
+      expect(run.result.skipped).toEqual([
+        {
+          sourcePath,
+          reason: "already imported",
+          threadId: existingThreadId,
+        },
+      ]);
+    }),
+  );
+
+  it.effect("finalizes an incomplete import when a different binding was preserved", () =>
+    Effect.gen(function* () {
+      const sourcePath = yield* Effect.promise(() => temporaryFile(rollout(1)));
+      const run = yield* runImport({
+        sourcePath,
+        existingThreadId: ThreadId.make("incomplete-existing-thread"),
+        existingFinalized: false,
+        continuationOutcome: {
+          state: "history-only",
+          providerInstanceId: ProviderInstanceId.make("codex"),
+          continuationIdentity: null,
+          reason: IMPORT_CONTINUATION_PRESERVED_BINDING_REASON,
+        },
       });
+
+      expect(
+        run.commands.filter((command) => command.type === "thread.activity.append"),
+      ).toHaveLength(1);
+      expect(run.result.skipped).toEqual([
+        {
+          sourcePath,
+          reason: "already imported",
+          threadId: ThreadId.make("incomplete-existing-thread"),
+        },
+      ]);
     }),
   );
 
@@ -1853,7 +2102,7 @@ describe("ImportService", () => {
     }),
   );
 
-  it.effect("rejects aggregate normalized record amplification before dispatch", () =>
+  it.effect("rejects per-session normalized record amplification before dispatch", () =>
     Effect.gen(function* () {
       const providerInstanceId = ProviderInstanceId.make("cursor-record-limit");
       const sourcePath = "acp://cursor/cursor-record-limit/record-heavy";
@@ -2082,6 +2331,41 @@ describe("ImportService", () => {
       expect(run.result.skipped[0]).toMatchObject({
         reason: "no cwd recorded",
         threadId: null,
+      });
+    }),
+  );
+
+  it.effect("groups sessions without recorded cwd in the imported-history project", () =>
+    Effect.gen(function* () {
+      const holdingWorkspaceRoot = "/state/imported-history";
+      const sourcePath = yield* Effect.promise(() =>
+        temporaryFile(
+          [
+            '{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"native"}}',
+            '{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"hello"}}',
+          ].join("\n"),
+        ),
+      );
+      const run = yield* runImport({
+        sourcePath,
+        resolveImportWorkspaceRoot: (request) => {
+          expect(request.recordedWorkspaceRoot).toBeNull();
+          return Effect.succeed({ workspaceRoot: holdingWorkspaceRoot });
+        },
+      });
+
+      expect(run.result.failed).toEqual([]);
+      expect(run.result.imported).toHaveLength(1);
+      expect(run.commands.find((command) => command.type === "project.create")).toMatchObject({
+        title: "Imported history",
+        workspaceRoot: holdingWorkspaceRoot,
+      });
+      expect(
+        run.commands.find((command) => command.type === "thread.create")?.origin,
+      ).not.toHaveProperty("originalWorkspaceRoot");
+      expect(run.result.imported[0]?.continuation).toMatchObject({
+        state: "history-only",
+        reason: "the original workspace was not recorded",
       });
     }),
   );

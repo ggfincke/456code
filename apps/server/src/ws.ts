@@ -8,6 +8,7 @@ import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Path from "effect/Path";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -38,6 +39,7 @@ import {
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamEvent,
   type OrchestrationShellStreamItem,
+  type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetSnapshotError,
@@ -120,7 +122,7 @@ import * as ImportSessions from "./import/importService.ts";
 import {
   AcpImportError,
   loadAcpImportSessionsBatch,
-  scanAndLoadAcpImportCatalog,
+  scanAcpImportCatalog,
 } from "./import/acpImport.ts";
 import { partitionAcpImportBytePolicy } from "./import/resourceLimits.ts";
 import { resolveAcpImportSourceCatalog, resolveSourceCatalog } from "./import/sourceCatalog.ts";
@@ -184,6 +186,8 @@ const RELAY_CLIENT_UNAVAILABLE_STATUS = {
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 const EDITOR_DISCOVERY_TIMEOUT = Duration.seconds(5);
+// leave room for catalog setup and the service's structured timeout result
+const IMPORT_RPC_ENVELOPE_DEADLINE_MS = ImportSessions.IMPORT_REQUEST_DEADLINE_MS + 30_000;
 
 export const resolveAvailableEditorsForConfig = <A, E, R>(
   discovery: Effect.Effect<ReadonlyArray<A>, E, R>,
@@ -195,7 +199,7 @@ export const resolveAvailableEditorsForConfig = <A, E, R>(
 
 interface ImportedThreadShellIndex {
   readonly find: (
-    lookup: ImportSessions.ImportedThreadLookup,
+    lookup: Omit<ImportSessions.ImportedThreadLookup, "contentHash">,
   ) => ImportSessions.ImportedThreadMatch | null;
   readonly findById: (threadId: ThreadId) => ImportSessions.ImportedThreadMatch | null;
   readonly addThread: (
@@ -217,16 +221,22 @@ function importedNativeSessionKey(
 }
 
 function makeImportedThreadShellIndex(
-  activeSnapshot: OrchestrationShellSnapshot,
-  archivedSnapshot: OrchestrationShellSnapshot,
+  context: ProjectionSnapshotQuery.ProjectionImportReconciliationContext,
 ): ImportedThreadShellIndex {
   const bySourcePath = new Map<string, ImportSessions.ImportedThreadMatch>();
   const byNativeSession = new Map<string, ImportSessions.ImportedThreadMatch>();
   const byThreadId = new Map<ThreadId, ImportSessions.ImportedThreadMatch>();
-  const addThread: ImportedThreadShellIndex["addThread"] = (thread, archived) => {
-    if (thread.origin === null) {
-      return;
-    }
+  const projectWorkspaceRoots = new Map(
+    context.projects.map((project) => [project.projectId, project.workspaceRoot]),
+  );
+  const addMatch = (thread: {
+    readonly id: ThreadId;
+    readonly projectId: ProjectId;
+    readonly modelSelection: OrchestrationThreadDetailSnapshot["thread"]["modelSelection"];
+    readonly origin: NonNullable<OrchestrationThreadDetailSnapshot["thread"]["origin"]>;
+    readonly archived: boolean;
+  }) => {
+    const workspaceRoot = projectWorkspaceRoots.get(thread.projectId);
     const match = {
       threadId: thread.id,
       projectId: thread.projectId,
@@ -236,7 +246,11 @@ function makeImportedThreadShellIndex(
       nativeSessionId: thread.origin.nativeSessionId,
       providerInstanceId: thread.origin.providerInstanceId,
       modelSelection: thread.modelSelection,
-      archived,
+      archived: thread.archived,
+      ...(workspaceRoot === undefined ? {} : { workspaceRoot }),
+      ...(thread.origin.originalWorkspaceRoot === undefined
+        ? {}
+        : { originalWorkspaceRoot: thread.origin.originalWorkspaceRoot }),
     } satisfies ImportSessions.ImportedThreadMatch;
     byThreadId.set(thread.id, match);
     const sourcePathKey = importedSourcePathKey(thread.origin.source, thread.origin.sourcePath);
@@ -254,11 +268,39 @@ function makeImportedThreadShellIndex(
       }
     }
   };
-  for (const thread of activeSnapshot.threads) {
-    addThread(thread, false);
+  const addThread: ImportedThreadShellIndex["addThread"] = (thread, archived) => {
+    if (thread.origin === null) {
+      return;
+    }
+    addMatch({
+      id: thread.id,
+      projectId: thread.projectId,
+      modelSelection: thread.modelSelection,
+      origin: thread.origin,
+      archived,
+    });
+  };
+  for (const thread of context.threads) {
+    if (!thread.archived) {
+      addMatch({
+        id: thread.threadId,
+        projectId: thread.projectId,
+        modelSelection: thread.modelSelection,
+        origin: thread.origin,
+        archived: false,
+      });
+    }
   }
-  for (const thread of archivedSnapshot.threads) {
-    addThread(thread, true);
+  for (const thread of context.threads) {
+    if (thread.archived) {
+      addMatch({
+        id: thread.threadId,
+        projectId: thread.projectId,
+        modelSelection: thread.modelSelection,
+        origin: thread.origin,
+        archived: true,
+      });
+    }
   }
   return {
     addThread,
@@ -435,12 +477,12 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
 
 const PROVIDER_STATUS_DEBOUNCE_MS = 200;
 
-// When a resuming client's cursor is more than this many events behind the
-// current head, skip the per-event catch-up replay and send a fresh shell
-// snapshot instead. Replaying each intervening event costs a shell refetch;
-// past this gap a single O(active-threads) snapshot is cheaper and bounded.
-// Matches the event store's default page size (DEFAULT_READ_FROM_SEQUENCE_LIMIT).
-const SHELL_RESUME_MAX_GAP = 1_000;
+// when a resuming client's cursor is more than this many events behind the
+// current head, skip the per-event catch-up replay and send a fresh snapshot
+// instead. this keeps both shell refetches and per-thread global event scans
+// bounded by the event store's default page size.
+// matches the event store's default page size (DEFAULT_READ_FROM_SEQUENCE_LIMIT).
+const RESUME_MAX_EVENT_GAP = 1_000;
 
 const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [ORCHESTRATION_WS_METHODS.dispatchCommand, AuthOrchestrationOperateScope],
@@ -602,6 +644,7 @@ const makeWsRpcLayer = (
       const workspacePaths = yield* WorkspacePaths.WorkspacePaths;
       const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries;
       const workspaceFileSystem = yield* WorkspaceFileSystem.WorkspaceFileSystem;
+      const path = yield* Path.Path;
       const proposalService = yield* ProposalService.ProposalService;
       const proposalGenerationService = yield* ProposalGenerationService.ProposalGenerationService;
       const proposalImplementationAttemptService =
@@ -1503,7 +1546,7 @@ const makeWsRpcLayer = (
                 // is also invalid, so reset it with a snapshot. Send the snapshot
                 // followed by the buffered live tail, exactly as the
                 // no-afterSequence path does.
-                if (replayGap < 0 || replayGap > SHELL_RESUME_MAX_GAP) {
+                if (replayGap < 0 || replayGap > RESUME_MAX_EVENT_GAP) {
                   const snapshot = yield* loadSnapshot;
                   return Stream.concat(
                     Stream.make({ kind: "snapshot" as const, snapshot }),
@@ -1544,31 +1587,27 @@ const makeWsRpcLayer = (
             ORCHESTRATION_WS_METHODS.importScan,
             Effect.gen(function* () {
               const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-              const [snapshot, archivedSnapshot, settings] = yield* Effect.all([
-                projectionSnapshotQuery.getShellSnapshot(),
-                projectionSnapshotQuery.getArchivedShellSnapshot(),
+              const [reconciliationContext, settings] = yield* Effect.all([
+                projectionSnapshotQuery.getImportReconciliationContext(),
                 serverSettings.getSettings,
               ]);
-              const importedThreadIndex = makeImportedThreadShellIndex(snapshot, archivedSnapshot);
+              const importedThreadIndex = makeImportedThreadShellIndex(reconciliationContext);
               const discovery = yield* ImportDiscovery.make.pipe(
                 Effect.provideService(
                   ImportDiscovery.ImportDiscoveryDeps,
                   ImportDiscovery.ImportDiscoveryDeps.of({
-                    findThreadByContentHash: (lookup) =>
+                    findImportedThread: (lookup) =>
                       Effect.succeed(importedThreadIndex.find(lookup)),
                     findProjectByWorkspaceRoot: (normalizedRoot) =>
                       Effect.succeed(
-                        snapshot.projects.find(
+                        reconciliationContext.projects.find(
                           (project) => project.workspaceRoot === normalizedRoot,
-                        )?.id ?? null,
+                        )?.projectId ?? null,
                       ),
                     normalizeWorkspaceRoot: (workspaceRoot) =>
                       workspacePaths.normalizeWorkspaceRoot(workspaceRoot),
-                    scanAcpSource: (descriptor, maximumSessionsToLoad) =>
-                      scanAndLoadAcpImportCatalog(
-                        descriptor.connection,
-                        maximumSessionsToLoad,
-                      ).pipe(
+                    scanAcpSource: (descriptor) =>
+                      scanAcpImportCatalog(descriptor.connection).pipe(
                         Effect.provideService(
                           ChildProcessSpawner.ChildProcessSpawner,
                           childProcessSpawner,
@@ -1618,31 +1657,25 @@ const makeWsRpcLayer = (
               );
               const fallbackModelSelection =
                 ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection();
-              let [activeImportSnapshot, archivedImportSnapshot] = yield* Effect.all([
-                projectionSnapshotQuery.getShellSnapshot(),
-                projectionSnapshotQuery.getArchivedShellSnapshot(),
-              ]);
-              let importedThreadIndex = makeImportedThreadShellIndex(
-                activeImportSnapshot,
-                archivedImportSnapshot,
-              );
+              const importedHistoryWorkspaceRoot = path.join(config.stateDir, "imported-history");
+              let importReconciliationContext =
+                yield* projectionSnapshotQuery.getImportReconciliationContext();
+              let importedThreadIndex = makeImportedThreadShellIndex(importReconciliationContext);
               let importedProjectByWorkspaceRoot = new Map(
-                activeImportSnapshot.projects.map((project) => [project.workspaceRoot, project.id]),
+                importReconciliationContext.projects.map((project) => [
+                  project.workspaceRoot,
+                  project.projectId,
+                ]),
               );
               let importedThreadIndexDirty = false;
               const refreshImportedThreadIndex = Effect.gen(function* () {
-                [activeImportSnapshot, archivedImportSnapshot] = yield* Effect.all([
-                  projectionSnapshotQuery.getShellSnapshot(),
-                  projectionSnapshotQuery.getArchivedShellSnapshot(),
-                ]);
-                importedThreadIndex = makeImportedThreadShellIndex(
-                  activeImportSnapshot,
-                  archivedImportSnapshot,
-                );
+                importReconciliationContext =
+                  yield* projectionSnapshotQuery.getImportReconciliationContext();
+                importedThreadIndex = makeImportedThreadShellIndex(importReconciliationContext);
                 importedProjectByWorkspaceRoot = new Map(
-                  activeImportSnapshot.projects.map((project) => [
+                  importReconciliationContext.projects.map((project) => [
                     project.workspaceRoot,
-                    project.id,
+                    project.projectId,
                   ]),
                 );
                 importedThreadIndexDirty = false;
@@ -1746,25 +1779,53 @@ const makeWsRpcLayer = (
                             ),
                       ),
                     isImportFinalized: (threadId) =>
-                      projectionSnapshotQuery.getSnapshot().pipe(
-                        Effect.map((snapshot) => {
-                          const thread = snapshot.threads.find(
-                            (candidate) =>
-                              candidate.id === threadId && candidate.deletedAt === null,
-                          );
-                          return (
-                            thread?.activities.some(
-                              (activity) =>
-                                typeof activity.payload === "object" &&
-                                activity.payload !== null &&
-                                "type" in activity.payload &&
-                                activity.payload.type === "import.continuation",
-                            ) ?? false
-                          );
-                        }),
-                      ),
+                      projectionSnapshotQuery.isThreadImportFinalized(threadId),
                     normalizeWorkspaceRoot: (workspaceRoot) =>
                       workspacePaths.normalizeWorkspaceRoot(workspaceRoot),
+                    resolveImportWorkspaceRoot: (request) => {
+                      if (request.recordedWorkspaceRoot === null) {
+                        return workspacePaths
+                          .normalizeWorkspaceRoot(importedHistoryWorkspaceRoot, {
+                            createIfMissing: true,
+                          })
+                          .pipe(Effect.map((workspaceRoot) => ({ workspaceRoot })));
+                      }
+                      if (request.originalWorkspaceRoot !== undefined) {
+                        if (request.existingWorkspaceRoot === undefined) {
+                          return Effect.fail(
+                            new OrchestrationDispatchCommandError({
+                              message:
+                                "The imported thread project is missing its selected workspace root",
+                            }),
+                          );
+                        }
+                        return workspacePaths
+                          .normalizeWorkspaceRoot(request.existingWorkspaceRoot)
+                          .pipe(
+                            Effect.map((workspaceRoot) => ({
+                              workspaceRoot,
+                              originalWorkspaceRoot: request.originalWorkspaceRoot,
+                            })),
+                          );
+                      }
+                      return workspacePaths
+                        .normalizeWorkspaceRoot(request.recordedWorkspaceRoot)
+                        .pipe(
+                          Effect.map((workspaceRoot) => ({ workspaceRoot })),
+                          Effect.catchTag("WorkspaceRootNotExistsError", (missingWorkspace) =>
+                            workspacePaths
+                              .normalizeWorkspaceRoot(importedHistoryWorkspaceRoot, {
+                                createIfMissing: true,
+                              })
+                              .pipe(
+                                Effect.map((workspaceRoot) => ({
+                                  workspaceRoot,
+                                  originalWorkspaceRoot: missingWorkspace.normalizedWorkspaceRoot,
+                                })),
+                              ),
+                          ),
+                        );
+                    },
                     resolveImportTarget: (driver, requestedInstanceId, compatibleInstanceIds) => {
                       const compatibleIds = new Set(compatibleInstanceIds);
                       const eligibleProviders = providers.filter(
@@ -1874,13 +1935,13 @@ const makeWsRpcLayer = (
               );
               return yield* importService.importSessions(input);
             }).pipe(
-              Effect.timeoutOption(ImportSessions.IMPORT_REQUEST_DEADLINE_MS),
+              Effect.timeoutOption(IMPORT_RPC_ENVELOPE_DEADLINE_MS),
               Effect.flatMap(
                 Option.match({
                   onNone: () =>
                     Effect.fail(
                       new OrchestrationDispatchCommandError({
-                        message: `Session import initialization and execution exceeded ${ImportSessions.IMPORT_REQUEST_DEADLINE_MS}ms`,
+                        message: `Session import initialization and execution exceeded ${IMPORT_RPC_ENVELOPE_DEADLINE_MS}ms`,
                       }),
                     ),
                   onSome: Effect.succeed,
@@ -1933,6 +1994,34 @@ const makeWsRpcLayer = (
                 liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
               );
               const bufferedLiveStream = Stream.fromQueue(liveBuffer);
+              const loadSnapshot = projectionSnapshotQuery
+                .getThreadDetailSnapshot(input.threadId)
+                .pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new OrchestrationGetSnapshotError({
+                        message: `Failed to load thread ${input.threadId}`,
+                        cause,
+                      }),
+                  ),
+                );
+              const afterCatchUp =
+                input.requestCompletionMarker === true
+                  ? Stream.concat(
+                      Stream.fromEffect(
+                        Queue.offer(liveBuffer, { kind: "synchronized" as const }),
+                      ).pipe(Stream.drain),
+                      bufferedLiveStream,
+                    )
+                  : bufferedLiveStream;
+              const snapshotThenLive = (snapshot: OrchestrationThreadDetailSnapshot) =>
+                Stream.concat(
+                  Stream.make({
+                    kind: "snapshot" as const,
+                    snapshot: projectThreadDetailSnapshot(snapshot),
+                  }),
+                  afterCatchUp,
+                );
 
               // When the client already loaded the snapshot over HTTP it passes
               // that snapshot's sequence, and we resume the live subscription by
@@ -1947,51 +2036,41 @@ const makeWsRpcLayer = (
               // catch-up followed by the buffered/ongoing live events. Overlapping
               // events are deduped by sequence on the client.
               //
-              // Read the full range after the cursor (not the store's default
-              // page-bounded limit): the range is normally tiny (a fresh HTTP
-              // snapshot sequence) and the per-thread filter runs after reading,
-              // so a global cap could otherwise omit this thread's events.
+              // Bound the catch-up at the head captured before reading so it
+              // cannot chase a moving store. Stale or invalid cursors get a fresh
+              // detail snapshot instead of scanning the full global event history.
               if (input.afterSequence !== undefined) {
                 const afterSequence = input.afterSequence;
-                const catchUpStream = orchestrationEngine
-                  .readEvents(afterSequence, Number.MAX_SAFE_INTEGER)
-                  .pipe(
-                    Stream.filter(isThisThreadDetailEvent),
-                    Stream.map((event) => ({
-                      kind: "event" as const,
-                      event: projectActivityEvent(event),
-                    })),
-                    Stream.mapError(
-                      (cause) =>
-                        new OrchestrationGetSnapshotError({
-                          message: `Failed to replay thread ${input.threadId} events`,
-                          cause,
-                        }),
-                    ),
-                  );
-                const afterCatchUp =
-                  input.requestCompletionMarker === true
-                    ? Stream.concat(
-                        Stream.fromEffect(
-                          Queue.offer(liveBuffer, { kind: "synchronized" as const }),
-                        ).pipe(Stream.drain),
-                        bufferedLiveStream,
-                      )
-                    : bufferedLiveStream;
-                return Stream.concat(catchUpStream, afterCatchUp);
-              }
-
-              const snapshot = yield* projectionSnapshotQuery
-                .getThreadDetailSnapshot(input.threadId)
-                .pipe(
-                  Effect.mapError(
+                const headSequence = yield* orchestrationEngine.latestSequence;
+                const replayGap = headSequence - afterSequence;
+                if (replayGap < 0 || replayGap > RESUME_MAX_EVENT_GAP) {
+                  const snapshot = yield* loadSnapshot;
+                  if (Option.isNone(snapshot)) {
+                    return yield* new OrchestrationGetSnapshotError({
+                      message: `Thread ${input.threadId} was not found`,
+                      cause: input.threadId,
+                    });
+                  }
+                  return snapshotThenLive(snapshot.value);
+                }
+                const catchUpStream = orchestrationEngine.readEvents(afterSequence, replayGap).pipe(
+                  Stream.filter(isThisThreadDetailEvent),
+                  Stream.map((event) => ({
+                    kind: "event" as const,
+                    event: projectActivityEvent(event),
+                  })),
+                  Stream.mapError(
                     (cause) =>
                       new OrchestrationGetSnapshotError({
-                        message: `Failed to load thread ${input.threadId}`,
+                        message: `Failed to replay thread ${input.threadId} events`,
                         cause,
                       }),
                   ),
                 );
+                return Stream.concat(catchUpStream, afterCatchUp);
+              }
+
+              const snapshot = yield* loadSnapshot;
 
               if (Option.isNone(snapshot)) {
                 return yield* new OrchestrationGetSnapshotError({
@@ -1999,23 +2078,7 @@ const makeWsRpcLayer = (
                   cause: input.threadId,
                 });
               }
-
-              const afterSnapshot =
-                input.requestCompletionMarker === true
-                  ? Stream.concat(
-                      Stream.fromEffect(
-                        Queue.offer(liveBuffer, { kind: "synchronized" as const }),
-                      ).pipe(Stream.drain),
-                      bufferedLiveStream,
-                    )
-                  : bufferedLiveStream;
-              return Stream.concat(
-                Stream.make({
-                  kind: "snapshot" as const,
-                  snapshot: projectThreadDetailSnapshot(snapshot.value),
-                }),
-                afterSnapshot,
-              );
+              return snapshotThenLive(snapshot.value);
             }),
             { "rpc.aggregate": "orchestration" },
           ),

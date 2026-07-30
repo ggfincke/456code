@@ -4,7 +4,6 @@ import type { Dispatch, SetStateAction } from "react";
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import {
   EnvironmentId,
-  IMPORT_SESSIONS_MAX_ITEMS,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -115,7 +114,10 @@ vi.mock("~/state/use-atom-command", () => ({
     atom === operationAtoms.importScan ? testState.runScan : testState.runImport,
 }));
 
-import { useImportSessions } from "../../../../apps/web/src/hooks/useImportSessions";
+import {
+  IMPORT_SESSIONS_CLIENT_BATCH_SIZE,
+  useImportSessions,
+} from "../../../../apps/web/src/hooks/useImportSessions";
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -182,10 +184,10 @@ describe("useImportSessions environment guards", () => {
     expect(testState.runScan).not.toHaveBeenCalled();
   });
 
-  it("batches 101 selected sessions without exceeding the RPC limit and aggregates in order", async () => {
+  it("reports progress across bounded batches and aggregates in order", async () => {
     const providerInstanceId = ProviderInstanceId.make("codex");
     const items = Array.from(
-      { length: IMPORT_SESSIONS_MAX_ITEMS + 1 },
+      { length: IMPORT_SESSIONS_CLIENT_BATCH_SIZE + 1 },
       (_, index): ImportSessionsRequest["items"][number] => ({
         source: "codex-cli",
         sourcePath: `/tmp/session-${index}.jsonl`,
@@ -203,41 +205,60 @@ describe("useImportSessions environment guards", () => {
         candidates: [],
         errors: [],
         scannedAt: "2026-07-25T12:01:00.000Z",
+        truncated: false,
       },
     });
 
     const hook = renderHook();
     const importPromise = hook.importSelected({ items });
-    expect(renderHook().isImporting).toBe(true);
+    expect(renderHook()).toMatchObject({
+      isImporting: true,
+      importProgress: {
+        phase: "running",
+        total: IMPORT_SESSIONS_CLIENT_BATCH_SIZE + 1,
+        completed: 0,
+      },
+    });
     expect(testState.runImport).toHaveBeenCalledOnce();
     expect(testState.runImport.mock.calls[0]?.[0].input.items).toHaveLength(
-      IMPORT_SESSIONS_MAX_ITEMS,
+      IMPORT_SESSIONS_CLIENT_BATCH_SIZE,
     );
 
-    firstBatch.resolve(successfulImport(items.slice(0, IMPORT_SESSIONS_MAX_ITEMS)));
+    firstBatch.resolve(successfulImport(items.slice(0, IMPORT_SESSIONS_CLIENT_BATCH_SIZE)));
     await flushPromises();
     expect(testState.runImport).toHaveBeenCalledTimes(2);
     expect(testState.runImport.mock.calls[1]?.[0].input.items).toHaveLength(1);
-    expect(renderHook().isImporting).toBe(true);
+    expect(renderHook()).toMatchObject({
+      isImporting: true,
+      importProgress: {
+        phase: "running",
+        total: IMPORT_SESSIONS_CLIENT_BATCH_SIZE + 1,
+        completed: IMPORT_SESSIONS_CLIENT_BATCH_SIZE,
+        imported: IMPORT_SESSIONS_CLIENT_BATCH_SIZE,
+        skipped: 0,
+        failed: 0,
+      },
+    });
 
-    secondBatch.resolve(successfulImport(items.slice(IMPORT_SESSIONS_MAX_ITEMS)));
+    secondBatch.resolve(successfulImport(items.slice(IMPORT_SESSIONS_CLIENT_BATCH_SIZE)));
     const result = await importPromise;
     await flushPromises();
 
-    expect(result?.imported).toHaveLength(IMPORT_SESSIONS_MAX_ITEMS + 1);
+    expect(result?.imported).toHaveLength(IMPORT_SESSIONS_CLIENT_BATCH_SIZE + 1);
     expect(result?.imported.map((item) => item.sourcePath)).toEqual(
       items.map((item) => item.sourcePath),
     );
     expect(testState.runScan).toHaveBeenCalledOnce();
     const complete = renderHook();
     expect(complete.isImporting).toBe(false);
-    expect(complete.importResult?.imported).toHaveLength(IMPORT_SESSIONS_MAX_ITEMS + 1);
+    expect(complete.importProgress).toBeNull();
+    expect(complete.importResult?.imported).toHaveLength(IMPORT_SESSIONS_CLIENT_BATCH_SIZE + 1);
   });
 
   it("keeps an operation error and rescans after a later batch transport failure", async () => {
     const providerInstanceId = ProviderInstanceId.make("codex");
     const items = Array.from(
-      { length: IMPORT_SESSIONS_MAX_ITEMS + 1 },
+      { length: IMPORT_SESSIONS_CLIENT_BATCH_SIZE + 1 },
       (_, index): ImportSessionsRequest["items"][number] => ({
         source: "codex-cli",
         sourcePath: `/tmp/session-${index}.jsonl`,
@@ -245,7 +266,7 @@ describe("useImportSessions environment guards", () => {
       }),
     );
     testState.runImport
-      .mockResolvedValueOnce(successfulImport(items.slice(0, IMPORT_SESSIONS_MAX_ITEMS)))
+      .mockResolvedValueOnce(successfulImport(items.slice(0, IMPORT_SESSIONS_CLIENT_BATCH_SIZE)))
       .mockResolvedValueOnce({
         _tag: "Failure",
         cause: Cause.fail(new Error("second batch unavailable")),
@@ -256,6 +277,7 @@ describe("useImportSessions environment guards", () => {
         candidates: [],
         errors: [],
         scannedAt: "2026-07-25T12:01:00.000Z",
+        truncated: false,
       },
     });
 
@@ -266,6 +288,82 @@ describe("useImportSessions environment guards", () => {
     expect(testState.runImport).toHaveBeenCalledTimes(2);
     expect(testState.runScan).toHaveBeenCalledOnce();
     expect(renderHook().importError).toBe("second batch unavailable");
+  });
+
+  it("stops scheduling after the acknowledged batch and preserves partial results", async () => {
+    const providerInstanceId = ProviderInstanceId.make("codex");
+    const items = Array.from(
+      { length: IMPORT_SESSIONS_CLIENT_BATCH_SIZE + 1 },
+      (_, index): ImportSessionsRequest["items"][number] => ({
+        source: "codex-cli",
+        sourcePath: `/tmp/session-${index}.jsonl`,
+        providerInstanceId,
+      }),
+    );
+    const firstBatch = deferred<ReturnType<typeof successfulImport>>();
+    testState.runImport.mockReturnValueOnce(firstBatch.promise);
+    testState.runScan.mockResolvedValue({
+      _tag: "Success",
+      value: {
+        candidates: [],
+        errors: [],
+        scannedAt: "2026-07-25T12:01:00.000Z",
+        truncated: false,
+      },
+    });
+
+    const importPromise = renderHook().importSelected({ items });
+    renderHook().cancelImport();
+    expect(renderHook().importProgress?.phase).toBe("stopping");
+
+    firstBatch.resolve(successfulImport(items.slice(0, IMPORT_SESSIONS_CLIENT_BATCH_SIZE)));
+    await expect(importPromise).resolves.toBeNull();
+    await flushPromises();
+
+    expect(testState.runImport).toHaveBeenCalledOnce();
+    expect(testState.runScan).toHaveBeenCalledOnce();
+    expect(renderHook()).toMatchObject({
+      isImporting: false,
+      importProgress: {
+        phase: "cancelled",
+        total: IMPORT_SESSIONS_CLIENT_BATCH_SIZE + 1,
+        completed: IMPORT_SESSIONS_CLIENT_BATCH_SIZE,
+        imported: IMPORT_SESSIONS_CLIENT_BATCH_SIZE,
+      },
+    });
+    expect(renderHook().importResult?.imported).toHaveLength(IMPORT_SESSIONS_CLIENT_BATCH_SIZE);
+  });
+
+  it("rescans after a first-batch transport failure that may have persisted work", async () => {
+    testState.runImport.mockResolvedValue({
+      _tag: "Failure",
+      cause: Cause.fail(new Error("connection closed after dispatch")),
+    });
+    testState.runScan.mockResolvedValue({
+      _tag: "Success",
+      value: {
+        candidates: [],
+        errors: [],
+        scannedAt: "2026-07-25T12:01:00.000Z",
+        truncated: false,
+      },
+    });
+
+    await expect(
+      renderHook().importSelected({
+        items: [
+          {
+            source: "codex-cli",
+            sourcePath: "/tmp/session.jsonl",
+            providerInstanceId: ProviderInstanceId.make("codex"),
+          },
+        ],
+      }),
+    ).resolves.toBeNull();
+    await flushPromises();
+
+    expect(testState.runScan).toHaveBeenCalledOnce();
+    expect(renderHook().importError).toBe("connection closed after dispatch");
   });
 
   it("clears a successful scan before a rescan and keeps it cleared when that rescan fails", async () => {
@@ -280,6 +378,7 @@ describe("useImportSessions environment guards", () => {
           candidates: [],
           errors: [],
           scannedAt: "2026-07-25T12:00:00.000Z",
+          truncated: false,
         },
       })
       .mockReturnValueOnce(failedRescan.promise);
@@ -314,6 +413,7 @@ describe("useImportSessions environment guards", () => {
         readonly candidates: readonly [];
         readonly errors: readonly [];
         readonly scannedAt: string;
+        readonly truncated: boolean;
       };
     }>();
     const scanB = deferred<{
@@ -322,6 +422,7 @@ describe("useImportSessions environment guards", () => {
         readonly candidates: readonly [];
         readonly errors: readonly [];
         readonly scannedAt: string;
+        readonly truncated: boolean;
       };
     }>();
     testState.runScan.mockImplementation(({ environmentId }: { readonly environmentId: string }) =>
@@ -340,6 +441,7 @@ describe("useImportSessions environment guards", () => {
         candidates: [],
         errors: [],
         scannedAt: "2026-07-25T12:00:00.000Z",
+        truncated: false,
       },
     });
     await scanAPromise;
@@ -352,6 +454,7 @@ describe("useImportSessions environment guards", () => {
         candidates: [],
         errors: [],
         scannedAt: "2026-07-25T12:01:00.000Z",
+        truncated: false,
       },
     });
     await scanBPromise;
@@ -396,6 +499,7 @@ describe("useImportSessions environment guards", () => {
         ],
         errors: [],
         scannedAt: "2026-07-25T12:01:00.000Z",
+        truncated: false,
       },
     });
 
@@ -446,6 +550,7 @@ describe("useImportSessions environment guards", () => {
         candidates: [],
         errors: [],
         scannedAt: "2026-07-25T12:00:00.000Z",
+        truncated: false,
       },
     });
     testState.runImport.mockReturnValue(importA.promise);

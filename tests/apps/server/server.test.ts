@@ -126,6 +126,7 @@ import * as CartographerEmbedBroker from "../../../apps/server/src/cartographer/
 import * as ProposalGenerationService from "../../../apps/server/src/proposal/ProposalGenerationService.ts";
 import * as ProposalImplementationAttemptService from "../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts";
 import * as ProposalService from "../../../apps/server/src/proposal/ProposalService.ts";
+import { makeProjectionSnapshotQueryStub } from "./projectionSnapshotQueryTestHelpers.ts";
 import * as Data from "effect/Data";
 
 const defaultProjectId = ProjectId.make("project-default");
@@ -763,34 +764,36 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provide(
-        Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)({
-          getCommandReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
-          getShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              updatedAt: "1970-01-01T00:00:00.000Z",
-            }),
-          getArchivedShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: 0,
-              projects: [],
-              threads: [],
-              updatedAt: "1970-01-01T00:00:00.000Z",
-            }),
-          getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-          getProjectShellById: () => Effect.succeed(Option.none()),
-          getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
-          getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-          ...options?.layers?.projectionSnapshotQuery,
-        }),
+        Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)(
+          makeProjectionSnapshotQueryStub({
+            getCommandReadModel: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+            getSnapshot: () => Effect.succeed(makeDefaultOrchestrationReadModel()),
+            getShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                projects: [],
+                threads: [],
+                updatedAt: "1970-01-01T00:00:00.000Z",
+              }),
+            getArchivedShellSnapshot: () =>
+              Effect.succeed({
+                snapshotSequence: 0,
+                projects: [],
+                threads: [],
+                updatedAt: "1970-01-01T00:00:00.000Z",
+              }),
+            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
+            getProjectShellById: () => Effect.succeed(Option.none()),
+            getThreadShellById: () => Effect.succeed(Option.none()),
+            getThreadDetailById: () => Effect.succeed(Option.none()),
+            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
+            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
+            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+            getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+            ...options?.layers?.projectionSnapshotQuery,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
@@ -4528,7 +4531,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
   );
 
   it.effect(
-    "imports through the authenticated websocket handler using the configured server cwd",
+    "imports missing-workspace history through the authenticated websocket handler using the configured server cwd",
     () =>
       Effect.gen(function* () {
         const fileSystem = yield* FileSystem.FileSystem;
@@ -4538,19 +4541,18 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         });
         const codexHome = path.join(testRoot, "codex-home");
         const sessionDirectory = path.join(codexHome, "sessions", "2026", "01", "01");
-        const workspaceRoot = path.join(testRoot, "workspace");
+        const historicalWorkspaceRoot = path.join(testRoot, "missing-workspace");
         const nativeSessionId = "ws-import-native";
         const sourcePath = path.join(
           sessionDirectory,
           `rollout-2026-01-01T00-00-00-${nativeSessionId}.jsonl`,
         );
         yield* fileSystem.makeDirectory(sessionDirectory, { recursive: true });
-        yield* fileSystem.makeDirectory(workspaceRoot, { recursive: true });
         yield* fileSystem.writeFileString(
           sourcePath,
           [
-            `{"timestamp":"2026-01-01T00:00:00.000Z","type":"session_meta","payload":{"id":"${nativeSessionId}","cwd":"${workspaceRoot}","model_provider":"openai"}}`,
-            `{"timestamp":"2026-01-01T00:00:00.000Z","type":"turn_context","payload":{"cwd":"${workspaceRoot}","model":"gpt-test"}}`,
+            `{"timestamp":"2026-01-01T00:00:00.000Z","type":"session_meta","payload":{"id":"${nativeSessionId}","cwd":"${historicalWorkspaceRoot}","model_provider":"openai"}}`,
+            `{"timestamp":"2026-01-01T00:00:00.000Z","type":"turn_context","payload":{"cwd":"${historicalWorkspaceRoot}","model":"gpt-test"}}`,
             '{"timestamp":"2026-01-01T00:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Import over WebSocket"}}',
           ].join("\n"),
         );
@@ -4560,12 +4562,32 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         const threads: OrchestrationThreadShell[] = [];
         const events: OrchestrationEvent[] = [];
         const domainEvents = yield* PubSub.unbounded<OrchestrationEvent>();
+        let importFinalizedCheckCount = 0;
         let sequence = 0;
         const shellSnapshot = () => ({
           snapshotSequence: sequence,
           projects: [...projects],
           threads: [...threads],
           updatedAt: "2026-01-01T00:00:10.000Z",
+        });
+        const importReconciliationContext = () => ({
+          projects: projects.map((project) => ({
+            projectId: project.id,
+            workspaceRoot: project.workspaceRoot,
+          })),
+          threads: threads.flatMap((thread) =>
+            thread.origin === null
+              ? []
+              : [
+                  {
+                    threadId: thread.id,
+                    projectId: thread.projectId,
+                    modelSelection: thread.modelSelection,
+                    origin: thread.origin,
+                    archived: thread.archivedAt !== null,
+                  },
+                ],
+          ),
         });
         const dispatch = (command: OrchestrationCommand) =>
           Effect.gen(function* () {
@@ -4646,7 +4668,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
           },
         };
 
-        yield* buildAppUnderTest({
+        const config = yield* buildAppUnderTest({
           config: { cwd: testRoot },
           layers: {
             serverSettings: {
@@ -4688,6 +4710,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               latestSequence: Effect.sync(() => sequence),
             },
             projectionSnapshotQuery: {
+              getSnapshot: () => Effect.die("full snapshot must not be used by session import"),
               getShellSnapshot: () => Effect.sync(shellSnapshot),
               getArchivedShellSnapshot: () =>
                 Effect.sync(() => ({
@@ -4696,6 +4719,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                   threads: [],
                   updatedAt: "2026-01-01T00:00:10.000Z",
                 })),
+              getImportReconciliationContext: () => Effect.sync(importReconciliationContext),
               getProjectShellById: (projectId) =>
                 Effect.sync(() =>
                   Option.fromNullishOr(projects.find((project) => project.id === projectId)),
@@ -4704,9 +4728,15 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
                 Effect.sync(() =>
                   Option.fromNullishOr(threads.find((thread) => thread.id === threadId)),
                 ),
+              isThreadImportFinalized: () =>
+                Effect.sync(() => {
+                  importFinalizedCheckCount += 1;
+                  return true;
+                }),
             },
           },
         });
+        const holdingWorkspaceRoot = path.join(config.stateDir, "imported-history");
 
         const { response: readExchangeResponse, body: readToken } = yield* exchangeAccessToken(
           defaultDesktopBootstrapToken,
@@ -4776,6 +4806,12 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
               });
               assert.deepEqual(result.failed, []);
               assert.equal(result.imported.length, 1);
+              assert.deepEqual(result.imported[0]?.continuation, {
+                state: "history-only",
+                providerInstanceId,
+                continuationIdentity: null,
+                reason: "the original workspace is unavailable",
+              });
               yield* TestClock.adjust(Duration.millis(50));
               const shellUpdate = Option.getOrThrow(yield* Fiber.join(shellUpdateFiber));
               return { result, shellUpdate };
@@ -4786,7 +4822,68 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
         assert.equal(imported.shellUpdate.kind, "thread-upserted");
         if (imported.shellUpdate.kind === "thread-upserted") {
           assert.equal(imported.shellUpdate.thread.origin?.providerInstanceId, providerInstanceId);
+          assert.equal(
+            imported.shellUpdate.thread.origin?.originalWorkspaceRoot,
+            historicalWorkspaceRoot,
+          );
         }
+        assert.equal(projects.length, 1);
+        assert.equal(projects[0]?.title, "Imported history");
+        assert.equal(projects[0]?.workspaceRoot, holdingWorkspaceRoot);
+        assert.isTrue(yield* fileSystem.exists(holdingWorkspaceRoot));
+        assert.isFalse(yield* fileSystem.exists(historicalWorkspaceRoot));
+
+        yield* fileSystem.remove(holdingWorkspaceRoot, { recursive: true, force: true });
+        const retryWithMissingHoldingRoot = yield* Effect.scoped(
+          withWsRpcClient(operateWsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.importSessions]({
+              items: [
+                {
+                  source: "codex-cli",
+                  sourcePath,
+                  providerInstanceId,
+                },
+              ],
+            }),
+          ),
+        );
+        assert.equal(retryWithMissingHoldingRoot.imported.length, 0);
+        assert.equal(retryWithMissingHoldingRoot.failed.length, 1);
+        assert.include(retryWithMissingHoldingRoot.failed[0]?.message ?? "", holdingWorkspaceRoot);
+        assert.isFalse(yield* fileSystem.exists(holdingWorkspaceRoot));
+        assert.isFalse(yield* fileSystem.exists(historicalWorkspaceRoot));
+        yield* fileSystem.makeDirectory(holdingWorkspaceRoot, { recursive: true });
+
+        yield* fileSystem.writeFileString(
+          sourcePath,
+          [
+            `{"timestamp":"2026-01-01T00:00:00.000Z","type":"session_meta","payload":{"id":"${nativeSessionId}","cwd":"${historicalWorkspaceRoot}","model_provider":"openai"}}`,
+            `{"timestamp":"2026-01-01T00:00:00.000Z","type":"turn_context","payload":{"cwd":"${historicalWorkspaceRoot}","model":"gpt-test"}}`,
+            '{"timestamp":"2026-01-01T00:00:01.000Z","type":"event_msg","payload":{"type":"user_message","message":"Import over WebSocket"}}',
+            '{"timestamp":"2026-01-01T00:00:02.000Z","type":"event_msg","payload":{"type":"user_message","message":"New source activity"}}',
+          ].join("\n"),
+        );
+        const changedSourceResult = yield* Effect.scoped(
+          withWsRpcClient(operateWsUrl, (client) =>
+            client[ORCHESTRATION_WS_METHODS.importSessions]({
+              items: [
+                {
+                  source: "codex-cli",
+                  sourcePath,
+                  providerInstanceId,
+                },
+              ],
+            }),
+          ),
+        );
+        assert.deepEqual(changedSourceResult.failed, []);
+        assert.equal(changedSourceResult.skipped.length, 1);
+        assert.include(
+          changedSourceResult.skipped[0]?.reason ?? "",
+          "original session has new activity",
+        );
+        assert.equal(importFinalizedCheckCount, 1);
+
         const scan = yield* Effect.scoped(
           withWsRpcClient(operateWsUrl, (client) =>
             client[ORCHESTRATION_WS_METHODS.importScan]({}),
@@ -5062,6 +5159,45 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       );
 
       assert.equal(Option.getOrThrow(first).kind, "snapshot");
+      assert.equal(readEventsCalls, 0);
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  );
+
+  it.effect("subscribeThread sends a fresh snapshot instead of replaying a large gap", () =>
+    Effect.gen(function* () {
+      let readEventsCalls = 0;
+      const thread = makeDefaultOrchestrationReadModel().threads[0]!;
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(100_000),
+            readEvents: () =>
+              Stream.sync(() => {
+                readEventsCalls += 1;
+                return {} as OrchestrationEvent;
+              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadDetailSnapshot: () =>
+              Effect.succeed(Option.some({ snapshotSequence: 100_000, thread })),
+          },
+        },
+      });
+
+      const wsUrl = yield* getWsServerUrl("/ws");
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: defaultThreadId,
+            afterSequence: 5,
+            requestCompletionMarker: true,
+          }).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      );
+
+      assert.equal(items[0]?.kind, "snapshot");
+      assert.deepEqual(items[1], { kind: "synchronized" });
       assert.equal(readEventsCalls, 0);
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );

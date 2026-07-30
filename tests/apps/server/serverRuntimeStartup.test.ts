@@ -15,6 +15,7 @@ import * as OrchestrationEngine from "../../../apps/server/src/orchestration/Ser
 import * as ProjectionSnapshotQuery from "../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as AnalyticsService from "../../../apps/server/src/telemetry/AnalyticsService.ts";
 import * as ServerRuntimeStartup from "../../../apps/server/src/serverRuntimeStartup.ts";
+import { makeProjectionSnapshotQueryStub } from "./projectionSnapshotQueryTestHelpers.ts";
 
 it("uses the canonical Codex default for auto-bootstrapped model selection", () => {
   assert.deepStrictEqual(ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(), {
@@ -76,28 +77,18 @@ it.effect("launchStartupHeartbeat does not block the caller while counts are loa
       const releaseCounts = yield* Deferred.make<void, never>();
 
       yield* ServerRuntimeStartup.launchStartupHeartbeat.pipe(
-        Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-          getCommandReadModel: () => Effect.die("unused"),
-          getSnapshot: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getArchivedShellSnapshot: () => Effect.die("unused"),
-          getSnapshotSequence: () => Effect.die("unused"),
-          getCounts: () =>
-            Deferred.await(releaseCounts).pipe(
-              Effect.as({
-                projectCount: 2,
-                threadCount: 3,
-              }),
-            ),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getProjectShellById: () => Effect.succeed(Option.none()),
-          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-          getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-          getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
-          getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-        }),
+        Effect.provideService(
+          ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+          makeProjectionSnapshotQueryStub({
+            getCounts: () =>
+              Deferred.await(releaseCounts).pipe(
+                Effect.as({
+                  projectCount: 2,
+                  threadCount: 3,
+                }),
+              ),
+          }),
+        ),
         Effect.provideService(AnalyticsService.AnalyticsService, {
           record: () => Effect.void,
           flush: Effect.void,
@@ -133,34 +124,25 @@ it.effect("resolveAutoBootstrapWelcomeTargets returns existing project and threa
         cwd: "/tmp/startup-project",
         autoBootstrapProjectFromCwd: true,
       } as never),
-      Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-        getCommandReadModel: () => Effect.die("unused"),
-        getSnapshot: () => Effect.die("unused"),
-        getShellSnapshot: () => Effect.die("unused"),
-        getArchivedShellSnapshot: () => Effect.die("unused"),
-        getSnapshotSequence: () => Effect.die("unused"),
-        getCounts: () => Effect.die("unused"),
-        getActiveProjectByWorkspaceRoot: () =>
-          Effect.succeed(
-            Option.some({
-              id: bootstrapProjectId,
-              title: "Startup Project",
-              workspaceRoot: "/tmp/startup-project",
-              defaultModelSelection: ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
-              scripts: [],
-              createdAt: "2026-01-01T00:00:00.000Z",
-              updatedAt: "2026-01-01T00:00:00.000Z",
-              deletedAt: null,
-            }),
-          ),
-        getProjectShellById: () => Effect.die("unused"),
-        getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.some(bootstrapThreadId)),
-        getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-        getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-        getThreadShellById: () => Effect.die("unused"),
-        getThreadDetailById: () => Effect.die("unused"),
-        getThreadDetailSnapshot: () => Effect.die("unused"),
-      }),
+      Effect.provideService(
+        ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+        makeProjectionSnapshotQueryStub({
+          getActiveProjectByWorkspaceRoot: () =>
+            Effect.succeed(
+              Option.some({
+                id: bootstrapProjectId,
+                title: "Startup Project",
+                workspaceRoot: "/tmp/startup-project",
+                defaultModelSelection: ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(),
+                scripts: [],
+                createdAt: "2026-01-01T00:00:00.000Z",
+                updatedAt: "2026-01-01T00:00:00.000Z",
+                deletedAt: null,
+              }),
+            ),
+          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.some(bootstrapThreadId)),
+        }),
+      ),
       Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
         readEvents: () => Stream.empty,
         dispatch: (command) =>
@@ -189,22 +171,13 @@ it.effect("resolveAutoBootstrapWelcomeTargets creates a project and thread when 
         cwd: "/tmp/startup-project",
         autoBootstrapProjectFromCwd: true,
       } as never),
-      Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-        getCommandReadModel: () => Effect.die("unused"),
-        getSnapshot: () => Effect.die("unused"),
-        getShellSnapshot: () => Effect.die("unused"),
-        getArchivedShellSnapshot: () => Effect.die("unused"),
-        getSnapshotSequence: () => Effect.die("unused"),
-        getCounts: () => Effect.die("unused"),
-        getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-        getProjectShellById: () => Effect.die("unused"),
-        getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-        getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-        getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-        getThreadShellById: () => Effect.die("unused"),
-        getThreadDetailById: () => Effect.die("unused"),
-        getThreadDetailSnapshot: () => Effect.die("unused"),
-      }),
+      Effect.provideService(
+        ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+        makeProjectionSnapshotQueryStub({
+          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
+        }),
+      ),
       Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
         readEvents: () => Stream.empty,
         dispatch: (command) =>
@@ -239,22 +212,12 @@ it.effect("resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
         cwd: "/tmp/startup-project",
         autoBootstrapProjectFromCwd: true,
       } as never),
-      Effect.provideService(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-        getCommandReadModel: () => Effect.die("unused"),
-        getSnapshot: () => Effect.die("unused"),
-        getShellSnapshot: () => Effect.die("unused"),
-        getArchivedShellSnapshot: () => Effect.die("unused"),
-        getSnapshotSequence: () => Effect.die("unused"),
-        getCounts: () => Effect.die("unused"),
-        getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-        getProjectShellById: () => Effect.die("unused"),
-        getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-        getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-        getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-        getThreadShellById: () => Effect.die("unused"),
-        getThreadDetailById: () => Effect.die("unused"),
-        getThreadDetailSnapshot: () => Effect.die("unused"),
-      }),
+      Effect.provideService(
+        ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+        makeProjectionSnapshotQueryStub({
+          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
+        }),
+      ),
       Effect.provideService(OrchestrationEngine.OrchestrationEngineService, {
         readEvents: () => Stream.empty,
         dispatch: (command) =>

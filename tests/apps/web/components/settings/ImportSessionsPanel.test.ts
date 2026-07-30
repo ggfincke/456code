@@ -13,6 +13,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   boundImportCandidateGroups,
+  candidateMessageCountLabel,
   IMPORT_CANDIDATE_PAGE_SIZE,
   importRequestItemForCandidate,
   importSessionsAnnouncement,
@@ -105,6 +106,12 @@ describe("candidate rendering window", () => {
     expect(complete.visibleCandidateCount).toBe(120);
     expect(complete.hiddenCandidateCount).toBe(0);
     expect(complete.groups.map((group) => group.candidates.length)).toEqual([40, 80]);
+  });
+});
+
+describe("candidate transcript summaries", () => {
+  it("omits unknown catalog counts without inventing a zero-message session", () => {
+    expect(candidateMessageCountLabel(null)).toBeNull();
   });
 });
 
@@ -225,6 +232,16 @@ describe("resolveCandidateProviderSelection", () => {
     expect(importRequestItemForCandidate(archivedImport, providerInstanceId)).toBeNull();
   });
 
+  it("never builds an import request for a zero-message artifact", () => {
+    const providerInstanceId = ProviderInstanceId.make("codex");
+    const emptyArtifact = {
+      ...candidate(["codex"]),
+      messageCount: 0,
+    };
+
+    expect(importRequestItemForCandidate(emptyArtifact, providerInstanceId)).toBeNull();
+  });
+
   it("locks a multi-instance repair to the original exact provider owner after rescan", () => {
     const originalOwner = ProviderInstanceId.make("codex_personal");
     const alreadyImported = {
@@ -249,6 +266,73 @@ describe("resolveCandidateProviderSelection", () => {
 });
 
 describe("importSessionsAnnouncement", () => {
+  it("announces acknowledged progress and stop-after-batch state", () => {
+    const base = {
+      candidateCount: 5_188,
+      hasScanned: true,
+      importError: null,
+      importResult: null,
+      isImporting: true,
+      isScanning: false,
+      scanError: null,
+      scanTruncated: false,
+    } as const;
+
+    expect(
+      importSessionsAnnouncement({
+        ...base,
+        importProgress: {
+          phase: "running",
+          total: 5_188,
+          completed: 50,
+          imported: 49,
+          skipped: 1,
+          failed: 0,
+        },
+      }),
+    ).toBe("Importing selected sessions. 50 of 5188 processed.");
+    expect(
+      importSessionsAnnouncement({
+        ...base,
+        importProgress: {
+          phase: "stopping",
+          total: 5_188,
+          completed: 50,
+          imported: 49,
+          skipped: 1,
+          failed: 0,
+        },
+      }),
+    ).toBe("Stopping after the current batch. 50 of 5188 sessions processed.");
+  });
+
+  it("announces the partial outcome when an import is stopped", () => {
+    expect(
+      importSessionsAnnouncement({
+        candidateCount: 5_188,
+        hasScanned: true,
+        importError: null,
+        importProgress: {
+          phase: "cancelled",
+          total: 5_188,
+          completed: 75,
+          imported: 70,
+          skipped: 3,
+          failed: 2,
+        },
+        importResult: {
+          imported: [],
+          skipped: [],
+          failed: [],
+        },
+        isImporting: false,
+        isScanning: false,
+        scanError: null,
+        scanTruncated: false,
+      }),
+    ).toBe("Import stopped after 75 of 5188 sessions. 70 imported, 3 skipped, 2 failed.");
+  });
+
   it("announces complete imported, skipped, and failed outcome counts", () => {
     const result = {
       imported: [
@@ -293,6 +377,7 @@ describe("importSessionsAnnouncement", () => {
         isImporting: false,
         isScanning: false,
         scanError: null,
+        scanTruncated: false,
       }),
     ).toBe("Import complete. 1 imported, 1 skipped, 1 failed.");
   });
@@ -307,7 +392,23 @@ describe("importSessionsAnnouncement", () => {
         isImporting: false,
         isScanning: false,
         scanError: "The source root is unavailable.",
+        scanTruncated: false,
       }),
     ).toBe("Scan failed: The source root is unavailable.");
+  });
+
+  it("announces when a successful scan returned only a partial catalog", () => {
+    expect(
+      importSessionsAnnouncement({
+        candidateCount: 10_000,
+        hasScanned: true,
+        importError: null,
+        importResult: null,
+        isImporting: false,
+        isScanning: false,
+        scanError: null,
+        scanTruncated: true,
+      }),
+    ).toBe("10000 sessions found. Results may be incomplete.");
   });
 });

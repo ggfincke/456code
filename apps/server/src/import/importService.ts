@@ -45,8 +45,10 @@ import {
 } from "./continuationContract.ts";
 import { parseCodexRollout } from "./codexRolloutParser.ts";
 import { deterministicId, deterministicSortableMessageId } from "./ids.ts";
+import { firstUserMessageTitle } from "./importTitle.ts";
 import { loadOpenCodeSessionFromMetadata } from "./openCodeStorage.ts";
 import {
+  codexSessionTitleForSource,
   readResolvedImportSourceFile,
   resolveImportSourcePath,
   type ImportFileSourceDescriptor,
@@ -70,6 +72,9 @@ const importBatchSize = 200;
 const importCreationAttempts = 3;
 const titleLimit = 60;
 const archivedImportHistoryOnlyReason = "the imported thread remains archived";
+const missingWorkspaceHistoryOnlyReason = "the original workspace is unavailable";
+const unrecordedWorkspaceHistoryOnlyReason = "the original workspace was not recorded";
+const sourceHistoryOnlyReason = "the source is not resumable";
 const maximumDateEpochMillis = 8_640_000_000_000_000;
 export const ACP_IMPORT_REQUEST_DEADLINE_MS = 5 * 60_000;
 export const IMPORT_REQUEST_DEADLINE_MS = 5 * 60_000;
@@ -89,6 +94,17 @@ export interface ImportServiceDepsShape {
   ) => Effect.Effect<ProjectIdType | null, Error>;
   readonly isImportFinalized: (threadId: ThreadIdType) => Effect.Effect<boolean, Error>;
   readonly normalizeWorkspaceRoot: (path: string) => Effect.Effect<string, Error>;
+  readonly resolveImportWorkspaceRoot?: (input: {
+    readonly recordedWorkspaceRoot: string | null;
+    readonly existingWorkspaceRoot?: string;
+    readonly originalWorkspaceRoot?: string;
+  }) => Effect.Effect<
+    {
+      readonly workspaceRoot: string;
+      readonly originalWorkspaceRoot?: string;
+    },
+    Error
+  >;
   readonly resolveImportTarget: (
     driver: ProviderDriverKind,
     requestedInstanceId: ProviderInstanceId | null,
@@ -132,6 +148,8 @@ export interface ImportedThreadMatch {
   readonly providerInstanceId: ProviderInstanceId | null;
   readonly modelSelection: ModelSelection;
   readonly archived: boolean;
+  readonly workspaceRoot?: string;
+  readonly originalWorkspaceRoot?: string;
 }
 
 export class ImportServiceDeps extends Context.Service<ImportServiceDeps, ImportServiceDepsShape>()(
@@ -196,12 +214,7 @@ function driverFor(source: ImportSource): ProviderDriverKind {
 
 function importedTitle(session: ImportedSession): string {
   const candidate =
-    session.meta.title ??
-    session.records.find(
-      (record): record is Extract<ImportedRecord, { kind: "message" }> =>
-        record.kind === "message" && record.role === "user",
-    )?.text ??
-    "Imported session";
+    session.meta.title ?? firstUserMessageTitle(session.records) ?? "Imported session";
   const firstLine = candidate.trim().split(/\r?\n/, 1)[0] ?? "";
   if (firstLine.length <= titleLimit) return firstLine || "Imported session";
   return `${firstLine.slice(0, titleLimit - 1)}…`;
@@ -382,6 +395,36 @@ function makeContinuationActivityCommand(
 export const make = Effect.gen(function* () {
   const deps = yield* ImportServiceDeps;
   const continuation = yield* ImportContinuationDeps;
+  const canResolveUnrecordedWorkspace = deps.resolveImportWorkspaceRoot !== undefined;
+  const resolveImportWorkspaceRoot: NonNullable<
+    ImportServiceDepsShape["resolveImportWorkspaceRoot"]
+  > =
+    deps.resolveImportWorkspaceRoot ??
+    Effect.fn("ImportService.resolveImportWorkspaceRoot")(function* (input) {
+      if (input.recordedWorkspaceRoot === null) {
+        return yield* new ImportSessionOperationError({
+          operation: "persist",
+          sourcePath: "<unrecorded-workspace>",
+          cause: "The imported session has no workspace root to resolve",
+        });
+      }
+      if (input.originalWorkspaceRoot !== undefined && input.existingWorkspaceRoot === undefined) {
+        return yield* new ImportSessionOperationError({
+          operation: "persist",
+          sourcePath: input.recordedWorkspaceRoot,
+          cause: "The imported thread is missing its selected workspace root",
+        });
+      }
+      const workspaceRoot = yield* deps.normalizeWorkspaceRoot(
+        input.existingWorkspaceRoot ?? input.recordedWorkspaceRoot,
+      );
+      return {
+        workspaceRoot,
+        ...(input.originalWorkspaceRoot === undefined
+          ? {}
+          : { originalWorkspaceRoot: input.originalWorkspaceRoot }),
+      };
+    });
 
   const importSessionsUnlocked = Effect.fn("ImportService.importSessionsUnlocked")(function* (
     request: ImportSessionsRequest,
@@ -397,23 +440,18 @@ export const make = Effect.gen(function* () {
     const requestMaximumBytes = Number.isFinite(configuredRequestMaximum)
       ? Math.max(0, Math.min(Math.floor(configuredRequestMaximum), IMPORT_RPC_MAX_BYTES))
       : IMPORT_RPC_MAX_BYTES;
-    const requestByteBudget = makeImportByteBudget(requestMaximumBytes);
-    const normalizedByteBudget = makeImportByteBudget(requestMaximumBytes);
+    const acpRequestByteBudget = makeImportByteBudget(requestMaximumBytes);
     const configuredRequestMaximumRecords =
       deps.maximumRequestRecords ?? IMPORT_NORMALIZED_REQUEST_MAX_RECORDS;
-    const normalizedRecordBudget = makeImportCountBudget(
-      Number.isFinite(configuredRequestMaximumRecords)
-        ? Math.max(
-            0,
-            Math.min(
-              Math.floor(configuredRequestMaximumRecords),
-              IMPORT_NORMALIZED_REQUEST_MAX_RECORDS,
-            ),
-          )
-        : IMPORT_NORMALIZED_REQUEST_MAX_RECORDS,
-    );
-    const openCodeTraversalBudget = makeImportCountBudget(IMPORT_SCAN_MAX_TRAVERSAL_ENTRIES);
-    const openCodeJsonFileBudget = makeImportCountBudget(OPENCODE_SESSION_MAX_JSON_FILES);
+    const itemMaximumRecords = Number.isFinite(configuredRequestMaximumRecords)
+      ? Math.max(
+          0,
+          Math.min(
+            Math.floor(configuredRequestMaximumRecords),
+            IMPORT_NORMALIZED_REQUEST_MAX_RECORDS,
+          ),
+        )
+      : IMPORT_NORMALIZED_REQUEST_MAX_RECORDS;
     const seenRawRequestItems = new Set<string>();
     const seenCanonicalRequestItems = new Set<string>();
     const configuredSwapCleanupDeadline = deps.requestDeadlineMs ?? IMPORT_REQUEST_DEADLINE_MS;
@@ -424,6 +462,7 @@ export const make = Effect.gen(function* () {
     const ensureActiveProject = Effect.fn("ImportService.ensureActiveProject")(function* (
       normalizedRoot: string,
       createdAt: string,
+      title: string,
     ) {
       const existingProjectId = yield* deps.findProjectByWorkspaceRoot(normalizedRoot);
       if (existingProjectId !== null) {
@@ -444,7 +483,7 @@ export const make = Effect.gen(function* () {
             type: "project.create",
             commandId: identity.commandId,
             projectId: identity.projectId,
-            title: NodePath.basename(normalizedRoot) || "Imported project",
+            title,
             workspaceRoot: normalizedRoot,
             createdAt,
           })
@@ -530,7 +569,8 @@ export const make = Effect.gen(function* () {
     const acpRequestDeadlineExpired = Option.isNone(
       yield* Effect.gen(function* () {
         for (const group of acpBatchGroups.values()) {
-          const remainingBytes = requestByteBudget.maximumBytes - requestByteBudget.consumedBytes;
+          const remainingBytes =
+            acpRequestByteBudget.maximumBytes - acpRequestByteBudget.consumedBytes;
           if (remainingBytes < 3) {
             for (const sourcePath of group.sourcePaths) {
               acpBatchResults.set(
@@ -539,7 +579,7 @@ export const make = Effect.gen(function* () {
                   session: null,
                   error: new ImportResourceLimitError({
                     sourcePath,
-                    reason: `byte budget exceeded (${requestByteBudget.maximumBytes} bytes maximum)`,
+                    reason: `byte budget exceeded (${acpRequestByteBudget.maximumBytes} bytes maximum)`,
                   }),
                 },
               );
@@ -562,7 +602,7 @@ export const make = Effect.gen(function* () {
                     : wireBytesBeforeLoad;
                   acpWireUsage.consumedBytes = reportedWireBytes;
                   wireReservationError = reserveImportBytes(
-                    requestByteBudget,
+                    acpRequestByteBudget,
                     reportedWireBytes - wireBytesBeforeLoad,
                     group.sourcePaths[0] ?? `${group.source}:${group.providerInstanceId}`,
                   );
@@ -610,7 +650,7 @@ export const make = Effect.gen(function* () {
               continue;
             }
             const reservationError = reserveImportBytes(
-              requestByteBudget,
+              acpRequestByteBudget,
               NodeBuffer.Buffer.byteLength(serialized.success, "utf8"),
               loadedResult.sourcePath,
             );
@@ -644,6 +684,12 @@ export const make = Effect.gen(function* () {
           return;
         }
         seenRawRequestItems.add(rawRequestKey);
+        const itemRawByteBudget = makeImportByteBudget(requestMaximumBytes);
+        const itemNormalizedByteBudget = makeImportByteBudget(requestMaximumBytes);
+        const itemNormalizedRecordBudget = makeImportCountBudget(itemMaximumRecords);
+        const openCodeTraversalBudget = makeImportCountBudget(IMPORT_SCAN_MAX_TRAVERSAL_ENTRIES);
+        const openCodeJsonFileBudget = makeImportCountBudget(OPENCODE_SESSION_MAX_JSON_FILES);
+        let isArchivedCodexSource = false;
         let loaded: {
           readonly session: ImportedSession;
           readonly providerInstanceIds: ReadonlyArray<ProviderInstanceId>;
@@ -702,9 +748,11 @@ export const make = Effect.gen(function* () {
             return;
           }
           seenCanonicalRequestItems.add(requestKey);
+          isArchivedCodexSource =
+            source === "codex-cli" && trustedSource.layout === "codex-archive";
           if (source === "opencode") {
             const openCode = yield* loadOpenCodeSessionFromMetadata(trustedSource.canonicalPath, {
-              aggregateBudget: requestByteBudget,
+              aggregateBudget: itemRawByteBudget,
               jsonFileBudget: openCodeJsonFileBudget,
               sourceValidation: trustedSource.validation,
               traversalBudget: openCodeTraversalBudget,
@@ -716,7 +764,7 @@ export const make = Effect.gen(function* () {
           } else {
             const sourceFile = yield* readResolvedImportSourceFile(
               trustedSource,
-              requestByteBudget,
+              itemRawByteBudget,
             );
             const contentHash = hashContent(sourceFile.content);
             const session = yield* Effect.try({
@@ -733,6 +781,14 @@ export const make = Effect.gen(function* () {
                   cause,
                 }),
             });
+            if (source === "codex-cli") {
+              session.meta.title =
+                codexSessionTitleForSource(
+                  deps.sourceDescriptors,
+                  sourceFile.canonicalPath,
+                  session.meta.nativeSessionId,
+                ) ?? session.meta.title;
+            }
             loaded = {
               session,
               providerInstanceIds: trustedSource.providerInstanceIds,
@@ -762,10 +818,10 @@ export const make = Effect.gen(function* () {
           ),
         );
         const normalizedReservationError = reserveNormalizedImportResources({
-          byteBudget: normalizedByteBudget,
+          byteBudget: itemNormalizedByteBudget,
           maximumSessionBytes: IMPORT_NORMALIZED_SESSION_MAX_BYTES,
           maximumSessionRecords: IMPORT_NORMALIZED_SESSION_MAX_RECORDS,
-          recordBudget: normalizedRecordBudget,
+          recordBudget: itemNormalizedRecordBudget,
           recordCount: session.records.length,
           serializedBytes: NodeBuffer.Buffer.byteLength(serializedSession, "utf8"),
           sourcePath: item.sourcePath,
@@ -846,11 +902,16 @@ export const make = Effect.gen(function* () {
             ? undefined
             : importedThreadsByNativeSession.get(nativeSessionKey)) ??
           projectedThread;
+        let importWorkspaceRoot = existingThread?.workspaceRoot;
+        let originalWorkspaceRoot = existingThread?.originalWorkspaceRoot;
         let incompleteImportProjectId: ProjectIdType | null = null;
         let incompleteImportWasArchived = false;
         let archivedIncompleteThreadToReplace: ImportedThreadMatch | null = null;
+        // only archived or changed-source threads need finalization state up
+        // front; the preserved-binding guard below fetches it on demand
         let existingImportFinalized: boolean | null =
-          existingThread?.archived === true
+          existingThread !== null &&
+          (existingThread.archived || existingThread.contentHash !== contentHash)
             ? yield* deps.isImportFinalized(existingThread.threadId)
             : null;
         if (existingThread !== null && existingThread.contentHash !== contentHash) {
@@ -906,7 +967,9 @@ export const make = Effect.gen(function* () {
         if (
           existingThread === null &&
           incompleteImportProjectId === null &&
-          session.meta.cwd === null
+          session.meta.cwd === null &&
+          originalWorkspaceRoot === undefined &&
+          !canResolveUnrecordedWorkspace
         ) {
           result.skipped.push({
             sourcePath: item.sourcePath,
@@ -918,9 +981,31 @@ export const make = Effect.gen(function* () {
 
         const now = DateTime.formatIso(yield* DateTime.now);
         let projectId = existingThread?.projectId ?? incompleteImportProjectId;
+        if (projectId === null || originalWorkspaceRoot !== undefined) {
+          const recordedWorkspaceRoot = originalWorkspaceRoot ?? session.meta.cwd;
+          const resolution = yield* resolveImportWorkspaceRoot({
+            recordedWorkspaceRoot,
+            ...(importWorkspaceRoot === undefined
+              ? {}
+              : { existingWorkspaceRoot: importWorkspaceRoot }),
+            ...(originalWorkspaceRoot === undefined ? {} : { originalWorkspaceRoot }),
+          });
+          importWorkspaceRoot = resolution.workspaceRoot;
+          originalWorkspaceRoot = resolution.originalWorkspaceRoot;
+        }
+        const projectTitle =
+          originalWorkspaceRoot === undefined && session.meta.cwd !== null
+            ? NodePath.basename(importWorkspaceRoot ?? session.meta.cwd ?? "") || "Imported project"
+            : "Imported history";
         if (projectId === null) {
-          const normalizedCwd = yield* deps.normalizeWorkspaceRoot(session.meta.cwd!);
-          projectId = yield* ensureActiveProject(normalizedCwd, now);
+          if (importWorkspaceRoot === undefined) {
+            return yield* new ImportSessionOperationError({
+              operation: "persist",
+              sourcePath: item.sourcePath,
+              cause: "The imported session workspace root was not resolved",
+            });
+          }
+          projectId = yield* ensureActiveProject(importWorkspaceRoot, now, projectTitle);
         }
 
         const threadCreateBase = {
@@ -939,6 +1024,7 @@ export const make = Effect.gen(function* () {
             contentHash,
             nativeSessionId: session.meta.nativeSessionId,
             providerInstanceId: originProviderInstanceId,
+            ...(originalWorkspaceRoot === undefined ? {} : { originalWorkspaceRoot }),
             importedAt: now,
           },
           createdAt: session.meta.firstActivityAt ?? now,
@@ -971,7 +1057,10 @@ export const make = Effect.gen(function* () {
                 original.source !== archivedIncompleteThreadToReplace.source ||
                 original.sourcePath !== archivedIncompleteThreadToReplace.sourcePath ||
                 original.nativeSessionId !== archivedIncompleteThreadToReplace.nativeSessionId ||
-                original.providerInstanceId !== archivedIncompleteThreadToReplace.providerInstanceId
+                original.providerInstanceId !==
+                  archivedIncompleteThreadToReplace.providerInstanceId ||
+                original.originalWorkspaceRoot !==
+                  archivedIncompleteThreadToReplace.originalWorkspaceRoot
               ) {
                 return yield* new ImportSessionOperationError({
                   operation: "persist",
@@ -987,7 +1076,8 @@ export const make = Effect.gen(function* () {
                 current.source !== item.source ||
                 current.sourcePath !== session.meta.sourcePath ||
                 current.nativeSessionId !== session.meta.nativeSessionId ||
-                current.providerInstanceId !== originProviderInstanceId
+                current.providerInstanceId !== originProviderInstanceId ||
+                current.originalWorkspaceRoot !== originalWorkspaceRoot
               ) {
                 return yield* new ImportSessionOperationError({
                   operation: "persist",
@@ -1028,8 +1118,10 @@ export const make = Effect.gen(function* () {
             let lastDispatchError: Error | null = null;
             for (let attempt = 0; attempt < importCreationAttempts; attempt += 1) {
               if (attempt > 0) {
-                const normalizedCwd = yield* deps.normalizeWorkspaceRoot(session.meta.cwd!);
-                creationProjectId = yield* ensureActiveProject(normalizedCwd, now);
+                const normalizedCwd = yield* deps.normalizeWorkspaceRoot(
+                  importWorkspaceRoot ?? session.meta.cwd!,
+                );
+                creationProjectId = yield* ensureActiveProject(normalizedCwd, now, projectTitle);
               }
               const identity =
                 attempt === 0
@@ -1071,7 +1163,8 @@ export const make = Effect.gen(function* () {
                   replacement.source === item.source &&
                   replacement.sourcePath === session.meta.sourcePath &&
                   replacement.nativeSessionId === session.meta.nativeSessionId &&
-                  replacement.providerInstanceId === originProviderInstanceId
+                  replacement.providerInstanceId === originProviderInstanceId &&
+                  replacement.originalWorkspaceRoot === originalWorkspaceRoot
                 ) {
                   createdThreadId = identity.threadId;
                   replacementAlreadyArchived = replacement.archived;
@@ -1236,6 +1329,11 @@ export const make = Effect.gen(function* () {
         }
         const importShouldRemainArchived =
           incompleteImportWasArchived || existingThread?.archived === true;
+        const sourceIsHistoryOnly =
+          originalWorkspaceRoot !== undefined ||
+          session.meta.cwd === null ||
+          session.meta.nativeSessionId === null ||
+          isArchivedCodexSource;
 
         const indexedRecords: Array<{
           readonly record: ImportedRecord;
@@ -1257,27 +1355,39 @@ export const make = Effect.gen(function* () {
                 continuationIdentity: null,
                 reason: archivedImportHistoryOnlyReason,
               }
-          : resolvedTarget === null && !wasAlreadyImported
+          : sourceIsHistoryOnly
             ? {
                 state: "history-only" as const,
-                providerInstanceId: item.providerInstanceId,
+                providerInstanceId: originProviderInstanceId,
                 continuationIdentity: null,
                 reason:
-                  item.providerInstanceId === null
-                    ? `no available ${driver} provider instance owns this source`
-                    : `provider instance '${item.providerInstanceId}' is unavailable or does not own this source`,
+                  originalWorkspaceRoot !== undefined
+                    ? missingWorkspaceHistoryOnlyReason
+                    : session.meta.cwd === null
+                      ? unrecordedWorkspaceHistoryOnlyReason
+                      : sourceHistoryOnlyReason,
               }
-            : yield* bindImportedContinuation({
-                threadId,
-                meta: session.meta,
-                providerInstanceId:
-                  resolvedTarget?.defaultModelSelection.instanceId ?? item.providerInstanceId,
-                modelSelection:
-                  resolvedTarget === null && existingThread !== null
-                    ? existingThread.modelSelection
-                    : modelSelection,
-                runtimeMode: "approval-required",
-              }).pipe(Effect.provideService(ImportContinuationDeps, continuation));
+            : resolvedTarget === null && !wasAlreadyImported
+              ? {
+                  state: "history-only" as const,
+                  providerInstanceId: item.providerInstanceId,
+                  continuationIdentity: null,
+                  reason:
+                    item.providerInstanceId === null
+                      ? `no available ${driver} provider instance owns this source`
+                      : `provider instance '${item.providerInstanceId}' is unavailable or does not own this source`,
+                }
+              : yield* bindImportedContinuation({
+                  threadId,
+                  meta: session.meta,
+                  providerInstanceId:
+                    resolvedTarget?.defaultModelSelection.instanceId ?? item.providerInstanceId,
+                  modelSelection:
+                    resolvedTarget === null && existingThread !== null
+                      ? existingThread.modelSelection
+                      : modelSelection,
+                  runtimeMode: "approval-required",
+                }).pipe(Effect.provideService(ImportContinuationDeps, continuation));
         if (
           wasAlreadyImported &&
           resolvedTarget !== null &&
@@ -1303,7 +1413,13 @@ export const make = Effect.gen(function* () {
         const bindingWasPreserved =
           continuationOutcome?.state === "history-only" &&
           continuationOutcome.reason === IMPORT_CONTINUATION_PRESERVED_BINDING_REASON;
-        if (continuationOutcome !== null && !bindingWasPreserved) {
+        if (bindingWasPreserved && existingImportFinalized === null && existingThread !== null) {
+          existingImportFinalized = yield* deps.isImportFinalized(existingThread.threadId);
+        }
+        if (
+          continuationOutcome !== null &&
+          (!bindingWasPreserved || existingImportFinalized !== true)
+        ) {
           yield* deps.dispatch(
             makeContinuationActivityCommand(
               importSeed,
@@ -1323,6 +1439,8 @@ export const make = Effect.gen(function* () {
           sourcePath: session.meta.sourcePath,
           nativeSessionId: session.meta.nativeSessionId,
           providerInstanceId: originProviderInstanceId,
+          ...(importWorkspaceRoot === undefined ? {} : { workspaceRoot: importWorkspaceRoot }),
+          ...(originalWorkspaceRoot === undefined ? {} : { originalWorkspaceRoot }),
           modelSelection:
             resolvedTarget === null && existingThread !== null
               ? existingThread.modelSelection

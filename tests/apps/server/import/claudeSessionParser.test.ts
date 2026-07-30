@@ -181,6 +181,72 @@ describe("parseClaudeSession", () => {
     ).toBe(false);
   });
 
+  it("uses the first non-meta Claude prompt for the title while preserving meta messages", () => {
+    const sessionId = "meta-title-session";
+    const session = parseClaudeSession({
+      content: jsonl([
+        {
+          type: "user",
+          uuid: "meta-caveat",
+          parentUuid: null,
+          sessionId,
+          isMeta: true,
+          timestamp: "2026-07-29T10:00:00Z",
+          message: {
+            content: "<local-command-caveat>Do not use this as the title.</local-command-caveat>",
+          },
+        },
+        {
+          type: "user",
+          uuid: "clear-command",
+          parentUuid: "meta-caveat",
+          sessionId,
+          timestamp: "2026-07-29T10:00:01Z",
+          message: {
+            content:
+              "<command-name>/clear</command-name>\n<command-message>clear</command-message>",
+          },
+        },
+        {
+          type: "user",
+          uuid: "request",
+          parentUuid: "clear-command",
+          sessionId,
+          timestamp: "2026-07-29T10:00:02Z",
+          message: { content: "Import the complete provider history" },
+        },
+        {
+          type: "assistant",
+          uuid: "response",
+          parentUuid: "request",
+          sessionId,
+          timestamp: "2026-07-29T10:00:03Z",
+          message: { content: "Import ready." },
+        },
+        {
+          type: "custom-title",
+          sessionId,
+          customTitle:
+            "<local-command-caveat>Do not use this generated branch title.</local-command-caveat>",
+        },
+      ]),
+      sourcePath: "/meta-title.jsonl",
+      contentHash: "meta-title-hash",
+    });
+
+    expect(session.meta.title).toBe("Import the complete provider history");
+    expect(
+      session.records
+        .filter((record) => record.kind === "message")
+        .map((record) => `${record.role}:${record.text}`),
+    ).toEqual([
+      "user:<local-command-caveat>Do not use this as the title.</local-command-caveat>",
+      "user:<command-name>/clear</command-name>\n<command-message>clear</command-message>",
+      "user:Import the complete provider history",
+      "assistant:Import ready.",
+    ]);
+  });
+
   it("reconstructs the active graph through post-anchor descendants and canonical duplicates", () => {
     const sessionId = "graph-session";
     const session = parseClaudeSession({
@@ -409,6 +475,55 @@ describe("parseClaudeSession", () => {
         expect.stringContaining("graph contains a cycle"),
         expect.stringContaining("no messages found"),
       ]),
+    );
+  });
+
+  it("retains an earlier duplicate when a later occurrence points back to its descendant", () => {
+    const session = parseClaudeSession({
+      content: jsonl([
+        {
+          type: "user",
+          uuid: "root",
+          parentUuid: null,
+          sessionId: "duplicate-backedge",
+          timestamp: "2026-01-01T00:00:00Z",
+          message: { content: "Root prompt" },
+        },
+        {
+          type: "assistant",
+          uuid: "answer",
+          parentUuid: "root",
+          sessionId: "duplicate-backedge",
+          timestamp: "2026-01-01T00:00:01Z",
+          message: { content: "Earlier answer" },
+        },
+        {
+          type: "user",
+          uuid: "follow-up",
+          parentUuid: "answer",
+          sessionId: "duplicate-backedge",
+          timestamp: "2026-01-01T00:00:02Z",
+          message: { content: "Follow-up prompt" },
+        },
+        {
+          type: "assistant",
+          uuid: "answer",
+          parentUuid: "follow-up",
+          sessionId: "duplicate-backedge",
+          timestamp: "2026-01-01T00:00:03Z",
+          message: { content: "Corrupt later duplicate" },
+        },
+      ]),
+      sourcePath: "/duplicate-backedge.jsonl",
+      contentHash: "duplicate-backedge-hash",
+    });
+
+    expect(
+      session.records.filter((record) => record.kind === "message").map((record) => record.text),
+    ).toEqual(["Root prompt", "Earlier answer", "Follow-up prompt"]);
+    expect(JSON.stringify(session.records)).not.toContain("Corrupt later duplicate");
+    expect(session.warnings).toContain(
+      'line 4: ignored later duplicate Claude UUID "answer" because it creates a parent-chain cycle; retained the earlier occurrence',
     );
   });
 
@@ -935,7 +1050,7 @@ describe("parseClaudeSession", () => {
   it("rejects JSONL beyond the hard physical-line cap", () => {
     expect(() =>
       parseClaudeSession({
-        content: `${"{}\n".repeat(50_000)}{}`,
+        content: `${"{}\n".repeat(100_000)}{}`,
         sourcePath: "/too-many-lines.jsonl",
         contentHash: "too-many-lines-hash",
       }),

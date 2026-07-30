@@ -9,13 +9,13 @@ import * as NodePath from "node:path";
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
-export const IMPORT_SESSION_MAX_BYTES = 25 * 1024 * 1024;
 export const IMPORT_RPC_MAX_BYTES = 256 * 1024 * 1024;
+export const IMPORT_SESSION_MAX_BYTES = IMPORT_RPC_MAX_BYTES;
 // rendered activity details can exceed their raw transcript representation
 export const IMPORT_NORMALIZED_SESSION_MAX_BYTES = 50 * 1024 * 1024;
 export const IMPORT_NORMALIZED_SESSION_MAX_RECORDS = 25_000;
 export const IMPORT_NORMALIZED_REQUEST_MAX_RECORDS = 25_000;
-export const IMPORT_SCAN_MAX_TRAVERSAL_ENTRIES = 10_000;
+export const IMPORT_SCAN_MAX_TRAVERSAL_ENTRIES = 50_000;
 export const OPENCODE_SESSION_MAX_JSON_FILES = 10_000;
 export const ACP_IMPORT_DEFAULT_CATALOG_MAX_BYTES = 25 * 1024 * 1024;
 export const ACP_IMPORT_DEFAULT_REPLAY_SESSION_MAX_BYTES = 25 * 1024 * 1024;
@@ -51,6 +51,10 @@ export interface BoundedUtf8File {
   readonly content: string;
   readonly sizeBytes: number;
   readonly mtimeMs: number;
+}
+
+export interface BoundedUtf8FilePrefix extends BoundedUtf8File {
+  readonly truncated: boolean;
 }
 
 export interface ImportFileSystemIdentity {
@@ -397,6 +401,84 @@ export const readBoundedUtf8File = Effect.fn("ImportResourceLimits.readBoundedUt
           sizeBytes,
           mtimeMs: Number(initialStat.mtimeMs),
         } satisfies BoundedUtf8File;
+      } finally {
+        await handle.close();
+      }
+    },
+    catch: (cause) =>
+      isImportResourceLimitError(cause)
+        ? cause
+        : new ImportResourceLimitError({
+            sourcePath,
+            reason: errorDetail(cause),
+            cause,
+          }),
+  });
+});
+
+export const readBoundedUtf8FilePrefix = Effect.fn(
+  "ImportResourceLimits.readBoundedUtf8FilePrefix",
+)(function* (sourcePath: string, maximumPrefixBytes: number, validation?: ImportSourceValidation) {
+  return yield* Effect.tryPromise({
+    try: async (signal) => {
+      const noFollow = NodeFS.constants.O_NOFOLLOW ?? 0;
+      const nonBlock = NodeFS.constants.O_NONBLOCK ?? 0;
+      const handle = await NodeFSP.open(
+        sourcePath,
+        NodeFS.constants.O_RDONLY | noFollow | nonBlock,
+      );
+      try {
+        const initialStat = await handle.stat({ bigint: true });
+        if (!initialStat.isFile()) {
+          throw new ImportResourceLimitError({
+            sourcePath,
+            reason: "path is not a regular file",
+          });
+        }
+        if (validation !== undefined) {
+          await verifyOpenedImportSource(sourcePath, initialStat, validation);
+        }
+        const sizeBytes = Number(initialStat.size);
+        if (!Number.isSafeInteger(sizeBytes)) {
+          throw new ImportResourceLimitError({
+            sourcePath,
+            reason: "file size exceeds the supported integer range",
+          });
+        }
+
+        const prefixBytes = Math.min(sizeBytes, Math.max(0, Math.floor(maximumPrefixBytes)));
+        signal.throwIfAborted();
+        const prefix = Buffer.allocUnsafe(prefixBytes);
+        let bytesRead = 0;
+        while (bytesRead < prefixBytes) {
+          signal.throwIfAborted();
+          const chunk = await handle.read(prefix, bytesRead, prefixBytes - bytesRead, bytesRead);
+          if (chunk.bytesRead === 0) {
+            break;
+          }
+          bytesRead += chunk.bytesRead;
+        }
+
+        const finalStat = await handle.stat({ bigint: true });
+        if (
+          finalStat.size !== initialStat.size ||
+          finalStat.mtimeNs !== initialStat.mtimeNs ||
+          finalStat.ctimeNs !== initialStat.ctimeNs
+        ) {
+          throw new ImportResourceLimitError({
+            sourcePath,
+            reason: "file changed while its metadata prefix was being read",
+          });
+        }
+        if (validation !== undefined) {
+          await verifyOpenedImportSource(sourcePath, finalStat, validation);
+        }
+        return {
+          content: prefix.subarray(0, bytesRead).toString("utf8"),
+          sizeBytes,
+          mtimeMs: Number(initialStat.mtimeMs),
+          truncated: bytesRead < sizeBytes,
+        } satisfies BoundedUtf8FilePrefix;
       } finally {
         await handle.close();
       }

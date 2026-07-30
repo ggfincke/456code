@@ -99,6 +99,7 @@ export const ThreadOrigin = Schema.Struct({
   providerInstanceId: Schema.NullOr(ProviderInstanceId).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  originalWorkspaceRoot: Schema.optional(TrimmedNonEmptyString),
   importedAt: IsoDateTime,
 });
 export type ThreadOrigin = typeof ThreadOrigin.Type;
@@ -1139,6 +1140,10 @@ export const ThreadMessageSentPayload = Schema.Struct({
   attachments: Schema.optional(Schema.Array(ChatAttachment)),
   turnId: Schema.NullOr(TurnId),
   streaming: Schema.Boolean,
+  provenance: Schema.Literals(["live", "import"]).pipe(
+    Schema.optional,
+    Schema.withDecodingDefault(Effect.succeed("live")),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
 });
@@ -1483,7 +1488,7 @@ export type OrchestrationReplayEventsInput = typeof OrchestrationReplayEventsInp
 const OrchestrationReplayEventsResult = Schema.Array(OrchestrationEvent);
 export type OrchestrationReplayEventsResult = typeof OrchestrationReplayEventsResult.Type;
 
-export const IMPORT_SCAN_MAX_CANDIDATES = 2_000;
+export const IMPORT_SCAN_MAX_CANDIDATES = 50_000;
 export const IMPORT_SCAN_MAX_ERRORS = 100;
 export const IMPORT_SESSIONS_MAX_ITEMS = 100;
 export const IMPORT_SOURCE_PATH_MAX_CHARS = 4_096;
@@ -1513,7 +1518,7 @@ export const ImportScanCandidate = Schema.Struct({
   cwd: Schema.NullOr(ImportWorkspaceRoot),
   gitBranch: Schema.NullOr(ImportMetadata),
   model: Schema.NullOr(ImportMetadata),
-  messageCount: NonNegativeInt,
+  messageCount: Schema.NullOr(NonNegativeInt),
   modifiedAt: Schema.NullOr(IsoDateTime),
   alreadyImportedThreadId: Schema.NullOr(ThreadId),
   alreadyImportedProviderInstanceId: Schema.NullOr(ProviderInstanceId).pipe(
@@ -1530,6 +1535,7 @@ export const ImportScanResult = Schema.Struct({
     Schema.isMaxLength(IMPORT_SCAN_MAX_CANDIDATES),
   ),
   scannedAt: IsoDateTime,
+  truncated: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   errors: Schema.Array(
     Schema.Struct({
       sourcePath: Schema.NullOr(ImportSourcePath),

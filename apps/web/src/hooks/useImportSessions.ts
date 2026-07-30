@@ -14,6 +14,19 @@ import { orchestrationEnvironment } from "../state/orchestration";
 import { usePrimaryEnvironmentId } from "../state/environments";
 import { useAtomCommand } from "../state/use-atom-command";
 
+// amortize catalog and reconciliation setup while staying within the server's
+// bounded multi-session request contract
+export const IMPORT_SESSIONS_CLIENT_BATCH_SIZE = IMPORT_SESSIONS_MAX_ITEMS;
+
+export interface ImportSessionProgress {
+  readonly phase: "running" | "stopping" | "cancelled";
+  readonly total: number;
+  readonly completed: number;
+  readonly imported: number;
+  readonly skipped: number;
+  readonly failed: number;
+}
+
 function importErrorMessage(result: Parameters<typeof squashAtomCommandFailure>[0]): string {
   const squashed = squashAtomCommandFailure(result);
   return squashed instanceof Error && squashed.message.trim().length > 0
@@ -45,11 +58,18 @@ type ImportState =
       readonly status: "loading";
       readonly environmentId: EnvironmentId;
       readonly generation: number;
+      readonly progress: ImportSessionProgress;
     }
   | {
       readonly status: "success";
       readonly environmentId: EnvironmentId;
       readonly result: ImportSessionsResult;
+    }
+  | {
+      readonly status: "cancelled";
+      readonly environmentId: EnvironmentId;
+      readonly result: ImportSessionsResult;
+      readonly progress: ImportSessionProgress;
     }
   | {
       readonly status: "error";
@@ -76,6 +96,8 @@ export function useImportSessions() {
   const scanGenerationRef = useRef(0);
   const importGenerationRef = useRef(0);
   const activeEnvironmentIdRef = useRef(environmentId);
+  const activeImportGenerationRef = useRef<number | null>(null);
+  const importCancellationRequestedRef = useRef(false);
 
   const scan = useCallback(
     async (options?: { readonly preserveImportState?: boolean }) => {
@@ -130,6 +152,8 @@ export function useImportSessions() {
       activeEnvironmentIdRef.current = environmentId;
       scanGenerationRef.current += 1;
       importGenerationRef.current += 1;
+      activeImportGenerationRef.current = null;
+      importCancellationRequestedRef.current = true;
       setScanState({ status: "idle", environmentId });
       setImportState({ status: "idle", environmentId });
     }
@@ -143,52 +167,118 @@ export function useImportSessions() {
     }
   }, [environmentId]);
 
+  useEffect(
+    () => () => {
+      importGenerationRef.current += 1;
+      activeImportGenerationRef.current = null;
+      importCancellationRequestedRef.current = true;
+    },
+    [],
+  );
+
   const importSelected = useCallback(
     async (request: ImportSessionsRequest) => {
-      if (environmentId === null || request.items.length === 0) {
+      if (
+        environmentId === null ||
+        request.items.length === 0 ||
+        activeImportGenerationRef.current !== null
+      ) {
         return null;
       }
       const generation = ++importGenerationRef.current;
       const requestedEnvironmentId = environmentId;
+      activeImportGenerationRef.current = generation;
+      importCancellationRequestedRef.current = false;
       setImportState({
         status: "loading",
         environmentId: requestedEnvironmentId,
         generation,
+        progress: {
+          phase: "running",
+          total: request.items.length,
+          completed: 0,
+          imported: 0,
+          skipped: 0,
+          failed: 0,
+        },
       });
       const imported: ImportSessionsResult["imported"][number][] = [];
       const skipped: ImportSessionsResult["skipped"][number][] = [];
       const failed: ImportSessionsResult["failed"][number][] = [];
-      let completedBatchCount = 0;
 
-      for (let index = 0; index < request.items.length; index += IMPORT_SESSIONS_MAX_ITEMS) {
+      for (
+        let index = 0;
+        index < request.items.length;
+        index += IMPORT_SESSIONS_CLIENT_BATCH_SIZE
+      ) {
+        const batchItems = request.items.slice(index, index + IMPORT_SESSIONS_CLIENT_BATCH_SIZE);
         const result = await runImport({
           environmentId,
           input: {
-            items: request.items.slice(index, index + IMPORT_SESSIONS_MAX_ITEMS),
+            items: batchItems,
           },
         });
         if (
           generation !== importGenerationRef.current ||
           activeEnvironmentIdRef.current !== requestedEnvironmentId
         ) {
+          // a newer import may already own the active-generation guard; only
+          // release it if it still belongs to this stale request
+          if (activeImportGenerationRef.current === generation) {
+            activeImportGenerationRef.current = null;
+          }
           return null;
         }
         if (result._tag === "Failure") {
+          activeImportGenerationRef.current = null;
           setImportState({
             status: "error",
             environmentId: requestedEnvironmentId,
             message: importErrorMessage(result),
           });
-          if (completedBatchCount > 0) {
-            await scan({ preserveImportState: true });
-          }
+          await scan({ preserveImportState: true });
           return null;
         }
 
         imported.push(...result.value.imported);
         skipped.push(...result.value.skipped);
         failed.push(...result.value.failed);
-        completedBatchCount += 1;
+        const completed = Math.min(index + batchItems.length, request.items.length);
+        const aggregateResult: ImportSessionsResult = {
+          imported,
+          skipped,
+          failed,
+        };
+        const progress: ImportSessionProgress = {
+          phase: importCancellationRequestedRef.current ? "stopping" : "running",
+          total: request.items.length,
+          completed,
+          imported: imported.length,
+          skipped: skipped.length,
+          failed: failed.length,
+        };
+        if (completed < request.items.length && importCancellationRequestedRef.current) {
+          activeImportGenerationRef.current = null;
+          setImportState({
+            status: "cancelled",
+            environmentId: requestedEnvironmentId,
+            result: aggregateResult,
+            progress: {
+              ...progress,
+              phase: "cancelled",
+            },
+          });
+          await scan({ preserveImportState: true });
+          return null;
+        }
+        if (completed < request.items.length) {
+          setImportState({
+            status: "loading",
+            environmentId: requestedEnvironmentId,
+            generation,
+            progress,
+          });
+        }
       }
 
       const aggregateResult: ImportSessionsResult = {
@@ -196,6 +286,7 @@ export function useImportSessions() {
         skipped,
         failed,
       };
+      activeImportGenerationRef.current = null;
       setImportState({
         status: "success",
         environmentId: requestedEnvironmentId,
@@ -213,14 +304,39 @@ export function useImportSessions() {
     [environmentId, runImport, scan],
   );
 
+  const cancelImport = useCallback(() => {
+    const activeGeneration = activeImportGenerationRef.current;
+    if (activeGeneration === null) {
+      return;
+    }
+    importCancellationRequestedRef.current = true;
+    setImportState((current) =>
+      current.status === "loading" && current.generation === activeGeneration
+        ? {
+            ...current,
+            progress: {
+              ...current.progress,
+              phase: "stopping",
+            },
+          }
+        : current,
+    );
+  }, []);
+
   const scanIsCurrent = scanState.environmentId === environmentId;
   const importIsCurrent = importState.environmentId === environmentId;
   const scanResult = scanIsCurrent && scanState.status === "success" ? scanState.result : null;
   const scanError = scanIsCurrent && scanState.status === "error" ? scanState.message : null;
   const importResult =
-    importIsCurrent && importState.status === "success" ? importState.result : null;
+    importIsCurrent && (importState.status === "success" || importState.status === "cancelled")
+      ? importState.result
+      : null;
   const importError =
     importIsCurrent && importState.status === "error" ? importState.message : null;
+  const importProgress =
+    importIsCurrent && (importState.status === "loading" || importState.status === "cancelled")
+      ? importState.progress
+      : null;
 
   return {
     environmentId,
@@ -230,7 +346,9 @@ export function useImportSessions() {
     scan,
     importResult,
     importError,
+    importProgress,
     isImporting: importIsCurrent && importState.status === "loading",
     importSelected,
+    cancelImport,
   };
 }

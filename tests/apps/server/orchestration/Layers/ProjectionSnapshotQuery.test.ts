@@ -587,6 +587,225 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
     }),
   );
 
+  it.effect("checks import finalization without hydrating thread history", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* clearProjectionTables(sql);
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES (
+          'project-import-finalization',
+          'Import Finalization',
+          '/tmp/import-finalization',
+          '{"provider":"codex","model":"gpt-5-codex"}',
+          '[]',
+          '2026-04-06T01:00:00.000Z',
+          '2026-04-06T01:00:01.000Z',
+          NULL
+        )
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          latest_turn_id,
+          latest_user_message_at,
+          pending_approval_count,
+          pending_user_input_count,
+          has_actionable_proposed_plan,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'thread-finalized-active',
+            'project-import-finalization',
+            'Finalized active',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-04-06T01:00:02.000Z',
+            '2026-04-06T01:00:03.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-finalized-archived',
+            'project-import-finalization',
+            'Finalized archived',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-04-06T01:00:04.000Z',
+            '2026-04-06T01:00:05.000Z',
+            '2026-04-06T01:00:06.000Z',
+            NULL
+          ),
+          (
+            'thread-finalized-deleted',
+            'project-import-finalization',
+            'Finalized deleted',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-04-06T01:00:07.000Z',
+            '2026-04-06T01:00:08.000Z',
+            NULL,
+            '2026-04-06T01:00:09.000Z'
+          ),
+          (
+            'thread-not-finalized',
+            'project-import-finalization',
+            'Not finalized',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            0,
+            0,
+            0,
+            '2026-04-06T01:00:10.000Z',
+            '2026-04-06T01:00:11.000Z',
+            NULL,
+            NULL
+          )
+      `;
+      yield* sql`
+        INSERT INTO projection_thread_activities (
+          activity_id,
+          thread_id,
+          turn_id,
+          tone,
+          kind,
+          summary,
+          payload_json,
+          sequence,
+          created_at
+        )
+        VALUES
+          (
+            'activity-finalized-active',
+            'thread-finalized-active',
+            NULL,
+            'info',
+            'task.completed',
+            'Continuation marker',
+            '{"type":"import.continuation"}',
+            1,
+            '2026-04-06T01:00:03.000Z'
+          ),
+          (
+            'activity-finalized-archived',
+            'thread-finalized-archived',
+            NULL,
+            'info',
+            'task.completed',
+            'Continuation marker',
+            '{"type":"import.continuation"}',
+            1,
+            '2026-04-06T01:00:05.000Z'
+          ),
+          (
+            'activity-finalized-deleted',
+            'thread-finalized-deleted',
+            NULL,
+            'info',
+            'task.completed',
+            'Continuation marker',
+            '{"type":"import.continuation"}',
+            1,
+            '2026-04-06T01:00:08.000Z'
+          ),
+          (
+            'activity-invalid-json',
+            'thread-not-finalized',
+            NULL,
+            'info',
+            'runtime.note',
+            'Invalid payload',
+            '{',
+            1,
+            '2026-04-06T01:00:11.000Z'
+          ),
+          (
+            'activity-other-type',
+            'thread-not-finalized',
+            NULL,
+            'info',
+            'runtime.note',
+            'Other payload',
+            '{"type":"runtime.note"}',
+            2,
+            '2026-04-06T01:00:12.000Z'
+          )
+      `;
+
+      assert.equal(
+        yield* snapshotQuery.isThreadImportFinalized(ThreadId.make("thread-finalized-active")),
+        true,
+      );
+      assert.equal(
+        yield* snapshotQuery.isThreadImportFinalized(ThreadId.make("thread-finalized-archived")),
+        true,
+      );
+      assert.equal(
+        yield* snapshotQuery.isThreadImportFinalized(ThreadId.make("thread-finalized-deleted")),
+        false,
+      );
+      assert.equal(
+        yield* snapshotQuery.isThreadImportFinalized(ThreadId.make("thread-not-finalized")),
+        false,
+      );
+      assert.equal(
+        yield* snapshotQuery.isThreadImportFinalized(ThreadId.make("thread-missing")),
+        false,
+      );
+    }),
+  );
+
   it.effect("keeps settled threads in the shell snapshot with non-null settlement fields", () =>
     Effect.gen(function* () {
       const snapshotQuery = yield* ProjectionSnapshotQuery;
@@ -824,6 +1043,159 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           assert.equal(firstThreadId.value, ThreadId.make("thread-first"));
         }
       }),
+  );
+
+  it.effect("reads only active projects and nondeleted imported-thread metadata", () =>
+    Effect.gen(function* () {
+      const snapshotQuery = yield* ProjectionSnapshotQuery;
+      const sql = yield* SqlClient.SqlClient;
+
+      yield* clearProjectionTables(sql);
+      yield* sql`
+        INSERT INTO projection_projects (
+          project_id,
+          title,
+          workspace_root,
+          default_model_selection_json,
+          scripts_json,
+          created_at,
+          updated_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'project-import-active',
+            'Imported History',
+            '/tmp/imported-history',
+            NULL,
+            '[]',
+            '2026-03-01T01:00:00.000Z',
+            '2026-03-01T01:00:01.000Z',
+            NULL
+          ),
+          (
+            'project-import-deleted',
+            'Deleted Imported History',
+            '/tmp/deleted-imported-history',
+            NULL,
+            '[]',
+            '2026-03-01T01:00:02.000Z',
+            '2026-03-01T01:00:03.000Z',
+            '2026-03-01T01:00:04.000Z'
+          )
+      `;
+      yield* sql`
+        INSERT INTO projection_threads (
+          thread_id,
+          project_id,
+          title,
+          model_selection_json,
+          runtime_mode,
+          interaction_mode,
+          branch,
+          worktree_path,
+          origin_json,
+          latest_turn_id,
+          created_at,
+          updated_at,
+          archived_at,
+          deleted_at
+        )
+        VALUES
+          (
+            'thread-import-active',
+            'project-import-active',
+            'Active import',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            '{"kind":"imported","source":"codex-cli","sourcePath":"/tmp/active.jsonl","contentHash":"active-hash","nativeSessionId":"active-native","providerInstanceId":null,"importedAt":"2026-03-01T01:00:05.000Z"}',
+            NULL,
+            '2026-03-01T01:00:05.000Z',
+            '2026-03-01T01:00:06.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-import-archived',
+            'project-import-active',
+            'Archived import',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            '{"kind":"imported","source":"claude-code","sourcePath":"/tmp/archived.jsonl","contentHash":"archived-hash","nativeSessionId":"archived-native","providerInstanceId":null,"originalWorkspaceRoot":"/missing/workspace","importedAt":"2026-03-01T01:00:07.000Z"}',
+            NULL,
+            '2026-03-01T01:00:07.000Z',
+            '2026-03-01T01:00:08.000Z',
+            '2026-03-01T01:00:09.000Z',
+            NULL
+          ),
+          (
+            'thread-not-imported',
+            'project-import-active',
+            'Ordinary thread',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            '2026-03-01T01:00:10.000Z',
+            '2026-03-01T01:00:11.000Z',
+            NULL,
+            NULL
+          ),
+          (
+            'thread-import-deleted',
+            'project-import-active',
+            'Deleted import',
+            '{"provider":"codex","model":"gpt-5-codex"}',
+            'full-access',
+            'default',
+            NULL,
+            NULL,
+            '{"kind":"imported","source":"opencode","sourcePath":"/tmp/deleted.json","contentHash":"deleted-hash","nativeSessionId":"deleted-native","providerInstanceId":null,"importedAt":"2026-03-01T01:00:12.000Z"}',
+            NULL,
+            '2026-03-01T01:00:12.000Z',
+            '2026-03-01T01:00:13.000Z',
+            NULL,
+            '2026-03-01T01:00:14.000Z'
+          )
+      `;
+
+      const context = yield* snapshotQuery.getImportReconciliationContext();
+
+      assert.deepEqual(context.projects, [
+        {
+          projectId: asProjectId("project-import-active"),
+          workspaceRoot: "/tmp/imported-history",
+        },
+      ]);
+      assert.deepEqual(
+        context.threads.map((thread) => ({
+          threadId: thread.threadId,
+          source: thread.origin.source,
+          archived: thread.archived,
+        })),
+        [
+          {
+            threadId: ThreadId.make("thread-import-active"),
+            source: "codex-cli",
+            archived: false,
+          },
+          {
+            threadId: ThreadId.make("thread-import-archived"),
+            source: "claude-code",
+            archived: true,
+          },
+        ],
+      );
+    }),
   );
 
   it.effect("reads single-thread checkpoint context without hydrating unrelated threads", () =>
