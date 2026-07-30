@@ -14,6 +14,10 @@ import * as Schema from "effect/Schema";
 
 import { toProjectorDecodeError, type OrchestrationProjectorDecodeError } from "./Errors.ts";
 import {
+  COMMAND_RELEVANT_THREAD_ACTIVITY_KIND_SET,
+  isImportContinuationActivityPayload,
+} from "./activityPolicy.ts";
+import {
   MessageSentPayloadSchema,
   ProjectCreatedPayload,
   ProjectDeletedPayload,
@@ -172,12 +176,7 @@ function retainThreadProposedPlansAfterRevert(
 function isImportContinuationActivity(
   activity: OrchestrationThread["activities"][number],
 ): boolean {
-  return (
-    typeof activity.payload === "object" &&
-    activity.payload !== null &&
-    "type" in activity.payload &&
-    activity.payload.type === "import.continuation"
-  );
+  return isImportContinuationActivityPayload(activity.payload);
 }
 
 function retainThreadActivities(
@@ -191,6 +190,21 @@ function retainThreadActivities(
     return retainedActivities;
   }
   return [latestImportContinuation, ...retainedActivities].toSorted(
+    compareOrchestrationThreadActivities,
+  );
+}
+
+function compactFinalizedImportActivities(
+  activities: ReadonlyArray<OrchestrationThread["activities"][number]>,
+): ReadonlyArray<OrchestrationThread["activities"][number]> {
+  const latestImportContinuation = activities.findLast(isImportContinuationActivity);
+  const retainedActivities = activities.filter((activity) =>
+    COMMAND_RELEVANT_THREAD_ACTIVITY_KIND_SET.has(activity.kind),
+  );
+  if (latestImportContinuation === undefined) {
+    return retainedActivities;
+  }
+  return [...retainedActivities, latestImportContinuation].toSorted(
     compareOrchestrationThreadActivities,
   );
 }
@@ -749,11 +763,23 @@ export function projectEvent(
             ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
             payload.activity,
           ].toSorted(compareOrchestrationThreadActivities);
+          const importFinalized =
+            thread.origin !== null &&
+            thread.latestTurn === null &&
+            isImportContinuationActivity(payload.activity);
 
           return {
             ...nextBase,
             threads: updateThread(nextBase.threads, payload.threadId, {
-              activities: retainThreadActivities(activities),
+              activities: importFinalized
+                ? compactFinalizedImportActivities(activities)
+                : retainThreadActivities(activities),
+              ...(importFinalized
+                ? {
+                    messages: [],
+                    checkpoints: [],
+                  }
+                : {}),
               updatedAt: event.occurredAt,
             }),
           };

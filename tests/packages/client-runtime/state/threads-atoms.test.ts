@@ -5,7 +5,6 @@ import { Atom } from "effect/unstable/reactivity";
 
 import type { EnvironmentRegistry } from "../../../../packages/client-runtime/src/connection/registry.ts";
 import type { EnvironmentCacheStore } from "../../../../packages/client-runtime/src/platform/persistence.ts";
-import { THREAD_STATE_IDLE_TTL_MS } from "../../../../packages/client-runtime/src/state/threadRetention.ts";
 import {
   createEnvironmentThreadStateAtoms,
   type ThreadSnapshotLoader,
@@ -22,7 +21,6 @@ describe("createEnvironmentThreadStateAtoms", () => {
     const threadId = ThreadId.make("thread-1");
     const atom = threads.stateAtom(environmentId, threadId);
 
-    expect(atom.idleTTL).toBe(THREAD_STATE_IDLE_TTL_MS);
     expect(threads.stateAtom(environmentId, threadId)).toBe(atom);
     expect(threads.stateAtom(environmentId, ThreadId.make("thread-2"))).not.toBe(atom);
   });

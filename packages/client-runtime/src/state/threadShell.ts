@@ -1,3 +1,5 @@
+// packages/client-runtime/src/state/threadShell.ts
+// derives indexed and scoped thread shell atoms without per-thread list fanout
 import type {
   EnvironmentId,
   OrchestrationShellSnapshot,
@@ -35,6 +37,28 @@ export function createEnvironmentThreadShellAtoms(input: {
     environmentId: EnvironmentId,
   ) => Atom.Atom<OrchestrationShellSnapshot | null>;
 }) {
+  const scopedThreadCacheByEnvironment = new Map<
+    EnvironmentId,
+    WeakMap<OrchestrationThreadShell, EnvironmentThreadShell>
+  >();
+  const scopeCachedThread = (
+    environmentId: EnvironmentId,
+    source: OrchestrationThreadShell,
+  ): EnvironmentThreadShell => {
+    let cache = scopedThreadCacheByEnvironment.get(environmentId);
+    if (cache === undefined) {
+      cache = new WeakMap();
+      scopedThreadCacheByEnvironment.set(environmentId, cache);
+    }
+    const cached = cache.get(source);
+    if (cached !== undefined) {
+      return cached;
+    }
+    const scoped = scopeThreadShell(environmentId, source);
+    cache.set(source, scoped);
+    return scoped;
+  };
+
   const environmentThreadsAtom = Atom.family((environmentId: EnvironmentId) =>
     Atom.make(
       (get): ReadonlyArray<OrchestrationThreadShell> =>
@@ -102,16 +126,9 @@ export function createEnvironmentThreadShellAtoms(input: {
 
   const threadShellAtomFamily = Atom.family((key: string) => {
     const ref = parseThreadKey(key);
-    let previousSource: OrchestrationThreadShell | null = null;
-    let previousValue: EnvironmentThreadShell | null = null;
     return Atom.make((get) => {
       const source = get(environmentThreadIndexAtom(ref.environmentId)).get(ref.threadId) ?? null;
-      if (source === previousSource) {
-        return previousValue;
-      }
-      previousSource = source;
-      previousValue = source === null ? null : scopeThreadShell(ref.environmentId, source);
-      return previousValue;
+      return source === null ? null : scopeCachedThread(ref.environmentId, source);
     }).pipe(Atom.withLabel(`environment-thread-shell:${key}`));
   });
 
@@ -122,6 +139,7 @@ export function createEnvironmentThreadShellAtoms(input: {
       const next: EnvironmentThreadShell[] = [];
       const seen = new Set<string>();
       for (const projectRef of projectRefs) {
+        const index = get(environmentThreadIndexAtom(projectRef.environmentId));
         const refs =
           get(environmentThreadRefsByProjectAtom(projectRef.environmentId)).get(
             projectRef.projectId,
@@ -132,9 +150,9 @@ export function createEnvironmentThreadShellAtoms(input: {
             continue;
           }
           seen.add(key);
-          const thread = get(threadShellAtomFamily(key));
-          if (thread !== null) {
-            next.push(thread);
+          const source = index.get(ref.threadId);
+          if (source !== undefined) {
+            next.push(scopeCachedThread(ref.environmentId, source));
           }
         }
       }
@@ -161,10 +179,12 @@ export function createEnvironmentThreadShellAtoms(input: {
 
   let previousThreadShells: ReadonlyArray<EnvironmentThreadShell> = [];
   const threadShellsAtom = Atom.make((get) => {
-    const next = get(threadRefsAtom).flatMap((ref) => {
-      const thread = get(threadShellAtomFamily(threadKey(ref)));
-      return thread === null ? [] : [thread];
-    });
+    const next: EnvironmentThreadShell[] = [];
+    for (const environmentId of get(input.catalogValueAtom).entries.keys()) {
+      for (const source of get(environmentThreadsAtom(environmentId))) {
+        next.push(scopeCachedThread(environmentId, source));
+      }
+    }
     if (arrayElementsEqual(previousThreadShells, next)) {
       return previousThreadShells;
     }
