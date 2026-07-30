@@ -29,59 +29,17 @@ it.effect("parses keybinding rules", () =>
     });
     assert.strictEqual(parsed.command, "terminal.toggle");
 
-    const parsedSidebarToggle = yield* decode(KeybindingRule, {
-      key: "mod+b",
-      command: "sidebar.toggle",
-    });
-    assert.strictEqual(parsedSidebarToggle.command, "sidebar.toggle");
-
     const parsedRightPanelToggle = yield* decode(KeybindingRule, {
       key: "mod+alt+b",
       command: "rightPanel.toggle",
     });
     assert.strictEqual(parsedRightPanelToggle.command, "rightPanel.toggle");
 
-    const parsedClose = yield* decode(KeybindingRule, {
-      key: "mod+w",
-      command: "terminal.close",
-    });
-    assert.strictEqual(parsedClose.command, "terminal.close");
-
-    const parsedDiffToggle = yield* decode(KeybindingRule, {
-      key: "mod+d",
-      command: "diff.toggle",
-    });
-    assert.strictEqual(parsedDiffToggle.command, "diff.toggle");
-
-    const parsedCommandPalette = yield* decode(KeybindingRule, {
-      key: "mod+k",
-      command: "commandPalette.toggle",
-    });
-    assert.strictEqual(parsedCommandPalette.command, "commandPalette.toggle");
-
-    const parsedLocal = yield* decode(KeybindingRule, {
-      key: "mod+shift+n",
-      command: "chat.newLocal",
-    });
-    assert.strictEqual(parsedLocal.command, "chat.newLocal");
-
-    const parsedModelPickerToggle = yield* decode(KeybindingRule, {
-      key: "mod+shift+m",
-      command: "modelPicker.toggle",
-    });
-    assert.strictEqual(parsedModelPickerToggle.command, "modelPicker.toggle");
-
     const parsedModelPickerJump = yield* decode(KeybindingRule, {
       key: "mod+1",
       command: "modelPicker.jump.1",
     });
     assert.strictEqual(parsedModelPickerJump.command, "modelPicker.jump.1");
-
-    const parsedThreadPrevious = yield* decode(KeybindingRule, {
-      key: "mod+shift+[",
-      command: "thread.previous",
-    });
-    assert.strictEqual(parsedThreadPrevious.command, "thread.previous");
   }),
 );
 

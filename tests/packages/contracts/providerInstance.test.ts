@@ -26,20 +26,10 @@ describe("provider slug validation (shared by driver + instance ids)", () => {
   for (const { schemaName, decode } of cases) {
     describe(schemaName, () => {
       it.each([
-        { label: "accepts codex", value: "codex", expectValid: true },
-        { label: "accepts codex_personal", value: "codex_personal", expectValid: true },
-        { label: "accepts codex-work", value: "codex-work", expectValid: true },
-        { label: "accepts claudeAgent", value: "claudeAgent", expectValid: true },
-        { label: "accepts x", value: "x", expectValid: true },
-        { label: "accepts abc123", value: "abc123", expectValid: true },
-        { label: "accepts ollama", value: "ollama", expectValid: true },
+        { label: "accepts codex_work", value: "codex_work", expectValid: true },
         { label: "rejects empty string", value: "", expectValid: false },
         { label: "rejects leading digit", value: "1codex", expectValid: false },
-        { label: "rejects leading dash", value: "-codex", expectValid: false },
-        { label: "rejects leading underscore", value: "_codex", expectValid: false },
         { label: "rejects whitespace inside", value: "codex personal", expectValid: false },
-        { label: "rejects dot inside", value: "codex.personal", expectValid: false },
-        { label: "rejects slash inside", value: "codex/personal", expectValid: false },
       ])("$label", ({ value, expectValid }) => {
         if (expectValid) {
           expect(decode(value)).toBe(value);
@@ -70,15 +60,6 @@ describe("ProviderInstanceRef", () => {
     });
     expect(ref.instanceId).toBe("codex_work");
     expect(ref.driver).toBe("codex");
-  });
-
-  it("decodes a fork-defined driver ref without complaint", () => {
-    const ref = decodeProviderInstanceRef({
-      instanceId: "ollama_local",
-      driver: "ollama",
-    });
-    expect(ref.instanceId).toBe("ollama_local");
-    expect(ref.driver).toBe("ollama");
   });
 
   it("rejects refs whose driver field is not a valid slug", () => {

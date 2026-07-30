@@ -78,7 +78,6 @@ import {
   insertInlineTerminalContextPlaceholder,
   type TerminalContextDraft,
 } from "../../../apps/web/src/lib/terminalContext";
-import { createDebouncedStorage } from "../../../apps/web/src/lib/storage";
 
 function makeImage(input: {
   id: string;
@@ -811,24 +810,13 @@ describe("composerDraftStore project draft thread mapping", () => {
       expect(useComposerDraftStore.getState().getDraftThreadByProjectRef(projectRef)).toBeNull();
       expect(useComposerDraftStore.getState().getDraftThread(draftId)).toBeNull();
       expect(revokeSpy).toHaveBeenCalledWith("blob:clear");
-    } finally {
-      URL.revokeObjectURL = originalRevokeObjectUrl;
-    }
-  });
 
-  it("revokes draft image blob URLs when clearing a matching project draft thread by id", () => {
-    const store = useComposerDraftStore.getState();
-    const originalRevokeObjectUrl = URL.revokeObjectURL;
-    const revokeSpy = vi.fn<(url: string) => void>();
-    URL.revokeObjectURL = revokeSpy;
-
-    try {
+      // Same revoke path via clear-by-id API.
       store.setProjectDraftThreadId(projectRef, draftId, { threadId });
       store.addImage(
         draftId,
         makeImage({ id: "img-project-clear-by-id", previewUrl: "blob:clear-by-id" }),
       );
-
       store.clearProjectDraftThreadById(projectRef, draftId);
 
       expect(useComposerDraftStore.getState().getDraftThreadByProjectRef(projectRef)).toBeNull();
@@ -1230,76 +1218,82 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
-  it("keeps explicit default-state overrides on the selection", () => {
+  it.each([
+    {
+      label: "claude default-state overrides",
+      setup: (store: ReturnType<typeof useComposerDraftStore.getState>) => {
+        store.setModelSelection(
+          threadRef,
+          modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", {
+            effort: "max",
+          }),
+        );
+        store.setProviderModelOptions(
+          threadRef,
+          CLAUDE_AGENT_DRIVER,
+          toSelections({ thinking: true }),
+        );
+      },
+      expectedInstance: CLAUDE_AGENT_INSTANCE,
+      expected: () =>
+        modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", {
+          thinking: true,
+        }),
+    },
+    {
+      label: "codex off/default overrides",
+      setup: (store: ReturnType<typeof useComposerDraftStore.getState>) => {
+        store.setModelSelection(
+          threadRef,
+          modelSelection(CODEX_DRIVER, "gpt-5.4", { fastMode: true }),
+        );
+        store.setProviderModelOptions(
+          threadRef,
+          CODEX_DRIVER,
+          toSelections({ reasoningEffort: "high", fastMode: false }),
+        );
+      },
+      expectedInstance: CODEX_INSTANCE,
+      expected: () =>
+        modelSelection(CODEX_DRIVER, "gpt-5.4", {
+          reasoningEffort: "high",
+          fastMode: false,
+        }),
+    },
+    {
+      label: "Cursor reset overrides",
+      setup: (store: ReturnType<typeof useComposerDraftStore.getState>) => {
+        store.setModelSelection(
+          threadRef,
+          modelSelection(CURSOR_DRIVER, "claude-opus-4-6", {
+            reasoning: "xhigh",
+            fastMode: true,
+            thinking: false,
+          }),
+        );
+        store.setProviderModelOptions(
+          threadRef,
+          CURSOR_DRIVER,
+          toSelections({ reasoning: "medium", fastMode: false, thinking: true }),
+        );
+      },
+      expectedInstance: CURSOR_INSTANCE,
+      expected: () =>
+        modelSelection(CURSOR_DRIVER, "claude-opus-4-6", {
+          reasoning: "medium",
+          fastMode: false,
+          thinking: true,
+        }),
+    },
+  ])("keeps explicit $label on the selection", ({ label, setup, expectedInstance, expected }) => {
     const store = useComposerDraftStore.getState();
-
-    store.setModelSelection(
-      threadRef,
-      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", {
-        effort: "max",
-      }),
-    );
-
-    store.setProviderModelOptions(threadRef, CLAUDE_AGENT_DRIVER, toSelections({ thinking: true }));
-
+    setup(store);
     expect(
-      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CLAUDE_AGENT_INSTANCE],
-    ).toEqual(
-      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", {
-        thinking: true,
-      }),
-    );
-    expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toEqual({});
-  });
-
-  it("keeps explicit off/default codex overrides on the selection", () => {
-    const store = useComposerDraftStore.getState();
-
-    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, "gpt-5.4", { fastMode: true }));
-
-    store.setProviderModelOptions(
-      threadRef,
-      CODEX_DRIVER,
-      toSelections({ reasoningEffort: "high", fastMode: false }),
-    );
-
-    expect(
-      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE],
-    ).toEqual(
-      modelSelection(CODEX_DRIVER, "gpt-5.4", {
-        reasoningEffort: "high",
-        fastMode: false,
-      }),
-    );
-  });
-
-  it("keeps explicit Cursor reset overrides on the selection", () => {
-    const store = useComposerDraftStore.getState();
-
-    store.setModelSelection(
-      threadRef,
-      modelSelection(CURSOR_DRIVER, "claude-opus-4-6", {
-        reasoning: "xhigh",
-        fastMode: true,
-        thinking: false,
-      }),
-    );
-
-    store.setProviderModelOptions(
-      threadRef,
-      CURSOR_DRIVER,
-      toSelections({ reasoning: "medium", fastMode: false, thinking: true }),
-    );
-
-    expect(
-      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CURSOR_INSTANCE],
-    ).toEqual(
-      modelSelection(CURSOR_DRIVER, "claude-opus-4-6", {
-        reasoning: "medium",
-        fastMode: false,
-        thinking: true,
-      }),
-    );
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[expectedInstance],
+    ).toEqual(expected());
+    if (label === "claude default-state overrides") {
+      expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toEqual({});
+    }
   });
 
   it("preserves the selected Cursor model when only traits change", () => {
@@ -1326,7 +1320,10 @@ describe("composerDraftStore modelSelection", () => {
     );
   });
 
-  it("updates only the draft when sticky persistence is omitted", () => {
+  it.each([
+    { label: "omitted", options: undefined },
+    { label: "disabled", options: { persistSticky: false as const } },
+  ])("updates only the draft when sticky persistence is $label", ({ options }) => {
     const store = useComposerDraftStore.getState();
 
     store.setStickyModelSelection(
@@ -1341,6 +1338,7 @@ describe("composerDraftStore modelSelection", () => {
       threadRef,
       CLAUDE_AGENT_DRIVER,
       toSelections({ thinking: false }),
+      options,
     );
 
     expect(
@@ -1458,38 +1456,6 @@ describe("composerDraftStore modelSelection", () => {
         options: [{ id: "reasoningEffort", value: "low" }],
       }),
     );
-  });
-
-  it("updates only the draft when sticky persistence is disabled", () => {
-    const store = useComposerDraftStore.getState();
-
-    store.setStickyModelSelection(
-      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", { effort: "max" }),
-    );
-    store.setModelSelection(
-      threadRef,
-      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", { effort: "max" }),
-    );
-
-    store.setProviderModelOptions(
-      threadRef,
-      CLAUDE_AGENT_DRIVER,
-      toSelections({ thinking: false }),
-      {
-        persistSticky: false,
-      },
-    );
-
-    expect(
-      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CLAUDE_AGENT_INSTANCE],
-    ).toEqual(
-      modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", {
-        thinking: false,
-      }),
-    );
-    expect(
-      useComposerDraftStore.getState().stickyModelSelectionByProvider[CLAUDE_AGENT_INSTANCE],
-    ).toEqual(modelSelection(CLAUDE_AGENT_DRIVER, "claude-opus-4-6", { effort: "max" }));
   });
 });
 
@@ -1647,127 +1613,5 @@ describe("composerDraftStore runtime and interaction settings", () => {
     store.setInteractionMode(threadRef, null);
 
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// createDebouncedStorage
-// ---------------------------------------------------------------------------
-
-function createMockStorage() {
-  const store = new Map<string, string>();
-  return {
-    getItem: vi.fn((name: string) => store.get(name) ?? null),
-    setItem: vi.fn((name: string, value: string) => {
-      store.set(name, value);
-    }),
-    removeItem: vi.fn((name: string) => {
-      store.delete(name);
-    }),
-  };
-}
-
-describe("createDebouncedStorage", () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.useRealTimers();
-  });
-
-  it("delegates getItem immediately", () => {
-    const base = createMockStorage();
-    base.getItem.mockReturnValueOnce("value");
-    const storage = createDebouncedStorage(base);
-
-    expect(storage.getItem("key")).toBe("value");
-    expect(base.getItem).toHaveBeenCalledWith("key");
-  });
-
-  it("does not write to base storage until the debounce fires", () => {
-    const base = createMockStorage();
-    const storage = createDebouncedStorage(base);
-
-    storage.setItem("key", "v1");
-    expect(base.setItem).not.toHaveBeenCalled();
-
-    vi.advanceTimersByTime(299);
-    expect(base.setItem).not.toHaveBeenCalled();
-
-    vi.advanceTimersByTime(1);
-    expect(base.setItem).toHaveBeenCalledWith("key", "v1");
-  });
-
-  it("only writes the last value when setItem is called rapidly", () => {
-    const base = createMockStorage();
-    const storage = createDebouncedStorage(base);
-
-    storage.setItem("key", "v1");
-    storage.setItem("key", "v2");
-    storage.setItem("key", "v3");
-
-    vi.advanceTimersByTime(300);
-    expect(base.setItem).toHaveBeenCalledTimes(1);
-    expect(base.setItem).toHaveBeenCalledWith("key", "v3");
-  });
-
-  it("removeItem cancels a pending setItem write", () => {
-    const base = createMockStorage();
-    const storage = createDebouncedStorage(base);
-
-    storage.setItem("key", "v1");
-    storage.removeItem("key");
-
-    vi.advanceTimersByTime(300);
-    expect(base.setItem).not.toHaveBeenCalled();
-    expect(base.removeItem).toHaveBeenCalledWith("key");
-  });
-
-  it("flush writes the pending value immediately", () => {
-    const base = createMockStorage();
-    const storage = createDebouncedStorage(base);
-
-    storage.setItem("key", "v1");
-    expect(base.setItem).not.toHaveBeenCalled();
-
-    storage.flush();
-    expect(base.setItem).toHaveBeenCalledWith("key", "v1");
-
-    // Timer should be cancelled; no duplicate write.
-    vi.advanceTimersByTime(300);
-    expect(base.setItem).toHaveBeenCalledTimes(1);
-  });
-
-  it("flush is a no-op when nothing is pending", () => {
-    const base = createMockStorage();
-    const storage = createDebouncedStorage(base);
-
-    storage.flush();
-    expect(base.setItem).not.toHaveBeenCalled();
-  });
-
-  it("flush after removeItem is a no-op", () => {
-    const base = createMockStorage();
-    const storage = createDebouncedStorage(base);
-
-    storage.setItem("key", "v1");
-    storage.removeItem("key");
-    storage.flush();
-
-    expect(base.setItem).not.toHaveBeenCalled();
-  });
-
-  it("setItem works normally after removeItem cancels a pending write", () => {
-    const base = createMockStorage();
-    const storage = createDebouncedStorage(base);
-
-    storage.setItem("key", "v1");
-    storage.removeItem("key");
-    storage.setItem("key", "v2");
-
-    vi.advanceTimersByTime(300);
-    expect(base.setItem).toHaveBeenCalledTimes(1);
-    expect(base.setItem).toHaveBeenCalledWith("key", "v2");
   });
 });

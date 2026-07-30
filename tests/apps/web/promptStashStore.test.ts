@@ -56,14 +56,10 @@ function resetPromptStashStore() {
 }
 
 describe("promptStashScopeKey", () => {
-  it("maps a provider instance to its own bucket and null to the unscoped bucket", () => {
+  it("maps provider instances to namespaced buckets and nullish to the unscoped bucket", () => {
     expect(promptStashScopeKey(CLAUDE_AGENT_INSTANCE)).toBe("provider:claudeAgent");
     expect(promptStashScopeKey(null)).toBe(PROMPT_STASH_UNSCOPED_KEY);
     expect(promptStashScopeKey(undefined)).toBe(PROMPT_STASH_UNSCOPED_KEY);
-  });
-
-  // provider slugs cannot equal the unscoped sentinel
-  it("namespaces provider keys so they can never equal the unscoped sentinel", () => {
     expect(promptStashScopeKey(CLAUDE_AGENT_INSTANCE)).not.toBe(PROMPT_STASH_UNSCOPED_KEY);
     expect(promptStashScopeKey(CODEX_INSTANCE).startsWith("provider:")).toBe(true);
   });

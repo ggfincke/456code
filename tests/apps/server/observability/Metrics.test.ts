@@ -32,22 +32,29 @@ const findHistogramSnapshot = (
   );
 
 describe("withMetrics", () => {
-  it.effect("supports pipe-style usage", () =>
+  it.effect("supports pipe-style success and direct-invocation failure", () =>
     Effect.gen(function* () {
-      const counter = Metric.counter("with_metrics_pipe_total");
-      const timer = Metric.timer("with_metrics_pipe_duration");
+      const pipeCounter = Metric.counter("with_metrics_pipe_total");
+      const pipeTimer = Metric.timer("with_metrics_pipe_duration");
+      const directCounter = Metric.counter("with_metrics_direct_total");
 
       const result = yield* Effect.succeed("ok").pipe(
         withMetrics({
-          counter,
-          timer,
+          counter: pipeCounter,
+          timer: pipeTimer,
           attributes: {
             operation: "pipe",
           },
         }),
       );
-
       assert.equal(result, "ok");
+
+      yield* withMetrics(Effect.fail("boom"), {
+        counter: directCounter,
+        attributes: {
+          operation: "direct",
+        },
+      }).pipe(Effect.exit);
 
       const snapshots = yield* Metric.snapshot;
       assert.equal(
@@ -63,21 +70,6 @@ describe("withMetrics", () => {
         }),
         true,
       );
-    }),
-  );
-
-  it.effect("supports direct invocation", () =>
-    Effect.gen(function* () {
-      const counter = Metric.counter("with_metrics_direct_total");
-
-      yield* withMetrics(Effect.fail("boom"), {
-        counter,
-        attributes: {
-          operation: "direct",
-        },
-      }).pipe(Effect.exit);
-
-      const snapshots = yield* Metric.snapshot;
       assert.equal(
         hasMetricSnapshot(snapshots, "with_metrics_direct_total", {
           operation: "direct",

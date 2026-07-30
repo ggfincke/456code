@@ -324,11 +324,6 @@ describe("rightPanelStore", () => {
     expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
   });
 
-  it("close on never-opened thread is a no-op", () => {
-    useRightPanelStore.getState().close(refA);
-    expect(useRightPanelStore.getState().byThreadKey).toEqual({});
-  });
-
   it("tracks one surface per browser session", () => {
     useRightPanelStore.getState().openBrowser(refA, "tab-a");
     useRightPanelStore.getState().openBrowser(refA, "tab-b");

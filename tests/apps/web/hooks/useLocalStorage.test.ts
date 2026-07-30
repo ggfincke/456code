@@ -32,90 +32,89 @@ afterEach(() => {
 });
 
 describe("local storage errors", () => {
-  it("preserves read failure context", async () => {
-    const cause = new Error("storage unavailable");
-    const { getLocalStorageItem, LocalStorageOperationError } = await loadWithStorage(
-      createStorage({
+  it.each([
+    {
+      label: "read",
+      storageKey: "read-key",
+      cause: new Error("storage unavailable"),
+      createOverrides: (cause: Error): Partial<Storage> => ({
         getItem: () => {
           throw cause;
         },
       }),
-    );
-
-    try {
-      getLocalStorageItem("read-key", Schema.String);
-      expect.unreachable("expected the read to fail");
-    } catch (error) {
-      expect(error).toBeInstanceOf(LocalStorageOperationError);
-      expect(error).toMatchObject({
-        operation: "read",
-        storageKey: "read-key",
-        cause,
-      });
-    }
-  });
-
-  it("preserves decode failure context", async () => {
-    const { getLocalStorageItem, LocalStorageOperationError } = await loadWithStorage(
-      createStorage({ getItem: () => "not-json" }),
-    );
-
-    try {
-      getLocalStorageItem("decode-key", Schema.String);
-      expect.unreachable("expected decoding to fail");
-    } catch (error) {
-      expect(error).toBeInstanceOf(LocalStorageOperationError);
-      expect(error).toMatchObject({
-        operation: "decode",
-        storageKey: "decode-key",
-        cause: expect.anything(),
-      });
-    }
-  });
-
-  it("preserves write failure context", async () => {
-    const cause = new Error("storage quota exceeded");
-    const { LocalStorageOperationError, setLocalStorageItem } = await loadWithStorage(
-      createStorage({
+      run: async (
+        api: Awaited<ReturnType<typeof loadWithStorage>>,
+        storageKey: string,
+      ): Promise<void> => {
+        api.getLocalStorageItem(storageKey, Schema.String);
+      },
+      expectedCause: (cause: Error) => cause,
+    },
+    {
+      label: "decode",
+      storageKey: "decode-key",
+      cause: null,
+      createOverrides: (): Partial<Storage> => ({ getItem: () => "not-json" }),
+      run: async (
+        api: Awaited<ReturnType<typeof loadWithStorage>>,
+        storageKey: string,
+      ): Promise<void> => {
+        api.getLocalStorageItem(storageKey, Schema.String);
+      },
+      expectedCause: () => expect.anything(),
+    },
+    {
+      label: "write",
+      storageKey: "write-key",
+      cause: new Error("storage quota exceeded"),
+      createOverrides: (cause: Error): Partial<Storage> => ({
         setItem: () => {
           throw cause;
         },
       }),
-    );
-
-    try {
-      setLocalStorageItem("write-key", "value", Schema.String);
-      expect.unreachable("expected the write to fail");
-    } catch (error) {
-      expect(error).toBeInstanceOf(LocalStorageOperationError);
-      expect(error).toMatchObject({
-        operation: "write",
-        storageKey: "write-key",
-        cause,
-      });
-    }
-  });
-
-  it("preserves removal failure context", async () => {
-    const cause = new Error("storage unavailable");
-    const { LocalStorageOperationError, removeLocalStorageItem } = await loadWithStorage(
-      createStorage({
+      run: async (
+        api: Awaited<ReturnType<typeof loadWithStorage>>,
+        storageKey: string,
+      ): Promise<void> => {
+        api.setLocalStorageItem(storageKey, "value", Schema.String);
+      },
+      expectedCause: (cause: Error) => cause,
+    },
+    {
+      label: "remove",
+      storageKey: "remove-key",
+      cause: new Error("storage unavailable"),
+      createOverrides: (cause: Error): Partial<Storage> => ({
         removeItem: () => {
           throw cause;
         },
       }),
-    );
+      run: async (
+        api: Awaited<ReturnType<typeof loadWithStorage>>,
+        storageKey: string,
+      ): Promise<void> => {
+        api.removeLocalStorageItem(storageKey);
+      },
+      expectedCause: (cause: Error) => cause,
+    },
+  ])(
+    "preserves $label failure context",
+    async ({ label, storageKey, cause, createOverrides, run, expectedCause }) => {
+      const { LocalStorageOperationError, ...api } = await loadWithStorage(
+        createStorage(createOverrides(cause ?? new Error("unused"))),
+      );
 
-    try {
-      removeLocalStorageItem("remove-key");
-      expect.unreachable("expected the removal to fail");
-    } catch (error) {
-      expect(error).toBeInstanceOf(LocalStorageOperationError);
-      expect(error).toMatchObject({
-        operation: "remove",
-        storageKey: "remove-key",
-        cause,
-      });
-    }
-  });
+      try {
+        await run({ LocalStorageOperationError, ...api }, storageKey);
+        expect.unreachable(`expected the ${label} to fail`);
+      } catch (error) {
+        expect(error).toBeInstanceOf(LocalStorageOperationError);
+        expect(error).toMatchObject({
+          operation: label,
+          storageKey,
+          cause: expectedCause(cause ?? new Error("unused")),
+        });
+      }
+    },
+  );
 });

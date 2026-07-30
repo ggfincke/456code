@@ -30,34 +30,36 @@ const decodeAutomationError = Schema.decodeUnknownSync(PreviewAutomationError);
 const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus);
 
 describe("PreviewNavStatus", () => {
-  it("decodes Idle", () => {
-    expect(decodeNavStatus({ _tag: "Idle" })).toEqual({ _tag: "Idle" });
-  });
-
-  it("decodes Loading with title", () => {
-    expect(decodeNavStatus({ _tag: "Loading", url: "http://localhost:5173/", title: "" })).toEqual({
-      _tag: "Loading",
-      url: "http://localhost:5173/",
-      title: "",
-    });
-  });
-
-  it("decodes LoadFailed with code/description", () => {
-    expect(
-      decodeNavStatus({
+  it.each([
+    {
+      tag: "Idle",
+      input: { _tag: "Idle" },
+      expected: { _tag: "Idle" },
+    },
+    {
+      tag: "Loading",
+      input: { _tag: "Loading", url: "http://localhost:5173/", title: "" },
+      expected: { _tag: "Loading", url: "http://localhost:5173/", title: "" },
+    },
+    {
+      tag: "LoadFailed",
+      input: {
         _tag: "LoadFailed",
         url: "https://example.com/",
         title: "Example",
         code: -105,
         description: "ERR_NAME_NOT_RESOLVED",
-      }),
-    ).toEqual({
-      _tag: "LoadFailed",
-      url: "https://example.com/",
-      title: "Example",
-      code: -105,
-      description: "ERR_NAME_NOT_RESOLVED",
-    });
+      },
+      expected: {
+        _tag: "LoadFailed",
+        url: "https://example.com/",
+        title: "Example",
+        code: -105,
+        description: "ERR_NAME_NOT_RESOLVED",
+      },
+    },
+  ] as const)("decodes $tag", ({ input, expected }) => {
+    expect(decodeNavStatus(input)).toEqual(expected);
   });
 
   it("rejects empty url", () => {
@@ -210,74 +212,86 @@ describe("PreviewAutomationStatus", () => {
 });
 
 describe("PreviewEvent", () => {
-  it("decodes opened", () => {
-    const event = decodePreviewEvent({
+  it.each([
+    {
       type: "opened",
-      threadId: "t",
-      tabId: "preview-t",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      snapshot: {
+      input: {
+        type: "opened",
         threadId: "t",
         tabId: "preview-t",
-        navStatus: { _tag: "Idle" },
-        canGoBack: false,
-        canGoForward: false,
-        updatedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        snapshot: {
+          threadId: "t",
+          tabId: "preview-t",
+          navStatus: { _tag: "Idle" },
+          canGoBack: false,
+          canGoForward: false,
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
       },
-    });
-    expect(event.type).toBe("opened");
-  });
-
-  it("decodes failed with code/description", () => {
-    const event = decodePreviewEvent({
+    },
+    {
       type: "failed",
-      threadId: "t",
-      tabId: "preview-t",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      url: "https://example.com/",
-      title: "",
-      code: -105,
-      description: "ERR_NAME_NOT_RESOLVED",
-    });
-    expect(event.type).toBe("failed");
-    if (event.type === "failed") {
-      expect(event.code).toBe(-105);
-    }
-  });
-
-  it("decodes resized with tab viewport state", () => {
-    const event = decodePreviewEvent({
-      type: "resized",
-      threadId: "t",
-      tabId: "preview-t",
-      createdAt: "2026-01-01T00:00:00.000Z",
-      snapshot: {
+      input: {
+        type: "failed",
         threadId: "t",
         tabId: "preview-t",
-        navStatus: { _tag: "Idle" },
-        canGoBack: false,
-        canGoForward: false,
-        viewport: { _tag: "freeform", width: 1024, height: 768 },
-        updatedAt: "2026-01-01T00:00:00.000Z",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        url: "https://example.com/",
+        title: "",
+        code: -105,
+        description: "ERR_NAME_NOT_RESOLVED",
       },
-    });
-    expect(event.type).toBe("resized");
-  });
-
-  it("decodes closed without snapshot", () => {
-    const event = decodePreviewEvent({
+      assertExtra: (event: { type: string; code?: number }) => {
+        expect(event.type).toBe("failed");
+        expect(event.code).toBe(-105);
+      },
+    },
+    {
+      type: "resized",
+      input: {
+        type: "resized",
+        threadId: "t",
+        tabId: "preview-t",
+        createdAt: "2026-01-01T00:00:00.000Z",
+        snapshot: {
+          threadId: "t",
+          tabId: "preview-t",
+          navStatus: { _tag: "Idle" },
+          canGoBack: false,
+          canGoForward: false,
+          viewport: { _tag: "freeform", width: 1024, height: 768 },
+          updatedAt: "2026-01-01T00:00:00.000Z",
+        },
+      },
+      assertExtra: (event: { type: string; snapshot?: { viewport?: unknown } }) => {
+        expect(event.type).toBe("resized");
+        expect(event.snapshot?.viewport).toEqual({
+          _tag: "freeform",
+          width: 1024,
+          height: 768,
+        });
+      },
+    },
+    {
       type: "closed",
-      threadId: "t",
-      tabId: "preview-t",
-      createdAt: "2026-01-01T00:00:00.000Z",
-    });
-    expect(event.type).toBe("closed");
+      input: {
+        type: "closed",
+        threadId: "t",
+        tabId: "preview-t",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      },
+    },
+  ] as const)("decodes $type", ({ input, assertExtra }) => {
+    const event = decodePreviewEvent(input);
+    expect(event.type).toBe(input.type);
+    assertExtra?.(event as never);
   });
 });
 
 describe("DiscoveredLocalServer", () => {
-  it("decodes a server with process metadata", () => {
-    const server = decodeServer({
+  it("decodes a server with optional process metadata", () => {
+    const withProcess = decodeServer({
       host: "localhost",
       port: 5173,
       url: "http://localhost:5173",
@@ -285,12 +299,10 @@ describe("DiscoveredLocalServer", () => {
       pid: 12345,
       terminal: null,
     });
-    expect(server.port).toBe(5173);
-    expect(server.processName).toBe("node");
-  });
+    expect(withProcess.port).toBe(5173);
+    expect(withProcess.processName).toBe("node");
 
-  it("decodes a server without process metadata", () => {
-    const server = decodeServer({
+    const withoutProcess = decodeServer({
       host: "localhost",
       port: 3000,
       url: "http://localhost:3000",
@@ -298,7 +310,8 @@ describe("DiscoveredLocalServer", () => {
       pid: null,
       terminal: null,
     });
-    expect(server.processName).toBeNull();
+    expect(withoutProcess.processName).toBeNull();
+    expect(withoutProcess.pid).toBeNull();
   });
 
   it("rejects invalid ports", () => {

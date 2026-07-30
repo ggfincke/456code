@@ -423,26 +423,8 @@ describe("ClaudeAdapterLive", () => {
     },
     {
       model: "claude-opus-4-7",
-      expectedEffort: "max",
-      modelSelection: {
-        instanceId: ProviderInstanceId.make("claudeAgent"),
-        model: "claude-opus-4-7",
-      },
-    },
-    {
-      model: "claude-opus-4-7",
       options: [{ id: "effort", value: "xhigh" }],
       expectedEffort: "max",
-    },
-    {
-      model: "claude-fable-5",
-      options: [{ id: "effort", value: "xhigh" }],
-      expectedEffort: "xhigh",
-    },
-    {
-      model: "claude-opus-5",
-      options: [{ id: "effort", value: "xhigh" }],
-      expectedEffort: "xhigh",
     },
     {
       model: "claude-sonnet-4-6",

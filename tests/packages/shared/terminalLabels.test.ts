@@ -10,13 +10,6 @@ import {
 } from "../../../packages/shared/src/terminalLabels.ts";
 
 describe("getTerminalLabel", () => {
-  it("uses the numeric suffix for term-* ids", () => {
-    expect(getTerminalLabel(DEFAULT_TERMINAL_ID)).toBe("Terminal 1");
-    expect(getTerminalLabel("term-2")).toBe("Terminal 2");
-    expect(getTerminalLabel("term-12")).toBe("Terminal 12");
-    expect(getTerminalLabel("terminal-3")).toBe("Terminal 3");
-  });
-
   it("falls back to the raw id for unknown shapes", () => {
     expect(getTerminalLabel("custom-session")).toBe("custom-session");
   });
@@ -32,6 +25,8 @@ describe("resolveTerminalSessionLabel", () => {
     expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, { label: "   " })).toBe("Terminal 1");
     expect(resolveTerminalSessionLabel(DEFAULT_TERMINAL_ID, null)).toBe("Terminal 1");
     expect(resolveTerminalSessionLabel("term-2", undefined)).toBe("Terminal 2");
+    expect(resolveTerminalSessionLabel("term-12", null)).toBe("Terminal 12");
+    expect(resolveTerminalSessionLabel("terminal-3", null)).toBe("Terminal 3");
   });
 });
 

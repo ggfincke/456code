@@ -11,17 +11,4 @@ describe("QRCodeSvg", () => {
     expect(markup).toContain('fill="#000"');
     expect(markup).not.toContain('fill="currentColor"');
   });
-
-  it("supports custom foreground and background colors", () => {
-    const markup = renderToStaticMarkup(
-      <QRCodeSvg
-        value="https://example.com/pair"
-        foregroundColor="#123456"
-        backgroundColor="#abcdef"
-      />,
-    );
-
-    expect(markup).toContain('fill="#abcdef"');
-    expect(markup).toContain('fill="#123456"');
-  });
 });

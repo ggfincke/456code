@@ -24,93 +24,61 @@ describe("tokenizeCliArgs", () => {
 });
 
 describe("parseCliArgs", () => {
-  it("returns empty result for empty string", () => {
+  it("returns empty result for empty inputs", () => {
     expect(parseCliArgs("")).toEqual({ flags: {}, positionals: [] });
-  });
-
-  it("returns empty result for whitespace-only string", () => {
     expect(parseCliArgs("   ")).toEqual({ flags: {}, positionals: [] });
-  });
-
-  it("returns empty result for empty array", () => {
     expect(parseCliArgs([])).toEqual({ flags: {}, positionals: [] });
   });
 
-  it("parses --chrome boolean flag", () => {
-    expect(parseCliArgs("--chrome")).toEqual({
-      flags: { chrome: null },
-      positionals: [],
-    });
-  });
-
-  it("parses --chrome with --verbose", () => {
-    expect(parseCliArgs("--chrome --verbose")).toEqual({
-      flags: { chrome: null, verbose: null },
-      positionals: [],
-    });
-  });
-
-  it("parses --effort with a value", () => {
-    expect(parseCliArgs("--effort high")).toEqual({
-      flags: { effort: "high" },
-      positionals: [],
-    });
-  });
-
-  it("parses --chrome --effort high --debug", () => {
-    expect(parseCliArgs("--chrome --effort high --debug")).toEqual({
-      flags: { chrome: null, effort: "high", debug: null },
-      positionals: [],
-    });
-  });
-
-  it("parses --model with full model name", () => {
-    expect(parseCliArgs("--model claude-sonnet-4-6")).toEqual({
-      flags: { model: "claude-sonnet-4-6" },
-      positionals: [],
-    });
-  });
-
-  it("parses --append-system-prompt with value and --chrome", () => {
-    expect(parseCliArgs("--append-system-prompt always-think-step-by-step --chrome")).toEqual({
-      flags: { "append-system-prompt": "always-think-step-by-step", chrome: null },
-      positionals: [],
-    });
-  });
-
-  it("parses quoted --append-system-prompt with value and --chrome", () => {
-    expect(parseCliArgs(`--append-system-prompt "always think step by step" --chrome`)).toEqual({
-      flags: { "append-system-prompt": "always think step by step", chrome: null },
-      positionals: [],
-    });
-  });
-
-  it("parses --max-budget-usd with numeric value", () => {
-    expect(parseCliArgs("--chrome --max-budget-usd 5.00")).toEqual({
-      flags: { chrome: null, "max-budget-usd": "5.00" },
-      positionals: [],
-    });
-  });
-
-  it("parses --effort=high syntax", () => {
-    expect(parseCliArgs("--effort=high")).toEqual({
-      flags: { effort: "high" },
-      positionals: [],
-    });
-  });
-
-  it("parses --key=value mixed with boolean flags", () => {
-    expect(parseCliArgs("--chrome --model=claude-sonnet-4-6 --debug")).toEqual({
-      flags: { chrome: null, model: "claude-sonnet-4-6", debug: null },
-      positionals: [],
-    });
-  });
-
-  it("collects positional arguments", () => {
-    expect(parseCliArgs("1.2.3")).toEqual({
-      flags: {},
-      positionals: ["1.2.3"],
-    });
+  it.each([
+    {
+      label: "boolean chrome flag",
+      input: "--chrome",
+      expected: { flags: { chrome: null }, positionals: [] },
+    },
+    {
+      label: "boolean flags combined with valued flag",
+      input: "--chrome --effort high --debug",
+      expected: { flags: { chrome: null, effort: "high", debug: null }, positionals: [] },
+    },
+    {
+      label: "key=value mixed with boolean flags",
+      input: "--chrome --model=claude-sonnet-4-6 --debug",
+      expected: {
+        flags: { chrome: null, model: "claude-sonnet-4-6", debug: null },
+        positionals: [],
+      },
+    },
+    {
+      label: "quoted valued flag with chrome",
+      input: `--append-system-prompt "always think step by step" --chrome`,
+      expected: {
+        flags: { "append-system-prompt": "always think step by step", chrome: null },
+        positionals: [],
+      },
+    },
+    {
+      label: "equals-form valued flag",
+      input: "--effort=high",
+      expected: { flags: { effort: "high" }, positionals: [] },
+    },
+    {
+      label: "extra whitespace between tokens",
+      input: "  --chrome   --verbose  ",
+      expected: { flags: { chrome: null, verbose: null }, positionals: [] },
+    },
+    {
+      label: "bare -- with no flag name",
+      input: "--",
+      expected: { flags: {}, positionals: [] },
+    },
+    {
+      label: "positional only",
+      input: "1.2.3",
+      expected: { flags: {}, positionals: ["1.2.3"] },
+    },
+  ])("parses $label", ({ input, expected }) => {
+    expect(parseCliArgs(input)).toEqual(expected);
   });
 
   it("collects positionals mixed with flags (argv array)", () => {
@@ -118,17 +86,6 @@ describe("parseCliArgs", () => {
       flags: { root: "/path", "github-output": null },
       positionals: ["1.2.3"],
     });
-  });
-
-  it("handles extra whitespace between tokens", () => {
-    expect(parseCliArgs("  --chrome   --verbose  ")).toEqual({
-      flags: { chrome: null, verbose: null },
-      positionals: [],
-    });
-  });
-
-  it("ignores bare -- with no flag name", () => {
-    expect(parseCliArgs("--")).toEqual({ flags: {}, positionals: [] });
   });
 
   it("boolean flag does not consume next token as value", () => {

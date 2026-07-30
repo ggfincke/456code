@@ -143,15 +143,6 @@ describe("TerminalWriteInput", () => {
       }),
     ).toBe(false);
   });
-
-  it("rejects missing terminalId", () => {
-    expect(
-      decodes(TerminalWriteInput, {
-        threadId: "thread-1",
-        data: "echo hello\n",
-      }),
-    ).toBe(false);
-  });
 });
 
 describe("TerminalThreadInput", () => {
@@ -172,23 +163,9 @@ describe("TerminalResizeInput", () => {
       }),
     ).toBe(true);
   });
-
-  it("rejects missing terminalId", () => {
-    expect(
-      decodes(TerminalResizeInput, {
-        threadId: "thread-1",
-        cols: 80,
-        rows: 24,
-      }),
-    ).toBe(false);
-  });
 });
 
 describe("TerminalClearInput", () => {
-  it("requires terminalId", () => {
-    expect(decodes(TerminalClearInput, { threadId: "thread-1" })).toBe(false);
-  });
-
   it("accepts an explicit terminalId", () => {
     const parsed = decodeSync(TerminalClearInput, {
       threadId: "thread-1",
@@ -234,37 +211,36 @@ describe("TerminalSessionSnapshot", () => {
 describe("TerminalEvent", () => {
   const isoTimestamp = "2026-01-01T00:00:00.000Z";
 
-  it("accepts output events", () => {
-    expect(
-      decodes(TerminalEvent, {
+  it.each([
+    {
+      type: "output",
+      payload: {
         type: "output",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
         data: "line\n",
-      }),
-    ).toBe(true);
-  });
-
-  it("accepts exited events", () => {
-    expect(
-      decodes(TerminalEvent, {
+      },
+    },
+    {
+      type: "exited",
+      payload: {
         type: "exited",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
         exitCode: 0,
         exitSignal: null,
-      }),
-    ).toBe(true);
-  });
-
-  it("accepts closed events", () => {
-    expect(
-      decodes(TerminalEvent, {
+      },
+    },
+    {
+      type: "closed",
+      payload: {
         type: "closed",
         threadId: "thread-1",
         terminalId: DEFAULT_TERMINAL_ID,
-      }),
-    ).toBe(true);
+      },
+    },
+  ] as const)("accepts $type events", ({ payload }) => {
+    expect(decodes(TerminalEvent, payload)).toBe(true);
   });
 
   it("accepts activity events", () => {

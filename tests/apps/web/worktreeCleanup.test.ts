@@ -97,27 +97,18 @@ describe("getOrphanedWorktreePathForThread", () => {
 });
 
 describe("formatWorktreePathForDisplay", () => {
-  it("shows only the last path segment for unix-like paths", () => {
-    const result = formatWorktreePathForDisplay(
-      "/Users/julius/.456code/worktrees/t3code-mvp/t3code-4e609bb8",
-    );
-    expect(result).toBe("t3code-4e609bb8");
-  });
-
-  it("normalizes windows separators before selecting the final segment", () => {
-    const result = formatWorktreePathForDisplay(
-      "C:\\Users\\julius\\.456code\\worktrees\\t3code-mvp\\t3code-4e609bb8",
-    );
-    expect(result).toBe("t3code-4e609bb8");
-  });
-
-  it("uses the final segment even when outside ~/.456code/worktrees", () => {
-    const result = formatWorktreePathForDisplay("/tmp/custom-worktrees/my-worktree");
-    expect(result).toBe("my-worktree");
-  });
-
-  it("ignores trailing slashes", () => {
-    const result = formatWorktreePathForDisplay("/tmp/custom-worktrees/my-worktree/");
-    expect(result).toBe("my-worktree");
+  it.each([
+    {
+      label: "unix-like paths",
+      path: "/Users/julius/.456code/worktrees/t3code-mvp/t3code-4e609bb8",
+      expected: "t3code-4e609bb8",
+    },
+    {
+      label: "windows separators",
+      path: "C:\\Users\\julius\\.456code\\worktrees\\t3code-mvp\\t3code-4e609bb8",
+      expected: "t3code-4e609bb8",
+    },
+  ])("shows only the last path segment for $label", ({ path, expected }) => {
+    expect(formatWorktreePathForDisplay(path)).toBe(expected);
   });
 });

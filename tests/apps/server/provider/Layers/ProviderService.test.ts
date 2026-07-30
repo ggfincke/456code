@@ -1543,96 +1543,95 @@ routing.layer("ProviderServiceLive routing", (it) => {
     Effect.gen(function* () {
       const provider = yield* ProviderService.ProviderService;
 
-      const codexInitial = yield* provider.startSession(asThreadId("thread-1"), {
-        provider: ProviderDriverKind.make("codex"),
-        providerInstanceId: codexInstanceId,
+      type RoutingAdapter = {
+        readonly startSession: {
+          readonly mockClear: () => void;
+          readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> };
+        };
+        readonly sendTurn: {
+          readonly mockClear: () => void;
+          readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> };
+        };
+        readonly stopAll: () => Effect.Effect<void, ProviderAdapterError>;
+      };
+
+      const recoverStaleSendTurn = (input: {
+        readonly threadId: ThreadId;
+        readonly driver: ProviderDriverKind;
+        readonly providerInstanceId: typeof codexInstanceId;
+        readonly cwd: string;
+        readonly modelSelection?: ReturnType<typeof createModelSelection>;
+        readonly routing: RoutingAdapter;
+        readonly resumeInput: string;
+        readonly expectModelSelection?: ReturnType<typeof createModelSelection>;
+      }) =>
+        Effect.gen(function* () {
+          const initial = yield* provider.startSession(input.threadId, {
+            provider: input.driver,
+            providerInstanceId: input.providerInstanceId,
+            threadId: input.threadId,
+            cwd: input.cwd,
+            ...(input.modelSelection ? { modelSelection: input.modelSelection } : {}),
+            runtimeMode: "full-access",
+          });
+
+          yield* input.routing.stopAll();
+          input.routing.startSession.mockClear();
+          input.routing.sendTurn.mockClear();
+
+          yield* provider.sendTurn({
+            threadId: initial.threadId,
+            input: input.resumeInput,
+            attachments: [],
+          });
+
+          assert.equal(input.routing.startSession.mock.calls.length, 1);
+          const resumedStartInput = input.routing.startSession.mock.calls[0]?.[0];
+          assert.equal(typeof resumedStartInput === "object" && resumedStartInput !== null, true);
+          if (resumedStartInput && typeof resumedStartInput === "object") {
+            const startPayload = resumedStartInput as {
+              provider?: string;
+              cwd?: string;
+              modelSelection?: unknown;
+              resumeCursor?: unknown;
+              threadId?: string;
+            };
+            assert.equal(startPayload.provider, input.driver);
+            assert.equal(startPayload.cwd, input.cwd);
+            if (input.expectModelSelection !== undefined) {
+              assert.deepEqual(startPayload.modelSelection, input.expectModelSelection);
+            }
+            assert.deepEqual(startPayload.resumeCursor, initial.resumeCursor);
+            assert.equal(startPayload.threadId, initial.threadId);
+          }
+          assert.equal(input.routing.sendTurn.mock.calls.length, 1);
+        });
+
+      const claudeModelSelection = createModelSelection(
+        ProviderInstanceId.make("claudeAgent"),
+        "claude-opus-4-6",
+        [{ id: "effort", value: "max" }],
+      );
+
+      yield* recoverStaleSendTurn({
         threadId: asThreadId("thread-1"),
+        driver: ProviderDriverKind.make("codex"),
+        providerInstanceId: codexInstanceId,
         cwd: "/tmp/project-send-turn",
-        runtimeMode: "full-access",
+        routing: routing.codex,
+        resumeInput: "resume",
       });
 
-      yield* routing.codex.stopAll();
-      routing.codex.startSession.mockClear();
-      routing.codex.sendTurn.mockClear();
-
-      yield* provider.sendTurn({
-        threadId: codexInitial.threadId,
-        input: "resume",
-        attachments: [],
-      });
-
-      assert.equal(routing.codex.startSession.mock.calls.length, 1);
-      const codexResumedStartInput = routing.codex.startSession.mock.calls[0]?.[0];
-      assert.equal(
-        typeof codexResumedStartInput === "object" && codexResumedStartInput !== null,
-        true,
-      );
-      if (codexResumedStartInput && typeof codexResumedStartInput === "object") {
-        const startPayload = codexResumedStartInput as {
-          provider?: string;
-          cwd?: string;
-          resumeCursor?: unknown;
-          threadId?: string;
-        };
-        assert.equal(startPayload.provider, "codex");
-        assert.equal(startPayload.cwd, "/tmp/project-send-turn");
-        assert.deepEqual(startPayload.resumeCursor, codexInitial.resumeCursor);
-        assert.equal(startPayload.threadId, codexInitial.threadId);
-      }
-      assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
-
-      routing.claude.startSession.mockClear();
-      routing.claude.sendTurn.mockClear();
-
-      const claudeInitial = yield* provider.startSession(asThreadId("thread-claude-send-turn"), {
-        provider: ProviderDriverKind.make("claudeAgent"),
-        providerInstanceId: claudeAgentInstanceId,
+      yield* recoverStaleSendTurn({
         threadId: asThreadId("thread-claude-send-turn"),
+        driver: ProviderDriverKind.make("claudeAgent"),
+        providerInstanceId: claudeAgentInstanceId,
         cwd: "/tmp/project-claude-send-turn",
-        modelSelection: createModelSelection(
-          ProviderInstanceId.make("claudeAgent"),
-          "claude-opus-4-6",
-          [{ id: "effort", value: "max" }],
-        ),
-        runtimeMode: "full-access",
+        modelSelection: claudeModelSelection,
+        routing: routing.claude,
+        resumeInput: "resume with claude",
+        expectModelSelection: claudeModelSelection,
       });
-
-      yield* routing.claude.stopAll();
-      routing.claude.startSession.mockClear();
-      routing.claude.sendTurn.mockClear();
-
-      yield* provider.sendTurn({
-        threadId: claudeInitial.threadId,
-        input: "resume with claude",
-        attachments: [],
-      });
-
-      assert.equal(routing.claude.startSession.mock.calls.length, 1);
-      const claudeResumedStartInput = routing.claude.startSession.mock.calls[0]?.[0];
-      assert.equal(
-        typeof claudeResumedStartInput === "object" && claudeResumedStartInput !== null,
-        true,
-      );
-      if (claudeResumedStartInput && typeof claudeResumedStartInput === "object") {
-        const startPayload = claudeResumedStartInput as {
-          provider?: string;
-          cwd?: string;
-          modelSelection?: unknown;
-          resumeCursor?: unknown;
-          threadId?: string;
-        };
-        assert.equal(startPayload.provider, "claudeAgent");
-        assert.equal(startPayload.cwd, "/tmp/project-claude-send-turn");
-        assert.deepEqual(
-          startPayload.modelSelection,
-          createModelSelection(ProviderInstanceId.make("claudeAgent"), "claude-opus-4-6", [
-            { id: "effort", value: "max" },
-          ]),
-        );
-        assert.deepEqual(startPayload.resumeCursor, claudeInitial.resumeCursor);
-        assert.equal(startPayload.threadId, claudeInitial.threadId);
-      }
-      assert.equal(routing.claude.sendTurn.mock.calls.length, 1);
     }),
   );
 

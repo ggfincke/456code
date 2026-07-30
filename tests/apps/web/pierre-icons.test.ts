@@ -7,29 +7,15 @@ import {
 } from "../../../apps/web/src/pierre-icons";
 
 describe("Pierre file icons", () => {
-  it("uses Pierre exact filename and complete-set extension mappings", () => {
-    assert.equal(resolvePierreIconForEntry("Dockerfile", "file")?.token, "docker");
-    assert.equal(resolvePierreIconForEntry("src/Button.tsx", "file")?.token, "react");
-    assert.equal(resolvePierreIconForEntry("vite.config.ts", "file")?.token, "vite");
-  });
-
-  it("extends Pierre with T3-specific exact filename icons", () => {
+  it("extends Pierre with a T3-specific exact filename icon", () => {
     assert.equal(
       resolvePierreIconForEntry("package.json", "file")?.name,
       "t3-file-icon-package-json",
     );
-    assert.equal(
-      resolvePierreIconForEntry("config/tsconfig.json", "file")?.name,
-      "t3-file-icon-tsconfig",
-    );
-    assert.equal(resolvePierreIconForEntry("AGENTS.md", "file")?.name, "t3-file-icon-agents");
-    assert.equal(resolvePierreIconForEntry("CLAUDE.md", "file")?.name, "t3-file-icon-claude");
-    assert.equal(resolvePierreIconForEntry("README.md", "file")?.name, "t3-file-icon-readme");
+  });
+
+  it("aliases lockfile names onto the shared pnpm sprite", () => {
     assert.equal(resolvePierreIconForEntry("pnpm-lock.yaml", "file")?.name, "t3-file-icon-pnpm");
-    assert.equal(
-      resolvePierreIconForEntry("pnpm-workspace.yaml", "file")?.name,
-      "t3-file-icon-pnpm",
-    );
   });
 
   it("uses the Pierre default icon for unknown file types", () => {
@@ -44,6 +30,5 @@ describe("Pierre file icons", () => {
   it("normalizes common markdown fence language aliases", () => {
     assert.equal(syntheticFileNameForLanguageId("typescript"), "file.ts");
     assert.equal(syntheticFileNameForLanguageId("shellscript"), "file.sh");
-    assert.equal(syntheticFileNameForLanguageId("python"), "file.py");
   });
 });

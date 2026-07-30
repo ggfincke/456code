@@ -3,7 +3,7 @@ import { describe, expect, it } from "vite-plus/test";
 import { fileBreadcrumbs } from "../../../../../apps/web/src/components/files/filePath";
 
 describe("fileBreadcrumbs", () => {
-  it("builds project, directory, and file crumbs", () => {
+  it("builds project, directory, and file crumbs and normalizes separators", () => {
     expect(fileBreadcrumbs("t3code", "apps/web/src/main.tsx")).toEqual([
       { label: "t3code", path: "", kind: "project" },
       { label: "apps", path: "apps", kind: "directory" },
@@ -11,9 +11,6 @@ describe("fileBreadcrumbs", () => {
       { label: "src", path: "apps/web/src", kind: "directory" },
       { label: "main.tsx", path: "apps/web/src/main.tsx", kind: "file" },
     ]);
-  });
-
-  it("normalizes repeated separators", () => {
     expect(fileBreadcrumbs("workspace", "/src//index.ts").map((crumb) => crumb.label)).toEqual([
       "workspace",
       "src",

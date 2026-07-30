@@ -197,12 +197,11 @@ describe("computeMessageDurationStart", () => {
 });
 
 describe("normalizeCompactToolLabel", () => {
-  it("removes trailing completion wording from command labels", () => {
-    expect(normalizeCompactToolLabel("Ran command complete")).toBe("Ran command");
-  });
-
-  it("removes trailing completion wording from other labels", () => {
-    expect(normalizeCompactToolLabel("Read file completed")).toBe("Read file");
+  it.each([
+    ["Ran command complete", "Ran command"],
+    ["Read file completed", "Read file"],
+  ])("removes trailing completion wording from %s", (input, expected) => {
+    expect(normalizeCompactToolLabel(input)).toBe(expected);
   });
 });
 

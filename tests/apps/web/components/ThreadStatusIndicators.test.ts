@@ -32,19 +32,10 @@ function status(overrides: Partial<VcsStatusResult> = {}): VcsStatusResult {
 }
 
 describe("resolveThreadPr", () => {
-  it("keeps local-checkout PR indicators scoped to the stored thread branch", () => {
+  it("hides PR indicators when the live checkout does not match the stored thread branch", () => {
     expect(
       resolveThreadPr({
         threadBranch: "feature/other",
-        gitStatus: status(),
-      }),
-    ).toBeNull();
-  });
-
-  it("hides PR indicators when a dedicated worktree has switched away from the thread branch", () => {
-    expect(
-      resolveThreadPr({
-        threadBranch: "stack/base",
         gitStatus: status(),
       }),
     ).toBeNull();
