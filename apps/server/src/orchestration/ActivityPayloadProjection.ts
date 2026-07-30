@@ -1,5 +1,6 @@
 // apps/server/src/orchestration/ActivityPayloadProjection.ts
 // trims persisted activity payloads for client transport
+
 import type {
   OrchestrationEvent,
   OrchestrationThreadActivity,
@@ -220,6 +221,37 @@ export function projectActivityPayload(
   };
 }
 
+// match the web meter's finite, non-negative usage rule
+function isResolvableContextWindowActivity(activity: OrchestrationThreadActivity): boolean {
+  if (activity.kind !== "context-window.updated") {
+    return false;
+  }
+  const payload = asRecord(activity.payload);
+  const usedTokens = payload?.usedTokens;
+  return typeof usedTokens === "number" && Number.isFinite(usedTokens) && usedTokens >= 0;
+}
+
+// retain one usable meter row per turn so thread reverts can expose older usage
+// malformed rows pass through and live updates remain unfiltered
+function dropStaleContextWindowActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  const latestIndexByTurn = new Map<string | null, number>();
+  for (let index = 0; index < activities.length; index += 1) {
+    if (isResolvableContextWindowActivity(activities[index]!)) {
+      latestIndexByTurn.set(activities[index]!.turnId, index);
+    }
+  }
+  if (latestIndexByTurn.size === 0) {
+    return activities;
+  }
+  return activities.filter(
+    (activity, index) =>
+      !isResolvableContextWindowActivity(activity) ||
+      latestIndexByTurn.get(activity.turnId) === index,
+  );
+}
+
 export function projectThreadDetailSnapshot(
   snapshot: OrchestrationThreadDetailSnapshot,
 ): OrchestrationThreadDetailSnapshot {
@@ -227,7 +259,9 @@ export function projectThreadDetailSnapshot(
     ...snapshot,
     thread: {
       ...snapshot.thread,
-      activities: snapshot.thread.activities.map(projectActivityPayload),
+      activities: dropStaleContextWindowActivities(snapshot.thread.activities).map(
+        projectActivityPayload,
+      ),
     },
   };
 }

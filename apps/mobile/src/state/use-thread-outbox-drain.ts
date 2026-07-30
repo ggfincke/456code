@@ -24,7 +24,11 @@ import { toUploadChatImageAttachments } from "../lib/composerImages";
 import { randomHex } from "../lib/uuid";
 import { appAtomRegistry } from "./atom-registry";
 import { useProjects, useThreadShells } from "./entities";
-import { ensureThreadOutboxLoaded, removeThreadOutboxMessage } from "./thread-outbox";
+import {
+  confirmThreadOutboxMessageQueued,
+  ensureThreadOutboxLoaded,
+  removeThreadOutboxMessage,
+} from "./thread-outbox";
 import {
   isQueuedThreadCreationSendable,
   modelSelectionsEqual,
@@ -37,7 +41,7 @@ import {
   type QueuedThreadMessage,
   type ThreadOutboxCommandStage,
 } from "./thread-outbox-model";
-import { threadEnvironment } from "./threads";
+import { environmentThreadShells, threadEnvironment } from "./threads";
 import { useAtomCommand } from "./use-atom-command";
 import {
   editingQueuedMessageIdsAtom,
@@ -356,8 +360,26 @@ export function useThreadOutboxDrain(): void {
             return false;
           },
         );
-      const delivery =
-        deliveryAction === "remove"
+      // confirm durable storage before dispatching an optimistic queue entry
+      const delivery = confirmThreadOutboxMessageQueued(nextQueuedMessage).then((queued) => {
+        if (!queued) {
+          // skip messages rolled back by failed storage
+          return true;
+        }
+        // recheck guards after awaiting storage confirmation
+        if (appAtomRegistry.get(editingQueuedMessageIdsAtom)[nextQueuedMessage.messageId]) {
+          return true;
+        }
+        const freshThread = findThread(
+          appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
+          nextQueuedMessage,
+        );
+        const freshThreadBusy =
+          freshThread?.session?.status === "running" || freshThread?.session?.status === "starting";
+        if (deliveryAction === "send" && creation === undefined && freshThreadBusy) {
+          return true;
+        }
+        return deliveryAction === "remove"
           ? removeQueuedMessage("[thread-outbox] failed to remove message for a missing thread")
           : creation !== undefined
             ? creationProjectCwd !== null
@@ -366,6 +388,7 @@ export function useThreadOutboxDrain(): void {
             : thread !== undefined
               ? sendQueuedMessage(nextQueuedMessage, thread)
               : Promise.resolve(false);
+      });
       void delivery
         .then((sent) => {
           if (sent) {

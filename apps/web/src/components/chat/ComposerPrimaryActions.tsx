@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPrimaryActions.tsx
+// renders composer send and interrupt actions
+
 import { memo, type PointerEventHandler } from "react";
 import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
 import { cn } from "~/lib/utils";
@@ -21,6 +24,7 @@ interface ComposerPrimaryActionsProps {
   showPlanFollowUpPrompt: boolean;
   promptHasText: boolean;
   isSendBusy: boolean;
+  sendDisabledReason: string | null;
   isConnecting: boolean;
   isEnvironmentUnavailable: boolean;
   isPreparingWorktree: boolean;
@@ -60,6 +64,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   showPlanFollowUpPrompt,
   promptHasText,
   isSendBusy,
+  sendDisabledReason,
   isConnecting,
   isEnvironmentUnavailable,
   isPreparingWorktree,
@@ -72,6 +77,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
     : undefined;
+  const isSendDisabled = sendDisabledReason !== null;
   const stageBackdropVariant = useSidebarStageBackdropVariant();
 
   if (pendingAction) {
@@ -149,7 +155,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           size="sm"
           className={cn("rounded-full", compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8")}
           {...pointerFocusProps}
-          disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+          disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Refine"}
         </Button>
@@ -163,7 +169,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           size="sm"
           className="h-9 rounded-l-full rounded-r-none px-4 sm:h-8"
           {...pointerFocusProps}
-          disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+          disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
           {isConnecting || isSendBusy ? "Sending..." : "Implement"}
         </Button>
@@ -176,7 +182,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
                 className="h-9 rounded-l-none rounded-r-full border-l-white/12 px-2 sm:h-8"
                 aria-label="Implementation actions"
                 {...pointerFocusProps}
-                disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+                disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
               />
             }
           >
@@ -184,7 +190,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           </MenuTrigger>
           <MenuPopup align="end" side="top">
             <MenuItem
-              disabled={isSendBusy || isConnecting || isEnvironmentUnavailable}
+              disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
               onClick={() => void onImplementPlanInNewThread()}
             >
               Implement in a new thread
@@ -205,17 +211,25 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           : "bg-primary/90 enabled:shadow-primary/24 hover:bg-primary",
       )}
       {...pointerFocusProps}
-      disabled={isSendBusy || isConnecting || isEnvironmentUnavailable || !hasSendableContent}
+      disabled={
+        isSendBusy ||
+        isSendDisabled ||
+        isConnecting ||
+        isEnvironmentUnavailable ||
+        !hasSendableContent
+      }
       aria-label={
         isEnvironmentUnavailable
           ? "Environment disconnected"
-          : isConnecting
-            ? "Connecting"
-            : isPreparingWorktree
-              ? "Preparing worktree"
-              : isSendBusy
-                ? "Sending"
-                : "Send message"
+          : sendDisabledReason
+            ? sendDisabledReason
+            : isConnecting
+              ? "Connecting"
+              : isPreparingWorktree
+                ? "Preparing worktree"
+                : isSendBusy
+                  ? "Sending"
+                  : "Send message"
       }
     >
       {stageBackdropVariant ? (

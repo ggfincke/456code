@@ -1,3 +1,6 @@
+// apps/mobile/src/state/thread-outbox-manager.ts
+// persists and publishes queued mobile messages
+
 import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
 import * as Schema from "effect/Schema";
 import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
@@ -88,11 +91,18 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
     return loadPromise;
   };
 
-  const enqueue = (message: QueuedThreadMessage): Promise<void> =>
-    serialize(async () => {
+  // publish immediately and roll back if durable storage fails
+  const enqueue = (message: QueuedThreadMessage): Promise<void> => {
+    setMessages([
+      ...currentMessages().filter((candidate) => candidate.messageId !== message.messageId),
+      message,
+    ]);
+    return serialize(async () => {
       try {
         await options.storage.write(message);
       } catch (cause) {
+        // preserve a replacement attempt that reused the message id
+        setMessages(currentMessages().filter((candidate) => candidate !== message));
         throw new ThreadOutboxManagerError({
           operation: "enqueue",
           environmentId: message.environmentId,
@@ -101,11 +111,12 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
           cause,
         });
       }
-      setMessages([
-        ...currentMessages().filter((candidate) => candidate.messageId !== message.messageId),
-        message,
-      ]);
     });
+  };
+
+  // wait for pending writes before confirming delivery eligibility
+  const confirmQueued = (message: QueuedThreadMessage): Promise<boolean> =>
+    serialize(async () => currentMessages().some((candidate) => candidate === message));
 
   // Rewrites an already-queued message. A no-op when the message has been
   // removed in the meantime (e.g. deleted or delivered), so a trailing editor
@@ -204,6 +215,7 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
     serialize,
     load,
     enqueue,
+    confirmQueued,
     update,
     remove,
     clearEnvironment,

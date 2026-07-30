@@ -1007,9 +1007,10 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 <span className="flex-1" />
               )}
               <span className="relative ml-auto flex h-5 min-w-8 shrink-0 items-center justify-end pl-1 text-xs">
+                {/* hidden status text must not intercept hover actions */}
                 <span
                   className={cn(
-                    "tabular-nums text-muted-foreground/65 transition-opacity group-hover/v2-row:opacity-0",
+                    "pointer-events-none tabular-nums text-muted-foreground/65 transition-opacity group-hover/v2-row:opacity-0",
                     snoozeMenuOpen && "opacity-0",
                   )}
                 >

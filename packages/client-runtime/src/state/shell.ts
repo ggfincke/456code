@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/shell.ts
+// synchronizes environment shell state
+
 import {
   ORCHESTRATION_WS_METHODS,
   type EnvironmentId,
@@ -172,7 +175,7 @@ export const makeEnvironmentShellState = Effect.fn("EnvironmentShellState.make")
   const foregroundResubscriptions = Option.match(wakeups, {
     onNone: () => Stream.never,
     onSome: (service) =>
-      service.changes.pipe(Stream.filter((reason) => reason === "application-active")),
+      service.changes.pipe(Stream.filter(ConnectionWakeups.shouldResubscribeAfterWakeup)),
   });
 
   yield* setSynchronizing;

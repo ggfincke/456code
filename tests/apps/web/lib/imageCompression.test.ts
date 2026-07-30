@@ -1,11 +1,16 @@
-// tests/apps/web/lib/stashImageCompression.test.ts
-// verifies stash image compression budgets and fallbacks
+// tests/apps/web/lib/imageCompression.test.ts
+// verifies image compression budgets and fallbacks
+
 import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 
 import {
   compressImageForStash,
+  compressImageToByteLimit,
+  MAX_COMPRESSIBLE_SOURCE_BYTES,
   MAX_STASH_IMAGE_DATA_URL_CHARS,
-} from "../../../../apps/web/src/lib/stashImageCompression";
+} from "../../../../apps/web/src/lib/imageCompression";
+
+// stubbed canvas output exercises budgets without a native codec
 
 const originalCreateImageBitmap = globalThis.createImageBitmap;
 const originalOffscreenCanvas = globalThis.OffscreenCanvas;
@@ -149,6 +154,56 @@ describe("compressImageForStash", () => {
       ok: false,
       reason: "unreadable",
     });
+  });
+
+  it("compressImageToByteLimit passes small files through byte-for-byte", async () => {
+    const bitmapSpy = vi.fn();
+    vi.stubGlobal("createImageBitmap", bitmapSpy);
+
+    const original = makeFile(1024);
+    const result = await compressImageToByteLimit(original, 10 * 1024 * 1024);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.recompressed).toBe(false);
+    // pass-through keeps the same file object
+    expect(result.ok && result.file).toBe(original);
+    expect(bitmapSpy).not.toHaveBeenCalled();
+  });
+
+  it("compressImageToByteLimit re-encodes an oversized file under the byte cap", async () => {
+    stubCanvasPipeline(() => 200_000);
+
+    const result = await compressImageToByteLimit(makeFile(2_000_000), 1_000_000);
+
+    expect(result.ok).toBe(true);
+    expect(result.ok && result.recompressed).toBe(true);
+    expect(result.ok && result.file.type).toBe("image/webp");
+    // the re-encoded name matches the new container
+    expect(result.ok && result.file.name).toBe("shot.webp");
+    expect(result.ok && result.file.size).toBeLessThanOrEqual(1_000_000);
+  });
+
+  it("compressImageToByteLimit refuses sources above the decode-safety ceiling", async () => {
+    const bitmapSpy = vi.fn();
+    vi.stubGlobal("createImageBitmap", bitmapSpy);
+
+    const result = await compressImageToByteLimit(
+      makeFile(MAX_COMPRESSIBLE_SOURCE_BYTES + 1),
+      10 * 1024 * 1024,
+    );
+
+    expect(result).toEqual({ ok: false, reason: "too-large" });
+    // the ceiling prevents decoding unsafe source sizes
+    expect(bitmapSpy).not.toHaveBeenCalled();
+  });
+
+  it("compressImageToByteLimit reports too-large when no encoding fits", async () => {
+    const { close } = stubCanvasPipeline(() => 3_000_000);
+
+    const result = await compressImageToByteLimit(makeFile(2_000_000), 1_000_000);
+
+    expect(result).toEqual({ ok: false, reason: "too-large" });
+    expect(close).toHaveBeenCalled();
   });
 
   it("shrinks below the source size when the image is already under MAX_DIMENSION", async () => {

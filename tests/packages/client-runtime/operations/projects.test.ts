@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/operations/projects.test.ts
+// verifies shared project operation eligibility and command builders
+
 import { describe, expect, it } from "vite-plus/test";
 import {
   EnvironmentId,
@@ -10,6 +13,7 @@ import * as Option from "effect/Option";
 import {
   buildAddProjectRemoteSourceReadiness,
   buildProjectCreateCommand,
+  canCreateProjectInEnvironment,
   findExistingAddProject,
   getAddProjectInitialQuery,
   resolveAddProjectPath,
@@ -18,6 +22,15 @@ import {
 import type { EnvironmentProject } from "../../../../packages/client-runtime/src/state/models.ts";
 
 describe("add project shared logic", () => {
+  it("only allows project creation in connected environments", () => {
+    expect(canCreateProjectInEnvironment("connected")).toBe(true);
+    expect(canCreateProjectInEnvironment("available")).toBe(false);
+    expect(canCreateProjectInEnvironment("offline")).toBe(false);
+    expect(canCreateProjectInEnvironment("connecting")).toBe(false);
+    expect(canCreateProjectInEnvironment("reconnecting")).toBe(false);
+    expect(canCreateProjectInEnvironment("error")).toBe(false);
+  });
+
   it("resolves initial browse paths from settings", () => {
     expect(getAddProjectInitialQuery("")).toBe("~/");
     expect(getAddProjectInitialQuery("/work")).toBe("/work/");

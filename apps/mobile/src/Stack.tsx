@@ -1,3 +1,6 @@
+// apps/mobile/src/Stack.tsx
+// composes mobile navigation and background workers
+
 import {
   createPathConfigForStaticNavigation,
   getPathFromState,
@@ -270,6 +273,12 @@ function workspacePathFromState(state: NavigationState): string {
   return path.startsWith("/") ? path : `/${path}`;
 }
 
+// isolate outbox subscriptions from the root navigation render
+function ThreadOutboxDrainWorker() {
+  useThreadOutboxDrain();
+  return null;
+}
+
 function RootStackLayout(props: {
   readonly children: React.ReactNode;
   readonly state: NavigationState;
@@ -278,8 +287,7 @@ function RootStackLayout(props: {
   const { pendingShare } = useIncomingShare();
   const sharePresentationRef = useRef(EMPTY_INCOMING_SHARE_PRESENTATION_STATE);
   useAgentNotificationNavigation();
-  useThreadOutboxDrain();
-  // Presents the cloud-relay onboarding sheet after an in-session sign-in.
+  // present cloud-relay onboarding after an in-session sign-in
   useConnectOnboardingNavigation();
   // Launcher app shortcuts: routes shortcut taps and tracks opened threads.
   useAppShortcuts(props.state);
@@ -306,6 +314,7 @@ function RootStackLayout(props: {
 
   return (
     <HardwareKeyboardCommandProvider pathname={pathname}>
+      <ThreadOutboxDrainWorker />
       <ShowcaseCaptureCoordinator pathname={pathname} />
       <ClerkSettingsSheetDetentProvider initiallyExpanded={false}>
         <AdaptiveWorkspaceLayout pathname={workspacePathname}>

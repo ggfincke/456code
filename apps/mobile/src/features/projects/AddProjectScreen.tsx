@@ -1,15 +1,23 @@
+// apps/mobile/src/features/projects/AddProjectScreen.tsx
+// orchestrates connected environment selection and project creation flows
+
 import {
   addProjectRemoteSourceLabel,
   addProjectRemoteSourcePathHint,
   addProjectRemoteSourceProvider,
   buildAddProjectRemoteSourceReadiness,
   buildProjectCreateCommand,
+  canCreateProjectInEnvironment,
   findExistingAddProject,
   getAddProjectInitialQuery,
   resolveAddProjectPath,
   sortAddProjectProviderSources,
   type AddProjectRemoteSource,
 } from "@t3tools/client-runtime/operations/projects";
+import {
+  connectionStatusText,
+  type EnvironmentConnectionPhase,
+} from "@t3tools/client-runtime/connection";
 import {
   appendBrowsePathSegment,
   canNavigateUp,
@@ -45,13 +53,20 @@ import { useThemeColor } from "../../lib/useThemeColor";
 import { uuidv4 } from "../../lib/uuid";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
-import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
+import {
+  useRemoteConnectionStatus,
+  useSavedRemoteConnections,
+} from "../../state/use-remote-environment-registry";
+import { resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
 
 interface EnvironmentOption {
   readonly environmentId: EnvironmentId;
   readonly label: string;
   readonly platform: string;
   readonly baseDirectory: string | null;
+  readonly connectionState: EnvironmentConnectionPhase;
+  readonly connectionError: string | null;
+  readonly connectionErrorTraceId: string | null;
 }
 
 const environmentOptionOrder = Order.mapInput(
@@ -231,19 +246,27 @@ function ProjectPathInput(props: {
 function useEnvironmentOptions(): ReadonlyArray<EnvironmentOption> {
   const serverConfigByEnvironmentId = useServerConfigs();
   const { savedConnectionsById } = useSavedRemoteConnections();
+  const { connectedEnvironments } = useRemoteConnectionStatus();
 
   return useMemo<ReadonlyArray<EnvironmentOption>>(() => {
+    const runtimeByEnvironmentId = new Map(
+      connectedEnvironments.map((environment) => [environment.environmentId, environment] as const),
+    );
     const options = Object.values(savedConnectionsById).map((connection) => {
       const config = serverConfigByEnvironmentId.get(connection.environmentId);
+      const runtime = runtimeByEnvironmentId.get(connection.environmentId);
       return {
         environmentId: connection.environmentId,
         label: connection.environmentLabel,
         platform: platformFromOs(config?.environment.platform.os ?? null),
         baseDirectory: config?.settings.addProjectBaseDirectory ?? null,
+        connectionState: runtime?.connectionState ?? "available",
+        connectionError: runtime?.connectionError ?? null,
+        connectionErrorTraceId: runtime?.connectionErrorTraceId ?? null,
       };
     });
     return Arr.sort(options, environmentOptionOrder);
-  }, [savedConnectionsById, serverConfigByEnvironmentId]);
+  }, [connectedEnvironments, savedConnectionsById, serverConfigByEnvironmentId]);
 }
 
 function useSelectedEnvironment(): {
@@ -254,8 +277,14 @@ function useSelectedEnvironment(): {
   const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
   const environmentOptions = useEnvironmentOptions();
   const selectedEnvironment =
-    environmentOptions.find((environment) => environment.environmentId === selectedEnvironmentId) ??
-    environmentOptions[0] ??
+    environmentOptions.find(
+      (environment) =>
+        environment.environmentId === selectedEnvironmentId &&
+        canCreateProjectInEnvironment(environment.connectionState),
+    ) ??
+    environmentOptions.find((environment) =>
+      canCreateProjectInEnvironment(environment.connectionState),
+    ) ??
     null;
 
   return {
@@ -270,9 +299,9 @@ function EmptyEnvironmentState() {
 
   return (
     <View className="items-center gap-3 rounded-2xl bg-card px-5 py-8">
-      <Text className="text-center text-lg font-sans-bold">No environments connected</Text>
+      <Text className="text-center text-lg font-sans-bold">Environment unavailable</Text>
       <Text className="text-center text-sm leading-normal text-foreground-muted">
-        Add an environment before adding a project.
+        Start or reconnect an environment before adding a project.
       </Text>
       <Pressable
         onPress={() => navigation.dispatch(StackActions.replace("ConnectionsNew"))}
@@ -352,17 +381,25 @@ export function AddProjectSourceScreen() {
 
   return (
     <AddProjectShell>
-      {environmentOptions.length === 0 ? <EmptyEnvironmentState /> : null}
+      {selectedEnvironment === null ? <EmptyEnvironmentState /> : null}
 
       {environmentOptions.length > 1 ? (
         <>
-          <SectionTitle>Connected environments</SectionTitle>
+          <SectionTitle>Environments</SectionTitle>
           <ListSection>
             {environmentOptions.map((environment, index) => (
               <ListRow
                 key={environment.environmentId}
                 title={environment.label}
-                subtitle={environment.environmentId}
+                subtitle={
+                  canCreateProjectInEnvironment(environment.connectionState)
+                    ? environment.environmentId
+                    : connectionStatusText({
+                        phase: environment.connectionState,
+                        error: environment.connectionError,
+                        traceId: environment.connectionErrorTraceId,
+                      })
+                }
                 icon={
                   <SymbolView
                     name="server.rack"
@@ -372,6 +409,7 @@ export function AddProjectSourceScreen() {
                   />
                 }
                 selected={environment.environmentId === selectedEnvironment?.environmentId}
+                disabled={!canCreateProjectInEnvironment(environment.connectionState)}
                 isFirst={index === 0}
                 right={
                   environment.environmentId === selectedEnvironment?.environmentId ? (
@@ -445,7 +483,7 @@ function useCreateProject(environment: EnvironmentOption | null) {
 
   return useCallback(
     async (workspaceRoot: string) => {
-      if (!environment) return;
+      if (!environment || !canCreateProjectInEnvironment(environment.connectionState)) return;
 
       const existing = findExistingAddProject({
         projects,
@@ -496,11 +534,7 @@ function useEnvironmentFromParam(
 ): EnvironmentOption | null {
   const environmentOptions = useEnvironmentOptions();
   const environmentId = stringParam(environmentIdParam) as EnvironmentId | null;
-  return (
-    environmentOptions.find((environment) => environment.environmentId === environmentId) ??
-    environmentOptions[0] ??
-    null
-  );
+  return resolveAddProjectEnvironment(environmentOptions, environmentId);
 }
 
 export function AddProjectRepositoryScreen(props: {
@@ -564,26 +598,32 @@ export function AddProjectRepositoryScreen(props: {
   return (
     <AddProjectShell>
       {error ? <ErrorBanner message={error} /> : null}
-      <TextInput
-        className="h-12 min-h-12 rounded-[24px] px-4 py-0 text-base leading-snug"
-        value={repositoryInput}
-        onChangeText={setRepositoryInput}
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder={
-          source === "url"
-            ? "https://github.com/org/repo.git"
-            : addProjectRemoteSourcePathHint(source)
-        }
-        returnKeyType="next"
-        onSubmitEditing={() => void lookupRepository()}
-      />
-      <PrimaryActionButton
-        label={source === "url" ? "Continue" : "Lookup repository"}
-        disabled={isSubmitting || repositoryInput.trim().length === 0}
-        onPress={() => void lookupRepository()}
-        loading={isSubmitting}
-      />
+      {environment ? (
+        <>
+          <TextInput
+            className="h-12 min-h-12 rounded-[24px] px-4 py-0 text-base leading-snug"
+            value={repositoryInput}
+            onChangeText={setRepositoryInput}
+            autoCapitalize="none"
+            autoCorrect={false}
+            placeholder={
+              source === "url"
+                ? "https://github.com/org/repo.git"
+                : addProjectRemoteSourcePathHint(source)
+            }
+            returnKeyType="next"
+            onSubmitEditing={() => void lookupRepository()}
+          />
+          <PrimaryActionButton
+            label={source === "url" ? "Continue" : "Lookup repository"}
+            disabled={isSubmitting || repositoryInput.trim().length === 0}
+            onPress={() => void lookupRepository()}
+            loading={isSubmitting}
+          />
+        </>
+      ) : (
+        <EmptyEnvironmentState />
+      )}
     </AddProjectShell>
   );
 }

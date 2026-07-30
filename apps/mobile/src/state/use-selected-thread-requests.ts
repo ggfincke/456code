@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-selected-thread-requests.ts
+// manages selected thread approval and input requests
+
 import { useAtomValue } from "@effect/atom-react";
 import { useCallback, useMemo, useState } from "react";
 
@@ -11,6 +14,7 @@ import {
   derivePendingApprovals,
   derivePendingUserInputs,
   setPendingUserInputCustomAnswer,
+  sortThreadActivities,
   type PendingUserInputDraftAnswer,
 } from "../lib/threadActivity";
 import { appAtomRegistry } from "./atom-registry";
@@ -70,14 +74,19 @@ export function useSelectedThreadRequests() {
     null,
   );
 
-  const activePendingApprovals = useMemo(
-    () => (selectedThread ? derivePendingApprovals(selectedThread.activities) : []),
+  // share one lifecycle ordering across both request derivations
+  const sortedActivities = useMemo(
+    () => (selectedThread ? sortThreadActivities(selectedThread.activities) : []),
     [selectedThread],
+  );
+  const activePendingApprovals = useMemo(
+    () => derivePendingApprovals(sortedActivities),
+    [sortedActivities],
   );
   const activePendingApproval = activePendingApprovals[0] ?? null;
   const activePendingUserInputs = useMemo(
-    () => (selectedThread ? derivePendingUserInputs(selectedThread.activities) : []),
-    [selectedThread],
+    () => derivePendingUserInputs(sortedActivities),
+    [sortedActivities],
   );
   const activePendingUserInput = activePendingUserInputs[0] ?? null;
   const activePendingUserInputDrafts =

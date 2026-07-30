@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/sourceControl.ts
+// coordinates source control publication state
+
 import { WS_METHODS } from "@t3tools/contracts";
 import { Atom } from "effect/unstable/reactivity";
 
@@ -7,10 +10,12 @@ import {
   createEnvironmentRpcQueryAtomFamily,
 } from "./runtime.ts";
 import type { EnvironmentRegistry } from "../connection/registry.ts";
+import { EnvironmentCacheStore } from "../platform/persistence.ts";
 import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
+import { invalidateCachedVcsRefs } from "./vcsRefInvalidation.ts";
 
 export function createSourceControlEnvironmentAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
+  runtime: Atom.AtomRuntime<EnvironmentRegistry | EnvironmentCacheStore | R, E>,
 ) {
   const commandScheduler = createAtomCommandScheduler();
   return {
@@ -36,6 +41,11 @@ export function createSourceControlEnvironmentAtoms<R, E>(
       tag: WS_METHODS.sourceControlPublishRepository,
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
+      onSettled: (target, registry) =>
+        invalidateCachedVcsRefs(registry, {
+          environmentId: target.environmentId,
+          cwd: target.input.cwd,
+        }),
     }),
   };
 }

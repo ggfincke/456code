@@ -1342,6 +1342,8 @@ function createDraftThreadState(
     interactionMode?: ProviderInteractionMode;
   },
 ): DraftThreadState {
+  // project changes drop machine-specific branch and worktree context
+  // env mode and start-from-origin intent carry across machines
   const projectChanged =
     existingThread !== undefined &&
     (existingThread.environmentId !== projectRef.environmentId ||
@@ -1360,9 +1362,7 @@ function createDraftThreadState(
       : (options.branch ?? null);
   const nextStartFromOrigin =
     options?.startFromOrigin === undefined
-      ? projectChanged
-        ? false
-        : (existingThread?.startFromOrigin ?? false)
+      ? (existingThread?.startFromOrigin ?? false)
       : options.startFromOrigin;
   return {
     threadId,
@@ -1376,12 +1376,7 @@ function createDraftThreadState(
     branch: nextBranch,
     worktreePath: nextWorktreePath,
     envMode:
-      options?.envMode ??
-      (nextWorktreePath
-        ? "worktree"
-        : projectChanged
-          ? "local"
-          : (existingThread?.envMode ?? "local")),
+      options?.envMode ?? (nextWorktreePath ? "worktree" : (existingThread?.envMode ?? "local")),
     startFromOrigin: nextStartFromOrigin,
     promotedTo: null,
   };
@@ -2345,6 +2340,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
             ) {
               return state;
             }
+            // mirror createDraftThreadState's machine-specific context reset
             const projectChanged =
               nextProjectRef.environmentId !== existing.environmentId ||
               nextProjectRef.projectId !== existing.projectId;
@@ -2362,9 +2358,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
                 : (options.branch ?? null);
             const nextStartFromOrigin =
               options.startFromOrigin === undefined
-                ? projectChanged
-                  ? false
-                  : existing.startFromOrigin
+                ? existing.startFromOrigin
                 : options.startFromOrigin;
             const nextDraftThread: DraftThreadState = {
               threadId: existing.threadId,
@@ -2380,12 +2374,7 @@ const composerDraftStore = create<ComposerDraftStoreState>()(
               branch: nextBranch,
               worktreePath: nextWorktreePath,
               envMode:
-                options.envMode ??
-                (nextWorktreePath
-                  ? "worktree"
-                  : projectChanged
-                    ? "local"
-                    : (existing.envMode ?? "local")),
+                options.envMode ?? (nextWorktreePath ? "worktree" : (existing.envMode ?? "local")),
               startFromOrigin: nextStartFromOrigin,
               promotedTo: existing.promotedTo ?? null,
             };

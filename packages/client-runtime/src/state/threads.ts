@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/threads.ts
+// synchronizes environment thread state
+
 import {
   ORCHESTRATION_WS_METHODS,
   type EnvironmentId as EnvironmentIdType,
@@ -236,7 +239,7 @@ export const makeEnvironmentThreadState = Effect.fn("EnvironmentThreadState.make
   const foregroundResubscriptions = Option.match(wakeups, {
     onNone: () => Stream.never,
     onSome: (service) =>
-      service.changes.pipe(Stream.filter((reason) => reason === "application-active")),
+      service.changes.pipe(Stream.filter(ConnectionWakeups.shouldResubscribeAfterWakeup)),
   });
 
   yield* setSynchronizing;

@@ -959,6 +959,9 @@ function isEmptyMessage(entry: RawThreadFeedEntry): boolean {
 
 function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): ThreadFeedEntry[] {
   const grouped: ThreadFeedEntry[] = [];
+  // mutate only the trailing group to keep long tool runs linear
+  let openGroupActivities: ThreadFeedActivity[] | null = null;
+  let openGroupTurnId: TurnId | null = null;
 
   for (const entry of entries) {
     // skip empty messages so they do not break activity grouping
@@ -968,24 +971,23 @@ function groupAdjacentActivities(entries: ReadonlyArray<RawThreadFeedEntry>): Th
 
     if (entry.type !== "activity") {
       grouped.push(entry);
+      openGroupActivities = null;
       continue;
     }
 
-    const previous = grouped.at(-1);
-    if (previous?.type === "activity-group" && previous.turnId === entry.turnId) {
-      grouped[grouped.length - 1] = {
-        ...previous,
-        activities: [...previous.activities, entry.activity],
-      };
+    if (openGroupActivities !== null && openGroupTurnId === entry.turnId) {
+      openGroupActivities.push(entry.activity);
       continue;
     }
 
+    openGroupActivities = [entry.activity];
+    openGroupTurnId = entry.turnId;
     grouped.push({
       type: "activity-group",
       id: entry.id,
       createdAt: entry.createdAt,
       turnId: entry.turnId,
-      activities: [entry.activity],
+      activities: openGroupActivities,
     });
   }
 
@@ -1227,13 +1229,19 @@ function appendPresentedFeedEntry(
   });
 }
 
-export function derivePendingApprovals(
+// sort once for consumers that share lifecycle ordering
+export function sortThreadActivities(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
+): ReadonlyArray<OrchestrationThreadActivity> {
+  return Arr.sort(activities, activityOrder);
+}
+
+export function derivePendingApprovals(
+  sortedActivities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingApproval[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingApproval>();
-  const ordered = Arr.sort(activities, activityOrder);
 
-  for (const activity of ordered) {
+  for (const activity of sortedActivities) {
     const payload =
       activity.payload && typeof activity.payload === "object"
         ? (activity.payload as Record<string, unknown>)
@@ -1275,12 +1283,11 @@ export function derivePendingApprovals(
 }
 
 export function derivePendingUserInputs(
-  activities: ReadonlyArray<OrchestrationThreadActivity>,
+  sortedActivities: ReadonlyArray<OrchestrationThreadActivity>,
 ): PendingUserInput[] {
   const openByRequestId = new Map<ApprovalRequestId, PendingUserInput>();
-  const ordered = Arr.sort(activities, activityOrder);
 
-  for (const activity of ordered) {
+  for (const activity of sortedActivities) {
     const payload =
       activity.payload && typeof activity.payload === "object"
         ? (activity.payload as Record<string, unknown>)

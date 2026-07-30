@@ -1,3 +1,6 @@
+// apps/server/src/vcs/VcsDriverRegistry.ts
+// resolves version control drivers by workspace
+
 import * as Cache from "effect/Cache";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -115,7 +118,10 @@ export const make = Effect.gen(function* () {
     (key) => detectResolvedKind(parseDetectionCacheKey(key)),
     {
       capacity: DETECTION_CACHE_CAPACITY,
-      timeToLive: (exit) => (Exit.isSuccess(exit) ? DETECTION_CACHE_TTL : Duration.zero),
+      timeToLive: Exit.match({
+        onSuccess: (detected) => (detected === null ? Duration.zero : DETECTION_CACHE_TTL),
+        onFailure: () => Duration.zero,
+      }),
     },
   );
 

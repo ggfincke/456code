@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/appearancePreferences.ts
+// derives mobile appearance preferences
+
 import { MOBILE_CODE_SURFACE, MOBILE_TYPOGRAPHY } from "./typography";
 import {
   DEFAULT_TERMINAL_FONT_SIZE,
@@ -198,10 +201,19 @@ export function resolveTextScaleVariables(baseFontSize: number): Record<string, 
 
   for (const [name, role] of Object.entries(TEXT_SCALE_VARIABLE_ROLES)) {
     variables[name] = Math.max(8, Math.round(role.fontSize * scale));
-    variables[`${name}--line-height`] = Math.max(10, Math.round(role.lineHeight * scale));
+    variables[`${name}--line-height`] = scaledTypographyLineHeight(role, baseFontSize);
   }
 
   return variables;
+}
+
+// predict a typography role's rendered line height at the selected base size
+export function scaledTypographyLineHeight(
+  role: { readonly lineHeight: number },
+  baseFontSize: number,
+): number {
+  const scale = normalizeBaseFontSize(baseFontSize) / DEFAULT_BASE_FONT_SIZE;
+  return Math.max(10, Math.round(role.lineHeight * scale));
 }
 
 export function resolveNativeMarkdownTypography(baseFontSize: number): NativeMarkdownTypography {
