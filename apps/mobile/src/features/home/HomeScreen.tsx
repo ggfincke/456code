@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/HomeScreen.tsx
+// renders the mobile project and thread list
+
 import {
   LegendList,
   type LegendListRef,
@@ -616,6 +619,24 @@ export function HomeScreen(props: HomeScreenProps) {
     [],
   );
 
+  // keep list extra data stable between relevant state changes
+  const v2ExtraData = useMemo(
+    () => ({
+      projectByKey,
+      projectCwdByKey,
+      projectTitleByProjectKey: v2ProjectTitleByProjectKey,
+      serverConfigs,
+      savedConnectionsById: props.savedConnectionsById,
+    }),
+    [
+      projectByKey,
+      projectCwdByKey,
+      props.savedConnectionsById,
+      serverConfigs,
+      v2ProjectTitleByProjectKey,
+    ],
+  );
+
   const extraData = useMemo(
     () => ({ savedConnectionsById: props.savedConnectionsById, projectCwdByKey }),
     [props.savedConnectionsById, projectCwdByKey],
@@ -887,11 +908,7 @@ export function HomeScreen(props: HomeScreenProps) {
             data={threadListV2Items}
             renderItem={renderV2Item}
             keyExtractor={v2KeyExtractor}
-            extraData={{
-              projectByKey,
-              serverConfigs,
-              savedConnectionsById: props.savedConnectionsById,
-            }}
+            extraData={v2ExtraData}
             ListHeaderComponent={v2ListHeader}
             ListFooterComponent={
               threadListV2Layout.hiddenSettledCount > 0 ? (

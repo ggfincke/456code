@@ -1,3 +1,6 @@
+// apps/mobile/src/features/shortcuts/useAppShortcuts.ts
+// routes mobile launcher shortcuts
+
 import * as QuickActions from "expo-quick-actions";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform } from "react-native";
@@ -54,7 +57,11 @@ function useShortcutNavigation(): void {
 }
 
 function useRecentThreadShortcutSync(state: NavigationState): void {
-  const threadRef = useMemo(() => activeThreadRef(state), [state]);
+  // avoid root thread-shell subscriptions where launcher shortcuts are unavailable
+  const threadRef = useMemo(
+    () => (Platform.OS === "android" ? activeThreadRef(state) : null),
+    [state],
+  );
   const threadShell = useThreadShell(threadRef);
   // null until the persisted list loads; recording waits on it so the first
   // thread opened after a cold start cannot clobber older entries.

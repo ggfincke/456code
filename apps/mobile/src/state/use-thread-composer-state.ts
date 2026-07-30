@@ -32,6 +32,7 @@ import {
   composerDraftsAtom,
   ensureComposerDraftsLoaded,
   getComposerDraftSnapshot,
+  mergeComposerDraftContent,
   removeComposerDraftAttachment,
   setComposerDraftText,
   updateComposerDraftSettings,
@@ -157,27 +158,29 @@ export function useThreadComposerState() {
 
     const metadata = makeQueuedMessageMetadata();
     const messageId = MessageId.make(metadata.messageId);
-    try {
-      await enqueueThreadOutboxMessage({
-        environmentId: selectedThreadShell.environmentId,
-        threadId: selectedThreadShell.id,
-        messageId,
-        commandId: CommandId.make(metadata.commandId),
-        text,
-        attachments,
-        modelSelection: draft.modelSelection ?? thread.modelSelection,
-        runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
-        interactionMode: draft.interactionMode ?? thread.interactionMode,
-        createdAt: metadata.createdAt,
-      });
-      clearComposerDraftContent(threadKey);
-      return messageId;
-    } catch (error) {
+    // clear on optimistic enqueue and restore content if storage fails
+    const enqueuePromise = enqueueThreadOutboxMessage({
+      environmentId: selectedThreadShell.environmentId,
+      threadId: selectedThreadShell.id,
+      messageId,
+      commandId: CommandId.make(metadata.commandId),
+      text,
+      attachments,
+      modelSelection: draft.modelSelection ?? thread.modelSelection,
+      runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
+      interactionMode: draft.interactionMode ?? thread.interactionMode,
+      createdAt: metadata.createdAt,
+    });
+    clearComposerDraftContent(threadKey);
+    enqueuePromise.catch((error: unknown) => {
+      // append attachments uncapped so newer draft images cannot displace them
+      void mergeComposerDraftContent(threadKey, { text, attachments: [] });
+      appendComposerDraftAttachments(threadKey, attachments);
       setPendingConnectionError(
         error instanceof Error ? error.message : "Failed to save the queued message.",
       );
-      return null;
-    }
+    });
+    return messageId;
   }, [selectedThreadDetail, selectedThreadShell, sendBlockedReason]);
 
   const onChangeDraftMessage = useCallback(

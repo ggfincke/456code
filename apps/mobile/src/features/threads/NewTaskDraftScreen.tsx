@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/NewTaskDraftScreen.tsx
+// renders and routes new mobile task drafts
+
 import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { StackActions, useNavigation, usePreventRemove } from "@react-navigation/native";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -946,7 +949,8 @@ export function NewTaskDraftScreen(props: {
   const promptEditor = (
     <ComposerEditor
       ref={promptInputRef}
-      autoFocus={!isAndroid}
+      // focus after the ios form-sheet transition to avoid keyboard stalls
+      autoFocus={false}
       editable={!isIncomingShareTransferPending}
       multiline
       scrollEnabled={isExpanded}
