@@ -888,6 +888,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --sidebar-row-selected: var(--color-white);
   --sidebar-border: var(--border);
   --sidebar-stage-fade: var(--sidebar);
+  --selection-background: rgb(37 63 99 / 20%);
+  --caret-color: var(--foreground);
+  --scrollbar-thumb: rgb(0 0 0 / 15%);
+  --scrollbar-thumb-hover: rgb(0 0 0 / 25%);
 
   @variant dark {
     color-scheme: dark;
@@ -929,6 +933,10 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     --sidebar-row-selected: var(--muted);
     --sidebar-border: var(--border);
     --sidebar-stage-fade: var(--card);
+    --selection-background: rgb(180 203 255 / 25%);
+    --caret-color: var(--foreground);
+    --scrollbar-thumb: rgb(255 255 255 / 10%);
+    --scrollbar-thumb-hover: rgb(255 255 255 / 18%);
   }
 }
 
@@ -984,6 +992,154 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
      global chrome background, or the fade shows a seam (same rule as the
      light palette above). */
   --sidebar-stage-fade: var(--card);
+}
+
+:root.ocean {
+  color-scheme: dark;
+
+  /* Material Ocean High Contrast source palette */
+  --ocean-white: #ffffff;
+  --ocean-black: #000000;
+  --ocean-red: #f07178;
+  --ocean-orange: #f78c6c;
+  --ocean-yellow: #ffcb6b;
+  --ocean-green: #c3e88d;
+  --ocean-cyan: #89ddff;
+  --ocean-blue: #82aaff;
+  --ocean-pale-blue: #b2ccd6;
+  --ocean-purple: #c792ea;
+  --ocean-brown: #916b53;
+  --ocean-pink: #ff9cac;
+  --ocean-violet: #bb80b3;
+  --ocean-accent: #80cbc4;
+  --ocean-background: #0f111a;
+  --ocean-background-alt: #090b10;
+  --ocean-contrast-border: #3e445d;
+  --ocean-comments: #464b5d;
+  --ocean-caret: #ffcc00;
+  --ocean-foreground: #babed8;
+  --ocean-guides: #3b3f51;
+  --ocean-line-numbers: #3b3f5180;
+  --ocean-invisibles: #80869e50;
+  --ocean-line-highlight: #000000;
+  --ocean-selection: #717cb450;
+  --ocean-shadow: #00000030;
+  --ocean-input-background: #1a1c25;
+  --ocean-input-foreground: #eeffff;
+  --ocean-input-border: #ffffff10;
+  --ocean-scrollbar: #8f93a220;
+  --ocean-scrollbar-hover: #8f93a210;
+  --ocean-scrollbar-active: #8f93a230;
+  --ocean-statusbar-foreground: #4b526d;
+  --ocean-sidebar-background: #292d3e;
+
+  /* semantic app surfaces */
+  --background: var(--ocean-background);
+  --app-chrome-background: var(--ocean-background);
+  --surface-raised: var(--ocean-input-background);
+  --foreground: var(--ocean-foreground);
+  --card: var(--ocean-background-alt);
+  --card-foreground: var(--ocean-foreground);
+  --popover: var(--ocean-input-background);
+  --popover-foreground: var(--ocean-input-foreground);
+  --primary: var(--ocean-accent);
+  --primary-foreground: var(--ocean-background);
+  --secondary: var(--ocean-input-background);
+  --secondary-foreground: var(--ocean-input-foreground);
+  --muted: var(--ocean-input-background);
+  --muted-foreground: var(--ocean-foreground);
+  --accent: var(--ocean-sidebar-background);
+  --accent-foreground: var(--ocean-white);
+  --destructive: var(--ocean-red);
+  --destructive-foreground: var(--ocean-red);
+  --info: var(--ocean-blue);
+  --info-foreground: var(--ocean-cyan);
+  --success: var(--ocean-green);
+  --success-foreground: var(--ocean-green);
+  --warning: var(--ocean-orange);
+  --warning-foreground: var(--ocean-orange);
+  --border: var(--ocean-contrast-border);
+  --input: var(--ocean-input-border);
+  --ring: var(--ocean-white);
+  --sidebar: var(--ocean-background-alt);
+  --sidebar-foreground: var(--ocean-foreground);
+  --sidebar-muted-foreground: var(--ocean-statusbar-foreground);
+  --sidebar-control-surface: var(--ocean-input-background);
+  --sidebar-row-hover: var(--ocean-sidebar-background);
+  --sidebar-row-active: var(--ocean-sidebar-background);
+  --sidebar-row-selected: var(--ocean-selection);
+  --sidebar-border: var(--ocean-contrast-border);
+  --sidebar-stage-fade: var(--ocean-background-alt);
+  --selection-background: var(--ocean-selection);
+  --caret-color: var(--ocean-caret);
+  --scrollbar-thumb: var(--ocean-scrollbar);
+  --scrollbar-thumb-hover: var(--ocean-scrollbar-hover);
+
+  /* existing status utilities inherit the Ocean semantic spectrum */
+  --color-red-300: color-mix(in srgb, var(--ocean-red) 82%, var(--ocean-white));
+  --color-red-400: color-mix(in srgb, var(--ocean-red) 94%, var(--ocean-white));
+  --color-red-500: var(--ocean-red);
+  --color-red-600: color-mix(in srgb, var(--ocean-red) 86%, var(--ocean-background));
+  --color-red-700: color-mix(in srgb, var(--ocean-red) 72%, var(--ocean-background));
+  --color-amber-50: color-mix(in srgb, var(--ocean-yellow) 10%, var(--ocean-white));
+  --color-amber-100: color-mix(in srgb, var(--ocean-yellow) 24%, var(--ocean-white));
+  --color-amber-200: color-mix(in srgb, var(--ocean-yellow) 58%, var(--ocean-white));
+  --color-amber-300: color-mix(in srgb, var(--ocean-yellow) 84%, var(--ocean-white));
+  --color-amber-400: color-mix(in srgb, var(--ocean-yellow) 94%, var(--ocean-white));
+  --color-amber-500: var(--ocean-yellow);
+  --color-amber-600: color-mix(in srgb, var(--ocean-yellow) 88%, var(--ocean-background));
+  --color-amber-700: color-mix(in srgb, var(--ocean-yellow) 76%, var(--ocean-background));
+  --color-amber-800: color-mix(in srgb, var(--ocean-yellow) 60%, var(--ocean-background));
+  --color-amber-900: color-mix(in srgb, var(--ocean-yellow) 44%, var(--ocean-background));
+  --color-amber-950: color-mix(in srgb, var(--ocean-yellow) 18%, var(--ocean-background-alt));
+  --color-yellow-500: var(--ocean-yellow);
+  --color-yellow-600: color-mix(in srgb, var(--ocean-yellow) 88%, var(--ocean-background));
+  --color-emerald-300: color-mix(in srgb, var(--ocean-green) 84%, var(--ocean-white));
+  --color-emerald-400: color-mix(in srgb, var(--ocean-green) 94%, var(--ocean-white));
+  --color-emerald-500: var(--ocean-green);
+  --color-emerald-600: color-mix(in srgb, var(--ocean-green) 86%, var(--ocean-background));
+  --color-emerald-700: color-mix(in srgb, var(--ocean-green) 72%, var(--ocean-background));
+  --color-sky-300: color-mix(in srgb, var(--ocean-cyan) 84%, var(--ocean-white));
+  --color-sky-400: color-mix(in srgb, var(--ocean-cyan) 94%, var(--ocean-white));
+  --color-sky-500: var(--ocean-cyan);
+  --color-sky-600: color-mix(in srgb, var(--ocean-cyan) 86%, var(--ocean-background));
+  --color-blue-300: color-mix(in srgb, var(--ocean-blue) 84%, var(--ocean-white));
+  --color-blue-400: color-mix(in srgb, var(--ocean-blue) 94%, var(--ocean-white));
+  --color-blue-500: var(--ocean-blue);
+  --color-blue-600: color-mix(in srgb, var(--ocean-blue) 86%, var(--ocean-background));
+  --color-indigo-300: color-mix(in srgb, var(--ocean-blue) 84%, var(--ocean-white));
+  --color-indigo-500: var(--ocean-blue);
+  --color-indigo-600: color-mix(in srgb, var(--ocean-blue) 86%, var(--ocean-background));
+  --color-violet-300: color-mix(in srgb, var(--ocean-purple) 84%, var(--ocean-white));
+  --color-violet-500: var(--ocean-purple);
+  --color-violet-600: color-mix(in srgb, var(--ocean-purple) 86%, var(--ocean-background));
+  --color-teal-300: color-mix(in srgb, var(--ocean-accent) 84%, var(--ocean-white));
+  --color-teal-500: var(--ocean-accent);
+  --color-teal-600: color-mix(in srgb, var(--ocean-accent) 86%, var(--ocean-background));
+}
+
+.ocean [data-sidebar-version="v1"],
+.ocean [data-sidebar-version="v2"] {
+  --background: var(--ocean-background);
+  --foreground: var(--ocean-foreground);
+  --card: var(--ocean-background-alt);
+  --card-foreground: var(--ocean-foreground);
+  --accent: var(--ocean-sidebar-background);
+  --accent-foreground: var(--ocean-white);
+  --muted: var(--ocean-input-background);
+  --muted-foreground: var(--ocean-foreground);
+  --border: var(--ocean-contrast-border);
+  --input: var(--ocean-input-border);
+  --sidebar: var(--ocean-background-alt);
+  --sidebar-foreground: var(--ocean-foreground);
+  --sidebar-muted-foreground: var(--ocean-statusbar-foreground);
+  --sidebar-control-surface: var(--ocean-input-background);
+  --sidebar-row-hover: var(--ocean-sidebar-background);
+  --sidebar-row-active: var(--ocean-sidebar-background);
+  --sidebar-row-selected: var(--ocean-selection);
+  --sidebar-border: var(--ocean-contrast-border);
+  --sidebar-stage-fade: var(--ocean-background-alt);
+  background-color: var(--sidebar);
 }
 
 body {
@@ -1049,6 +1205,16 @@ code {
     "SF Mono", "SFMono-Regular", "JetBrains Mono", Consolas, "Liberation Mono", Menlo, monospace;
 }
 
+::selection {
+  background: var(--selection-background);
+}
+
+input,
+textarea,
+[contenteditable="true"] {
+  caret-color: var(--caret-color);
+}
+
 /* Window drag region (frameless titlebar) */
 .drag-region {
   -webkit-app-region: drag;
@@ -1072,20 +1238,12 @@ code {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.15);
+  background: var(--scrollbar-thumb);
   border-radius: 3px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.25);
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.1);
-}
-
-.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.18);
+  background: var(--scrollbar-thumb-hover);
 }
 
 .turn-chip-strip {
