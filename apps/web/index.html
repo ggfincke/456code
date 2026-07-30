@@ -1,3 +1,5 @@
+<!-- apps/web/index.html -->
+<!-- boots the web client and applies the stored theme before React -->
 <!doctype html>
 <html lang="en">
   <head>
@@ -15,17 +17,27 @@
       (() => {
         const LIGHT_BACKGROUND = "#ffffff";
         const DARK_BACKGROUND = "#161616";
+        const OCEAN_BACKGROUND = "#0f111a";
         const themeColorMeta = document.querySelector('meta[name="theme-color"]');
         try {
           const storedTheme = window.localStorage.getItem("456code:theme");
           const theme =
-            storedTheme === "light" || storedTheme === "dark" || storedTheme === "system"
+            storedTheme === "light" ||
+            storedTheme === "dark" ||
+            storedTheme === "ocean" ||
+            storedTheme === "system"
               ? storedTheme
               : "system";
           const prefersDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
-          const isDark = theme === "dark" || (theme === "system" && prefersDark);
+          const isOcean = theme === "ocean";
+          const isDark = isOcean || theme === "dark" || (theme === "system" && prefersDark);
+          document.documentElement.classList.toggle("ocean", isOcean);
           document.documentElement.classList.toggle("dark", isDark);
-          const chromeColor = isDark ? DARK_BACKGROUND : LIGHT_BACKGROUND;
+          const chromeColor = isOcean
+            ? OCEAN_BACKGROUND
+            : isDark
+              ? DARK_BACKGROUND
+              : LIGHT_BACKGROUND;
           document.documentElement.style.backgroundColor = chromeColor;
           themeColorMeta?.setAttribute("content", chromeColor);
         } catch {
@@ -60,6 +72,11 @@
       html.dark body {
         background: #161616;
         color: #f5f5f5;
+      }
+
+      html.ocean body {
+        background: #0f111a;
+        color: #babed8;
       }
 
       #boot-shell {

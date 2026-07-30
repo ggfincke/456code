@@ -1,5 +1,12 @@
+// apps/web/src/components/ChatMarkdown.tsx
+// renders markdown, code fences, links, and interactive message content
 import { useAtomValue } from "@effect/atom-react";
-import { DiffsHighlighter, getSharedHighlighter, SupportedLanguages } from "@pierre/diffs";
+import {
+  type DiffsHighlighter,
+  type DiffsThemeNames,
+  getSharedHighlighter,
+  SupportedLanguages,
+} from "@pierre/diffs";
 import {
   CheckIcon,
   ChevronRightIcon,
@@ -54,7 +61,7 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Menu, MenuItem, MenuPopup, MenuTrigger } from "./ui/menu";
 import { stackedThreadToast, toastManager } from "./ui/toast";
 import { useOpenInPreferredEditor } from "../editorPreferences";
-import { resolveDiffThemeName, type DiffThemeName } from "../lib/diffRendering";
+import { resolveDiffThemeName } from "../lib/diffRendering";
 import { fnv1a32 } from "../lib/diffRendering";
 import { LRUCache } from "../lib/lruCache";
 import { useTheme } from "../hooks/useTheme";
@@ -146,6 +153,7 @@ const highlightedCodeCache = new LRUCache<string>(
   MAX_HIGHLIGHT_CACHE_MEMORY_BYTES,
 );
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>();
+const OCEAN_CODE_THEME_NAME = "material-theme-ocean";
 
 function findTaskListMarkerOffset(markdown: string, listItemStart: number): number | null {
   const firstLineEnd = markdown.indexOf("\n", listItemStart);
@@ -288,7 +296,11 @@ function extractCodeBlock(
   };
 }
 
-function createHighlightCacheKey(code: string, language: string, themeName: DiffThemeName): string {
+function createHighlightCacheKey(
+  code: string,
+  language: string,
+  themeName: DiffsThemeNames,
+): string {
   return `${fnv1a32(code).toString(36)}:${code.length}:${language}:${themeName}`;
 }
 
@@ -301,7 +313,7 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter> {
   if (cached) return cached;
 
   const promise = getSharedHighlighter({
-    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light")],
+    themes: [resolveDiffThemeName("dark"), resolveDiffThemeName("light"), OCEAN_CODE_THEME_NAME],
     langs: [language as SupportedLanguages],
     preferredHighlighter: "shiki-js",
   }).catch((err) => {
@@ -657,7 +669,7 @@ function MarkdownCodeBlock({
 interface SuspenseShikiCodeBlockProps {
   className: string | undefined;
   code: string;
-  themeName: DiffThemeName;
+  themeName: DiffsThemeNames;
   isStreaming: boolean;
 }
 
@@ -694,7 +706,7 @@ function SuspenseShikiCodeBlock({
 interface UncachedShikiCodeBlockProps {
   code: string;
   language: string;
-  themeName: DiffThemeName;
+  themeName: DiffsThemeNames;
   cacheKey: string;
   isStreaming: boolean;
 }
@@ -1251,7 +1263,7 @@ function ChatMarkdown({
   className,
   lineBreaks = false,
 }: ChatMarkdownProps) {
-  const { resolvedTheme } = useTheme();
+  const { theme, resolvedTheme } = useTheme();
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
   });
@@ -1266,6 +1278,7 @@ function ChatMarkdown({
     serverConfig?.availableEditors ?? [],
   );
   const diffThemeName = resolveDiffThemeName(resolvedTheme);
+  const codeThemeName: DiffsThemeNames = theme === "ocean" ? OCEAN_CODE_THEME_NAME : diffThemeName;
   const markdownFileLinkMetaByHref = useMemo(() => {
     const metaByHref = new Map<
       string,
@@ -1516,7 +1529,7 @@ function ChatMarkdown({
                 <SuspenseShikiCodeBlock
                   className={codeBlock.className}
                   code={codeBlock.code}
-                  themeName={diffThemeName}
+                  themeName={codeThemeName}
                   isStreaming={isStreaming}
                 />
               </Suspense>
@@ -1526,7 +1539,7 @@ function ChatMarkdown({
       },
     }),
     [
-      diffThemeName,
+      codeThemeName,
       fileLinkParentSuffixByPath,
       isStreaming,
       markdownFileLinkMetaByHref,

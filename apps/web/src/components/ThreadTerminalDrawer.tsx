@@ -1,3 +1,5 @@
+// apps/web/src/components/ThreadTerminalDrawer.tsx
+// manages thread terminal sessions and theme-aware xterm presentation
 import { useAtomValue } from "@effect/atom-react";
 import { FitAddon } from "@xterm/addon-fit";
 import {
@@ -125,6 +127,7 @@ function normalizeComputedColor(value: string | null | undefined, fallback: stri
 }
 
 function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
+  const isOcean = document.documentElement.classList.contains("ocean");
   const isDark = document.documentElement.classList.contains("dark");
   const fallbackBackground = isDark ? "rgb(14, 18, 24)" : "rgb(255, 255, 255)";
   const fallbackForeground = isDark ? "rgb(237, 241, 247)" : "rgb(28, 33, 41)";
@@ -142,6 +145,39 @@ function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
     drawerStyles.color,
     normalizeComputedColor(bodyStyles.color, fallbackForeground),
   );
+
+  if (isOcean) {
+    const rootStyles = getComputedStyle(document.documentElement);
+    const oceanColor = (property: string, fallback: string): string =>
+      normalizeComputedColor(rootStyles.getPropertyValue(property), fallback);
+
+    return {
+      background,
+      foreground,
+      cursor: oceanColor("--ocean-caret", foreground),
+      cursorAccent: oceanColor("--ocean-background", background),
+      selectionBackground: oceanColor("--ocean-selection", foreground),
+      scrollbarSliderBackground: oceanColor("--ocean-scrollbar", foreground),
+      scrollbarSliderHoverBackground: oceanColor("--ocean-scrollbar-hover", foreground),
+      scrollbarSliderActiveBackground: oceanColor("--ocean-scrollbar-active", foreground),
+      black: oceanColor("--ocean-black", background),
+      red: oceanColor("--ocean-red", foreground),
+      green: oceanColor("--ocean-green", foreground),
+      yellow: oceanColor("--ocean-yellow", foreground),
+      blue: oceanColor("--ocean-blue", foreground),
+      magenta: oceanColor("--ocean-purple", foreground),
+      cyan: oceanColor("--ocean-cyan", foreground),
+      white: oceanColor("--ocean-pale-blue", foreground),
+      brightBlack: oceanColor("--ocean-comments", foreground),
+      brightRed: oceanColor("--ocean-pink", foreground),
+      brightGreen: oceanColor("--ocean-green", foreground),
+      brightYellow: oceanColor("--ocean-caret", foreground),
+      brightBlue: oceanColor("--ocean-pale-blue", foreground),
+      brightMagenta: oceanColor("--ocean-violet", foreground),
+      brightCyan: oceanColor("--ocean-cyan", foreground),
+      brightWhite: oceanColor("--ocean-white", foreground),
+    };
+  }
 
   if (isDark) {
     return {

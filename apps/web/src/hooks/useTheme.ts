@@ -1,9 +1,11 @@
+// apps/web/src/hooks/useTheme.ts
+// owns stored theme preference and browser/desktop synchronization
 import type { DesktopBridge } from "@t3tools/contracts";
 import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
 import * as Schema from "effect/Schema";
 import { useCallback, useEffect, useSyncExternalStore } from "react";
 
-const ThemePreference = Schema.Literals(["light", "dark", "system"]);
+const ThemePreference = Schema.Literals(["light", "dark", "ocean", "system"]);
 type Theme = typeof ThemePreference.Type;
 type ThemeSnapshot = {
   theme: Theme;
@@ -81,7 +83,7 @@ export function readThemePreference(): Theme {
       cause,
     });
   }
-  if (raw === "light" || raw === "dark" || raw === "system") return raw;
+  if (raw === "light" || raw === "dark" || raw === "ocean" || raw === "system") return raw;
   return DEFAULT_THEME_SNAPSHOT.theme;
 }
 
@@ -184,7 +186,9 @@ function applyTheme(theme: Theme, suppressTransitions = false) {
   if (suppressTransitions) {
     document.documentElement.classList.add("no-transitions");
   }
-  const isDark = theme === "dark" || (theme === "system" && systemDark);
+  const isOcean = theme === "ocean";
+  const isDark = isOcean || theme === "dark" || (theme === "system" && systemDark);
+  document.documentElement.classList.toggle("ocean", isOcean);
   document.documentElement.classList.toggle("dark", isDark);
   lastAppliedTheme = { theme, systemDark };
   syncBrowserChromeTheme();
@@ -204,7 +208,7 @@ export async function syncDesktopThemePreference(
   theme: Theme,
 ): Promise<void> {
   try {
-    await bridge.setTheme(theme);
+    await bridge.setTheme(theme === "ocean" ? "dark" : theme);
   } catch (cause) {
     throw new DesktopThemeSyncError({ theme, cause });
   }
@@ -288,7 +292,13 @@ export function useTheme() {
   const theme = snapshot.theme;
 
   const resolvedTheme: "light" | "dark" =
-    theme === "system" ? (snapshot.systemDark ? "dark" : "light") : theme;
+    theme === "system"
+      ? snapshot.systemDark
+        ? "dark"
+        : "light"
+      : theme === "ocean"
+        ? "dark"
+        : theme;
 
   const setTheme = useCallback((next: Theme) => {
     if (typeof window === "undefined") return;
