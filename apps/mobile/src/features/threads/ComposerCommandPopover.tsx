@@ -2,7 +2,7 @@ import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass
 import type { ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
 import type { ServerProviderSkill, ServerProviderSlashCommand } from "@t3tools/contracts";
 import { SymbolView } from "../../components/AppSymbol";
-import { memo } from "react";
+import { memo, useMemo } from "react";
 import { Pressable, ScrollView, useColorScheme, View, type ViewStyle } from "react-native";
 
 import { AppText as Text } from "../../components/AppText";
@@ -44,6 +44,12 @@ interface ComposerCommandPopoverProps {
   readonly isLoading: boolean;
   readonly onSelect: (item: ComposerCommandItem) => void;
 }
+
+type ComposerCommandGroup = {
+  readonly id: string;
+  readonly label: string | null;
+  readonly items: ReadonlyArray<ComposerCommandItem>;
+};
 
 function PopoverSurface(props: {
   readonly children: React.ReactNode;
@@ -98,17 +104,35 @@ function itemIcon(item: ComposerCommandItem) {
   }
 }
 
-function groupLabel(triggerKind: ComposerTriggerKind | null): string | null {
-  switch (triggerKind) {
-    case "slash-command":
-      return "Commands";
-    case "skill":
-      return "Skills";
-    case "path":
-      return "Files";
-    default:
-      return null;
+function groupCommandItems(
+  items: ReadonlyArray<ComposerCommandItem>,
+  triggerKind: ComposerTriggerKind | null,
+): ComposerCommandGroup[] {
+  if (triggerKind === "skill") {
+    return items.length > 0 ? [{ id: "skills", label: "Skills", items }] : [];
   }
+  if (triggerKind === "path") {
+    return items.length > 0 ? [{ id: "files", label: "Files", items }] : [];
+  }
+  if (triggerKind !== "slash-command" && triggerKind !== "slash-model") {
+    return items.length > 0 ? [{ id: "default", label: null, items }] : [];
+  }
+
+  const builtInItems = items.filter((item) => item.type === "slash-command");
+  const providerItems = items.filter((item) => item.type === "provider-slash-command");
+  const skillItems = items.filter((item) => item.type === "skill");
+
+  const groups: ComposerCommandGroup[] = [];
+  if (builtInItems.length > 0) {
+    groups.push({ id: "built-in", label: "Commands", items: builtInItems });
+  }
+  if (providerItems.length > 0) {
+    groups.push({ id: "provider", label: "Provider", items: providerItems });
+  }
+  if (skillItems.length > 0) {
+    groups.push({ id: "skills", label: "Skills", items: skillItems });
+  }
+  return groups;
 }
 
 function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean): string {
@@ -121,6 +145,7 @@ function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean):
     case "skill":
       return "No skills found.";
     case "slash-command":
+    case "slash-model":
       return "No matching commands.";
     default:
       return "No results.";
@@ -170,30 +195,37 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
   props: ComposerCommandPopoverProps,
 ) {
   const isDarkMode = useColorScheme() === "dark";
-  const label = groupLabel(props.triggerKind);
+  const groups = useMemo(
+    () => groupCommandItems(props.items, props.triggerKind),
+    [props.items, props.triggerKind],
+  );
 
   return (
     <PopoverSurface isDarkMode={isDarkMode}>
-      {label ? (
-        <View className="px-3.5 pt-2.5 pb-1">
-          <Text className="text-3xs font-sans-bold tracking-[0.8px] uppercase text-foreground-muted">
-            {label}
-          </Text>
-        </View>
-      ) : null}
       {props.items.length > 0 ? (
         <ScrollView
           className="max-h-[180px]"
           keyboardShouldPersistTaps="always"
           showsVerticalScrollIndicator={false}
         >
-          {props.items.map((item, index) => (
-            <CommandRow
-              key={item.id}
-              item={item}
-              onPress={() => props.onSelect(item)}
-              isLast={index === props.items.length - 1}
-            />
+          {groups.map((group) => (
+            <View key={group.id}>
+              {group.label ? (
+                <View className="px-3.5 pt-2.5 pb-1">
+                  <Text className="text-3xs font-sans-bold tracking-[0.8px] uppercase text-foreground-muted">
+                    {group.label}
+                  </Text>
+                </View>
+              ) : null}
+              {group.items.map((item, index) => (
+                <CommandRow
+                  key={item.id}
+                  item={item}
+                  onPress={() => props.onSelect(item)}
+                  isLast={index === group.items.length - 1}
+                />
+              ))}
+            </View>
           ))}
         </ScrollView>
       ) : (

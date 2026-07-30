@@ -9,6 +9,7 @@ import type {
   ProviderInteractionMode,
   RuntimeMode,
   ServerConfig,
+  ServerProviderSkill,
 } from "@t3tools/contracts";
 import {
   detectComposerTrigger,
@@ -72,6 +73,92 @@ import {
 import { useComposerPathSearch } from "../../state/use-composer-path-search";
 import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";
 import { composerConnectionStatus, type ComposerStatusPillState } from "./threadComposerStatus";
+
+function searchMobileComposerSkills(
+  skills: ReadonlyArray<ServerProviderSkill>,
+  query: string,
+): ComposerCommandItem[] {
+  const enabledSkills = skills.filter((s) => s.enabled);
+  const normalizedQuery = normalizeSearchQuery(query, {
+    trimLeadingPattern: /^\$+/,
+  });
+
+  if (!normalizedQuery) {
+    return enabledSkills.slice(0, 20).map((skill) => ({
+      id: `skill:${skill.name}`,
+      type: "skill" as const,
+      skill,
+      label: skill.displayName ?? skill.name,
+      description: skill.shortDescription ?? skill.description ?? "",
+    }));
+  }
+
+  const ranked: Array<{
+    item: (typeof enabledSkills)[number];
+    score: number;
+    tieBreaker: string;
+  }> = [];
+  for (const skill of enabledSkills) {
+    const displayLabel = (skill.displayName ?? skill.name).toLowerCase();
+    const scores = [
+      scoreQueryMatch({
+        value: skill.name.toLowerCase(),
+        query: normalizedQuery,
+        exactBase: 0,
+        prefixBase: 2,
+        boundaryBase: 4,
+        includesBase: 6,
+        fuzzyBase: 100,
+        boundaryMarkers: ["-", "_", "/"],
+      }),
+      scoreQueryMatch({
+        value: displayLabel,
+        query: normalizedQuery,
+        exactBase: 1,
+        prefixBase: 3,
+        boundaryBase: 5,
+        includesBase: 7,
+        fuzzyBase: 110,
+      }),
+      scoreQueryMatch({
+        value: skill.shortDescription?.toLowerCase() ?? "",
+        query: normalizedQuery,
+        exactBase: 20,
+        prefixBase: 22,
+        boundaryBase: 24,
+        includesBase: 26,
+      }),
+      scoreQueryMatch({
+        value: skill.description?.toLowerCase() ?? "",
+        query: normalizedQuery,
+        exactBase: 30,
+        prefixBase: 32,
+        boundaryBase: 34,
+        includesBase: 36,
+      }),
+    ].filter((s): s is number => s !== null);
+
+    if (scores.length > 0) {
+      insertRankedSearchResult(
+        ranked,
+        {
+          item: skill,
+          score: Math.min(...scores),
+          tieBreaker: `${displayLabel}\u0000${skill.name}`,
+        },
+        20,
+      );
+    }
+  }
+
+  return ranked.map(({ item: skill }) => ({
+    id: `skill:${skill.name}`,
+    type: "skill" as const,
+    skill,
+    label: skill.displayName ?? skill.name,
+    description: skill.shortDescription ?? skill.description ?? "",
+  }));
+}
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
@@ -373,8 +460,15 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       ];
       const builtIn = allBuiltIn.filter((item) => item.command.includes(q));
 
+      const collidingSkillNames = new Set(
+        (selectedProviderStatus?.skills ?? [])
+          .filter((skill) => skill.enabled)
+          .map((skill) => skill.name.toLowerCase()),
+      );
+
       const providerCommands: ComposerCommandItem[] = [];
       for (const cmd of selectedProviderStatus?.slashCommands ?? []) {
+        if (collidingSkillNames.has(cmd.name.toLowerCase())) continue;
         if (!cmd.name.toLowerCase().includes(q)) continue;
         providerCommands.push({
           id: `pcmd:${cmd.name}`,
@@ -385,90 +479,19 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         });
       }
 
-      return [...builtIn, ...providerCommands];
+      const skillItems = searchMobileComposerSkills(
+        selectedProviderStatus?.skills ?? [],
+        composerTrigger.query,
+      );
+
+      return [...builtIn, ...providerCommands, ...skillItems];
     }
 
     if (composerTrigger.kind === "skill") {
-      const enabledSkills = (selectedProviderStatus?.skills ?? []).filter((s) => s.enabled);
-      const normalizedQuery = normalizeSearchQuery(composerTrigger.query, {
-        trimLeadingPattern: /^\$+/,
-      });
-
-      if (!normalizedQuery) {
-        return enabledSkills.slice(0, 20).map((skill) => ({
-          id: `skill:${skill.name}`,
-          type: "skill" as const,
-          skill,
-          label: skill.displayName ?? skill.name,
-          description: skill.shortDescription ?? skill.description ?? "",
-        }));
-      }
-
-      const ranked: Array<{
-        item: (typeof enabledSkills)[number];
-        score: number;
-        tieBreaker: string;
-      }> = [];
-      for (const skill of enabledSkills) {
-        const displayLabel = (skill.displayName ?? skill.name).toLowerCase();
-        const scores = [
-          scoreQueryMatch({
-            value: skill.name.toLowerCase(),
-            query: normalizedQuery,
-            exactBase: 0,
-            prefixBase: 2,
-            boundaryBase: 4,
-            includesBase: 6,
-            fuzzyBase: 100,
-            boundaryMarkers: ["-", "_", "/"],
-          }),
-          scoreQueryMatch({
-            value: displayLabel,
-            query: normalizedQuery,
-            exactBase: 1,
-            prefixBase: 3,
-            boundaryBase: 5,
-            includesBase: 7,
-            fuzzyBase: 110,
-          }),
-          scoreQueryMatch({
-            value: skill.shortDescription?.toLowerCase() ?? "",
-            query: normalizedQuery,
-            exactBase: 20,
-            prefixBase: 22,
-            boundaryBase: 24,
-            includesBase: 26,
-          }),
-          scoreQueryMatch({
-            value: skill.description?.toLowerCase() ?? "",
-            query: normalizedQuery,
-            exactBase: 30,
-            prefixBase: 32,
-            boundaryBase: 34,
-            includesBase: 36,
-          }),
-        ].filter((s): s is number => s !== null);
-
-        if (scores.length > 0) {
-          insertRankedSearchResult(
-            ranked,
-            {
-              item: skill,
-              score: Math.min(...scores),
-              tieBreaker: `${displayLabel}\u0000${skill.name}`,
-            },
-            20,
-          );
-        }
-      }
-
-      return ranked.map(({ item: skill }) => ({
-        id: `skill:${skill.name}`,
-        type: "skill" as const,
-        skill,
-        label: skill.displayName ?? skill.name,
-        description: skill.shortDescription ?? skill.description ?? "",
-      }));
+      return searchMobileComposerSkills(
+        selectedProviderStatus?.skills ?? [],
+        composerTrigger.query,
+      );
     }
 
     if (composerTrigger.kind === "path") {

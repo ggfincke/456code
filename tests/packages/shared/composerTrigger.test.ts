@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  detectComposerTrigger,
   serializeComposerFileLink,
   serializeComposerMentionPath,
 } from "../../../packages/shared/src/composerTrigger.ts";
@@ -23,5 +24,49 @@ describe("serializeComposerFileLink", () => {
     ["@scope/package.json", "[package.json](@scope/package.json)"],
   ])("serializes file link %s", (input, expected) => {
     expect(serializeComposerFileLink(input)).toBe(expected);
+  });
+});
+
+describe("detectComposerTrigger", () => {
+  it("detects mid-line / after a skill token", () => {
+    const text = "$review-follow-up /ui";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "slash-command",
+      query: "ui",
+      rangeStart: "$review-follow-up ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("keeps line-start /model as slash-model", () => {
+    const text = "/model";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-model",
+      query: "",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("keeps /model query args as slash-model", () => {
+    const text = "/model spark";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-model",
+      query: "spark",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("treats line-start /plan as a slash-command token", () => {
+    const text = "/plan";
+    expect(detectComposerTrigger(text, text.length)).toEqual({
+      kind: "slash-command",
+      query: "plan",
+      rangeStart: 0,
+      rangeEnd: text.length,
+    });
   });
 });

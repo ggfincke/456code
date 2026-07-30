@@ -39,13 +39,12 @@ describe("detectComposerTrigger", () => {
     });
   });
 
-  it("detects slash command token while typing command name", () => {
-    const text = "/mo";
+  it.each(["/mo", "/pl", "/rev"])("detects slash command token while typing %s", (text) => {
     const trigger = detectComposerTrigger(text, text.length);
 
     expect(trigger).toEqual({
       kind: "slash-command",
-      query: "mo",
+      query: text.slice(1),
       rangeStart: 0,
       rangeEnd: text.length,
     });
@@ -70,30 +69,6 @@ describe("detectComposerTrigger", () => {
     expect(trigger).toBeNull();
   });
 
-  it("detects non-model slash commands while typing", () => {
-    const text = "/pl";
-    const trigger = detectComposerTrigger(text, text.length);
-
-    expect(trigger).toEqual({
-      kind: "slash-command",
-      query: "pl",
-      rangeStart: 0,
-      rangeEnd: text.length,
-    });
-  });
-
-  it("keeps slash command detection active for provider commands", () => {
-    const text = "/rev";
-    const trigger = detectComposerTrigger(text, text.length);
-
-    expect(trigger).toEqual({
-      kind: "slash-command",
-      query: "rev",
-      rangeStart: 0,
-      rangeEnd: text.length,
-    });
-  });
-
   it("detects $skill trigger at cursor", () => {
     const text = "Use $gh-fi";
     const trigger = detectComposerTrigger(text, text.length);
@@ -102,6 +77,30 @@ describe("detectComposerTrigger", () => {
       kind: "skill",
       query: "gh-fi",
       rangeStart: "Use ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("detects mid-line / after a skill chip so another skill can be added", () => {
+    const text = "$review-follow-up /";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "slash-command",
+      query: "",
+      rangeStart: "$review-follow-up ".length,
+      rangeEnd: text.length,
+    });
+  });
+
+  it("detects mid-line /query after whitespace", () => {
+    const text = "please run /ui";
+    const trigger = detectComposerTrigger(text, text.length);
+
+    expect(trigger).toEqual({
+      kind: "slash-command",
+      query: "ui",
+      rangeStart: "please run ".length,
       rangeEnd: text.length,
     });
   });
