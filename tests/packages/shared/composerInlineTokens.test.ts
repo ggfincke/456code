@@ -82,14 +82,10 @@ describe("collectComposerInlineTokens", () => {
     expect(collectComposerInlineTokens("Read [docs](https://example.com) first")).toEqual([]);
   });
 
-  it.each(["@expo/ui", "@jane/foo.js", "@scope/pkg/sub/path"])(
-    "keeps scoped package reference %s as plain text",
-    (reference) => {
-      expect(collectComposerInlineTokens(`Install ${reference} next`)).toEqual([]);
-    },
-  );
-
   it("keeps scoped package references plain across incomplete input and IME whitespace", () => {
+    expect(collectComposerInlineTokens("Install @expo/ui next")).toEqual([]);
+    expect(collectComposerInlineTokens("Install @jane/foo.js next")).toEqual([]);
+    expect(collectComposerInlineTokens("Install @scope/pkg/sub/path next")).toEqual([]);
     expect(collectComposerInlineTokens("Install @expo/ui")).toEqual([]);
     expect(collectComposerInlineTokens("入力 @expo/ui　を追加")).toEqual([]);
   });

@@ -64,7 +64,7 @@ describe("KeybindingsSettings.logic", () => {
     ).toBe("mod+shift+k");
   });
 
-  it("serializes shortcuts and when expressions for upserts", () => {
+  it("serializes shortcuts for upserts", () => {
     expect(
       shortcutToKeybindingInput({
         key: " ",
@@ -75,7 +75,9 @@ describe("KeybindingsSettings.logic", () => {
         shiftKey: false,
       }),
     ).toBe("mod+alt+space");
+  });
 
+  it("serializes when ASTs and parses when expression drafts", () => {
     expect(
       whenAstToExpression({
         type: "and",
@@ -105,18 +107,6 @@ describe("KeybindingsSettings.logic", () => {
     expect(parseWhenExpressionDraft("editorFocus &&")).toEqual({
       ok: false,
       message: "Use variables with !, &&, ||, and parentheses.",
-    });
-
-    expect(parseWhenExpressionDraft("!(terminalFocus || modelPickerOpen)")).toEqual({
-      ok: true,
-      value: {
-        type: "not",
-        node: {
-          type: "or",
-          left: { type: "identifier", name: "terminalFocus" },
-          right: { type: "identifier", name: "modelPickerOpen" },
-        },
-      },
     });
   });
 

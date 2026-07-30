@@ -61,13 +61,13 @@ afterEach(() => {
 });
 
 describe("resolveServerEnvironmentLabel", () => {
-  it.effect("uses hostname fallback regardless of launch mode", () =>
+  it.effect("falls back to the hostname when friendly labels are unavailable", () =>
     Effect.gen(function* () {
       const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
         cwdBaseName: "t3code",
-      }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32", "macbook-pro")));
+      }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32", "JULIUS-LAPTOP")));
 
-      expect(result).toBe("macbook-pro");
+      expect(result).toBe("JULIUS-LAPTOP");
     }),
   );
 
@@ -135,16 +135,6 @@ describe("resolveServerEnvironmentLabel", () => {
           timeoutBehavior: "timedOutResult",
         }),
       );
-    }),
-  );
-
-  it.effect("falls back to the hostname when friendly labels are unavailable", () =>
-    Effect.gen(function* () {
-      const result = yield* ServerEnvironmentLabel.resolveServerEnvironmentLabel({
-        cwdBaseName: "t3code",
-      }).pipe(Effect.provide(withHostPlatform(TestLayer, "win32", "JULIUS-LAPTOP")));
-
-      expect(result).toBe("JULIUS-LAPTOP");
     }),
   );
 

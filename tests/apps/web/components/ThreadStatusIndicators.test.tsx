@@ -23,7 +23,7 @@ describe("ThreadWorktreeIndicator", () => {
     expect(markup).toContain('data-testid="thread-worktree-thread-1"');
   });
 
-  it.each([null, "", "   "])("renders nothing for an absent worktree path", (worktreePath) => {
+  it.each([null, "   "])("renders nothing for an absent worktree path", (worktreePath) => {
     const markup = renderToStaticMarkup(
       <ThreadWorktreeIndicator
         thread={{

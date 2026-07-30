@@ -24,6 +24,7 @@ describe("threadSelectionStore", () => {
       expect(state.selectedThreadKeys.has(THREAD_A)).toBe(true);
       expect(state.selectedThreadKeys.size).toBe(1);
       expect(state.anchorThreadKey).toBe(THREAD_A);
+      expect(state.hasSelection()).toBe(true);
     });
 
     it("removes a thread that is already selected", () => {
@@ -213,20 +214,24 @@ describe("threadSelectionStore", () => {
       const store = useThreadSelectionStore.getState();
       store.toggleThread(THREAD_A);
       store.toggleThread(THREAD_B);
+      expect(store.hasSelection()).toBe(true);
       store.clearSelection();
 
       const state = useThreadSelectionStore.getState();
       expect(state.selectedThreadKeys.size).toBe(0);
       expect(state.anchorThreadKey).toBeNull();
+      expect(state.hasSelection()).toBe(false);
     });
 
     it("is a no-op when already empty", () => {
       const stateBefore = useThreadSelectionStore.getState();
+      expect(stateBefore.hasSelection()).toBe(false);
       stateBefore.clearSelection();
       const stateAfter = useThreadSelectionStore.getState();
 
       // Should be referentially the same (no unnecessary re-render)
       expect(stateAfter.selectedThreadKeys).toBe(stateBefore.selectedThreadKeys);
+      expect(stateAfter.hasSelection()).toBe(false);
     });
   });
 
@@ -269,24 +274,6 @@ describe("threadSelectionStore", () => {
       const stateAfter = useThreadSelectionStore.getState();
 
       expect(stateAfter.selectedThreadKeys).toBe(stateBefore.selectedThreadKeys);
-    });
-  });
-
-  describe("hasSelection", () => {
-    it("returns false when nothing is selected", () => {
-      expect(useThreadSelectionStore.getState().hasSelection()).toBe(false);
-    });
-
-    it("returns true when threads are selected", () => {
-      useThreadSelectionStore.getState().toggleThread(THREAD_A);
-      expect(useThreadSelectionStore.getState().hasSelection()).toBe(true);
-    });
-
-    it("returns false after clearing selection", () => {
-      const store = useThreadSelectionStore.getState();
-      store.toggleThread(THREAD_A);
-      store.clearSelection();
-      expect(useThreadSelectionStore.getState().hasSelection()).toBe(false);
     });
   });
 });

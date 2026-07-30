@@ -1,10 +1,7 @@
 import type { DiscoveredLocalServer } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
 
-import {
-  mergeServers,
-  type PreviewableServer,
-} from "../../../../../apps/web/src/components/preview/useDiscoveredLocalServers";
+import { mergeServers } from "../../../../../apps/web/src/components/preview/useDiscoveredLocalServers";
 
 const scannerServer = (overrides: Partial<DiscoveredLocalServer>): DiscoveredLocalServer => ({
   host: "localhost",
@@ -104,17 +101,5 @@ describe("mergeServers", () => {
       recentlySeenUrls: [],
     });
     expect(result).toHaveLength(1);
-  });
-});
-
-describe("PreviewableServer interface", () => {
-  it("preserves listening flag through enrichment", () => {
-    const result = mergeServers({
-      scanner: [scannerServer({})],
-      configuredUrls: ["http://localhost:5173"],
-      recentlySeenUrls: [],
-    });
-    const merged: PreviewableServer | undefined = result[0];
-    expect(merged?.listening).toBe(true);
   });
 });

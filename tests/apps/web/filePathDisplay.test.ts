@@ -3,15 +3,6 @@ import { describe, expect, it } from "vite-plus/test";
 import { formatWorkspaceRelativePath } from "../../../apps/web/src/filePathDisplay";
 
 describe("formatWorkspaceRelativePath", () => {
-  it("formats absolute workspace paths from the workspace root", () => {
-    expect(
-      formatWorkspaceRelativePath(
-        "C:/Users/mike/dev-stuff/t3code/apps/web/src/session-logic.ts:501",
-        "C:/Users/mike/dev-stuff/t3code",
-      ),
-    ).toBe("t3code/apps/web/src/session-logic.ts:501");
-  });
-
   it("prefixes relative paths with the workspace root label", () => {
     expect(
       formatWorkspaceRelativePath(

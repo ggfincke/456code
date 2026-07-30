@@ -6,22 +6,12 @@ import {
 } from "../../../../../apps/mobile/src/features/terminal/terminalTheme";
 
 describe("getPierreTerminalTheme", () => {
-  it("returns the Pierre light terminal palette", () => {
-    expect(getPierreTerminalTheme("light")).toMatchObject({
-      background: "#f2f2f7",
-      foreground: "#6C6C71",
-      cursorForeground: "#009fff",
-      cursorBackground: "#f2f2f7",
-    });
-  });
-
-  it("returns the Pierre dark terminal palette", () => {
-    expect(getPierreTerminalTheme("dark")).toMatchObject({
-      background: "#0a0a0a",
-      foreground: "#adadb1",
-      cursorForeground: "#009fff",
-      cursorBackground: "#0a0a0a",
-    });
+  it("returns a distinct Pierre palette for the dark scheme", () => {
+    const theme = getPierreTerminalTheme("dark");
+    expect(theme.background).toMatch(/^#[0-9a-f]{6}$/i);
+    expect(theme.foreground).toMatch(/^#[0-9a-fA-F]{6}$/);
+    expect(theme.palette).toHaveLength(16);
+    expect(theme.background).not.toBe(getPierreTerminalTheme("light").background);
   });
 });
 

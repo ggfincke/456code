@@ -44,29 +44,29 @@ describe("browser target resolver", () => {
   });
 
   it("preserves URL credentials when mapping localhost onto a remote host", async () => {
-    readPreparedConnection.mockReturnValue({ httpBaseUrl: "http://100.65.180.100:3773" });
-    const { resolveBrowserNavigationTarget } =
-      await import("../../../../apps/web/src/browser/browserTargetResolver");
-    expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
-        url: "http://user:p%40ss@localhost:5173/dashboard",
-      }).resolvedUrl,
-    ).toBe("http://user:p%40ss@100.65.180.100:5173/dashboard");
-  });
-
-  it("maps credentialed localhost URLs onto private IPv6 hosts", async () => {
-    readPreparedConnection.mockReturnValue({
-      httpBaseUrl: "http://[fd7a:115c:a1e0::53]:3773",
-    });
-    const { resolveBrowserNavigationTarget } =
-      await import("../../../../apps/web/src/browser/browserTargetResolver");
-    expect(
-      resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
-        kind: "url",
+    const cases = [
+      {
+        httpBaseUrl: "http://100.65.180.100:3773",
+        expected: "http://user:p%40ss@100.65.180.100:5173/dashboard",
+      },
+      {
+        httpBaseUrl: "http://[fd7a:115c:a1e0::53]:3773",
+        expected: "http://user:p%40ss@[fd7a:115c:a1e0::53]:5173/dashboard?mode=test#results",
         url: "http://user:p%40ss@localhost:5173/dashboard?mode=test#results",
-      }).resolvedUrl,
-    ).toBe("http://user:p%40ss@[fd7a:115c:a1e0::53]:5173/dashboard?mode=test#results");
+      },
+    ] as const;
+
+    for (const entry of cases) {
+      readPreparedConnection.mockReturnValue({ httpBaseUrl: entry.httpBaseUrl });
+      const { resolveBrowserNavigationTarget } =
+        await import("../../../../apps/web/src/browser/browserTargetResolver");
+      expect(
+        resolveBrowserNavigationTarget(EnvironmentId.make("environment-1"), {
+          kind: "url",
+          url: "url" in entry ? entry.url : "http://user:p%40ss@localhost:5173/dashboard",
+        }).resolvedUrl,
+      ).toBe(entry.expected);
+    }
   });
 
   it("maps schemeless localhost navigation onto a remote environment host", async () => {

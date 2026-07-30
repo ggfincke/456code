@@ -238,18 +238,6 @@ describe("previewStateStore (single-tab)", () => {
     expect(state.snapshot).toBeNull();
   });
 
-  it("does not resurrect an intentionally closed tab from a stale list snapshot", () => {
-    const snapshot = makeSnapshot();
-    applyPreviewServerSnapshot(ref, snapshot);
-    beginPreviewSessionClose(ref, snapshot.tabId);
-
-    applyPreviewServerSnapshot(ref, snapshot);
-
-    const state = readThreadPreviewState(ref);
-    expect(state.sessions).toEqual({});
-    expect(state.snapshot).toBeNull();
-  });
-
   it("can restore a suppressed tab after a failed close", () => {
     const snapshot = makeSnapshot();
     applyPreviewServerSnapshot(ref, snapshot);

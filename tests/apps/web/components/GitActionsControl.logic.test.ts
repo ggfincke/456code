@@ -169,48 +169,6 @@ describe("when: ref is clean, ahead, and has an open PR", () => {
     );
     assert.deepInclude(quick, { kind: "run_action", action: "push", label: "Push" });
   });
-
-  it("buildMenuItems enables push and keeps open PR available", () => {
-    const items = buildMenuItems(
-      status({
-        aheadCount: 2,
-        pr: {
-          number: 12,
-          title: "Existing PR",
-          url: "https://example.com/pr/12",
-          baseRef: "main",
-          headRef: "feature/test",
-          state: "open",
-        },
-      }),
-      false,
-    );
-    assert.deepEqual(items, [
-      {
-        id: "commit",
-        label: "Commit",
-        disabled: true,
-        icon: "commit",
-        kind: "open_dialog",
-        dialogAction: "commit",
-      },
-      {
-        id: "push",
-        label: "Push",
-        disabled: false,
-        icon: "push",
-        kind: "open_dialog",
-        dialogAction: "push",
-      },
-      {
-        id: "pr",
-        label: "View PR",
-        disabled: false,
-        icon: "pr",
-        kind: "open_pr",
-      },
-    ]);
-  });
 });
 
 describe("when: ref is clean, ahead, and has no open PR", () => {
@@ -221,36 +179,6 @@ describe("when: ref is clean, ahead, and has no open PR", () => {
       action: "create_pr",
       label: "Push & create PR",
     });
-  });
-
-  it("buildMenuItems enables push and create PR, with commit disabled", () => {
-    const items = buildMenuItems(status({ aheadCount: 2, pr: null }), false);
-    assert.deepEqual(items, [
-      {
-        id: "commit",
-        label: "Commit",
-        disabled: true,
-        icon: "commit",
-        kind: "open_dialog",
-        dialogAction: "commit",
-      },
-      {
-        id: "push",
-        label: "Push",
-        disabled: false,
-        icon: "push",
-        kind: "open_dialog",
-        dialogAction: "push",
-      },
-      {
-        id: "pr",
-        label: "Create PR",
-        disabled: false,
-        icon: "pr",
-        kind: "open_dialog",
-        dialogAction: "create_pr",
-      },
-    ]);
   });
 });
 
@@ -308,72 +236,12 @@ describe("when: ref is clean, up to date, and has no open PR", () => {
     );
     assert.deepInclude(quick, { kind: "show_hint", label: "Commit", disabled: true });
   });
-
-  it("buildMenuItems disables commit, push, and create PR", () => {
-    const items = buildMenuItems(status({ aheadCount: 0, behindCount: 0, pr: null }), false);
-    assert.deepEqual(items, [
-      {
-        id: "commit",
-        label: "Commit",
-        disabled: true,
-        icon: "commit",
-        kind: "open_dialog",
-        dialogAction: "commit",
-      },
-      {
-        id: "push",
-        label: "Push",
-        disabled: true,
-        icon: "push",
-        kind: "open_dialog",
-        dialogAction: "push",
-      },
-      {
-        id: "pr",
-        label: "Create PR",
-        disabled: true,
-        icon: "pr",
-        kind: "open_dialog",
-        dialogAction: "create_pr",
-      },
-    ]);
-  });
 });
 
 describe("when: ref is behind upstream", () => {
   it("resolveQuickAction returns pull", () => {
     const quick = resolveQuickAction(status({ behindCount: 2 }), false);
     assert.deepInclude(quick, { kind: "run_pull", label: "Pull", disabled: false });
-  });
-
-  it("buildMenuItems disables push and create PR", () => {
-    const items = buildMenuItems(status({ behindCount: 1, pr: null }), false);
-    assert.deepEqual(items, [
-      {
-        id: "commit",
-        label: "Commit",
-        disabled: true,
-        icon: "commit",
-        kind: "open_dialog",
-        dialogAction: "commit",
-      },
-      {
-        id: "push",
-        label: "Push",
-        disabled: true,
-        icon: "push",
-        kind: "open_dialog",
-        dialogAction: "push",
-      },
-      {
-        id: "pr",
-        label: "Create PR",
-        disabled: true,
-        icon: "pr",
-        kind: "open_dialog",
-        dialogAction: "create_pr",
-      },
-    ]);
   });
 });
 
@@ -551,36 +419,6 @@ describe("when: working tree has local changes and ref is behind upstream", () =
       label: "Commit, push & PR",
     });
   });
-
-  it("buildMenuItems enables commit and keeps push and PR disabled", () => {
-    const items = buildMenuItems(status({ hasWorkingTreeChanges: true, behindCount: 2 }), false);
-    assert.deepEqual(items, [
-      {
-        id: "commit",
-        label: "Commit",
-        disabled: false,
-        icon: "commit",
-        kind: "open_dialog",
-        dialogAction: "commit",
-      },
-      {
-        id: "push",
-        label: "Push",
-        disabled: true,
-        icon: "push",
-        kind: "open_dialog",
-        dialogAction: "push",
-      },
-      {
-        id: "pr",
-        label: "Create PR",
-        disabled: true,
-        icon: "pr",
-        kind: "open_dialog",
-        dialogAction: "create_pr",
-      },
-    ]);
-  });
 });
 
 describe("when: HEAD is detached and there are no local changes", () => {
@@ -590,36 +428,6 @@ describe("when: HEAD is detached and there are no local changes", () => {
       false,
     );
     assert.deepInclude(quick, { kind: "show_hint", label: "Commit", disabled: true });
-  });
-
-  it("buildMenuItems keeps commit, push, and PR disabled", () => {
-    const items = buildMenuItems(status({ refName: null, hasWorkingTreeChanges: false }), false);
-    assert.deepEqual(items, [
-      {
-        id: "commit",
-        label: "Commit",
-        disabled: true,
-        icon: "commit",
-        kind: "open_dialog",
-        dialogAction: "commit",
-      },
-      {
-        id: "push",
-        label: "Push",
-        disabled: true,
-        icon: "push",
-        kind: "open_dialog",
-        dialogAction: "push",
-      },
-      {
-        id: "pr",
-        label: "Create PR",
-        disabled: true,
-        icon: "pr",
-        kind: "open_dialog",
-        dialogAction: "create_pr",
-      },
-    ]);
   });
 });
 

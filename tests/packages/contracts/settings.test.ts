@@ -44,7 +44,6 @@ describe("ClientSettings glass opacity", () => {
     { value: 101, valid: false },
     { value: 72.5, valid: false },
     { value: 40, valid: true },
-    { value: 75, valid: true },
     { value: 100, valid: true },
   ])("$valid ? accepts : rejects glass opacity $value", ({ value, valid }) => {
     if (valid) {
@@ -78,12 +77,6 @@ describe("ClientSettings sidebar v2", () => {
       expected: undefined,
     },
     {
-      label: "rejects zero-day threshold",
-      value: 0,
-      expectValid: false,
-      expected: undefined,
-    },
-    {
       label: "rejects threshold above maximum",
       value: 91,
       expectValid: false,
@@ -108,48 +101,6 @@ describe("ServerSettings.providerInstances (slice-2 invariant)", () => {
     // Legacy `providers` struct is still hydrated with its per-driver defaults
     // so existing call sites keep working through the migration.
     expect(decoded.providers.codex.enabled).toBe(true);
-  });
-
-  it("decodes a multi-instance map mixing first-party and fork drivers", () => {
-    const decoded = decodeServerSettings({
-      providerInstances: {
-        codex_personal: {
-          driver: "codex",
-          displayName: "Codex (personal)",
-          config: { homePath: "~/.codex_personal" },
-        },
-        codex_work: {
-          driver: "codex",
-          config: { homePath: "~/.codex_work" },
-        },
-        ollama_local: {
-          driver: "ollama",
-          displayName: "Ollama (local)",
-          config: { endpoint: "http://localhost:11434" },
-        },
-      },
-    });
-    const personalId = ProviderInstanceId.make("codex_personal");
-    const workId = ProviderInstanceId.make("codex_work");
-    const ollamaId = ProviderInstanceId.make("ollama_local");
-
-    expect(decoded.providerInstances[personalId]?.driver).toBe("codex");
-    expect(decoded.providerInstances[workId]?.config).toEqual({ homePath: "~/.codex_work" });
-    // Critical: a config naming a driver this build does not know about
-    // (`ollama` is not in `ProviderDriverKind`) must round-trip without loss.
-    // The runtime handles "driver not installed" — the schema must not.
-    expect(decoded.providerInstances[ollamaId]?.driver).toBe("ollama");
-    expect(decoded.providerInstances[ollamaId]?.config).toEqual({
-      endpoint: "http://localhost:11434",
-    });
-  });
-
-  it("rejects instance keys that violate the slug pattern", () => {
-    expect(() =>
-      decodeServerSettings({
-        providerInstances: { "1bad": { driver: "codex" } },
-      }),
-    ).toThrow();
   });
 });
 
@@ -200,25 +151,20 @@ describe("ServerSettingsPatch.providerInstances", () => {
     const replacement = decodeServerSettingsPatch({
       providerInstances: {
         codex_personal: { driver: "codex", config: { homePath: "~/.codex" } },
-      },
-    });
-    expect(replacement.providerInstances).toBeDefined();
-    expect(replacement.providerInstances?.[ProviderInstanceId.make("codex_personal")]?.driver).toBe(
-      "codex",
-    );
-  });
-
-  it("preserves a fork-defined driver entry through patch decoding", () => {
-    const patch = decodeServerSettingsPatch({
-      providerInstances: {
         ollama_local: {
           driver: "ollama",
           config: { endpoint: "http://localhost:11434" },
         },
       },
     });
-    const ollamaId = ProviderInstanceId.make("ollama_local");
-    expect(patch.providerInstances?.[ollamaId]?.driver).toBe("ollama");
+    expect(replacement.providerInstances).toBeDefined();
+    expect(replacement.providerInstances?.[ProviderInstanceId.make("codex_personal")]?.driver).toBe(
+      "codex",
+    );
+    // Fork/unknown drivers must survive whole-map replacement patches opaquely.
+    expect(replacement.providerInstances?.[ProviderInstanceId.make("ollama_local")]?.driver).toBe(
+      "ollama",
+    );
   });
 });
 

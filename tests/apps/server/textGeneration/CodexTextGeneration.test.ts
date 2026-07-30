@@ -421,12 +421,21 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
     ),
   );
 
-  it.effect("falls back when thread title normalization becomes whitespace-only", () =>
+  it.effect.each([
+    {
+      name: "falls back when thread title normalization becomes whitespace-only",
+      title: '  """   """  ',
+      expected: "New thread",
+    },
+    {
+      name: "trims whitespace exposed after quote removal in thread titles",
+      title: `  "' hello world '"  `,
+      expected: "hello world",
+    },
+  ])("$name", ({ title, expected }) =>
     withFakeCodexEnv(
       {
-        output: JSON.stringify({
-          title: '  """   """  ',
-        }),
+        output: JSON.stringify({ title }),
       },
       (textGeneration) =>
         Effect.gen(function* () {
@@ -436,27 +445,7 @@ it.layer(CodexTextGenerationTestLayer)("CodexTextGeneration", (it) => {
             modelSelection: DEFAULT_TEST_MODEL_SELECTION,
           });
 
-          expect(generated.title).toBe("New thread");
-        }),
-    ),
-  );
-
-  it.effect("trims whitespace exposed after quote removal in thread titles", () =>
-    withFakeCodexEnv(
-      {
-        output: JSON.stringify({
-          title: `  "' hello world '"  `,
-        }),
-      },
-      (textGeneration) =>
-        Effect.gen(function* () {
-          const generated = yield* textGeneration.generateThreadTitle({
-            cwd: process.cwd(),
-            message: "Name this thread.",
-            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-          });
-
-          expect(generated.title).toBe("hello world");
+          expect(generated.title).toBe(expected);
         }),
     ),
   );
