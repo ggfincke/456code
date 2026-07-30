@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/server.test.ts
+// covers server query state behavior
+
 import {
   EnvironmentId,
   type ServerConfig,
@@ -152,6 +155,8 @@ describe("server state projection", () => {
         saveServerConfig: (_environmentId, config) => Queue.offer(savedConfigs, config),
         loadVcsRefs: () => Effect.succeed(Option.none()),
         saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
         clear: () => Effect.void,
       });
 
@@ -211,6 +216,8 @@ describe("server state projection", () => {
         saveServerConfig: (_environmentId, config) => Queue.offer(savedConfigs, config),
         loadVcsRefs: () => Effect.succeed(Option.none()),
         saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
         clear: () => Effect.void,
       });
 

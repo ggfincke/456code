@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/connection/registry.test.ts
+// covers environment connection registry behavior
+
 import {
   type DesktopSshEnvironmentTarget,
   EnvironmentId,
@@ -251,6 +254,8 @@ const makeHarness = Effect.fn("TestEnvironmentRegistry.makeHarness")(function* (
     saveServerConfig: () => Effect.void,
     loadVcsRefs: () => Effect.succeed(Option.none()),
     saveVcsRefs: () => Effect.void,
+    removeVcsRefs: () => Effect.void,
+    clearVcsRefs: () => Effect.void,
     clear: (environmentId) =>
       Ref.update(shellCache, (current) => {
         const next = new Map(current);

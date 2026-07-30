@@ -1,3 +1,6 @@
+// apps/mobile/src/connection/environment-cache-store.ts
+// persists mobile environment caches
+
 import {
   ConnectionPersistenceError,
   EnvironmentCacheStore,
@@ -222,6 +225,16 @@ export const make = Effect.fn("MobileEnvironmentCacheStore.make")(function* () {
           .saveCache(environmentId, "vcs-refs", cwd, VCS_REFS_CACHE_SCHEMA_VERSION, payload)
           .pipe(Effect.mapError(mapDatabaseError("save-vcs-refs")));
       },
+    ),
+    removeVcsRefs: Effect.fn("MobileEnvironmentCache.removeVcsRefs")((environmentId, cwd) =>
+      database
+        .removeCache(environmentId, "vcs-refs", cwd)
+        .pipe(Effect.mapError(mapDatabaseError("remove-vcs-refs"))),
+    ),
+    clearVcsRefs: Effect.fn("MobileEnvironmentCache.clearVcsRefs")((environmentId) =>
+      database
+        .clearCacheKind(environmentId, "vcs-refs")
+        .pipe(Effect.mapError(mapDatabaseError("clear-vcs-refs"))),
     ),
     clear: Effect.fn("MobileEnvironmentCache.clear")((environmentId) =>
       database

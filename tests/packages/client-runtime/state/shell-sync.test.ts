@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/shell-sync.test.ts
+// covers shell synchronization state
+
 import {
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
@@ -90,6 +93,8 @@ describe("environment shell synchronization", () => {
         saveServerConfig: () => Effect.void,
         loadVcsRefs: () => Effect.succeed(Option.none()),
         saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
         clear: () => Effect.void,
       });
       // Cold cache with no HTTP snapshot available → falls back to the
@@ -204,6 +209,8 @@ describe("environment shell synchronization", () => {
         saveServerConfig: () => Effect.void,
         loadVcsRefs: () => Effect.succeed(Option.none()),
         saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
         clear: () => Effect.void,
       });
       const snapshotLoader = ShellSnapshotLoader.of({
@@ -273,6 +280,8 @@ describe("environment shell synchronization", () => {
         saveServerConfig: () => Effect.void,
         loadVcsRefs: () => Effect.succeed(Option.none()),
         saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
         clear: () => Effect.void,
       });
       const snapshotLoader = ShellSnapshotLoader.of({

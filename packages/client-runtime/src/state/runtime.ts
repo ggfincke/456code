@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/runtime.ts
+// builds environment-scoped reactive runtime state
+
 import { EnvironmentId, type EnvironmentId as EnvironmentIdType } from "@t3tools/contracts";
 import * as Cause from "effect/Cause";
 import * as Effect from "effect/Effect";
@@ -30,6 +33,17 @@ interface EnvironmentAtomOptions<Input, A, E, R> {
     readonly environmentId: EnvironmentIdType;
     readonly input: Input;
   }>;
+}
+
+interface EnvironmentCommandAtomOptions<Input, A, E, R> extends Omit<
+  EnvironmentAtomOptions<Input, A, E, R>,
+  "execute"
+> {
+  readonly execute: (
+    input: Input,
+    registry: AtomRegistry.AtomRegistry,
+    environmentId: EnvironmentIdType,
+  ) => Effect.Effect<A, E, R>;
 }
 
 interface EnvironmentQueryAtomOptions<Input, A, E, R> extends EnvironmentAtomOptions<
@@ -520,13 +534,17 @@ export function createEnvironmentSubscriptionAtomFamily<R, ER, Input, A, E>(
 
 export function createEnvironmentCommand<R, ER, Input, A, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, ER>,
-  options: EnvironmentAtomOptions<Input, A, E, EnvironmentSupervisor | R>,
+  options: EnvironmentCommandAtomOptions<Input, A, E, EnvironmentSupervisor | R>,
 ) {
   return createRuntimeCommand(runtime, {
     label: options.label,
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
-    execute: (target) => runInEnvironment(target.environmentId, options.execute(target.input)),
+    execute: (target, registry) =>
+      runInEnvironment(
+        target.environmentId,
+        options.execute(target.input, registry, target.environmentId),
+      ),
   });
 }
 
@@ -616,13 +634,36 @@ export function createEnvironmentRpcCommand<R, ER, TTag extends EnvironmentUnary
       readonly environmentId: EnvironmentIdType;
       readonly input: EnvironmentRpcInput<TTag>;
     }>;
+    readonly onSuccess?: (
+      target: {
+        readonly environmentId: EnvironmentIdType;
+        readonly input: EnvironmentRpcInput<TTag>;
+      },
+      registry: AtomRegistry.AtomRegistry,
+    ) => Effect.Effect<void, never, R>;
+    readonly onSettled?: (
+      target: {
+        readonly environmentId: EnvironmentIdType;
+        readonly input: EnvironmentRpcInput<TTag>;
+      },
+      registry: AtomRegistry.AtomRegistry,
+    ) => Effect.Effect<void, never, R>;
   },
 ) {
   return createEnvironmentCommand(runtime, {
     label: options.label,
     ...(options.scheduler === undefined ? {} : { scheduler: options.scheduler }),
     ...(options.concurrency === undefined ? {} : { concurrency: options.concurrency }),
-    execute: (input: EnvironmentRpcInput<TTag>) => request(options.tag, input),
+    execute: (input: EnvironmentRpcInput<TTag>, registry, environmentId) => {
+      const target = {
+        environmentId,
+        input,
+      };
+      return request(options.tag, input).pipe(
+        Effect.tap(() => options.onSuccess?.(target, registry) ?? Effect.void),
+        Effect.ensuring(options.onSettled?.(target, registry) ?? Effect.void),
+      );
+    },
   });
 }
 

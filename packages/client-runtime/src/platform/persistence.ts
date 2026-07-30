@@ -1,3 +1,6 @@
+// packages/client-runtime/src/platform/persistence.ts
+// defines shared client persistence contracts
+
 import {
   type EnvironmentId,
   type OrchestrationShellSnapshot,
@@ -30,6 +33,8 @@ export class ConnectionPersistenceError extends Schema.TaggedErrorClass<Connecti
       "save-server-config",
       "load-vcs-refs",
       "save-vcs-refs",
+      "remove-vcs-refs",
+      "clear-vcs-refs",
       "clear-environment",
     ]),
     message: Schema.String,
@@ -101,6 +106,18 @@ export class EnvironmentCacheStore extends Context.Service<
       environmentId: EnvironmentId,
       cwd: string,
       refs: VcsListRefsResult,
+    ) => Effect.Effect<void, ConnectionPersistenceError>;
+    readonly removeVcsRefs: (
+      environmentId: EnvironmentId,
+      cwd: string,
+    ) => Effect.Effect<void, ConnectionPersistenceError>;
+    /**
+     * Removes every persisted branch-list snapshot for an environment. Git ref
+     * mutations are repository-wide, and linked worktrees may have cached the
+     * same refs under different working-directory keys.
+     */
+    readonly clearVcsRefs: (
+      environmentId: EnvironmentId,
     ) => Effect.Effect<void, ConnectionPersistenceError>;
     readonly clear: (
       environmentId: EnvironmentId,

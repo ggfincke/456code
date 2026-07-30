@@ -1,3 +1,6 @@
+// packages/contracts/src/git.ts
+// defines shared git protocol schemas
+
 import * as Schema from "effect/Schema";
 import { NonNegativeInt, PositiveInt, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
 import { SourceControlProviderError, SourceControlProviderInfo } from "./sourceControl.ts";
@@ -127,6 +130,7 @@ export const VcsListRefsInput = Schema.Struct({
   cursor: Schema.optional(NonNegativeInt),
   includeMatchingRemoteRefs: Schema.optional(Schema.Boolean),
   refKind: Schema.optional(Schema.Literals(["all", "local", "remote"])),
+  refresh: Schema.optional(Schema.Boolean),
   limit: Schema.optional(
     PositiveInt.check(Schema.isLessThanOrEqualTo(GIT_LIST_BRANCHES_MAX_LIMIT)),
   ),
