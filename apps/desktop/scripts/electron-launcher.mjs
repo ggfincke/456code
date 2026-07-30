@@ -25,12 +25,7 @@ export const APP_BUNDLE_ID = isDevelopment
 const APP_PROTOCOL_SCHEMES = isDevelopment ? ["code456-dev"] : ["code456"];
 const LAUNCHER_VERSION = 14;
 const defaultIconPath = NodePath.join(desktopDir, "resources", "icon.icns");
-const developmentMacIconPngPath = NodePath.join(
-  repoRoot,
-  "assets",
-  "dev",
-  "blueprint-macos-1024.png",
-);
+const developmentMacIconPngPath = NodePath.join(repoRoot, "assets", "dev", "ocean-macos-1024.png");
 // oxlint-disable-next-line 456code/no-global-process-runtime -- Standalone launcher script has no Effect runtime.
 const hostPlatform = NodeOS.platform();
 

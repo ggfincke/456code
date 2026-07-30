@@ -1,7 +1,7 @@
 export const BRAND_ASSET_PATHS = {
   developmentIconComposerProject: "assets/dev/app-icon.icon",
-  developmentIosIconPng: "assets/dev/blueprint-ios-1024.png",
-  developmentUniversalIconPng: "assets/dev/blueprint-universal-1024.png",
+  developmentIosIconPng: "assets/dev/ocean-ios-1024.png",
+  developmentUniversalIconPng: "assets/dev/ocean-universal-1024.png",
 
   productionIconComposerProject: "assets/prod/app-icon.icon",
   productionIosIconPng: "assets/prod/456-black-ios-1024.png",
@@ -23,12 +23,12 @@ export const BRAND_ASSET_PATHS = {
   nightlyWebFavicon32Png: "assets/nightly/nightly-web-favicon-32x32.png",
   nightlyWebAppleTouchIconPng: "assets/nightly/nightly-web-apple-touch-180.png",
 
-  developmentDesktopIconPng: "assets/dev/blueprint-macos-1024.png",
-  developmentWindowsIconIco: "assets/dev/blueprint-windows.ico",
-  developmentWebFaviconIco: "assets/dev/blueprint-web-favicon.ico",
-  developmentWebFavicon16Png: "assets/dev/blueprint-web-favicon-16x16.png",
-  developmentWebFavicon32Png: "assets/dev/blueprint-web-favicon-32x32.png",
-  developmentWebAppleTouchIconPng: "assets/dev/blueprint-web-apple-touch-180.png",
+  developmentDesktopIconPng: "assets/dev/ocean-macos-1024.png",
+  developmentWindowsIconIco: "assets/dev/ocean-windows.ico",
+  developmentWebFaviconIco: "assets/dev/ocean-web-favicon.ico",
+  developmentWebFavicon16Png: "assets/dev/ocean-web-favicon-16x16.png",
+  developmentWebFavicon32Png: "assets/dev/ocean-web-favicon-32x32.png",
+  developmentWebAppleTouchIconPng: "assets/dev/ocean-web-apple-touch-180.png",
 } as const;
 
 export type WebAssetBrand = "development" | "nightly" | "production";

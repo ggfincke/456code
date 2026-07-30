@@ -1,37 +1,13 @@
 <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arrowStart" markerWidth="5" markerHeight="5" refX="1.2" refY="2.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M4.5 0.6L1 2.5L4.5 4.4" fill="none" stroke="#DDF7FF" stroke-width="0.8" stroke-linecap="round"/>
-    </marker>
-    <marker id="arrowEnd" markerWidth="5" markerHeight="5" refX="3.8" refY="2.5" orient="auto" markerUnits="strokeWidth">
-      <path d="M0.5 0.6L4 2.5L0.5 4.4" fill="none" stroke="#DDF7FF" stroke-width="0.8" stroke-linecap="round"/>
-    </marker>
-  </defs>
-
-  <g stroke="#DDF7FF" stroke-linecap="round" stroke-linejoin="round">
-    <g opacity="0.9" stroke-width="0.44">
-      <path d="M11.2941 35.7099V30.3099M48.5341 35.7099V30.3099M84.0012 35.7099V30.3099M116.7059 35.7099V30.3099"/>
-      <path d="M12.6941 31.9099H47.1341" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
-      <path d="M47.1633 31.9099H115.3059" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
-      <path d="M11.2941 90.5901V96.2901M48.5341 90.5901V96.2901M81.2303 90.5901V96.2901M116.7059 90.5901V96.2901"/>
-      <path d="M12.6941 94.3901H47.1341" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
-      <path d="M82.6303 94.3901H115.3059" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
-      <path d="M6.2 41.7099H2.1M6.2 64.0000H2.1M6.2 86.2901H2.1"/>
-      <path d="M3.9 43.1099V62.6000" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
-      <path d="M3.9 65.4000V84.8901" marker-start="url(#arrowStart)" marker-end="url(#arrowEnd)"/>
+  <g stroke="#89DDFF" stroke-linecap="round" stroke-linejoin="round">
+    <g opacity="0.6" stroke-width="0.6">
+      <path d="M40 116 q4 -3 8 0 t8 0" opacity="0.7"/>
     </g>
 
-    <g opacity="0.58" stroke-width="0.34">
-      <path d="M8.5 39.8099H45.7633M48.5341 88.0901V39.2099M45.7633 38.9099V54.6099" stroke-dasharray="1.6 1.6"/>
-      <path d="M81.2303 64.0000H116.7059M100.7496 37.4099V90.4901" stroke-dasharray="1.2 2"/>
-      <circle cx="100.7496" cy="64.0000" r="18.7237"/>
-      <circle cx="100.7496" cy="64.0000" r="1.1"/>
-    </g>
-
-    <g opacity="0.76" stroke-width="0.4">
-      <path d="M24 20V24M22 22H26M101 17V21M99 19H103M114 106V110M112 108H116"/>
-      <path d="M54 107L57 110M57 107L54 110M16 74L19 77M19 74L16 77"/>
-      <path d="M74 22H82M78 18V26" stroke-dasharray="0.7 1.1"/>
+    <g opacity="0.55" stroke-width="0.55">
+      <circle cx="112" cy="104" r="1.6"/>
+      <circle cx="107.5" cy="97" r="1.1" opacity="0.8"/>
+      <circle cx="110.5" cy="90.5" r="0.75" opacity="0.65"/>
     </g>
   </g>
 </svg>
