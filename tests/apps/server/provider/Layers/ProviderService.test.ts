@@ -1552,7 +1552,7 @@ routing.layer("ProviderServiceLive routing", (it) => {
           readonly mockClear: () => void;
           readonly mock: { readonly calls: ReadonlyArray<ReadonlyArray<unknown>> };
         };
-        readonly stopAll: () => Effect.Effect<void>;
+        readonly stopAll: () => Effect.Effect<void, ProviderAdapterError>;
       };
 
       const recoverStaleSendTurn = (input: {
