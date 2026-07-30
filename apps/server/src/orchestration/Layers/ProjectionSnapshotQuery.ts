@@ -56,8 +56,13 @@ import { ProjectionThread } from "../../persistence/Services/ProjectionThreads.t
 import * as RepositoryIdentityResolver from "../../project/RepositoryIdentityResolver.ts";
 import { ORCHESTRATION_PROJECTOR_NAMES } from "./ProjectionPipeline.ts";
 import {
+  COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS,
+  IMPORT_CONTINUATION_ACTIVITY_TYPE,
+} from "../activityPolicy.ts";
+import {
   ProjectionSnapshotQuery,
   type ProjectionFullThreadDiffContext,
+  type ProjectionImportReconciliationContext,
   type ProjectionSnapshotCounts,
   type ProjectionThreadCheckpointContext,
   type ProjectionSnapshotQueryShape,
@@ -113,6 +118,20 @@ const ProjectionCountsRowSchema = Schema.Struct({
   projectCount: Schema.Number,
   threadCount: Schema.Number,
 });
+const ProjectionImportProjectRowSchema = Schema.Struct({
+  projectId: ProjectId,
+  workspaceRoot: Schema.String,
+});
+const ProjectionImportThreadRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  modelSelection: Schema.fromJsonString(ModelSelection),
+  origin: Schema.fromJsonString(ThreadOrigin),
+  archived: Schema.Number,
+});
+const ProjectionThreadImportFinalizedRowSchema = Schema.Struct({
+  isFinalized: Schema.Number,
+});
 const WorkspaceRootLookupInput = Schema.Struct({
   workspaceRoot: Schema.String,
 });
@@ -145,6 +164,11 @@ const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
   toCheckpointRef: Schema.NullOr(CheckpointRef),
 });
 
+const COMMAND_RELEVANT_THREAD_ACTIVITY_SQL_LIST = COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS.map(
+  (kind) => `'${kind}'`,
+).join(",\n        ");
+const IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL = `'${IMPORT_CONTINUATION_ACTIVITY_TYPE}'`;
+
 export const COMMAND_THREAD_ACTIVITY_QUERY_SQL = `
   WITH retained_command_activities AS (
     SELECT
@@ -160,12 +184,7 @@ export const COMMAND_THREAD_ACTIVITY_QUERY_SQL = `
     FROM projection_thread_activities AS activity
       INDEXED BY idx_projection_thread_activities_command_relevant
     WHERE activity.kind IN (
-        'approval.requested',
-        'approval.resolved',
-        'user-input.requested',
-        'user-input.resolved',
-        'provider.approval.respond.failed',
-        'provider.user-input.respond.failed'
+        ${COMMAND_RELEVANT_THREAD_ACTIVITY_SQL_LIST}
       )
       AND activity.rowid IN (
         SELECT recent.rowid
@@ -174,7 +193,8 @@ export const COMMAND_THREAD_ACTIVITY_QUERY_SQL = `
         WHERE recent.thread_id = activity.thread_id
           AND (
             json_valid(recent.payload_json) = 0
-            OR COALESCE(json_extract(recent.payload_json, '$.type'), '') <> 'import.continuation'
+            OR COALESCE(json_extract(recent.payload_json, '$.type'), '')
+              <> ${IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL}
           )
         ORDER BY
           CASE
@@ -212,14 +232,16 @@ export const COMMAND_THREAD_ACTIVITY_QUERY_SQL = `
     FROM projection_thread_activities AS marker
       INDEXED BY idx_projection_thread_activities_import_continuation
     WHERE json_valid(marker.payload_json) = 1
-      AND json_extract(marker.payload_json, '$.type') = 'import.continuation'
+      AND json_extract(marker.payload_json, '$.type')
+        = ${IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL}
       AND marker.rowid = (
         SELECT latest_marker.rowid
         FROM projection_thread_activities AS latest_marker
           INDEXED BY idx_projection_thread_activities_import_continuation
         WHERE latest_marker.thread_id = marker.thread_id
           AND json_valid(latest_marker.payload_json) = 1
-          AND json_extract(latest_marker.payload_json, '$.type') = 'import.continuation'
+          AND json_extract(latest_marker.payload_json, '$.type')
+            = ${IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL}
         ORDER BY
           CASE
             WHEN latest_marker.turn_id IS NULL AND latest_marker.sequence IS NOT NULL THEN 0
@@ -477,6 +499,38 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           has_actionable_proposed_plan AS "hasActionableProposedPlan",
           deleted_at AS "deletedAt"
         FROM projection_threads
+        ORDER BY created_at ASC, thread_id ASC
+      `,
+  });
+
+  const listImportProjectRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionImportProjectRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          project_id AS "projectId",
+          workspace_root AS "workspaceRoot"
+        FROM projection_projects
+        WHERE deleted_at IS NULL
+        ORDER BY created_at ASC, project_id ASC
+      `,
+  });
+
+  const listImportThreadRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionImportThreadRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          project_id AS "projectId",
+          model_selection_json AS "modelSelection",
+          origin_json AS "origin",
+          CASE WHEN archived_at IS NULL THEN 0 ELSE 1 END AS "archived"
+        FROM projection_threads
+        WHERE deleted_at IS NULL
+          AND origin_json IS NOT NULL
         ORDER BY created_at ASC, thread_id ASC
       `,
   });
@@ -931,6 +985,30 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
           AND deleted_at IS NULL
           AND archived_at IS NULL
         LIMIT 1
+      `,
+  });
+
+  const getThreadImportFinalizedRow = SqlSchema.findOne({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadImportFinalizedRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT EXISTS (
+          SELECT 1
+          FROM projection_threads AS thread
+          WHERE thread.thread_id = ${threadId}
+            AND thread.deleted_at IS NULL
+            AND EXISTS (
+              SELECT 1
+              FROM projection_thread_activities AS activity
+                INDEXED BY idx_projection_thread_activities_import_continuation
+              WHERE activity.thread_id = thread.thread_id
+                AND json_valid(activity.payload_json) = 1
+                AND json_extract(activity.payload_json, '$.type')
+                  = ${sql.literal(IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL)}
+              LIMIT 1
+            )
+        ) AS "isFinalized"
       `,
   });
 
@@ -1945,6 +2023,51 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       ),
     );
 
+  const getImportReconciliationContext: ProjectionSnapshotQueryShape["getImportReconciliationContext"] =
+    () =>
+      sql
+        .withTransaction(
+          Effect.all([
+            listImportProjectRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getImportReconciliationContext:listProjects:query",
+                  "ProjectionSnapshotQuery.getImportReconciliationContext:listProjects:decodeRows",
+                ),
+              ),
+            ),
+            listImportThreadRows(undefined).pipe(
+              Effect.mapError(
+                toPersistenceSqlOrDecodeError(
+                  "ProjectionSnapshotQuery.getImportReconciliationContext:listThreads:query",
+                  "ProjectionSnapshotQuery.getImportReconciliationContext:listThreads:decodeRows",
+                ),
+              ),
+            ),
+          ]),
+        )
+        .pipe(
+          Effect.map(
+            ([projects, threads]): ProjectionImportReconciliationContext => ({
+              projects,
+              threads: threads.map((thread) => ({
+                threadId: thread.threadId,
+                projectId: thread.projectId,
+                modelSelection: thread.modelSelection,
+                origin: thread.origin,
+                archived: thread.archived === 1,
+              })),
+            }),
+          ),
+          Effect.mapError((error) =>
+            isPersistenceError(error)
+              ? error
+              : toPersistenceSqlError(
+                  "ProjectionSnapshotQuery.getImportReconciliationContext:transaction",
+                )(error),
+          ),
+        );
+
   const getActiveProjectByWorkspaceRoot: ProjectionSnapshotQueryShape["getActiveProjectByWorkspaceRoot"] =
     (workspaceRoot) =>
       getActiveProjectRowByWorkspaceRoot({ workspaceRoot }).pipe(
@@ -2140,6 +2263,19 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
       } satisfies OrchestrationThreadShell);
     });
 
+  const isThreadImportFinalized: ProjectionSnapshotQueryShape["isThreadImportFinalized"] = (
+    threadId,
+  ) =>
+    getThreadImportFinalizedRow({ threadId }).pipe(
+      Effect.map((row) => row.isFinalized === 1),
+      Effect.mapError(
+        toPersistenceSqlOrDecodeError(
+          "ProjectionSnapshotQuery.isThreadImportFinalized:query",
+          "ProjectionSnapshotQuery.isThreadImportFinalized:decodeRow",
+        ),
+      ),
+    );
+
   const getThreadDetailById: ProjectionSnapshotQueryShape["getThreadDetailById"] = (threadId) =>
     Effect.gen(function* () {
       const [
@@ -2320,12 +2456,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* () {
     getArchivedShellSnapshot,
     getSnapshotSequence,
     getCounts,
+    getImportReconciliationContext,
     getActiveProjectByWorkspaceRoot,
     getProjectShellById,
     getFirstActiveThreadIdByProjectId,
     getThreadCheckpointContext,
     getFullThreadDiffContext,
     getThreadShellById,
+    isThreadImportFinalized,
     getThreadDetailById,
     getThreadDetailSnapshot,
   } satisfies ProjectionSnapshotQueryShape;

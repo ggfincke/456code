@@ -342,7 +342,7 @@ it.live(
           const claudeRoot = NodePath.join(harness.rootDir, "imports", "claude");
           const codexPath = writeImportFixture({
             rootDir: NodePath.join(codexRoot, "2026", "01", "02"),
-            fileName: "rollout-2026-01-02T03-04-05-123e4567-e89b-12d3-a456-426614174000.jsonl",
+            fileName: "rollout-2026-01-02T03-04-05-019fab93-5678-7abc-8def-0123456789ab.jsonl",
             fixtureName: "codex-rollout-basic.jsonl",
             workspaceDir: harness.workspaceDir,
           });
@@ -469,7 +469,7 @@ it.live(
               kind: "imported",
               source: "codex-cli",
               sourcePath: codexCanonicalPath,
-              nativeSessionId: "codex-session-1",
+              nativeSessionId: "019fab93-5678-7abc-8def-0123456789ab",
               providerInstanceId: CODEX_INSTANCE_ID,
             },
           });
@@ -550,7 +550,7 @@ it.live(
               meta: {
                 source: "codex-cli",
                 sourcePath: codexCanonicalPath,
-                nativeSessionId: "codex-session-1",
+                nativeSessionId: "019fab93-5678-7abc-8def-0123456789ab",
                 cwd: harness.workspaceDir,
                 model: "gpt-5.4",
               },

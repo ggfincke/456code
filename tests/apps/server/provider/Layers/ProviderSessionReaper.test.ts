@@ -31,6 +31,7 @@ import {
 } from "../../../../../apps/server/src/provider/Services/ProviderService.ts";
 import { ProviderSessionDirectoryLive } from "../../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts";
 import { makeProviderSessionReaperLive } from "../../../../../apps/server/src/provider/Layers/ProviderSessionReaper.ts";
+import { makeProjectionSnapshotQueryStub } from "../../projectionSnapshotQueryTestHelpers.ts";
 
 const defaultModelSelection = {
   instanceId: ProviderInstanceId.make("codex"),
@@ -198,28 +199,17 @@ describe("ProviderSessionReaper", () => {
       Layer.provideMerge(runtimeRepositoryLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
       Layer.provideMerge(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getCommandReadModel: () => Effect.die("unused"),
-          getSnapshot: () => Effect.die("unused"),
-          getShellSnapshot: () => Effect.die("unused"),
-          getArchivedShellSnapshot: () => Effect.die("unused"),
-          getSnapshotSequence: () =>
-            Effect.succeed({ snapshotSequence: input.readModel.snapshotSequence }),
-          getCounts: () => Effect.die("unused"),
-          getActiveProjectByWorkspaceRoot: () => Effect.die("unused"),
-          getProjectShellById: () => Effect.die("unused"),
-          getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-          getThreadCheckpointContext: () => Effect.die("unused"),
-          getFullThreadDiffContext: () => Effect.die("unused"),
-          getThreadShellById: (threadId) =>
-            Effect.succeed(
-              input.readModel.threads.find((thread) => thread.id === threadId)
-                ? Option.some(input.readModel.threads.find((thread) => thread.id === threadId)!)
-                : Option.none(),
-            ),
-          getThreadDetailById: () => Effect.die("unused"),
-          getThreadDetailSnapshot: () => Effect.die("unused"),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          makeProjectionSnapshotQueryStub({
+            getThreadShellById: (threadId) =>
+              Effect.succeed(
+                input.readModel.threads.find((thread) => thread.id === threadId)
+                  ? Option.some(input.readModel.threads.find((thread) => thread.id === threadId)!)
+                  : Option.none(),
+              ),
+          }),
+        ),
       ),
       Layer.provideMerge(NodeServices.layer),
     );

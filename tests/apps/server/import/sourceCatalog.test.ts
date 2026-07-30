@@ -19,6 +19,7 @@ import * as Fiber from "effect/Fiber";
 import * as TestClock from "effect/testing/TestClock";
 
 import {
+  codexSessionTitleForSource,
   groupImportFileSourceDescriptors,
   readResolvedImportSourceFile,
   resolveAcpImportSourceCatalog,
@@ -100,6 +101,17 @@ describe("resolveSourceCatalog", () => {
           ),
         },
         {
+          source: "codex-cli",
+          driverKind: CODEX,
+          providerInstanceId: CODEX_DEFAULT,
+          scanRoot: NodePath.join(homePath, ".codex", "archived_sessions"),
+          layout: "codex-archive",
+          continuationIdentity: fileContinuationIdentity(
+            CODEX,
+            NodePath.join(homePath, ".codex", "sessions"),
+          ),
+        },
+        {
           source: "claude-code",
           driverKind: CLAUDE,
           providerInstanceId: CLAUDE_DEFAULT,
@@ -145,6 +157,54 @@ describe("resolveSourceCatalog", () => {
       ).toMatchObject({
         scanRoot: NodePath.join(configuredHome, "sessions"),
       });
+    }),
+  );
+
+  it.effect("loads canonical Codex thread names for only their configured source root", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => temporaryDirectory());
+      const configuredHome = NodePath.join(root, "configured-codex");
+      const sessionsRoot = NodePath.join(configuredHome, "sessions");
+      const nativeSessionId = "019fab93-1234-7abc-8def-1234567890ab";
+      const administrativeSessionId = "019fab93-5678-7abc-8def-1234567890ab";
+      yield* Effect.promise(() => NodeFSP.mkdir(sessionsRoot, { recursive: true }));
+      yield* Effect.promise(() =>
+        NodeFSP.writeFile(
+          NodePath.join(configuredHome, "session_index.jsonl"),
+          [
+            `{"id":"${nativeSessionId}","thread_name":"Canonical import title"}`,
+            `{"id":"${administrativeSessionId}","thread_name":"<command-name>/clear</command-name>"}`,
+            "",
+          ].join("\n"),
+        ),
+      );
+
+      const catalog = yield* resolveSourceCatalog(
+        settingsWith({ codex: { homePath: configuredHome } }),
+        { environment: {}, homePath: root, cwd: root },
+      );
+      const canonicalSessionsRoot = yield* Effect.promise(() => NodeFSP.realpath(sessionsRoot));
+      const sourcePath = NodePath.join(
+        canonicalSessionsRoot,
+        "2026",
+        "07",
+        "29",
+        `rollout-2026-07-29T10-00-00-${nativeSessionId}.jsonl`,
+      );
+
+      expect(codexSessionTitleForSource(catalog.descriptors, sourcePath, nativeSessionId)).toBe(
+        "Canonical import title",
+      );
+      expect(
+        codexSessionTitleForSource(catalog.descriptors, sourcePath, administrativeSessionId),
+      ).toBeNull();
+      expect(
+        codexSessionTitleForSource(
+          catalog.descriptors,
+          NodePath.join(root, "different-codex", "sessions", NodePath.basename(sourcePath)),
+          nativeSessionId,
+        ),
+      ).toBeNull();
     }),
   );
 
@@ -306,7 +366,10 @@ describe("resolveSourceCatalog", () => {
 
       expect(
         catalog.descriptors
-          .filter((descriptor) => descriptor.source === "codex-cli")
+          .filter(
+            (descriptor) =>
+              descriptor.source === "codex-cli" && descriptor.layout !== "codex-archive",
+          )
           .map(({ providerInstanceId, scanRoot, displayName }) => ({
             providerInstanceId,
             scanRoot,
@@ -366,7 +429,7 @@ describe("resolveSourceCatalog", () => {
           { environment: {}, homePath: root, cwd: root },
         );
         const codexGroups = groupImportFileSourceDescriptors(catalog.descriptors).filter(
-          (group) => group.source === "codex-cli",
+          (group) => group.source === "codex-cli" && group.layout !== "codex-archive",
         );
 
         expect(codexGroups).toEqual([
@@ -485,20 +548,34 @@ describe("resolveSourceCatalog", () => {
           blockedRoot,
           NodePath.join(laterHome, "sessions"),
           NodePath.join(finalHome, "sessions"),
+          NodePath.join(laterHome, "archived_sessions"),
+          NodePath.join(finalHome, "archived_sessions"),
         ]);
         yield* TestClock.adjust("50 millis");
         const catalog = yield* Fiber.join(catalogFiber);
 
-        expect(catalog.descriptors).toEqual([
-          expect.objectContaining({
-            providerInstanceId: laterId,
-            scanRoot: NodePath.join(laterHome, "sessions"),
-          }),
-          expect.objectContaining({
-            providerInstanceId: finalId,
-            scanRoot: NodePath.join(finalHome, "sessions"),
-          }),
-        ]);
+        expect(catalog.descriptors).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              providerInstanceId: laterId,
+              scanRoot: NodePath.join(laterHome, "sessions"),
+            }),
+            expect.objectContaining({
+              providerInstanceId: laterId,
+              scanRoot: NodePath.join(laterHome, "archived_sessions"),
+              layout: "codex-archive",
+            }),
+            expect.objectContaining({
+              providerInstanceId: finalId,
+              scanRoot: NodePath.join(finalHome, "sessions"),
+            }),
+            expect.objectContaining({
+              providerInstanceId: finalId,
+              scanRoot: NodePath.join(finalHome, "archived_sessions"),
+              layout: "codex-archive",
+            }),
+          ]),
+        );
         expect(catalog.errors).toEqual([
           {
             sourcePath: blockedRoot,
@@ -963,6 +1040,83 @@ describe("resolveImportSourcePath", () => {
         expect(result.failure.reason).toBe(
           "the file does not use a recognized session transcript layout",
         );
+      }
+    }),
+  );
+
+  it.effect("authorizes flat Codex archives and rejects Claude child transcript layouts", () =>
+    Effect.gen(function* () {
+      const root = yield* Effect.promise(() => temporaryDirectory());
+      const codexHome = NodePath.join(root, "codex");
+      const sessionsRoot = NodePath.join(codexHome, "sessions");
+      const archiveRoot = NodePath.join(codexHome, "archived_sessions");
+      const archivedSession = NodePath.join(archiveRoot, "rollout-archived.jsonl");
+      const nestedArchive = NodePath.join(archiveRoot, "nested", "rollout-impostor.jsonl");
+      const claudeHome = NodePath.join(root, "claude");
+      const projectRoot = NodePath.join(claudeHome, "projects", "project");
+      const parentSessionId = "123e4567-e89b-42d3-a456-426614174000";
+      const subagentsRoot = NodePath.join(projectRoot, parentSessionId, "subagents");
+      const directAgent = NodePath.join(subagentsRoot, "agent-direct_1.jsonl");
+      const workflowAgent = NodePath.join(
+        subagentsRoot,
+        "workflows",
+        "wf_123-test",
+        "agent-workflow_1.jsonl",
+      );
+      const rejectedPaths = [
+        nestedArchive,
+        directAgent,
+        workflowAgent,
+        NodePath.join(subagentsRoot, "journal.jsonl"),
+        NodePath.join(subagentsRoot, "nested", "agent-extra.jsonl"),
+        NodePath.join(subagentsRoot, "workflows", "wf_123-test", "journal.jsonl"),
+        NodePath.join(subagentsRoot, "workflows", "wf_123-test", "nested", "agent-extra.jsonl"),
+        NodePath.join(projectRoot, "not-a-session-id", "subagents", "agent-impostor.jsonl"),
+      ];
+      yield* Effect.promise(async () => {
+        await NodeFSP.mkdir(sessionsRoot, { recursive: true });
+        for (const path of [archivedSession, ...rejectedPaths]) {
+          await NodeFSP.mkdir(NodePath.dirname(path), { recursive: true });
+          await NodeFSP.writeFile(path, "{}");
+        }
+      });
+      const catalog = yield* resolveSourceCatalog(
+        settingsWith({
+          codex: { homePath: codexHome },
+          claude: { homePath: claudeHome },
+        }),
+        { environment: {}, homePath: root, cwd: root },
+      );
+
+      const activeCodex = catalog.descriptors.find(
+        (descriptor) => descriptor.source === "codex-cli" && descriptor.layout !== "codex-archive",
+      );
+      const archivedCodex = catalog.descriptors.find(
+        (descriptor) => descriptor.layout === "codex-archive",
+      );
+      expect(archivedCodex).toMatchObject({
+        scanRoot: yield* Effect.promise(() => NodeFSP.realpath(archiveRoot)),
+        continuationIdentity: activeCodex?.continuationIdentity,
+      });
+
+      const resolvedArchive = yield* resolveImportSourcePath(
+        catalog.descriptors,
+        "codex-cli",
+        archivedSession,
+      );
+      expect(resolvedArchive.providerInstanceIds).toEqual([CODEX_DEFAULT]);
+
+      for (const path of rejectedPaths) {
+        const source = path.startsWith(archiveRoot) ? "codex-cli" : "claude-code";
+        const result = yield* resolveImportSourcePath(catalog.descriptors, source, path).pipe(
+          Effect.result,
+        );
+        expect(result._tag).toBe("Failure");
+        if (result._tag === "Failure") {
+          expect(result.failure.reason).toBe(
+            "the file does not use a recognized session transcript layout",
+          );
+        }
       }
     }),
   );

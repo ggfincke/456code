@@ -9,6 +9,14 @@ import type {
   ImportedSessionMeta,
 } from "./types.ts";
 import { deterministicId } from "./ids.ts";
+import {
+  addWarning,
+  appendParsingWarningActivity,
+  applyStrictlyIncreasingTimestamps,
+  materializeWarnings,
+  truncateUtf8,
+  type WarningState,
+} from "./parserSupport.ts";
 import { IMPORT_NORMALIZED_SESSION_MAX_RECORDS } from "./resourceLimits.ts";
 
 export interface OpenCodeStoredFile {
@@ -34,23 +42,13 @@ interface ParsedStoredFile {
   readonly relativePath: string;
 }
 
-interface WarningState {
-  details: string[];
-  omittedCount: number;
-  totalCount: number;
-}
-
 const summaryLimit = 120;
 const payloadTextLimit = 4_000;
-const warningDetailLimit = 100;
-const warningTextLimit = 512;
 const maxFieldBytes = 1_048_576;
 const maxCwdCharacters = 4_096;
 const maxMetadataCharacters = 512;
 const maxToolCallIdBytes = 512;
 const maxToolNameBytes = 256;
-const maximumDateTimestamp = 8_640_000_000_000_000;
-const textEncoder = new TextEncoder();
 const omittedAttachmentDetail = "Attachment payloads are not included in imported transcripts.";
 const administrativePartTypes = new Set([
   "agent",
@@ -96,45 +94,6 @@ function truncate(value: string, limit: number): string {
 function summarize(value: string): string {
   const firstLine = value.trim().split(/\r?\n/, 1)[0] ?? "";
   return truncate(firstLine, summaryLimit);
-}
-
-function addWarning(state: WarningState, message: string): void {
-  state.totalCount += 1;
-  if (state.details.length < warningDetailLimit) {
-    state.details.push(truncate(message, warningTextLimit));
-    return;
-  }
-  state.omittedCount += 1;
-}
-
-function materializeWarnings(state: WarningState): string[] {
-  if (state.omittedCount === 0) {
-    return [...state.details];
-  }
-  return [
-    ...state.details,
-    `${state.omittedCount} additional parsing warnings omitted after the first ${warningDetailLimit}`,
-  ];
-}
-
-function truncateUtf8(value: string, maxBytes: number): string {
-  const suffix = "…";
-  const byteBudget = maxBytes - textEncoder.encode(suffix).byteLength;
-  let byteLength = 0;
-  let truncatedEnd = 0;
-  for (let index = 0; index < value.length; ) {
-    const codePoint = value.codePointAt(index)!;
-    const codeUnits = codePoint > 0xffff ? 2 : 1;
-    byteLength += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-    index += codeUnits;
-    if (byteLength <= byteBudget) {
-      truncatedEnd = index;
-    }
-    if (byteLength > maxBytes) {
-      return `${value.slice(0, truncatedEnd)}${suffix}`;
-    }
-  }
-  return value;
 }
 
 function boundUtf8(
@@ -255,6 +214,26 @@ function storedFileId(relativePath: string): string | null {
 function storedSessionProjectId(relativePath: string): string | null {
   const segments = relativePath.split("/");
   return segments.length === 3 && segments[0] === "session" ? (segments[1] ?? null) : null;
+}
+
+export function openCodeSessionIdentityStatus(input: {
+  readonly storedSessionId: string | null;
+  readonly storedProjectId: string | null;
+  readonly sessionId: string;
+  readonly enclosingProjectId: string | null;
+}): {
+  readonly sessionIdMatches: boolean;
+  readonly projectIdMatches: boolean;
+  readonly valid: boolean;
+} {
+  const sessionIdMatches = input.storedSessionId === input.sessionId;
+  const projectIdMatches =
+    input.enclosingProjectId !== null && input.storedProjectId === input.enclosingProjectId;
+  return {
+    sessionIdMatches,
+    projectIdMatches,
+    valid: sessionIdMatches && projectIdMatches,
+  };
 }
 
 function messageTimestamp(message: Record<string, unknown>): string | null {
@@ -428,46 +407,6 @@ function toolActivity(
   };
 }
 
-function applyStrictlyIncreasingTimestamps(records: ImportedRecord[]): void {
-  let previousTimestamp: number | null = null;
-  for (const record of records) {
-    const currentTimestamp = Date.parse(record.createdAt);
-    if (previousTimestamp !== null && currentTimestamp <= previousTimestamp) {
-      previousTimestamp = Math.min(previousTimestamp + 1, maximumDateTimestamp);
-      record.createdAt = new Date(previousTimestamp).toISOString();
-      continue;
-    }
-    previousTimestamp = currentTimestamp;
-  }
-}
-
-function appendParsingWarningActivity(
-  records: ImportedRecord[],
-  warnings: WarningState,
-  sourceIndex: number,
-): void {
-  const createdAt = records.at(-1)?.createdAt;
-  if (warnings.totalCount === 0 || createdAt === undefined) {
-    return;
-  }
-  const noun = warnings.totalCount === 1 ? "warning" : "warnings";
-  const summary = `Imported with ${warnings.totalCount} parsing ${noun}`;
-  pushImportedRecord(records, {
-    kind: "activity",
-    tone: "error",
-    activityKind: "task.completed",
-    summary,
-    payload: {
-      summary,
-      detail: materializeWarnings(warnings).join("\n"),
-      importWarningCount: warnings.totalCount,
-      omittedWarningCount: warnings.omittedCount,
-    },
-    createdAt,
-    sourceIndex,
-  });
-}
-
 function emptyMeta(input: ParseOpenCodeSessionBundleInput): ImportedSessionMeta {
   return {
     source: "opencode",
@@ -496,16 +435,20 @@ export function parseOpenCodeSessionBundle(
     const storedSessionId = asString(parsedSession.value.id);
     const storedProjectId = asString(parsedSession.value.projectID);
     const enclosingProjectId = storedSessionProjectId(parsedSession.relativePath);
-    const sessionIdMatches = storedSessionId === input.sessionId;
-    const projectIdMatches = enclosingProjectId !== null && storedProjectId === enclosingProjectId;
-    if (sessionIdMatches && projectIdMatches) {
+    const identity = openCodeSessionIdentityStatus({
+      storedSessionId,
+      storedProjectId,
+      sessionId: input.sessionId,
+      enclosingProjectId,
+    });
+    if (identity.valid) {
       meta.nativeSessionId = safeNativeSessionId(storedSessionId, warnings);
       hasMetadata = meta.nativeSessionId !== null;
     }
-    if (!sessionIdMatches) {
+    if (!identity.sessionIdMatches) {
       addWarning(warnings, "session metadata id does not match its storage filename");
     }
-    if (!projectIdMatches) {
+    if (!identity.projectIdMatches) {
       addWarning(
         warnings,
         "session metadata project id does not match its enclosing storage directory",
@@ -835,7 +778,7 @@ export function parseOpenCodeSessionBundle(
     return { meta, records: [], warnings: materializeWarnings(warnings) };
   }
 
-  appendParsingWarningActivity(records, warnings, sourceIndex);
+  appendParsingWarningActivity(records, warnings, sourceIndex, pushImportedRecord);
   applyStrictlyIncreasingTimestamps(records);
   meta.firstActivityAt = records[0]?.createdAt ?? null;
   meta.lastActivityAt = records.at(-1)?.createdAt ?? null;

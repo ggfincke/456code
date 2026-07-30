@@ -264,6 +264,7 @@ it.layer(NodeServices.layer)("thread.messages.import decider", (it) => {
       for (const event of messageEvents) {
         expect(event.payload.turnId).toBeNull();
         expect(event.payload.streaming).toBe(false);
+        expect(event.payload.provenance).toBe("import");
         expect("attachments" in event.payload).toBe(false);
       }
     }),

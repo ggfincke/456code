@@ -14,6 +14,7 @@ import {
   IMPORT_SESSIONS_MAX_ITEMS,
   IMPORT_SOURCE_PATH_MAX_CHARS,
   ImportScanCandidate,
+  ImportScanResult,
   ImportSessionsRequest,
   ImportSessionsResult,
   ModelSelection,
@@ -74,6 +75,7 @@ const decodeThreadOrigin = Schema.decodeUnknownEffect(ThreadOrigin);
 const decodeImportSessionsRequest = Schema.decodeUnknownEffect(ImportSessionsRequest);
 const decodeImportSessionsResult = Schema.decodeUnknownEffect(ImportSessionsResult);
 const decodeImportScanCandidate = Schema.decodeUnknownEffect(ImportScanCandidate);
+const decodeImportScanResult = Schema.decodeUnknownEffect(ImportScanResult);
 const decodeClientOrchestrationCommand = Schema.decodeUnknownEffect(ClientOrchestrationCommand);
 
 it.effect("bounds session import request count and source path length", () =>
@@ -158,6 +160,35 @@ it.effect("defaults archived import scan provenance for older scan payloads", ()
 
     assert.strictEqual(olderPayload.alreadyImportedArchived, false);
     assert.strictEqual(archivedPayload.alreadyImportedArchived, true);
+  }),
+);
+
+it.effect("supports unknown catalog message counts and defaults older scans to complete", () =>
+  Effect.gen(function* () {
+    const candidate = {
+      source: "codex-cli",
+      sourcePath: "/tmp/rollout-session.jsonl",
+      providerInstanceIds: ["codex_personal"],
+      nativeSessionId: "native-session",
+      title: "Imported session",
+      cwd: "/tmp/project",
+      gitBranch: "main",
+      model: "gpt-5.4",
+      messageCount: null,
+      modifiedAt: "2026-01-01T00:00:00.000Z",
+      alreadyImportedThreadId: null,
+      matchedProjectId: "project-1",
+      resumable: true,
+    };
+
+    const decoded = yield* decodeImportScanResult({
+      candidates: [candidate],
+      scannedAt: "2026-01-01T00:00:00.000Z",
+      errors: [],
+    });
+
+    assert.strictEqual(decoded.truncated, false);
+    assert.strictEqual(decoded.candidates[0]?.messageCount, null);
   }),
 );
 
@@ -481,6 +512,7 @@ it.effect("decodes imported thread provenance", () =>
       contentHash: " abc123 ",
       nativeSessionId: " session-1 ",
       providerInstanceId: " codex_personal ",
+      originalWorkspaceRoot: " /tmp/missing-workspace ",
       importedAt: "2026-01-01T00:00:00.000Z",
     });
 
@@ -491,6 +523,7 @@ it.effect("decodes imported thread provenance", () =>
       contentHash: "abc123",
       nativeSessionId: "session-1",
       providerInstanceId: ProviderInstanceId.make("codex_personal"),
+      originalWorkspaceRoot: "/tmp/missing-workspace",
       importedAt: "2026-01-01T00:00:00.000Z",
     });
   }),
@@ -541,6 +574,7 @@ it.effect("decodes legacy imported provenance without provider instance identity
     });
 
     assert.strictEqual(parsed.providerInstanceId, null);
+    assert.strictEqual(parsed.originalWorkspaceRoot, undefined);
   }),
 );
 
@@ -725,6 +759,38 @@ it.effect("decodes thread archived and unarchived events", () =>
     }
     assert.strictEqual(archived.payload.archivedAt, "2026-01-01T00:00:00.000Z");
     assert.strictEqual(unarchived.type, "thread.unarchived");
+  }),
+);
+
+it.effect("defaults historical message events to live provenance", () =>
+  Effect.gen(function* () {
+    const message = yield* decodeOrchestrationEvent({
+      sequence: 1,
+      eventId: "event-message-1",
+      aggregateKind: "thread",
+      aggregateId: "thread-1",
+      type: "thread.message-sent",
+      occurredAt: "2026-01-01T00:00:00.000Z",
+      commandId: "cmd-message-1",
+      causationEventId: null,
+      correlationId: "cmd-message-1",
+      metadata: {},
+      payload: {
+        threadId: "thread-1",
+        messageId: "message-1",
+        role: "user",
+        text: "Historical prompt",
+        turnId: null,
+        streaming: false,
+        createdAt: "2026-01-01T00:00:00.000Z",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      },
+    });
+
+    if (message.type !== "thread.message-sent") {
+      assert.fail(`Expected thread.message-sent event, received ${message.type}.`);
+    }
+    assert.strictEqual(message.payload.provenance, "live");
   }),
 );
 

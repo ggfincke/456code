@@ -36,8 +36,8 @@ import {
   resolveOpenCodeSessionsRoot,
 } from "../provider/continuationIdentity.ts";
 import { mergeProviderInstanceEnvironment } from "../provider/ProviderInstanceEnvironment.ts";
-import type { ImportSource } from "./types.ts";
 import type { AcpImportConnectionOptions } from "./acpImport.ts";
+import { loadCodexSessionTitles } from "./importTitle.ts";
 import {
   type BoundedUtf8File,
   type ImportByteBudget,
@@ -48,6 +48,7 @@ import {
   IMPORT_SESSION_MAX_BYTES,
   readBoundedUtf8File,
 } from "./resourceLimits.ts";
+import type { ImportSource } from "./types.ts";
 
 const CODEX_DRIVER = ProviderDriverKind.make("codex");
 const CLAUDE_DRIVER = ProviderDriverKind.make("claudeAgent");
@@ -68,16 +69,20 @@ export interface ImportScanRootOverrides {
 
 export interface ImportScanRoots {
   readonly codexSessions: string;
+  readonly codexArchivedSessions: string;
   readonly claudeProjects: string;
 }
 
 export type ImportFileSource = Exclude<ImportSource, "cursor" | "grok">;
+export type ImportFileSourceLayout = "codex-archive";
 
 export interface ImportFileSourceDescriptor {
   readonly source: ImportFileSource;
   readonly driverKind: ProviderDriverKind;
   readonly providerInstanceId: ProviderInstanceId;
   readonly scanRoot: string;
+  readonly codexSessionTitles?: ReadonlyMap<string, string>;
+  readonly layout?: ImportFileSourceLayout;
   readonly continuationIdentity: ProviderContinuationIdentity;
   readonly displayName?: string;
 }
@@ -87,6 +92,7 @@ export interface ImportFileSourceDescriptorGroup {
   readonly driverKind: ProviderDriverKind;
   readonly scanRoot: string;
   readonly providerInstanceIds: ReadonlyArray<ProviderInstanceId>;
+  readonly layout?: ImportFileSourceLayout;
 }
 
 export interface SourceCatalogOptions {
@@ -124,6 +130,7 @@ export interface AcpImportSourceCatalogResult {
 export interface ResolvedImportSourcePath {
   readonly canonicalPath: string;
   readonly providerInstanceIds: ReadonlyArray<ProviderInstanceId>;
+  readonly layout?: ImportFileSourceLayout;
   readonly validation: ImportSourceValidation;
 }
 
@@ -348,6 +355,74 @@ function baseEnvironment(options: SourceCatalogOptions): NodeJS.ProcessEnv {
   return environment;
 }
 
+const resolveCodexFileDescriptors = Effect.fn("SourceCatalog.resolveCodexFileDescriptors")(
+  function* (
+    providerInstanceId: ProviderInstanceId,
+    displayName: string | undefined,
+    primaryScanRoot: string,
+    options: SourceCatalogOptions,
+    resolveArchiveAfterPrimaryFailure: boolean,
+  ): Effect.fn.Return<SourceCatalogResult> {
+    const archiveRoot = NodePath.join(NodePath.dirname(primaryScanRoot), "archived_sessions");
+    const canonicalRoots = yield* resolveArchiveAfterPrimaryFailure
+      ? Effect.all(
+          [
+            canonicalizeScanRootWithinLimit(primaryScanRoot, options),
+            canonicalizeScanRootWithinLimit(archiveRoot, options),
+          ],
+          { concurrency: "unbounded" },
+        )
+      : Effect.gen(function* () {
+          const primaryCanonical = yield* canonicalizeScanRootWithinLimit(primaryScanRoot, options);
+          if (primaryCanonical.error !== null) {
+            return [primaryCanonical] as const;
+          }
+          const archiveCanonical = yield* canonicalizeScanRootWithinLimit(archiveRoot, options);
+          return [primaryCanonical, archiveCanonical] as const;
+        });
+    const [primaryCanonical, archiveCanonical] = canonicalRoots;
+    if (archiveCanonical === undefined) {
+      return {
+        descriptors: [],
+        errors: primaryCanonical.error === null ? [] : [primaryCanonical.error],
+      };
+    }
+
+    const codexSessionTitles = yield* loadCodexSessionTitles(
+      NodePath.join(NodePath.dirname(primaryScanRoot), "session_index.jsonl"),
+    );
+    const continuationIdentity = fileContinuationIdentity(CODEX_DRIVER, primaryCanonical.scanRoot);
+    const commonDescriptor: Omit<ImportFileSourceDescriptor, "scanRoot"> = {
+      source: "codex-cli",
+      driverKind: CODEX_DRIVER,
+      providerInstanceId,
+      continuationIdentity,
+      ...(displayName === undefined ? {} : { displayName }),
+      ...(codexSessionTitles.size === 0 ? {} : { codexSessionTitles }),
+    };
+    return {
+      descriptors: [
+        ...(primaryCanonical.error === null
+          ? [{ ...commonDescriptor, scanRoot: primaryCanonical.scanRoot }]
+          : []),
+        ...(archiveCanonical.error === null
+          ? [
+              {
+                ...commonDescriptor,
+                scanRoot: archiveCanonical.scanRoot,
+                layout: "codex-archive" as const,
+              },
+            ]
+          : []),
+      ],
+      errors: [
+        ...(primaryCanonical.error === null ? [] : [primaryCanonical.error]),
+        ...(archiveCanonical.error === null ? [] : [archiveCanonical.error]),
+      ],
+    };
+  },
+);
+
 const resolveConfiguredFileSource = Effect.fn("SourceCatalog.resolveConfiguredFileSource")(
   function* (
     source: ConfiguredSource,
@@ -405,34 +480,41 @@ const resolveConfiguredFileSource = Effect.fn("SourceCatalog.resolveConfiguredFi
       homePath: hostHomePath,
       cwd,
     };
-    const scanRoot =
+    const primaryScanRoot =
       source.driverKind === CODEX_DRIVER
         ? resolveCodexSessionsRoot(decodedConfig.success as CodexSettings, rootOptions)
         : source.driverKind === CLAUDE_DRIVER
           ? resolveClaudeProjectsRoot(decodedConfig.success as ClaudeSettings, rootOptions)
           : resolveOpenCodeSessionsRoot(rootOptions);
-    const canonical = yield* canonicalizeScanRootWithinLimit(scanRoot, options);
-    if (canonical.error !== null) {
-      return { descriptors: [], errors: [canonical.error] };
+    if (source.driverKind === CODEX_DRIVER) {
+      // configured sources stop before resolving the archive when the primary root fails
+      return yield* resolveCodexFileDescriptors(
+        source.providerInstanceId,
+        source.displayName,
+        primaryScanRoot,
+        options,
+        false,
+      );
     }
-    return {
-      descriptors: [
-        {
-          source:
-            source.driverKind === CODEX_DRIVER
-              ? "codex-cli"
-              : source.driverKind === CLAUDE_DRIVER
-                ? "claude-code"
-                : "opencode",
-          driverKind: source.driverKind,
-          providerInstanceId: source.providerInstanceId,
-          scanRoot: canonical.scanRoot,
-          continuationIdentity: fileContinuationIdentity(source.driverKind, canonical.scanRoot),
-          ...(source.displayName === undefined ? {} : { displayName: source.displayName }),
-        },
-      ],
-      errors: [],
+
+    const primaryCanonical = yield* canonicalizeScanRootWithinLimit(primaryScanRoot, options);
+    if (primaryCanonical.error !== null) {
+      return { descriptors: [], errors: [primaryCanonical.error] };
+    }
+    const sourceName = source.driverKind === CLAUDE_DRIVER ? "claude-code" : "opencode";
+    const continuationIdentity = fileContinuationIdentity(
+      source.driverKind,
+      primaryCanonical.scanRoot,
+    );
+    const primaryDescriptor: ImportFileSourceDescriptor = {
+      source: sourceName,
+      driverKind: source.driverKind,
+      providerInstanceId: source.providerInstanceId,
+      scanRoot: primaryCanonical.scanRoot,
+      continuationIdentity,
+      ...(source.displayName === undefined ? {} : { displayName: source.displayName }),
     };
+    return { descriptors: [primaryDescriptor], errors: [] };
   },
 );
 
@@ -568,10 +650,11 @@ export function groupImportFileSourceDescriptors(
       driverKind: ProviderDriverKind;
       scanRoot: string;
       providerInstanceIds: ProviderInstanceId[];
+      layout?: ImportFileSourceLayout;
     }
   >();
   for (const descriptor of descriptors) {
-    const key = `${descriptor.source}\0${descriptor.scanRoot}`;
+    const key = `${descriptor.source}\0${descriptor.scanRoot}\0${descriptor.layout ?? ""}`;
     const group = groups.get(key);
     if (group === undefined) {
       groups.set(key, {
@@ -579,6 +662,7 @@ export function groupImportFileSourceDescriptors(
         driverKind: descriptor.driverKind,
         scanRoot: descriptor.scanRoot,
         providerInstanceIds: [descriptor.providerInstanceId],
+        ...(descriptor.layout === undefined ? {} : { layout: descriptor.layout }),
       });
       continue;
     }
@@ -599,6 +683,7 @@ export function resolveScanRoots(overrides: ImportScanRootOverrides = {}): Impor
   );
   return {
     codexSessions: NodePath.join(codexHome, "sessions"),
+    codexArchivedSessions: NodePath.join(codexHome, "archived_sessions"),
     claudeProjects: NodePath.join(claudeHome, "projects"),
   };
 }
@@ -608,41 +693,43 @@ export const resolveDefaultSourceCatalog = Effect.fn("resolveDefaultSourceCatalo
   options: SourceCatalogOptions = {},
 ): Effect.fn.Return<SourceCatalogResult> {
   const roots = resolveScanRoots(overrides);
-  const descriptors: ImportFileSourceDescriptor[] = [];
-  const errors: SourceCatalogIssue[] = [];
-  const resolvedDescriptors = yield* Effect.forEach(
+  // default discovery keeps a valid archive when the primary root fails
+  const [codexCatalog, claudeCanonical] = yield* Effect.all(
     [
-      {
-        source: "codex-cli",
-        driverKind: CODEX_DRIVER,
-        providerInstanceId: defaultInstanceIdForDriver(CODEX_DRIVER),
-        scanRoot: roots.codexSessions,
-      },
-      {
-        source: "claude-code",
-        driverKind: CLAUDE_DRIVER,
-        providerInstanceId: defaultInstanceIdForDriver(CLAUDE_DRIVER),
-        scanRoot: roots.claudeProjects,
-      },
-    ] as const,
-    (descriptor) =>
-      canonicalizeScanRootWithinLimit(descriptor.scanRoot, options).pipe(
-        Effect.map((canonical) => ({ canonical, descriptor })),
+      resolveCodexFileDescriptors(
+        defaultInstanceIdForDriver(CODEX_DRIVER),
+        undefined,
+        roots.codexSessions,
+        options,
+        true,
       ),
+      canonicalizeScanRootWithinLimit(roots.claudeProjects, options),
+    ],
     { concurrency: "unbounded" },
   );
-  for (const { canonical, descriptor } of resolvedDescriptors) {
-    if (canonical.error !== null) {
-      errors.push(canonical.error);
-      continue;
-    }
-    descriptors.push({
-      ...descriptor,
-      scanRoot: canonical.scanRoot,
-      continuationIdentity: fileContinuationIdentity(descriptor.driverKind, canonical.scanRoot),
-    });
-  }
-  return { descriptors, errors };
+  return {
+    descriptors: [
+      ...codexCatalog.descriptors,
+      ...(claudeCanonical.error === null
+        ? [
+            {
+              source: "claude-code" as const,
+              driverKind: CLAUDE_DRIVER,
+              providerInstanceId: defaultInstanceIdForDriver(CLAUDE_DRIVER),
+              scanRoot: claudeCanonical.scanRoot,
+              continuationIdentity: fileContinuationIdentity(
+                CLAUDE_DRIVER,
+                claudeCanonical.scanRoot,
+              ),
+            },
+          ]
+        : []),
+    ],
+    errors: [
+      ...codexCatalog.errors,
+      ...(claudeCanonical.error === null ? [] : [claudeCanonical.error]),
+    ],
+  };
 });
 
 function isCanonicalDescendant(root: string, candidate: string): boolean {
@@ -655,18 +742,40 @@ function isCanonicalDescendant(root: string, candidate: string): boolean {
   );
 }
 
+export function codexSessionTitleForSource(
+  descriptors: ReadonlyArray<ImportFileSourceDescriptor>,
+  sourcePath: string,
+  nativeSessionId: string | null,
+): string | null {
+  if (nativeSessionId === null) return null;
+  for (const descriptor of descriptors) {
+    if (
+      descriptor.source === "codex-cli" &&
+      descriptor.codexSessionTitles !== undefined &&
+      isCanonicalDescendant(descriptor.scanRoot, sourcePath)
+    ) {
+      const title = descriptor.codexSessionTitles.get(nativeSessionId);
+      if (title !== undefined) return title;
+    }
+  }
+  return null;
+}
+
 const claudeSessionFileNamePattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.jsonl$/i;
 
 function hasRecognizedFileLayout(
-  source: ImportFileSource,
+  descriptor: ImportFileSourceDescriptor,
   canonicalRoot: string,
   canonicalPath: string,
 ): boolean {
   const relativePath = NodePath.relative(canonicalRoot, canonicalPath);
   const segments = relativePath.split(NodePath.sep);
   const fileName = segments.at(-1) ?? "";
-  if (source === "codex-cli") {
+  if (descriptor.source === "codex-cli") {
+    if (descriptor.layout === "codex-archive") {
+      return segments.length === 1 && /^rollout-.*\.jsonl$/.test(fileName);
+    }
     return (
       segments.length === 4 &&
       /^\d{4}$/.test(segments[0] ?? "") &&
@@ -675,7 +784,7 @@ function hasRecognizedFileLayout(
       /^rollout-.*\.jsonl$/.test(fileName)
     );
   }
-  if (source === "claude-code") {
+  if (descriptor.source === "claude-code") {
     return segments.length === 2 && claudeSessionFileNamePattern.test(fileName);
   }
   return (
@@ -737,6 +846,7 @@ export const resolveImportSourcePath = Effect.fn("resolveImportSourcePath")(func
 
   const matchingProviderIds: ProviderInstanceId[] = [];
   const matchingRoots = new Map<string, ImportValidatedRoot>();
+  let matchingLayout: ImportFileSourceLayout | undefined;
   let containedByMatchingSource = false;
   for (const descriptor of descriptors) {
     if (descriptor.source !== source) {
@@ -773,14 +883,17 @@ export const resolveImportSourcePath = Effect.fn("resolveImportSourcePath")(func
     }
     containedByMatchingSource = true;
     if (
-      hasRecognizedFileLayout(
-        descriptor.source,
-        canonicalRootResult.success.canonicalRoot,
-        canonicalPath,
-      ) &&
-      !matchingProviderIds.includes(descriptor.providerInstanceId)
+      !hasRecognizedFileLayout(descriptor, canonicalRootResult.success.canonicalRoot, canonicalPath)
     ) {
+      continue;
+    }
+    if (!matchingProviderIds.includes(descriptor.providerInstanceId)) {
       matchingProviderIds.push(descriptor.providerInstanceId);
+    }
+    if (descriptor.layout !== undefined) {
+      matchingLayout ??= descriptor.layout;
+    }
+    if (!matchingRoots.has(canonicalRootResult.success.canonicalRoot)) {
       matchingRoots.set(
         canonicalRootResult.success.canonicalRoot,
         canonicalRootResult.success.validation,
@@ -799,6 +912,7 @@ export const resolveImportSourcePath = Effect.fn("resolveImportSourcePath")(func
   return {
     canonicalPath,
     providerInstanceIds: matchingProviderIds,
+    ...(matchingLayout === undefined ? {} : { layout: matchingLayout }),
     validation: {
       canonicalPath,
       fileIdentity: importFileSystemIdentity(fileStat),

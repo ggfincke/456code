@@ -516,6 +516,7 @@ describe("CheckpointReactor", () => {
     return {
       engine,
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
+      snapshotQuery,
       provider,
       cwd,
       drain,
@@ -954,6 +955,7 @@ describe("CheckpointReactor", () => {
           checkpointStoreCalls,
         }),
       );
+      const getThreadDetailById = vi.spyOn(harness.snapshotQuery, "getThreadDetailById");
 
       yield* harness.engine.dispatch({
         type: "thread.messages.import",
@@ -995,6 +997,7 @@ describe("CheckpointReactor", () => {
       yield* Effect.promise(() => harness.drain());
 
       expect(checkpointStoreCalls).toEqual([]);
+      expect(getThreadDetailById).not.toHaveBeenCalled();
     }),
   );
 

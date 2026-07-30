@@ -41,6 +41,7 @@ import {
 } from "../../../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts";
 import { ProjectionSnapshotQuery } from "../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import { ServerConfig } from "../../../../../apps/server/src/config.ts";
+import { makeProjectionSnapshotQueryStub } from "../../projectionSnapshotQueryTestHelpers.ts";
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
@@ -175,39 +176,17 @@ describe("OrchestrationEngine", () => {
 
     const layer = OrchestrationEngineLive.pipe(
       Layer.provide(
-        Layer.succeed(ProjectionSnapshotQuery, {
-          getCommandReadModel: () => Effect.succeed(commandReadModel),
-          getSnapshot: () =>
-            Effect.sync(() => {
-              fullSnapshotReadCount += 1;
-              return projectionSnapshot;
-            }),
-          getShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: projectionSnapshot.snapshotSequence,
-              projects: [],
-              threads: [],
-              updatedAt: projectionSnapshot.updatedAt,
-            }),
-          getArchivedShellSnapshot: () =>
-            Effect.succeed({
-              snapshotSequence: projectionSnapshot.snapshotSequence,
-              projects: [],
-              threads: [],
-              updatedAt: projectionSnapshot.updatedAt,
-            }),
-          getSnapshotSequence: () =>
-            Effect.succeed({ snapshotSequence: projectionSnapshot.snapshotSequence }),
-          getCounts: () => Effect.succeed({ projectCount: 1, threadCount: 1 }),
-          getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-          getProjectShellById: () => Effect.succeed(Option.none()),
-          getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-          getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-          getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-          getThreadShellById: () => Effect.succeed(Option.none()),
-          getThreadDetailById: () => Effect.succeed(Option.none()),
-          getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-        }),
+        Layer.succeed(
+          ProjectionSnapshotQuery,
+          makeProjectionSnapshotQueryStub({
+            getCommandReadModel: () => Effect.succeed(commandReadModel),
+            getSnapshot: () =>
+              Effect.sync(() => {
+                fullSnapshotReadCount += 1;
+                return projectionSnapshot;
+              }),
+          }),
+        ),
       ),
       Layer.provide(
         Layer.succeed(OrchestrationProjectionPipeline, {

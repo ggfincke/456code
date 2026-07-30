@@ -102,7 +102,7 @@ import { useAtomCommand } from "../state/use-atom-command";
 import { buildThreadRouteParams, resolveThreadRouteTarget } from "../threadRoutes";
 import { formatRelativeTimeLabel, parseTimestampDate } from "../timestampFormat";
 import type { SidebarThreadSummary } from "../types";
-import { importSourceDisplayName } from "../importSourcePresentation";
+import { importSourceDisplayName, importSourceDriverKind } from "../importSourcePresentation";
 import { cn } from "~/lib/utils";
 import {
   formatWorkingDurationLabel,
@@ -295,9 +295,21 @@ function SidebarV2ThreadTooltip({
           ) : null}
           {thread.origin ? (
             <div className="flex min-w-0 items-center gap-2">
-              <ImportIcon className="size-4 shrink-0 stroke-muted-foreground" aria-hidden />
+              <ProviderInstanceIcon
+                driverKind={importSourceDriverKind(thread.origin.source)}
+                displayName={importSourceDisplayName(thread.origin.source)}
+                iconClassName="size-4"
+              />
               <div className="min-w-0 wrap-break-word text-foreground/90">
                 Imported from {importSourceDisplayName(thread.origin.source)}
+              </div>
+            </div>
+          ) : null}
+          {thread.origin?.originalWorkspaceRoot ? (
+            <div className="flex min-w-0 items-center gap-2">
+              <FolderIcon className="size-4 shrink-0 stroke-muted-foreground" aria-hidden />
+              <div className="min-w-0 wrap-break-word text-foreground/90">
+                Original workspace: {thread.origin.originalWorkspaceRoot}
               </div>
             </div>
           ) : null}

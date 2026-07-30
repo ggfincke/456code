@@ -16,8 +16,10 @@ import type {
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
   OrchestrationThreadShell,
+  ModelSelection,
   ProjectId,
   ThreadId,
+  ThreadOrigin,
 } from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import type * as Option from "effect/Option";
@@ -49,6 +51,20 @@ export interface ProjectionFullThreadDiffContext {
   readonly worktreePath: string | null;
   readonly latestCheckpointTurnCount: number;
   readonly toCheckpointRef: CheckpointRef | null;
+}
+
+export interface ProjectionImportReconciliationContext {
+  readonly projects: ReadonlyArray<{
+    readonly projectId: ProjectId;
+    readonly workspaceRoot: string;
+  }>;
+  readonly threads: ReadonlyArray<{
+    readonly threadId: ThreadId;
+    readonly projectId: ProjectId;
+    readonly modelSelection: ModelSelection;
+    readonly origin: ThreadOrigin;
+    readonly archived: boolean;
+  }>;
 }
 
 /**
@@ -109,6 +125,15 @@ export interface ProjectionSnapshotQueryShape {
   readonly getCounts: () => Effect.Effect<ProjectionSnapshotCounts, ProjectionRepositoryError>;
 
   /**
+   * Read the narrow project and imported-thread metadata needed to reconcile
+   * external session history without hydrating shell or thread bodies.
+   */
+  readonly getImportReconciliationContext: () => Effect.Effect<
+    ProjectionImportReconciliationContext,
+    ProjectionRepositoryError
+  >;
+
+  /**
    * Read the active project for an exact workspace root match.
    */
   readonly getActiveProjectByWorkspaceRoot: (
@@ -151,6 +176,14 @@ export interface ProjectionSnapshotQueryShape {
   readonly getThreadShellById: (
     threadId: ThreadId,
   ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>;
+
+  /**
+   * Check whether an active or archived thread has completed session import
+   * without hydrating its imported transcript.
+   */
+  readonly isThreadImportFinalized: (
+    threadId: ThreadId,
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
 
   /**
    * Read a single active thread detail snapshot by id.

@@ -13,15 +13,16 @@ import {
   CheckCircle2Icon,
   CircleAlertIcon,
   DownloadIcon,
+  FolderIcon,
   LoaderIcon,
   RefreshCwIcon,
 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useState } from "react";
 
 import { useImportSessions } from "../../hooks/useImportSessions";
+import type { ImportSessionProgress } from "../../hooks/useImportSessions";
 import { importSourceDisplayName, importSourceDriverKind } from "../../importSourcePresentation";
 import { deriveProviderInstanceEntries, type ProviderInstanceEntry } from "../../providerInstances";
-import { useProjects } from "../../state/entities";
 import { primaryServerProvidersAtom } from "../../state/server";
 import { formatRelativeTimeLabel } from "../../timestampFormat";
 import { ProviderInstanceIcon } from "../chat/ProviderInstanceIcon";
@@ -52,6 +53,8 @@ interface ImportCandidateGroup {
   readonly title: string;
   readonly candidates: ReadonlyArray<ImportScanCandidate>;
 }
+
+type BulkSelectionMode = "all" | "resumable" | "transcript-only";
 
 export const IMPORT_CANDIDATE_PAGE_SIZE = 50;
 
@@ -108,6 +111,22 @@ function candidateDriverKind(candidate: ImportScanCandidate) {
   return importSourceDriverKind(candidate.source);
 }
 
+function candidateGroupPresentation(title: string): {
+  readonly detail: string | null;
+  readonly label: string;
+} {
+  const normalized = title.replaceAll("\\", "/").replace(/\/+$/, "");
+  const isPath =
+    normalized.startsWith("/") || normalized.startsWith("~/") || /^[a-z]:\//i.test(normalized);
+  if (!isPath) {
+    return { detail: null, label: title };
+  }
+  return {
+    detail: title,
+    label: normalized.split("/").at(-1) || title,
+  };
+}
+
 function isImportTargetSelectable(entry: ProviderInstanceEntry | null): boolean {
   return Boolean(
     entry && entry.enabled && entry.installed && entry.isAvailable && entry.status !== "disabled",
@@ -118,7 +137,11 @@ export function importRequestItemForCandidate(
   candidate: ImportScanCandidate,
   providerInstanceId: ProviderInstanceId | null,
 ): ImportSessionsRequest["items"][number] | null {
-  if (providerInstanceId === null || candidate.alreadyImportedArchived) {
+  if (
+    providerInstanceId === null ||
+    candidate.alreadyImportedArchived ||
+    candidate.messageCount === 0
+  ) {
     return null;
   }
   if (
@@ -209,12 +232,22 @@ export function importSessionsAnnouncement(input: {
   readonly hasScanned: boolean;
   readonly importError: string | null;
   readonly importResult: ImportSessionsResult | null;
+  readonly importProgress?: ImportSessionProgress | null;
   readonly isImporting: boolean;
   readonly isScanning: boolean;
   readonly scanError: string | null;
+  readonly scanTruncated: boolean;
 }): string {
+  if (input.importProgress?.phase === "stopping") {
+    return `Stopping after the current batch. ${input.importProgress.completed} of ${input.importProgress.total} sessions processed.`;
+  }
+  if (input.importProgress?.phase === "cancelled") {
+    return `Import stopped after ${input.importProgress.completed} of ${input.importProgress.total} sessions. ${input.importProgress.imported} imported, ${input.importProgress.skipped} skipped, ${input.importProgress.failed} failed.`;
+  }
   if (input.isImporting) {
-    return "Importing selected sessions.";
+    return input.importProgress
+      ? `Importing selected sessions. ${input.importProgress.completed} of ${input.importProgress.total} processed.`
+      : "Importing selected sessions.";
   }
   if (input.importError) {
     return `Import failed: ${input.importError}`;
@@ -237,7 +270,16 @@ export function importSessionsAnnouncement(input: {
   if (!input.hasScanned) {
     return "Ready to scan for local sessions.";
   }
-  return `${input.candidateCount} ${input.candidateCount === 1 ? "session" : "sessions"} found.`;
+  const found = `${input.candidateCount} ${
+    input.candidateCount === 1 ? "session" : "sessions"
+  } found.`;
+  return input.scanTruncated ? `${found} Results may be incomplete.` : found;
+}
+
+export function candidateMessageCountLabel(messageCount: number | null): string | null {
+  return messageCount === null
+    ? null
+    : `${messageCount} ${messageCount === 1 ? "message" : "messages"}`;
 }
 
 function ImportOutcomeRows({
@@ -315,7 +357,6 @@ function ImportOutcomeRows({
 
 export function ImportSessionsPanel() {
   useRelativeTimeTick(60_000);
-  const projects = useProjects();
   const serverProviders = useAtomValue(primaryServerProvidersAtom);
   const providerEntries = useMemo(
     () => deriveProviderInstanceEntries(serverProviders),
@@ -329,8 +370,10 @@ export function ImportSessionsPanel() {
     scan,
     importResult,
     importError,
+    importProgress,
     isImporting,
     importSelected,
+    cancelImport,
   } = useImportSessions();
   const [selectedKeys, setSelectedKeys] = useState<ReadonlySet<string>>(() => new Set());
   const [selectedProviderInstanceIds, setSelectedProviderInstanceIds] = useState<
@@ -353,27 +396,17 @@ export function ImportSessionsPanel() {
   }, [environmentId, scanError, scanResult]);
 
   const groupedCandidates = useMemo(() => {
-    const primaryProjects = projects.filter((project) => project.environmentId === environmentId);
-    const projectById = new Map(primaryProjects.map((project) => [project.id, project]));
     const groups = new Map<string, { title: string; candidates: ImportScanCandidate[] }>();
 
     for (const candidate of scanResult?.candidates ?? []) {
-      const project =
-        candidate.matchedProjectId === null
-          ? null
-          : (projectById.get(candidate.matchedProjectId) ?? null);
-      const title = project?.title ?? candidate.cwd ?? "No recorded directory";
-      const key = project
-        ? `project:${project.id}`
-        : candidate.cwd
-          ? `cwd:${candidate.cwd}`
-          : "cwd:none";
+      const title = candidate.cwd ?? "No recorded directory";
+      const key = candidate.cwd ? `cwd:${candidate.cwd}` : "cwd:none";
       const group = groups.get(key) ?? { title, candidates: [] };
       group.candidates.push(candidate);
       groups.set(key, group);
     }
     return [...groups.entries()].map(([key, group]) => ({ key, ...group }));
-  }, [environmentId, projects, scanResult?.candidates]);
+  }, [scanResult?.candidates]);
   const candidateCount = scanResult?.candidates.length ?? 0;
   const scanId = scanResult?.scannedAt ?? null;
   const requestedVisibleCandidateCount =
@@ -424,19 +457,28 @@ export function ImportSessionsPanel() {
     });
   }, [providerSelectionByCandidateKey]);
 
-  const selectedCandidates = useMemo(() => {
+  const importableCandidates = useMemo(() => {
     const candidates = scanResult?.candidates ?? [];
     return candidates.flatMap((candidate) => {
       const key = candidateKey(candidate);
       const providerInstanceId =
         providerSelectionByCandidateKey.get(key)?.providerInstanceId ?? null;
       return candidate.alreadyImportedThreadId === null &&
-        selectedKeys.has(key) &&
+        candidate.messageCount !== 0 &&
         providerInstanceId !== null
         ? [{ candidate, providerInstanceId }]
         : [];
     });
-  }, [providerSelectionByCandidateKey, scanResult?.candidates, selectedKeys]);
+  }, [providerSelectionByCandidateKey, scanResult?.candidates]);
+  const selectedCandidates = useMemo(
+    () => importableCandidates.filter(({ candidate }) => selectedKeys.has(candidateKey(candidate))),
+    [importableCandidates, selectedKeys],
+  );
+  const resumableCandidateCount = useMemo(
+    () => importableCandidates.filter(({ candidate }) => candidate.resumable).length,
+    [importableCandidates],
+  );
+  const transcriptOnlyCandidateCount = importableCandidates.length - resumableCandidateCount;
 
   const toggleCandidate = useCallback((candidate: ImportScanCandidate, selected: boolean) => {
     const key = candidateKey(candidate);
@@ -449,6 +491,27 @@ export function ImportSessionsPanel() {
       }
       return next;
     });
+  }, []);
+
+  const selectBulkCandidates = useCallback(
+    (mode: BulkSelectionMode) => {
+      setSelectedKeys(
+        new Set(
+          importableCandidates.flatMap(({ candidate }) => {
+            const matches =
+              mode === "all" ||
+              (mode === "resumable" && candidate.resumable) ||
+              (mode === "transcript-only" && !candidate.resumable);
+            return matches ? [candidateKey(candidate)] : [];
+          }),
+        ),
+      );
+    },
+    [importableCandidates],
+  );
+
+  const clearSelectedCandidates = useCallback(() => {
+    setSelectedKeys(new Set());
   }, []);
 
   const selectProviderInstance = useCallback(
@@ -521,11 +584,19 @@ export function ImportSessionsPanel() {
     candidateCount,
     hasScanned: scanResult !== null,
     importError,
+    importProgress,
     importResult,
     isImporting,
     isScanning,
     scanError,
+    scanTruncated: scanResult?.truncated ?? false,
   });
+  const selectionAnnouncement =
+    scanResult === null
+      ? ""
+      : `${selectedCandidates.length} of ${importableCandidates.length} importable ${
+          importableCandidates.length === 1 ? "session" : "sessions"
+        } selected.`;
   const showMoreCandidateCount = Math.min(
     IMPORT_CANDIDATE_PAGE_SIZE,
     visibleCandidateWindow.hiddenCandidateCount,
@@ -535,6 +606,9 @@ export function ImportSessionsPanel() {
     <SettingsPageContainer>
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {liveAnnouncement}
+      </div>
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        {selectionAnnouncement}
       </div>
       <SettingsSection
         title="Import sessions"
@@ -574,267 +648,379 @@ export function ImportSessionsPanel() {
             (scanResult === null
               ? "Scanning reads local transcript stores and may briefly start configured Cursor or Grok provider processes."
               : candidateCount === 0
-                ? "Sessions from supported local agent providers will appear here."
-                : "Choose each transcript and the exact provider instance that should continue it.")
+                ? scanResult.truncated
+                  ? "No sessions were cataloged before one or more source limits were reached. Review the scan warnings and rescan."
+                  : "Sessions from supported local agent providers will appear here."
+                : scanResult.truncated
+                  ? "Some sources stopped at a catalog, traversal, or time limit. You can import the sessions shown or review the scan warnings below."
+                  : "Choose each transcript and the exact provider instance that should continue it.")
           }
           status={
-            isImporting
-              ? `Importing ${selectedCandidates.length} sessions.`
-              : importError
-                ? importError
-                : null
+            importProgress?.phase === "stopping" ? (
+              `Stopping after the current batch · ${importProgress.completed} of ${importProgress.total} processed.`
+            ) : importProgress?.phase === "cancelled" ? (
+              `Stopped after ${importProgress.completed} of ${importProgress.total} sessions.`
+            ) : isImporting && importProgress ? (
+              `Importing · ${importProgress.completed} of ${importProgress.total} processed.`
+            ) : isImporting ? (
+              `Importing ${selectedCandidates.length} sessions.`
+            ) : importError ? (
+              importError
+            ) : scanResult?.truncated ? (
+              <span className="inline-flex items-center gap-1.5 text-warning" role="status">
+                <CircleAlertIcon className="size-3.5" aria-hidden />
+                Results may be incomplete
+              </span>
+            ) : null
           }
         />
+        {scanResult !== null && candidateCount > 0 ? (
+          <SettingsRow
+            title="Bulk selection"
+            description={`${selectedCandidates.length} of ${importableCandidates.length} importable ${
+              importableCandidates.length === 1 ? "session" : "sessions"
+            } selected. Bulk choices apply to every scan result, including rows not shown yet.`}
+            control={
+              <div
+                className="flex flex-wrap items-center justify-start gap-2 sm:justify-end"
+                role="group"
+                aria-label="Bulk session selection"
+              >
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={importableCandidates.length === 0 || isImporting || isScanning}
+                  onClick={() => selectBulkCandidates("all")}
+                >
+                  Select all ({importableCandidates.length})
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={resumableCandidateCount === 0 || isImporting || isScanning}
+                  onClick={() => selectBulkCandidates("resumable")}
+                >
+                  Resumable ({resumableCandidateCount})
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="outline"
+                  disabled={transcriptOnlyCandidateCount === 0 || isImporting || isScanning}
+                  onClick={() => selectBulkCandidates("transcript-only")}
+                >
+                  Transcript only ({transcriptOnlyCandidateCount})
+                </Button>
+                <Button
+                  type="button"
+                  size="xs"
+                  variant="ghost"
+                  disabled={selectedCandidates.length === 0 || isImporting || isScanning}
+                  onClick={clearSelectedCandidates}
+                >
+                  Clear
+                </Button>
+              </div>
+            }
+          />
+        ) : null}
       </SettingsSection>
 
-      {visibleCandidateWindow.groups.map((group, groupIndex) => (
-        <SettingsSection key={group.key} title={group.title}>
-          {group.candidates.map((candidate, candidateIndex) => {
-            const key = candidateKey(candidate);
-            const isImported = candidate.alreadyImportedThreadId !== null;
-            const sourceLabel = candidateSourceLabel(candidate);
-            const modifiedLabel = candidate.modifiedAt
-              ? formatRelativeTimeLabel(candidate.modifiedAt)
-              : "Modified time unavailable";
-            const providerSelection = providerSelectionByCandidateKey.get(key);
-            const providerInstanceId = providerSelection?.providerInstanceId ?? null;
-            const selectedProviderOption =
-              providerSelection?.options.find(
-                (option) => option.instanceId === providerInstanceId,
-              ) ?? null;
-            const canSelect = !isImported && providerInstanceId !== null;
-            const checkboxId = `${checkboxIdPrefix}-${groupIndex}-${candidateIndex}`;
-            const title = candidate.title ?? "Untitled session";
-            const providerExplanation =
-              providerSelection?.blockedReason ??
-              (providerSelection !== undefined &&
-              providerSelection.options.length > 1 &&
-              providerInstanceId === null
-                ? "Choose a provider instance before selecting this session."
-                : null);
-            const providerControl = providerSelection ? (
-              providerSelection.options.length > 1 &&
-              providerSelection.options.some((option) => option.selectable) ? (
-                <Select
-                  value={providerInstanceId}
-                  onValueChange={(value) => {
-                    const option = providerSelection.options.find(
-                      (candidateOption) =>
-                        candidateOption.instanceId === value && candidateOption.selectable,
-                    );
-                    if (option) {
-                      selectProviderInstance(candidate, option.instanceId);
-                    }
-                  }}
-                >
-                  <SelectTrigger
-                    size="sm"
-                    className="min-h-11 w-full min-w-48 sm:w-56"
-                    aria-label={`Provider instance for ${title}`}
-                  >
-                    <SelectValue placeholder="Choose provider instance">
-                      {selectedProviderOption
-                        ? providerOptionLabel(selectedProviderOption)
-                        : undefined}
-                    </SelectValue>
-                  </SelectTrigger>
-                  <SelectPopup align="end">
-                    {providerSelection.options.map((option) => (
-                      <SelectItem
-                        key={option.instanceId}
-                        value={option.instanceId}
-                        disabled={!option.selectable}
-                      >
-                        {providerOptionLabel(option)}
-                      </SelectItem>
-                    ))}
-                  </SelectPopup>
-                </Select>
-              ) : selectedProviderOption !== null ? (
-                <span className="wrap-break-word text-xs text-muted-foreground">
-                  {providerOptionLabel(selectedProviderOption)}
-                </span>
-              ) : (
-                <Button render={<Link to="/settings/providers" />} size="xs" variant="outline">
-                  Configure providers
-                </Button>
-              )
-            ) : null;
-
-            if (isImported) {
-              const isArchivedImport = candidate.alreadyImportedArchived;
-              return (
-                <SettingsRow
-                  key={key}
-                  title={
-                    <span className="inline-flex min-w-0 items-start gap-2">
-                      <ProviderInstanceIcon
-                        driverKind={candidateDriverKind(candidate)}
-                        displayName={sourceLabel}
-                        iconClassName="mt-0.5 size-4"
-                      />
-                      <span className="min-w-0 wrap-break-word">{title}</span>
-                    </span>
-                  }
-                  description={
-                    <>
-                      {sourceLabel} · {modifiedLabel} · {candidate.messageCount}{" "}
-                      {candidate.messageCount === 1 ? "message" : "messages"} ·{" "}
-                      {candidate.resumable ? "Resumable" : "Transcript only"}
-                    </>
-                  }
-                  status={
-                    environmentId !== null ? (
-                      <span className="flex flex-col gap-1">
-                        <span className="break-all">{candidate.sourcePath}</span>
-                        {isArchivedImport ? (
-                          <Link
-                            to="/settings/archived"
-                            className="font-medium text-foreground underline underline-offset-2"
-                          >
-                            Imported · View archived threads
-                          </Link>
-                        ) : (
-                          <Link
-                            to="/$environmentId/$threadId"
-                            params={{
-                              environmentId,
-                              threadId: candidate.alreadyImportedThreadId!,
-                            }}
-                            className="font-medium text-foreground underline underline-offset-2"
-                          >
-                            Imported · Open thread
-                          </Link>
-                        )}
-                        {!isArchivedImport && providerExplanation ? (
-                          <span className="text-warning">{providerExplanation}</span>
-                        ) : null}
-                      </span>
-                    ) : (
-                      <span className="break-all">{candidate.sourcePath}</span>
-                    )
-                  }
-                  control={
-                    isArchivedImport ? (
-                      <Button render={<Link to="/settings/archived" />} size="xs" variant="outline">
-                        View archived threads
-                      </Button>
-                    ) : (
-                      <div className="flex w-full flex-col items-stretch gap-2 sm:w-auto sm:items-end">
-                        {providerControl}
-                        <Button
-                          type="button"
-                          size="xs"
-                          variant="outline"
-                          disabled={
-                            providerInstanceId === null ||
-                            isImporting ||
-                            isScanning ||
-                            environmentId === null
-                          }
-                          aria-label={`Retry or reverify ${title}`}
-                          data-import-repair-key={candidateDomKey(candidate)}
-                          onClick={() => void handleRepair(candidate, providerInstanceId)}
-                        >
-                          {isImporting && repairingKey === key ? (
-                            <>
-                              <LoaderIcon className="size-3.5 animate-spin" />
-                              Repairing...
-                            </>
-                          ) : (
-                            "Retry / reverify"
-                          )}
-                        </Button>
-                      </div>
-                    )
-                  }
-                />
-              );
-            }
-
-            return (
-              <div
-                key={key}
-                className="rounded-xl px-3 py-2 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(12rem,auto)] sm:items-center sm:gap-6 sm:px-4"
+      {visibleCandidateWindow.groups.map((group, groupIndex) => {
+        const groupPresentation = candidateGroupPresentation(group.title);
+        return (
+          <SettingsSection
+            key={group.key}
+            title={groupPresentation.label}
+            icon={<FolderIcon className="size-4 text-muted-foreground" />}
+            className="space-y-2"
+          >
+            {groupPresentation.detail ? (
+              <p
+                className="truncate px-3 text-xs text-muted-foreground/70 sm:px-4"
+                title={groupPresentation.detail}
               >
-                <label
-                  htmlFor={checkboxId}
-                  className={cn(
-                    "flex min-h-11 min-w-0 items-start gap-3 rounded-lg py-2 pr-2",
-                    canSelect ? "cursor-pointer" : "cursor-not-allowed opacity-70",
-                  )}
-                >
-                  <Checkbox
-                    id={checkboxId}
-                    className="mt-0.5"
-                    aria-labelledby={`${checkboxId}-title`}
-                    aria-describedby={`${checkboxId}-description ${checkboxId}-path${
-                      providerExplanation ? ` ${checkboxId}-provider` : ""
-                    }`}
-                    checked={canSelect && selectedKeys.has(key)}
-                    disabled={!canSelect || isImporting}
-                    onCheckedChange={(checked) => toggleCandidate(candidate, checked === true)}
-                  />
-                  <span className="min-w-0 flex-1 space-y-1">
-                    <span className="flex min-w-0 items-start gap-2 text-sm font-medium tracking-[-0.005em] text-foreground">
-                      <ProviderInstanceIcon
-                        driverKind={candidateDriverKind(candidate)}
-                        displayName={sourceLabel}
-                        iconClassName="mt-0.5 size-4"
-                      />
-                      <span id={`${checkboxId}-title`} className="min-w-0 wrap-break-word">
-                        {title}
+                {groupPresentation.detail}
+              </p>
+            ) : null}
+            <div className="overflow-hidden rounded-xl border border-border/70 bg-muted/10">
+              <div className="hidden grid-cols-[minmax(0,1fr)_14rem] gap-4 border-b border-border/60 bg-muted/25 px-4 py-2 text-[11px] font-medium tracking-wide text-muted-foreground sm:grid">
+                <span>Session</span>
+                <span>Continue with</span>
+              </div>
+              <div className="divide-y divide-border/60" role="list">
+                {group.candidates.map((candidate, candidateIndex) => {
+                  const key = candidateKey(candidate);
+                  const isImported = candidate.alreadyImportedThreadId !== null;
+                  const sourceLabel = candidateSourceLabel(candidate);
+                  const modifiedLabel = candidate.modifiedAt
+                    ? formatRelativeTimeLabel(candidate.modifiedAt)
+                    : "Modified time unavailable";
+                  const providerSelection = providerSelectionByCandidateKey.get(key);
+                  const providerInstanceId = providerSelection?.providerInstanceId ?? null;
+                  const hasImportableMessages = candidate.messageCount !== 0;
+                  const selectedProviderOption =
+                    providerSelection?.options.find(
+                      (option) => option.instanceId === providerInstanceId,
+                    ) ?? null;
+                  const canSelect =
+                    !isImported && hasImportableMessages && providerInstanceId !== null;
+                  const checkboxId = `${checkboxIdPrefix}-${groupIndex}-${candidateIndex}`;
+                  const title = candidate.title ?? "Untitled session";
+                  const messageCountLabel = candidateMessageCountLabel(candidate.messageCount);
+                  const providerExplanation = !hasImportableMessages
+                    ? "No messages to import."
+                    : (providerSelection?.blockedReason ??
+                      (providerSelection !== undefined &&
+                      providerSelection.options.length > 1 &&
+                      providerInstanceId === null
+                        ? "Choose a provider instance before selecting this session."
+                        : null));
+                  const providerControl = !hasImportableMessages ? (
+                    <span className="inline-flex min-h-11 items-center text-xs font-medium text-muted-foreground">
+                      No messages
+                    </span>
+                  ) : providerSelection ? (
+                    providerSelection.options.length > 1 &&
+                    providerSelection.options.some((option) => option.selectable) ? (
+                      <Select
+                        value={providerInstanceId}
+                        onValueChange={(value) => {
+                          const option = providerSelection.options.find(
+                            (candidateOption) =>
+                              candidateOption.instanceId === value && candidateOption.selectable,
+                          );
+                          if (option) {
+                            selectProviderInstance(candidate, option.instanceId);
+                          }
+                        }}
+                      >
+                        <SelectTrigger
+                          size="sm"
+                          className="min-h-11 w-full min-w-48 sm:w-full"
+                          aria-label={`Provider instance for ${title}`}
+                        >
+                          <SelectValue placeholder="Choose provider instance">
+                            {selectedProviderOption
+                              ? providerOptionLabel(selectedProviderOption)
+                              : undefined}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectPopup align="end">
+                          {providerSelection.options.map((option) => (
+                            <SelectItem
+                              key={option.instanceId}
+                              value={option.instanceId}
+                              disabled={!option.selectable}
+                            >
+                              {providerOptionLabel(option)}
+                            </SelectItem>
+                          ))}
+                        </SelectPopup>
+                      </Select>
+                    ) : selectedProviderOption !== null ? (
+                      <span className="inline-flex min-h-11 items-center text-xs font-medium text-muted-foreground">
+                        <span className="mr-1 sm:hidden">Continue with</span>
+                        {providerOptionLabel(selectedProviderOption)}
                       </span>
-                    </span>
-                    <span
-                      id={`${checkboxId}-description`}
-                      className="block text-[13px] leading-[1.45] text-muted-foreground/80"
+                    ) : (
+                      <Button
+                        render={<Link to="/settings/providers" />}
+                        size="xs"
+                        variant="outline"
+                      >
+                        Configure providers
+                      </Button>
+                    )
+                  ) : null;
+
+                  if (isImported) {
+                    const isArchivedImport = candidate.alreadyImportedArchived;
+                    return (
+                      <SettingsRow
+                        key={key}
+                        role="listitem"
+                        className="scroll-mb-20 rounded-none py-3 [&>div]:sm:grid-cols-[minmax(0,1fr)_14rem] [&>div]:sm:gap-4 [&>div>div:first-child]:pl-7"
+                        title={
+                          <span className="inline-flex min-w-0 items-start gap-2">
+                            <ProviderInstanceIcon
+                              driverKind={candidateDriverKind(candidate)}
+                              displayName={sourceLabel}
+                              iconClassName="mt-0.5 size-4"
+                            />
+                            <span className="min-w-0 wrap-break-word">{title}</span>
+                          </span>
+                        }
+                        description={
+                          <>
+                            {sourceLabel} · {modifiedLabel}
+                            {messageCountLabel === null ? null : ` · ${messageCountLabel}`} ·{" "}
+                            {candidate.resumable ? "Resumable" : "Transcript only"}
+                          </>
+                        }
+                        status={
+                          environmentId !== null ? (
+                            <span className="flex flex-col gap-1">
+                              <span
+                                className="block max-w-xl truncate font-mono text-[11px] text-muted-foreground/70"
+                                title={candidate.sourcePath}
+                              >
+                                {candidate.sourcePath}
+                              </span>
+                              {isArchivedImport ? (
+                                <Link
+                                  to="/settings/archived"
+                                  className="font-medium text-foreground underline underline-offset-2"
+                                >
+                                  Imported · View archived threads
+                                </Link>
+                              ) : (
+                                <Link
+                                  to="/$environmentId/$threadId"
+                                  params={{
+                                    environmentId,
+                                    threadId: candidate.alreadyImportedThreadId!,
+                                  }}
+                                  className="font-medium text-foreground underline underline-offset-2"
+                                >
+                                  Imported · Open thread
+                                </Link>
+                              )}
+                              {!isArchivedImport && providerExplanation ? (
+                                <span className="text-warning">{providerExplanation}</span>
+                              ) : null}
+                            </span>
+                          ) : (
+                            <span
+                              className="block max-w-xl truncate font-mono text-[11px] text-muted-foreground/70"
+                              title={candidate.sourcePath}
+                            >
+                              {candidate.sourcePath}
+                            </span>
+                          )
+                        }
+                        control={
+                          isArchivedImport ? (
+                            <Button
+                              render={<Link to="/settings/archived" />}
+                              size="xs"
+                              variant="outline"
+                            >
+                              View archived threads
+                            </Button>
+                          ) : (
+                            <div className="flex w-full flex-col items-stretch gap-2 sm:items-start">
+                              {providerControl}
+                              <Button
+                                type="button"
+                                size="xs"
+                                variant="outline"
+                                disabled={
+                                  providerInstanceId === null ||
+                                  isImporting ||
+                                  isScanning ||
+                                  environmentId === null
+                                }
+                                aria-label={`Retry or reverify ${title}`}
+                                data-import-repair-key={candidateDomKey(candidate)}
+                                onClick={() => void handleRepair(candidate, providerInstanceId)}
+                              >
+                                {isImporting && repairingKey === key ? (
+                                  <>
+                                    <LoaderIcon className="size-3.5 animate-spin" />
+                                    Repairing...
+                                  </>
+                                ) : (
+                                  "Retry / reverify"
+                                )}
+                              </Button>
+                            </div>
+                          )
+                        }
+                      />
+                    );
+                  }
+
+                  return (
+                    <div
+                      key={key}
+                      role="listitem"
+                      className="scroll-mb-20 px-3 py-2.5 transition-colors hover:bg-muted/20 sm:grid sm:grid-cols-[minmax(0,1fr)_14rem] sm:items-center sm:gap-4 sm:px-4"
                     >
-                      {sourceLabel} · {modifiedLabel} · {candidate.messageCount}{" "}
-                      {candidate.messageCount === 1 ? "message" : "messages"} ·{" "}
-                      {candidate.resumable ? "Resumable" : "Transcript only"}
-                    </span>
-                    <span
-                      id={`${checkboxId}-path`}
-                      className="block break-all pt-0.5 text-xs text-muted-foreground"
-                    >
-                      {candidate.sourcePath}
-                    </span>
-                    {providerExplanation ? (
-                      <span
-                        id={`${checkboxId}-provider`}
+                      <label
+                        htmlFor={checkboxId}
                         className={cn(
-                          "block text-xs",
-                          providerSelection?.blockedReason
-                            ? "text-warning"
-                            : "text-muted-foreground",
+                          "flex min-h-11 min-w-0 items-start gap-3 py-1.5 pr-2",
+                          canSelect ? "cursor-pointer" : "cursor-not-allowed opacity-70",
                         )}
                       >
-                        {providerExplanation}
-                      </span>
-                    ) : null}
-                  </span>
-                </label>
-                <div className="flex min-h-11 min-w-0 items-center sm:justify-end">
-                  {providerControl}
-                </div>
+                        <Checkbox
+                          id={checkboxId}
+                          className="mt-0.5"
+                          aria-labelledby={`${checkboxId}-title`}
+                          aria-describedby={`${checkboxId}-description ${checkboxId}-path${
+                            providerExplanation ? ` ${checkboxId}-provider` : ""
+                          }`}
+                          checked={canSelect && selectedKeys.has(key)}
+                          disabled={!canSelect || isImporting}
+                          onCheckedChange={(checked) =>
+                            toggleCandidate(candidate, checked === true)
+                          }
+                        />
+                        <span className="min-w-0 flex-1 space-y-1">
+                          <span className="flex min-w-0 items-start gap-2 text-sm font-medium tracking-[-0.005em] text-foreground">
+                            <ProviderInstanceIcon
+                              driverKind={candidateDriverKind(candidate)}
+                              displayName={sourceLabel}
+                              iconClassName="mt-px size-4"
+                            />
+                            <span id={`${checkboxId}-title`} className="min-w-0 wrap-break-word">
+                              {title}
+                            </span>
+                          </span>
+                          <span
+                            id={`${checkboxId}-description`}
+                            className="block text-[13px] leading-[1.45] text-muted-foreground/80"
+                          >
+                            {sourceLabel} · {modifiedLabel}
+                            {messageCountLabel === null ? null : ` · ${messageCountLabel}`} ·{" "}
+                            {candidate.resumable ? "Resumable" : "Transcript only"}
+                          </span>
+                          <span
+                            id={`${checkboxId}-path`}
+                            className="block truncate pt-0.5 font-mono text-[11px] text-muted-foreground/70"
+                            title={candidate.sourcePath}
+                          >
+                            {candidate.sourcePath}
+                          </span>
+                          {providerExplanation ? (
+                            <span
+                              id={`${checkboxId}-provider`}
+                              className={cn(
+                                "block text-xs",
+                                providerSelection?.blockedReason
+                                  ? "text-warning"
+                                  : "text-muted-foreground",
+                              )}
+                            >
+                              {providerExplanation}
+                            </span>
+                          ) : null}
+                        </span>
+                      </label>
+                      <div className="flex min-h-11 min-w-0 items-center sm:justify-start">
+                        {providerControl}
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
-            );
-          })}
-        </SettingsSection>
-      ))}
-
-      {visibleCandidateWindow.hiddenCandidateCount > 0 ? (
-        <div className="flex flex-col items-center gap-2">
-          <span className="text-xs text-muted-foreground" role="status" aria-live="polite">
-            Showing {visibleCandidateWindow.visibleCandidateCount} of {candidateCount} sessions
-          </span>
-          <Button type="button" size="sm" variant="outline" onClick={showMoreCandidates}>
-            Show {showMoreCandidateCount} more{" "}
-            {showMoreCandidateCount === 1 ? "session" : "sessions"}
-          </Button>
-        </div>
-      ) : null}
+            </div>
+          </SettingsSection>
+        );
+      })}
 
       {scanResult && scanResult.errors.length > 0 ? (
         <details className="group rounded-xl border border-border/70 bg-muted/20 px-4 py-3">
@@ -859,22 +1045,52 @@ export function ImportSessionsPanel() {
         <ImportOutcomeRows environmentId={environmentId} result={importResult} />
       ) : null}
 
-      <div className="sticky bottom-0 flex justify-end border-t border-border/70 bg-background/95 px-3 py-3 backdrop-blur-sm">
-        <Button
-          type="button"
-          disabled={selectedCandidates.length === 0 || isImporting || isScanning}
-          onClick={() => void handleImport()}
-        >
-          {isImporting ? (
-            <>
-              <LoaderIcon className="size-3.5 animate-spin" />
-              Importing {selectedCandidates.length}...
-            </>
-          ) : (
-            `Import selected (${selectedCandidates.length})`
-          )}
-        </Button>
-      </div>
+      {scanResult !== null && candidateCount > 0 ? (
+        <div className="sticky bottom-0 z-20 -mx-1 flex flex-col gap-3 rounded-t-xl border border-b-0 border-border/70 bg-background/95 px-3 py-3 shadow-[0_-12px_30px_-20px_rgba(0,0,0,0.55)] backdrop-blur-md sm:flex-row sm:items-center sm:justify-between sm:px-4">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
+            <span className="text-xs text-muted-foreground" role="status" aria-live="polite">
+              Showing {visibleCandidateWindow.visibleCandidateCount} of {candidateCount}
+            </span>
+            {visibleCandidateWindow.hiddenCandidateCount > 0 ? (
+              <Button type="button" size="xs" variant="outline" onClick={showMoreCandidates}>
+                Show {showMoreCandidateCount} more
+              </Button>
+            ) : null}
+          </div>
+          <div className="flex items-center justify-between gap-3 sm:justify-end">
+            <span className="text-xs tabular-nums text-muted-foreground">
+              {isImporting && importProgress
+                ? `${importProgress.completed} of ${importProgress.total} processed`
+                : `${selectedCandidates.length} selected`}
+            </span>
+            {isImporting ? (
+              <Button
+                type="button"
+                variant="outline"
+                disabled={importProgress?.phase === "stopping"}
+                onClick={cancelImport}
+              >
+                {importProgress?.phase === "stopping" ? (
+                  <>
+                    <LoaderIcon className="size-3.5 animate-spin" />
+                    Stopping...
+                  </>
+                ) : (
+                  "Stop after batch"
+                )}
+              </Button>
+            ) : (
+              <Button
+                type="button"
+                disabled={selectedCandidates.length === 0 || isScanning}
+                onClick={() => void handleImport()}
+              >
+                {`Import selected (${selectedCandidates.length})`}
+              </Button>
+            )}
+          </div>
+        </div>
+      ) : null}
     </SettingsPageContainer>
   );
 }

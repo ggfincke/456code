@@ -10,13 +10,18 @@ import type {
   ParseInput,
 } from "./types.ts";
 import { deterministicId } from "./ids.ts";
+import { claudeExplicitTitle, claudeSemanticTitle } from "./importTitle.ts";
+import {
+  addWarning,
+  appendParsingWarningActivity,
+  applyStrictlyIncreasingTimestamps,
+  incrementJsonlRecordCount,
+  iterateJsonlPhysicalLines,
+  materializeWarnings,
+  truncateUtf8,
+  type WarningState,
+} from "./parserSupport.ts";
 import { IMPORT_NORMALIZED_SESSION_MAX_RECORDS } from "./resourceLimits.ts";
-
-interface WarningState {
-  details: string[];
-  omittedCount: number;
-  totalCount: number;
-}
 
 interface ParsedClaudeLine {
   readonly parentUuid: string | null;
@@ -59,10 +64,8 @@ const administrativeAttachmentTypes = new Set([
   "ultrathink_effort",
 ]);
 const summaryLimit = 120;
-const warningDetailLimit = 100;
-const warningTextLimit = 512;
-const maxPhysicalLines = 50_000;
-const maxJsonlRecords = 50_000;
+const maxPhysicalLines = 100_000;
+const maxJsonlRecords = 100_000;
 const maxFieldBytes = 1_048_576;
 const maxCwdCharacters = 4_096;
 const maxMetadataCharacters = 512;
@@ -71,18 +74,9 @@ const maxToolNameBytes = 256;
 const maxCollectionItems = 25_000;
 const maxNestedCollectionDepth = 8;
 const maxNestedCollectionNodes = 25_000;
-const maximumDateTimestamp = 8_640_000_000_000_000;
-const textEncoder = new TextEncoder();
 const omittedAttachmentDetail = "Attachment payloads are not included in imported transcripts.";
 const uuidFileNamePattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const safeNativeSessionIdPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/u;
-
-class JsonlParseLimitError extends Error {
-  constructor(limitKind: "physical-line" | "record") {
-    super(`session import ${limitKind} limit exceeded: maximum is 50000`);
-    this.name = "JsonlParseLimitError";
-  }
-}
 
 class NormalizedRecordLimitError extends Error {
   constructor() {
@@ -117,47 +111,8 @@ function summarize(value: string): string {
   return truncate(firstLine, summaryLimit);
 }
 
-function addWarning(state: WarningState, message: string): void {
-  state.totalCount += 1;
-  if (state.details.length < warningDetailLimit) {
-    state.details.push(truncate(message, warningTextLimit));
-    return;
-  }
-  state.omittedCount += 1;
-}
-
-function materializeWarnings(state: WarningState): string[] {
-  if (state.omittedCount === 0) {
-    return [...state.details];
-  }
-  return [
-    ...state.details,
-    `${state.omittedCount} additional parsing warnings omitted after the first ${warningDetailLimit}`,
-  ];
-}
-
-function truncateUtf8(value: string, maxBytes = maxFieldBytes): string {
-  const suffix = "…";
-  const byteBudget = maxBytes - textEncoder.encode(suffix).byteLength;
-  let byteLength = 0;
-  let truncatedEnd = 0;
-  for (let index = 0; index < value.length; ) {
-    const codePoint = value.codePointAt(index)!;
-    const codeUnits = codePoint > 0xffff ? 2 : 1;
-    byteLength += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;
-    index += codeUnits;
-    if (byteLength <= byteBudget) {
-      truncatedEnd = index;
-    }
-    if (byteLength > maxBytes) {
-      return `${value.slice(0, truncatedEnd)}${suffix}`;
-    }
-  }
-  return value;
-}
-
 function boundTextField(value: string, fieldDescription: string, warnings: WarningState): string {
-  const bounded = truncateUtf8(value);
+  const bounded = truncateUtf8(value, maxFieldBytes);
   if (bounded === value) {
     return value;
   }
@@ -234,31 +189,6 @@ function normalizeTimestamp(value: unknown): string | null {
     return new Date(value).toISOString();
   } catch {
     return null;
-  }
-}
-
-function* iteratePhysicalLines(content: string): Generator<{ line: string; sourceIndex: number }> {
-  let lineStart = 0;
-  let sourceIndex = 0;
-
-  while (lineStart < content.length) {
-    if (sourceIndex >= maxPhysicalLines) {
-      throw new JsonlParseLimitError("physical-line");
-    }
-
-    const newlineIndex = content.indexOf("\n", lineStart);
-    const lineEnd = newlineIndex === -1 ? content.length : newlineIndex;
-    const contentEnd =
-      lineEnd > lineStart && content.charCodeAt(lineEnd - 1) === 13 ? lineEnd - 1 : lineEnd;
-    yield {
-      line: content.slice(lineStart, contentEnd),
-      sourceIndex,
-    };
-    sourceIndex += 1;
-    if (newlineIndex === -1) {
-      return;
-    }
-    lineStart = newlineIndex + 1;
   }
 }
 
@@ -509,21 +439,6 @@ function completeToolActivity(
   activity.payload.data = data;
 }
 
-function applyStrictlyIncreasingTimestamps(records: ImportedRecord[]): void {
-  let previousTimestamp: number | null = null;
-
-  for (const record of records) {
-    const currentTimestamp = Date.parse(record.createdAt);
-    if (previousTimestamp !== null && currentTimestamp <= previousTimestamp) {
-      previousTimestamp = Math.min(previousTimestamp + 1, maximumDateTimestamp);
-      record.createdAt = new Date(previousTimestamp).toISOString();
-      continue;
-    }
-
-    previousTimestamp = currentTimestamp;
-  }
-}
-
 function appendOmittedAttachmentActivity(
   records: ImportedRecord[],
   omittedAttachmentCount: number,
@@ -549,34 +464,6 @@ function appendOmittedAttachmentActivity(
       detail: omittedAttachmentDetail,
     },
     createdAt: activityCreatedAt,
-    sourceIndex,
-  });
-}
-
-function appendParsingWarningActivity(
-  records: ImportedRecord[],
-  warnings: WarningState,
-  sourceIndex: number,
-): void {
-  const createdAt = records.at(-1)?.createdAt;
-  if (warnings.totalCount === 0 || createdAt === undefined) {
-    return;
-  }
-
-  const noun = warnings.totalCount === 1 ? "warning" : "warnings";
-  const summary = `Imported with ${warnings.totalCount} parsing ${noun}`;
-  pushImportedRecord(records, {
-    kind: "activity",
-    tone: "error",
-    activityKind: "task.completed",
-    summary,
-    payload: {
-      summary,
-      detail: materializeWarnings(warnings).join("\n"),
-      importWarningCount: warnings.totalCount,
-      omittedWarningCount: warnings.omittedCount,
-    },
-    createdAt,
     sourceIndex,
   });
 }
@@ -685,6 +572,23 @@ function graphContainsCycle(nodes: ReadonlyMap<string, ParsedClaudeLine>): boole
   return false;
 }
 
+function parentChainReachesUuid(
+  nodes: ReadonlyMap<string, ParsedClaudeLine>,
+  parentUuid: string | null,
+  targetUuid: string,
+): boolean {
+  const visited = new Set<string>();
+  let currentUuid = parentUuid;
+  while (currentUuid !== null && nodes.has(currentUuid) && !visited.has(currentUuid)) {
+    if (currentUuid === targetUuid) {
+      return true;
+    }
+    visited.add(currentUuid);
+    currentUuid = nodes.get(currentUuid)?.parentUuid ?? null;
+  }
+  return false;
+}
+
 function graphChildren(
   nodes: ReadonlyMap<string, ParsedClaudeLine>,
 ): ReadonlyMap<string, ReadonlyArray<string>> {
@@ -718,21 +622,46 @@ function selectClaudeGraphAncestry(
   warnings: WarningState,
 ): ParsedClaudeLine[] | null {
   const nodes = new Map<string, ParsedClaudeLine>();
-  let duplicateCount = 0;
+  const duplicateLines: ParsedClaudeLine[] = [];
   for (const line of sessionLines) {
     if (line.uuid === null) {
       continue;
     }
     if (nodes.has(line.uuid)) {
-      duplicateCount += 1;
+      duplicateLines.push(line);
+      continue;
     }
     nodes.set(line.uuid, line);
   }
-  if (duplicateCount > 0) {
-    const noun = duplicateCount === 1 ? "record" : "records";
+
+  let canonicalizedDuplicateCount = 0;
+  for (const line of duplicateLines) {
+    const uuid = line.uuid;
+    if (uuid === null) {
+      continue;
+    }
+    const previous = nodes.get(uuid);
+    if (previous === undefined) {
+      nodes.set(uuid, line);
+      continue;
+    }
+    const previousHasParentCycle = parentChainReachesUuid(nodes, previous.parentUuid, uuid);
+    nodes.set(uuid, line);
+    if (!previousHasParentCycle && parentChainReachesUuid(nodes, line.parentUuid, uuid)) {
+      nodes.set(uuid, previous);
+      addWarning(
+        warnings,
+        `line ${line.sourceIndex + 1}: ignored later duplicate Claude UUID "${truncate(uuid, summaryLimit)}" because it creates a parent-chain cycle; retained the earlier occurrence`,
+      );
+      continue;
+    }
+    canonicalizedDuplicateCount += 1;
+  }
+  if (canonicalizedDuplicateCount > 0) {
+    const noun = canonicalizedDuplicateCount === 1 ? "record" : "records";
     addWarning(
       warnings,
-      `canonicalized ${duplicateCount} duplicate Claude UUID ${noun} to the last occurrence`,
+      `canonicalized ${canonicalizedDuplicateCount} duplicate Claude UUID ${noun} to the last occurrence`,
     );
   }
   if (nodes.size === 0) {
@@ -846,11 +775,12 @@ function applySessionWideTitle(
     if (line.type !== "ai-title" && line.type !== "custom-title") {
       continue;
     }
-    const title =
+    const title = claudeExplicitTitle(
       asString(line.value.aiTitle) ??
-      asString(line.value.customTitle) ??
-      asString(line.value.title) ??
-      asString(line.value.content);
+        asString(line.value.customTitle) ??
+        asString(line.value.title) ??
+        asString(line.value.content),
+    );
     if (title === null) {
       addWarning(warnings, `line ${line.sourceIndex + 1}: ${line.type} has no title text`);
       continue;
@@ -1064,7 +994,10 @@ export function parseClaudeSession(input: ParseInput): ImportedSession {
   let lastSourceIndex = -1;
   let parsedRecordCount = 0;
 
-  for (const { line: rawLine, sourceIndex } of iteratePhysicalLines(input.content)) {
+  for (const { line: rawLine, sourceIndex } of iterateJsonlPhysicalLines(
+    input.content,
+    maxPhysicalLines,
+  )) {
     lastSourceIndex = sourceIndex;
     if (rawLine.trim().length === 0) {
       continue;
@@ -1081,10 +1014,7 @@ export function parseClaudeSession(input: ParseInput): ImportedSession {
       addWarning(warnings, `line ${sourceIndex + 1}: expected a JSON object`);
       continue;
     }
-    parsedRecordCount += 1;
-    if (parsedRecordCount > maxJsonlRecords) {
-      throw new JsonlParseLimitError("record");
-    }
+    parsedRecordCount = incrementJsonlRecordCount(parsedRecordCount, maxJsonlRecords);
     const line = parsedValue;
     if (line.isSidechain === true) {
       continue;
@@ -1293,6 +1223,14 @@ export function parseClaudeSession(input: ParseInput): ImportedSession {
       continue;
     }
 
+    if (type === "user" && meta.title === null) {
+      const title = claudeSemanticTitle(
+        line.isMeta,
+        Array.isArray(content) ? content.slice(0, maxCollectionItems) : content,
+      );
+      meta.title = title === null ? null : truncate(title, maxMetadataCharacters);
+    }
+
     if (typeof content === "string") {
       const text = content.trim();
       if (type === "user" && text.length > 0) {
@@ -1492,6 +1430,7 @@ export function parseClaudeSession(input: ParseInput): ImportedSession {
     lastOmittedAttachmentAt,
     lastSourceIndex + 1,
   );
-  appendParsingWarningActivity(completedRecords, warnings, lastSourceIndex + 2);
+  appendParsingWarningActivity(completedRecords, warnings, lastSourceIndex + 2, pushImportedRecord);
+  meta.title ??= "Imported session";
   return finalize(meta, completedRecords, warnings, hasMetadata);
 }

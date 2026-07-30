@@ -10,6 +10,7 @@ import { checkpointRefForThreadTurn } from "../../../../apps/server/src/checkpoi
 import * as CheckpointDiffQuery from "../../../../apps/server/src/checkpointing/CheckpointDiffQuery.ts";
 import * as CheckpointStore from "../../../../apps/server/src/checkpointing/CheckpointStore.ts";
 import { CheckpointThreadNotFoundError } from "../../../../apps/server/src/checkpointing/Errors.ts";
+import { makeProjectionSnapshotQueryStub } from "../projectionSnapshotQueryTestHelpers.ts";
 
 function makeThreadCheckpointContext(input: {
   readonly projectId: ProjectId;
@@ -74,41 +75,28 @@ describe("CheckpointDiffQuery.layer", () => {
       const layer = CheckpointDiffQuery.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
-          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-            getCommandReadModel: () =>
-              Effect.die("CheckpointDiffQuery should not request the command read model"),
-            getSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-            getShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the orchestration shell snapshot"),
-            getArchivedShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
-            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-            getProjectShellById: () => Effect.succeed(Option.none()),
-            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-            getThreadCheckpointContext: () =>
-              Effect.sync(() => {
-                getThreadCheckpointContextCalls += 1;
-                return Option.none();
-              }),
-            getFullThreadDiffContext: () =>
-              Effect.sync(() => {
-                getFullThreadDiffContextCalls += 1;
-                return Option.some({
-                  threadId,
-                  projectId,
-                  workspaceRoot: "/tmp/workspace",
-                  worktreePath: "/tmp/worktree",
-                  latestCheckpointTurnCount: 4,
-                  toCheckpointRef,
-                });
-              }),
-            getThreadShellById: () => Effect.succeed(Option.none()),
-            getThreadDetailById: () => Effect.succeed(Option.none()),
-            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          }),
+          Layer.succeed(
+            ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+            makeProjectionSnapshotQueryStub({
+              getThreadCheckpointContext: () =>
+                Effect.sync(() => {
+                  getThreadCheckpointContextCalls += 1;
+                  return Option.none();
+                }),
+              getFullThreadDiffContext: () =>
+                Effect.sync(() => {
+                  getFullThreadDiffContextCalls += 1;
+                  return Option.some({
+                    threadId,
+                    projectId,
+                    workspaceRoot: "/tmp/workspace",
+                    worktreePath: "/tmp/worktree",
+                    latestCheckpointTurnCount: 4,
+                    toCheckpointRef,
+                  });
+                }),
+            }),
+          ),
         ),
       );
 
@@ -182,26 +170,13 @@ describe("CheckpointDiffQuery.layer", () => {
       const layer = CheckpointDiffQuery.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
-          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-            getCommandReadModel: () =>
-              Effect.die("CheckpointDiffQuery should not request the command read model"),
-            getSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-            getShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the orchestration shell snapshot"),
-            getArchivedShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
-            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-            getProjectShellById: () => Effect.succeed(Option.none()),
-            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-            getFullThreadDiffContext: () => Effect.die("unused"),
-            getThreadShellById: () => Effect.succeed(Option.none()),
-            getThreadDetailById: () => Effect.succeed(Option.none()),
-            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          }),
+          Layer.succeed(
+            ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+            makeProjectionSnapshotQueryStub({
+              getThreadCheckpointContext: () =>
+                Effect.succeed(Option.some(threadCheckpointContext)),
+            }),
+          ),
         ),
       );
 
@@ -265,26 +240,13 @@ describe("CheckpointDiffQuery.layer", () => {
       const layer = CheckpointDiffQuery.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
-          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-            getCommandReadModel: () =>
-              Effect.die("CheckpointDiffQuery should not request the command read model"),
-            getSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-            getShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the orchestration shell snapshot"),
-            getArchivedShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
-            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-            getProjectShellById: () => Effect.succeed(Option.none()),
-            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-            getFullThreadDiffContext: () => Effect.die("unused"),
-            getThreadShellById: () => Effect.succeed(Option.none()),
-            getThreadDetailById: () => Effect.succeed(Option.none()),
-            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          }),
+          Layer.succeed(
+            ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+            makeProjectionSnapshotQueryStub({
+              getThreadCheckpointContext: () =>
+                Effect.succeed(Option.some(threadCheckpointContext)),
+            }),
+          ),
         ),
       );
 
@@ -333,26 +295,13 @@ describe("CheckpointDiffQuery.layer", () => {
       const layer = CheckpointDiffQuery.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
-          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-            getCommandReadModel: () =>
-              Effect.die("CheckpointDiffQuery should not request the command read model"),
-            getSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-            getShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the orchestration shell snapshot"),
-            getArchivedShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
-            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-            getProjectShellById: () => Effect.succeed(Option.none()),
-            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-            getThreadCheckpointContext: () => Effect.succeed(Option.some(threadCheckpointContext)),
-            getFullThreadDiffContext: () => Effect.die("unused"),
-            getThreadShellById: () => Effect.succeed(Option.none()),
-            getThreadDetailById: () => Effect.succeed(Option.none()),
-            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          }),
+          Layer.succeed(
+            ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+            makeProjectionSnapshotQueryStub({
+              getThreadCheckpointContext: () =>
+                Effect.succeed(Option.some(threadCheckpointContext)),
+            }),
+          ),
         ),
       );
 
@@ -386,26 +335,12 @@ describe("CheckpointDiffQuery.layer", () => {
       const layer = CheckpointDiffQuery.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
-          Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-            getCommandReadModel: () =>
-              Effect.die("CheckpointDiffQuery should not request the command read model"),
-            getSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the full orchestration snapshot"),
-            getShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request the orchestration shell snapshot"),
-            getArchivedShellSnapshot: () =>
-              Effect.die("CheckpointDiffQuery should not request archived shell snapshots"),
-            getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 0 }),
-            getCounts: () => Effect.succeed({ projectCount: 0, threadCount: 0 }),
-            getActiveProjectByWorkspaceRoot: () => Effect.succeed(Option.none()),
-            getProjectShellById: () => Effect.succeed(Option.none()),
-            getFirstActiveThreadIdByProjectId: () => Effect.succeed(Option.none()),
-            getThreadCheckpointContext: () => Effect.succeed(Option.none()),
-            getFullThreadDiffContext: () => Effect.succeed(Option.none()),
-            getThreadShellById: () => Effect.succeed(Option.none()),
-            getThreadDetailById: () => Effect.succeed(Option.none()),
-            getThreadDetailSnapshot: () => Effect.succeed(Option.none()),
-          }),
+          Layer.succeed(
+            ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+            makeProjectionSnapshotQueryStub({
+              getThreadCheckpointContext: () => Effect.succeed(Option.none()),
+            }),
+          ),
         ),
       );
 

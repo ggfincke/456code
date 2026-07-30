@@ -52,6 +52,17 @@ type ReactorInput =
       readonly event: OrchestrationEvent;
     };
 
+type ThreadMessageSentEvent = Extract<OrchestrationEvent, { type: "thread.message-sent" }>;
+
+function isCheckpointBaselineMessage(event: ThreadMessageSentEvent): boolean {
+  return (
+    event.payload.provenance !== "import" &&
+    event.payload.role === "user" &&
+    !event.payload.streaming &&
+    event.payload.turnId === null
+  );
+}
+
 function toTurnId(value: string | undefined): TurnId | null {
   return value === undefined ? null : TurnId.make(String(value));
 }
@@ -710,14 +721,8 @@ const make = Effect.gen(function* () {
       { type: "thread.turn-start-requested" | "thread.message-sent" }
     >,
   ) {
-    if (event.type === "thread.message-sent") {
-      if (
-        event.payload.role !== "user" ||
-        event.payload.streaming ||
-        event.payload.turnId !== null
-      ) {
-        return;
-      }
+    if (event.type === "thread.message-sent" && !isCheckpointBaselineMessage(event)) {
+      return;
     }
 
     const threadId = event.payload.threadId;
@@ -1020,6 +1025,9 @@ const make = Effect.gen(function* () {
   const start: CheckpointReactorShape["start"] = Effect.fn("start")(function* () {
     yield* Effect.forkScoped(
       Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) => {
+        if (event.type === "thread.message-sent" && !isCheckpointBaselineMessage(event)) {
+          return Effect.void;
+        }
         if (
           event.type !== "thread.turn-start-requested" &&
           event.type !== "thread.message-sent" &&

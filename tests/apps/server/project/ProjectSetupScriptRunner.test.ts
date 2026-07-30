@@ -8,6 +8,7 @@ import * as Schema from "effect/Schema";
 import * as ProjectionSnapshotQuery from "../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as TerminalManager from "../../../../apps/server/src/terminal/Manager.ts";
 import * as ProjectSetupScriptRunner from "../../../../apps/server/src/project/ProjectSetupScriptRunner.ts";
+import { makeProjectionSnapshotQueryStub } from "../projectionSnapshotQueryTestHelpers.ts";
 
 const isProjectSetupScriptOperationError = Schema.is(
   ProjectSetupScriptRunner.ProjectSetupScriptOperationError,
@@ -25,26 +26,17 @@ const makeProject = (scripts: OrchestrationProject["scripts"]): OrchestrationPro
 });
 
 const makeProjectionSnapshotQueryLayer = (project: OrchestrationProject) =>
-  Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, {
-    getCommandReadModel: () => Effect.die("unused"),
-    getSnapshot: () => Effect.die("unused"),
-    getShellSnapshot: () => Effect.die("unused"),
-    getArchivedShellSnapshot: () => Effect.die("unused"),
-    getSnapshotSequence: () => Effect.succeed({ snapshotSequence: 1 }),
-    getCounts: () => Effect.die("unused"),
-    getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
-      Effect.succeed(
-        workspaceRoot === project.workspaceRoot ? Option.some(project) : Option.none(),
-      ),
-    getProjectShellById: (projectId) =>
-      Effect.succeed(projectId === project.id ? Option.some(project) : Option.none()),
-    getFirstActiveThreadIdByProjectId: () => Effect.die("unused"),
-    getThreadCheckpointContext: () => Effect.die("unused"),
-    getFullThreadDiffContext: () => Effect.die("unused"),
-    getThreadShellById: () => Effect.die("unused"),
-    getThreadDetailById: () => Effect.die("unused"),
-    getThreadDetailSnapshot: () => Effect.die("unused"),
-  });
+  Layer.succeed(
+    ProjectionSnapshotQuery.ProjectionSnapshotQuery,
+    makeProjectionSnapshotQueryStub({
+      getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
+        Effect.succeed(
+          workspaceRoot === project.workspaceRoot ? Option.some(project) : Option.none(),
+        ),
+      getProjectShellById: (projectId) =>
+        Effect.succeed(projectId === project.id ? Option.some(project) : Option.none()),
+    }),
+  );
 
 const makeTerminalManagerLayer = (
   overrides: Pick<TerminalManager.TerminalManager["Service"], "open" | "write">,
