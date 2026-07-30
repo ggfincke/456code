@@ -312,6 +312,184 @@ describe("orchestration projector", () => {
     }),
   );
 
+  it.effect("compacts finalized imported history while retaining command state", () =>
+    Effect.gen(function* () {
+      const importedAt = "2026-01-01T00:00:00.000Z";
+      const threadId = "thread-finalized-import";
+      let model = yield* projectEvent(
+        createEmptyReadModel(importedAt),
+        makeEvent({
+          sequence: 1,
+          type: "thread.created",
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: importedAt,
+          commandId: "cmd-thread-finalized-import",
+          payload: {
+            threadId,
+            projectId: "project-1",
+            title: "Imported timeline",
+            modelSelection: {
+              provider: ProviderDriverKind.make("codex"),
+              model: "gpt-5-codex",
+            },
+            runtimeMode: "approval-required",
+            interactionMode: "default",
+            branch: null,
+            worktreePath: null,
+            origin: {
+              kind: "imported",
+              source: "codex-cli",
+              sourcePath: "/tmp/import.jsonl",
+              contentHash: "import-hash",
+              nativeSessionId: "native-import",
+              providerInstanceId: "codex",
+              importedAt,
+            },
+            createdAt: importedAt,
+            updatedAt: importedAt,
+          },
+        }),
+      );
+
+      const importedEvents = [
+        makeEvent({
+          sequence: 2,
+          type: "thread.message-sent",
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-01-01T00:00:01.000Z",
+          commandId: "cmd-imported-message",
+          payload: {
+            threadId,
+            messageId: "imported-message",
+            role: "user",
+            text: "Historical prompt",
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-01-01T00:00:01.000Z",
+            updatedAt: "2026-01-01T00:00:01.000Z",
+          },
+        }),
+        makeEvent({
+          sequence: 3,
+          type: "thread.activity-appended",
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-01-01T00:00:02.000Z",
+          commandId: "cmd-imported-activity",
+          payload: {
+            threadId,
+            activity: {
+              id: "imported-tool",
+              tone: "info",
+              kind: "tool.completed",
+              summary: "Historical tool result",
+              payload: { output: "large imported body" },
+              turnId: null,
+              sequence: 1,
+              createdAt: "2026-01-01T00:00:02.000Z",
+            },
+          },
+        }),
+        makeEvent({
+          sequence: 4,
+          type: "thread.activity-appended",
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-01-01T00:00:03.000Z",
+          commandId: "cmd-imported-approval",
+          payload: {
+            threadId,
+            activity: {
+              id: "imported-approval",
+              tone: "approval",
+              kind: "approval.requested",
+              summary: "Approval requested",
+              payload: { requestId: "approval-imported" },
+              turnId: null,
+              sequence: 2,
+              createdAt: "2026-01-01T00:00:03.000Z",
+            },
+          },
+        }),
+      ];
+      for (const event of importedEvents) {
+        model = yield* projectEvent(model, event);
+      }
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 5,
+          type: "thread.activity-appended",
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-01-01T00:00:04.000Z",
+          commandId: "cmd-import-finalized",
+          payload: {
+            threadId,
+            activity: {
+              id: "import-continuation-marker",
+              tone: "info",
+              kind: "task.completed",
+              summary: "Native codex continuation verified",
+              payload: {
+                type: "import.continuation",
+                driverKind: "codex",
+                continuation: {
+                  state: "verified",
+                  providerInstanceId: "codex",
+                  continuationIdentity: {
+                    driverKind: "codex",
+                    continuationKey: "codex:native-import",
+                  },
+                  reason: null,
+                },
+              },
+              turnId: null,
+              sequence: 3,
+              createdAt: "2026-01-01T00:00:04.000Z",
+            },
+          },
+        }),
+      );
+
+      const finalizedThread = model.threads[0];
+      expect(finalizedThread?.messages).toEqual([]);
+      expect(finalizedThread?.checkpoints).toEqual([]);
+      expect(finalizedThread?.activities.map((activity) => activity.id)).toEqual([
+        "imported-approval",
+        "import-continuation-marker",
+      ]);
+      expect(finalizedThread?.origin?.contentHash).toBe("import-hash");
+      expect(model.snapshotSequence).toBe(5);
+
+      const continued = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 6,
+          type: "thread.message-sent",
+          aggregateKind: "thread",
+          aggregateId: threadId,
+          occurredAt: "2026-01-01T00:00:05.000Z",
+          commandId: "cmd-live-message",
+          payload: {
+            threadId,
+            messageId: "live-message",
+            role: "user",
+            text: "Continue this session",
+            turnId: null,
+            streaming: false,
+            createdAt: "2026-01-01T00:00:05.000Z",
+            updatedAt: "2026-01-01T00:00:05.000Z",
+          },
+        }),
+      );
+      expect(continued.threads[0]?.messages.map((message) => message.id)).toEqual(["live-message"]);
+    }),
+  );
+
   it("fails when event payload cannot be decoded by runtime schema", async () => {
     const now = "2026-01-01T00:00:00.000Z";
     const model = createEmptyReadModel(now);

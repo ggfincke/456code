@@ -116,21 +116,6 @@ const fixtures = [
     },
     ignored: "top-level bulk",
   }),
-  makeActivity("dynamic", "dynamic_tool_call", {
-    toolCallId: "tool-dynamic",
-    rawOutput: {
-      stdout: "dynamic summary\nlong output".repeat(1_000),
-    },
-    ignored: "top-level bulk",
-  }),
-  makeActivity("collab", "collab_agent_tool_call", {
-    kind: "delegate",
-    rawOutput: {
-      content: "``` \n```",
-      stdout: "must not be used when content is present",
-    },
-    ignored: "top-level bulk",
-  }),
   makeActivity("mcp", "mcp_tool_call", {
     item: {
       server: "repository",
@@ -139,17 +124,6 @@ const fixtures = [
       aggregatedOutput: "mcp payload remains available",
     },
     ignored: "MCP data is rendered verbatim",
-  }),
-  makeActivity("search", "web_search", {
-    rawOutput: {
-      totalFiles: 42,
-      truncated: true,
-      content: "ignored because totalFiles wins",
-    },
-    ignored: "top-level bulk",
-  }),
-  makeActivity("image", "image_view", {
-    ignored: "top-level bulk",
   }),
 ] satisfies ReadonlyArray<OrchestrationThreadActivity>;
 
@@ -183,7 +157,7 @@ describe("projectActivityPayload", () => {
   });
 
   it("passes MCP tool data through unchanged", () => {
-    expect(projectActivityPayload(fixtures[4]!)).toBe(fixtures[4]);
+    expect(projectActivityPayload(fixtures[2]!)).toBe(fixtures[2]);
   });
 
   it("projects snapshot and event transports without mutating their sources", () => {

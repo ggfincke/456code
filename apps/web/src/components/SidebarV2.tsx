@@ -1,7 +1,7 @@
 // apps/web/src/components/SidebarV2.tsx
 // renders project-grouped thread navigation and lifecycle shelves
-import { autoAnimate } from "@formkit/auto-animate";
 import { useAtomValue } from "@effect/atom-react";
+import { LegendList, type LegendListRef } from "@legendapp/list/react";
 import {
   canSnooze,
   effectiveSettled,
@@ -28,7 +28,6 @@ import {
   FolderIcon,
   FolderPlusIcon,
   GitBranchIcon,
-  ImportIcon,
   EllipsisIcon,
   MessageSquareIcon,
   PlusIcon,
@@ -47,7 +46,6 @@ import {
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
-  type ReactNode,
 } from "react";
 import { useParams, useRouter } from "@tanstack/react-router";
 
@@ -163,11 +161,86 @@ import { useComposerDraftStore } from "../composerDraftStore";
 // stays behind an explicit Show more.
 const SETTLED_TAIL_INITIAL_COUNT = 10;
 const SETTLED_TAIL_PAGE_COUNT = 25;
+const SIDEBAR_V2_LIST_CONTENT_STYLE = { gap: 1 };
+const SIDEBAR_V2_MAINTAIN_VISIBLE_CONTENT_POSITION = { data: true, size: false };
+type SidebarV2ThreadSection = "active" | "imported" | "snoozed" | "settled";
+type SidebarV2Shelf = Exclude<SidebarV2ThreadSection, "active">;
+
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: "Group by repository",
   repository_path: "Group by repository path",
   separate: "Keep separate",
 };
+
+function importedThreadListKey(thread: EnvironmentThreadShell): string {
+  return scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+}
+
+function SidebarV2ShelfHeader(props: {
+  shelf: SidebarV2Shelf;
+  count: number;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const isImported = props.shelf === "imported";
+  const isSnoozed = props.shelf === "snoozed";
+  const label =
+    isImported || !props.expanded
+      ? `${isImported ? "Imported" : isSnoozed ? "Snoozed" : "Settled"} (${props.count})`
+      : isSnoozed
+        ? "Snoozed"
+        : "Settled";
+
+  return (
+    <div role="listitem" data-thread-selection-safe className="list-none">
+      <button
+        type="button"
+        onClick={props.onToggle}
+        aria-expanded={props.expanded}
+        data-testid={`sidebar-v2-${props.shelf}-shelf-toggle`}
+        className={cn(
+          "mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left",
+          isImported && "min-h-11 py-2",
+        )}
+      >
+        <span
+          className={cn(
+            "text-xs font-medium",
+            isImported
+              ? "min-w-0 wrap-break-word text-muted-foreground/60"
+              : isSnoozed
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-muted-foreground/50",
+          )}
+        >
+          {label}
+        </span>
+        <span
+          className={cn(
+            "h-px flex-1",
+            isImported
+              ? "bg-sidebar-border/60"
+              : isSnoozed
+                ? "bg-blue-500/20 dark:bg-blue-400/15"
+                : "bg-sidebar-border/60",
+          )}
+        />
+        <ChevronDownIcon
+          aria-hidden
+          className={cn(
+            "size-3 transition-transform motion-reduce:transition-none",
+            isImported
+              ? "text-muted-foreground/60"
+              : isSnoozed
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-muted-foreground/50",
+            props.expanded && "rotate-180",
+          )}
+        />
+      </button>
+    </div>
+  );
+}
 
 function compactSidebarTimeLabel(label: string): string {
   if (label === "just now") return "now";
@@ -412,7 +485,9 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   onUnsettle: (threadRef: ScopedThreadRef) => void;
   onSnooze: (threadRef: ScopedThreadRef, preset: SnoozePreset) => void;
   onUnsnooze: (threadRef: ScopedThreadRef) => void;
-  onChangeRequestState: (threadKey: string, state: "open" | "closed" | "merged" | null) => void;
+  onChangeRequestState:
+    | ((threadKey: string, state: "open" | "closed" | "merged" | null) => void)
+    | null;
 }) {
   const {
     isRenaming,
@@ -529,11 +604,11 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   });
   const prStatus = prStatusIndicator(pr, gitStatus.data?.sourceControlProvider);
   const settledPrHoverClass = pr ? settledPrHoverColorClass(pr.state) : undefined;
-  // Report the PR state up: the parent partitions rows with effectiveSettled,
-  // and a merged/closed PR auto-settles a thread — data only rows have.
+  // non-imported rows report PR state so merged/closed work can auto-settle;
+  // imported rows keep the badge local because their shelf ignores this map
   const prState = pr?.state ?? null;
   useEffect(() => {
-    onChangeRequestState(threadKey, prState);
+    onChangeRequestState?.(threadKey, prState);
   }, [onChangeRequestState, prState, threadKey]);
 
   const modelInstanceId = thread.session?.providerInstanceId ?? thread.modelSelection.instanceId;
@@ -545,6 +620,24 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   const modelLabel = selectedModel
     ? getTriggerDisplayModelLabel(selectedModel)
     : thread.modelSelection.model;
+  const importedSource =
+    thread.origin === null
+      ? null
+      : {
+          displayName: importSourceDisplayName(thread.origin.source),
+          driverKind: importSourceDriverKind(thread.origin.source),
+        };
+  const importedSourceLabel =
+    importedSource === null ? null : (
+      <span className="inline-flex min-w-0 items-center gap-1">
+        <ProviderInstanceIcon
+          driverKind={importedSource.driverKind}
+          displayName={importedSource.displayName}
+          iconClassName="size-3"
+        />
+        <span className="truncate">Imported · {importedSource.displayName}</span>
+      </span>
+    );
 
   const isRemote =
     props.currentEnvironmentId !== null && thread.environmentId !== props.currentEnvironmentId;
@@ -757,10 +850,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
 
   if (variant === "slim") {
     return (
-      <li
-        data-thread-item
-        className="list-none [content-visibility:auto] [contain-intrinsic-size:auto_34px]"
-      >
+      <div role="listitem" data-thread-item className="list-none">
         <Tooltip>
           <TooltipTrigger
             render={
@@ -768,7 +858,12 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 role="button"
                 tabIndex={0}
                 data-testid="sidebar-v2-row-slim"
-                className={cn(rowSurfaceClassName, "flex h-9 items-center gap-2.5 px-2.5")}
+                className={cn(
+                  rowSurfaceClassName,
+                  importedSource
+                    ? "flex min-h-12 items-center gap-2.5 px-2.5 py-1.5"
+                    : "flex h-9 items-center gap-2.5 px-2.5",
+                )}
                 onClick={handleClick}
                 onDoubleClick={handleDoubleClick}
                 onKeyDown={handleKeyDown}
@@ -792,7 +887,16 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
                 fallbackIcon={MessageSquareIcon}
               />
             </span>
-            {title}
+            {importedSource ? (
+              <div className="min-w-0 flex-1">
+                <div className="flex min-w-0">{title}</div>
+                <div className="mt-0.5 flex min-w-0 items-center text-[11px] leading-4 text-muted-foreground/65">
+                  {importedSourceLabel}
+                </div>
+              </div>
+            ) : (
+              title
+            )}
             {/* The PR badge stays outside the hover-fading slot: it must
               remain visible AND clickable while the row is hovered. Only
               the time/jump label yields to the settle affordance. */}
@@ -860,17 +964,14 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
           </TooltipTrigger>
           {detailsTooltip}
         </Tooltip>
-      </li>
+      </div>
     );
   }
 
   const diff = latestTurnDiff(thread);
 
   return (
-    <li
-      data-thread-item
-      className="list-none py-0.5 [content-visibility:auto] [contain-intrinsic-size:auto_96px]"
-    >
+    <div role="listitem" data-thread-item className="list-none py-0.5">
       <Tooltip>
         <TooltipTrigger
           render={
@@ -971,11 +1072,19 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
             </div>
             <div className="mt-1 flex min-w-0">{title}</div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground/75">
-              {thread.branch ? (
-                <span className="min-w-0 flex-1 truncate whitespace-nowrap">{thread.branch}</span>
-              ) : (
-                <span className="flex-1" />
-              )}
+              <span className="flex min-w-0 flex-1 items-center gap-1.5">
+                {importedSourceLabel}
+                {importedSourceLabel && thread.branch ? (
+                  <span aria-hidden className="shrink-0 text-muted-foreground/35">
+                    ·
+                  </span>
+                ) : null}
+                {thread.branch ? (
+                  <span className="min-w-0 truncate whitespace-nowrap">{thread.branch}</span>
+                ) : importedSourceLabel ? null : (
+                  <span className="flex-1" />
+                )}
+              </span>
               {prBadge}
               {diff ? (
                 <span className="shrink-0 font-mono">
@@ -1008,7 +1117,7 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
         </TooltipTrigger>
         {detailsTooltip}
       </Tooltip>
-    </li>
+    </div>
   );
 });
 
@@ -2239,10 +2348,231 @@ export default function SidebarV2() {
     setShowJumpHints(shouldShowJumpHintsNow);
   }, [shouldShowJumpHintsNow]);
 
-  const attachListAutoAnimateRef = useCallback((node: HTMLUListElement | null) => {
-    if (!node) return;
-    autoAnimate(node, { duration: 150, easing: "ease-out" });
-  }, []);
+  // LegendList owns the imported shelf's scroll viewport. Active and lifecycle
+  // rows stay in its static header/footer so their PR subscriptions remain
+  // mounted while only imported history is windowed.
+  const renderThreadRow = useCallback(
+    (thread: EnvironmentThreadShell, section: SidebarV2ThreadSection) => {
+      const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id));
+      const isCard = section === "active";
+      const rowVariant = isCard ? "card" : "slim";
+      return (
+        <SidebarV2Row
+          key={`${threadKey}:${rowVariant}`}
+          thread={thread}
+          variant={rowVariant}
+          variantAction={
+            section === "imported"
+              ? "none"
+              : section === "snoozed"
+                ? "unsnooze"
+                : section === "settled"
+                  ? "unsettle"
+                  : "settle"
+          }
+          settlementSupported={
+            serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSettlement ===
+            true
+          }
+          snoozeSupported={
+            serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true
+          }
+          snoozeWakeLabelText={
+            section === "snoozed" && thread.snoozedUntil != null
+              ? snoozeWakeLabel(thread.snoozedUntil, new Date())
+              : null
+          }
+          wokeAt={threadWokeAt(thread, { now: snoozeNow })}
+          isActive={routeThreadKey === threadKey}
+          jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
+          currentEnvironmentId={primaryEnvironmentId}
+          environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
+          projectCwd={projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null}
+          projectTitle={
+            projectDisplayNameByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
+          }
+          providerEntryByInstanceId={providerEntryByInstanceId}
+          onThreadClick={handleThreadClick}
+          onThreadActivate={navigateToThread}
+          onStartRename={startThreadRename}
+          onRenameTitleChange={setRenamingTitle}
+          onCommitRename={commitThreadRename}
+          onCancelRename={cancelThreadRename}
+          isRenaming={renamingThreadKey === threadKey}
+          renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
+          onContextMenu={handleThreadContextMenu}
+          onSettle={attemptSettle}
+          onUnsettle={attemptUnsettle}
+          onSnooze={attemptSnooze}
+          onUnsnooze={attemptUnsnooze}
+          onChangeRequestState={section === "imported" ? null : handleChangeRequestState}
+        />
+      );
+    },
+    [
+      attemptSettle,
+      attemptSnooze,
+      attemptUnsettle,
+      attemptUnsnooze,
+      cancelThreadRename,
+      commitThreadRename,
+      environmentLabelById,
+      handleChangeRequestState,
+      handleThreadClick,
+      handleThreadContextMenu,
+      jumpLabelByKey,
+      navigateToThread,
+      primaryEnvironmentId,
+      projectCwdByKey,
+      projectDisplayNameByKey,
+      providerEntryByInstanceId,
+      renamingThreadKey,
+      renamingTitle,
+      routeThreadKey,
+      serverConfigs,
+      setRenamingTitle,
+      showJumpHints,
+      snoozeNow,
+      startThreadRename,
+    ],
+  );
+  const renderImportedThread = useCallback(
+    ({ item }: { item: EnvironmentThreadShell }) => renderThreadRow(item, "imported"),
+    [renderThreadRow],
+  );
+  const sidebarListHeader = useMemo(
+    () => (
+      <div role="presentation" className="flex flex-col gap-px">
+        {activeThreads.map((thread) => renderThreadRow(thread, "active"))}
+        {importedThreads.length > 0 ? (
+          <SidebarV2ShelfHeader
+            shelf="imported"
+            count={importedThreads.length}
+            expanded={importedShelfExpanded}
+            onToggle={toggleImportedShelf}
+          />
+        ) : null}
+      </div>
+    ),
+    [
+      activeThreads,
+      importedShelfExpanded,
+      importedThreads.length,
+      renderThreadRow,
+      toggleImportedShelf,
+    ],
+  );
+  const sidebarListFooter = useMemo(
+    () => (
+      <div role="presentation" className="flex flex-col gap-px">
+        {snoozedThreads.length > 0 ? (
+          <SidebarV2ShelfHeader
+            shelf="snoozed"
+            count={snoozedThreads.length}
+            expanded={snoozedShelfExpanded}
+            onToggle={toggleSnoozedShelf}
+          />
+        ) : null}
+        {visibleSnoozedThreads.map((thread) => renderThreadRow(thread, "snoozed"))}
+        {settledThreads.length > 0 ? (
+          <SidebarV2ShelfHeader
+            shelf="settled"
+            count={settledThreads.length}
+            expanded={settledShelfExpanded}
+            onToggle={toggleSettledShelf}
+          />
+        ) : null}
+        {renderedSettledThreads.map((thread) => renderThreadRow(thread, "settled"))}
+        {settledShelfExpanded && hiddenSettledCount > 0 ? (
+          <div role="listitem" className="list-none">
+            <button
+              type="button"
+              onClick={showMoreSettled}
+              className="mt-1 flex h-[30px] w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border font-mono text-[11px] text-muted-foreground transition-colors hover:border-solid hover:border-input hover:bg-background/45 hover:text-foreground dark:border-white/15 dark:hover:border-white/30 dark:hover:bg-transparent"
+            >
+              Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
+              <span className="text-muted-foreground/50">
+                ({hiddenSettledCount} settled hidden)
+              </span>
+            </button>
+          </div>
+        ) : null}
+        {activeThreads.length +
+          importedThreads.length +
+          snoozedThreads.length +
+          settledThreads.length ===
+        0 ? (
+          <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
+            {projects.length === 0 ? (
+              <>
+                <span>No projects yet</span>
+                <button
+                  type="button"
+                  onClick={openAddProjectCommandPalette}
+                  className="inline-flex items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                >
+                  <PlusIcon className="size-3" />
+                  Add project
+                </button>
+              </>
+            ) : scopedProjectGroup ? (
+              `No threads in ${scopedProjectGroup.displayName} yet`
+            ) : (
+              "No threads yet"
+            )}
+          </div>
+        ) : null}
+      </div>
+    ),
+    [
+      activeThreads,
+      hiddenSettledCount,
+      importedThreads.length,
+      openAddProjectCommandPalette,
+      projects.length,
+      renderedSettledThreads,
+      renderThreadRow,
+      scopedProjectGroup,
+      settledShelfExpanded,
+      settledThreads.length,
+      showMoreSettled,
+      snoozedShelfExpanded,
+      snoozedThreads.length,
+      toggleSettledShelf,
+      toggleSnoozedShelf,
+      visibleSnoozedThreads,
+    ],
+  );
+  const sidebarListRef = useRef<LegendListRef | null>(null);
+  const lastImportedRouteScrollRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!importedShelfExpanded) {
+      lastImportedRouteScrollRef.current = null;
+      return;
+    }
+    if (routeThreadKey === null) {
+      lastImportedRouteScrollRef.current = null;
+      return;
+    }
+    const routeScrollKey = `${projectScopeKey ?? "all"}:${routeThreadKey}`;
+    if (lastImportedRouteScrollRef.current === routeScrollKey) return;
+    const routeIndex = visibleImportedThreads.findIndex(
+      (thread) => importedThreadListKey(thread) === routeThreadKey,
+    );
+    if (routeIndex < 0) {
+      lastImportedRouteScrollRef.current = null;
+      return;
+    }
+    lastImportedRouteScrollRef.current = routeScrollKey;
+    const list = sidebarListRef.current;
+    if (list === null) return;
+    const { start, end } = list.getState();
+    if (routeIndex >= start && routeIndex <= end) return;
+    void list.scrollIndexIntoView({
+      index: routeIndex,
+      animated: false,
+    });
+  }, [importedShelfExpanded, projectScopeKey, routeThreadKey, visibleImportedThreads]);
 
   // New thread defaults to the project you're in (active thread's project,
   // falling back to the top project) — same resolution the command palette
@@ -2273,7 +2603,7 @@ export default function SidebarV2() {
   return (
     <>
       <SidebarChromeHeader isElectron={isElectron} />
-      <SidebarContent className="gap-0">
+      <SidebarContent className="h-full min-h-0 gap-0">
         <SidebarGroup className="px-2 pb-2 pt-3">
           <div className="flex items-center gap-1">
             <div className="min-w-0 flex-1">
@@ -2417,236 +2747,34 @@ export default function SidebarV2() {
             </div>
           </SidebarGroup>
         ) : null}
-        <SidebarGroup className="min-h-0 flex-1 overflow-y-auto px-2 py-1 [scrollbar-gutter:stable]">
+        <SidebarGroup className="min-h-0 flex-1 overflow-hidden px-2 py-1">
           <TooltipProvider
             key="sidebar-thread-tooltips-150"
             delay={150}
             closeDelay={0}
             timeout={400}
           >
-            <ul ref={attachListAutoAnimateRef} role="list" className="flex flex-col gap-px">
-              {(() => {
-                const renderThreadRow = (
-                  thread: EnvironmentThreadShell,
-                  section: "active" | "imported" | "snoozed" | "settled",
-                ) => {
-                  const threadKey = scopedThreadKey(
-                    scopeThreadRef(thread.environmentId, thread.id),
-                  );
-                  // shelved rows collapse to the slim variant; active work
-                  // stays a full card
-                  const isCard = section === "active";
-                  const rowVariant = isCard ? "card" : "slim";
-                  return (
-                    <SidebarV2Row
-                      // Keyed per variant on purpose: when a thread settles,
-                      // the card fades out in place and the slim row fades
-                      // in at its settled position instead of one element
-                      // FLIP-sliding through every row in between (rows here
-                      // are translucent, so a crossing row reads as text
-                      // painted over text).
-                      key={`${threadKey}:${rowVariant}`}
-                      thread={thread}
-                      variant={rowVariant}
-                      // Snoozed rows wake; settled rows un-settle (explicit
-                      // settles clear the override, auto-settled rows get
-                      // pinned active); cards settle.
-                      variantAction={
-                        section === "imported"
-                          ? "none"
-                          : section === "snoozed"
-                            ? "unsnooze"
-                            : section === "settled"
-                              ? "unsettle"
-                              : "settle"
-                      }
-                      settlementSupported={
-                        serverConfigs.get(thread.environmentId)?.environment.capabilities
-                          .threadSettlement === true
-                      }
-                      snoozeSupported={
-                        serverConfigs.get(thread.environmentId)?.environment.capabilities
-                          .threadSnooze === true
-                      }
-                      snoozeWakeLabelText={
-                        section === "snoozed" && thread.snoozedUntil != null
-                          ? snoozeWakeLabel(thread.snoozedUntil, new Date())
-                          : null
-                      }
-                      // All sections: a woken thread can classify straight
-                      // into the settled tail (PR merged while snoozed), and
-                      // the wake signal must survive the trip. Still-snoozed
-                      // rows resolve to null on their own.
-                      wokeAt={threadWokeAt(thread, { now: snoozeNow })}
-                      isActive={routeThreadKey === threadKey}
-                      jumpLabel={showJumpHints ? (jumpLabelByKey.get(threadKey) ?? null) : null}
-                      currentEnvironmentId={primaryEnvironmentId}
-                      environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
-                      projectCwd={
-                        projectCwdByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
-                      }
-                      projectTitle={
-                        projectDisplayNameByKey.get(
-                          `${thread.environmentId}:${thread.projectId}`,
-                        ) ?? null
-                      }
-                      providerEntryByInstanceId={providerEntryByInstanceId}
-                      onThreadClick={handleThreadClick}
-                      onThreadActivate={navigateToThread}
-                      onStartRename={startThreadRename}
-                      onRenameTitleChange={setRenamingTitle}
-                      onCommitRename={commitThreadRename}
-                      onCancelRename={cancelThreadRename}
-                      isRenaming={renamingThreadKey === threadKey}
-                      renamingTitle={renamingThreadKey === threadKey ? renamingTitle : ""}
-                      onContextMenu={handleThreadContextMenu}
-                      onSettle={attemptSettle}
-                      onUnsettle={attemptUnsettle}
-                      onSnooze={attemptSnooze}
-                      onUnsnooze={attemptUnsnooze}
-                      onChangeRequestState={handleChangeRequestState}
-                    />
-                  );
-                };
-                const items: ReactNode[] = activeThreads.map((thread) =>
-                  renderThreadRow(thread, "active"),
-                );
-                if (importedThreads.length > 0) {
-                  items.push(
-                    <li
-                      key="imported-shelf-header"
-                      data-thread-selection-safe
-                      className="list-none"
-                    >
-                      <button
-                        type="button"
-                        onClick={toggleImportedShelf}
-                        aria-expanded={importedShelfExpanded}
-                        data-testid="sidebar-v2-imported-shelf-toggle"
-                        className="mb-1 mt-3 flex min-h-11 w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left"
-                      >
-                        <span className="min-w-0 wrap-break-word text-xs font-medium text-muted-foreground/60">
-                          Imported ({importedThreads.length})
-                        </span>
-                        <span className="h-px flex-1 bg-sidebar-border/60" />
-                        <ChevronDownIcon
-                          aria-hidden
-                          className={cn(
-                            "size-3 text-muted-foreground/60 transition-transform motion-reduce:transition-none",
-                            importedShelfExpanded && "rotate-180",
-                          )}
-                        />
-                      </button>
-                    </li>,
-                  );
-                  for (const thread of visibleImportedThreads) {
-                    items.push(renderThreadRow(thread, "imported"));
-                  }
-                }
-                // Snoozed shelf: between the inbox and Settled — out of the
-                // way, never gone. The header always renders while anything
-                // is snoozed (the count is the whole footprint when
-                // collapsed); rows only when expanded. Vanishes entirely at
-                // count 0.
-                if (snoozedThreads.length > 0) {
-                  items.push(
-                    <li key="snoozed-shelf-header" data-thread-selection-safe className="list-none">
-                      <button
-                        type="button"
-                        onClick={toggleSnoozedShelf}
-                        aria-expanded={snoozedShelfExpanded}
-                        data-testid="sidebar-v2-snoozed-shelf-toggle"
-                        className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
-                      >
-                        <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                          {snoozedShelfExpanded ? "Snoozed" : `Snoozed (${snoozedThreads.length})`}
-                        </span>
-                        <span className="h-px flex-1 bg-blue-500/20 dark:bg-blue-400/15" />
-                        <ChevronDownIcon
-                          aria-hidden
-                          className={cn(
-                            "size-3 text-blue-600 transition-transform dark:text-blue-400",
-                            snoozedShelfExpanded && "rotate-180",
-                          )}
-                        />
-                      </button>
-                    </li>,
-                  );
-                  for (const thread of visibleSnoozedThreads) {
-                    items.push(renderThreadRow(thread, "snoozed"));
-                  }
-                }
-                if (settledThreads.length > 0) {
-                  items.push(
-                    <li key="settled-shelf-header" data-thread-selection-safe className="list-none">
-                      <button
-                        type="button"
-                        onClick={toggleSettledShelf}
-                        aria-expanded={settledShelfExpanded}
-                        data-testid="sidebar-v2-settled-shelf-toggle"
-                        className="mb-1 mt-3 flex w-full cursor-pointer items-center gap-2 px-2.5 text-left"
-                      >
-                        <span className="text-xs font-medium text-muted-foreground/50">
-                          {settledShelfExpanded ? "Settled" : `Settled (${settledThreads.length})`}
-                        </span>
-                        <span className="h-px flex-1 bg-sidebar-border/60" />
-                        <ChevronDownIcon
-                          aria-hidden
-                          className={cn(
-                            "size-3 text-muted-foreground/50 transition-transform",
-                            settledShelfExpanded && "rotate-180",
-                          )}
-                        />
-                      </button>
-                    </li>,
-                  );
-                }
-                for (const thread of renderedSettledThreads) {
-                  items.push(renderThreadRow(thread, "settled"));
-                }
-                return items;
-              })()}
-              {settledShelfExpanded && hiddenSettledCount > 0 ? (
-                <li className="list-none">
-                  <button
-                    type="button"
-                    onClick={showMoreSettled}
-                    className="mt-1 flex h-[30px] w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border font-mono text-[11px] text-muted-foreground transition-colors hover:border-solid hover:border-input hover:bg-background/45 hover:text-foreground dark:border-white/15 dark:hover:border-white/30 dark:hover:bg-transparent"
-                  >
-                    Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-                    <span className="text-muted-foreground/50">
-                      ({hiddenSettledCount} settled hidden)
-                    </span>
-                  </button>
-                </li>
-              ) : null}
-            </ul>
+            <LegendList<EnvironmentThreadShell>
+              ref={sidebarListRef}
+              data={visibleImportedThreads}
+              keyExtractor={importedThreadListKey}
+              renderItem={renderImportedThread}
+              extraData={renderThreadRow}
+              estimatedItemSize={48}
+              estimatedHeaderSize={
+                activeThreads.length * 83 + (importedThreads.length > 0 ? 60 : 0)
+              }
+              drawDistance={480}
+              recycleItems={false}
+              maintainVisibleContentPosition={SIDEBAR_V2_MAINTAIN_VISIBLE_CONTENT_POSITION}
+              ListHeaderComponent={sidebarListHeader}
+              ListFooterComponent={sidebarListFooter}
+              role="list"
+              aria-label="Threads"
+              className="h-full min-h-0 overflow-x-hidden overscroll-y-contain [scrollbar-gutter:stable]"
+              contentContainerStyle={SIDEBAR_V2_LIST_CONTENT_STYLE}
+            />
           </TooltipProvider>
-          {activeThreads.length +
-            importedThreads.length +
-            snoozedThreads.length +
-            settledThreads.length ===
-          0 ? (
-            <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {projects.length === 0 ? (
-                <>
-                  <span>No projects yet</span>
-                  <button
-                    type="button"
-                    onClick={openAddProjectCommandPalette}
-                    className="inline-flex items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-[11px] font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
-                  >
-                    <PlusIcon className="size-3" />
-                    Add project
-                  </button>
-                </>
-              ) : scopedProjectGroup ? (
-                `No threads in ${scopedProjectGroup.displayName} yet`
-              ) : (
-                "No threads yet"
-              )}
-            </div>
-          ) : null}
         </SidebarGroup>
       </SidebarContent>
       <Dialog

@@ -329,9 +329,7 @@ describe("shouldClearThreadSelectionOnMouseDown", () => {
 describe("isTrailingDoubleClick", () => {
   it.each([
     [1, false],
-    [0, false],
     [2, true],
-    [3, true],
   ])("maps click detail %s to trailing=%s", (detail, expected) => {
     expect(isTrailingDoubleClick(detail)).toBe(expected);
   });

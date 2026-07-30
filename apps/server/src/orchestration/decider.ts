@@ -28,6 +28,12 @@ import {
   requireThreadAbsent,
   requireThreadNotArchived,
 } from "./commandInvariants.ts";
+import {
+  isBlockingRequestActivityKind,
+  isBlockingRequestFailureActivityKind,
+  isBlockingRequestResolutionActivityKind,
+  isImportContinuationActivityPayload,
+} from "./activityPolicy.ts";
 import { projectEvent } from "./projector.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
@@ -48,21 +54,12 @@ type LatestImportContinuationActivity =
       readonly payload: ThreadImportContinuationActivityPayloadType;
     };
 
-function isImportContinuationMarker(payload: unknown): boolean {
-  return (
-    typeof payload === "object" &&
-    payload !== null &&
-    "type" in payload &&
-    payload.type === "import.continuation"
-  );
-}
-
 function latestImportContinuationActivity(
   thread: Pick<OrchestrationThread, "activities">,
 ): LatestImportContinuationActivity {
   for (let index = thread.activities.length - 1; index >= 0; index -= 1) {
     const activity = thread.activities[index];
-    if (!activity || !isImportContinuationMarker(activity.payload)) {
+    if (!activity || !isImportContinuationActivityPayload(activity.payload)) {
       continue;
     }
     return isThreadImportContinuationActivityPayload(activity.payload)
@@ -153,13 +150,12 @@ function hasOpenBlockingRequest(thread: {
         : null;
     const requestId = typeof payload?.requestId === "string" ? payload.requestId : null;
     if (requestId === null) continue;
-    if (activity.kind === "approval.requested" || activity.kind === "user-input.requested") {
+    if (isBlockingRequestActivityKind(activity.kind)) {
       openRequestIds.add(requestId);
-    } else if (activity.kind === "approval.resolved" || activity.kind === "user-input.resolved") {
+    } else if (isBlockingRequestResolutionActivityKind(activity.kind)) {
       openRequestIds.delete(requestId);
     } else if (
-      (activity.kind === "provider.approval.respond.failed" ||
-        activity.kind === "provider.user-input.respond.failed") &&
+      isBlockingRequestFailureActivityKind(activity.kind) &&
       isStaleRequestFailureDetail(payload)
     ) {
       openRequestIds.delete(requestId);
@@ -1327,9 +1323,7 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
       };
       // An approval or user-input request is blocked-on-you work — it must
       // never stay hidden inside a settled slim row.
-      const wakesSettledThread =
-        command.activity.kind === "approval.requested" ||
-        command.activity.kind === "user-input.requested";
+      const wakesSettledThread = isBlockingRequestActivityKind(command.activity.kind);
       // Real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !wakesSettledThread) {
         return activityAppendedEvent;
