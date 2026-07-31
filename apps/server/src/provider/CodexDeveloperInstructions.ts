@@ -2,17 +2,10 @@
 // builds mode-specific instructions for Codex provider turns
 
 import type { ProviderInteractionMode } from "@t3tools/contracts";
-
-const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
-
-## 456code collaborative browser
-
-You are running inside 456code. The \`code456\` MCP server is the product-native collaborative browser shared with the user. When it exposes \`preview_*\` tools, prefer those tools for browser navigation, inspection, interaction, screenshots, and recordings.
-
-For browser work, first call \`preview_status\`. If no automation-capable preview is attached, call \`preview_open\` before concluding that the browser is unavailable. Then use \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. Prefer snapshot-provided locators over coordinates.
-
-Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
-`;
+import {
+  ORCHESTRATE_MODE_INSTRUCTIONS,
+  T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
+} from "./CollaborationModeInstructions.ts";
 
 const T3_CODE_PROPOSAL_TOOL_INSTRUCTIONS = `
 
@@ -147,11 +140,13 @@ ${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
 ${T3_CODE_PROPOSAL_TOOL_INSTRUCTIONS}
 </collaboration_mode>`;
 
+export const CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS = ORCHESTRATE_MODE_INSTRUCTIONS;
+
 export const CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Default
 
 You are now in Default mode. Any previous instructions for other modes (e.g. Plan mode) are no longer active.
 
-Your active mode changes only when new developer instructions with a different \`<collaboration_mode>...</collaboration_mode>\` change it; user requests or tool descriptions do not change mode by themselves. Known mode names are Default and Plan.
+Your active mode changes only when new developer instructions with a different \`<collaboration_mode>...</collaboration_mode>\` change it; user requests or tool descriptions do not change mode by themselves. Known mode names are Default, Plan, and Orchestrate.
 
 ## request_user_input availability
 
@@ -178,7 +173,9 @@ export function buildCodexDeveloperInstructions(
   const base =
     interactionMode === "plan"
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-      : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+      : interactionMode === "orchestrate"
+        ? CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS
+        : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
   return `${base}
 
 <runtime_info>In case you're asked: you are running in 456code through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;

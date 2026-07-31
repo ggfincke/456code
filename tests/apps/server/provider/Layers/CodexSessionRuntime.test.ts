@@ -14,6 +14,7 @@ import * as CodexRpc from "effect-codex-app-server/rpc";
 import {
   buildCodexDeveloperInstructions,
   CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
+  CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS,
   CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
 } from "../../../../../apps/server/src/provider/CodexDeveloperInstructions.ts";
 import { codexSessionAppServerArgs } from "../../../../../apps/server/src/provider/Layers/codexLaunchArgs.ts";
@@ -182,6 +183,28 @@ describe("buildTurnStartParams", () => {
     });
   });
 
+  it.effect("runs orchestrate on the default protocol surface with orchestrate instructions", () =>
+    Effect.gen(function* () {
+      const params = yield* buildTurnStartParams({
+        threadId: "provider-thread-1",
+        runtimeMode: "full-access",
+        prompt: "Coordinate this change",
+        model: "gpt-5.3-codex",
+        effort: "high",
+        interactionMode: "orchestrate",
+      });
+
+      NodeAssert.equal(params.collaborationMode?.mode, "default");
+      NodeAssert.equal(params.collaborationMode?.settings.model, "gpt-5.3-codex");
+      NodeAssert.equal(params.collaborationMode?.settings.reasoning_effort, "high");
+      NodeAssert.ok(
+        params.collaborationMode?.settings.developer_instructions?.startsWith(
+          CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS,
+        ),
+      );
+    }),
+  );
+
   it("reports the same fallback model and effort in settings and instructions", () => {
     const params = Effect.runSync(
       buildTurnStartParams({
@@ -274,6 +297,20 @@ describe("buildCodexDeveloperInstructions", () => {
     NodeAssert.match(instructions, /Do not finalize the plan until the call succeeds/);
     NodeAssert.match(instructions, /does not edit the user's worktree or index/);
     NodeAssert.match(instructions, /as gpt-5\.3-codex with medium reasoning effort/);
+  });
+
+  it("makes the orchestrate workflow and approval gate mode-level instructions", () => {
+    const instructions = buildCodexDeveloperInstructions("orchestrate", {
+      model: "gpt-5.3-codex",
+      reasoningEffort: "high",
+    });
+
+    NodeAssert.ok(instructions.startsWith(CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS));
+    NodeAssert.match(instructions, /core collaboration mode, not a user-level skill/);
+    NodeAssert.match(instructions, /Before any .*start_worker.* call/);
+    NodeAssert.match(instructions, /orchestrate-plan/);
+    NodeAssert.match(instructions, /Wait for explicit approval before launching/);
+    NodeAssert.match(instructions, /wait_for_workers/);
   });
 
   it("varies with the model and effort of each turn", () => {

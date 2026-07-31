@@ -59,6 +59,7 @@ import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import { applyOrchestrateModeInstructions } from "../CollaborationModeInstructions.ts";
 import { observeHiddenTurnRuntimeEvent } from "../HiddenTurnRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
 const isProviderContinuationIdentity = Schema.is(ProviderContinuationIdentity);
@@ -866,7 +867,9 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
         yield* McpSessionRegistry.touchActiveMcpThread(input.threadId);
         // clear the prior turn before starting another so overlapping mcp calls fail closed
         yield* McpSessionRegistry.bindActiveMcpTurn(input.threadId);
-        const turn = yield* routed.adapter.sendTurn(input);
+        const adapterInput =
+          routed.adapter.provider === "codex" ? input : applyOrchestrateModeInstructions(input);
+        const turn = yield* routed.adapter.sendTurn(adapterInput);
         yield* McpSessionRegistry.bindActiveMcpTurn(input.threadId, turn.turnId);
         yield* directory.upsert({
           threadId: input.threadId,

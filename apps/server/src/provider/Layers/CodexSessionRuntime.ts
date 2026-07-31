@@ -357,7 +357,9 @@ function buildCodexCollaborationMode(input: {
   const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
   const reasoningEffort = input.effort ?? "medium";
   return {
-    mode: input.interactionMode,
+    // app-server currently exposes only default and plan as protocol modes;
+    // orchestrate is enforced by its developer instructions on the default tool surface
+    mode: input.interactionMode === "plan" ? "plan" : "default",
     settings: {
       model,
       reasoning_effort: reasoningEffort,
