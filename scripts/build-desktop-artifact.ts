@@ -1000,11 +1000,39 @@ export function resolveDesktopUpdateChannel(version: string): "latest" | "nightl
   return /-nightly\.\d{8}\.\d+$/.test(version) ? "nightly" : "latest";
 }
 
-export function resolveDesktopWebAssetBrand(version: string): WebAssetBrand {
+// a locally packaged artifact carries the same version as a shipped one, so the
+// only reliable signal is where it was built. GitHub Actions always sets CI, so
+// release.yml keeps the released artwork & everything else is treated as local.
+export const resolveIsLocalDesktopBuild = Effect.fn("resolveIsLocalDesktopBuild")(function* () {
+  const ci = yield* Config.string("CI").pipe(Config.option);
+  const normalized = Option.getOrElse(ci, () => "")
+    .trim()
+    .toLowerCase();
+  return normalized === "" || normalized === "false" || normalized === "0";
+});
+
+export function resolveDesktopWebAssetBrand(version: string, isLocalBuild: boolean): WebAssetBrand {
+  if (isLocalBuild) {
+    return "development";
+  }
+
   return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version));
 }
 
-export function resolveDesktopBuildIconAssets(version: string): DesktopBuildIconAssets {
+export function resolveDesktopBuildIconAssets(
+  version: string,
+  isLocalBuild: boolean,
+): DesktopBuildIconAssets {
+  // local wins over the version channel: the point of the ocean mark is telling
+  // a self-built app apart in the Dock, including when the version says nightly
+  if (isLocalBuild) {
+    return {
+      macIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
+      linuxIconPng: BRAND_ASSET_PATHS.developmentUniversalIconPng,
+      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
+    };
+  }
+
   if (resolveDesktopUpdateChannel(version) === "nightly") {
     return {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
@@ -1283,7 +1311,8 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
   });
 
   const appVersion = options.version ?? serverPackageJson.version;
-  const iconAssets = resolveDesktopBuildIconAssets(appVersion);
+  const isLocalBuild = yield* resolveIsLocalDesktopBuild();
+  const iconAssets = resolveDesktopBuildIconAssets(appVersion, isLocalBuild);
   const commitHash = yield* resolveGitCommitHash(repoRoot);
   const mkdir = options.keepStage ? fs.makeTempDirectory : fs.makeTempDirectoryScoped;
   const stageRoot = yield* mkdir({
@@ -1333,7 +1362,7 @@ const buildDesktopArtifact = Effect.fn("buildDesktopArtifact")(function* (
     });
   }
 
-  const webAssetBrand = resolveDesktopWebAssetBrand(appVersion);
+  const webAssetBrand = resolveDesktopWebAssetBrand(appVersion, isLocalBuild);
   yield* applyWebBrandAssets(webAssetBrand, "apps/server/dist/client");
   yield* Effect.log(`[desktop-artifact] Applied ${webAssetBrand} web client branding.`);
   yield* validateBundledClientAssets(path.dirname(bundledClientEntry));
