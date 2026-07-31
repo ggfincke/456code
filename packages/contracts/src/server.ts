@@ -1,3 +1,5 @@
+// packages/contracts/src/server.ts
+// defines server configuration, provider snapshots, and server lifecycle contracts
 import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 import { ExecutionEnvironmentDescriptor, ServerSelfUpdateMethod } from "./environment.ts";
@@ -154,6 +156,46 @@ export const ServerProviderUpdateState = Schema.Struct({
 });
 export type ServerProviderUpdateState = typeof ServerProviderUpdateState.Type;
 
+export const ServerProviderAccountUsageWindow = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  label: TrimmedNonEmptyString,
+  scopeLabel: Schema.optional(TrimmedNonEmptyString),
+  usedPercent: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  resetsAt: Schema.NullOr(IsoDateTime),
+});
+export type ServerProviderAccountUsageWindow = typeof ServerProviderAccountUsageWindow.Type;
+
+const ServerProviderAvailableAccountUsage = Schema.Struct({
+  status: Schema.Literal("available"),
+  observedAt: IsoDateTime,
+  windows: Schema.Array(ServerProviderAccountUsageWindow).check(Schema.isMinLength(1)),
+});
+
+const ServerProviderExternalAccountUsage = Schema.Struct({
+  status: Schema.Literal("external"),
+  dashboardUrl: TrimmedNonEmptyString,
+});
+
+const ServerProviderNotApplicableAccountUsage = Schema.Struct({
+  status: Schema.Literal("notApplicable"),
+  observedAt: IsoDateTime,
+  message: TrimmedNonEmptyString,
+});
+
+const ServerProviderUnavailableAccountUsage = Schema.Struct({
+  status: Schema.Literal("unavailable"),
+  observedAt: Schema.optional(IsoDateTime),
+  message: TrimmedNonEmptyString,
+});
+
+export const ServerProviderAccountUsage = Schema.Union([
+  ServerProviderAvailableAccountUsage,
+  ServerProviderExternalAccountUsage,
+  ServerProviderNotApplicableAccountUsage,
+  ServerProviderUnavailableAccountUsage,
+]);
+export type ServerProviderAccountUsage = typeof ServerProviderAccountUsage.Type;
+
 export const ServerProvider = Schema.Struct({
   // Routing key for the configured instance this snapshot represents. This
   // is the only stable identity consumers may use for provider routing.
@@ -188,6 +230,7 @@ export const ServerProvider = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   skills: Schema.Array(ServerProviderSkill).pipe(Schema.withDecodingDefault(Effect.succeed([]))),
+  accountUsage: Schema.optionalKey(ServerProviderAccountUsage),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
 });
