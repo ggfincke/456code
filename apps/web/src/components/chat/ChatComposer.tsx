@@ -285,10 +285,8 @@ function isInsideComposerFloatingLayer(element: Element): boolean {
 }
 
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
-  showInteractionModeToggle: boolean;
+  showPlanMode: boolean;
   interactionMode: ProviderInteractionMode;
-  orchestrateMode: boolean;
-  showOrchestrateMode: boolean;
   runtimeMode: RuntimeMode;
   showPlanToggle: boolean;
   planSidebarLabel: string;
@@ -299,14 +297,10 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
-  const effectiveMode = props.orchestrateMode
-    ? "orchestrate"
-    : props.interactionMode === "plan"
-      ? "plan"
-      : "build";
+  const effectiveMode = props.interactionMode === "default" ? "build" : props.interactionMode;
   const interactionModeTooltip =
     effectiveMode === "orchestrate"
-      ? "Orchestrate mode — coordinate this request with the orchestrate skill"
+      ? "Orchestrate mode — coordinate bounded work through the worker broker"
       : effectiveMode === "plan"
         ? "Plan mode — explore and propose changes before building"
         : "Build mode — make changes directly";
@@ -320,7 +314,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
     ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
     : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`;
 
-  const interactionModeToggle = props.showInteractionModeToggle ? (
+  const interactionModeToggle = (
     <>
       <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
       <Tooltip>
@@ -363,26 +357,26 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
                 Build
               </span>
             </SelectItem>
-            <SelectItem value="plan" hideIndicator>
-              <span className="flex items-center gap-2 whitespace-nowrap">
-                <PencilRulerIcon className="size-3.5" />
-                Plan
-              </span>
-            </SelectItem>
-            {props.showOrchestrateMode ? (
-              <SelectItem value="orchestrate" hideIndicator>
+            {props.showPlanMode ? (
+              <SelectItem value="plan" hideIndicator>
                 <span className="flex items-center gap-2 whitespace-nowrap">
-                  <WorkflowIcon className="size-3.5" />
-                  Orchestrate
+                  <PencilRulerIcon className="size-3.5" />
+                  Plan
                 </span>
               </SelectItem>
             ) : null}
+            <SelectItem value="orchestrate" hideIndicator>
+              <span className="flex items-center gap-2 whitespace-nowrap">
+                <WorkflowIcon className="size-3.5" />
+                Orchestrate
+              </span>
+            </SelectItem>
           </SelectPopup>
         </Select>
         <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
       </Tooltip>
     </>
-  ) : null;
+  );
 
   return (
     <>
@@ -564,7 +558,6 @@ export interface ChatComposerHandle {
     selectedProvider: ProviderDriverKind;
     selectedModel: string;
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
-    orchestrateInsertionText: string | null;
   };
 }
 
@@ -760,8 +753,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
   } = props;
-  const isSendDisabled = sendDisabledReason !== null;
-
   // ------------------------------------------------------------------
   // Store subscriptions (prompt / images / terminal contexts)
   // ------------------------------------------------------------------
@@ -803,9 +794,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (store) => store.clearComposerPromptAndImages,
   );
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
-  const setComposerDraftOrchestrateMode = useComposerDraftStore(
-    (store) => store.setOrchestrateMode,
-  );
   const syncComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.syncPersistedAttachments,
   );
@@ -947,26 +935,15 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
   );
-  const orchestrateSkill = useMemo(
+  const orchestrateMode = interactionMode === "orchestrate";
+  const providerSkills = useMemo(
     () =>
-      selectedProviderStatus?.skills.find(
-        (skill) => skill.enabled && skill.name.toLowerCase() === "orchestrate",
-      ) ?? null,
+      (selectedProviderStatus?.skills ?? []).filter(
+        (skill) => skill.name.toLowerCase() !== "orchestrate",
+      ),
     [selectedProviderStatus],
   );
-  const orchestrateMode = composerDraft.orchestrateMode && orchestrateSkill !== null;
-  useEffect(() => {
-    if (composerDraft.orchestrateMode && orchestrateSkill === null) {
-      setComposerDraftOrchestrateMode(composerDraftTarget, false);
-    }
-  }, [
-    composerDraft.orchestrateMode,
-    composerDraftTarget,
-    orchestrateSkill,
-    setComposerDraftOrchestrateMode,
-  ]);
-  // broker readiness only matters while orchestrate mode is armed; the warning
-  // is advisory, so sending stays enabled either way
+  // broker readiness only matters while orchestrate mode is armed
   const workersReadinessQuery = useEnvironmentQuery(
     orchestrateMode
       ? workersEnvironment.readiness({ environmentId, input: WORKERS_READINESS_INPUT })
@@ -982,6 +959,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? `Worker-broker state dir is missing: ${workersReadiness.stateDir}`
       : "The worker broker is not configured for this environment.";
   }, [orchestrateMode, workersReadiness]);
+  const effectiveSendDisabledReason = sendDisabledReason ?? brokerNotReadyMessage;
+  const isSendDisabled = effectiveSendDisabledReason !== null;
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
     () => selectedProviderEntry?.models ?? [],
     [selectedProviderEntry],
@@ -1023,15 +1002,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   );
   const handleComposerModeChange = useCallback(
     (mode: "build" | "plan" | "orchestrate") => {
-      if (mode === "orchestrate") {
-        void handleInteractionModeChange("default");
-        setComposerDraftOrchestrateMode(composerDraftTarget, true);
-      } else {
-        setComposerDraftOrchestrateMode(composerDraftTarget, false);
-        void handleInteractionModeChange(mode === "plan" ? "plan" : "default");
-      }
+      void handleInteractionModeChange(mode === "build" ? "default" : mode);
     },
-    [composerDraftTarget, handleInteractionModeChange, setComposerDraftOrchestrateMode],
+    [handleInteractionModeChange],
   );
   const handleProviderModelSelect = useCallback(
     (instanceId: ProviderInstanceId, model: string) => {
@@ -1206,6 +1179,13 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
             description: "Switch this thread into plan mode",
           },
           {
+            id: "slash:orchestrate",
+            type: "slash-command",
+            command: "orchestrate",
+            label: "/orchestrate",
+            description: "Switch this thread into orchestrate mode",
+          },
+          {
             id: "slash:default",
             type: "slash-command",
             command: "default",
@@ -1214,26 +1194,30 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           },
         ],
         slashCommands: selectedProviderStatus?.slashCommands ?? [],
-        skills: selectedProviderStatus?.skills ?? [],
+        skills: providerSkills,
       });
     }
     if (composerTrigger.kind === "skill") {
-      return searchProviderSkills(selectedProviderStatus?.skills ?? [], composerTrigger.query).map(
-        (skill) => ({
-          id: `skill:${selectedProvider}:${skill.name}`,
-          type: "skill" as const,
-          provider: selectedProvider,
-          skill,
-          label: formatProviderSkillDisplayName(skill),
-          description:
-            skill.shortDescription ??
-            skill.description ??
-            (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
-        }),
-      );
+      return searchProviderSkills(providerSkills, composerTrigger.query).map((skill) => ({
+        id: `skill:${selectedProvider}:${skill.name}`,
+        type: "skill" as const,
+        provider: selectedProvider,
+        skill,
+        label: formatProviderSkillDisplayName(skill),
+        description:
+          skill.shortDescription ??
+          skill.description ??
+          (skill.scope ? `${skill.scope} skill` : "Run provider skill"),
+      }));
     }
     return [];
-  }, [composerTrigger, selectedProvider, selectedProviderStatus, workspaceEntries.entries]);
+  }, [
+    composerTrigger,
+    providerSkills,
+    selectedProvider,
+    selectedProviderStatus,
+    workspaceEntries.entries,
+  ]);
 
   const composerMenuOpen = Boolean(composerTrigger);
   const composerMenuSearchKey = composerTrigger
@@ -1819,7 +1803,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           }
           return;
         }
-        void handleInteractionModeChange(item.command === "plan" ? "plan" : "default");
+        void handleInteractionModeChange(item.command === "default" ? "default" : item.command);
         const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "", {
           expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
         });
@@ -2756,10 +2740,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedProvider,
         selectedModel,
         selectedProviderModels,
-        orchestrateInsertionText:
-          orchestrateMode && orchestrateSkill
-            ? composerSkillInsertionText(orchestrateSkill.name)
-            : null,
       }),
     }),
     [
@@ -2788,8 +2768,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedPromptEffort,
       selectedProvider,
       selectedProviderModels,
-      orchestrateMode,
-      orchestrateSkill,
     ],
   );
 
@@ -2933,7 +2911,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       showPlanFollowUpPrompt={false}
                       promptHasText={false}
                       isSendBusy={isSendBusy}
-                      sendDisabledReason={sendDisabledReason}
+                      sendDisabledReason={effectiveSendDisabledReason}
                       isConnecting={isConnecting}
                       isEnvironmentUnavailable={
                         environmentUnavailable !== null ||
@@ -3224,7 +3202,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     showPlanFollowUpPrompt={false}
                     promptHasText={false}
                     isSendBusy={isSendBusy}
-                    sendDisabledReason={sendDisabledReason}
+                    sendDisabledReason={effectiveSendDisabledReason}
                     isConnecting={isConnecting}
                     isEnvironmentUnavailable={
                       environmentUnavailable !== null ||
@@ -3307,15 +3285,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <CompactComposerControlsMenu
                     activePlan={showPlanSidebarToggle}
                     interactionMode={interactionMode}
-                    orchestrateMode={orchestrateMode}
-                    showOrchestrateMode={orchestrateSkill !== null}
                     planSidebarLabel={planSidebarLabel}
                     planSidebarOpen={planSidebarOpen}
                     runtimeMode={runtimeMode}
-                    showInteractionModeToggle={
-                      composerProviderControls.showInteractionModeToggle ||
-                      orchestrateSkill !== null
-                    }
+                    showPlanMode={composerProviderControls.showInteractionModeToggle}
                     traitsMenuContent={providerTraitsMenuContent}
                     onInteractionModeChange={handleComposerModeChange}
                     onTogglePlanSidebar={togglePlanSidebar}
@@ -3330,13 +3303,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       </>
                     ) : null}
                     <ComposerFooterModeControls
-                      showInteractionModeToggle={
-                        composerProviderControls.showInteractionModeToggle ||
-                        orchestrateSkill !== null
-                      }
+                      showPlanMode={composerProviderControls.showInteractionModeToggle}
                       interactionMode={interactionMode}
-                      orchestrateMode={orchestrateMode}
-                      showOrchestrateMode={orchestrateSkill !== null}
                       runtimeMode={runtimeMode}
                       showPlanToggle={showPlanSidebarToggle}
                       planSidebarLabel={planSidebarLabel}
@@ -3379,7 +3347,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}
-                  sendDisabledReason={sendDisabledReason}
+                  sendDisabledReason={effectiveSendDisabledReason}
                   isConnecting={isConnecting}
                   isEnvironmentUnavailable={
                     environmentUnavailable !== null ||

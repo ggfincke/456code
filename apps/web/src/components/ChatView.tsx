@@ -74,6 +74,7 @@ import { useDiffPanelStore } from "../diffPanelStore";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
+  parseLegacyOrchestrateInvocation,
 } from "../composer-logic";
 import {
   derivePendingApprovals,
@@ -1279,9 +1280,6 @@ function ChatViewContent(props: ChatViewProps) {
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
-  );
-  const setComposerDraftOrchestrateMode = useComposerDraftStore(
-    (store) => store.setOrchestrateMode,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
@@ -3111,7 +3109,6 @@ function ChatViewContent(props: ChatViewProps) {
 
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
-      setComposerDraftOrchestrateMode(composerDraftTarget, false);
       if (mode === interactionMode) {
         scheduleComposerFocus();
         return;
@@ -3128,7 +3125,6 @@ function ChatViewContent(props: ChatViewProps) {
       scheduleComposerFocus,
       composerDraftTarget,
       setComposerDraftInteractionMode,
-      setComposerDraftOrchestrateMode,
       setDraftThreadContext,
     ],
   );
@@ -4723,9 +4719,14 @@ function ChatViewContent(props: ChatViewProps) {
       selectedProviderModels: ctxSelectedProviderModels,
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
-      orchestrateInsertionText,
     } = sendCtx;
-    const promptForSend = promptRef.current;
+    const legacyOrchestrateInvocation = parseLegacyOrchestrateInvocation(promptRef.current);
+    const interactionModeForSend =
+      legacyOrchestrateInvocation === null ? interactionMode : "orchestrate";
+    if (legacyOrchestrateInvocation !== null) {
+      handleInteractionModeChange("orchestrate");
+    }
+    const promptForSend = legacyOrchestrateInvocation?.prompt ?? promptRef.current;
     const {
       trimmedPrompt: trimmed,
       sendableTerminalContexts: sendableComposerTerminalContexts,
@@ -4764,6 +4765,12 @@ function ChatViewContent(props: ChatViewProps) {
         : null;
     if (standaloneSlashCommand) {
       handleInteractionModeChange(standaloneSlashCommand);
+      promptRef.current = "";
+      clearComposerDraftContent(composerDraftTarget);
+      composerRef.current?.resetCursorState();
+      return false;
+    }
+    if (legacyOrchestrateInvocation !== null && !hasSendableContent) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
@@ -4834,16 +4841,8 @@ function ChatViewContent(props: ChatViewProps) {
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
-    const orchestrateMention = orchestrateInsertionText?.trimEnd() ?? null;
-    const promptTextForSend =
-      orchestrateInsertionText &&
-      orchestrateMention &&
-      trimmed !== orchestrateMention &&
-      !trimmed.startsWith(orchestrateInsertionText)
-        ? `${orchestrateInsertionText}${promptForSend.trimStart()}`
-        : promptForSend;
     const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptTextForSend, composerTerminalContextsSnapshot),
+      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
       composerElementContextsSnapshot,
     );
     const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
@@ -4975,7 +4974,7 @@ function ChatViewContent(props: ChatViewProps) {
           ? { branch: localCheckoutBranchMismatch.currentBranch }
           : {}),
         runtimeMode,
-        interactionMode: orchestrateInsertionText ? "default" : interactionMode,
+        interactionMode: interactionModeForSend,
       });
       if (settingsResult._tag === "Failure") {
         failure = settingsResult;
@@ -4999,7 +4998,7 @@ function ChatViewContent(props: ChatViewProps) {
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
-                      interactionMode: orchestrateInsertionText ? "default" : interactionMode,
+                      interactionMode: interactionModeForSend,
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
@@ -5033,7 +5032,7 @@ function ChatViewContent(props: ChatViewProps) {
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
           runtimeMode,
-          interactionMode: orchestrateInsertionText ? "default" : interactionMode,
+          interactionMode: interactionModeForSend,
           ...(bootstrap ? { bootstrap } : {}),
           ...(importContinuationConsent ? { importContinuationConsent } : {}),
           createdAt: messageCreatedAt,

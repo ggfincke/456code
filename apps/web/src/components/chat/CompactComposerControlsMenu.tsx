@@ -17,12 +17,10 @@ import {
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   activePlan: boolean;
   interactionMode: ProviderInteractionMode;
-  orchestrateMode: boolean;
-  showOrchestrateMode: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
-  showInteractionModeToggle: boolean;
+  showPlanMode: boolean;
   traitsMenuContent?: ReactNode;
   onInteractionModeChange: (mode: "build" | "plan" | "orchestrate") => void;
   onTogglePlanSidebar: () => void;
@@ -49,31 +47,19 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
             <MenuDivider />
           </>
         ) : null}
-        {props.showInteractionModeToggle ? (
-          <>
-            <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
-            <MenuRadioGroup
-              value={
-                props.orchestrateMode
-                  ? "orchestrate"
-                  : props.interactionMode === "plan"
-                    ? "plan"
-                    : "build"
-              }
-              onValueChange={(value) => {
-                if (!value) return;
-                props.onInteractionModeChange(value as "build" | "plan" | "orchestrate");
-              }}
-            >
-              <MenuRadioItem value="build">Build</MenuRadioItem>
-              <MenuRadioItem value="plan">Plan</MenuRadioItem>
-              {props.showOrchestrateMode ? (
-                <MenuRadioItem value="orchestrate">Orchestrate</MenuRadioItem>
-              ) : null}
-            </MenuRadioGroup>
-            <MenuDivider />
-          </>
-        ) : null}
+        <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
+        <MenuRadioGroup
+          value={props.interactionMode === "default" ? "build" : props.interactionMode}
+          onValueChange={(value) => {
+            if (!value) return;
+            props.onInteractionModeChange(value as "build" | "plan" | "orchestrate");
+          }}
+        >
+          <MenuRadioItem value="build">Build</MenuRadioItem>
+          {props.showPlanMode ? <MenuRadioItem value="plan">Plan</MenuRadioItem> : null}
+          <MenuRadioItem value="orchestrate">Orchestrate</MenuRadioItem>
+        </MenuRadioGroup>
+        <MenuDivider />
         <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Access</div>
         <MenuRadioGroup
           value={props.runtimeMode}
