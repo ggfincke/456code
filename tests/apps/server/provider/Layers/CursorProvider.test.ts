@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/CursorProvider.test.ts
+// verifies Cursor provider discovery, capability mapping, and usage affordances
 import * as NodeOS from "node:os";
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -341,6 +343,10 @@ describe("buildCursorProviderSnapshot", () => {
       status: "warning",
       message: "Cursor ACP model discovery timed out after 15000ms.",
       models: [],
+      accountUsage: {
+        status: "external",
+        dashboardUrl: "https://cursor.com/dashboard",
+      },
     });
   });
 

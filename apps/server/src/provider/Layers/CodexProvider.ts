@@ -1,3 +1,5 @@
+// apps/server/src/provider/Layers/CodexProvider.ts
+// builds Codex provider snapshots from app-server account, model, skill, and usage data
 import * as DateTime from "effect/DateTime";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -16,6 +18,8 @@ import * as CodexErrors from "effect-codex-app-server/errors";
 import type {
   CodexSettings,
   ServerProvider,
+  ServerProviderAccountUsage,
+  ServerProviderAccountUsageWindow,
   ServerProviderState,
   ModelCapabilities,
   ProviderOptionDescriptor,
@@ -45,9 +49,173 @@ const CODEX_PRESENTATION = {
 
 export interface CodexAppServerProviderSnapshot {
   readonly account: CodexSchema.V2GetAccountResponse;
+  readonly rateLimits?: CodexSchema.V2GetAccountRateLimitsResponse | undefined;
   readonly version: string | undefined;
   readonly models: ReadonlyArray<ServerProviderModel>;
   readonly skills: ReadonlyArray<ServerProviderSkill>;
+}
+
+type CodexRateLimitSnapshot = CodexSchema.V2GetAccountRateLimitsResponse["rateLimits"];
+type CodexRateLimitWindow = NonNullable<CodexRateLimitSnapshot["primary"]>;
+
+function clampUsagePercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function codexResetTimestamp(value: number | null | undefined): string | null {
+  if (value === null || value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+  return Option.match(DateTime.make(value * 1_000), {
+    onNone: () => null,
+    onSome: DateTime.formatIso,
+  });
+}
+
+export function formatCodexRateLimitWindowLabel(
+  durationMinutes: number | null | undefined,
+  fallback: "Primary" | "Secondary",
+): string {
+  if (durationMinutes === 300) return "5h";
+  if (durationMinutes === 10_080) return "Week";
+  if (durationMinutes === 43_200) return "Month";
+  if (durationMinutes && durationMinutes % 10_080 === 0) {
+    return `${durationMinutes / 10_080}w`;
+  }
+  if (durationMinutes && durationMinutes % 1_440 === 0) {
+    return `${durationMinutes / 1_440}d`;
+  }
+  if (durationMinutes && durationMinutes % 60 === 0) {
+    return `${durationMinutes / 60}h`;
+  }
+  return fallback;
+}
+
+function areCodexWindowsEqual(
+  left: CodexRateLimitWindow | null | undefined,
+  right: CodexRateLimitWindow | null | undefined,
+): boolean {
+  if (left === null || left === undefined || right === null || right === undefined) {
+    return left === right;
+  }
+  return (
+    left.usedPercent === right.usedPercent &&
+    left.windowDurationMins === right.windowDurationMins &&
+    left.resetsAt === right.resetsAt
+  );
+}
+
+function areCodexSnapshotsMirrored(
+  left: CodexRateLimitSnapshot,
+  right: CodexRateLimitSnapshot,
+): boolean {
+  return (
+    areCodexWindowsEqual(left.primary, right.primary) &&
+    areCodexWindowsEqual(left.secondary, right.secondary)
+  );
+}
+
+function normalizeCodexWindow(input: {
+  readonly idPrefix: string;
+  readonly position: "primary" | "secondary";
+  readonly window: CodexRateLimitWindow | null | undefined;
+  readonly scopeLabel?: string | undefined;
+}): ServerProviderAccountUsageWindow | null {
+  if (!input.window) return null;
+  return {
+    id: `${input.idPrefix}:${input.position}`,
+    label: formatCodexRateLimitWindowLabel(
+      input.window.windowDurationMins,
+      input.position === "primary" ? "Primary" : "Secondary",
+    ),
+    ...(input.scopeLabel ? { scopeLabel: input.scopeLabel } : {}),
+    usedPercent: clampUsagePercent(input.window.usedPercent),
+    resetsAt: codexResetTimestamp(input.window.resetsAt),
+  };
+}
+
+function normalizeCodexSnapshotWindows(input: {
+  readonly snapshot: CodexRateLimitSnapshot;
+  readonly idPrefix: string;
+  readonly scopeLabel?: string | undefined;
+}): ReadonlyArray<ServerProviderAccountUsageWindow> {
+  const primary = normalizeCodexWindow({
+    idPrefix: input.idPrefix,
+    position: "primary",
+    window: input.snapshot.primary,
+    scopeLabel: input.scopeLabel,
+  });
+  const secondary = normalizeCodexWindow({
+    idPrefix: input.idPrefix,
+    position: "secondary",
+    window: input.snapshot.secondary,
+    scopeLabel: input.scopeLabel,
+  });
+  return [primary, secondary].filter(
+    (window): window is ServerProviderAccountUsageWindow => window !== null,
+  );
+}
+
+export function mapCodexAccountUsage(
+  response: CodexSchema.V2GetAccountRateLimitsResponse,
+  observedAt: string,
+): ServerProviderAccountUsage {
+  const windows = [
+    ...normalizeCodexSnapshotWindows({ snapshot: response.rateLimits, idPrefix: "account" }),
+  ];
+  for (const [limitId, snapshot] of Object.entries(response.rateLimitsByLimitId ?? {}).toSorted(
+    ([left], [right]) => left.localeCompare(right),
+  )) {
+    if (areCodexSnapshotsMirrored(response.rateLimits, snapshot)) continue;
+    const scopeLabel = snapshot.limitName?.trim() || undefined;
+    windows.push(
+      ...normalizeCodexSnapshotWindows({
+        snapshot,
+        idPrefix: limitId,
+        ...(scopeLabel ? { scopeLabel } : {}),
+      }),
+    );
+  }
+  if (windows.length === 0) {
+    return {
+      status: "unavailable",
+      observedAt,
+      message: "Codex did not report plan usage windows for this account.",
+    };
+  }
+  return { status: "available", observedAt, windows };
+}
+
+export function resolveCodexAccountUsage(
+  snapshot: CodexAppServerProviderSnapshot,
+  observedAt: string,
+): ServerProviderAccountUsage {
+  const account = snapshot.account.account;
+  if (!account) {
+    return {
+      status: "unavailable",
+      observedAt,
+      message: "Sign in to Codex to view plan usage.",
+    };
+  }
+  if (account.type !== "chatgpt") {
+    return {
+      status: "notApplicable",
+      observedAt,
+      message:
+        account.type === "apiKey"
+          ? "Plan limits are not available for OpenAI API key sessions."
+          : "Plan limits are not available for Amazon Bedrock sessions.",
+    };
+  }
+  if (!snapshot.rateLimits) {
+    return {
+      status: "unavailable",
+      observedAt,
+      message: "Codex plan usage is temporarily unavailable.",
+    };
+  }
+  return mapCodexAccountUsage(snapshot.rateLimits, observedAt);
 }
 
 const REASONING_EFFORT_LABELS: Readonly<Record<string, string>> = {
@@ -383,24 +551,37 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
   if (!accountResponse.account && accountResponse.requiresOpenaiAuth) {
     return {
       account: accountResponse,
+      rateLimits: undefined,
       version,
       models: appendCustomCodexModels([], input.customModels ?? []),
       skills: [],
     } satisfies CodexAppServerProviderSnapshot;
   }
 
-  const [skillsResponse, models] = yield* Effect.all(
+  const rateLimitsEffect =
+    accountResponse.account?.type === "chatgpt"
+      ? client.request("account/rateLimits/read", undefined).pipe(
+          Effect.catch((error) =>
+            Effect.logWarning("Codex plan usage probe failed", {
+              errorTag: error._tag,
+            }).pipe(Effect.as(undefined)),
+          ),
+        )
+      : Effect.succeed(undefined);
+  const [skillsResponse, models, rateLimits] = yield* Effect.all(
     [
       client.request("skills/list", {
         cwds: [input.cwd],
       }),
       requestAllCodexModels(client),
+      rateLimitsEffect,
     ],
     { concurrency: "unbounded" },
   );
 
   return {
     account: accountResponse,
+    rateLimits,
     version,
     models: applyPreferredCodexDefaultModel(
       appendCustomCodexModels(models, input.customModels ?? []),
@@ -588,6 +769,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
 
   const snapshot = probeResult.success.value;
   const accountStatus = accountProbeStatus(snapshot.account);
+  const accountUsage = resolveCodexAccountUsage(snapshot, checkedAt);
 
   return buildServerProvider({
     presentation: CODEX_PRESENTATION,
@@ -595,6 +777,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     checkedAt,
     models: snapshot.models,
     skills: snapshot.skills,
+    accountUsage,
     probe: {
       installed: true,
       version: snapshot.version ?? null,

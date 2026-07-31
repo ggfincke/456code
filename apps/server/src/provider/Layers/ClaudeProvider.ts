@@ -4,10 +4,13 @@ import {
   type ClaudeSettings,
   type ModelCapabilities,
   type ModelSelection,
+  type ServerProviderAccountUsage,
+  type ServerProviderAccountUsageWindow,
   type ServerProviderModel,
   type ServerProviderSlashCommand,
 } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
+import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Option from "effect/Option";
@@ -25,6 +28,7 @@ import { compareSemverVersions } from "@t3tools/shared/semver";
 import {
   query as claudeQuery,
   type Options as ClaudeQueryOptions,
+  type SDKControlGetUsageResponse,
   type SlashCommand as ClaudeSlashCommand,
   type SDKUserMessage,
   type SettingSource,
@@ -563,6 +567,7 @@ function apiProviderAuthMetadata(
 // account info. The previous 8s budget expired mid-init, so the probe returned
 // `undefined` and left the provider unverified and unselectable in the picker.
 const CAPABILITIES_PROBE_TIMEOUT_MS = 25_000;
+const USAGE_PROBE_TIMEOUT_MS = 4_000;
 
 /**
  * Keep workspace-scoped command discovery intact while isolating the periodic
@@ -617,8 +622,176 @@ type ClaudeCapabilitiesProbe = {
    * the subscription/token fields are absent and auth is external AWS creds.
    */
   readonly apiProvider: string | undefined;
+  readonly planUsage?: ClaudePlanUsageProbe | undefined;
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>;
 };
+
+type ClaudeModelScopedRateLimit = {
+  readonly display_name: string;
+  readonly utilization: number | null;
+  readonly resets_at: string | null;
+};
+
+// the runtime can expose model buckets before the pinned sdk declarations catch up.
+type ClaudePlanRateLimits = NonNullable<SDKControlGetUsageResponse["rate_limits"]> & {
+  readonly model_scoped?: ReadonlyArray<ClaudeModelScopedRateLimit>;
+};
+
+type ClaudePlanUsageProbe =
+  | {
+      readonly status: "available";
+      readonly rateLimits: ClaudePlanRateLimits;
+    }
+  | { readonly status: "notApplicable" }
+  | { readonly status: "unavailable" };
+
+function extractClaudePlanUsage(response: SDKControlGetUsageResponse): ClaudePlanUsageProbe {
+  if (!response.rate_limits_available) {
+    return { status: "notApplicable" };
+  }
+  return response.rate_limits
+    ? { status: "available", rateLimits: response.rate_limits as ClaudePlanRateLimits }
+    : { status: "unavailable" };
+}
+
+const probeClaudePlanUsage = Effect.fn("probeClaudePlanUsage")(function* (
+  query: ReturnType<typeof claudeQuery>,
+) {
+  const usage = yield* Effect.tryPromise(() =>
+    query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET(),
+  ).pipe(
+    Effect.map(extractClaudePlanUsage),
+    Effect.timeoutOption(Duration.millis(USAGE_PROBE_TIMEOUT_MS)),
+    Effect.orElseSucceed(() => Option.none<ClaudePlanUsageProbe>()),
+  );
+  return Option.getOrElse(usage, (): ClaudePlanUsageProbe => ({ status: "unavailable" }));
+});
+
+function clampClaudeUsagePercent(value: number): number {
+  return Math.max(0, Math.min(100, value));
+}
+
+function normalizeClaudeWindow(input: {
+  readonly id: string;
+  readonly label: string;
+  readonly scopeLabel?: string | undefined;
+  readonly utilization: number | null | undefined;
+  readonly resetsAt?: string | null | undefined;
+}): ServerProviderAccountUsageWindow | null {
+  if (input.utilization === null || input.utilization === undefined) return null;
+  if (!Number.isFinite(input.utilization)) return null;
+  return {
+    id: input.id,
+    label: input.label,
+    ...(input.scopeLabel ? { scopeLabel: input.scopeLabel } : {}),
+    usedPercent: clampClaudeUsagePercent(input.utilization),
+    resetsAt: input.resetsAt ?? null,
+  };
+}
+
+function normalizeClaudeModelScopedWindows(
+  limits: ReadonlyArray<ClaudeModelScopedRateLimit> | undefined,
+): ReadonlyArray<ServerProviderAccountUsageWindow> {
+  const windows = new Map<string, ServerProviderAccountUsageWindow>();
+
+  for (const limit of limits ?? []) {
+    const scopeLabel = limit.display_name.trim();
+    if (!scopeLabel) continue;
+
+    const id = `seven-day-model:${scopeLabel.toLowerCase()}`;
+    const window = normalizeClaudeWindow({
+      id,
+      label: "Week",
+      scopeLabel,
+      utilization: limit.utilization,
+      resetsAt: limit.resets_at,
+    });
+    if (window) {
+      windows.set(id, window);
+    }
+  }
+
+  return [...windows.values()];
+}
+
+export function mapClaudeAccountUsage(
+  usage: ClaudePlanUsageProbe | undefined,
+  observedAt: string,
+): ServerProviderAccountUsage {
+  if (usage === undefined) {
+    return {
+      status: "unavailable",
+      observedAt,
+      message: "Claude plan usage is temporarily unavailable.",
+    };
+  }
+  if (usage.status === "notApplicable") {
+    return {
+      status: "notApplicable",
+      observedAt,
+      message: "Plan limits are not available for API key or third-party provider sessions.",
+    };
+  }
+  if (usage.status === "unavailable") {
+    return {
+      status: "unavailable",
+      observedAt,
+      message: "Claude plan usage is temporarily unavailable.",
+    };
+  }
+
+  const limits = usage.rateLimits;
+  const windows = [
+    normalizeClaudeWindow({
+      id: "five-hour",
+      label: "5h",
+      utilization: limits.five_hour?.utilization,
+      resetsAt: limits.five_hour?.resets_at,
+    }),
+    normalizeClaudeWindow({
+      id: "seven-day",
+      label: "Week",
+      utilization: limits.seven_day?.utilization,
+      resetsAt: limits.seven_day?.resets_at,
+    }),
+    normalizeClaudeWindow({
+      id: "seven-day-oauth-apps",
+      label: "Week",
+      scopeLabel: "OAuth apps",
+      utilization: limits.seven_day_oauth_apps?.utilization,
+      resetsAt: limits.seven_day_oauth_apps?.resets_at,
+    }),
+    normalizeClaudeWindow({
+      id: "seven-day-opus",
+      label: "Week",
+      scopeLabel: "Opus",
+      utilization: limits.seven_day_opus?.utilization,
+      resetsAt: limits.seven_day_opus?.resets_at,
+    }),
+    normalizeClaudeWindow({
+      id: "seven-day-sonnet",
+      label: "Week",
+      scopeLabel: "Sonnet",
+      utilization: limits.seven_day_sonnet?.utilization,
+      resetsAt: limits.seven_day_sonnet?.resets_at,
+    }),
+    ...normalizeClaudeModelScopedWindows(limits.model_scoped),
+    normalizeClaudeWindow({
+      id: "extra-usage",
+      label: "Month",
+      scopeLabel: "Extra usage",
+      utilization: limits.extra_usage?.utilization,
+    }),
+  ].filter((window): window is ServerProviderAccountUsageWindow => window !== null);
+
+  return windows.length > 0
+    ? { status: "available", observedAt, windows }
+    : {
+        status: "unavailable",
+        observedAt,
+        message: "Claude did not report plan usage windows for this account.",
+      };
+}
 
 function parseClaudeInitializationCommands(
   commands: ReadonlyArray<ClaudeSlashCommand> | undefined,
@@ -717,7 +890,7 @@ const probeClaudeCapabilities = (
       claudeSettings.binaryPath,
       claudeEnvironment,
     );
-    return yield* Effect.tryPromise(async () => {
+    const { account, init, query } = yield* Effect.tryPromise(async () => {
       const q = claudeQuery({
         // Never yield — we only need initialization data, not a conversation.
         // This prevents any prompt from reaching the Anthropic API.
@@ -741,14 +914,17 @@ const probeClaudeCapabilities = (
             readonly apiProvider?: string;
           }
         | undefined;
-      return {
-        email: account?.email,
-        subscriptionType: account?.subscriptionType,
-        tokenSource: account?.tokenSource,
-        apiProvider: account?.apiProvider,
-        slashCommands: parseClaudeInitializationCommands(init.commands),
-      } satisfies ClaudeCapabilitiesProbe;
+      return { account, init, query: q };
     });
+    const planUsage = yield* probeClaudePlanUsage(query);
+    return {
+      email: account?.email,
+      subscriptionType: account?.subscriptionType,
+      tokenSource: account?.tokenSource,
+      apiProvider: account?.apiProvider,
+      planUsage,
+      slashCommands: parseClaudeInitializationCommands(init.commands),
+    } satisfies ClaudeCapabilitiesProbe;
   }).pipe(
     Effect.ensuring(
       Effect.sync(() => {
@@ -931,6 +1107,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
       subscriptionType: capabilities.subscriptionType,
       authMethod: capabilities.tokenSource,
     }) ?? apiProviderAuthMetadata(capabilities.apiProvider);
+  const accountUsage = mapClaudeAccountUsage(capabilities.planUsage, checkedAt);
   return buildServerProvider({
     presentation: CLAUDE_PRESENTATION,
     enabled: claudeSettings.enabled,
@@ -938,6 +1115,7 @@ export const checkClaudeProviderStatus = Effect.fn("checkClaudeProviderStatus")(
     models,
     slashCommands: dedupedSlashCommands,
     skills,
+    accountUsage,
     probe: {
       installed: true,
       version: parsedVersion,

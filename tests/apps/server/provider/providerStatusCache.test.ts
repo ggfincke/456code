@@ -1,3 +1,5 @@
+// tests/apps/server/provider/providerStatusCache.test.ts
+// verifies provider cache identity, hydration, and ephemeral field exclusion
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import {
   defaultInstanceIdForDriver,
@@ -118,6 +120,38 @@ it.layer(NodeServices.layer)("providerStatusCache", (it) => {
       assert.deepStrictEqual(yield* readProviderStatusCache(codexPath), codexProvider);
       assert.deepStrictEqual(yield* readProviderStatusCache(claudePath), claudeProvider);
       assert.deepStrictEqual(yield* readProviderStatusCache(openCodePath), openCodeProvider);
+    }),
+  );
+
+  it.effect("does not persist ephemeral account usage", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-provider-cache-usage-" });
+      const cachePath = yield* resolveProviderStatusCachePath({
+        cacheDir: tempDir,
+        instanceId: defaultInstanceIdForDriver(CODEX_DRIVER),
+      });
+      yield* writeProviderStatusCache({
+        filePath: cachePath,
+        provider: makeProvider(CODEX_DRIVER, {
+          accountUsage: {
+            status: "available",
+            observedAt: "2026-04-11T00:00:00.000Z",
+            windows: [
+              {
+                id: "account:primary",
+                label: "5h",
+                usedPercent: 62,
+                resetsAt: "2026-04-11T05:00:00.000Z",
+              },
+            ],
+          },
+        }),
+      });
+
+      const raw = yield* fs.readFileString(cachePath);
+      assert.ok(!raw.includes("accountUsage"));
+      assert.strictEqual((yield* readProviderStatusCache(cachePath))?.accountUsage, undefined);
     }),
   );
 
