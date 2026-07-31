@@ -181,6 +181,8 @@ import {
   LockOpenIcon,
   PenLineIcon,
   SparklesIcon,
+  TriangleAlertIcon,
+  WorkflowIcon,
   XIcon,
 } from "lucide-react";
 import { proposedPlanTitle } from "../../proposedPlan";
@@ -208,6 +210,12 @@ import { searchProviderSkills } from "../../providerSkillSearch";
 import { buildComposerSlashMenuItems, composerSkillInsertionText } from "./composerSlashMenuItems";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import type { ReviewCommentContext } from "../../reviewCommentContext";
+import { useEnvironmentQuery } from "../../state/query";
+import { workersEnvironment } from "../../state/workers";
+import * as Option from "effect/Option";
+
+// readiness input literal -> the readiness atom family keys on its JSON form
+const WORKERS_READINESS_INPUT = {};
 
 const runtimeModeConfig: Record<
   RuntimeMode,
@@ -279,20 +287,35 @@ function isInsideComposerFloatingLayer(element: Element): boolean {
 const ComposerFooterModeControls = memo(function ComposerFooterModeControls(props: {
   showInteractionModeToggle: boolean;
   interactionMode: ProviderInteractionMode;
+  orchestrateMode: boolean;
+  showOrchestrateMode: boolean;
   runtimeMode: RuntimeMode;
   showPlanToggle: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: "build" | "plan" | "orchestrate") => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
   onTogglePlanSidebar: () => void;
 }) {
   const runtimeModeOption = runtimeModeConfig[props.runtimeMode];
   const RuntimeModeIcon = runtimeModeOption.icon;
+  const effectiveMode = props.orchestrateMode
+    ? "orchestrate"
+    : props.interactionMode === "plan"
+      ? "plan"
+      : "build";
   const interactionModeTooltip =
-    props.interactionMode === "plan"
-      ? "Plan mode — click to return to normal build mode"
-      : "Default mode — click to enter plan mode";
+    effectiveMode === "orchestrate"
+      ? "Orchestrate mode — coordinate this request with the orchestrate skill"
+      : effectiveMode === "plan"
+        ? "Plan mode — explore and propose changes before building"
+        : "Build mode — make changes directly";
+  const InteractionModeIcon =
+    effectiveMode === "orchestrate"
+      ? WorkflowIcon
+      : effectiveMode === "plan"
+        ? PencilRulerIcon
+        : BotIcon;
   const planSidebarTooltip = props.planSidebarOpen
     ? `Hide ${props.planSidebarLabel.toLowerCase()} sidebar`
     : `Show ${props.planSidebarLabel.toLowerCase()} sidebar`;
@@ -301,32 +324,61 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
     <>
       <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
       <Tooltip>
-        <TooltipTrigger
-          render={
-            <Button
-              variant="ghost"
-              className={cn(
-                "shrink-0 whitespace-nowrap px-2 sm:px-3",
-                props.interactionMode === "plan"
-                  ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
-                  : "text-muted-foreground/70 hover:text-foreground/80",
-              )}
-              size="sm"
-              type="button"
-              onClick={props.onToggleInteractionMode}
-              aria-label={interactionModeTooltip}
-            />
+        <Select
+          value={effectiveMode}
+          onValueChange={(value) =>
+            props.onInteractionModeChange(value! as "build" | "plan" | "orchestrate")
           }
         >
-          {props.interactionMode === "plan" ? (
-            <PencilRulerIcon className="text-current opacity-100" />
-          ) : (
-            <BotIcon />
-          )}
-          <span className="sr-only sm:not-sr-only">
-            {props.interactionMode === "plan" ? "Plan" : "Build"}
-          </span>
-        </TooltipTrigger>
+          <TooltipTrigger
+            render={
+              <SelectTrigger
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  "shrink-0 whitespace-nowrap px-2 sm:px-3",
+                  effectiveMode !== "build"
+                    ? "bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300"
+                    : "text-muted-foreground/70 hover:text-foreground/80",
+                )}
+                aria-label={interactionModeTooltip}
+              />
+            }
+          >
+            <InteractionModeIcon className="size-4" />
+            <SelectValue>
+              {effectiveMode === "orchestrate"
+                ? "Orchestrate"
+                : effectiveMode === "plan"
+                  ? "Plan"
+                  : "Build"}
+            </SelectValue>
+          </TooltipTrigger>
+          <SelectPopup alignItemWithTrigger={false} popupClassName="min-w-40">
+            {/* item text is one block, and preflight makes svg display:block, so
+                each label needs its own flex row to sit beside its icon */}
+            <SelectItem value="build" hideIndicator>
+              <span className="flex items-center gap-2 whitespace-nowrap">
+                <BotIcon className="size-3.5" />
+                Build
+              </span>
+            </SelectItem>
+            <SelectItem value="plan" hideIndicator>
+              <span className="flex items-center gap-2 whitespace-nowrap">
+                <PencilRulerIcon className="size-3.5" />
+                Plan
+              </span>
+            </SelectItem>
+            {props.showOrchestrateMode ? (
+              <SelectItem value="orchestrate" hideIndicator>
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <WorkflowIcon className="size-3.5" />
+                  Orchestrate
+                </span>
+              </SelectItem>
+            ) : null}
+          </SelectPopup>
+        </Select>
         <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
       </Tooltip>
     </>
@@ -512,6 +564,7 @@ export interface ChatComposerHandle {
     selectedProvider: ProviderDriverKind;
     selectedModel: string;
     selectedProviderModels: ReadonlyArray<ServerProvider["models"][number]>;
+    orchestrateInsertionText: string | null;
   };
 }
 
@@ -750,6 +803,9 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     (store) => store.clearComposerPromptAndImages,
   );
   const setComposerDraftModelSelection = useComposerDraftStore((store) => store.setModelSelection);
+  const setComposerDraftOrchestrateMode = useComposerDraftStore(
+    (store) => store.setOrchestrateMode,
+  );
   const syncComposerDraftPersistedAttachments = useComposerDraftStore(
     (store) => store.syncPersistedAttachments,
   );
@@ -887,6 +943,41 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     () => selectedProviderEntry?.snapshot ?? null,
     [selectedProviderEntry],
   );
+  const orchestrateSkill = useMemo(
+    () =>
+      selectedProviderStatus?.skills.find(
+        (skill) => skill.enabled && skill.name.toLowerCase() === "orchestrate",
+      ) ?? null,
+    [selectedProviderStatus],
+  );
+  const orchestrateMode = composerDraft.orchestrateMode && orchestrateSkill !== null;
+  useEffect(() => {
+    if (composerDraft.orchestrateMode && orchestrateSkill === null) {
+      setComposerDraftOrchestrateMode(composerDraftTarget, false);
+    }
+  }, [
+    composerDraft.orchestrateMode,
+    composerDraftTarget,
+    orchestrateSkill,
+    setComposerDraftOrchestrateMode,
+  ]);
+  // broker readiness only matters while orchestrate mode is armed; the warning
+  // is advisory, so sending stays enabled either way
+  const workersReadinessQuery = useEnvironmentQuery(
+    orchestrateMode
+      ? workersEnvironment.readiness({ environmentId, input: WORKERS_READINESS_INPUT })
+      : null,
+  );
+  const workersReadiness = workersReadinessQuery.data;
+  const brokerNotReadyMessage = useMemo(() => {
+    if (!orchestrateMode || workersReadiness === null) return null;
+    if (workersReadiness.brokerConfigured && workersReadiness.stateDirExists) return null;
+    const message = Option.getOrNull(workersReadiness.message);
+    if (message !== null && message.trim() !== "") return message;
+    return workersReadiness.brokerConfigured
+      ? `Worker-broker state dir is missing: ${workersReadiness.stateDir}`
+      : "The worker broker is not configured for this environment.";
+  }, [orchestrateMode, workersReadiness]);
   const selectedProviderModels = useMemo<ReadonlyArray<ServerProvider["models"][number]>>(
     () => selectedProviderEntry?.models ?? [],
     [selectedProviderEntry],
@@ -925,6 +1016,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ),
     }),
     [providerStatuses, selectedProvider],
+  );
+  const handleComposerModeChange = useCallback(
+    (mode: "build" | "plan" | "orchestrate") => {
+      if (mode === "orchestrate") {
+        void handleInteractionModeChange("default");
+        setComposerDraftOrchestrateMode(composerDraftTarget, true);
+      } else {
+        setComposerDraftOrchestrateMode(composerDraftTarget, false);
+        void handleInteractionModeChange(mode === "plan" ? "plan" : "default");
+      }
+    },
+    [composerDraftTarget, handleInteractionModeChange, setComposerDraftOrchestrateMode],
   );
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
@@ -2641,6 +2744,10 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         selectedProvider,
         selectedModel,
         selectedProviderModels,
+        orchestrateInsertionText:
+          orchestrateMode && orchestrateSkill
+            ? composerSkillInsertionText(orchestrateSkill.name)
+            : null,
       }),
     }),
     [
@@ -2669,6 +2776,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       selectedPromptEffort,
       selectedProvider,
       selectedProviderModels,
+      orchestrateMode,
+      orchestrateSkill,
     ],
   );
 
@@ -3185,12 +3294,17 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   <CompactComposerControlsMenu
                     activePlan={showPlanSidebarToggle}
                     interactionMode={interactionMode}
+                    orchestrateMode={orchestrateMode}
+                    showOrchestrateMode={orchestrateSkill !== null}
                     planSidebarLabel={planSidebarLabel}
                     planSidebarOpen={planSidebarOpen}
                     runtimeMode={runtimeMode}
-                    showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
+                    showInteractionModeToggle={
+                      composerProviderControls.showInteractionModeToggle ||
+                      orchestrateSkill !== null
+                    }
                     traitsMenuContent={providerTraitsMenuContent}
-                    onToggleInteractionMode={toggleInteractionMode}
+                    onInteractionModeChange={handleComposerModeChange}
                     onTogglePlanSidebar={togglePlanSidebar}
                     onRuntimeModeChange={handleRuntimeModeChange}
                   />
@@ -3203,17 +3317,34 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       </>
                     ) : null}
                     <ComposerFooterModeControls
-                      showInteractionModeToggle={composerProviderControls.showInteractionModeToggle}
+                      showInteractionModeToggle={
+                        composerProviderControls.showInteractionModeToggle ||
+                        orchestrateSkill !== null
+                      }
                       interactionMode={interactionMode}
+                      orchestrateMode={orchestrateMode}
+                      showOrchestrateMode={orchestrateSkill !== null}
                       runtimeMode={runtimeMode}
                       showPlanToggle={showPlanSidebarToggle}
                       planSidebarLabel={planSidebarLabel}
                       planSidebarOpen={planSidebarOpen}
-                      onToggleInteractionMode={toggleInteractionMode}
+                      onInteractionModeChange={handleComposerModeChange}
                       onRuntimeModeChange={handleRuntimeModeChange}
                       onTogglePlanSidebar={togglePlanSidebar}
                     />
                   </>
+                )}
+
+                {brokerNotReadyMessage === null ? null : (
+                  <span
+                    role="status"
+                    data-chat-orchestrate-broker-warning="true"
+                    title={brokerNotReadyMessage}
+                    className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-md bg-amber-500/10 px-2 py-1 text-amber-700 text-xs dark:text-amber-400"
+                  >
+                    <TriangleAlertIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                    <span className="max-w-56 truncate">{brokerNotReadyMessage}</span>
+                  </span>
                 )}
               </div>
 

@@ -1,3 +1,5 @@
+// apps/web/src/components/chat/CompactComposerControlsMenu.tsx
+// renders compact composer mode, access, and plan controls
 import { ProviderInteractionMode, RuntimeMode } from "@t3tools/contracts";
 import { memo, type ReactNode } from "react";
 import { EllipsisIcon, ListTodoIcon } from "lucide-react";
@@ -15,12 +17,14 @@ import {
 export const CompactComposerControlsMenu = memo(function CompactComposerControlsMenu(props: {
   activePlan: boolean;
   interactionMode: ProviderInteractionMode;
+  orchestrateMode: boolean;
+  showOrchestrateMode: boolean;
   planSidebarLabel: string;
   planSidebarOpen: boolean;
   runtimeMode: RuntimeMode;
   showInteractionModeToggle: boolean;
   traitsMenuContent?: ReactNode;
-  onToggleInteractionMode: () => void;
+  onInteractionModeChange: (mode: "build" | "plan" | "orchestrate") => void;
   onTogglePlanSidebar: () => void;
   onRuntimeModeChange: (mode: RuntimeMode) => void;
 }) {
@@ -49,14 +53,23 @@ export const CompactComposerControlsMenu = memo(function CompactComposerControls
           <>
             <div className="px-2 py-1.5 font-medium text-muted-foreground text-xs">Mode</div>
             <MenuRadioGroup
-              value={props.interactionMode}
+              value={
+                props.orchestrateMode
+                  ? "orchestrate"
+                  : props.interactionMode === "plan"
+                    ? "plan"
+                    : "build"
+              }
               onValueChange={(value) => {
-                if (!value || value === props.interactionMode) return;
-                props.onToggleInteractionMode();
+                if (!value) return;
+                props.onInteractionModeChange(value as "build" | "plan" | "orchestrate");
               }}
             >
-              <MenuRadioItem value="default">Chat</MenuRadioItem>
+              <MenuRadioItem value="build">Build</MenuRadioItem>
               <MenuRadioItem value="plan">Plan</MenuRadioItem>
+              {props.showOrchestrateMode ? (
+                <MenuRadioItem value="orchestrate">Orchestrate</MenuRadioItem>
+              ) : null}
             </MenuRadioGroup>
             <MenuDivider />
           </>

@@ -39,6 +39,12 @@ export const WorkersJobSummary = Schema.Struct({
   mode: TrimmedNonEmptyString,
   repo: TrimmedNonEmptyString,
   branch: Schema.Option(TrimmedNonEmptyString),
+  stage: Schema.Option(TrimmedNonEmptyString),
+  workflow: Schema.Option(TrimmedNonEmptyString),
+  run: Schema.Option(TrimmedNonEmptyString),
+  model: Schema.Option(TrimmedNonEmptyString),
+  effort: Schema.Option(TrimmedNonEmptyString),
+  error: Schema.Option(Schema.String),
   createdAt: Schema.Option(IsoDateTime),
   startedAt: Schema.Option(IsoDateTime),
   completedAt: Schema.Option(IsoDateTime),
@@ -59,15 +65,12 @@ export const WorkersJobDetail = Schema.Struct({
   ...WorkersJobSummary.fields,
   task: Schema.String,
   allowedPaths: Schema.Array(TrimmedNonEmptyString),
-  model: Schema.Option(TrimmedNonEmptyString),
-  effort: Schema.Option(TrimmedNonEmptyString),
   baseRef: Schema.Option(TrimmedNonEmptyString),
   baseSha: Schema.Option(TrimmedNonEmptyString),
   headSha: Schema.Option(TrimmedNonEmptyString),
   worktree: Schema.Option(TrimmedNonEmptyString),
   patchPath: Schema.Option(TrimmedNonEmptyString),
   summary: Schema.Option(Schema.String),
-  error: Schema.Option(Schema.String),
   assumptions: Schema.Array(Schema.String),
   risks: Schema.Array(Schema.String),
   followUps: Schema.Array(Schema.String),
@@ -83,7 +86,21 @@ export type WorkersJobDetail = typeof WorkersJobDetail.Type;
 export const WorkersSnapshotState = Schema.Literals(["available", "state-dir-missing"]);
 export type WorkersSnapshotState = typeof WorkersSnapshotState.Type;
 
-export const WorkersListInput = Schema.Struct({});
+export const WorkersReadinessInput = Schema.Struct({});
+export type WorkersReadinessInput = typeof WorkersReadinessInput.Type;
+
+export const WorkersReadinessResult = Schema.Struct({
+  stateDir: TrimmedNonEmptyString,
+  stateDirExists: Schema.Boolean,
+  brokerConfigured: Schema.Boolean,
+  brokerConfigSource: Schema.Option(TrimmedNonEmptyString),
+  message: Schema.Option(Schema.String),
+});
+export type WorkersReadinessResult = typeof WorkersReadinessResult.Type;
+
+export const WorkersListInput = Schema.Struct({
+  run: Schema.optional(TrimmedNonEmptyString),
+});
 export type WorkersListInput = typeof WorkersListInput.Type;
 
 export const WorkersListResult = Schema.Struct({
@@ -100,6 +117,75 @@ export const WorkersListResult = Schema.Struct({
   ),
 });
 export type WorkersListResult = typeof WorkersListResult.Type;
+
+export const WorkersRunStageRollup = Schema.Struct({
+  stage: Schema.Option(TrimmedNonEmptyString),
+  total: NonNegativeInt,
+  queued: NonNegativeInt,
+  running: NonNegativeInt,
+  completed: NonNegativeInt,
+  failed: NonNegativeInt,
+  rejected: NonNegativeInt,
+  cancelled: NonNegativeInt,
+});
+export type WorkersRunStageRollup = typeof WorkersRunStageRollup.Type;
+
+export const WorkersRunSummary = Schema.Struct({
+  run: TrimmedNonEmptyString,
+  workflows: Schema.Array(TrimmedNonEmptyString),
+  firstCreatedAt: Schema.Option(IsoDateTime),
+  lastCompletedAt: Schema.Option(IsoDateTime),
+  total: NonNegativeInt,
+  queued: NonNegativeInt,
+  running: NonNegativeInt,
+  completed: NonNegativeInt,
+  failed: NonNegativeInt,
+  rejected: NonNegativeInt,
+  cancelled: NonNegativeInt,
+  stages: Schema.Array(WorkersRunStageRollup),
+  scopeViolationCount: NonNegativeInt,
+});
+export type WorkersRunSummary = typeof WorkersRunSummary.Type;
+
+export const WorkersListRunsInput = Schema.Struct({});
+export type WorkersListRunsInput = typeof WorkersListRunsInput.Type;
+
+export const WorkersListRunsResult = Schema.Struct({
+  state: WorkersSnapshotState,
+  stateDir: TrimmedNonEmptyString,
+  readAt: IsoDateTime,
+  runs: Schema.Array(WorkersRunSummary),
+  skippedJobCount: NonNegativeInt,
+  error: Schema.Option(
+    Schema.Struct({
+      message: TrimmedNonEmptyString,
+    }),
+  ),
+});
+export type WorkersListRunsResult = typeof WorkersListRunsResult.Type;
+
+export const WorkersStatusSnapshot = Schema.Struct({
+  list: WorkersListResult,
+  runs: WorkersListRunsResult,
+});
+export type WorkersStatusSnapshot = typeof WorkersStatusSnapshot.Type;
+
+export const WorkersGetRunInput = Schema.Struct({
+  run: TrimmedNonEmptyString,
+});
+export type WorkersGetRunInput = typeof WorkersGetRunInput.Type;
+
+export const WorkersGetRunResult = Schema.Struct({
+  readAt: IsoDateTime,
+  run: Schema.Option(WorkersRunSummary),
+  jobs: Schema.Array(WorkersJobSummary),
+  error: Schema.Option(
+    Schema.Struct({
+      message: TrimmedNonEmptyString,
+    }),
+  ),
+});
+export type WorkersGetRunResult = typeof WorkersGetRunResult.Type;
 
 export const WorkersGetJobInput = Schema.Struct({
   jobId: TrimmedNonEmptyString,

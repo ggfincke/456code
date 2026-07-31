@@ -153,6 +153,8 @@ import * as ProcessDiagnostics from "./diagnostics/ProcessDiagnostics.ts";
 import * as ProcessResourceMonitor from "./diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as WorkerBrokerStore from "./workers/WorkerBrokerStore.ts";
+import * as WorkersStatusBroadcaster from "./workers/WorkersStatusBroadcaster.ts";
+import { readWorkersReadiness } from "./workers/WorkersReadiness.ts";
 import * as SourceControlDiscovery from "./sourceControl/SourceControlDiscovery.ts";
 import * as SourceControlRepositoryService from "./sourceControl/SourceControlRepositoryService.ts";
 import * as AzureDevOpsCli from "./sourceControl/AzureDevOpsCli.ts";
@@ -505,7 +507,11 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.serverGetProcessResourceHistory, AuthOrchestrationReadScope],
   [WS_METHODS.serverSignalProcess, AuthOrchestrationOperateScope],
   [WS_METHODS.workersList, AuthOrchestrationReadScope],
+  [WS_METHODS.workersReadiness, AuthOrchestrationReadScope],
+  [WS_METHODS.workersListRuns, AuthOrchestrationReadScope],
   [WS_METHODS.workersGetJob, AuthOrchestrationReadScope],
+  [WS_METHODS.workersGetRun, AuthOrchestrationReadScope],
+  [WS_METHODS.workersSubscribe, AuthOrchestrationReadScope],
   [WS_METHODS.cloudGetRelayClientStatus, AuthRelayWriteScope],
   [WS_METHODS.cloudInstallRelayClient, AuthRelayWriteScope],
   [WS_METHODS.sourceControlLookupRepository, AuthOrchestrationReadScope],
@@ -664,6 +670,7 @@ const makeWsRpcLayer = (
       const processDiagnostics = yield* ProcessDiagnostics.ProcessDiagnostics;
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor;
       const workerBrokerStore = yield* WorkerBrokerStore.WorkerBrokerStore;
+      const workersStatusBroadcaster = yield* WorkersStatusBroadcaster.WorkersStatusBroadcaster;
       const authorizationError = (requiredScope: AuthEnvironmentScope) =>
         new EnvironmentAuthorizationError({
           message: `The authenticated token is missing required scope: ${requiredScope}.`,
@@ -2115,8 +2122,24 @@ const makeWsRpcLayer = (
           observeRpcEffect(WS_METHODS.workersList, workerBrokerStore.list(input), {
             "rpc.aggregate": "workers",
           }),
+        [WS_METHODS.workersReadiness]: (_input) =>
+          observeRpcEffect(
+            WS_METHODS.workersReadiness,
+            workerBrokerStore
+              .list({})
+              .pipe(Effect.flatMap((snapshot) => readWorkersReadiness(snapshot.stateDir))),
+            { "rpc.aggregate": "workers" },
+          ),
+        [WS_METHODS.workersListRuns]: (input) =>
+          observeRpcEffect(WS_METHODS.workersListRuns, workerBrokerStore.listRuns(input), {
+            "rpc.aggregate": "workers",
+          }),
         [WS_METHODS.workersGetJob]: (input) =>
           observeRpcEffect(WS_METHODS.workersGetJob, workerBrokerStore.getJob(input), {
+            "rpc.aggregate": "workers",
+          }),
+        [WS_METHODS.workersGetRun]: (input) =>
+          observeRpcEffect(WS_METHODS.workersGetRun, workerBrokerStore.getRun(input), {
             "rpc.aggregate": "workers",
           }),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) =>
@@ -2664,6 +2687,14 @@ const makeWsRpcLayer = (
             }),
             {
               "rpc.aggregate": "vcs",
+            },
+          ),
+        [WS_METHODS.workersSubscribe]: (input) =>
+          observeRpcStream(
+            WS_METHODS.workersSubscribe,
+            workersStatusBroadcaster.streamSnapshots(input),
+            {
+              "rpc.aggregate": "workers",
             },
           ),
         [WS_METHODS.vcsRefreshStatus]: (input) =>

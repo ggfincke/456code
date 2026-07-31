@@ -155,8 +155,15 @@ import { VcsError } from "./vcs.ts";
 import {
   WorkersGetJobInput,
   WorkersGetJobResult,
+  WorkersGetRunInput,
+  WorkersGetRunResult,
   WorkersListInput,
   WorkersListResult,
+  WorkersListRunsInput,
+  WorkersListRunsResult,
+  WorkersReadinessInput,
+  WorkersReadinessResult,
+  WorkersStatusSnapshot,
 } from "./workers.ts";
 import {
   ProposalDiffResult,
@@ -275,7 +282,11 @@ export const WS_METHODS = {
 
   // Workers (worker-broker) methods
   workersList: "workers.list",
+  workersReadiness: "workers.readiness",
+  workersListRuns: "workers.listRuns",
   workersGetJob: "workers.getJob",
+  workersGetRun: "workers.getRun",
+  workersSubscribe: "workers.subscribe",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -844,10 +855,35 @@ export const WsWorkersListRpc = Rpc.make(WS_METHODS.workersList, {
   error: EnvironmentAuthorizationError,
 });
 
+export const WsWorkersReadinessRpc = Rpc.make(WS_METHODS.workersReadiness, {
+  payload: WorkersReadinessInput,
+  success: WorkersReadinessResult,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsWorkersListRunsRpc = Rpc.make(WS_METHODS.workersListRuns, {
+  payload: WorkersListRunsInput,
+  success: WorkersListRunsResult,
+  error: EnvironmentAuthorizationError,
+});
+
 export const WsWorkersGetJobRpc = Rpc.make(WS_METHODS.workersGetJob, {
   payload: WorkersGetJobInput,
   success: WorkersGetJobResult,
   error: EnvironmentAuthorizationError,
+});
+
+export const WsWorkersGetRunRpc = Rpc.make(WS_METHODS.workersGetRun, {
+  payload: WorkersGetRunInput,
+  success: WorkersGetRunResult,
+  error: EnvironmentAuthorizationError,
+});
+
+export const WsWorkersSubscribeRpc = Rpc.make(WS_METHODS.workersSubscribe, {
+  payload: WorkersListInput,
+  success: WorkersStatusSnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
 });
 
 export const WsRpcGroup = RpcGroup.make(
@@ -868,7 +904,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsWorkersListRpc,
+  WsWorkersReadinessRpc,
+  WsWorkersListRunsRpc,
   WsWorkersGetJobRpc,
+  WsWorkersGetRunRpc,
+  WsWorkersSubscribeRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
