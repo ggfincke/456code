@@ -1,3 +1,6 @@
+// apps/server/src/orchestration/Schemas.ts
+// re-exports orchestration payload schemas for server internals
+
 import {
   ProjectCreatedPayload as ContractsProjectCreatedPayloadSchema,
   ProjectMetaUpdatedPayload as ContractsProjectMetaUpdatedPayloadSchema,
@@ -8,6 +11,9 @@ import {
   ThreadMetaUpdatedPayload as ContractsThreadMetaUpdatedPayloadSchema,
   ThreadRuntimeModeSetPayload as ContractsThreadRuntimeModeSetPayloadSchema,
   ThreadInteractionModeSetPayload as ContractsThreadInteractionModeSetPayloadSchema,
+  ThreadProviderSwitchRequestedPayload as ContractsThreadProviderSwitchRequestedPayloadSchema,
+  ThreadProviderSwitchedPayload as ContractsThreadProviderSwitchedPayloadSchema,
+  ThreadHandoffClearedPayload as ContractsThreadHandoffClearedPayloadSchema,
   ThreadDeletedPayload as ContractsThreadDeletedPayloadSchema,
   ThreadUnarchivedPayload as ContractsThreadUnarchivedPayloadSchema,
   ThreadUnsettledPayload as ContractsThreadUnsettledPayloadSchema,
@@ -37,6 +43,10 @@ export const ThreadSettledPayload = ContractsThreadSettledPayloadSchema;
 export const ThreadMetaUpdatedPayload = ContractsThreadMetaUpdatedPayloadSchema;
 export const ThreadRuntimeModeSetPayload = ContractsThreadRuntimeModeSetPayloadSchema;
 export const ThreadInteractionModeSetPayload = ContractsThreadInteractionModeSetPayloadSchema;
+export const ThreadProviderSwitchRequestedPayload =
+  ContractsThreadProviderSwitchRequestedPayloadSchema;
+export const ThreadProviderSwitchedPayload = ContractsThreadProviderSwitchedPayloadSchema;
+export const ThreadHandoffClearedPayload = ContractsThreadHandoffClearedPayloadSchema;
 export const ThreadDeletedPayload = ContractsThreadDeletedPayloadSchema;
 export const ThreadUnarchivedPayload = ContractsThreadUnarchivedPayloadSchema;
 export const ThreadUnsettledPayload = ContractsThreadUnsettledPayloadSchema;

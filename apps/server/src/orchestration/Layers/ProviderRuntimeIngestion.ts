@@ -42,6 +42,7 @@ import {
 } from "../Services/ProviderRuntimeIngestion.ts";
 import { ServerSettingsService } from "../../serverSettings.ts";
 import { proposedPlanIdForTurn } from "../proposedPlanIdentity.ts";
+import { isHiddenTurnRuntimeEvent } from "../../provider/HiddenTurnRegistry.ts";
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`;
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`;
@@ -1294,6 +1295,7 @@ const make = Effect.gen(function* () {
     Effect.gen(function* () {
       const thread = yield* resolveThreadShell(event.threadId);
       if (!thread) return;
+      const isHiddenTurnEvent = isHiddenTurnRuntimeEvent(event);
 
       let loadedThreadDetail: OrchestrationThread | null | undefined;
       const getLoadedThreadDetail = () =>
@@ -1357,7 +1359,7 @@ const make = Effect.gen(function* () {
         }
       })();
       const acceptedTurnStartedSourcePlan =
-        event.type === "turn.started" && shouldApplyThreadLifecycle
+        !isHiddenTurnEvent && event.type === "turn.started" && shouldApplyThreadLifecycle
           ? yield* getSourceProposedPlanReferenceForAcceptedTurnStart(thread.id, eventTurnId)
           : null;
 
@@ -1444,11 +1446,66 @@ const make = Effect.gen(function* () {
                 ? { providerInstanceId: event.providerInstanceId }
                 : {}),
               runtimeMode: thread.session?.runtimeMode ?? "full-access",
-              activeTurnId: nextActiveTurnId,
+              // hidden compaction turns keep session status transitions but
+              // must not surface a turn id -> no projected turn record
+              activeTurnId: isHiddenTurnEvent ? null : nextActiveTurnId,
               lastError,
               updatedAt: now,
             },
             createdAt: now,
+          });
+        }
+      }
+
+      if (event.type === "runtime.error") {
+        const runtimeErrorMessage = event.payload.message;
+        const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
+          ? true
+          : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
+
+        if (shouldApplyRuntimeError) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.session.set",
+            commandId: yield* providerCommandId(event, "runtime-error-session-set"),
+            threadId: thread.id,
+            session: {
+              threadId: thread.id,
+              status: "error",
+              providerName: event.provider,
+              ...(event.providerInstanceId !== undefined
+                ? { providerInstanceId: event.providerInstanceId }
+                : {}),
+              runtimeMode: thread.session?.runtimeMode ?? "full-access",
+              activeTurnId: isHiddenTurnEvent ? null : (eventTurnId ?? null),
+              lastError: runtimeErrorMessage,
+              updatedAt: now,
+            },
+            createdAt: now,
+          });
+        }
+      }
+
+      if (event.type === "session.exited") {
+        yield* clearTurnStateForSession(thread.id);
+      }
+
+      if (isHiddenTurnEvent) {
+        return;
+      }
+
+      if (
+        event.type === "turn.completed" &&
+        event.payload.state === "completed" &&
+        shouldApplyThreadLifecycle &&
+        activeTurnId !== null &&
+        sameId(activeTurnId, eventTurnId)
+      ) {
+        const detailedThread = yield* getLoadedThreadDetail();
+        if (detailedThread?.pendingHandoff) {
+          yield* orchestrationEngine.dispatch({
+            type: "thread.handoff.clear",
+            commandId: yield* providerCommandId(event, "thread-handoff-clear"),
+            threadId: thread.id,
           });
         }
       }
@@ -1666,39 +1723,6 @@ const make = Effect.gen(function* () {
             planId: proposedPlanIdForTurn(thread.id, turnId),
             turnId,
             updatedAt: now,
-          });
-        }
-      }
-
-      if (event.type === "session.exited") {
-        yield* clearTurnStateForSession(thread.id);
-      }
-
-      if (event.type === "runtime.error") {
-        const runtimeErrorMessage = event.payload.message;
-
-        const shouldApplyRuntimeError = !STRICT_PROVIDER_LIFECYCLE_GUARD
-          ? true
-          : activeTurnId === null || eventTurnId === undefined || sameId(activeTurnId, eventTurnId);
-
-        if (shouldApplyRuntimeError) {
-          yield* orchestrationEngine.dispatch({
-            type: "thread.session.set",
-            commandId: yield* providerCommandId(event, "runtime-error-session-set"),
-            threadId: thread.id,
-            session: {
-              threadId: thread.id,
-              status: "error",
-              providerName: event.provider,
-              ...(event.providerInstanceId !== undefined
-                ? { providerInstanceId: event.providerInstanceId }
-                : {}),
-              runtimeMode: thread.session?.runtimeMode ?? "full-access",
-              activeTurnId: eventTurnId ?? null,
-              lastError: runtimeErrorMessage,
-              updatedAt: now,
-            },
-            createdAt: now,
           });
         }
       }

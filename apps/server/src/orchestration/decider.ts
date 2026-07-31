@@ -715,6 +715,21 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         command,
         threadId: command.threadId,
       });
+      // cross-instance rebinding of a started thread must go through
+      // thread.provider.switch so the handoff workflow runs; meta updates
+      // may still change the model within the bound instance
+      const threadStarted =
+        thread.session !== null || thread.latestTurn !== null || thread.messages.length > 0;
+      if (
+        command.modelSelection !== undefined &&
+        command.modelSelection.instanceId !== thread.modelSelection.instanceId &&
+        threadStarted
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is bound to provider instance '${thread.modelSelection.instanceId}'. Use thread.provider.switch to change providers on a started thread.`,
+        });
+      }
       const branch =
         command.branch !== undefined &&
         command.expectedBranch !== undefined &&
@@ -785,6 +800,69 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
           threadId: command.threadId,
           interactionMode: command.interactionMode,
           updatedAt: occurredAt,
+        },
+      };
+    }
+
+    case "thread.provider.switch": {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      if (
+        command.expectedCurrentInstanceId !== undefined &&
+        command.expectedCurrentInstanceId !== thread.modelSelection.instanceId
+      ) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is bound to provider instance '${thread.modelSelection.instanceId}', not expected instance '${command.expectedCurrentInstanceId}'.`,
+        });
+      }
+      if (command.targetModelSelection.instanceId === thread.modelSelection.instanceId) {
+        // same-instance model changes use thread.meta.update; routing the
+        // switch workflow at the same instance would reuse the persisted
+        // resume cursor and double-inject context alongside the handoff
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' is already bound to provider instance '${thread.modelSelection.instanceId}'; provider switch requires a different instance.`,
+        });
+      }
+      const hasActiveSessionTurn =
+        (thread.session?.status === "starting" || thread.session?.status === "running") &&
+        thread.session.activeTurnId !== null;
+      if (hasActiveSessionTurn || thread.latestTurn?.state === "running") {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a running turn and cannot switch providers.`,
+        });
+      }
+      const occurredAtForQueueCheck = yield* nowIso;
+      if (threadHasQueuedTurnStart(thread, occurredAtForQueueCheck)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a queued turn start and cannot switch providers.`,
+        });
+      }
+      if (hasOpenBlockingRequest(thread)) {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Thread '${command.threadId}' has a pending approval or user-input request and cannot switch providers.`,
+        });
+      }
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.provider-switch-requested",
+        payload: {
+          threadId: command.threadId,
+          targetModelSelection: command.targetModelSelection,
+          expectedCurrentInstanceId: command.expectedCurrentInstanceId ?? null,
         },
       };
     }
@@ -1168,6 +1246,53 @@ export const decideOrchestrationCommand = Effect.fn("decideOrchestrationCommand"
         },
       };
       return [unsettledEvent, sessionSetEvent];
+    }
+
+    case "thread.provider.switch.complete": {
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.provider-switched",
+        payload: {
+          modelSelection: command.modelSelection,
+          fromInstanceId: command.fromInstanceId,
+          ...(command.fromModel !== undefined ? { fromModel: command.fromModel } : {}),
+          handoffText: command.handoffText,
+        },
+      };
+    }
+
+    case "thread.handoff.clear": {
+      // emits unconditionally: the engine rejects zero-event results, and a
+      // raced duplicate clear is harmless (projector re-sets null)
+      yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      });
+      const occurredAt = yield* nowIso;
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: "thread",
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: "thread.handoff-cleared",
+        payload: {
+          threadId: command.threadId,
+        },
+      };
     }
 
     case "thread.message.assistant.delta": {
