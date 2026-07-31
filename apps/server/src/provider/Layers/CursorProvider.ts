@@ -1,9 +1,12 @@
+// apps/server/src/provider/Layers/CursorProvider.ts
+// builds Cursor provider snapshots and ACP-discovered model capabilities
 import * as NodeOS from "node:os";
 import type {
   CursorSettings,
   ModelCapabilities,
   ProviderOptionSelection,
   ServerProvider,
+  ServerProviderAccountUsage,
   ServerProviderAuth,
   ServerProviderModel,
   ServerProviderState,
@@ -62,6 +65,11 @@ const EMPTY_CAPABILITIES: ModelCapabilities = createModelCapabilities({
 const CURSOR_ACP_MODEL_DISCOVERY_TIMEOUT_MS = 15_000;
 const CURSOR_PARAMETERIZED_MODEL_PICKER_MIN_VERSION_DATE = 2026_04_08;
 const CURSOR_CLI_INSTALLATION_DOCS_URL = "https://cursor.com/docs/cli/installation";
+const CURSOR_USAGE_DASHBOARD_URL = "https://cursor.com/dashboard";
+const CURSOR_ACCOUNT_USAGE = {
+  status: "external",
+  dashboardUrl: CURSOR_USAGE_DASHBOARD_URL,
+} as const satisfies ServerProviderAccountUsage;
 const CURSOR_ACP_MODEL_DISCOVERY_FAILED_MESSAGE = [
   "Cursor ACP model discovery failed.",
   "Cursor CLI setup may be incomplete; install or enable the Cursor CLI, restart 456code, and try again.",
@@ -74,6 +82,15 @@ export const CURSOR_PARAMETERIZED_MODEL_PICKER_CAPABILITIES = {
   },
 } satisfies NonNullable<EffectAcpSchema.InitializeRequest["clientCapabilities"]>;
 
+function buildCursorServerProvider(
+  input: Parameters<typeof buildServerProvider>[0],
+): ServerProviderDraft {
+  return buildServerProvider({
+    ...input,
+    ...(input.enabled ? { accountUsage: CURSOR_ACCOUNT_USAGE } : {}),
+  });
+}
+
 export function buildInitialCursorProviderSnapshot(
   cursorSettings: CursorSettings,
 ): Effect.Effect<ServerProviderDraft> {
@@ -82,7 +99,7 @@ export function buildInitialCursorProviderSnapshot(
     const models = getCursorFallbackModels(cursorSettings);
 
     if (!cursorSettings.enabled) {
-      return buildServerProvider({
+      return buildCursorServerProvider({
         presentation: CURSOR_PRESENTATION,
         enabled: false,
         checkedAt,
@@ -97,7 +114,7 @@ export function buildInitialCursorProviderSnapshot(
       });
     }
 
-    return buildServerProvider({
+    return buildCursorServerProvider({
       presentation: CURSOR_PRESENTATION,
       enabled: true,
       checkedAt,
@@ -630,7 +647,7 @@ export function buildCursorProviderSnapshot(input: {
   readonly discoveryWarning?: string;
 }): ServerProviderDraft {
   const message = joinProviderMessages(input.parsed.message, input.discoveryWarning);
-  return buildServerProvider({
+  return buildCursorServerProvider({
     presentation: CURSOR_PRESENTATION,
     enabled: input.cursorSettings.enabled,
     checkedAt: input.checkedAt,
@@ -996,7 +1013,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
   const fallbackModels = getCursorFallbackModels(cursorSettings);
 
   if (!cursorSettings.enabled) {
-    return buildServerProvider({
+    return buildCursorServerProvider({
       presentation: CURSOR_PRESENTATION,
       enabled: false,
       checkedAt,
@@ -1022,7 +1039,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
     yield* Effect.logWarning("Cursor Agent CLI health check failed.", {
       errorTag: error._tag,
     });
-    return buildServerProvider({
+    return buildCursorServerProvider({
       presentation: CURSOR_PRESENTATION,
       enabled: cursorSettings.enabled,
       checkedAt,
@@ -1040,7 +1057,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
   }
 
   if (Option.isNone(aboutProbe.success)) {
-    return buildServerProvider({
+    return buildCursorServerProvider({
       presentation: CURSOR_PRESENTATION,
       enabled: cursorSettings.enabled,
       checkedAt,
@@ -1063,7 +1080,7 @@ export const checkCursorProviderStatus = Effect.fn("checkCursorProviderStatus")(
       channel: cursorCliConfigChannel,
     });
   if (parameterizedModelPickerUnsupportedMessage) {
-    return buildServerProvider({
+    return buildCursorServerProvider({
       presentation: CURSOR_PRESENTATION,
       enabled: cursorSettings.enabled,
       checkedAt,

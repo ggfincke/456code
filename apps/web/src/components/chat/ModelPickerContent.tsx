@@ -1,3 +1,5 @@
+// apps/web/src/components/chat/ModelPickerContent.tsx
+// renders provider-scoped model navigation, search, and compact plan usage
 import {
   type ProviderInstanceId,
   type ProviderDriverKind,
@@ -9,6 +11,7 @@ import { memo, useMemo, useState, useCallback, useEffect, useLayoutEffect, useRe
 import { SearchIcon } from "lucide-react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
+import { ProviderUsageStrip, shouldShowProviderUsageStrip } from "./ProviderUsage";
 import { isModelPickerNewModel } from "./modelPickerModelHighlights";
 import { buildModelPickerSearchText, scoreModelPickerSearch } from "./modelPickerSearch";
 import { Combobox, ComboboxEmpty, ComboboxInput, ComboboxListVirtualized } from "../ui/combobox";
@@ -103,6 +106,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
   const modelListRef = useRef<LegendListRef | null>(null);
   const highlightedModelKeyRef = useRef<string | null>(null);
   const favorites = useClientSettings((s) => s.favorites ?? []);
+  const usageDisplayMode = useClientSettings((s) => s.providerUsageDisplayMode);
   const [selectedInstanceId, setSelectedInstanceId] = useState<ProviderInstanceId | "favorites">(
     () => {
       if (props.lockedProvider !== null) {
@@ -251,6 +255,15 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return [...available, ...disabled];
   }, [instanceEntries, isLocked, matchesLockedProvider]);
   const showSidebar = !isSearching && sidebarInstanceEntries.length > 0;
+  const selectedAccountUsage =
+    selectedInstanceId === "favorites"
+      ? undefined
+      : entryByInstanceId.get(selectedInstanceId)?.snapshot.accountUsage;
+  const showProviderUsage = shouldShowProviderUsageStrip({
+    usage: selectedAccountUsage,
+    selectedInstanceId,
+    isSearching,
+  });
   const instanceOrder = useMemo(
     () => instanceEntries.map((entry) => entry.instanceId),
     [instanceEntries],
@@ -616,6 +629,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 />
               </div>
             </div>
+
+            {showProviderUsage && selectedAccountUsage ? (
+              <ProviderUsageStrip usage={selectedAccountUsage} displayMode={usageDisplayMode} />
+            ) : null}
 
             {/* Model list */}
             <div className="relative min-h-0 flex-1 overflow-hidden">

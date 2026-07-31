@@ -1,7 +1,10 @@
+// apps/server/src/provider/providerSnapshot.ts
+// builds normalized provider snapshots from provider-specific probe results
 import type {
   ProviderDriverKind,
   ModelCapabilities,
   ServerProvider,
+  ServerProviderAccountUsage,
   ServerProviderAuth,
   ServerProviderSkill,
   ServerProviderSlashCommand,
@@ -215,6 +218,7 @@ export function buildServerProvider(input: {
   models: ReadonlyArray<ServerProviderModel>;
   slashCommands?: ReadonlyArray<ServerProviderSlashCommand>;
   skills?: ReadonlyArray<ServerProviderSkill>;
+  accountUsage?: ServerProviderAccountUsage;
   probe: ProviderProbeResult;
 }): ServerProviderDraft {
   const versionAdvisory = input.driver
@@ -243,6 +247,7 @@ export function buildServerProvider(input: {
     models: input.models,
     slashCommands: [...(input.slashCommands ?? [])],
     skills: [...(input.skills ?? [])],
+    ...(input.accountUsage ? { accountUsage: input.accountUsage } : {}),
     ...(versionAdvisory ? { versionAdvisory } : {}),
   };
 }

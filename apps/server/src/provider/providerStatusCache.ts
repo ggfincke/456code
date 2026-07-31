@@ -1,3 +1,5 @@
+// apps/server/src/provider/providerStatusCache.ts
+// persists non-ephemeral provider status snapshots between server runs
 import {
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -145,7 +147,11 @@ export const writeProviderStatusCache = (input: {
   readonly filePath: string;
   readonly provider: ServerProvider;
 }) => {
-  const { updateState: _updateState, ...cacheableProvider } = input.provider;
+  const {
+    updateState: _updateState,
+    accountUsage: _accountUsage,
+    ...cacheableProvider
+  } = input.provider;
   return writeFileStringAtomically({
     filePath: input.filePath,
     contents: `${JSON.stringify(cacheableProvider, null, 2)}\n`,

@@ -2040,7 +2040,12 @@ function ChatViewContent(props: ChatViewProps) {
       return EMPTY_PROVIDERS;
     }
     return importProviderSnapshot === null ? EMPTY_PROVIDERS : [importProviderSnapshot];
-  }, [importContinuationGate.state, importProviderInstanceId, importProviderSnapshot]);
+  }, [
+    importContinuationGate.state,
+    importProviderInstanceId,
+    importProviderSnapshot,
+    providerStatuses,
+  ]);
   const verifiedImportProviderInstanceId =
     importContinuationGate.state === "verified" ? importContinuationGate.providerInstanceId : null;
   const focusImportContinuationBanner = useCallback(() => {

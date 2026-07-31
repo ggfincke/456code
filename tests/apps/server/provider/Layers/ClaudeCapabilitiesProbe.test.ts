@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/ClaudeCapabilitiesProbe.test.ts
+// verifies Claude's no-prompt initialization and structured plan usage probe
 import { ClaudeSettings } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
@@ -9,10 +11,78 @@ import * as Schema from "effect/Schema";
 import {
   buildClaudeCapabilitiesProbeQueryOptions,
   CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES,
+  mapClaudeAccountUsage,
   probeClaudeCapabilities,
 } from "../../../../../apps/server/src/provider/Layers/ClaudeProvider.ts";
 
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
+
+it("normalizes aggregate and scoped Claude usage windows", () => {
+  const usage = mapClaudeAccountUsage(
+    {
+      status: "available",
+      rateLimits: {
+        five_hour: { utilization: 62, resets_at: "2026-04-10T05:00:00.000Z" },
+        seven_day: { utilization: 84, resets_at: "2026-04-17T00:00:00.000Z" },
+        seven_day_opus: { utilization: 101, resets_at: null },
+        model_scoped: [
+          {
+            display_name: "Fable",
+            utilization: 35,
+            resets_at: "2026-04-17T00:00:00.000Z",
+          },
+        ],
+        extra_usage: {
+          is_enabled: true,
+          monthly_limit: 100,
+          used_credits: 20,
+          utilization: 20,
+        },
+      },
+    },
+    "2026-04-10T00:00:00.000Z",
+  );
+
+  assert.deepEqual(usage, {
+    status: "available",
+    observedAt: "2026-04-10T00:00:00.000Z",
+    windows: [
+      {
+        id: "five-hour",
+        label: "5h",
+        usedPercent: 62,
+        resetsAt: "2026-04-10T05:00:00.000Z",
+      },
+      {
+        id: "seven-day",
+        label: "Week",
+        usedPercent: 84,
+        resetsAt: "2026-04-17T00:00:00.000Z",
+      },
+      {
+        id: "seven-day-opus",
+        label: "Week",
+        scopeLabel: "Opus",
+        usedPercent: 100,
+        resetsAt: null,
+      },
+      {
+        id: "seven-day-model:fable",
+        label: "Week",
+        scopeLabel: "Fable",
+        usedPercent: 35,
+        resetsAt: "2026-04-17T00:00:00.000Z",
+      },
+      {
+        id: "extra-usage",
+        label: "Month",
+        scopeLabel: "Extra usage",
+        usedPercent: 20,
+        resetsAt: null,
+      },
+    ],
+  });
+});
 
 it("isolates Claude capability probes without dropping workspace setting sources", () => {
   const abortController = new AbortController();
@@ -63,16 +133,44 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
           '  const contents = existsSync(rawMcpConfig) ? readFileSync(rawMcpConfig, "utf8") : rawMcpConfig;',
           "  try { mcpConfig = JSON.parse(contents); } catch { mcpConfig = contents; }",
           "}",
-          "writeFileSync(process.env.T3_PROBE_INVOCATION_PATH, JSON.stringify({",
+          "const receivedTypes = [];",
+          "const persistInvocation = () => writeFileSync(process.env.T3_PROBE_INVOCATION_PATH, JSON.stringify({",
           "  args,",
           "  cwd: process.cwd(),",
           "  connectorEnv: process.env.ENABLE_CLAUDEAI_MCP_SERVERS,",
           "  mcpConfig,",
+          "  receivedTypes,",
           "}));",
+          "persistInvocation();",
           "const lines = createInterface({ input: process.stdin });",
           'lines.on("line", (line) => {',
           "  const message = JSON.parse(line);",
-          '  if (message.type !== "control_request" || message.request?.subtype !== "initialize") return;',
+          "  receivedTypes.push(message.type);",
+          "  persistInvocation();",
+          '  if (message.type !== "control_request") return;',
+          '  if (message.request?.subtype === "get_usage") {',
+          "    process.stdout.write(JSON.stringify({",
+          '      type: "control_response",',
+          "      response: {",
+          '        subtype: "success",',
+          "        request_id: message.request_id,",
+          "        response: {",
+          '          subtype: "get_usage",',
+          "          session: { total_cost_usd: 0, total_api_duration_ms: 0, total_duration_ms: 0, total_lines_added: 0, total_lines_removed: 0, model_usage: {} },",
+          '          subscription_type: "pro",',
+          "          rate_limits_available: true,",
+          "          rate_limits: {",
+          '            five_hour: { utilization: 62, resets_at: "2026-04-10T05:00:00.000Z" },',
+          '            seven_day: { utilization: 84, resets_at: "2026-04-17T00:00:00.000Z" },',
+          '            model_scoped: [{ display_name: "Fable", utilization: 35, resets_at: "2026-04-17T00:00:00.000Z" }],',
+          "          },",
+          "          behaviors: null,",
+          "        },",
+          "      },",
+          '    }) + "\\n");',
+          "    return;",
+          "  }",
+          '  if (message.request?.subtype !== "initialize") return;',
           "  process.stdout.write(JSON.stringify({",
           '    type: "control_response",',
           "    response: {",
@@ -110,6 +208,26 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
         subscriptionType: "pro",
         tokenSource: "oauth",
         apiProvider: undefined,
+        planUsage: {
+          status: "available",
+          rateLimits: {
+            five_hour: {
+              utilization: 62,
+              resets_at: "2026-04-10T05:00:00.000Z",
+            },
+            seven_day: {
+              utilization: 84,
+              resets_at: "2026-04-17T00:00:00.000Z",
+            },
+            model_scoped: [
+              {
+                display_name: "Fable",
+                utilization: 35,
+                resets_at: "2026-04-17T00:00:00.000Z",
+              },
+            ],
+          },
+        },
         slashCommands: [
           {
             name: "review",
@@ -125,12 +243,14 @@ it.layer(NodeServices.layer)("Claude capability probe SDK boundary", (it) => {
         readonly cwd: string;
         readonly connectorEnv: string;
         readonly mcpConfig: unknown;
+        readonly receivedTypes: ReadonlyArray<string>;
       };
       assert.equal(invocation.cwd, yield* fs.realPath(workspaceCwd));
       assert.equal(invocation.connectorEnv, "false");
       assert.equal(invocation.args.includes("--strict-mcp-config"), true);
       assert.equal(invocation.args.includes("--mcp-config"), false);
       assert.equal(invocation.mcpConfig, undefined);
+      assert.deepEqual(invocation.receivedTypes, ["control_request", "control_request"]);
 
       assert.equal(invocation.args.includes("--setting-sources=user,project,local"), true);
     }).pipe(Effect.scoped),

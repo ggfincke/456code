@@ -26,6 +26,7 @@ import {
   DEFAULT_UNIFIED_SETTINGS,
   MAX_GLASS_OPACITY,
   MIN_GLASS_OPACITY,
+  type ProviderUsageDisplayMode,
 } from "@t3tools/contracts/settings";
 import { createModelSelection } from "@t3tools/shared/model";
 import * as Arr from "effect/Array";
@@ -125,6 +126,11 @@ const TIMESTAMP_FORMAT_LABELS = {
   "12-hour": "12-hour",
   "24-hour": "24-hour",
 } as const;
+
+const PROVIDER_USAGE_DISPLAY_LABELS = {
+  "percent-left": "Percent left",
+  "percent-used": "Percent used",
+} satisfies Record<ProviderUsageDisplayMode, string>;
 
 const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
 
@@ -410,6 +416,9 @@ export function useSettingsRestore(onRestored?: () => void) {
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
         ? ["Time format"]
         : []),
+      ...(settings.providerUsageDisplayMode !== DEFAULT_UNIFIED_SETTINGS.providerUsageDisplayMode
+        ? ["Usage display"]
+        : []),
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
         ? ["Visible threads"]
         : []),
@@ -468,6 +477,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.enableProviderUpdateChecks,
       settings.sidebarProjectGroupingMode,
       settings.sidebarThreadPreviewCount,
+      settings.providerUsageDisplayMode,
       settings.timestampFormat,
       settings.wordWrap,
       theme,
@@ -487,6 +497,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     setTheme("system");
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
+      providerUsageDisplayMode: DEFAULT_UNIFIED_SETTINGS.providerUsageDisplayMode,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
       glassOpacity: DEFAULT_UNIFIED_SETTINGS.glassOpacity,
@@ -717,6 +728,48 @@ export function GeneralSettingsPanel() {
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
                   {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                </SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+
+        <SettingsRow
+          title="Usage display"
+          description="Show provider limits as the percentage left or the percentage used."
+          resetAction={
+            settings.providerUsageDisplayMode !==
+            DEFAULT_UNIFIED_SETTINGS.providerUsageDisplayMode ? (
+              <SettingResetButton
+                label="usage display"
+                onClick={() =>
+                  updateSettings({
+                    providerUsageDisplayMode: DEFAULT_UNIFIED_SETTINGS.providerUsageDisplayMode,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <Select
+              value={settings.providerUsageDisplayMode}
+              onValueChange={(value) => {
+                if (value === "percent-left" || value === "percent-used") {
+                  updateSettings({ providerUsageDisplayMode: value });
+                }
+              }}
+            >
+              <SelectTrigger className="w-full sm:w-40" aria-label="Provider usage display">
+                <SelectValue>
+                  {PROVIDER_USAGE_DISPLAY_LABELS[settings.providerUsageDisplayMode]}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end" alignItemWithTrigger={false}>
+                <SelectItem hideIndicator value="percent-left">
+                  {PROVIDER_USAGE_DISPLAY_LABELS["percent-left"]}
+                </SelectItem>
+                <SelectItem hideIndicator value="percent-used">
+                  {PROVIDER_USAGE_DISPLAY_LABELS["percent-used"]}
                 </SelectItem>
               </SelectPopup>
             </Select>
