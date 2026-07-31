@@ -4,12 +4,18 @@
 import type {
   WorkersGetJobInput,
   WorkersGetJobResult,
+  WorkersGetRunInput,
+  WorkersGetRunResult,
   WorkersJobChange,
   WorkersJobDetail,
   WorkersJobStatus,
   WorkersJobSummary,
   WorkersListInput,
   WorkersListResult,
+  WorkersListRunsInput,
+  WorkersListRunsResult,
+  WorkersRunStageRollup,
+  WorkersRunSummary,
   WorkersVerificationRun,
   WorkersVerificationSummary,
 } from "@t3tools/contracts";
@@ -36,7 +42,10 @@ export class WorkerBrokerStore extends Context.Service<
   WorkerBrokerStore,
   {
     readonly list: (input: WorkersListInput) => Effect.Effect<WorkersListResult>;
+    readonly listRuns: (input: WorkersListRunsInput) => Effect.Effect<WorkersListRunsResult>;
     readonly getJob: (input: WorkersGetJobInput) => Effect.Effect<WorkersGetJobResult>;
+    readonly getRun: (input: WorkersGetRunInput) => Effect.Effect<WorkersGetRunResult>;
+    readonly jobsDir: string;
   }
 >()("456code/workers/WorkerBrokerStore") {}
 
@@ -65,6 +74,9 @@ const DiskJobRequest = Schema.Struct({
   allowed_paths: Schema.optional(Schema.Array(Schema.String)),
   model: Schema.optional(Schema.String),
   effort: Schema.optional(Schema.String),
+  stage: Schema.optional(Schema.String),
+  workflow: Schema.optional(Schema.String),
+  run: Schema.optional(Schema.String),
 });
 
 const DiskJobResult = Schema.Struct({
@@ -105,6 +117,7 @@ const DiskJobRecord = Schema.Struct({
   base_sha: Schema.optional(Schema.String),
   branch: Schema.optional(Schema.String),
   worktree: Schema.optional(Schema.String),
+  error: Schema.optional(Schema.NullOr(Schema.String)),
   schema_version: Schema.optional(Schema.NullOr(Schema.Number)),
   request: Schema.optional(DiskJobRequest),
   result: Schema.optional(DiskJobResult),
@@ -218,6 +231,12 @@ function toJobSummary(jobId: string, record: DiskJobRecord): WorkersJobSummary {
     mode: toText(request?.mode) ?? toText(result?.mode) ?? "unknown",
     repo: toText(request?.repo) ?? toText(result?.repo) ?? "unknown",
     branch: toTextOption(record.branch ?? result?.branch),
+    stage: toTextOption(request?.stage),
+    workflow: toTextOption(request?.workflow),
+    run: toTextOption(request?.run),
+    model: toTextOption(request?.model),
+    effort: toTextOption(request?.effort),
+    error: toTextOption(record.error ?? result?.error),
     createdAt: toTextOption(record.created_at ?? result?.created_at),
     startedAt: toTextOption(record.started_at ?? result?.started_at),
     completedAt: toTextOption(record.completed_at ?? result?.completed_at),
@@ -237,15 +256,12 @@ function toJobDetail(jobId: string, record: DiskJobRecord): WorkersJobDetail {
     ...toJobSummary(jobId, record),
     task: toText(request?.task) ?? "",
     allowedPaths: toTextList(request?.allowed_paths),
-    model: toTextOption(request?.model),
-    effort: toTextOption(request?.effort),
     baseRef: toTextOption(request?.base_ref ?? result?.base_ref),
     baseSha: toTextOption(record.base_sha ?? result?.base_sha),
     headSha: toTextOption(result?.head_sha),
     worktree: toTextOption(record.worktree ?? result?.worktree),
     patchPath: toTextOption(result?.patch_path),
     summary: toTextOption(result?.summary),
-    error: toTextOption(result?.error),
     assumptions: toTextList(result?.assumptions),
     risks: toTextList(result?.risks),
     followUps: toTextList(result?.follow_ups),
@@ -266,6 +282,133 @@ function compareJobsNewestFirst(left: WorkersJobSummary, right: WorkersJobSummar
   if (rightCreatedAt === undefined) return -1;
   if (leftCreatedAt === rightCreatedAt) return 0;
   return leftCreatedAt < rightCreatedAt ? 1 : -1;
+}
+
+type RunCounts = {
+  total: number;
+  queued: number;
+  running: number;
+  completed: number;
+  failed: number;
+  rejected: number;
+  cancelled: number;
+};
+
+type RunAccumulator = RunCounts & {
+  run: string;
+  workflows: Set<string>;
+  firstCreatedAt: string | null;
+  lastCompletedAt: string | null;
+  stages: Map<string | null, RunCounts>;
+  scopeViolationCount: number;
+};
+
+function emptyRunCounts(): RunCounts {
+  return {
+    total: 0,
+    queued: 0,
+    running: 0,
+    completed: 0,
+    failed: 0,
+    rejected: 0,
+    cancelled: 0,
+  };
+}
+
+function addJobToCounts(counts: RunCounts, status: WorkersJobStatus): void {
+  counts.total += 1;
+  if (status !== "unknown") counts[status] += 1;
+}
+
+function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummary[] {
+  const runs = new Map<string, RunAccumulator>();
+
+  for (const job of jobs) {
+    const run = Option.getOrUndefined(job.run);
+    if (run === undefined) continue;
+
+    let accumulator = runs.get(run);
+    if (accumulator === undefined) {
+      accumulator = {
+        run,
+        workflows: new Set(),
+        firstCreatedAt: null,
+        lastCompletedAt: null,
+        stages: new Map(),
+        scopeViolationCount: 0,
+        ...emptyRunCounts(),
+      };
+      runs.set(run, accumulator);
+    }
+
+    addJobToCounts(accumulator, job.status);
+    accumulator.scopeViolationCount += job.scopeViolationCount;
+
+    const workflow = Option.getOrUndefined(job.workflow);
+    if (workflow !== undefined) accumulator.workflows.add(workflow);
+
+    const createdAt = Option.getOrUndefined(job.createdAt);
+    if (
+      createdAt !== undefined &&
+      (accumulator.firstCreatedAt === null || createdAt < accumulator.firstCreatedAt)
+    ) {
+      accumulator.firstCreatedAt = createdAt;
+    }
+
+    const completedAt = Option.getOrUndefined(job.completedAt);
+    if (
+      completedAt !== undefined &&
+      (accumulator.lastCompletedAt === null || completedAt > accumulator.lastCompletedAt)
+    ) {
+      accumulator.lastCompletedAt = completedAt;
+    }
+
+    const stage = Option.getOrUndefined(job.stage) ?? null;
+    let stageCounts = accumulator.stages.get(stage);
+    if (stageCounts === undefined) {
+      stageCounts = emptyRunCounts();
+      accumulator.stages.set(stage, stageCounts);
+    }
+    addJobToCounts(stageCounts, job.status);
+  }
+
+  return [...runs.values()]
+    .map(
+      (run): WorkersRunSummary => ({
+        run: run.run,
+        workflows: [...run.workflows].toSorted(),
+        firstCreatedAt: Option.fromNullishOr(run.firstCreatedAt),
+        lastCompletedAt: Option.fromNullishOr(run.lastCompletedAt),
+        total: run.total,
+        queued: run.queued,
+        running: run.running,
+        completed: run.completed,
+        failed: run.failed,
+        rejected: run.rejected,
+        cancelled: run.cancelled,
+        stages: [...run.stages.entries()]
+          .toSorted(([left], [right]) => {
+            if (left === null) return right === null ? 0 : -1;
+            if (right === null) return 1;
+            return left.localeCompare(right);
+          })
+          .map(
+            ([stage, counts]): WorkersRunStageRollup => ({
+              stage: Option.fromNullishOr(stage),
+              ...counts,
+            }),
+          ),
+        scopeViolationCount: run.scopeViolationCount,
+      }),
+    )
+    .toSorted((left, right) => {
+      const leftCreatedAt = Option.getOrUndefined(left.firstCreatedAt);
+      const rightCreatedAt = Option.getOrUndefined(right.firstCreatedAt);
+      if (leftCreatedAt === rightCreatedAt) return left.run.localeCompare(right.run);
+      if (leftCreatedAt === undefined) return 1;
+      if (rightCreatedAt === undefined) return -1;
+      return leftCreatedAt < rightCreatedAt ? 1 : -1;
+    });
 }
 
 // job ids address a directory under <stateDir>/jobs; anything that could escape
@@ -337,7 +480,7 @@ export const make = Effect.gen(function* () {
   });
 
   const list: WorkerBrokerStore["Service"]["list"] = Effect.fn("WorkerBrokerStore.list")(
-    function* (_input) {
+    function* (input) {
       const readAt = DateTime.formatIso(yield* DateTime.now);
       if (!(yield* stateDirExists)) {
         return {
@@ -391,7 +534,9 @@ export const make = Effect.gen(function* () {
           continue;
         }
         if (outcome.success._tag === "Loaded") {
-          jobs.push(toJobSummary(outcome.success.jobId, outcome.success.record));
+          const job = toJobSummary(outcome.success.jobId, outcome.success.record);
+          const jobRun = Option.getOrUndefined(job.run);
+          if (input.run === undefined || jobRun === input.run.trim()) jobs.push(job);
           continue;
         }
         if (outcome.success._tag === "Skipped") {
@@ -412,6 +557,20 @@ export const make = Effect.gen(function* () {
       };
     },
   );
+
+  const listRuns: WorkerBrokerStore["Service"]["listRuns"] = Effect.fn(
+    "WorkerBrokerStore.listRuns",
+  )(function* (_input) {
+    const snapshot = yield* list({});
+    return {
+      state: snapshot.state,
+      stateDir: snapshot.stateDir,
+      readAt: snapshot.readAt,
+      runs: aggregateRuns(snapshot.jobs),
+      skippedJobCount: snapshot.skippedJobCount,
+      error: snapshot.error,
+    };
+  });
 
   const getJob: WorkerBrokerStore["Service"]["getJob"] = Effect.fn("WorkerBrokerStore.getJob")(
     function* (input) {
@@ -459,7 +618,47 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return WorkerBrokerStore.of({ list, getJob });
+  const getRun: WorkerBrokerStore["Service"]["getRun"] = Effect.fn("WorkerBrokerStore.getRun")(
+    function* (input) {
+      const runName = input.run.trim();
+      const snapshot = yield* list({ run: runName });
+      const run = aggregateRuns(snapshot.jobs)[0];
+      if (snapshot.state === "state-dir-missing") {
+        return {
+          readAt: snapshot.readAt,
+          run: Option.none(),
+          jobs: [],
+          error: Option.some({
+            message: `Worker-broker state directory '${stateDir}' was not found.`,
+          }),
+        };
+      }
+      if (Option.isSome(snapshot.error)) {
+        return {
+          readAt: snapshot.readAt,
+          run: Option.none(),
+          jobs: [],
+          error: snapshot.error,
+        };
+      }
+      if (run === undefined) {
+        return {
+          readAt: snapshot.readAt,
+          run: Option.none(),
+          jobs: [],
+          error: Option.some({ message: `Worker-broker run '${runName}' was not found.` }),
+        };
+      }
+      return {
+        readAt: snapshot.readAt,
+        run: Option.some(run),
+        jobs: snapshot.jobs,
+        error: Option.none(),
+      };
+    },
+  );
+
+  return WorkerBrokerStore.of({ list, listRuns, getJob, getRun, jobsDir });
 });
 
 export const layer = Layer.effect(WorkerBrokerStore, make);

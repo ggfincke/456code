@@ -122,6 +122,7 @@ import * as ProcessDiagnostics from "../../../apps/server/src/diagnostics/Proces
 import * as ProcessResourceMonitor from "../../../apps/server/src/diagnostics/ProcessResourceMonitor.ts";
 import * as TraceDiagnostics from "../../../apps/server/src/diagnostics/TraceDiagnostics.ts";
 import * as WorkerBrokerStore from "../../../apps/server/src/workers/WorkerBrokerStore.ts";
+import * as WorkersStatusBroadcaster from "../../../apps/server/src/workers/WorkersStatusBroadcaster.ts";
 import * as CartographerEmbedBroker from "../../../apps/server/src/cartographer/CartographerEmbedBroker.ts";
 import * as ProposalGenerationService from "../../../apps/server/src/proposal/ProposalGenerationService.ts";
 import * as ProposalImplementationAttemptService from "../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts";
@@ -653,7 +654,11 @@ const buildAppUnderTest = (options?: {
                 error: Option.none(),
               }),
           }),
+          Layer.mock(WorkersStatusBroadcaster.WorkersStatusBroadcaster)({
+            streamSnapshots: () => Stream.empty,
+          }),
           Layer.mock(WorkerBrokerStore.WorkerBrokerStore)({
+            jobsDir: "/tmp/worker-broker/jobs",
             list: () =>
               Effect.succeed({
                 state: "state-dir-missing",
