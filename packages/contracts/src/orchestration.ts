@@ -414,6 +414,14 @@ export const OrchestrationLatestTurn = Schema.Struct({
 });
 export type OrchestrationLatestTurn = typeof OrchestrationLatestTurn.Type;
 
+export const OrchestrationPendingHandoff = Schema.Struct({
+  text: Schema.String,
+  fromInstanceId: Schema.NullOr(ProviderInstanceId),
+  fromModel: Schema.optional(TrimmedNonEmptyString),
+  createdAt: IsoDateTime,
+});
+export type OrchestrationPendingHandoff = typeof OrchestrationPendingHandoff.Type;
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -426,6 +434,7 @@ export const OrchestrationThread = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  pendingHandoff: Schema.optional(Schema.NullOr(OrchestrationPendingHandoff)),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -730,6 +739,15 @@ const ThreadInteractionModeSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 });
 
+export const ThreadProviderSwitchCommand = Schema.Struct({
+  type: Schema.Literal("thread.provider.switch"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  targetModelSelection: ModelSelection,
+  expectedCurrentInstanceId: Schema.optional(ProviderInstanceId),
+});
+export type ThreadProviderSwitchCommand = typeof ThreadProviderSwitchCommand.Type;
+
 const ThreadTurnStartBootstrapCreateThread = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
@@ -854,6 +872,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadProviderSwitchCommand,
   ThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -879,6 +898,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadMetaUpdateCommand,
   ThreadRuntimeModeSetCommand,
   ThreadInteractionModeSetCommand,
+  ThreadProviderSwitchCommand,
   ClientThreadTurnStartCommand,
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
@@ -895,6 +915,24 @@ const ThreadSessionSetCommand = Schema.Struct({
   session: OrchestrationSession,
   createdAt: IsoDateTime,
 });
+
+export const ThreadProviderSwitchCompleteCommand = Schema.Struct({
+  type: Schema.Literal("thread.provider.switch.complete"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  modelSelection: ModelSelection,
+  fromInstanceId: Schema.NullOr(ProviderInstanceId),
+  handoffText: Schema.String,
+  fromModel: Schema.optional(TrimmedNonEmptyString),
+});
+export type ThreadProviderSwitchCompleteCommand = typeof ThreadProviderSwitchCompleteCommand.Type;
+
+export const ThreadHandoffClearCommand = Schema.Struct({
+  type: Schema.Literal("thread.handoff.clear"),
+  commandId: CommandId,
+  threadId: ThreadId,
+});
+export type ThreadHandoffClearCommand = typeof ThreadHandoffClearCommand.Type;
 
 const ThreadMessageAssistantDeltaCommand = Schema.Struct({
   type: Schema.Literal("thread.message.assistant.delta"),
@@ -972,6 +1010,8 @@ const ThreadRevertCompleteCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
+  ThreadProviderSwitchCompleteCommand,
+  ThreadHandoffClearCommand,
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
@@ -1003,6 +1043,9 @@ export const OrchestrationEventType = Schema.Literals([
   "thread.meta-updated",
   "thread.runtime-mode-set",
   "thread.interaction-mode-set",
+  "thread.provider-switch-requested",
+  "thread.provider-switched",
+  "thread.handoff-cleared",
   "thread.message-sent",
   "thread.turn-start-requested",
   "thread.turn-interrupt-requested",
@@ -1131,6 +1174,26 @@ export const ThreadInteractionModeSetPayload = Schema.Struct({
   ),
   updatedAt: IsoDateTime,
 });
+
+export const ThreadProviderSwitchRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  targetModelSelection: ModelSelection,
+  expectedCurrentInstanceId: Schema.NullOr(ProviderInstanceId),
+});
+export type ThreadProviderSwitchRequestedPayload = typeof ThreadProviderSwitchRequestedPayload.Type;
+
+export const ThreadProviderSwitchedPayload = Schema.Struct({
+  modelSelection: ModelSelection,
+  fromInstanceId: Schema.NullOr(ProviderInstanceId),
+  fromModel: Schema.optional(TrimmedNonEmptyString),
+  handoffText: Schema.String,
+});
+export type ThreadProviderSwitchedPayload = typeof ThreadProviderSwitchedPayload.Type;
+
+export const ThreadHandoffClearedPayload = Schema.Struct({
+  threadId: ThreadId,
+});
+export type ThreadHandoffClearedPayload = typeof ThreadHandoffClearedPayload.Type;
 
 export const ThreadMessageSentPayload = Schema.Struct({
   threadId: ThreadId,
@@ -1315,6 +1378,21 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal("thread.interaction-mode-set"),
     payload: ThreadInteractionModeSetPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.provider-switch-requested"),
+    payload: ThreadProviderSwitchRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.provider-switched"),
+    payload: ThreadProviderSwitchedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal("thread.handoff-cleared"),
+    payload: ThreadHandoffClearedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
