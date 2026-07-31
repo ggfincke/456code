@@ -2,7 +2,7 @@
 // read-model contract for the workers dashboard over local worker-broker state
 
 import * as Schema from "effect/Schema";
-import { IsoDateTime, NonNegativeInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { IsoDateTime, NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from "./baseSchemas.ts";
 
 // broker statuses plus "unknown" so newer broker records degrade instead of failing decode
 export const WorkersJobStatus = Schema.Literals([
@@ -202,3 +202,67 @@ export const WorkersGetJobResult = Schema.Struct({
   ),
 });
 export type WorkersGetJobResult = typeof WorkersGetJobResult.Type;
+
+export const WorkersActivityPhase = Schema.Literals([
+  "preparing",
+  "working",
+  "verifying",
+  "finalizing",
+]);
+export type WorkersActivityPhase = typeof WorkersActivityPhase.Type;
+
+export const WorkersActivityStatus = Schema.Literals(["started", "completed", "failed"]);
+export type WorkersActivityStatus = typeof WorkersActivityStatus.Type;
+
+const WorkersActivityEntryBase = {
+  sequence: PositiveInt,
+  recordedAt: IsoDateTime,
+};
+
+export const WorkersActivityPhaseEntry = Schema.Struct({
+  ...WorkersActivityEntryBase,
+  kind: Schema.Literal("phase"),
+  phase: WorkersActivityPhase,
+  status: WorkersActivityStatus,
+});
+export type WorkersActivityPhaseEntry = typeof WorkersActivityPhaseEntry.Type;
+
+export const WorkersActivityMessageEntry = Schema.Struct({
+  ...WorkersActivityEntryBase,
+  kind: Schema.Literal("message"),
+  summary: TrimmedNonEmptyString,
+});
+export type WorkersActivityMessageEntry = typeof WorkersActivityMessageEntry.Type;
+
+export const WorkersActivityActionEntry = Schema.Struct({
+  ...WorkersActivityEntryBase,
+  kind: Schema.Literal("action"),
+  status: WorkersActivityStatus,
+});
+export type WorkersActivityActionEntry = typeof WorkersActivityActionEntry.Type;
+
+export const WorkersActivityEntry = Schema.Union([
+  WorkersActivityPhaseEntry,
+  WorkersActivityMessageEntry,
+  WorkersActivityActionEntry,
+]);
+export type WorkersActivityEntry = typeof WorkersActivityEntry.Type;
+
+export const WorkersActivityInput = Schema.Struct({
+  jobId: TrimmedNonEmptyString,
+});
+export type WorkersActivityInput = typeof WorkersActivityInput.Type;
+
+export const WorkersActivitySnapshot = Schema.Struct({
+  jobId: TrimmedNonEmptyString,
+  readAt: IsoDateTime,
+  entries: Schema.Array(WorkersActivityEntry),
+  skippedEntryCount: NonNegativeInt,
+  truncated: Schema.Boolean,
+  error: Schema.Option(
+    Schema.Struct({
+      message: TrimmedNonEmptyString,
+    }),
+  ),
+});
+export type WorkersActivitySnapshot = typeof WorkersActivitySnapshot.Type;

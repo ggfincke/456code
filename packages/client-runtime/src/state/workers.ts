@@ -88,6 +88,12 @@ export function createWorkersEnvironmentAtoms<R, E>(
       staleTimeMs: 30_000,
       refreshIntervalMs: 30_000,
     }),
+    activity: createEnvironmentSubscriptionAtomFamily(runtime, {
+      label: "environment-data:workers:activity",
+      idleTtlMs: 0,
+      subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.workersSubscribeActivity>) =>
+        subscribe(WS_METHODS.workersSubscribeActivity, input),
+    }),
     getRun,
   };
 }

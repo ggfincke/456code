@@ -2,6 +2,9 @@
 // read-only reader for local worker-broker job records on disk
 
 import type {
+  WorkersActivityEntry,
+  WorkersActivityInput,
+  WorkersActivitySnapshot,
   WorkersGetJobInput,
   WorkersGetJobResult,
   WorkersGetRunInput,
@@ -30,6 +33,7 @@ import * as Path from "effect/Path";
 import * as PlatformError from "effect/PlatformError";
 import * as Result from "effect/Result";
 import * as Schema from "effect/Schema";
+import * as Stream from "effect/Stream";
 import * as NodeOS from "node:os";
 
 /**
@@ -45,11 +49,14 @@ export class WorkerBrokerStore extends Context.Service<
     readonly listRuns: (input: WorkersListRunsInput) => Effect.Effect<WorkersListRunsResult>;
     readonly getJob: (input: WorkersGetJobInput) => Effect.Effect<WorkersGetJobResult>;
     readonly getRun: (input: WorkersGetRunInput) => Effect.Effect<WorkersGetRunResult>;
+    readonly readActivity: (input: WorkersActivityInput) => Effect.Effect<WorkersActivitySnapshot>;
     readonly jobsDir: string;
   }
 >()("456code/workers/WorkerBrokerStore") {}
 
 const SUPPORTED_SCHEMA_VERSION = 1;
+const MAX_ACTIVITY_BYTES = 256 * 1024;
+const MAX_ACTIVITY_ENTRIES = 200;
 
 // lenient mirror of the broker's on-disk snake_case record; unknown keys are ignored
 // and everything but the id is optional so partial or in-flight jobs still decode
@@ -427,6 +434,56 @@ function isNotFoundError(error: PlatformError.PlatformError): boolean {
   return error.reason._tag === "NotFound";
 }
 
+function normalizeActivityRecord(
+  value: unknown,
+  previousSequence: number,
+): WorkersActivityEntry | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.schema_version !== SUPPORTED_SCHEMA_VERSION) return null;
+  if (
+    typeof record.sequence !== "number" ||
+    !Number.isInteger(record.sequence) ||
+    record.sequence <= previousSequence
+  ) {
+    return null;
+  }
+  if (
+    typeof record.recorded_at !== "string" ||
+    record.recorded_at.trim().length === 0 ||
+    !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(
+      record.recorded_at,
+    ) ||
+    Number.isNaN(Date.parse(record.recorded_at))
+  ) {
+    return null;
+  }
+
+  const base = { sequence: record.sequence, recordedAt: record.recorded_at };
+  const status = record.status;
+  const validStatus = status === "started" || status === "completed" || status === "failed";
+  if (record.kind === "phase") {
+    const phase = record.phase;
+    const validPhase =
+      phase === "preparing" ||
+      phase === "working" ||
+      phase === "verifying" ||
+      phase === "finalizing";
+    return validPhase && validStatus ? { ...base, kind: "phase", phase, status } : null;
+  }
+  if (record.kind === "action") {
+    return validStatus ? { ...base, kind: "action", status } : null;
+  }
+  if (record.kind === "message" && typeof record.summary === "string") {
+    const summary = record.summary
+      .replace(/[\u0000-\u001f\u007f]/g, " ")
+      .trim()
+      .slice(0, 1000);
+    return summary.length > 0 ? { ...base, kind: "message", summary } : null;
+  }
+  return null;
+}
+
 function resolveStateDir(environment: NodeJS.ProcessEnv, path: Path.Path): string {
   const explicitHome = toText(environment.WORKER_BROKER_HOME);
   if (explicitHome !== null) return explicitHome;
@@ -658,7 +715,84 @@ export const make = Effect.gen(function* () {
     },
   );
 
-  return WorkerBrokerStore.of({ list, listRuns, getJob, getRun, jobsDir });
+  const readActivity: WorkerBrokerStore["Service"]["readActivity"] = Effect.fn(
+    "WorkerBrokerStore.readActivity",
+  )(function* (input) {
+    const readAt = DateTime.formatIso(yield* DateTime.now);
+    const jobId = input.jobId.trim();
+    const empty = (overrides?: Partial<WorkersActivitySnapshot>): WorkersActivitySnapshot => ({
+      jobId: jobId.length > 0 ? jobId : "invalid",
+      readAt,
+      entries: [],
+      skippedEntryCount: 0,
+      truncated: false,
+      error: Option.none(),
+      ...overrides,
+    });
+    if (!isSafeJobId(jobId)) {
+      return empty({
+        error: Option.some({ message: "The requested job id is not a valid job identifier." }),
+      });
+    }
+
+    const activityPath = path.join(jobsDir, jobId, "activity.jsonl");
+    const info = yield* fileSystem.stat(activityPath).pipe(Effect.result);
+    if (Result.isFailure(info)) {
+      if (isNotFoundError(info.failure)) return empty();
+      return empty({ error: Option.some({ message: "Failed to read worker activity." }) });
+    }
+
+    const size = BigInt(info.success.size);
+    const maxBytes = BigInt(MAX_ACTIVITY_BYTES);
+    const byteTruncated = size > maxBytes;
+    const offset = byteTruncated ? size - maxBytes : BigInt(0);
+    const text = yield* fileSystem.stream(activityPath, { offset, bytesToRead: maxBytes }).pipe(
+      Stream.decodeText(),
+      Stream.runFold(
+        () => "",
+        (acc, chunk) => acc + chunk,
+      ),
+      Effect.result,
+    );
+    if (Result.isFailure(text)) {
+      return empty({ error: Option.some({ message: "Failed to read worker activity." }) });
+    }
+
+    const lines = text.success.split(/\r?\n/);
+    let skippedEntryCount = 0;
+    if (byteTruncated && lines.length > 0) {
+      lines.shift();
+      skippedEntryCount += 1;
+    }
+    const entries: WorkersActivityEntry[] = [];
+    let previousSequence = 0;
+    for (const line of lines) {
+      if (line.trim().length === 0) continue;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(line);
+      } catch {
+        skippedEntryCount += 1;
+        continue;
+      }
+      const entry = normalizeActivityRecord(parsed, previousSequence);
+      if (entry === null) {
+        skippedEntryCount += 1;
+        continue;
+      }
+      entries.push(entry);
+      previousSequence = entry.sequence;
+    }
+
+    const entryTruncated = entries.length > MAX_ACTIVITY_ENTRIES;
+    return empty({
+      entries: entryTruncated ? entries.slice(-MAX_ACTIVITY_ENTRIES) : entries,
+      skippedEntryCount,
+      truncated: byteTruncated || entryTruncated,
+    });
+  });
+
+  return WorkerBrokerStore.of({ list, listRuns, getJob, getRun, readActivity, jobsDir });
 });
 
 export const layer = Layer.effect(WorkerBrokerStore, make);

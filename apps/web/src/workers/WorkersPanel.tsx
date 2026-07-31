@@ -5,13 +5,14 @@ import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import type {
   EnvironmentId,
   WorkersJobDetail,
+  WorkersJobStatus,
   WorkersJobSummary,
   WorkersListInput,
   WorkersRunSummary,
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { Check, ChevronLeft, ChevronRight, Copy, RefreshCw, TriangleAlert } from "lucide-react";
-import { type ReactNode, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
 
 import { Badge } from "~/components/ui/badge";
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "~/components/ui/collapsible";
@@ -37,14 +38,24 @@ import {
 } from "~/rightPanelStore";
 import { formatDuration } from "~/session-logic";
 import { useEnvironmentQuery } from "~/state/query";
-import { workersEnvironment } from "~/state/workers";
+import { workersActivityEnvironment, workersEnvironment } from "~/state/workers";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
+import {
+  workerActivityAgeLabel,
+  workerActivityHeadline,
+  workerActivityNoticeLabel,
+  workerActivityTransportLabel,
+  workerActivityView,
+  type WorkerActivityHeadline,
+  type WorkerActivityHistoryEntry,
+} from "./workersActivity.logic";
 import {
   repoBasename,
   shortSha,
   sortWorkerRunsNewestFirst,
   workerElapsedLabel,
+  workerJobPresentation,
   workerJobsHaveStages,
   workerModelLabel,
   workerPatchClipboard,
@@ -472,9 +483,254 @@ function WorkersJobPatchSection({ job }: { job: WorkersJobDetail }) {
   );
 }
 
-function WorkersJobDetailView({ job }: { job: WorkersJobDetail }) {
+// whether three lines hide anything is a question about the rendered width, not the
+// character count: a short task wraps past the clamp in a narrow panel & a long one can
+// fit in a wide one. the clamped paragraph measures itself instead, and re-measures as
+// the panel resizes, so the disclosure appears exactly when text is actually clipped
+function useTaskClipped(collapsed: boolean): {
+  readonly ref: (node: HTMLParagraphElement | null) => void;
+  readonly clipped: boolean;
+} {
+  const [node, setNode] = useState<HTMLParagraphElement | null>(null);
+  const [clipped, setClipped] = useState(false);
+
+  // an expanded paragraph carries no clamp to overflow, so it is left unmeasured & keeps
+  // the verdict that opened it; collapsing re-measures at the current width
+  useEffect(() => {
+    if (node === null || !collapsed) return;
+
+    const measure = () => {
+      const next = node.scrollHeight - node.clientHeight > 1;
+      setClipped((current) => (current === next ? current : next));
+    };
+
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [node, collapsed]);
+
+  return { ref: setNode, clipped };
+}
+
+// a broker task runs to hundreds of lines, which used to push everything below it off
+// screen; the clamp keeps the detail scannable & the disclosure keeps the full text one
+// keystroke away
+function WorkersJobTaskSection({ task }: { task: string }) {
+  const [expanded, setExpanded] = useState(false);
+  const bodyId = useId();
+  const text = task.trim();
+  const collapsed = text.length > 0 && !expanded;
+  const { ref, clipped } = useTaskClipped(collapsed);
+
+  return (
+    <section className="border-b border-border/60 px-3 py-2.5 last:border-b-0">
+      <div className="mb-1.5 flex items-center gap-2">
+        <SectionHeading inline>Task</SectionHeading>
+        {clipped ? (
+          <button
+            type="button"
+            aria-expanded={expanded}
+            aria-controls={bodyId}
+            className="ml-auto shrink-0 rounded-md px-1 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {expanded ? "Hide full task" : "Show full task"}
+          </button>
+        ) : null}
+      </div>
+      <p
+        id={bodyId}
+        ref={ref}
+        className={cn(
+          "whitespace-pre-wrap break-words text-xs leading-relaxed",
+          text.length === 0 ? "text-muted-foreground" : "text-foreground",
+          collapsed ? "line-clamp-3" : null,
+        )}
+      >
+        {text.length > 0 ? text : "No task text recorded."}
+      </p>
+    </section>
+  );
+}
+
+// the headline is the one part that changes while a job runs; it renders inside the
+// section's persistent live region rather than owning one, so a swap between headline,
+// empty & disconnected states is announced in place. status is stated as text inside the
+// badge rather than by tint alone
+function WorkersActivityHeadlineBlock({
+  headline,
+  message,
+  note,
+  actionSummary,
+}: {
+  headline: WorkerActivityHeadline;
+  message: string | null;
+  note: string | null;
+  actionSummary: string | null;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <Badge size="sm" variant={headline.variant}>
+          {headline.label}
+        </Badge>
+        {actionSummary === null ? null : (
+          <span className="text-[10px] text-muted-foreground">{actionSummary}</span>
+        )}
+      </div>
+      {message !== null ? (
+        <p className="mt-1 break-words text-xs leading-relaxed text-foreground">{message}</p>
+      ) : note !== null ? (
+        <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{note}</p>
+      ) : null}
+    </div>
+  );
+}
+
+function WorkersActivityHistory({
+  entries,
+  nowMs,
+}: {
+  entries: readonly WorkerActivityHistoryEntry[];
+  nowMs: number;
+}) {
+  return (
+    <Collapsible>
+      <CollapsibleTrigger className="-ml-1 mt-1.5 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground data-panel-open:[&_svg]:rotate-90">
+        <ChevronRight aria-hidden className="size-3 shrink-0 transition-transform" />
+        {`History (${entries.length})`}
+      </CollapsibleTrigger>
+      <CollapsiblePanel>
+        <ol className="mt-1 space-y-0.5 text-[10px] leading-relaxed">
+          {entries.map((entry) => (
+            <li key={entry.key} className="flex gap-2">
+              <span className="w-14 shrink-0 tabular-nums text-muted-foreground">
+                {workerActivityAgeLabel(entry.recordedAt, nowMs)}
+              </span>
+              <span className="min-w-0 flex-1 break-words text-foreground">
+                <span className="text-muted-foreground">{entry.label}</span>
+                {entry.text === null ? null : ` ${entry.text}`}
+              </span>
+            </li>
+          ))}
+        </ol>
+      </CollapsiblePanel>
+    </Collapsible>
+  );
+}
+
+// the only subscription in this panel that is scoped to a single job; it is mounted from
+// the selected detail alone, so list & run rows never open an activity stream
+function WorkersJobActivitySection({
+  environmentId,
+  job,
+  status,
+  live,
+  nowMs,
+  elapsedLabel,
+}: {
+  environmentId: EnvironmentId;
+  job: WorkersJobDetail;
+  status: WorkersJobStatus;
+  live: boolean;
+  nowMs: number;
+  elapsedLabel: string | null;
+}) {
+  // the atom family keys on JSON.stringify([environmentId, input]), so the inline input
+  // stays one stable key for as long as this job is the selected one
+  const activityQuery = useEnvironmentQuery(
+    workersActivityEnvironment({ environmentId, input: { jobId: job.jobId } }),
+  );
+
+  // a failed stream still hands back the last snapshot it read, so the two are disclosed
+  // independently: the transport line qualifies whatever trace remains below it
+  const snapshot = activityQuery.data;
+  const view = snapshot === null ? null : workerActivityView(snapshot.entries, snapshot.truncated);
+  const snapshotError = snapshot === null ? null : Option.getOrNull(snapshot.error);
+  const notice = snapshot === null ? null : workerActivityNoticeLabel(snapshot);
+  const transport = workerActivityTransportLabel(activityQuery.error, snapshot !== null);
+  const headline = workerActivityHeadline(status, view?.latestPhase ?? null);
+  const hasTrace = view !== null && view.history.length > 0;
+
+  return (
+    <section className="border-b border-border/60 px-3 py-2.5 last:border-b-0">
+      <div className="mb-1.5 flex items-center gap-2">
+        <SectionHeading inline>Activity</SectionHeading>
+        {elapsedLabel === null ? null : (
+          <span className="ml-auto shrink-0 text-[10px] text-muted-foreground">{elapsedLabel}</span>
+        )}
+      </div>
+
+      {/* one region for every status this section can be in, so a change is announced in
+          place instead of remounting a new live node; the ordered history stays outside it
+          so expanding the disclosure is not read out */}
+      <div aria-live="polite" className="min-w-0">
+        {transport === null ? null : (
+          <p className="mb-1.5 break-words text-xs leading-relaxed text-muted-foreground">
+            {transport}
+          </p>
+        )}
+
+        {snapshotError === null ? null : (
+          <p className="mb-1.5 break-words text-xs leading-relaxed text-destructive">
+            {snapshotError.message}
+          </p>
+        )}
+
+        {snapshot === null ? (
+          transport === null ? (
+            <p className="text-xs text-muted-foreground">Reading activity…</p>
+          ) : null
+        ) : !hasTrace && !live ? (
+          <p className="text-xs leading-relaxed text-muted-foreground">
+            No activity was recorded for this job.
+          </p>
+        ) : (
+          <>
+            <WorkersActivityHeadlineBlock
+              headline={headline}
+              message={view?.latestMessage ?? null}
+              note={hasTrace ? null : "Waiting for the first activity update…"}
+              actionSummary={view?.actionSummary ?? null}
+            />
+            {notice === null ? null : (
+              <p className="mt-1 text-[10px] text-muted-foreground">{notice}</p>
+            )}
+          </>
+        )}
+      </div>
+
+      {view === null || view.history.length === 0 ? null : (
+        <WorkersActivityHistory entries={view.history} nowMs={nowMs} />
+      )}
+    </section>
+  );
+}
+
+function WorkersJobDetailView({
+  environmentId,
+  job,
+  summary: listSummary,
+  nowMs,
+}: {
+  environmentId: EnvironmentId;
+  job: WorkersJobDetail;
+  summary: WorkersJobSummary | null;
+  nowMs: number;
+}) {
   const verification = workerVerificationView(job.verification);
-  const elapsed = workerElapsedLabel(job.elapsedMs);
+  // the live list row wins over the 30s detail read for status & timing alone; every
+  // terminal field below still comes from the detail payload. the id check drops a row
+  // that belongs to a newly selected job whose detail read has not landed yet
+  const presentation = workerJobPresentation(
+    job,
+    listSummary?.jobId === job.jobId ? listSummary : null,
+    nowMs,
+  );
+  const elapsed = presentation.elapsedLabel;
   const model = workerModelLabel(job);
   const workflow = Option.getOrNull(job.workflow);
   const stage = Option.getOrNull(job.stage);
@@ -490,11 +746,16 @@ function WorkersJobDetailView({ job }: { job: WorkersJobDetail }) {
 
   return (
     <div className="pb-4">
-      <DetailSection title="Task">
-        <p className="whitespace-pre-wrap break-words text-xs leading-relaxed text-foreground">
-          {job.task.trim().length > 0 ? job.task : "No task text recorded."}
-        </p>
-      </DetailSection>
+      <WorkersJobTaskSection task={job.task} />
+
+      <WorkersJobActivitySection
+        environmentId={environmentId}
+        job={job}
+        status={presentation.status}
+        live={presentation.live}
+        nowMs={nowMs}
+        elapsedLabel={elapsed}
+      />
 
       {error === null ? null : (
         <DetailSection title="Error">
@@ -514,8 +775,8 @@ function WorkersJobDetailView({ job }: { job: WorkersJobDetail }) {
 
       <DetailSection title="Run">
         <DetailField label="Status">
-          <Badge size="sm" variant={workerStatusBadgeVariant(job.status)}>
-            {job.status}
+          <Badge size="sm" variant={workerStatusBadgeVariant(presentation.status)}>
+            {presentation.status}
           </Badge>
         </DetailField>
         <DetailField label="Provider">{job.provider}</DetailField>
@@ -716,6 +977,13 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
   const runOpen = !detailOpen && selectedRunId !== null;
   const listOpen = !detailOpen && !runOpen;
 
+  // the list subscription is already mounted for every view, so the selected job's row is
+  // the freshest record the panel holds while the detail read waits out its 30s interval
+  const selectedSummary = useMemo(() => {
+    if (selectedJobId === null) return null;
+    return jobs.find((job) => job.jobId === selectedJobId) ?? null;
+  }, [jobs, selectedJobId]);
+
   const title = detailOpen ? "Worker job" : runOpen ? "Orchestration run" : "Workers";
   const subtitle = detailOpen
     ? selectedJobId
@@ -800,7 +1068,16 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
                   </div>
                 );
               }
-              return <WorkersJobDetailView job={job} />;
+              // keyed by job so the task disclosure & activity stream reset per selection
+              return (
+                <WorkersJobDetailView
+                  key={job.jobId}
+                  environmentId={environmentId}
+                  job={job}
+                  summary={selectedSummary}
+                  nowMs={nowMs}
+                />
+              );
             })()
           )
         ) : runOpen ? (

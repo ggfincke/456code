@@ -153,6 +153,8 @@ import {
 } from "./sourceControl.ts";
 import { VcsError } from "./vcs.ts";
 import {
+  WorkersActivityInput,
+  WorkersActivitySnapshot,
   WorkersGetJobInput,
   WorkersGetJobResult,
   WorkersGetRunInput,
@@ -287,6 +289,7 @@ export const WS_METHODS = {
   workersGetJob: "workers.getJob",
   workersGetRun: "workers.getRun",
   workersSubscribe: "workers.subscribe",
+  workersSubscribeActivity: "workers.subscribeActivity",
 
   // Source control methods
   sourceControlLookupRepository: "sourceControl.lookupRepository",
@@ -886,6 +889,13 @@ export const WsWorkersSubscribeRpc = Rpc.make(WS_METHODS.workersSubscribe, {
   stream: true,
 });
 
+export const WsWorkersSubscribeActivityRpc = Rpc.make(WS_METHODS.workersSubscribeActivity, {
+  payload: WorkersActivityInput,
+  success: WorkersActivitySnapshot,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 export const WsRpcGroup = RpcGroup.make(
   WsServerProbeRpc,
   WsServerGetConfigRpc,
@@ -909,6 +919,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsWorkersGetJobRpc,
   WsWorkersGetRunRpc,
   WsWorkersSubscribeRpc,
+  WsWorkersSubscribeActivityRpc,
   WsSourceControlLookupRepositoryRpc,
   WsSourceControlCloneRepositoryRpc,
   WsSourceControlPublishRepositoryRpc,
