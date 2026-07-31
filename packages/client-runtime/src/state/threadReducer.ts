@@ -164,6 +164,39 @@ export function applyThreadDetailEvent(
         },
       };
 
+    // payload carries no threadId; the caller matched this event to the
+    // thread via the event's aggregate id
+    case "thread.provider-switched":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          modelSelection: event.payload.modelSelection,
+          pendingHandoff:
+            event.payload.handoffText.trim().length > 0
+              ? {
+                  text: event.payload.handoffText,
+                  fromInstanceId: event.payload.fromInstanceId,
+                  ...(event.payload.fromModel !== undefined
+                    ? { fromModel: event.payload.fromModel }
+                    : {}),
+                  createdAt: event.occurredAt,
+                }
+              : null,
+          updatedAt: event.occurredAt,
+        },
+      };
+
+    case "thread.handoff-cleared":
+      return {
+        kind: "updated",
+        thread: {
+          ...thread,
+          pendingHandoff: null,
+          updatedAt: event.occurredAt,
+        },
+      };
+
     case "thread.runtime-mode-set":
       return {
         kind: "updated",

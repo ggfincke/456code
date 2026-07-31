@@ -3,7 +3,6 @@
 import {
   type EventId,
   type EnvironmentId,
-  isProviderDriverKind,
   ProjectId,
   type ModelSelection,
   type ProviderContinuationIdentity,
@@ -617,14 +616,6 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean {
   );
 }
 
-// `threadProvider` is the open branded driver kind carried by the session.
-// Unknown driver kinds degrade to `null` (i.e. "unlocked"), which is the safe
-// rollback / fork behavior — the routing layer is the right place to surface
-// "driver not installed" errors, not the lock state.
-//
-// `selectedProvider` and `threadProvider` can carry configured instance ids
-// (e.g. `codex_personal`), so resolve them through the exact provider snapshot
-// before falling back to an open driver-kind slug.
 export function deriveLockedProvider(input: {
   thread: Thread | null | undefined;
   selectedProvider: string | null;
@@ -638,23 +629,28 @@ export function deriveLockedProvider(input: {
   ) {
     return input.importContinuationGate.driverKind;
   }
-  if (!threadHasStarted(input.thread)) {
-    return null;
+  return null;
+}
+
+export function getStartedThreadProviderSwitchBlockReason(input: {
+  isSwitchingProvider: boolean;
+  isTurnRunning: boolean;
+  hasPendingApproval: boolean;
+  hasPendingUserInput: boolean;
+}): string | null {
+  if (input.isSwitchingProvider) {
+    return "A provider handoff is already in progress.";
   }
-  const sessionProvider = input.thread?.session?.providerName ?? null;
-  if (sessionProvider && isProviderDriverKind(sessionProvider)) {
-    return sessionProvider;
+  if (input.isTurnRunning) {
+    return "Wait for the current response to finish before switching providers.";
   }
-  const resolveDriverKind = (selection: string | null): ProviderDriverKind | null => {
-    if (selection === null) {
-      return null;
-    }
-    const configured = input.providers.find((provider) => provider.instanceId === selection);
-    return configured?.driver ?? (isProviderDriverKind(selection) ? selection : null);
-  };
-  const narrowedThreadProvider = resolveDriverKind(input.threadProvider);
-  const narrowedSelectedProvider = resolveDriverKind(input.selectedProvider);
-  return narrowedThreadProvider ?? narrowedSelectedProvider ?? null;
+  if (input.hasPendingApproval) {
+    return "Resolve the pending approval before switching providers.";
+  }
+  if (input.hasPendingUserInput) {
+    return "Answer the pending question before switching providers.";
+  }
+  return null;
 }
 
 export function getStartedThreadModelChangeBlockReason(input: {
@@ -675,6 +671,9 @@ export function getStartedThreadModelChangeBlockReason(input: {
     currentModelSelection.instanceId === input.nextModelSelection.instanceId &&
     currentModelSelection.model === input.nextModelSelection.model
   ) {
+    return null;
+  }
+  if (currentModelSelection.instanceId !== input.nextModelSelection.instanceId) {
     return null;
   }
   const currentProvider = input.providers.find(
