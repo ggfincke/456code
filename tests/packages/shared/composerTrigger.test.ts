@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   detectComposerTrigger,
+  parseStandaloneComposerSlashCommand,
   serializeComposerFileLink,
   serializeComposerMentionPath,
 } from "../../../packages/shared/src/composerTrigger.ts";
@@ -68,5 +69,9 @@ describe("detectComposerTrigger", () => {
       rangeStart: 0,
       rangeEnd: text.length,
     });
+  });
+
+  it("parses /orchestrate as a standalone mode command", () => {
+    expect(parseStandaloneComposerSlashCommand(" /orchestrate ")).toBe("orchestrate");
   });
 });

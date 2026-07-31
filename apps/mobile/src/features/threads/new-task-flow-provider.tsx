@@ -391,12 +391,19 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren) {
         option.selection.instanceId === selectedModel.instanceId &&
         option.selection.model === selectedModel.model,
     ) ?? null;
-  const selectedProviderSkills = useMemo(
+  const selectedProvider = useMemo(
     () =>
       selectedEnvironmentServerConfig?.providers.find(
         (provider) => provider.instanceId === selectedModel?.instanceId,
-      )?.skills ?? [],
+      ) ?? null,
     [selectedEnvironmentServerConfig, selectedModel?.instanceId],
+  );
+  const selectedProviderSkills = useMemo(
+    () =>
+      (selectedProvider?.skills ?? []).filter(
+        (skill) => skill.name.toLowerCase() !== "orchestrate",
+      ),
+    [selectedProvider],
   );
   const setSelectedModelKey = useCallback(
     (key: string | null) => {

@@ -1611,6 +1611,14 @@ describe("composerDraftStore runtime and interaction settings", () => {
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.interactionMode).toBe("plan");
   });
 
+  it("stores orchestrate as the canonical interaction mode", () => {
+    const store = useComposerDraftStore.getState();
+
+    store.setInteractionMode(threadRef, "orchestrate");
+
+    expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.interactionMode).toBe("orchestrate");
+  });
+
   it("removes empty settings-only drafts when overrides are cleared", () => {
     const store = useComposerDraftStore.getState();
 

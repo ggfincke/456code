@@ -49,6 +49,7 @@ import * as ProviderAdapterRegistry from "../../../../../apps/server/src/provide
 import * as ProviderService from "../../../../../apps/server/src/provider/Services/ProviderService.ts";
 import * as ProviderSessionDirectory from "../../../../../apps/server/src/provider/Services/ProviderSessionDirectory.ts";
 import { makeProviderServiceLive } from "../../../../../apps/server/src/provider/Layers/ProviderService.ts";
+import { ORCHESTRATE_MODE_INSTRUCTIONS } from "../../../../../apps/server/src/provider/CollaborationModeInstructions.ts";
 import * as ProviderEventLoggers from "../../../../../apps/server/src/provider/Layers/ProviderEventLoggers.ts";
 import { ProviderSessionDirectoryLive } from "../../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -1344,6 +1345,39 @@ routing.layer("ProviderServiceLive routing", (it) => {
         assert.equal(startPayload.threadId, session.threadId);
       }
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1);
+    }),
+  );
+
+  it.effect("delivers orchestrate mode instructions to non-Codex lead providers", () =>
+    Effect.gen(function* () {
+      const provider = yield* ProviderService.ProviderService;
+      const threadId = asThreadId("thread-claude-orchestrate");
+      routing.claude.startSession.mockClear();
+      routing.claude.sendTurn.mockClear();
+
+      yield* provider.startSession(threadId, {
+        provider: CLAUDE_AGENT_DRIVER,
+        providerInstanceId: claudeAgentInstanceId,
+        threadId,
+        runtimeMode: "full-access",
+      });
+      yield* provider.sendTurn({
+        threadId,
+        input: "review every provider path",
+        attachments: [],
+        interactionMode: "orchestrate",
+      });
+
+      const sent = routing.claude.sendTurn.mock.calls[0]?.[0];
+      assert.equal(sent?.interactionMode, "orchestrate");
+      assert.equal(
+        sent?.input,
+        `${ORCHESTRATE_MODE_INSTRUCTIONS}\n\n<user_request>\nreview every provider path\n</user_request>`,
+      );
+
+      yield* provider.stopSession({ threadId });
+      routing.claude.startSession.mockClear();
+      routing.claude.sendTurn.mockClear();
     }),
   );
 

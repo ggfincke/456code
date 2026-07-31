@@ -7,6 +7,7 @@ import {
   expandCollapsedComposerCursor,
   isCollapsedCursorAdjacentToInlineToken,
   parseStandaloneComposerSlashCommand,
+  parseLegacyOrchestrateInvocation,
   replaceTextRange,
   shouldSubmitComposerOnEnter,
 } from "../../../apps/web/src/composer-logic";
@@ -367,7 +368,23 @@ describe("parseStandaloneComposerSlashCommand", () => {
     expect(parseStandaloneComposerSlashCommand("/default")).toBe("default");
   });
 
+  it("parses standalone /orchestrate command", () => {
+    expect(parseStandaloneComposerSlashCommand("/orchestrate")).toBe("orchestrate");
+  });
+
   it("ignores slash commands with extra message text", () => {
     expect(parseStandaloneComposerSlashCommand("/plan explain this")).toBeNull();
+  });
+});
+
+describe("parseLegacyOrchestrateInvocation", () => {
+  it("turns the legacy skill prefix into a mode switch without forwarding the token", () => {
+    expect(parseLegacyOrchestrateInvocation(" $orchestrate   review this")).toEqual({
+      prompt: "review this",
+    });
+  });
+
+  it("does not match orchestrate mentions in ordinary prose", () => {
+    expect(parseLegacyOrchestrateInvocation("compare $orchestrate with /plan")).toBeNull();
   });
 });

@@ -396,6 +396,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       ) ?? null
     );
   }, [props.serverConfig, props.selectedThread.modelSelection.instanceId]);
+  const providerSkills = useMemo(
+    () =>
+      (selectedProviderStatus?.skills ?? []).filter(
+        (skill) => skill.name.toLowerCase() !== "orchestrate",
+      ),
+    [selectedProviderStatus],
+  );
 
   // ── Trigger detection ────────────────────────────────────
   const [composerSelection, setComposerSelection] = useState(() => ({
@@ -451,6 +458,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           description: "Switch to plan mode",
         },
         {
+          id: "cmd:orchestrate",
+          type: "slash-command" as const,
+          command: "orchestrate",
+          label: "/orchestrate",
+          description: "Switch to orchestrate mode",
+        },
+        {
           id: "cmd:default",
           type: "slash-command" as const,
           command: "default",
@@ -461,9 +475,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       const builtIn = allBuiltIn.filter((item) => item.command.includes(q));
 
       const collidingSkillNames = new Set(
-        (selectedProviderStatus?.skills ?? [])
-          .filter((skill) => skill.enabled)
-          .map((skill) => skill.name.toLowerCase()),
+        providerSkills.filter((skill) => skill.enabled).map((skill) => skill.name.toLowerCase()),
       );
 
       const providerCommands: ComposerCommandItem[] = [];
@@ -479,19 +491,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         });
       }
 
-      const skillItems = searchMobileComposerSkills(
-        selectedProviderStatus?.skills ?? [],
-        composerTrigger.query,
-      );
+      const skillItems = searchMobileComposerSkills(providerSkills, composerTrigger.query);
 
       return [...builtIn, ...providerCommands, ...skillItems];
     }
 
     if (composerTrigger.kind === "skill") {
-      return searchMobileComposerSkills(
-        selectedProviderStatus?.skills ?? [],
-        composerTrigger.query,
-      );
+      return searchMobileComposerSkills(providerSkills, composerTrigger.query);
     }
 
     if (composerTrigger.kind === "path") {
@@ -509,7 +515,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
 
     return [];
-  }, [composerTrigger, pathSearch.entries, selectedProviderStatus]);
+  }, [composerTrigger, pathSearch.entries, providerSkills, selectedProviderStatus]);
 
   // ── Handle command selection ──────────────────────────────
   const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props;
@@ -545,7 +551,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
 
       if (
         item.type === "slash-command" &&
-        (item.command === "plan" || item.command === "default")
+        (item.command === "plan" || item.command === "orchestrate" || item.command === "default")
       ) {
         const result = replaceTextRange(
           draftMessage,
@@ -661,10 +667,16 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       {
         id: "options-interaction",
         title: "Interaction",
-        subtitle: currentInteractionMode === "plan" ? "Plan" : "Default",
+        subtitle:
+          currentInteractionMode === "plan"
+            ? "Plan"
+            : currentInteractionMode === "orchestrate"
+              ? "Orchestrate"
+              : "Default",
         subactions: [
           { id: "options:interaction:default", title: "Default" },
           { id: "options:interaction:plan", title: "Plan" },
+          { id: "options:interaction:orchestrate", title: "Orchestrate" },
         ].map((option) => {
           const value = option.id.replace("options:interaction:", "");
           return {
