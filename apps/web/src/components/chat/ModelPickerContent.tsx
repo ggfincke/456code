@@ -87,6 +87,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
    * model set but are free to diverge via customModels).
    */
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>;
+  switchableThreadProviderInstanceId?: ProviderInstanceId | null;
   terminalOpen: boolean;
   onRequestClose?: () => void;
   getModelDisabledReason?: (instanceId: ProviderInstanceId, model: string) => string | null;
@@ -628,6 +629,11 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                   unstyled
                 />
               </div>
+              {props.switchableThreadProviderInstanceId ? (
+                <p className="pt-2 text-[11px] font-medium text-muted-foreground">
+                  Switch provider for this thread
+                </p>
+              ) : null}
             </div>
 
             {showProviderUsage && selectedAccountUsage ? (

@@ -39,6 +39,7 @@ import { isGitRepository } from "../../git/Utils.ts";
 import { ProposalImplementationAttemptService } from "../../proposal/ProposalImplementationAttemptService.ts";
 import { VcsStatusBroadcaster } from "../../vcs/VcsStatusBroadcaster.ts";
 import * as WorkspaceEntries from "../../workspace/WorkspaceEntries.ts";
+import { isHiddenTurnRuntimeEvent } from "../../provider/HiddenTurnRegistry.ts";
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
 
@@ -964,6 +965,9 @@ const make = Effect.gen(function* () {
   const processRuntimeEvent = Effect.fn("processRuntimeEvent")(function* (
     event: ProviderRuntimeEvent,
   ) {
+    if (isHiddenTurnRuntimeEvent(event)) {
+      return;
+    }
     if (event.type === "turn.started") {
       yield* ensurePreTurnBaselineFromTurnStart(event);
       yield* beginImplementationAttemptFromTurnStart(event).pipe(

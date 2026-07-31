@@ -144,6 +144,7 @@ import PlanSidebar from "./PlanSidebar";
 import ThreadTerminalDrawer from "./ThreadTerminalDrawer";
 import {
   AlarmClockIcon,
+  ArrowRightLeftIcon,
   CheckCircle2Icon,
   ChevronDownIcon,
   GitBranchIcon,
@@ -268,6 +269,7 @@ import {
   isBranchMismatchDismissedForSession,
   shouldShowBranchMismatchBanner,
   getStartedThreadModelChangeBlockReason,
+  getStartedThreadProviderSwitchBlockReason,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
   type LocalDispatchSnapshot,
@@ -285,6 +287,7 @@ import {
   revokeUserMessagePreviewUrls,
   shouldWriteThreadErrorToCurrentServerThread,
   startNewThreadForProject,
+  threadHasStarted,
   waitForStartedServerThread,
 } from "./ChatView.logic";
 import type { ThreadSyncPhase } from "../threadSync";
@@ -1141,6 +1144,14 @@ type LocalThreadErrorEntry = {
   readonly at: number;
 };
 
+type ProviderSwitchConfirmation = {
+  readonly environmentId: EnvironmentId;
+  readonly threadId: ThreadId;
+  readonly targetModelSelection: ModelSelection;
+  readonly targetDisplayName: string;
+  readonly expectedCurrentInstanceId: ProviderInstanceId;
+};
+
 function chatActionErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "An error occurred.";
 }
@@ -1183,6 +1194,9 @@ function ChatViewContent(props: ChatViewProps) {
     reportFailure: false,
   });
   const startThreadTurn = useAtomCommand(threadEnvironment.startTurn, { reportFailure: false });
+  const switchThreadProvider = useAtomCommand(threadEnvironment.switchProvider, {
+    reportFailure: false,
+  });
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, {
     reportFailure: false,
   });
@@ -1326,6 +1340,10 @@ function ChatViewContent(props: ChatViewProps) {
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null);
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>();
+  const [providerSwitchConfirmation, setProviderSwitchConfirmation] =
+    useState<ProviderSwitchConfirmation | null>(null);
+  const [switchingProviderThreadKey, setSwitchingProviderThreadKey] = useState<string | null>(null);
+  const isSwitchingProvider = switchingProviderThreadKey === routeThreadKey;
   const [
     pendingServerThreadStartFromOriginByThreadId,
     setPendingServerThreadStartFromOriginByThreadId,
@@ -1654,6 +1672,9 @@ function ChatViewContent(props: ChatViewProps) {
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null;
   const activeEnvironment =
     activeThread == null ? null : (environmentById.get(activeThread.environmentId) ?? null);
+  const liveServerConfig = useAtomValue(
+    serverEnvironment.configValueAtom(activeThread?.environmentId ?? primaryEnvironmentId),
+  );
   const activeEnvironmentConnectionPhase = activeEnvironment?.connection.phase ?? "available";
   const activeEnvironmentUnavailable =
     activeEnvironment !== null && activeEnvironmentConnectionPhase !== "connected";
@@ -1851,9 +1872,11 @@ function ChatViewContent(props: ChatViewProps) {
     null;
   // Once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
-  const serverConfig = activeThread
-    ? (activeEnvironment?.serverConfig ?? null)
-    : (primaryEnvironment?.serverConfig ?? null);
+  const serverConfig =
+    liveServerConfig ??
+    (activeThread
+      ? (activeEnvironment?.serverConfig ?? null)
+      : (primaryEnvironment?.serverConfig ?? null));
   const proposalPreviewAvailable = serverConfig?.environment.capabilities.proposalPreview === true;
   const cartographerAvailable = serverConfig?.environment.capabilities.cartographerEmbed === true;
   const versionMismatch = resolveServerConfigVersionMismatch(serverConfig);
@@ -5664,6 +5687,17 @@ function ChatViewContent(props: ChatViewProps) {
     composerRef,
   ]);
 
+  const providerSwitchBlockReason = getStartedThreadProviderSwitchBlockReason({
+    isSwitchingProvider,
+    isTurnRunning: phase === "running" || isSendBusy,
+    hasPendingApproval: pendingApprovals.length > 0,
+    hasPendingUserInput: pendingUserInputs.length > 0,
+  });
+  const currentProviderInstanceId = activeThread
+    ? activeThread.pendingHandoff
+      ? activeThread.modelSelection.instanceId
+      : (activeThread.session?.providerInstanceId ?? activeThread.modelSelection.instanceId)
+    : null;
   const getModelDisabledReason = useCallback(
     (instanceId: ProviderInstanceId, model: string): string | null => {
       if (!activeThread) {
@@ -5675,16 +5709,33 @@ function ChatViewContent(props: ChatViewProps) {
       ) {
         return "This imported session is locked to its verified provider instance until its first native turn.";
       }
+      if (threadHasStarted(activeThread) && instanceId !== activeThread.modelSelection.instanceId) {
+        return providerSwitchBlockReason;
+      }
       const reason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
         hasStartedSession: activeThread.session !== null,
         currentModelSelection: activeThread.modelSelection,
-        currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
+        currentProviderInstanceId,
         nextModelSelection: { instanceId, model },
       });
       return reason ? `${reason.description} Start a new thread to use this model.` : null;
     },
-    [activeThread, providerStatuses, verifiedImportProviderInstanceId],
+    [
+      activeThread,
+      currentProviderInstanceId,
+      providerStatuses,
+      providerSwitchBlockReason,
+      verifiedImportProviderInstanceId,
+    ],
+  );
+
+  const applyComposerModelSelection = useCallback(
+    (threadRef: ScopedThreadRef, nextModelSelection: ModelSelection) => {
+      setComposerDraftModelSelection(threadRef, nextModelSelection);
+      setStickyComposerModelSelection(nextModelSelection);
+    },
+    [setComposerDraftModelSelection, setStickyComposerModelSelection],
   );
 
   const onProviderModelSelect = useCallback(
@@ -5701,7 +5752,11 @@ function ChatViewContent(props: ChatViewProps) {
       // model lookup stay scoped to that exact instance. Unknown instance ids
       // are rejected by returning early; the server remains authoritative too.
       const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId);
-      const resolvedDriverKind = entry?.driver ?? null;
+      if (!entry) {
+        scheduleComposerFocus();
+        return;
+      }
+      const resolvedDriverKind = entry.driver;
       if (
         lockedProvider !== null &&
         resolvedDriverKind !== null &&
@@ -5737,11 +5792,34 @@ function ChatViewContent(props: ChatViewProps) {
         instanceId,
         model: resolvedModel,
       };
+      if (threadHasStarted(activeThread) && instanceId !== activeThread.modelSelection.instanceId) {
+        if (providerSwitchBlockReason) {
+          toastManager.add({
+            type: "warning",
+            title: "Provider switch unavailable",
+            description: providerSwitchBlockReason,
+          });
+          scheduleComposerFocus();
+          return;
+        }
+        setProviderSwitchConfirmation({
+          environmentId: activeThread.environmentId,
+          threadId: activeThread.id,
+          targetModelSelection: nextModelSelection,
+          targetDisplayName:
+            deriveProviderInstanceEntries([entry])[0]?.displayName ??
+            entry.displayName ??
+            instanceId,
+          expectedCurrentInstanceId:
+            currentProviderInstanceId ?? activeThread.modelSelection.instanceId,
+        });
+        return;
+      }
       const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
         providers: providerStatuses,
         hasStartedSession: activeThread.session !== null,
         currentModelSelection: activeThread.modelSelection,
-        currentProviderInstanceId: activeThread.session?.providerInstanceId ?? null,
+        currentProviderInstanceId,
         nextModelSelection,
       });
       if (modelChangeBlockReason) {
@@ -5753,24 +5831,116 @@ function ChatViewContent(props: ChatViewProps) {
         scheduleComposerFocus();
         return;
       }
-      setComposerDraftModelSelection(
+      applyComposerModelSelection(
         scopeThreadRef(activeThread.environmentId, activeThread.id),
         nextModelSelection,
       );
-      setStickyComposerModelSelection(nextModelSelection);
       scheduleComposerFocus();
     },
     [
       activeThread,
+      applyComposerModelSelection,
+      currentProviderInstanceId,
       lockedProvider,
+      providerSwitchBlockReason,
       verifiedImportProviderInstanceId,
       scheduleComposerFocus,
-      setComposerDraftModelSelection,
-      setStickyComposerModelSelection,
       providerStatuses,
       settings,
     ],
   );
+  const confirmProviderSwitch = useCallback(async () => {
+    const confirmation = providerSwitchConfirmation;
+    if (!confirmation || isSwitchingProvider) {
+      return;
+    }
+    const targetThreadRef = scopeThreadRef(confirmation.environmentId, confirmation.threadId);
+    const targetThreadKey = scopedThreadKey(targetThreadRef);
+    const targetProvider = providerStatuses.find(
+      (provider) => provider.instanceId === confirmation.targetModelSelection.instanceId,
+    );
+    if (!targetProvider) {
+      setProviderSwitchConfirmation(null);
+      toastManager.add({
+        type: "error",
+        title: "Could not switch provider",
+        description: "The selected provider instance is no longer available.",
+      });
+      return;
+    }
+
+    setSwitchingProviderThreadKey(targetThreadKey);
+    const result = await switchThreadProvider({
+      environmentId: confirmation.environmentId,
+      input: {
+        threadId: confirmation.threadId,
+        targetModelSelection: confirmation.targetModelSelection,
+        expectedCurrentInstanceId: confirmation.expectedCurrentInstanceId,
+      },
+    });
+    // acceptance only queues the switch; the composer follows the thread's
+    // projected modelSelection once thread.provider-switched arrives, and a
+    // failed compaction leaves the thread (and composer) on the old provider
+    if (result._tag !== "Success" && !isAtomCommandInterrupted(result)) {
+      const error = squashAtomCommandFailure(result);
+      toastManager.add(
+        stackedThreadToast({
+          type: "error",
+          title: "Could not switch provider",
+          description: chatActionErrorMessage(error),
+        }),
+      );
+    }
+    setProviderSwitchConfirmation((current) => (current === confirmation ? null : current));
+    setSwitchingProviderThreadKey((current) => (current === targetThreadKey ? null : current));
+    scheduleComposerFocus();
+  }, [
+    isSwitchingProvider,
+    providerStatuses,
+    providerSwitchConfirmation,
+    scheduleComposerFocus,
+    switchThreadProvider,
+  ]);
+
+  // follow server-side provider rebinds (thread.provider-switched): when the
+  // projected instance changes for the visible thread, move the composer's
+  // draft selection with it so the next send targets the new provider
+  const lastSyncedThreadInstanceRef = useRef<{
+    threadKey: string;
+    instanceId: ProviderInstanceId;
+  } | null>(null);
+  const activeThreadProjectedSelection =
+    routeKind === "server" ? (activeThread?.modelSelection ?? null) : null;
+  useEffect(() => {
+    if (activeThreadProjectedSelection === null) {
+      lastSyncedThreadInstanceRef.current = null;
+      return;
+    }
+    const previous = lastSyncedThreadInstanceRef.current;
+    lastSyncedThreadInstanceRef.current = {
+      threadKey: routeThreadKey,
+      instanceId: activeThreadProjectedSelection.instanceId,
+    };
+    if (previous === null || previous.threadKey !== routeThreadKey) {
+      return;
+    }
+    if (previous.instanceId === activeThreadProjectedSelection.instanceId) {
+      return;
+    }
+    const provider = providerStatuses.find(
+      (snapshot) => snapshot.instanceId === activeThreadProjectedSelection.instanceId,
+    );
+    if (!provider) {
+      return;
+    }
+    applyComposerModelSelection(routeThreadRef, activeThreadProjectedSelection);
+  }, [
+    activeThreadProjectedSelection,
+    applyComposerModelSelection,
+    providerStatuses,
+    routeThreadKey,
+    routeThreadRef,
+  ]);
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) => {
       if (canOverrideServerThreadEnvMode) {
@@ -6145,6 +6315,20 @@ function ChatViewContent(props: ChatViewProps) {
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
                     <ThreadSyncStatusPill phase={threadSyncPhase} />
                   ) : null}
+                  {activeThread?.pendingHandoff ? (
+                    <div
+                      className="pointer-events-none mx-auto mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-border/60 bg-card/95 px-3 py-1.5 text-foreground text-xs font-medium shadow-sm"
+                      role="status"
+                    >
+                      <ArrowRightLeftIcon
+                        aria-hidden
+                        className="size-3.5 shrink-0 text-muted-foreground"
+                      />
+                      <span className="truncate">
+                        Handoff summary pending — it will be included with your next message
+                      </span>
+                    </div>
+                  ) : null}
                   <div
                     className="relative"
                     style={
@@ -6287,6 +6471,45 @@ function ChatViewContent(props: ChatViewProps) {
                 </div>
               </div>
             </div>
+
+            <AlertDialog
+              open={
+                providerSwitchConfirmation?.environmentId === activeThread.environmentId &&
+                providerSwitchConfirmation.threadId === activeThread.id
+              }
+              onOpenChange={(open) => {
+                if (!open && !isSwitchingProvider) {
+                  setProviderSwitchConfirmation(null);
+                }
+              }}
+            >
+              <AlertDialogPopup>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>
+                    Switch to {providerSwitchConfirmation?.targetDisplayName ?? "this provider"}?
+                  </AlertDialogTitle>
+                  <AlertDialogDescription>
+                    The current model will summarize this thread and hand it off to{" "}
+                    {providerSwitchConfirmation?.targetDisplayName ?? "the selected provider"}. Tool
+                    state and pending approvals do not carry over.
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogClose
+                    render={<Button variant="outline" disabled={isSwitchingProvider} />}
+                  >
+                    Cancel
+                  </AlertDialogClose>
+                  <Button
+                    variant="default"
+                    disabled={isSwitchingProvider}
+                    onClick={() => void confirmProviderSwitch()}
+                  >
+                    {isSwitchingProvider ? "Switching..." : "Switch provider"}
+                  </Button>
+                </AlertDialogFooter>
+              </AlertDialogPopup>
+            </AlertDialog>
 
             <AlertDialog open={branchRestoreConfirmOpen} onOpenChange={setBranchRestoreConfirmOpen}>
               <AlertDialogPopup>

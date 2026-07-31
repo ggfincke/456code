@@ -311,6 +311,7 @@ projectionSnapshotLayer("ProjectionSnapshotQuery", (it) => {
           branch: null,
           worktreePath: null,
           origin: null,
+          pendingHandoff: null,
           latestTurn: {
             turnId: asTurnId("turn-1"),
             state: "completed",

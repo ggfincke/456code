@@ -461,7 +461,9 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
       | "thread.activity-appended"
       | "thread.turn-diff-completed"
       | "thread.reverted"
-      | "thread.session-set";
+      | "thread.session-set"
+      | "thread.provider-switched"
+      | "thread.handoff-cleared";
   }
 > {
   return (
@@ -470,7 +472,9 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
     event.type === "thread.activity-appended" ||
     event.type === "thread.turn-diff-completed" ||
     event.type === "thread.reverted" ||
-    event.type === "thread.session-set"
+    event.type === "thread.session-set" ||
+    event.type === "thread.provider-switched" ||
+    event.type === "thread.handoff-cleared"
   );
 }
 

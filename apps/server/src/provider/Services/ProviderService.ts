@@ -112,6 +112,11 @@ export interface ProviderServiceShape {
     instanceId: ProviderInstanceId,
   ) => Effect.Effect<ProviderInstanceRoutingInfo, ProviderServiceError>;
 
+  readonly hasRecoverableSession?: (
+    threadId: ThreadId,
+    instanceId: ProviderInstanceId,
+  ) => Effect.Effect<boolean, ProviderServiceError>;
+
   /**
    * Roll back provider conversation state by a number of turns.
    */

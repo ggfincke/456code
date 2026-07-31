@@ -59,6 +59,7 @@ import * as ProviderEventLoggers from "./ProviderEventLoggers.ts";
 import * as AnalyticsService from "../../telemetry/AnalyticsService.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
 import * as McpSessionRegistry from "../../mcp/McpSessionRegistry.ts";
+import { observeHiddenTurnRuntimeEvent } from "../HiddenTurnRegistry.ts";
 const isModelSelection = Schema.is(ModelSelection);
 const isProviderContinuationIdentity = Schema.is(ProviderContinuationIdentity);
 
@@ -407,10 +408,15 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   ): Effect.Effect<void> =>
     Effect.sync(() => correlateRuntimeEventWithInstance(source, event)).pipe(
       Effect.flatMap((canonicalEvent) =>
-        increment(providerRuntimeEventsTotal, {
-          provider: canonicalEvent.provider,
-          eventType: canonicalEvent.type,
-        }).pipe(Effect.andThen(publishRuntimeEvent(canonicalEvent))),
+        observeHiddenTurnRuntimeEvent(canonicalEvent).pipe(
+          Effect.andThen(
+            increment(providerRuntimeEventsTotal, {
+              provider: canonicalEvent.provider,
+              eventType: canonicalEvent.type,
+            }),
+          ),
+          Effect.andThen(publishRuntimeEvent(canonicalEvent)),
+        ),
       ),
     );
 
@@ -1150,6 +1156,23 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
   const getInstanceInfo: ProviderServiceMethod<"getInstanceInfo"> = (instanceId) =>
     registry.getInstanceInfo(instanceId);
 
+  const hasRecoverableSession: NonNullable<ProviderServiceMethod<"hasRecoverableSession">> = (
+    threadId,
+    instanceId,
+  ) =>
+    directory
+      .getBinding(threadId)
+      .pipe(
+        Effect.map(
+          Option.exists(
+            (binding) =>
+              binding.providerInstanceId === instanceId &&
+              binding.resumeCursor !== undefined &&
+              binding.resumeCursor !== null,
+          ),
+        ),
+      );
+
   const rollbackConversation: ProviderServiceMethod<"rollbackConversation"> = Effect.fn(
     "rollbackConversation",
   )(function* (rawInput) {
@@ -1261,6 +1284,7 @@ const makeProviderService = Effect.fn("makeProviderService")(function* (
     listSessions,
     getCapabilities,
     getInstanceInfo,
+    hasRecoverableSession,
     rollbackConversation,
     // Each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each

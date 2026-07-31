@@ -488,6 +488,95 @@ describe("ProviderCommandReactor", () => {
     expect(thread?.session?.runtimeMode).toBe("approval-required");
   });
 
+  it("switches without compaction when the thread has no provider context", async () => {
+    const harness = await createHarness();
+    const targetModelSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "sonnet",
+    };
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.provider.switch",
+        commandId: CommandId.make("cmd-provider-switch-empty"),
+        threadId: ThreadId.make("thread-1"),
+        targetModelSelection,
+        expectedCurrentInstanceId: ProviderInstanceId.make("codex"),
+      }),
+    );
+
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return readModel.threads[0]?.modelSelection.instanceId === targetModelSelection.instanceId;
+    });
+    const readModel = await harness.readModel();
+    expect(readModel.threads[0]?.modelSelection).toEqual(targetModelSelection);
+    // empty handoff text projects as null so clients do not advertise a handoff
+    expect(readModel.threads[0]?.pendingHandoff ?? null).toBeNull();
+    expect(harness.sendTurn).not.toHaveBeenCalled();
+    expect(harness.stopSession).not.toHaveBeenCalled();
+  });
+
+  it("injects a pending handoff into provider input without changing the projected message", async () => {
+    const harness = await createHarness();
+    const targetModelSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "sonnet",
+    };
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.provider.switch.complete",
+        commandId: CommandId.make("cmd-provider-switch-complete-seeded"),
+        threadId: ThreadId.make("thread-1"),
+        modelSelection: targetModelSelection,
+        fromInstanceId: ProviderInstanceId.make("codex"),
+        fromModel: "gpt-5-codex",
+        handoffText: "Prior work changed apps/server/src/example.ts.",
+      }),
+    );
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-after-provider-switch"),
+        threadId: ThreadId.make("thread-1"),
+        message: {
+          messageId: asMessageId("user-message-after-provider-switch"),
+          role: "user",
+          text: "continue the implementation",
+          attachments: [],
+        },
+        modelSelection: targetModelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:01:00.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      providerInstanceId: targetModelSelection.instanceId,
+      modelSelection: targetModelSelection,
+    });
+    expect(harness.startSession.mock.calls[0]?.[1]).not.toHaveProperty("resumeCursor");
+    const expectedProviderInput = [
+      '<prior-conversation-handoff from="gpt-5-codex">',
+      "Prior work changed apps/server/src/example.ts.",
+      "</prior-conversation-handoff>",
+      "",
+      "continue the implementation",
+    ].join("\n");
+    expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+      input: expectedProviderInput,
+    });
+
+    const readModel = await harness.readModel();
+    const userMessage = readModel.threads[0]?.messages.find(
+      (message) => message.id === asMessageId("user-message-after-provider-switch"),
+    );
+    expect(userMessage?.text).toBe("continue the implementation");
+  });
+
   it("does not start an imported continuation after its instance id moves to another driver", async () => {
     const now = "2026-01-01T00:00:00.000Z";
     const providerInstanceId = ProviderInstanceId.make("shared-provider");

@@ -24,6 +24,7 @@ import {
   deriveLockedProvider,
   dismissBranchMismatchForSession,
   getStartedThreadModelChangeBlockReason,
+  getStartedThreadProviderSwitchBlockReason,
   handleImportContinuationSendBlock,
   hasServerAcknowledgedLocalDispatch,
   importContinuationConsentToken,
@@ -570,7 +571,7 @@ describe("resolveImportContinuationProviderSnapshot", () => {
 });
 
 describe("deriveLockedProvider", () => {
-  it("locks an imported transcript with messages to the custom instance driver", () => {
+  it("does not lock a started thread to its current provider", () => {
     const customInstanceId = ProviderInstanceId.make("codex_personal");
     const importedThread = makeThread({
       modelSelection: {
@@ -598,7 +599,7 @@ describe("deriveLockedProvider", () => {
         threadProvider: customInstanceId,
         providers: [makeProvider("codex_personal")],
       }),
-    ).toBe(ProviderDriverKind.make("codex"));
+    ).toBeNull();
   });
 
   it("locks history-only starts to the exact marker driver instead of a cross-driver fallback", () => {
@@ -825,7 +826,26 @@ describe("getStartedThreadModelChangeBlockReason", () => {
       null,
     ],
     [
-      "blocks started-session model changes when either provider requires a new thread",
+      "blocks started-session model changes when the provider requires a new thread",
+      {
+        hasStartedSession: true,
+        currentModelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-build",
+        },
+        nextModelSelection: {
+          instanceId: ProviderInstanceId.make("grok"),
+          model: "grok-other",
+        },
+      },
+      {
+        title: "Start a new chat to change models",
+        description:
+          "This provider does not allow switching models after a conversation has started.",
+      },
+    ],
+    [
+      "allows provider-instance changes after a session has started",
       {
         hasStartedSession: true,
         currentModelSelection: {
@@ -837,14 +857,47 @@ describe("getStartedThreadModelChangeBlockReason", () => {
           model: "grok-build",
         },
       },
-      {
-        title: "Start a new chat to change models",
-        description:
-          "This provider does not allow switching models after a conversation has started.",
-      },
+      null,
     ],
   ])("%s", (_label, input, expected) => {
     expect(getStartedThreadModelChangeBlockReason({ providers, ...input })).toEqual(expected);
+  });
+});
+
+describe("getStartedThreadProviderSwitchBlockReason", () => {
+  it("prioritizes active handoffs, running turns, approvals, and user input", () => {
+    expect(
+      getStartedThreadProviderSwitchBlockReason({
+        isSwitchingProvider: true,
+        isTurnRunning: true,
+        hasPendingApproval: true,
+        hasPendingUserInput: true,
+      }),
+    ).toBe("A provider handoff is already in progress.");
+    expect(
+      getStartedThreadProviderSwitchBlockReason({
+        isSwitchingProvider: false,
+        isTurnRunning: true,
+        hasPendingApproval: true,
+        hasPendingUserInput: true,
+      }),
+    ).toBe("Wait for the current response to finish before switching providers.");
+    expect(
+      getStartedThreadProviderSwitchBlockReason({
+        isSwitchingProvider: false,
+        isTurnRunning: false,
+        hasPendingApproval: true,
+        hasPendingUserInput: true,
+      }),
+    ).toBe("Resolve the pending approval before switching providers.");
+    expect(
+      getStartedThreadProviderSwitchBlockReason({
+        isSwitchingProvider: false,
+        isTurnRunning: false,
+        hasPendingApproval: false,
+        hasPendingUserInput: true,
+      }),
+    ).toBe("Answer the pending question before switching providers.");
   });
 });
 

@@ -1,12 +1,13 @@
 // apps/server/src/orchestration/projector.ts
 // applies orchestration events to in-memory read models
 
-import type { OrchestrationEvent, OrchestrationReadModel, ThreadId } from "@t3tools/contracts";
+import type { OrchestrationEvent, OrchestrationReadModel } from "@t3tools/contracts";
 import {
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
+  ThreadId,
 } from "@t3tools/contracts";
 import { compareOrchestrationThreadActivities } from "@t3tools/shared/orchestrationActivityOrder";
 import * as Effect from "effect/Effect";
@@ -27,7 +28,9 @@ import {
   ThreadCreatedPayload,
   ThreadDeletedPayload,
   ThreadInteractionModeSetPayload,
+  ThreadHandoffClearedPayload,
   ThreadMetaUpdatedPayload,
+  ThreadProviderSwitchedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
@@ -314,6 +317,7 @@ export function projectEvent(
             branch: payload.branch,
             worktreePath: payload.worktreePath,
             latestTurn: null,
+            pendingHandoff: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
@@ -460,6 +464,47 @@ export function projectEvent(
           threads: updateThread(nextBase.threads, payload.threadId, {
             interactionMode: payload.interactionMode,
             updatedAt: payload.updatedAt,
+          }),
+        })),
+      );
+
+    case "thread.provider-switch-requested":
+      return Effect.succeed(nextBase);
+
+    case "thread.provider-switched":
+      return decodeForEvent(
+        ThreadProviderSwitchedPayload,
+        event.payload,
+        event.type,
+        "payload",
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, ThreadId.make(event.aggregateId), {
+            modelSelection: payload.modelSelection,
+            // a switch with no outgoing context completes with empty text;
+            // project null so clients do not advertise a handoff
+            pendingHandoff:
+              payload.handoffText.trim().length > 0
+                ? {
+                    text: payload.handoffText,
+                    fromInstanceId: payload.fromInstanceId,
+                    ...(payload.fromModel !== undefined ? { fromModel: payload.fromModel } : {}),
+                    createdAt: event.occurredAt,
+                  }
+                : null,
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      );
+
+    case "thread.handoff-cleared":
+      return decodeForEvent(ThreadHandoffClearedPayload, event.payload, event.type, "payload").pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            pendingHandoff: null,
+            updatedAt: event.occurredAt,
           }),
         })),
       );

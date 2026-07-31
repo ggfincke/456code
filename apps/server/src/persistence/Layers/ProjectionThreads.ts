@@ -17,11 +17,12 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from "../Services/ProjectionThreads.ts";
-import { ModelSelection } from "@t3tools/contracts";
+import { ModelSelection, OrchestrationPendingHandoff } from "@t3tools/contracts";
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
+    pendingHandoff: Schema.NullOr(Schema.fromJsonString(OrchestrationPendingHandoff)),
   }),
 );
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type;
@@ -38,6 +39,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           project_id,
           title,
           model_selection_json,
+          pending_handoff_json,
           runtime_mode,
           interaction_mode,
           branch,
@@ -62,6 +64,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           ${row.projectId},
           ${row.title},
           ${JSON.stringify(row.modelSelection)},
+          ${row.pendingHandoff === null ? null : JSON.stringify(row.pendingHandoff)},
           ${row.runtimeMode},
           ${row.interactionMode},
           ${row.branch},
@@ -86,6 +89,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           project_id = excluded.project_id,
           title = excluded.title,
           model_selection_json = excluded.model_selection_json,
+          pending_handoff_json = excluded.pending_handoff_json,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
           branch = excluded.branch,
@@ -117,6 +121,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           model_selection_json AS "modelSelection",
+          pending_handoff_json AS "pendingHandoff",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -150,6 +155,7 @@ const makeProjectionThreadRepository = Effect.gen(function* () {
           project_id AS "projectId",
           title,
           model_selection_json AS "modelSelection",
+          pending_handoff_json AS "pendingHandoff",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,

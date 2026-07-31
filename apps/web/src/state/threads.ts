@@ -1,4 +1,8 @@
+// apps/web/src/state/threads.ts
+// provides environment-scoped thread state and web-local commands
 import { useAtomValue } from "@effect/atom-react";
+import { request } from "@t3tools/client-runtime/rpc";
+import { createEnvironmentCommand } from "@t3tools/client-runtime/state/runtime";
 import {
   createEnvironmentThreadDetailAtoms,
   createEnvironmentThreadShellAtoms,
@@ -7,7 +11,15 @@ import {
   type EnvironmentThreadState,
   createThreadEnvironmentAtoms,
 } from "@t3tools/client-runtime/state/threads";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import {
+  CommandId,
+  ORCHESTRATION_WS_METHODS,
+  type EnvironmentId,
+  type ThreadId,
+  type ThreadProviderSwitchCommand,
+} from "@t3tools/contracts";
+import * as Crypto from "effect/Crypto";
+import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import { AsyncResult, Atom } from "effect/unstable/reactivity";
 
@@ -15,7 +27,34 @@ import { environmentCatalog } from "../connection/catalog";
 import { connectionAtomRuntime } from "../connection/runtime";
 import { environmentSnapshotAtom } from "./shell";
 
-export const threadEnvironment = createThreadEnvironmentAtoms(connectionAtomRuntime);
+type SwitchThreadProviderInput = Omit<ThreadProviderSwitchCommand, "type" | "commandId"> & {
+  readonly commandId?: CommandId;
+};
+
+const switchThreadProvider = Effect.fn("WebEnvironmentCommands.switchThreadProvider")(function* (
+  input: SwitchThreadProviderInput,
+) {
+  const commandId =
+    input.commandId ??
+    (yield* Crypto.Crypto.pipe(
+      Effect.flatMap((crypto) => crypto.randomUUIDv4),
+      Effect.orDie,
+      Effect.map(CommandId.make),
+    ));
+  return yield* request(ORCHESTRATION_WS_METHODS.dispatchCommand, {
+    ...input,
+    type: "thread.provider.switch",
+    commandId,
+  });
+});
+
+export const threadEnvironment = {
+  ...createThreadEnvironmentAtoms(connectionAtomRuntime),
+  switchProvider: createEnvironmentCommand(connectionAtomRuntime, {
+    label: "environment-data:commands:thread:switch-provider",
+    execute: switchThreadProvider,
+  }),
+};
 export const environmentThreads = createEnvironmentThreadStateAtoms(connectionAtomRuntime);
 export const environmentThreadDetails = createEnvironmentThreadDetailAtoms(
   environmentThreads.stateAtom,
