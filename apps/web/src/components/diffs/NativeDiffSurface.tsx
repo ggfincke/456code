@@ -28,11 +28,11 @@ import {
   getDiffCollapseIconClassName,
   getDiffLineStat,
   getRenderablePatch,
-  resolveDiffThemeName,
   resolveFileDiffPath,
   type DiffLineStat,
   type RenderablePatch,
 } from "~/lib/diffRendering";
+import { useSyntaxThemeName } from "~/hooks/useSyntaxThemeName";
 import { cn } from "~/lib/utils";
 
 import { DiffPanelLoadingState } from "../DiffPanelShell";
@@ -85,9 +85,10 @@ const NATIVE_DIFF_UNSAFE_CSS = `
 [data-virtualizer-buffer] {
   --diffs-header-font-family: var(--font-sans) !important;
   --diffs-font-family: var(--font-mono) !important;
-  --diffs-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
-  --diffs-light-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
-  --diffs-dark-bg: color-mix(in srgb, var(--card) 90%, var(--background)) !important;
+  /* code sits on the page background so the surface matches an editor, not a card */
+  --diffs-bg: var(--background) !important;
+  --diffs-light-bg: var(--background) !important;
+  --diffs-dark-bg: var(--background) !important;
   --diffs-token-light-bg: transparent;
   --diffs-token-dark-bg: transparent;
 
@@ -451,6 +452,7 @@ export function NativeDiffSurface(props: {
     onOpenFile,
   } = props;
   const { renderablePatch } = controller;
+  const syntaxThemeName = useSyntaxThemeName();
 
   return (
     <div
@@ -531,7 +533,7 @@ export function NativeDiffSurface(props: {
               diffStyle: renderMode === "split" ? "split" : "unified",
               lineDiffType: "none",
               overflow: wordWrap ? "wrap" : "scroll",
-              theme: resolveDiffThemeName(resolvedTheme),
+              theme: syntaxThemeName,
               themeType: resolvedTheme as NativeDiffThemeType,
               unsafeCSS: NATIVE_DIFF_UNSAFE_CSS,
               stickyHeaders: true,

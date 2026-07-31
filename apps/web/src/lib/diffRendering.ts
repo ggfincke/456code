@@ -3,15 +3,23 @@
 import { parsePatchFiles } from "@pierre/diffs/utils/parsePatchFiles";
 import type { FileDiffMetadata } from "@pierre/diffs/types";
 
+// shiki's bundled material-theme-ocean carries token colors byte-identical to
+// t3dotgg/vsc-material-but-i-wont-sue-you's Material Theme Ocean High Contrast;
+// the HC-only deltas are UI chrome keys the diff surface never reads, and the
+// ocean CSS in index.css already covers those.
 export const DIFF_THEME_NAMES = {
   light: "pierre-light",
   dark: "pierre-dark",
+  ocean: "material-theme-ocean",
 } as const;
 
 export type DiffThemeName = (typeof DIFF_THEME_NAMES)[keyof typeof DIFF_THEME_NAMES];
 
-export function resolveDiffThemeName(theme: "light" | "dark"): DiffThemeName {
-  return theme === "dark" ? DIFF_THEME_NAMES.dark : DIFF_THEME_NAMES.light;
+// ocean is a dark appearance w/ its own syntax palette, so it is tracked separately
+export type DiffThemeAppearance = keyof typeof DIFF_THEME_NAMES;
+
+export function resolveDiffThemeName(theme: DiffThemeAppearance): DiffThemeName {
+  return DIFF_THEME_NAMES[theme];
 }
 
 const FNV_OFFSET_BASIS_32 = 0x811c9dc5;

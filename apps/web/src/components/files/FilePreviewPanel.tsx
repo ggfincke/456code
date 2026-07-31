@@ -25,8 +25,8 @@ import ChatMarkdown from "~/components/ChatMarkdown";
 import { OpenInPicker } from "~/components/chat/OpenInPicker";
 import { useClientSettings } from "~/hooks/useSettings";
 import { useTheme } from "~/hooks/useTheme";
+import { useSyntaxThemeName } from "~/hooks/useSyntaxThemeName";
 import { getLocalStorageItem, setLocalStorageItem } from "~/hooks/useLocalStorage";
-import { resolveDiffThemeName } from "~/lib/diffRendering";
 import { cn } from "~/lib/utils";
 import { isPreviewSupportedInRuntime } from "~/previewStateStore";
 import { resolvePathLinkTarget } from "~/terminal-links";
@@ -370,6 +370,7 @@ function EditableFileSurface({
   onPostRender,
   onPendingChange,
 }: EditableFileSurfaceProps) {
+  const syntaxThemeName = useSyntaxThemeName();
   const addReviewComment = useComposerDraftStore((store) => store.addReviewComment);
   const removeReviewComment = useComposerDraftStore((store) => store.removeReviewComment);
   const [lineAnnotations, setLineAnnotations] = useState<FileCommentLineAnnotation[]>([]);
@@ -589,7 +590,7 @@ function EditableFileSurface({
               onLineSelectionChange: setSelectedRange,
               onLineSelectionEnd: handleLineSelectionEnd,
               overflow: wordWrap ? "wrap" : "scroll",
-              theme: resolveDiffThemeName(resolvedTheme),
+              theme: syntaxThemeName,
               themeType: resolvedTheme,
               unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
               onPostRender: handlePostRender,
@@ -689,6 +690,7 @@ export default function FilePreviewPanel({
   onPendingChange,
 }: FilePreviewPanelProps) {
   const { resolvedTheme } = useTheme();
+  const syntaxThemeName = useSyntaxThemeName();
   const wordWrap = useClientSettings((settings) => settings.wordWrap);
   const primaryEnvironmentId = usePrimaryEnvironmentId();
   const serverConfigs = useServerConfigs();
@@ -1037,7 +1039,7 @@ export default function FilePreviewPanel({
               />
             ) : file.data.truncated ? (
               <Virtualizer
-                key={`${relativePath}:${resolvedTheme}:${file.data.byteLength}`}
+                key={`${relativePath}:${syntaxThemeName}:${file.data.byteLength}`}
                 className="file-preview-virtualizer min-h-0 flex-1 overflow-auto"
                 config={{
                   overscrollSize: 600,
@@ -1053,7 +1055,7 @@ export default function FilePreviewPanel({
                   options={{
                     disableFileHeader: true,
                     overflow: wordWrap ? "wrap" : "scroll",
-                    theme: resolveDiffThemeName(resolvedTheme),
+                    theme: syntaxThemeName,
                     themeType: resolvedTheme,
                     unsafeCSS: FILE_LINK_REVEAL_UNSAFE_CSS,
                     onPostRender: onFilePostRender,

@@ -151,11 +151,14 @@ function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
     const oceanColor = (property: string, fallback: string): string =>
       normalizeComputedColor(rootStyles.getPropertyValue(property), fallback);
 
+    // mirrors terminal.ansi* / terminalCursor.* from Material Theme Ocean High Contrast.
+    // * bright variants intentionally repeat their base hue — xterm draws bold text in
+    //   bright colors, and upstream keeps the pairs equal so bold prompts stay on palette
     return {
       background,
       foreground,
-      cursor: oceanColor("--ocean-caret", foreground),
-      cursorAccent: oceanColor("--ocean-background", background),
+      cursor: oceanColor("--ocean-yellow", foreground),
+      cursorAccent: oceanColor("--ocean-black", background),
       selectionBackground: oceanColor("--ocean-selection", foreground),
       scrollbarSliderBackground: oceanColor("--ocean-scrollbar", foreground),
       scrollbarSliderHoverBackground: oceanColor("--ocean-scrollbar-hover", foreground),
@@ -167,13 +170,13 @@ function terminalThemeFromApp(mountElement?: HTMLElement | null): ITheme {
       blue: oceanColor("--ocean-blue", foreground),
       magenta: oceanColor("--ocean-purple", foreground),
       cyan: oceanColor("--ocean-cyan", foreground),
-      white: oceanColor("--ocean-pale-blue", foreground),
+      white: oceanColor("--ocean-white", foreground),
       brightBlack: oceanColor("--ocean-comments", foreground),
-      brightRed: oceanColor("--ocean-pink", foreground),
+      brightRed: oceanColor("--ocean-red", foreground),
       brightGreen: oceanColor("--ocean-green", foreground),
-      brightYellow: oceanColor("--ocean-caret", foreground),
-      brightBlue: oceanColor("--ocean-pale-blue", foreground),
-      brightMagenta: oceanColor("--ocean-violet", foreground),
+      brightYellow: oceanColor("--ocean-yellow", foreground),
+      brightBlue: oceanColor("--ocean-blue", foreground),
+      brightMagenta: oceanColor("--ocean-purple", foreground),
       brightCyan: oceanColor("--ocean-cyan", foreground),
       brightWhite: oceanColor("--ocean-white", foreground),
     };
