@@ -40,7 +40,7 @@
     "profile:android:hermes": "mkdir -p profiles/review && react-native profile-hermes profiles/review",
     "sync:pierre-icons": "node modules/code456-markdown-text/scripts/sync-pierre-file-icons.mjs",
     "test": "vp test run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc6 --noEmit"
   },
   "dependencies": {
     "@callstack/liquid-glass": "^0.7.1",
