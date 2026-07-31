@@ -606,6 +606,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             projectId: event.payload.projectId,
             title: event.payload.title,
             modelSelection: event.payload.modelSelection,
+            pendingHandoff: null,
             runtimeMode: event.payload.runtimeMode,
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
@@ -770,6 +771,47 @@ const makeOrchestrationProjectionPipeline = Effect.fn("makeOrchestrationProjecti
             ...existingRow.value,
             interactionMode: event.payload.interactionMode,
             updatedAt: event.payload.updatedAt,
+          });
+          return;
+        }
+
+        case "thread.provider-switched": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: ThreadId.make(event.aggregateId),
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            modelSelection: event.payload.modelSelection,
+            pendingHandoff:
+              event.payload.handoffText.trim().length > 0
+                ? {
+                    text: event.payload.handoffText,
+                    fromInstanceId: event.payload.fromInstanceId,
+                    ...(event.payload.fromModel !== undefined
+                      ? { fromModel: event.payload.fromModel }
+                      : {}),
+                    createdAt: event.occurredAt,
+                  }
+                : null,
+            updatedAt: event.occurredAt,
+          });
+          return;
+        }
+
+        case "thread.handoff-cleared": {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          });
+          if (Option.isNone(existingRow)) {
+            return;
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            pendingHandoff: null,
+            updatedAt: event.occurredAt,
           });
           return;
         }
