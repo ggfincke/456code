@@ -1116,6 +1116,11 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --color-teal-300: color-mix(in srgb, var(--ocean-accent) 84%, var(--ocean-white));
   --color-teal-500: var(--ocean-accent);
   --color-teal-600: color-mix(in srgb, var(--ocean-accent) 86%, var(--ocean-background));
+
+  /* Ocean ports Material Theme Ocean High Contrast, so its surfaces render the
+     theme's exact colors. The grain's brightening reads as a lift against the
+     near-black panels (#090b10) & would pull them off the palette. */
+  --surface-grain: none;
 }
 
 .ocean [data-sidebar-version="v1"],
