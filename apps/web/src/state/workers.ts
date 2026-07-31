@@ -6,3 +6,4 @@ import { createWorkersEnvironmentAtoms } from "@t3tools/client-runtime/state/wor
 import { connectionAtomRuntime } from "../connection/runtime";
 
 export const workersEnvironment = createWorkersEnvironmentAtoms(connectionAtomRuntime);
+export const workersActivityEnvironment = workersEnvironment.activity;

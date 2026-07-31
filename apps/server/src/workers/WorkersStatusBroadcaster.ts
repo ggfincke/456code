@@ -1,7 +1,12 @@
 // apps/server/src/workers/WorkersStatusBroadcaster.ts
 // streams debounced worker-broker snapshots from filesystem changes
 
-import type { WorkersListInput, WorkersStatusSnapshot } from "@t3tools/contracts";
+import type {
+  WorkersActivityInput,
+  WorkersActivitySnapshot,
+  WorkersListInput,
+  WorkersStatusSnapshot,
+} from "@t3tools/contracts";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -22,6 +27,9 @@ export class WorkersStatusBroadcaster extends Context.Service<
     readonly streamSnapshots: (
       input: WorkersListInput,
     ) => Stream.Stream<WorkersStatusSnapshot, never>;
+    readonly streamActivity: (
+      input: WorkersActivityInput,
+    ) => Stream.Stream<WorkersActivitySnapshot, never>;
   }
 >()("456code/workers/WorkersStatusBroadcaster") {}
 
@@ -76,7 +84,45 @@ export const make = Effect.gen(function* () {
       }),
     );
 
-  return WorkersStatusBroadcaster.of({ streamSnapshots });
+  const streamActivity: WorkersStatusBroadcaster["Service"]["streamActivity"] = (input) => {
+    const jobId = input.jobId.trim();
+    const safeJobId =
+      jobId.length > 0 &&
+      !jobId.includes("/") &&
+      !jobId.includes("\\") &&
+      !jobId.includes("..") &&
+      !jobId.startsWith(".");
+    const watchChanges = safeJobId
+      ? fs.watch(path.join(store.jobsDir, jobId)).pipe(Stream.catchCause(() => Stream.empty))
+      : Stream.empty;
+    const triggers = Stream.merge(watchChanges, Stream.tick(REFRESH_INTERVAL)).pipe(
+      Stream.debounce(WATCH_DEBOUNCE),
+    );
+    return Stream.concat(
+      Stream.fromEffect(store.readActivity(input)),
+      triggers.pipe(Stream.mapEffect(() => store.readActivity(input))),
+    ).pipe(
+      Stream.changesWith(
+        (left, right) =>
+          JSON.stringify([
+            left.jobId,
+            left.entries,
+            left.skippedEntryCount,
+            left.truncated,
+            left.error,
+          ]) ===
+          JSON.stringify([
+            right.jobId,
+            right.entries,
+            right.skippedEntryCount,
+            right.truncated,
+            right.error,
+          ]),
+      ),
+    );
+  };
+
+  return WorkersStatusBroadcaster.of({ streamSnapshots, streamActivity });
 });
 
 export const layer = Layer.effect(WorkersStatusBroadcaster, make);

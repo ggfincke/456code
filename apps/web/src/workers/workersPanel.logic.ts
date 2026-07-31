@@ -85,6 +85,79 @@ export function workerElapsedLabel(elapsedMs: Option.Option<number>): string | n
   return value === null ? null : formatDuration(value);
 }
 
+// queued & running are the states the broker is still moving; everything else is terminal
+export function workerJobIsLive(status: WorkersJobStatus): boolean {
+  return status === "running" || status === "queued";
+}
+
+export type WorkerJobElapsedFields = Pick<
+  WorkersJobSummary,
+  "status" | "elapsedMs" | "startedAt" | "createdAt"
+>;
+
+// the caller's clock is the panel's shared minute timer, so a running span is only ever
+// known to the minute; hours roll up so a long job does not read as a three-digit minute
+function minuteSpanLabel(spanMs: number): string {
+  const minutes = Math.floor(spanMs / 60_000);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainder = minutes % 60;
+  return remainder === 0 ? `${hours}h` : `${hours}h ${remainder}m`;
+}
+
+// every span measured against that clock shares one vocabulary, so nothing still in
+// flight ever claims a precision the minute timer cannot back
+function clockSpanLabel(spanMs: number): string {
+  if (spanMs === 0) return "just started";
+  return spanMs < 60_000 ? "under a minute so far" : `${minuteSpanLabel(spanMs)} so far`;
+}
+
+// the broker only records elapsedMs once a job settles, so a live job counts from its own
+// start against the caller's clock instead of rendering a dash; the recorded span keeps
+// its measured precision while the clock-derived one stays minute-honest
+export function workerJobElapsedLabel(job: WorkerJobElapsedFields, nowMs: number): string | null {
+  const recorded = Option.getOrNull(job.elapsedMs);
+  const settled = recorded === null ? null : formatDuration(recorded);
+  if (!workerJobIsLive(job.status)) return settled;
+
+  const start =
+    timestampMs(Option.getOrNull(job.startedAt)) ?? timestampMs(Option.getOrNull(job.createdAt));
+  if (start === null) return settled;
+
+  return clockSpanLabel(Math.max(0, nowMs - start));
+}
+
+export interface WorkerJobPresentation {
+  readonly status: WorkersJobStatus;
+  readonly live: boolean;
+  readonly elapsedLabel: string | null;
+}
+
+// the job detail RPC only refreshes every 30s while the jobs list is a live subscription,
+// so a job that settled in between keeps reading as Running in the detail payload; status
+// & timing are taken from whichever record has already settled, preferring the live list
+// when both agree, and the rest of the detail payload is left untouched
+export function workerJobPresentation(
+  detail: WorkerJobElapsedFields,
+  summary: WorkerJobElapsedFields | null,
+  nowMs: number,
+): WorkerJobPresentation {
+  const source =
+    summary === null
+      ? detail
+      : !workerJobIsLive(summary.status)
+        ? summary
+        : !workerJobIsLive(detail.status)
+          ? detail
+          : summary;
+
+  return {
+    status: source.status,
+    live: workerJobIsLive(source.status),
+    elapsedLabel: workerJobElapsedLabel(source, nowMs),
+  };
+}
+
 export function repoBasename(repoPath: string): string {
   const trimmed = repoPath.replace(/\/+$/, "");
   const separator = trimmed.lastIndexOf("/");
@@ -205,14 +278,17 @@ export function workerRunIsSettled(counts: WorkerRunCounts): boolean {
   return counts.queued === 0 && counts.running === 0;
 }
 
-// a settled run spans first-created to last-completed; a live run keeps counting from
-// the caller's clock so the label ticks with the panel's minute timer
+// a settled run spans two recorded timestamps, so it keeps their measured precision; any
+// other run is still ending against the caller's minute clock & reads minute-honest,
+// matching how a live job states its own elapsed
 export function workerRunSpanLabel(run: WorkersRunSummary, nowMs: number): string | null {
   const start = timestampMs(Option.getOrNull(run.firstCreatedAt));
   if (start === null) return null;
   const completed = timestampMs(Option.getOrNull(run.lastCompletedAt));
-  const end = workerRunIsSettled(run) && completed !== null ? completed : nowMs;
-  return formatDuration(Math.max(0, end - start));
+  if (workerRunIsSettled(run) && completed !== null) {
+    return formatDuration(Math.max(0, completed - start));
+  }
+  return clockSpanLabel(Math.max(0, nowMs - start));
 }
 
 function runOrderKey(run: WorkersRunSummary): number {
