@@ -120,6 +120,7 @@ import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import { RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY } from "../rightPanelLayout";
 import {
+  openWorkersPanel,
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
   selectThreadRightPanelState,
@@ -167,7 +168,11 @@ import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from "../p
 import { useClientSettings, useEnvironmentSettings } from "../hooks/useSettings";
 import { useNowMinute } from "../hooks/useNowMinute";
 import { useNewThreadHandler } from "../hooks/useHandleNewThread";
-import { resolveAppModelSelectionForInstance } from "../modelSelection";
+import {
+  type AppModelOption,
+  getAppModelOptionsForInstance,
+  resolveAppModelSelectionForInstance,
+} from "../modelSelection";
 import { getTerminalFocusOwner } from "../lib/terminalFocus";
 import { resolveNewDraftStartFromOrigin } from "../lib/chatThreadActions";
 import {
@@ -1260,6 +1265,9 @@ function ChatViewContent(props: ChatViewProps) {
   const setComposerDraftRuntimeMode = useComposerDraftStore((store) => store.setRuntimeMode);
   const setComposerDraftInteractionMode = useComposerDraftStore(
     (store) => store.setInteractionMode,
+  );
+  const setComposerDraftOrchestrateMode = useComposerDraftStore(
+    (store) => store.setOrchestrateMode,
   );
   const clearComposerDraftContent = useComposerDraftStore((store) => store.clearComposerContent);
   const setDraftThreadContext = useComposerDraftStore((store) => store.setDraftThreadContext);
@@ -3075,7 +3083,11 @@ function ChatViewContent(props: ChatViewProps) {
 
   const handleInteractionModeChange = useCallback(
     (mode: ProviderInteractionMode) => {
-      if (mode === interactionMode) return;
+      setComposerDraftOrchestrateMode(composerDraftTarget, false);
+      if (mode === interactionMode) {
+        scheduleComposerFocus();
+        return;
+      }
       setComposerDraftInteractionMode(composerDraftTarget, mode);
       if (isLocalDraftThread) {
         setDraftThreadContext(composerDraftTarget, { interactionMode: mode });
@@ -3088,6 +3100,7 @@ function ChatViewContent(props: ChatViewProps) {
       scheduleComposerFocus,
       composerDraftTarget,
       setComposerDraftInteractionMode,
+      setComposerDraftOrchestrateMode,
       setDraftThreadContext,
     ],
   );
@@ -4646,7 +4659,7 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }) => {
+  const onSend = async (e?: { preventDefault: () => void }): Promise<boolean> => {
     e?.preventDefault();
     if (
       !activeThread ||
@@ -4656,21 +4669,21 @@ function ChatViewContent(props: ChatViewProps) {
       activeEnvironmentUnavailable ||
       sendInFlightRef.current
     )
-      return;
+      return false;
     if (
       handleImportContinuationSendBlock(
         importContinuationSendBlocked,
         focusImportContinuationBanner,
       )
     ) {
-      return;
+      return false;
     }
     if (activePendingProgress) {
       onAdvanceActivePendingUserInput();
-      return;
+      return false;
     }
     const sendCtx = composerRef.current?.getSendContext();
-    if (!sendCtx?.providerAvailable) return;
+    if (!sendCtx?.providerAvailable) return false;
     const {
       images: composerImages,
       terminalContexts: composerTerminalContexts,
@@ -4682,6 +4695,7 @@ function ChatViewContent(props: ChatViewProps) {
       selectedProviderModels: ctxSelectedProviderModels,
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
+      orchestrateInsertionText,
     } = sendCtx;
     const promptForSend = promptRef.current;
     const {
@@ -4710,7 +4724,7 @@ function ChatViewContent(props: ChatViewProps) {
         text: followUp.text,
         interactionMode: followUp.interactionMode,
       });
-      return;
+      return false;
     }
     const standaloneSlashCommand =
       composerImages.length === 0 &&
@@ -4725,7 +4739,7 @@ function ChatViewContent(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
-      return;
+      return false;
     }
     if (!hasSendableContent) {
       if (expiredTerminalContextCount > 0) {
@@ -4741,7 +4755,7 @@ function ChatViewContent(props: ChatViewProps) {
           }),
         );
       }
-      return;
+      return false;
     }
     if (!activeProject) {
       toastManager.add(
@@ -4751,7 +4765,7 @@ function ChatViewContent(props: ChatViewProps) {
           description: "This draft no longer points to an available project.",
         }),
       );
-      return;
+      return false;
     }
     const threadIdForSend = activeThread.id;
     const isFirstMessage = !isServerThread || activeThread.messages.length === 0;
@@ -4766,7 +4780,7 @@ function ChatViewContent(props: ChatViewProps) {
       isFirstMessage && sendEnvMode === "worktree" && !activeThread.worktreePath;
     if (shouldCreateWorktree && !activeThreadBranch) {
       setThreadError(threadIdForSend, "Select a base branch before sending in New worktree mode.");
-      return;
+      return false;
     }
 
     sendInFlightRef.current = true;
@@ -4792,8 +4806,16 @@ function ChatViewContent(props: ChatViewProps) {
     const composerElementContextsSnapshot = [...composerElementContexts];
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations];
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments];
+    const orchestrateMention = orchestrateInsertionText?.trimEnd() ?? null;
+    const promptTextForSend =
+      orchestrateInsertionText &&
+      orchestrateMention &&
+      trimmed !== orchestrateMention &&
+      !trimmed.startsWith(orchestrateInsertionText)
+        ? `${orchestrateInsertionText}${promptForSend.trimStart()}`
+        : promptForSend;
     const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
+      appendTerminalContextsToPrompt(promptTextForSend, composerTerminalContextsSnapshot),
       composerElementContextsSnapshot,
     );
     const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
@@ -4925,7 +4947,7 @@ function ChatViewContent(props: ChatViewProps) {
           ? { branch: localCheckoutBranchMismatch.currentBranch }
           : {}),
         runtimeMode,
-        interactionMode,
+        interactionMode: orchestrateInsertionText ? "default" : interactionMode,
       });
       if (settingsResult._tag === "Failure") {
         failure = settingsResult;
@@ -4949,7 +4971,7 @@ function ChatViewContent(props: ChatViewProps) {
                       title,
                       modelSelection: threadCreateModelSelection,
                       runtimeMode,
-                      interactionMode,
+                      interactionMode: orchestrateInsertionText ? "default" : interactionMode,
                       branch: activeThreadBranch,
                       worktreePath: activeThread.worktreePath,
                       createdAt: activeThread.createdAt,
@@ -4983,7 +5005,7 @@ function ChatViewContent(props: ChatViewProps) {
           modelSelection: ctxSelectedModelSelection,
           titleSeed: title,
           runtimeMode,
-          interactionMode,
+          interactionMode: orchestrateInsertionText ? "default" : interactionMode,
           ...(bootstrap ? { bootstrap } : {}),
           ...(importContinuationConsent ? { importContinuationConsent } : {}),
           createdAt: messageCreatedAt,
@@ -5047,7 +5069,74 @@ function ChatViewContent(props: ChatViewProps) {
       );
       resetLocalDispatch();
     }
+    return turnStartSucceeded;
   };
+
+  // the full catalog, same as the composer picker -> the user picks models;
+  // mapping a model to a launchable harness is the orchestrator's job
+  const orchestrateInstanceEntries = useMemo(
+    () => deriveProviderInstanceEntries(providerStatuses),
+    [providerStatuses],
+  );
+
+  const orchestrateModelOptions = useMemo(() => {
+    const options = new Map<ProviderInstanceId, ReadonlyArray<AppModelOption>>();
+    for (const entry of orchestrateInstanceEntries) {
+      options.set(entry.instanceId, getAppModelOptionsForInstance(settings, entry));
+    }
+    return options;
+  }, [orchestrateInstanceEntries, settings]);
+
+  const onEditOrchestratePlanInChat = useCallback(
+    (reply: string) => {
+      promptRef.current = reply;
+      setComposerDraftPrompt(composerDraftTarget, reply);
+      composerRef.current?.resetCursorState({
+        cursor: reply.length,
+        prompt: reply,
+        detectTrigger: true,
+      });
+      scheduleComposerFocus();
+    },
+    [composerDraftTarget, composerRef, scheduleComposerFocus, setComposerDraftPrompt],
+  );
+
+  const onApproveOrchestratePlan = useCallback(
+    async (reply: string) => {
+      onEditOrchestratePlanInChat(reply);
+      return onSend();
+    },
+    [onEditOrchestratePlanInChat, onSend],
+  );
+
+  // the workers panel is the run surface; the card pins it to its own run
+  const onOpenOrchestrateRun = useCallback(
+    (runId: string) => {
+      if (!activeThreadRef) return;
+      openWorkersPanel(activeThreadRef, runId);
+    },
+    [activeThreadRef],
+  );
+
+  const orchestratePlanActions = useMemo(
+    () => ({
+      environmentId,
+      instanceEntries: orchestrateInstanceEntries,
+      modelOptionsByInstance: orchestrateModelOptions,
+      onApprove: onApproveOrchestratePlan,
+      onEditInChat: onEditOrchestratePlanInChat,
+      onOpenRun: activeThreadRef ? onOpenOrchestrateRun : undefined,
+    }),
+    [
+      activeThreadRef,
+      environmentId,
+      onApproveOrchestratePlan,
+      onEditOrchestratePlanInChat,
+      onOpenOrchestrateRun,
+      orchestrateInstanceEntries,
+      orchestrateModelOptions,
+    ],
+  );
 
   const onInterrupt = async () => {
     if (!activeThread) return;
@@ -5981,6 +6070,7 @@ function ChatViewContent(props: ChatViewProps) {
                 onManualNavigation={cancelTimelineLiveFollowForUserNavigation}
                 hideEmptyPlaceholder={isDraftHeroState || threadDetailLoading}
                 topFadeEnabled={!hasTimelineTopBanner}
+                orchestratePlanActions={orchestratePlanActions}
               />
 
               {/* scroll to end pill — shown when user has scrolled away from the live edge */}

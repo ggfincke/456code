@@ -49,7 +49,8 @@ export type RightPanelSurface =
       revealRequestId: number;
     }
   | { id: "plan"; kind: "plan" }
-  | { id: "workers"; kind: "workers" }
+  // an optional run scopes the workers panel to one orchestration run
+  | { id: "workers"; kind: "workers"; run?: string }
   | {
       id: "explorer";
       kind: "explorer";
@@ -70,6 +71,7 @@ interface RightPanelStoreState {
   open: (ref: ScopedThreadRef, kind: Exclude<RightPanelKind, "file" | "terminal">) => void;
   openBrowser: (ref: ScopedThreadRef, tabId: string | null) => void;
   openExplorer: (ref: ScopedThreadRef, planId: OrchestrationProposedPlanId | null) => void;
+  openWorkers: (ref: ScopedThreadRef, run?: string) => void;
   openFile: (ref: ScopedThreadRef, relativePath: string, line?: number) => void;
   openTerminal: (ref: ScopedThreadRef, terminalId: string) => void;
   splitTerminal: (
@@ -165,6 +167,33 @@ const upsertExplorerSurface = (
   };
 };
 
+const workersSurface = (run: string | null): Extract<RightPanelSurface, { kind: "workers" }> => ({
+  id: "workers",
+  kind: "workers",
+  ...(run === null ? {} : { run }),
+});
+
+// opening the workers panel without a run keeps whatever run is already
+// pinned there, so existing openers behave exactly as before
+const upsertWorkersSurface = (
+  current: ThreadRightPanelState,
+  run: string | null,
+): ThreadRightPanelState => {
+  const existing = current.surfaces.find((entry) => entry.id === "workers");
+  if (run === null && existing !== undefined) {
+    return { ...current, isOpen: true, activeSurfaceId: existing.id };
+  }
+  const surface = workersSurface(run);
+  return {
+    isOpen: true,
+    activeSurfaceId: surface.id,
+    surfaces:
+      existing === undefined
+        ? [...current.surfaces, surface]
+        : current.surfaces.map((entry) => (entry.id === surface.id ? surface : entry)),
+  };
+};
+
 const upsertSurface = (
   current: ThreadRightPanelState,
   surface: RightPanelSurface,
@@ -224,6 +253,16 @@ export function migratePersistedRightPanelState(persistedState: unknown): {
                           ? (surface.planId as OrchestrationProposedPlanId)
                           : null;
                       return [explorerSurface(planId)];
+                    }
+                    if (surface.kind === "workers") {
+                      if (surface.id !== "workers") return [];
+                      const run =
+                        "run" in surface &&
+                        typeof surface.run === "string" &&
+                        surface.run.trim().length > 0
+                          ? surface.run
+                          : null;
+                      return [workersSurface(run)];
                     }
                     if (surface.kind === "file") {
                       const revealLine =
@@ -321,6 +360,12 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
         set((state) => ({
           byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
             upsertExplorerSurface(current, planId),
+          ),
+        })),
+      openWorkers: (ref, run) =>
+        set((state) => ({
+          byThreadKey: updateThread(state.byThreadKey, scopedThreadKey(ref), (current) =>
+            upsertWorkersSurface(current, run !== undefined && run !== "" ? run : null),
           ),
         })),
       openFile: (ref, relativePath, line) =>
@@ -598,6 +643,11 @@ export const useRightPanelStore = create<RightPanelStoreState>()(
     },
   ),
 );
+
+// opens (or focuses) the workers panel, optionally pinned to one run
+export function openWorkersPanel(ref: ScopedThreadRef, run?: string): void {
+  useRightPanelStore.getState().openWorkers(ref, run);
+}
 
 export function selectThreadRightPanelState(
   byThreadKey: Record<string, ThreadRightPanelState>,
