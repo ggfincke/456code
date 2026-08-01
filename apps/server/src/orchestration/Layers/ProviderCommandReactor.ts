@@ -1138,7 +1138,7 @@ const make = Effect.gen(function* () {
     }
     const hasRecoverableOutgoingSession = recoverableSession.value;
 
-    if (!hasLiveOutgoingSession && !hasRecoverableOutgoingSession) {
+    const completeSwitch = Effect.fn("completeProviderSwitch")(function* (handoffText: string) {
       yield* orchestrationEngine.dispatch({
         type: "thread.provider.switch.complete",
         commandId: yield* serverCommandId("provider-switch-complete"),
@@ -1146,8 +1146,13 @@ const make = Effect.gen(function* () {
         modelSelection: event.payload.targetModelSelection,
         fromInstanceId: outgoingInstanceId,
         fromModel: thread.modelSelection.model,
-        handoffText: "",
+        handoffText,
       });
+      threadModelSelections.set(thread.id, event.payload.targetModelSelection);
+    });
+
+    if (!hasLiveOutgoingSession && !hasRecoverableOutgoingSession) {
+      yield* completeSwitch("");
       return;
     }
 
@@ -1196,15 +1201,7 @@ const make = Effect.gen(function* () {
       }
 
       yield* providerService.stopSession({ threadId: thread.id });
-      yield* orchestrationEngine.dispatch({
-        type: "thread.provider.switch.complete",
-        commandId: yield* serverCommandId("provider-switch-complete"),
-        threadId: thread.id,
-        modelSelection: event.payload.targetModelSelection,
-        fromInstanceId: outgoingInstanceId,
-        fromModel: thread.modelSelection.model,
-        handoffText,
-      });
+      yield* completeSwitch(handoffText);
     }).pipe(
       Effect.catchCause((cause) =>
         failSwitch(formatFailureDetail(cause)).pipe(

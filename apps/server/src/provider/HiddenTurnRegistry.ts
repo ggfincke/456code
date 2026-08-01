@@ -178,6 +178,48 @@ export const sendTurnAndAwait = Effect.fn("sendTurnAndAwait")(function* (
   };
   pendingWaitersBySession.set(key, waiter);
 
+  const interruptAndAwaitTerminalState = Effect.fn("interruptAndAwaitHiddenTurnTerminalState")(
+    function* () {
+      const interruptInput =
+        waiter.providerTurnId === null
+          ? { threadId: input.request.threadId }
+          : { threadId: input.request.threadId, turnId: waiter.providerTurnId };
+      yield* Effect.all(
+        [
+          providerService.interruptTurn(interruptInput).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("failed to interrupt hidden provider turn during cleanup", {
+                threadId: input.request.threadId,
+                turnId: waiter.providerTurnId,
+                cause,
+              }),
+            ),
+            Effect.timeoutOption(INTERRUPT_GRACE_TIMEOUT),
+            Effect.asVoid,
+          ),
+          Deferred.await(waiter.result).pipe(
+            Effect.timeoutOption(INTERRUPT_GRACE_TIMEOUT),
+            Effect.asVoid,
+          ),
+        ],
+        { concurrency: "unbounded", discard: true },
+      );
+      if (waiter.terminalState === null) {
+        // no terminal event confirmed: stop the session so a still-running
+        // compaction turn cannot leak visible output once the waiter is gone;
+        // the stopped binding keeps its cursor, so the next turn recovers
+        yield* providerService.stopSession({ threadId: input.request.threadId }).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("failed to stop session after hidden turn cleanup", {
+              threadId: input.request.threadId,
+              cause,
+            }),
+          ),
+        );
+      }
+    },
+  );
+
   return yield* Effect.gen(function* () {
     const awaited = yield* Effect.gen(function* () {
       const turn = yield* providerService.sendTurn(input.request, input.routingAuthority);
@@ -195,48 +237,19 @@ export const sendTurnAndAwait = Effect.fn("sendTurnAndAwait")(function* (
       }
       yield* completeWaiterIfReady(waiter);
       return yield* Deferred.await(waiter.result);
-    }).pipe(Effect.timeoutOption(WAIT_TIMEOUT));
+    }).pipe(
+      Effect.timeoutOption(WAIT_TIMEOUT),
+      Effect.catchCause((cause) =>
+        waiter.providerTurnId === null
+          ? Effect.failCause(cause)
+          : interruptAndAwaitTerminalState().pipe(Effect.andThen(Effect.failCause(cause))),
+      ),
+    );
     if (Option.isSome(awaited)) {
       return awaited.value;
     }
 
-    const interruptInput =
-      waiter.providerTurnId === null
-        ? { threadId: input.request.threadId }
-        : { threadId: input.request.threadId, turnId: waiter.providerTurnId };
-    yield* Effect.all(
-      [
-        providerService.interruptTurn(interruptInput).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("failed to interrupt timed-out hidden provider turn", {
-              threadId: input.request.threadId,
-              turnId: waiter.providerTurnId,
-              cause,
-            }),
-          ),
-          Effect.timeoutOption(INTERRUPT_GRACE_TIMEOUT),
-          Effect.asVoid,
-        ),
-        Deferred.await(waiter.result).pipe(
-          Effect.timeoutOption(INTERRUPT_GRACE_TIMEOUT),
-          Effect.asVoid,
-        ),
-      ],
-      { concurrency: "unbounded", discard: true },
-    );
-    if (waiter.terminalState === null) {
-      // no terminal event confirmed: stop the session so a still-running
-      // compaction turn cannot leak visible output once the waiter is gone;
-      // the stopped binding keeps its cursor, so the next turn recovers
-      yield* providerService.stopSession({ threadId: input.request.threadId }).pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("failed to stop session after hidden turn timeout", {
-            threadId: input.request.threadId,
-            cause,
-          }),
-        ),
-      );
-    }
+    yield* interruptAndAwaitTerminalState();
     return yield* new HiddenTurnAwaitError({
       threadId: input.request.threadId,
       detail: "Hidden provider turn timed out after 120 seconds.",
