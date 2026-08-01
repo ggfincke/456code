@@ -29,7 +29,7 @@ const LEGACY_BASELINE = new Map<string, number>([
   ["tests/apps/server/orchestration/Layers/CheckpointReactor.test.ts", 42],
   ["tests/apps/server/orchestration/Layers/OrchestrationEngine.test.ts", 5],
   ["tests/apps/server/orchestration/Layers/OrchestrationReactor.test.ts", 4],
-  ["tests/apps/server/orchestration/Layers/ProviderCommandReactor.test.ts", 70],
+  ["tests/apps/server/orchestration/Layers/ProviderCommandReactor.test.ts", 14],
   ["tests/apps/server/orchestration/Layers/ProviderRuntimeIngestion.test.ts", 31],
   ["tests/apps/server/orchestration/Layers/ThreadDeletionReactor.test.ts", 2],
   ["tests/apps/server/orchestration/projector.test.ts", 20],
