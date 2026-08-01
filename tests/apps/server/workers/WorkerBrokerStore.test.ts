@@ -5,10 +5,10 @@ import * as NodeServices from "@effect/platform-node/NodeServices";
 import { HostProcessEnvironment } from "@t3tools/shared/hostProcess";
 import { assert, describe, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
-import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
+import * as Path from "effect/Path";
+import * as Schema from "effect/Schema";
 
 import * as WorkerBrokerStore from "../../../../apps/server/src/workers/WorkerBrokerStore.ts";
 
@@ -19,31 +19,50 @@ function activityLayer(stateDir: string) {
   );
 }
 
+// fixtures are arbitrary broker records, so they encode through the unknown
+// JSON codec rather than JSON.stringify
+const encodeActivityLine = Schema.encodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
+// the temp state dir is scoped, so each case is cleaned up on release instead
+// of through a try/finally around the assertions
+const withActivityStore = <A, E>(
+  run: (
+    write: (lines: ReadonlyArray<string>) => Effect.Effect<void>,
+  ) => Effect.Effect<A, E, WorkerBrokerStore.WorkerBrokerStore>,
+) =>
+  Effect.gen(function* () {
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    const stateDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "workers-activity-" });
+    const jobDir = path.join(stateDir, "jobs", "job-1");
+
+    const write = (lines: ReadonlyArray<string>) =>
+      Effect.gen(function* () {
+        yield* fileSystem.makeDirectory(jobDir, { recursive: true });
+        yield* fileSystem.writeFileString(path.join(jobDir, "activity.jsonl"), lines.join("\n"));
+      }).pipe(Effect.orDie);
+
+    return yield* run(write).pipe(Effect.provide(activityLayer(stateDir)));
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
+
 describe("WorkerBrokerStore activity", () => {
-  it.effect("returns empty history when old jobs have no activity artifact", () => {
-    const stateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "workers-activity-"));
-    return Effect.gen(function* () {
-      try {
+  it.effect("returns empty history when old jobs have no activity artifact", () =>
+    withActivityStore(() =>
+      Effect.gen(function* () {
         const store = yield* WorkerBrokerStore.WorkerBrokerStore;
         const snapshot = yield* store.readActivity({ jobId: "job-1" });
         assert.deepStrictEqual(snapshot.entries, []);
         assert.strictEqual(snapshot.skippedEntryCount, 0);
         assert.strictEqual(snapshot.truncated, false);
-      } finally {
-        NodeFS.rmSync(stateDir, { recursive: true, force: true });
-      }
-    }).pipe(Effect.provide(activityLayer(stateDir)));
-  });
+      }),
+    ),
+  );
 
-  it.effect("normalizes safe records while reporting malformed and unsupported lines", () => {
-    const stateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "workers-activity-"));
-    return Effect.gen(function* () {
-      const jobDir = NodePath.join(stateDir, "jobs", "job-1");
-      NodeFS.mkdirSync(jobDir, { recursive: true });
-      NodeFS.writeFileSync(
-        NodePath.join(jobDir, "activity.jsonl"),
-        [
-          JSON.stringify({
+  it.effect("normalizes safe records while reporting malformed and unsupported lines", () =>
+    withActivityStore((write) =>
+      Effect.gen(function* () {
+        yield* write([
+          encodeActivityLine({
             schema_version: 1,
             sequence: 1,
             recorded_at: "2026-07-31T12:00:00Z",
@@ -52,21 +71,21 @@ describe("WorkerBrokerStore activity", () => {
             status: "started",
           }),
           "not json",
-          JSON.stringify({
+          encodeActivityLine({
             schema_version: 2,
             sequence: 2,
             recorded_at: "2026-07-31T12:00:01Z",
             kind: "message",
             summary: "hidden",
           }),
-          JSON.stringify({
+          encodeActivityLine({
             schema_version: 1,
             sequence: 3,
             recorded_at: "2026-07-31T12:00:02Z",
             kind: "message",
             summary: "  safe\u0000summary  ",
           }),
-          JSON.stringify({
+          encodeActivityLine({
             schema_version: 1,
             sequence: 4,
             recorded_at: "2026-07-31T12:00:03Z",
@@ -74,9 +93,8 @@ describe("WorkerBrokerStore activity", () => {
             status: "completed",
             command: "secret",
           }),
-        ].join("\n"),
-      );
-      try {
+        ]);
+
         const store = yield* WorkerBrokerStore.WorkerBrokerStore;
         const snapshot = yield* store.readActivity({ jobId: "job-1" });
         assert.strictEqual(snapshot.entries.length, 3);
@@ -93,38 +111,31 @@ describe("WorkerBrokerStore activity", () => {
           kind: "action",
           status: "completed",
         });
-      } finally {
-        NodeFS.rmSync(stateDir, { recursive: true, force: true });
-      }
-    }).pipe(Effect.provide(activityLayer(stateDir)));
-  });
+      }),
+    ),
+  );
 
-  it.effect("bounds large activity artifacts and normalized entry history", () => {
-    const stateDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "workers-activity-"));
-    const jobDir = NodePath.join(stateDir, "jobs", "job-1");
-    NodeFS.mkdirSync(jobDir, { recursive: true });
-    NodeFS.writeFileSync(
-      NodePath.join(jobDir, "activity.jsonl"),
-      Array.from({ length: 400 }, (_, index) =>
-        JSON.stringify({
-          schema_version: 1,
-          sequence: index + 1,
-          recorded_at: "2026-07-31T12:00:00Z",
-          kind: "message",
-          summary: "x".repeat(1000),
-        }),
-      ).join("\n"),
-    );
-    return Effect.gen(function* () {
-      try {
+  it.effect("bounds large activity artifacts and normalized entry history", () =>
+    withActivityStore((write) =>
+      Effect.gen(function* () {
+        yield* write(
+          Array.from({ length: 400 }, (_, index) =>
+            encodeActivityLine({
+              schema_version: 1,
+              sequence: index + 1,
+              recorded_at: "2026-07-31T12:00:00Z",
+              kind: "message",
+              summary: "x".repeat(1000),
+            }),
+          ),
+        );
+
         const store = yield* WorkerBrokerStore.WorkerBrokerStore;
         const snapshot = yield* store.readActivity({ jobId: "job-1" });
         assert.strictEqual(snapshot.entries.length, 200);
         assert.strictEqual(snapshot.truncated, true);
         assert.strictEqual(snapshot.entries[0]?.kind, "message");
-      } finally {
-        NodeFS.rmSync(stateDir, { recursive: true, force: true });
-      }
-    }).pipe(Effect.provide(activityLayer(stateDir)));
-  });
+      }),
+    ),
+  );
 });

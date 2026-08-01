@@ -3,6 +3,7 @@
 
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
 import * as Layer from "effect/Layer";
@@ -25,7 +26,7 @@ describe("WorkersStatusBroadcaster activity", () => {
       readActivity: ({ jobId }) =>
         Effect.sync(() => ({
           jobId,
-          readAt: new Date(reads).toISOString(),
+          readAt: DateTime.formatIso(DateTime.makeUnsafe(reads)),
           entries:
             reads++ < 1
               ? []
