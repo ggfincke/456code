@@ -5,6 +5,7 @@ import type {
   WorkersActivityEntry,
   WorkersActivityInput,
   WorkersActivitySnapshot,
+  WorkersFailureClass,
   WorkersGetJobInput,
   WorkersGetJobResult,
   WorkersGetRunInput,
@@ -111,6 +112,7 @@ const DiskJobResult = Schema.Struct({
   risks: Schema.optional(Schema.Array(Schema.String)),
   follow_ups: Schema.optional(Schema.Array(Schema.String)),
   patch_path: Schema.optional(Schema.String),
+  failure_class: Schema.optional(Schema.String),
   process_exit_code: Schema.optional(Schema.NullOr(Schema.Number)),
   created_at: Schema.optional(Schema.String),
   started_at: Schema.optional(Schema.String),
@@ -222,6 +224,38 @@ function toVerificationSummary(record: DiskJobRecord): Option.Option<WorkersVeri
   return Option.some({ total, passed, failed: total - passed - timedOut, timedOut });
 }
 
+const FAILURE_CLASSES: ReadonlySet<string> = new Set([
+  "environment",
+  "model",
+  "broker_fault",
+  "scope",
+  "verification",
+]);
+
+// mirror the broker's failure taxonomy for terminal failures; legacy records
+// and unrecognized values degrade to "unknown" rather than failing decode
+function toFailureClass(record: DiskJobRecord): Option.Option<WorkersFailureClass> {
+  const status = toJobStatus(record.status ?? record.result?.status);
+  if (status !== "failed" && status !== "rejected") return Option.none();
+  const raw = toText(record.result?.failure_class);
+  return Option.some(
+    raw !== null && FAILURE_CLASSES.has(raw) ? (raw as WorkersFailureClass) : "unknown",
+  );
+}
+
+// patch presence is evidence of salvageable work; absent result blocks stay unknown
+function toHasPatch(result: DiskJobResult | undefined): Option.Option<boolean> {
+  if (result === undefined) return Option.none();
+  return Option.some(toText(result.patch_path) !== null);
+}
+
+function toVerificationExitCodes(
+  runs: DiskJobResult["verification"],
+): ReadonlyArray<Option.Option<number>> {
+  if (!Array.isArray(runs)) return [];
+  return runs.map((run) => Option.fromNullishOr(toInt(run.exit_code)));
+}
+
 function toJobChanges(changes: DiskJobResult["changes"]): ReadonlyArray<WorkersJobChange> {
   if (!Array.isArray(changes)) return [];
   return changes.flatMap((change) => {
@@ -257,6 +291,9 @@ function toJobSummary(jobId: string, record: DiskJobRecord): WorkersJobSummary {
       : Option.none(),
     verification: toVerificationSummary(record),
     scopeViolationCount: toTextList(result?.scope_violations).length,
+    failureClass: toFailureClass(record),
+    hasPatch: toHasPatch(result),
+    verificationExitCodes: toVerificationExitCodes(result?.verification),
   };
 }
 
@@ -303,6 +340,7 @@ type RunCounts = {
   failed: number;
   rejected: number;
   cancelled: number;
+  unknown: number;
 };
 
 type RunAccumulator = RunCounts & {
@@ -323,12 +361,13 @@ function emptyRunCounts(): RunCounts {
     failed: 0,
     rejected: 0,
     cancelled: 0,
+    unknown: 0,
   };
 }
 
 function addJobToCounts(counts: RunCounts, status: WorkersJobStatus): void {
   counts.total += 1;
-  if (status !== "unknown") counts[status] += 1;
+  counts[status] += 1;
 }
 
 function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummary[] {
@@ -397,6 +436,7 @@ function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummar
         failed: run.failed,
         rejected: run.rejected,
         cancelled: run.cancelled,
+        unknown: run.unknown,
         stages: [...run.stages.entries()]
           .toSorted(([left], [right]) => {
             if (left === null) return right === null ? 0 : -1;
@@ -424,7 +464,7 @@ function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummar
 
 // job ids address a directory under <stateDir>/jobs; anything that could escape
 // it is rejected before it is ever joined into a path
-function isSafeJobId(jobId: string): boolean {
+export function isSafeJobId(jobId: string): boolean {
   return (
     jobId.length > 0 &&
     !jobId.includes("/") &&
@@ -447,7 +487,8 @@ function normalizeActivityRecord(
   if (record.schema_version !== SUPPORTED_SCHEMA_VERSION) return null;
   if (
     typeof record.sequence !== "number" ||
-    !Number.isInteger(record.sequence) ||
+    !Number.isSafeInteger(record.sequence) ||
+    record.sequence <= 0 ||
     record.sequence <= previousSequence
   ) {
     return null;
@@ -750,6 +791,19 @@ export const make = Effect.gen(function* () {
     const maxBytes = BigInt(MAX_ACTIVITY_BYTES);
     const byteTruncated = size > maxBytes;
     const offset = byteTruncated ? size - maxBytes : BigInt(0);
+    let tailStartsAtRecordBoundary = true;
+    if (byteTruncated) {
+      const precedingByte = yield* fileSystem
+        .stream(activityPath, { offset: offset - BigInt(1), bytesToRead: BigInt(1) })
+        .pipe(Stream.runHead, Effect.result);
+      if (Result.isFailure(precedingByte)) {
+        return empty({ error: Option.some({ message: "Failed to read worker activity." }) });
+      }
+      tailStartsAtRecordBoundary = Option.match(precedingByte.success, {
+        onNone: () => false,
+        onSome: (chunk) => chunk[0] === 0x0a,
+      });
+    }
     const text = yield* fileSystem.stream(activityPath, { offset, bytesToRead: maxBytes }).pipe(
       Stream.decodeText(),
       Stream.runFold(
@@ -764,7 +818,7 @@ export const make = Effect.gen(function* () {
 
     const lines = text.success.split(/\r?\n/);
     let skippedEntryCount = 0;
-    if (byteTruncated && lines.length > 0) {
+    if (byteTruncated && !tailStartsAtRecordBoundary && lines.length > 0) {
       lines.shift();
       skippedEntryCount += 1;
     }

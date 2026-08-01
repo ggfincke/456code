@@ -16,6 +16,18 @@ export const WorkersJobStatus = Schema.Literals([
 ]);
 export type WorkersJobStatus = typeof WorkersJobStatus.Type;
 
+// why a terminal job failed, mirrored from the broker's failure_class;
+// "unknown" covers legacy records and jobs the broker could not classify
+export const WorkersFailureClass = Schema.Literals([
+  "environment",
+  "model",
+  "broker_fault",
+  "scope",
+  "verification",
+  "unknown",
+]);
+export type WorkersFailureClass = typeof WorkersFailureClass.Type;
+
 export const WorkersVerificationSummary = Schema.Struct({
   total: NonNegativeInt,
   passed: NonNegativeInt,
@@ -52,6 +64,11 @@ export const WorkersJobSummary = Schema.Struct({
   changedFileCount: Schema.Option(NonNegativeInt),
   verification: Schema.Option(WorkersVerificationSummary),
   scopeViolationCount: NonNegativeInt,
+  // present only for failed/rejected jobs; Option-al evidence so missing data
+  // is never rendered as "no patch" or "exit 0"
+  failureClass: Schema.Option(WorkersFailureClass),
+  hasPatch: Schema.Option(Schema.Boolean),
+  verificationExitCodes: Schema.Array(Schema.Option(Schema.Int)),
 });
 export type WorkersJobSummary = typeof WorkersJobSummary.Type;
 
@@ -127,6 +144,7 @@ export const WorkersRunStageRollup = Schema.Struct({
   failed: NonNegativeInt,
   rejected: NonNegativeInt,
   cancelled: NonNegativeInt,
+  unknown: NonNegativeInt,
 });
 export type WorkersRunStageRollup = typeof WorkersRunStageRollup.Type;
 
@@ -142,6 +160,7 @@ export const WorkersRunSummary = Schema.Struct({
   failed: NonNegativeInt,
   rejected: NonNegativeInt,
   cancelled: NonNegativeInt,
+  unknown: NonNegativeInt,
   stages: Schema.Array(WorkersRunStageRollup),
   scopeViolationCount: NonNegativeInt,
 });

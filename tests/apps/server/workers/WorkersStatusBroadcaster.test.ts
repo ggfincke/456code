@@ -28,7 +28,7 @@ describe("WorkersStatusBroadcaster activity", () => {
           jobId,
           readAt: DateTime.formatIso(DateTime.makeUnsafe(reads)),
           entries:
-            reads++ < 1
+            reads++ < 2
               ? []
               : [
                   {
@@ -50,8 +50,11 @@ describe("WorkersStatusBroadcaster activity", () => {
         .pipe(Stream.take(2), Stream.runCollect, Effect.forkChild);
       yield* Effect.yieldNow;
       yield* TestClock.adjust("4 seconds");
+      yield* Effect.yieldNow;
+      yield* TestClock.adjust("4 seconds");
       const snapshots = yield* Fiber.join(snapshotsFiber);
       yield* Effect.sync(() => {
+        assert.strictEqual(reads, 3);
         assert.strictEqual(snapshots.length, 2);
         assert.strictEqual(snapshots[1]?.jobId, "job-a");
         assert.strictEqual(snapshots[1]?.entries.length, 1);
