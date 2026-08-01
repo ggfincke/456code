@@ -58,6 +58,10 @@ const SUPPORTED_SCHEMA_VERSION = 1;
 const MAX_ACTIVITY_BYTES = 256 * 1024;
 const MAX_ACTIVITY_ENTRIES = 200;
 
+// activity lines are arbitrary broker JSON, so they decode to unknown & are
+// shaped by normalizeActivityRecord; a malformed line throws and is skipped
+const decodeActivityLine = Schema.decodeUnknownSync(Schema.fromJsonString(Schema.Unknown));
+
 // lenient mirror of the broker's on-disk snake_case record; unknown keys are ignored
 // and everything but the id is optional so partial or in-flight jobs still decode
 const DiskJobChange = Schema.Struct({
@@ -770,7 +774,7 @@ export const make = Effect.gen(function* () {
       if (line.trim().length === 0) continue;
       let parsed: unknown;
       try {
-        parsed = JSON.parse(line);
+        parsed = decodeActivityLine(line);
       } catch {
         skippedEntryCount += 1;
         continue;
