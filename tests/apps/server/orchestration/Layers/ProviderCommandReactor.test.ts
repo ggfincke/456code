@@ -71,6 +71,10 @@ import { ServerSettingsService } from "../../../../../apps/server/src/serverSett
 import { VcsStatusBroadcaster } from "../../../../../apps/server/src/vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../../../../../apps/server/src/git/GitWorkflowService.ts";
 
+// the harness factory runs before the harness object exists, so its own
+// setup routes through this single runner
+const runTest = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
+
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
 const asMessageId = (value: string): MessageId => MessageId.make(value);
@@ -415,16 +419,16 @@ describe("ProviderCommandReactor", () => {
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
-    scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
+    scope = await runTest(Scope.make("sequential"));
+    await runTest(reactor.start().pipe(Scope.provide(scope)));
     if (input?.withRuntimeIngestion === true) {
-      await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)));
+      await runTest(ingestion.start().pipe(Scope.provide(scope)));
       await runtime.runPromise(Effect.yieldNow);
     }
-    const drain = () => Effect.runPromise(reactor.drain);
-    const drainIngestion = () => Effect.runPromise(ingestion.drain);
+    const drain = () => runTest(reactor.drain);
+    const drainIngestion = () => runTest(ingestion.drain);
 
-    await Effect.runPromise(
+    await runTest(
       engine.dispatch({
         type: "project.create",
         commandId: CommandId.make("cmd-project-create"),
@@ -435,7 +439,7 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       }),
     );
-    await Effect.runPromise(
+    await runTest(
       engine.dispatch({
         type: "thread.create",
         commandId: CommandId.make("cmd-thread-create"),
@@ -454,10 +458,10 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
-      readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
+      readModel: () => runTest(snapshotQuery.getSnapshot()),
       // one place that manually runs the test runtime; keeps the per-test
       // call sites free of Effect.runPromise
-      run: <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect),
+      run: runTest,
       startSession,
       sendTurn,
       interruptTurn,
@@ -557,7 +561,7 @@ describe("ProviderCommandReactor", () => {
       model: "sonnet",
     };
 
-    await Effect.runPromise(
+    await harness.run(
       harness.engine.dispatch({
         type: "thread.turn.start",
         commandId: CommandId.make("cmd-turn-start-before-provider-switch-cache"),
@@ -575,8 +579,8 @@ describe("ProviderCommandReactor", () => {
       }),
     );
     await waitFor(() => harness.sendTurn.mock.calls.length === 1);
-    await Effect.runPromise(harness.stopSession({ threadId }));
-    await Effect.runPromise(
+    await harness.run(harness.stopSession({ threadId }));
+    await harness.run(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-stop-before-provider-switch-cache"),
@@ -595,7 +599,7 @@ describe("ProviderCommandReactor", () => {
       }),
     );
 
-    await Effect.runPromise(
+    await harness.run(
       harness.engine.dispatch({
         type: "thread.provider.switch",
         commandId: CommandId.make("cmd-provider-switch-cache"),
@@ -609,7 +613,7 @@ describe("ProviderCommandReactor", () => {
       return readModel.threads[0]?.modelSelection.instanceId === targetModelSelection.instanceId;
     });
 
-    await Effect.runPromise(
+    await harness.run(
       harness.engine.dispatch({
         type: "thread.session.set",
         commandId: CommandId.make("cmd-session-ready-after-provider-switch-cache"),
@@ -627,7 +631,7 @@ describe("ProviderCommandReactor", () => {
         createdAt: "2026-01-01T00:00:02.000Z",
       }),
     );
-    await Effect.runPromise(
+    await harness.run(
       harness.engine.dispatch({
         type: "thread.runtime-mode.set",
         commandId: CommandId.make("cmd-runtime-mode-after-provider-switch-cache"),
@@ -654,7 +658,7 @@ describe("ProviderCommandReactor", () => {
       model: "sonnet",
     };
 
-    await Effect.runPromise(
+    await harness.run(
       harness.engine.dispatch({
         type: "thread.turn.start",
         commandId: CommandId.make("cmd-visible-turn-before-aborted-switch"),
@@ -696,7 +700,7 @@ describe("ProviderCommandReactor", () => {
       return readModel.threads[0]?.session?.status === "ready";
     });
 
-    await Effect.runPromise(
+    await harness.run(
       harness.engine.dispatch({
         type: "thread.provider.switch",
         commandId: CommandId.make("cmd-provider-switch-before-hidden-abort"),
@@ -739,7 +743,7 @@ describe("ProviderCommandReactor", () => {
     expect(afterAbort?.session?.activeTurnId).toBeNull();
     expect(afterAbort?.modelSelection.instanceId).toBe(providerInstanceId);
 
-    await Effect.runPromise(
+    await harness.run(
       harness.engine.dispatch({
         type: "thread.provider.switch",
         commandId: CommandId.make("cmd-provider-switch-after-hidden-abort"),
