@@ -447,6 +447,16 @@ function StageStatusCell({
                         ? ` · ${Math.round(job.elapsedMs.value / 1000)}s`
                         : ""}
                     </p>
+                    {Option.isSome(job.failureClass) ? (
+                      <p className="text-muted-foreground">
+                        {job.failureClass.value.replace("_", " ")}
+                        {Option.getOrNull(job.hasPatch) === true
+                          ? " · patch available — salvage before relaunching"
+                          : Option.getOrNull(job.hasPatch) === false
+                            ? " · no patch"
+                            : ""}
+                      </p>
+                    ) : null}
                     <p className="break-words text-muted-foreground">
                       {Option.getOrNull(job.error) ??
                         "no error recorded — open the worker in the panel for logs"}
@@ -843,6 +853,12 @@ export function OrchestratePlanCard({
   const failedCount = runJobs.filter(
     (job) => job.status === "failed" || job.status === "rejected",
   ).length;
+  // failures with an intact patch are recoverable work, not lost work
+  const salvageableCount = runJobs.filter(
+    (job) =>
+      (job.status === "failed" || job.status === "rejected") &&
+      Option.getOrNull(job.hasPatch) === true,
+  ).length;
   const notLaunchedCount = Math.max(0, plannedTotal - runJobs.length);
   // a run with workers still to launch is not finished, however quiet the
   // broker's job list looks right now
@@ -1114,6 +1130,12 @@ export function OrchestratePlanCard({
               {failedCount > 0 ? (
                 <span className="font-medium text-red-600 dark:text-red-400">
                   {failedCount} failed
+                  {salvageableCount > 0 ? (
+                    <span className="font-normal text-amber-600 dark:text-amber-400">
+                      {" "}
+                      · {salvageableCount} salvageable
+                    </span>
+                  ) : null}
                 </span>
               ) : null}
             </div>

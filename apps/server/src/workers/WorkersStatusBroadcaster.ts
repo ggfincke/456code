@@ -86,13 +86,7 @@ export const make = Effect.gen(function* () {
 
   const streamActivity: WorkersStatusBroadcaster["Service"]["streamActivity"] = (input) => {
     const jobId = input.jobId.trim();
-    const safeJobId =
-      jobId.length > 0 &&
-      !jobId.includes("/") &&
-      !jobId.includes("\\") &&
-      !jobId.includes("..") &&
-      !jobId.startsWith(".");
-    const watchChanges = safeJobId
+    const watchChanges = WorkerBrokerStore.isSafeJobId(jobId)
       ? fs.watch(path.join(store.jobsDir, jobId)).pipe(Stream.catchCause(() => Stream.empty))
       : Stream.empty;
     const triggers = Stream.merge(watchChanges, Stream.tick(REFRESH_INTERVAL)).pipe(

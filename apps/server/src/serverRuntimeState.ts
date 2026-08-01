@@ -1,3 +1,5 @@
+// apps/server/src/serverRuntimeState.ts
+// persists and safely retires live server ownership metadata
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -100,6 +102,30 @@ export const clearPersistedServerRuntimeState = (path: string) =>
     );
   });
 
+const runtimeStatesMatch = (
+  left: PersistedServerRuntimeState,
+  right: PersistedServerRuntimeState,
+): boolean =>
+  left.version === right.version &&
+  left.pid === right.pid &&
+  left.host === right.host &&
+  left.port === right.port &&
+  left.origin === right.origin &&
+  left.startedAt === right.startedAt;
+
+const isServerRuntimeStateOwnerAlive = (pid: number): Effect.Effect<boolean> =>
+  Effect.sync(() => {
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      return false;
+    }
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (cause) {
+      return !(cause instanceof Error && "code" in cause && cause.code === "ESRCH");
+    }
+  });
+
 export const readPersistedServerRuntimeState = (path: string) =>
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
@@ -151,3 +177,30 @@ export const readPersistedServerRuntimeState = (path: string) =>
         ),
     }),
   );
+
+export const clearPersistedServerRuntimeStateIfStale = (input: {
+  readonly path: string;
+  readonly expectedState: PersistedServerRuntimeState;
+}) =>
+  Effect.gen(function* () {
+    const currentState = yield* readPersistedServerRuntimeState(input.path);
+    if (
+      Option.isNone(currentState) ||
+      !runtimeStatesMatch(currentState.value, input.expectedState) ||
+      (yield* isServerRuntimeStateOwnerAlive(currentState.value.pid))
+    ) {
+      return false;
+    }
+
+    const stateBeforeClear = yield* readPersistedServerRuntimeState(input.path);
+    if (
+      Option.isNone(stateBeforeClear) ||
+      !runtimeStatesMatch(stateBeforeClear.value, input.expectedState) ||
+      (yield* isServerRuntimeStateOwnerAlive(stateBeforeClear.value.pid))
+    ) {
+      return false;
+    }
+
+    yield* clearPersistedServerRuntimeState(input.path);
+    return true;
+  });

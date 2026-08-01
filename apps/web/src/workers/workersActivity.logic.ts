@@ -9,7 +9,7 @@ import type {
 } from "@t3tools/contracts";
 
 import {
-  workerJobIsLive,
+  workerJobIsActive,
   workerStatusBadgeVariant,
   type WorkerStatusBadgeVariant,
 } from "./workersPanel.logic";
@@ -67,7 +67,7 @@ export function workerActivityHeadline(
   status: WorkersJobStatus,
   phase: WorkerActivityPhaseView | null,
 ): WorkerActivityHeadline {
-  if (phase !== null && workerJobIsLive(status)) {
+  if (phase !== null && workerJobIsActive(status)) {
     return {
       label: workerActivityPhaseLabel(phase),
       variant: ACTIVITY_STATUS_VARIANTS[phase.status],
