@@ -52,6 +52,7 @@ const decodeSessionCancelNotification = Schema.decodeEffect(
   Schema.fromJsonString(SessionCancelNotification),
 );
 const decodeExtRequest = Schema.decodeEffect(Schema.fromJsonString(ExtRequest));
+const decodeExtResponse = Schema.decodeEffect(Schema.fromJsonString(ExtResponse));
 const decodeRequestPermissionResponse = Schema.decodeEffect(
   Schema.fromJsonString(RequestPermissionResponse),
 );
@@ -686,6 +687,55 @@ it.layer(NodeServices.layer)("effect-acp protocol", (it) => {
 
       const resolved = yield* Fiber.join(response);
       assert.deepEqual(resolved, { ok: true });
+    }),
+  );
+
+  it.effect("routes extension responses while an inbound extension handler is blocked", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const handlerStarted = yield* Deferred.make<void>();
+      const releaseHandler = yield* Deferred.make<void>();
+      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+        stdio,
+        serverRequestMethods: new Set(),
+        onExtRequest: () =>
+          Deferred.succeed(handlerStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseHandler)),
+            Effect.as({ ok: true }),
+          ),
+      });
+
+      const pending = yield* transport
+        .request("x/test", { hello: "outbound" })
+        .pipe(Effect.forkScoped);
+      yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(ExtRequest, {
+          jsonrpc: "2.0",
+          id: 77,
+          method: "x/test",
+          params: { hello: "inbound" },
+          headers: [],
+        }),
+      );
+      yield* Deferred.await(handlerStarted);
+      yield* Queue.offer(
+        input,
+        yield* encodeJsonl(ExtResponse, {
+          jsonrpc: "2.0",
+          id: 1,
+          result: { ok: true },
+        }),
+      );
+
+      assert.deepEqual(yield* Fiber.join(pending).pipe(Effect.timeout("1 second")), { ok: true });
+      yield* Deferred.succeed(releaseHandler, undefined);
+      assert.deepEqual(yield* decodeExtResponse(yield* Queue.take(output)), {
+        jsonrpc: "2.0",
+        id: 77,
+        result: { ok: true },
+      });
     }),
   );
 

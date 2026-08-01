@@ -38,6 +38,7 @@ import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import { deriveServerPaths, ServerConfig } from "../../../../../apps/server/src/config.ts";
 import { TextGenerationError } from "@t3tools/contracts";
 import { ProviderAdapterRequestError } from "../../../../../apps/server/src/provider/Errors.ts";
+import { observeHiddenTurnRuntimeEvent } from "../../../../../apps/server/src/provider/HiddenTurnRegistry.ts";
 import { OrchestrationEventStoreLive } from "../../../../../apps/server/src/persistence/Layers/OrchestrationEventStore.ts";
 import { OrchestrationCommandReceiptRepositoryLive } from "../../../../../apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts";
 import { SqlitePersistenceMemory } from "../../../../../apps/server/src/persistence/Layers/Sqlite.ts";
@@ -59,14 +60,20 @@ import {
   providerErrorLabelFromInstanceHint,
   ProviderCommandReactorLive,
 } from "../../../../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts";
+import { ProviderRuntimeIngestionLive } from "../../../../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts";
 import { OrchestrationEngineService } from "../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts";
 import { ProviderCommandReactor } from "../../../../../apps/server/src/orchestration/Services/ProviderCommandReactor.ts";
+import { ProviderRuntimeIngestionService } from "../../../../../apps/server/src/orchestration/Services/ProviderRuntimeIngestion.ts";
 import { ProjectionSnapshotQuery } from "../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as Clock from "effect/Clock";
 import { ServerSettingsService } from "../../../../../apps/server/src/serverSettings.ts";
 import { VcsStatusBroadcaster } from "../../../../../apps/server/src/vcs/VcsStatusBroadcaster.ts";
 import * as GitWorkflowService from "../../../../../apps/server/src/git/GitWorkflowService.ts";
+
+// the harness factory runs before the harness object exists, so its own
+// setup routes through this single runner
+const runTest = <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect);
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value);
 const asApprovalRequestId = (value: string): ApprovalRequestId => ApprovalRequestId.make(value);
@@ -97,7 +104,10 @@ async function waitFor(
 
 describe("ProviderCommandReactor", () => {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderCommandReactor | ProjectionSnapshotQuery,
+    | OrchestrationEngineService
+    | ProviderCommandReactor
+    | ProviderRuntimeIngestionService
+    | ProjectionSnapshotQuery,
     unknown
   > | null = null;
   let scope: Scope.Closeable | null = null;
@@ -154,6 +164,7 @@ describe("ProviderCommandReactor", () => {
     readonly instanceDriverKind?: ProviderDriverKind;
     readonly sessionModelSwitch?: "unsupported" | "in-session";
     readonly requiresNewThreadForModelChange?: boolean;
+    readonly withRuntimeIngestion?: boolean;
     readonly startSessionEffect?: (
       session: ProviderSession,
     ) => Effect.Effect<ProviderSession, ProviderAdapterRequestError>;
@@ -166,6 +177,7 @@ describe("ProviderCommandReactor", () => {
     createdStateDirs.add(stateDir);
     const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>());
     let nextSessionIndex = 1;
+    let nextTurnIndex = 1;
     const runtimeSessions: Array<ProviderSession> = [];
     const modelSelection = input?.threadModelSelection ?? {
       instanceId: ProviderInstanceId.make("codex"),
@@ -236,7 +248,7 @@ describe("ProviderCommandReactor", () => {
     const sendTurn = vi.fn((_: unknown, _routingAuthority?: unknown) =>
       Effect.succeed({
         threadId: ThreadId.make("thread-1"),
-        turnId: asTurnId("turn-1"),
+        turnId: asTurnId(`turn-${nextTurnIndex++}`),
       }),
     );
     const interruptTurn = vi.fn((_: unknown) => Effect.void);
@@ -305,6 +317,7 @@ describe("ProviderCommandReactor", () => {
     const providerSnapshots = [
       {
         instanceId: modelSelection.instanceId,
+        models: modelSelection.model ? [{ slug: modelSelection.model }] : [],
         ...(input?.requiresNewThreadForModelChange === true
           ? { requiresNewThreadForModelChange: true }
           : {}),
@@ -350,6 +363,13 @@ describe("ProviderCommandReactor", () => {
         return Stream.fromPubSub(runtimeEventPubSub);
       },
     };
+    const emitRuntimeEvent = (event: ProviderRuntimeEvent) =>
+      Effect.runPromise(
+        observeHiddenTurnRuntimeEvent(event).pipe(
+          Effect.andThen(PubSub.publish(runtimeEventPubSub, event)),
+          Effect.asVoid,
+        ),
+      );
 
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
@@ -363,9 +383,10 @@ describe("ProviderCommandReactor", () => {
       Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provide(SqlitePersistenceMemory),
     );
-    const layer = ProviderCommandReactorLive.pipe(
+    const layer = Layer.merge(ProviderCommandReactorLive, ProviderRuntimeIngestionLive).pipe(
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
       Layer.provideMerge(
@@ -397,11 +418,17 @@ describe("ProviderCommandReactor", () => {
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService));
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery));
     const reactor = await runtime.runPromise(Effect.service(ProviderCommandReactor));
-    scope = await Effect.runPromise(Scope.make("sequential"));
-    await Effect.runPromise(reactor.start().pipe(Scope.provide(scope)));
-    const drain = () => Effect.runPromise(reactor.drain);
+    const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService));
+    scope = await runTest(Scope.make("sequential"));
+    await runTest(reactor.start().pipe(Scope.provide(scope)));
+    if (input?.withRuntimeIngestion === true) {
+      await runTest(ingestion.start().pipe(Scope.provide(scope)));
+      await runtime.runPromise(Effect.yieldNow);
+    }
+    const drain = () => runTest(reactor.drain);
+    const drainIngestion = () => runTest(ingestion.drain);
 
-    await Effect.runPromise(
+    await runTest(
       engine.dispatch({
         type: "project.create",
         commandId: CommandId.make("cmd-project-create"),
@@ -412,7 +439,7 @@ describe("ProviderCommandReactor", () => {
         createdAt: now,
       }),
     );
-    await Effect.runPromise(
+    await runTest(
       engine.dispatch({
         type: "thread.create",
         commandId: CommandId.make("cmd-thread-create"),
@@ -431,10 +458,10 @@ describe("ProviderCommandReactor", () => {
 
     return {
       engine,
-      readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
+      readModel: () => runTest(snapshotQuery.getSnapshot()),
       // one place that manually runs the test runtime; keeps the per-test
       // call sites free of Effect.runPromise
-      run: <A, E>(effect: Effect.Effect<A, E>) => Effect.runPromise(effect),
+      run: runTest,
       startSession,
       sendTurn,
       interruptTurn,
@@ -446,8 +473,10 @@ describe("ProviderCommandReactor", () => {
       generateBranchName,
       generateThreadTitle,
       runtimeSessions,
+      emitRuntimeEvent,
       stateDir,
       drain,
+      drainIngestion,
     };
   }
 
@@ -518,6 +547,254 @@ describe("ProviderCommandReactor", () => {
     expect(readModel.threads[0]?.pendingHandoff ?? null).toBeNull();
     expect(harness.sendTurn).not.toHaveBeenCalled();
     expect(harness.stopSession).not.toHaveBeenCalled();
+  });
+
+  it("uses the completed switch model when a runtime mode change reopens the session", async () => {
+    const harness = await createHarness();
+    const threadId = ThreadId.make("thread-1");
+    const initialModelSelection = {
+      instanceId: ProviderInstanceId.make("codex"),
+      model: "gpt-5-codex",
+    };
+    const targetModelSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "sonnet",
+    };
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-turn-start-before-provider-switch-cache"),
+        threadId,
+        message: {
+          messageId: asMessageId("user-message-before-provider-switch-cache"),
+          role: "user",
+          text: "seed the current model cache",
+          attachments: [],
+        },
+        modelSelection: initialModelSelection,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.run(harness.stopSession({ threadId }));
+    await harness.run(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-stop-before-provider-switch-cache"),
+        threadId,
+        session: {
+          threadId,
+          status: "stopped",
+          providerName: "codex",
+          providerInstanceId: initialModelSelection.instanceId,
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:01.000Z",
+        },
+        createdAt: "2026-01-01T00:00:01.000Z",
+      }),
+    );
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: "thread.provider.switch",
+        commandId: CommandId.make("cmd-provider-switch-cache"),
+        threadId,
+        targetModelSelection,
+        expectedCurrentInstanceId: initialModelSelection.instanceId,
+      }),
+    );
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return readModel.threads[0]?.modelSelection.instanceId === targetModelSelection.instanceId;
+    });
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: "thread.session.set",
+        commandId: CommandId.make("cmd-session-ready-after-provider-switch-cache"),
+        threadId,
+        session: {
+          threadId,
+          status: "ready",
+          providerName: "claudeAgent",
+          providerInstanceId: targetModelSelection.instanceId,
+          runtimeMode: "approval-required",
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: "2026-01-01T00:00:02.000Z",
+        },
+        createdAt: "2026-01-01T00:00:02.000Z",
+      }),
+    );
+    await harness.run(
+      harness.engine.dispatch({
+        type: "thread.runtime-mode.set",
+        commandId: CommandId.make("cmd-runtime-mode-after-provider-switch-cache"),
+        threadId,
+        runtimeMode: "full-access",
+        createdAt: "2026-01-01T00:00:03.000Z",
+      }),
+    );
+
+    await waitFor(() => harness.startSession.mock.calls.length === 2);
+    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
+      providerInstanceId: targetModelSelection.instanceId,
+      modelSelection: targetModelSelection,
+    });
+  });
+
+  it("closes an aborted hidden turn lifecycle so a provider switch can be retried", async () => {
+    const harness = await createHarness({ withRuntimeIngestion: true });
+    const threadId = ThreadId.make("thread-1");
+    const provider = ProviderDriverKind.make("codex");
+    const providerInstanceId = ProviderInstanceId.make("codex");
+    const targetModelSelection = {
+      instanceId: ProviderInstanceId.make("claudeAgent"),
+      model: "sonnet",
+    };
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: "thread.turn.start",
+        commandId: CommandId.make("cmd-visible-turn-before-aborted-switch"),
+        threadId,
+        message: {
+          messageId: asMessageId("user-message-before-aborted-switch"),
+          role: "user",
+          text: "establish provider context",
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: "approval-required",
+        createdAt: "2026-01-01T00:00:00.000Z",
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1);
+    await harness.emitRuntimeEvent({
+      type: "turn.started",
+      eventId: EventId.make("evt-visible-turn-started-before-aborted-switch"),
+      provider,
+      providerInstanceId,
+      threadId,
+      turnId: asTurnId("turn-1"),
+      createdAt: "2026-01-01T00:00:01.000Z",
+      payload: {},
+    });
+    await harness.emitRuntimeEvent({
+      type: "turn.completed",
+      eventId: EventId.make("evt-visible-turn-completed-before-aborted-switch"),
+      provider,
+      providerInstanceId,
+      threadId,
+      turnId: asTurnId("turn-1"),
+      createdAt: "2026-01-01T00:00:02.000Z",
+      payload: { state: "completed" },
+    });
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return readModel.threads[0]?.session?.status === "ready";
+    });
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: "thread.provider.switch",
+        commandId: CommandId.make("cmd-provider-switch-before-hidden-abort"),
+        threadId,
+        targetModelSelection,
+        expectedCurrentInstanceId: providerInstanceId,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 2);
+    await harness.emitRuntimeEvent({
+      type: "turn.started",
+      eventId: EventId.make("evt-hidden-turn-started-before-abort"),
+      provider,
+      providerInstanceId,
+      threadId,
+      turnId: asTurnId("turn-2"),
+      createdAt: "2026-01-01T00:00:03.000Z",
+      payload: {},
+    });
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      const session = readModel.threads[0]?.session;
+      return session?.status === "running" && session.activeTurnId === null;
+    });
+    await harness.emitRuntimeEvent({
+      type: "turn.aborted",
+      eventId: EventId.make("evt-hidden-turn-aborted"),
+      provider,
+      providerInstanceId,
+      threadId,
+      turnId: asTurnId("turn-2"),
+      createdAt: "2026-01-01T00:00:04.000Z",
+      payload: { reason: "provider rejected compaction" },
+    });
+    await harness.drainIngestion();
+    await harness.drain();
+
+    const afterAbort = (await harness.readModel()).threads[0];
+    expect(afterAbort?.session?.status).toBe("ready");
+    expect(afterAbort?.session?.activeTurnId).toBeNull();
+    expect(afterAbort?.modelSelection.instanceId).toBe(providerInstanceId);
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: "thread.provider.switch",
+        commandId: CommandId.make("cmd-provider-switch-after-hidden-abort"),
+        threadId,
+        targetModelSelection,
+        expectedCurrentInstanceId: providerInstanceId,
+      }),
+    );
+    await waitFor(() => harness.sendTurn.mock.calls.length === 3);
+    await harness.emitRuntimeEvent({
+      type: "turn.started",
+      eventId: EventId.make("evt-hidden-turn-started-after-retry"),
+      provider,
+      providerInstanceId,
+      threadId,
+      turnId: asTurnId("turn-3"),
+      createdAt: "2026-01-01T00:00:05.000Z",
+      payload: {},
+    });
+    await harness.emitRuntimeEvent({
+      type: "content.delta",
+      eventId: EventId.make("evt-hidden-turn-delta-after-retry"),
+      provider,
+      providerInstanceId,
+      threadId,
+      turnId: asTurnId("turn-3"),
+      createdAt: "2026-01-01T00:00:06.000Z",
+      payload: {
+        streamKind: "assistant_text",
+        delta: "Compacted provider handoff.",
+      },
+    });
+    await harness.emitRuntimeEvent({
+      type: "turn.completed",
+      eventId: EventId.make("evt-hidden-turn-completed-after-retry"),
+      provider,
+      providerInstanceId,
+      threadId,
+      turnId: asTurnId("turn-3"),
+      createdAt: "2026-01-01T00:00:07.000Z",
+      payload: { state: "completed" },
+    });
+    await harness.drainIngestion();
+    await harness.drain();
+    await waitFor(async () => {
+      const readModel = await harness.readModel();
+      return readModel.threads[0]?.modelSelection.instanceId === targetModelSelection.instanceId;
+    });
+
+    expect(harness.sendTurn).toHaveBeenCalledTimes(3);
+    expect((await harness.readModel()).threads[0]?.modelSelection).toEqual(targetModelSelection);
   });
 
   it("injects a pending handoff into provider input without changing the projected message", async () => {

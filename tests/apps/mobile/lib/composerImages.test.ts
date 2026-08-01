@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/composerImages.test.ts
+// verifies composer image wire conversion and native paste cleanup
+
 import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
 import { PROVIDER_SEND_TURN_MAX_ATTACHMENTS } from "@t3tools/contracts";
 
@@ -120,5 +123,24 @@ describe("native pasted image cleanup", () => {
     expect(files.get(rejected)?.deleted).toBe(true);
     expect(files.get(overflow)?.deleted).toBe(true);
     expect(files.get(userOwned)?.deleted).toBe(false);
+  });
+
+  it("releases failed slots and derives MIME type from pasted image data", async () => {
+    const unreadable = "content://clipboard/unreadable";
+    const jpeg = "content://clipboard/image-without-extension";
+    files.set(jpeg, { base64: "/9j/AA==", deleted: false });
+
+    const attachments = await convertPastedImagesToAttachments({
+      uris: [unreadable, jpeg],
+      existingCount: PROVIDER_SEND_TURN_MAX_ATTACHMENTS - 1,
+    });
+
+    expect(attachments).toEqual([
+      expect.objectContaining({
+        name: "pasted-image.jpeg",
+        mimeType: "image/jpeg",
+        dataUrl: "data:image/jpeg;base64,/9j/AA==",
+      }),
+    ]);
   });
 });

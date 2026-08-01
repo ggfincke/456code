@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-selected-thread-git-actions.ts
+// coordinates source control actions for the selected mobile thread
+
 import { useCallback, useEffect, useMemo } from "react";
 
 import { EnvironmentProject, EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
@@ -31,6 +34,7 @@ export function useSelectedThreadGitActions() {
     reportFailure: false,
   });
   const refreshStatus = useAtomCommand(vcsEnvironment.refreshStatus, { reportFailure: false });
+  const refreshRefs = useAtomCommand(vcsEnvironment.refreshRefs, { reportFailure: false });
   const switchRef = useAtomCommand(vcsEnvironment.switchRef, { reportFailure: false });
   const createRef = useAtomCommand(vcsEnvironment.createRef, { reportFailure: false });
   const createWorktree = useAtomCommand(vcsEnvironment.createWorktree, { reportFailure: false });
@@ -165,11 +169,25 @@ export function useSelectedThreadGitActions() {
   );
 
   const refreshSelectedThreadBranches = useCallback(async (): Promise<ReadonlyArray<VcsRef>> => {
+    if (branchTarget.environmentId === null || branchTarget.cwd === null) {
+      return [];
+    }
+    const result = await refreshRefs({
+      environmentId: branchTarget.environmentId,
+      input: { cwd: branchTarget.cwd, refresh: true, limit: 100 },
+    });
+    if (AsyncResult.isFailure(result)) {
+      const error = Cause.squash(result.cause);
+      const message = error instanceof Error ? error.message : "Failed to refresh branches.";
+      setPendingConnectionError(message);
+      return [];
+    }
     branchState.refresh();
-    return dedupeRemoteBranchesWithLocalMatches(branchState.data?.refs ?? []).filter(
+    setPendingConnectionError(null);
+    return dedupeRemoteBranchesWithLocalMatches(result.value.refs).filter(
       (branch) => !branch.isRemote,
     );
-  }, [branchState]);
+  }, [branchState, branchTarget, refreshRefs]);
 
   const syncSelectedThreadBranchState = useCallback(
     async (input: {
@@ -228,7 +246,7 @@ export function useSelectedThreadGitActions() {
 
   const onCreateSelectedThreadBranch = useCallback(
     async (branch: string) => {
-      await runSelectedThreadGitMutation(
+      return await runSelectedThreadGitMutation(
         "create_ref",
         "Creating branch",
         async ({ thread, cwd }) => {

@@ -1,3 +1,5 @@
+// apps/desktop/src/app/DesktopLifecycle.ts
+// coordinates Electron quit, shutdown, and relaunch transitions
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -147,6 +149,12 @@ export const make = DesktopLifecycle.of({
     const state = yield* DesktopState.DesktopState;
     yield* logLifecycleInfo("desktop relaunch requested", { reason });
     yield* Effect.gen(function* () {
+      if (!environment.isDevelopment) {
+        yield* electronApp.relaunch({
+          execPath: process.execPath,
+          args: process.argv.slice(1),
+        });
+      }
       yield* Effect.yieldNow;
       yield* Ref.set(state.quitting, true);
       yield* requestDesktopShutdownAndWait();
@@ -154,10 +162,6 @@ export const make = DesktopLifecycle.of({
         yield* electronApp.exit(75);
         return;
       }
-      yield* electronApp.relaunch({
-        execPath: process.execPath,
-        args: process.argv.slice(1),
-      });
       yield* electronApp.exit(0);
     }).pipe(
       Effect.catchCause((cause) => {

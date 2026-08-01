@@ -9,7 +9,7 @@ import type {
 } from "@t3tools/contracts";
 import * as Option from "effect/Option";
 import { ChevronDownIcon, ExternalLinkIcon, XIcon } from "lucide-react";
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useMemo, useState, useSyncExternalStore } from "react";
 
 import { cn } from "../../lib/utils";
 import type { AppModelOption } from "../../modelSelection";
@@ -24,8 +24,12 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { ModelPickerContent } from "./ModelPickerContent";
 import {
+  createOrchestratePlanCardStateKey,
   hashOrchestratePlanText,
   isOrchestratePlanCardSuperseded,
+  isOrchestratePlanRevisionStarted,
+  markOrchestratePlanRevisionStarted,
+  type OrchestratePlanEmissionOrder,
   type OrchestrateStageSelection,
   readOrchestratePlanCardState,
   registerOrchestratePlanCard,
@@ -56,6 +60,7 @@ export interface OrchestratePlan {
   totalWorkers: number;
   maxWorkers: number;
   runId?: string;
+  validationError: string | null;
 }
 
 /**
@@ -115,9 +120,8 @@ function parseStage(value: unknown): OrchestratePlanStage | null {
   };
 }
 
-// one table row per stage; row state keys on rowKey so a plan that repeats a
-// stage id still gets independent pickers, while the grammar keeps emitting
-// the stage's own id
+// positional row keys keep malformed duplicate stages independently readable
+// while their parse error blocks every approval path
 interface PlanRow {
   rowKey: string;
   stage: OrchestratePlanStage;
@@ -174,6 +178,12 @@ export function parseOrchestratePlan(value: string): OrchestratePlan | null {
     const stages = parsed.stages.map(parseStage);
     if (stages.length === 0 || stages.some((stage) => stage === null)) return null;
     const validStages = stages as OrchestratePlanStage[];
+    const stageIds = new Set<string>();
+    const duplicateStageId = validStages.find((stage) => {
+      if (stageIds.has(stage.id)) return true;
+      stageIds.add(stage.id);
+      return false;
+    })?.id;
 
     const workerSum = validStages.reduce((sum, stage) => sum + stage.workers, 0);
     const totalWorkers = isNonNegativeInteger(parsed.totalWorkers)
@@ -188,14 +198,17 @@ export function parseOrchestratePlan(value: string): OrchestratePlan | null {
       totalWorkers,
       maxWorkers,
       ...(typeof parsed.runId === "string" && parsed.runId !== "" ? { runId: parsed.runId } : {}),
+      validationError:
+        duplicateStageId === undefined
+          ? null
+          : `Duplicate stage ID "${duplicateStageId}". Stage IDs must be unique before approval.`,
     };
   } catch {
     return null;
   }
 }
 
-// canonical text for one rendered plan -> identity for supersession and for
-// draft state when the plan carries no run id
+// canonical text distinguishes content revisions within one streamed message
 function planContentText(plan: OrchestratePlan): string {
   return JSON.stringify([
     plan.workflow,
@@ -229,13 +242,18 @@ function initialSelection(
   return { provider: stage.provider, model: stage.model, instanceId: entry?.instanceId ?? null };
 }
 
-function buildReply(
+export function buildOrchestrateApprovalReply(
   plan: OrchestratePlan,
-  rows: ReadonlyArray<PlanRow>,
-  selections: Readonly<Record<string, OrchestrateStageSelection>>,
-  efforts: Readonly<Record<string, string>>,
-  maxWorkers: number,
+  options: {
+    readonly selections?: Readonly<Record<string, OrchestrateStageSelection>>;
+    readonly efforts?: Readonly<Record<string, string>>;
+    readonly maxWorkers?: number;
+  } = {},
 ): string {
+  const rows = buildPlanRows(plan.stages);
+  const selections = options.selections ?? {};
+  const efforts = options.efforts ?? {};
+  const maxWorkers = options.maxWorkers ?? plan.maxWorkers;
   const tokens: string[] = [];
   // name the plan the approval belongs to so a thread with several plans
   // correlates each approval to its own run
@@ -273,6 +291,46 @@ function buildReply(
     tokens.push(`max-workers=${maxWorkers}`);
   }
   return tokens.length === 0 ? "approve" : `approve ${tokens.join(" ")}`;
+}
+
+interface OrchestratePlanTimelineIdentity {
+  readonly revisionKey: string;
+  readonly order: OrchestratePlanEmissionOrder;
+}
+
+function resolvePlanTimelineIdentity(
+  element: HTMLElement,
+  contentKey: string,
+): OrchestratePlanTimelineIdentity | null {
+  const messageElement = element.closest<HTMLElement>("[data-message-id]");
+  const listItem = element.closest<HTMLElement>("[data-index]");
+  const messageIndexText = listItem?.dataset.index;
+  if (
+    messageElement === null ||
+    messageIndexText === undefined ||
+    !/^\d+$/.test(messageIndexText)
+  ) {
+    return null;
+  }
+
+  const messageId = messageElement.dataset.messageId;
+  const messageIndex = Number(messageIndexText);
+  const planIndex = [
+    ...messageElement.querySelectorAll<HTMLElement>("[data-orchestrate-plan]"),
+  ].indexOf(element);
+  if (
+    messageId === undefined ||
+    messageId === "" ||
+    !Number.isSafeInteger(messageIndex) ||
+    planIndex < 0
+  ) {
+    return null;
+  }
+
+  return {
+    revisionKey: `${messageId}:${planIndex}:${contentKey}`,
+    order: { messageIndex, planIndex },
+  };
 }
 
 const TERMINAL_STATUSES: ReadonlySet<WorkersJobStatus> = new Set([
@@ -714,20 +772,42 @@ export function OrchestratePlanCard({
   const rows = useMemo(() => buildPlanRows(plan.stages), [plan.stages]);
   const contentKey = useMemo(() => hashOrchestratePlanText(planContentText(plan)), [plan]);
   const runId = plan.runId ?? null;
-  // drafts follow the run when there is one so a re-rendered plan keeps its
-  // edits; plans without a run fall back to their own content
-  const draftKey = runId ?? `plan:${contentKey}`;
+  const [timelineIdentity, setTimelineIdentity] = useState<OrchestratePlanTimelineIdentity | null>(
+    null,
+  );
+  const revisionKey = timelineIdentity?.revisionKey ?? `content:${contentKey}`;
+  const draftKey = createOrchestratePlanCardStateKey(runId, revisionKey);
+
+  const registerCardElement = useCallback(
+    (element: HTMLElement | null) => {
+      if (element === null) return;
+      const identity = resolvePlanTimelineIdentity(element, contentKey);
+      if (identity === null) return;
+      setTimelineIdentity((current) =>
+        current?.revisionKey === identity.revisionKey &&
+        current.order.messageIndex === identity.order.messageIndex &&
+        current.order.planIndex === identity.order.planIndex
+          ? current
+          : identity,
+      );
+      if (runId !== null) {
+        registerOrchestratePlanCard(runId, identity.revisionKey, identity.order);
+      }
+    },
+    [contentKey, runId],
+  );
 
   const cardState = useSyncExternalStore(subscribeOrchestratePlanStore, () =>
     readOrchestratePlanCardState(draftKey),
   );
   const superseded = useSyncExternalStore(subscribeOrchestratePlanStore, () =>
-    runId === null ? false : isOrchestratePlanCardSuperseded(runId, contentKey),
+    runId === null
+      ? false
+      : isOrchestratePlanCardSuperseded(runId, revisionKey, timelineIdentity?.order),
   );
-  useEffect(() => {
-    if (runId === null) return;
-    registerOrchestratePlanCard(runId, contentKey);
-  }, [contentKey, runId]);
+  const startedRevision = useSyncExternalStore(subscribeOrchestratePlanStore, () =>
+    runId === null ? false : isOrchestratePlanRevisionStarted(runId, revisionKey),
+  );
 
   const [openRowKey, setOpenRowKey] = useState<string | null>(null);
   const maxWorkers = cardState.maxWorkers ?? plan.maxWorkers;
@@ -757,6 +837,7 @@ export function OrchestratePlanCard({
     rows.reduce((sum, row) => sum + row.stage.workers, 0),
   );
   const runStarted = runJobs.length > 0;
+  const revisionStarted = runStarted && startedRevision;
   const runActive = runJobs.some((job) => !TERMINAL_STATUSES.has(job.status));
   const finishedCount = runJobs.filter((job) => TERMINAL_STATUSES.has(job.status)).length;
   const failedCount = runJobs.filter(
@@ -765,11 +846,20 @@ export function OrchestratePlanCard({
   const notLaunchedCount = Math.max(0, plannedTotal - runJobs.length);
   // a run with workers still to launch is not finished, however quiet the
   // broker's job list looks right now
-  const runFinished = runStarted && notLaunchedCount === 0 && !runActive;
+  const runFinished = revisionStarted && notLaunchedCount === 0 && !runActive;
 
-  const disabled = superseded || status === "sending" || status === "sent" || runStarted;
+  const disabled =
+    superseded ||
+    plan.validationError !== null ||
+    status === "sending" ||
+    status === "sent" ||
+    revisionStarted;
   const maxWorkersValid = Number.isSafeInteger(maxWorkers) && maxWorkers >= 1;
-  const reply = buildReply(plan, rows, cardState.selections, cardState.efforts, maxWorkers);
+  const reply = buildOrchestrateApprovalReply(plan, {
+    selections: cardState.selections,
+    efforts: cardState.efforts,
+    maxWorkers,
+  });
 
   const handleApprove = async () => {
     setOrchestratePlanCardStatus(draftKey, "sending");
@@ -781,6 +871,9 @@ export function OrchestratePlanCard({
     } catch (error) {
       failure = error instanceof Error ? error.message : "The approval could not be sent.";
     } finally {
+      if (didSend && runId !== null) {
+        markOrchestratePlanRevisionStarted(runId, revisionKey);
+      }
       // sending always clears, so a failed send leaves the card usable
       setOrchestratePlanCardStatus(draftKey, didSend ? "sent" : "idle", failure);
     }
@@ -800,6 +893,7 @@ export function OrchestratePlanCard({
 
   return (
     <section
+      ref={registerCardElement}
       data-orchestrate-plan="true"
       data-orchestrate-plan-superseded={superseded ? "true" : "false"}
       // break out halfway between the prose measure (100%) and the timeline
@@ -833,7 +927,7 @@ export function OrchestratePlanCard({
                 "Effort",
                 "Access",
                 "Workers",
-                ...(runStarted ? ["Status"] : []),
+                ...(revisionStarted ? ["Status"] : []),
               ].map((label) => (
                 // w-px floors each control column at its natural nowrap width so
                 // the unsized trailing column absorbs all slack without inflating
@@ -855,7 +949,7 @@ export function OrchestratePlanCard({
                   key={`phase-${group.phase ?? groupIndex}`}
                   className="border-b border-border/70"
                 >
-                  <td colSpan={runStarted ? 7 : 6} className="bg-muted/25 px-3 py-2">
+                  <td colSpan={revisionStarted ? 7 : 6} className="bg-muted/25 px-3 py-2">
                     <span className="flex items-center gap-2">
                       <span className="h-3.5 w-1 shrink-0 rounded-full bg-blue-400/70" />
                       <span className="font-semibold text-[11px] text-foreground uppercase tracking-wider">
@@ -874,8 +968,8 @@ export function OrchestratePlanCard({
               ...group.rows.map(({ rowKey, stage, occurrence }) => {
                 const selection =
                   cardState.selections[rowKey] ?? initialSelection(stage, actions.instanceEntries);
-                // duplicate ids are tolerated: rows stay independent and the
-                // label says which wave this row is
+                // invalid duplicate rows remain distinguishable while the
+                // parser's validation error blocks approval
                 const rowLabel = occurrence === null ? stage.id : `${stage.id} #${occurrence}`;
                 // resolve the model this row actually displays so the effort menu
                 // reads that model's reasoning tiers, defaults included
@@ -955,7 +1049,7 @@ export function OrchestratePlanCard({
                       </span>
                     </td>
                     <td className="px-2 py-2 tabular-nums">{stage.workers}</td>
-                    {runStarted ? (
+                    {revisionStarted ? (
                       <td className="whitespace-nowrap px-2 py-2">
                         <StageStatusCell
                           jobs={jobsByRow.get(rowKey) ?? []}
@@ -970,7 +1064,7 @@ export function OrchestratePlanCard({
                       key={`${rowKey}-scope`}
                       className="border-b border-border/70 last:border-b-0"
                     >
-                      <td colSpan={runStarted ? 7 : 6} className="px-2 pt-0 pb-2.5">
+                      <td colSpan={revisionStarted ? 7 : 6} className="px-2 pt-0 pb-2.5">
                         <StageScopeLines scope={stage.scope} />
                       </td>
                     </tr>
@@ -1002,7 +1096,7 @@ export function OrchestratePlanCard({
           </label>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {runStarted ? (
+          {revisionStarted ? (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {runFinished ? null : (
                 <span
@@ -1029,9 +1123,9 @@ export function OrchestratePlanCard({
             </span>
           ) : (
             <>
-              {cardState.error === null ? null : (
-                <span role="status" className="text-red-600 text-xs dark:text-red-400">
-                  {cardState.error}
+              {plan.validationError === null && cardState.error === null ? null : (
+                <span role="alert" className="text-red-600 text-xs dark:text-red-400">
+                  {plan.validationError ?? cardState.error}
                 </span>
               )}
               {status === "editing" ? (

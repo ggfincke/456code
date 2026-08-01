@@ -1,3 +1,6 @@
+// packages/effect-codex-app-server/src/protocol.ts
+// routes newline-delimited Codex app-server messages over stdio
+
 import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
@@ -152,6 +155,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
   function* (
     options: CodexAppServerPatchedProtocolOptions,
   ): Effect.fn.Return<CodexAppServerPatchedProtocol, never, Scope.Scope> {
+    const scope = yield* Scope.Scope;
     const outgoing = yield* Queue.unbounded<string, Cause.Done<void>>();
     const incomingNotifications = yield* Queue.unbounded<CodexAppServerIncomingNotification>();
     const incomingRequests = yield* Queue.unbounded<CodexAppServerIncomingRequest>();
@@ -159,6 +163,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
     const nextRequestId = yield* Ref.make(1);
     const remainder = yield* Ref.make("");
     const terminationHandled = yield* Ref.make(false);
+    const terminationError = yield* Ref.make<CodexError.CodexAppServerError | undefined>(undefined);
 
     const logProtocol = (event: CodexAppServerProtocolLogEvent) => {
       if (event.direction === "incoming" && !options.logIncoming) {
@@ -191,6 +196,7 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
         return [
           Effect.gen(function* () {
             const error = yield* classify();
+            yield* Ref.set(terminationError, error);
             yield* failAllPending(error);
             yield* Queue.end(outgoing);
             if (options.onTermination) {
@@ -270,26 +276,23 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
     };
 
     const handleRequest = (request: CodexAppServerIncomingRequest) =>
-      Queue.offer(incomingRequests, request).pipe(
-        Effect.andThen(
-          options.onRequest
-            ? options.onRequest(request).pipe(
-                Effect.matchEffect({
-                  onFailure: (error) =>
-                    respondError(
-                      request.id,
-                      CodexError.CodexAppServerRequestError.fromAppServerError(
-                        error,
-                        request.method,
-                      ),
-                    ),
-                  onSuccess: (result) => respond(request.id, result),
-                }),
-              )
-            : Effect.void,
-        ),
-        Effect.asVoid,
-      );
+      Effect.gen(function* () {
+        yield* Queue.offer(incomingRequests, request);
+        if (!options.onRequest) {
+          return;
+        }
+        yield* options.onRequest(request).pipe(
+          Effect.matchEffect({
+            onFailure: (error) =>
+              respondError(
+                request.id,
+                CodexError.CodexAppServerRequestError.fromAppServerError(error, request.method),
+              ),
+            onSuccess: (result) => respond(request.id, result),
+          }),
+          Effect.forkIn(scope),
+        );
+      });
 
     const handleNotification = (notification: CodexAppServerIncomingNotification) =>
       Queue.offer(incomingNotifications, notification).pipe(
@@ -387,6 +390,10 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
 
     const request = (method: string, payload?: unknown) =>
       Effect.gen(function* () {
+        const terminated = yield* Ref.get(terminationError);
+        if (terminated !== undefined) {
+          return yield* terminated;
+        }
         const requestId = yield* Ref.modify(
           nextRequestId,
           (current) => [current, current + 1] as const,
@@ -395,6 +402,11 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn("makeCodexAppServerPa
         yield* Ref.update(pending, (current) =>
           new Map(current).set(String(requestId), { deferred, method }),
         );
+        const terminatedAfterRegistration = yield* Ref.get(terminationError);
+        if (terminatedAfterRegistration !== undefined) {
+          yield* removePending(String(requestId));
+          return yield* terminatedAfterRegistration;
+        }
         yield* offerOutgoing({
           id: requestId,
           method,

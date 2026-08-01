@@ -43,6 +43,7 @@ const makeFailingSecretStoreLayer = (cause: ServerSecretStore.SecretStoreError) 
       set: () => Effect.void,
       create: () => Effect.void,
       getOrCreateRandom: () => Effect.succeed(new Uint8Array()),
+      listNames: () => Effect.succeed([]),
       remove: () => Effect.void,
     }),
   );

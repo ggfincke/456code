@@ -1,3 +1,5 @@
+// tests/apps/desktop/updates/DesktopUpdates.test.ts
+// verifies desktop update state transitions and install recovery
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import type { DesktopUpdateState } from "@t3tools/contracts";
@@ -30,6 +32,8 @@ interface UpdatesHarnessOptions {
   readonly setUpdateChannelError?: DesktopAppSettings.DesktopSettingsWriteError;
   readonly setDisableDifferentialDownload?: Effect.Effect<void>;
   readonly stopBackend?: Effect.Effect<void>;
+  readonly startBackend?: Effect.Effect<void>;
+  readonly quitAndInstall?: Effect.Effect<void, ElectronUpdater.ElectronUpdaterQuitAndInstallError>;
   readonly env?: Record<string, string | undefined>;
 }
 
@@ -39,6 +43,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   let checkCount = 0;
   let allowDowngrade = false;
   let fullChangelog = false;
+  let backendStartCount = 0;
   const feedUrls: ElectronUpdater.ElectronUpdaterFeedUrl[] = [];
   const listeners = new Map<string, Set<(...args: readonly unknown[]) => void>>();
   const sentStates: DesktopUpdateState[] = [];
@@ -83,7 +88,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
       checkCount += 1;
     }).pipe(Effect.andThen(options.checkForUpdates ?? Effect.void)),
     downloadUpdate: Effect.void,
-    quitAndInstall: () => Effect.void,
+    quitAndInstall: () => options.quitAndInstall ?? Effect.void,
     on: (eventName, listener) =>
       Effect.acquireRelease(
         Effect.sync(() => {
@@ -115,7 +120,9 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   const stubBackendInstance: DesktopBackendPool.DesktopBackendInstance = {
     id: DesktopBackendPool.PRIMARY_INSTANCE_ID,
     label: Effect.succeed("Windows"),
-    start: Effect.void,
+    start: Effect.sync(() => {
+      backendStartCount += 1;
+    }).pipe(Effect.andThen(options.startBackend ?? Effect.void)),
     stop: () => options.stopBackend ?? Effect.void,
     currentConfig: Effect.succeed(Option.none()),
     snapshot: Effect.succeed({
@@ -191,6 +198,7 @@ function makeHarness(options: UpdatesHarnessOptions = {}) {
   return {
     layer,
     checkCount: () => checkCount,
+    backendStartCount: () => backendStartCount,
     feedUrls: () => feedUrls,
     fullChangelog: () => fullChangelog,
     listenerCount: () =>
@@ -505,6 +513,36 @@ describe("DesktopUpdates", () => {
 
         const changedState = yield* updates.setChannel("nightly");
         assert.equal(changedState.channel, "nightly");
+      }),
+    ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
+  });
+
+  it.effect("restarts stopped backends after update installation fails", () => {
+    const installError = new ElectronUpdater.ElectronUpdaterQuitAndInstallError({
+      channel: "stable",
+      isSilent: true,
+      isForceRunAfter: true,
+      cause: new Error("installer rejected the update"),
+    });
+    const harness = makeHarness({
+      quitAndInstall: Effect.fail(installError),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const desktopState = yield* DesktopState.DesktopState;
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+        harness.emit("update-downloaded", { version: "1.2.4" });
+        yield* flushCallbacks;
+
+        const result = yield* updates.install;
+
+        assert.isTrue(result.accepted);
+        assert.isFalse(result.completed);
+        assert.equal(harness.backendStartCount(), 1);
+        assert.isFalse(yield* Ref.get(desktopState.quitting));
+        assert.equal((yield* updates.getState).errorContext, "install");
       }),
     ).pipe(Effect.provide(Layer.merge(TestClock.layer(), harness.layer)));
   });

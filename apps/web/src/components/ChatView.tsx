@@ -1485,12 +1485,13 @@ function ChatViewContent(props: ChatViewProps) {
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
   const activeThreadId = activeThread?.id ?? null;
+  const activeThreadEnvironmentId = activeThread?.environmentId ?? null;
   const runningTerminalIds = useThreadRunningTerminalIds({
-    environmentId: activeThread?.environmentId ?? null,
+    environmentId: activeThreadEnvironmentId,
     threadId: activeThreadId,
   });
   const activeThreadKnownSessionsRaw = useKnownTerminalSessions({
-    environmentId: activeThread?.environmentId ?? null,
+    environmentId: activeThreadEnvironmentId,
     threadId: activeThreadId,
   });
   const activeThreadKnownSessions = useMemo(() => {
@@ -1520,8 +1521,11 @@ function ChatViewContent(props: ChatViewProps) {
     return labels;
   }, [activeThreadKnownSessions]);
   const activeThreadRef = useMemo(
-    () => (activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null),
-    [activeThread],
+    () =>
+      activeThreadEnvironmentId !== null && activeThreadId !== null
+        ? scopeThreadRef(activeThreadEnvironmentId, activeThreadId)
+        : null,
+    [activeThreadEnvironmentId, activeThreadId],
   );
   const activeThreadKey = activeThreadRef ? scopedThreadKey(activeThreadRef) : null;
   const [timelineAnchor, setTimelineAnchor] = useState<{
@@ -4683,7 +4687,10 @@ function ChatViewContent(props: ChatViewProps) {
     ],
   );
 
-  const onSend = async (e?: { preventDefault: () => void }): Promise<boolean> => {
+  const runSend = async (
+    e?: { preventDefault: () => void },
+    options: { bypassPlanFollowUp?: boolean } = {},
+  ): Promise<boolean> => {
     e?.preventDefault();
     if (
       !activeThread ||
@@ -4741,7 +4748,8 @@ function ChatViewContent(props: ChatViewProps) {
         composerPreviewAnnotations.length +
         composerReviewComments.length,
     });
-    if (showPlanFollowUpPrompt && activeProposedPlan) {
+    if (!options.bypassPlanFollowUp && showPlanFollowUpPrompt && activeProposedPlan) {
+      const draftPromptForRetry = promptRef.current;
       const followUp = resolvePlanFollowUpSubmission({
         draftText: trimmed,
         planMarkdown: activeProposedPlan.planMarkdown,
@@ -4749,10 +4757,19 @@ function ChatViewContent(props: ChatViewProps) {
       promptRef.current = "";
       clearComposerDraftContent(composerDraftTarget);
       composerRef.current?.resetCursorState();
-      await onSubmitPlanFollowUp({
+      const sent = await onSubmitPlanFollowUp({
         text: followUp.text,
         interactionMode: followUp.interactionMode,
       });
+      if (!sent && promptRef.current.length === 0) {
+        promptRef.current = draftPromptForRetry;
+        setComposerDraftPrompt(composerDraftTarget, draftPromptForRetry);
+        composerRef.current?.resetCursorState({
+          cursor: collapseExpandedComposerCursor(draftPromptForRetry, draftPromptForRetry.length),
+          prompt: draftPromptForRetry,
+          detectTrigger: true,
+        });
+      }
       return false;
     }
     const standaloneSlashCommand =
@@ -5098,6 +5115,19 @@ function ChatViewContent(props: ChatViewProps) {
     }
     return turnStartSucceeded;
   };
+  const runSendRef = useRef(runSend);
+  runSendRef.current = runSend;
+  const dispatchSend = useCallback(
+    (
+      e?: { preventDefault: () => void },
+      options?: { bypassPlanFollowUp?: boolean },
+    ): Promise<boolean> => runSendRef.current(e, options),
+    [],
+  );
+  const onSend = useCallback(
+    (e?: { preventDefault: () => void }): Promise<boolean> => dispatchSend(e),
+    [dispatchSend],
+  );
 
   // the full catalog, same as the composer picker -> the user picks models;
   // mapping a model to a launchable harness is the orchestrator's job
@@ -5131,9 +5161,9 @@ function ChatViewContent(props: ChatViewProps) {
   const onApproveOrchestratePlan = useCallback(
     async (reply: string) => {
       onEditOrchestratePlanInChat(reply);
-      return onSend();
+      return dispatchSend(undefined, { bypassPlanFollowUp: true });
     },
-    [onEditOrchestratePlanInChat, onSend],
+    [dispatchSend, onEditOrchestratePlanInChat],
   );
 
   // the workers panel is the run surface; the card pins it to its own run
@@ -5349,7 +5379,7 @@ function ChatViewContent(props: ChatViewProps) {
     }: {
       text: string;
       interactionMode: "default" | "plan";
-    }) => {
+    }): Promise<boolean> => {
       if (
         !activeThread ||
         !isServerThread ||
@@ -5357,7 +5387,7 @@ function ChatViewContent(props: ChatViewProps) {
         isConnecting ||
         sendInFlightRef.current
       ) {
-        return;
+        return false;
       }
       if (
         handleImportContinuationSendBlock(
@@ -5365,17 +5395,17 @@ function ChatViewContent(props: ChatViewProps) {
           focusImportContinuationBanner,
         )
       ) {
-        return;
+        return false;
       }
 
       const trimmed = text.trim();
       if (!trimmed) {
-        return;
+        return false;
       }
 
       const sendCtx = composerRef.current?.getSendContext();
       if (!sendCtx?.providerAvailable) {
-        return;
+        return false;
       }
       const {
         selectedProvider: ctxSelectedProvider,
@@ -5487,7 +5517,7 @@ function ChatViewContent(props: ChatViewProps) {
           }
         }
         sendInFlightRef.current = false;
-        return;
+        return true;
       }
 
       setOptimisticUserMessages((existing) =>
@@ -5502,6 +5532,7 @@ function ChatViewContent(props: ChatViewProps) {
       }
       sendInFlightRef.current = false;
       resetLocalDispatch();
+      return false;
     },
     [
       activeThread,
@@ -5589,6 +5620,7 @@ function ChatViewContent(props: ChatViewProps) {
     });
     let failure: AtomCommandResult<unknown, unknown> | null =
       createResult._tag === "Failure" ? createResult : null;
+    let implementationPhase: "created" | "started" = "created";
 
     if (failure === null) {
       const startResult = await startThreadTurn({
@@ -5613,6 +5645,9 @@ function ChatViewContent(props: ChatViewProps) {
         },
       });
       failure = startResult._tag === "Failure" ? startResult : null;
+      if (failure === null) {
+        implementationPhase = "started";
+      }
     }
 
     if (failure === null) {
@@ -5638,28 +5673,35 @@ function ChatViewContent(props: ChatViewProps) {
     }
 
     if (failure !== null) {
-      const cleanupResult = await deleteThread({
-        environmentId,
-        input: {
-          threadId: nextThreadId,
-        },
-      });
-      if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
-        console.warn(
-          "Failed to clean up implementation thread after start failure.",
-          squashAtomCommandFailure(cleanupResult),
-        );
+      if (implementationPhase !== "started") {
+        const cleanupResult = await deleteThread({
+          environmentId,
+          input: {
+            threadId: nextThreadId,
+          },
+        });
+        if (cleanupResult._tag === "Failure" && !isAtomCommandInterrupted(cleanupResult)) {
+          console.warn(
+            "Failed to clean up implementation thread after start failure.",
+            squashAtomCommandFailure(cleanupResult),
+          );
+        }
       }
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
         toastManager.add(
           stackedThreadToast({
             type: "error",
-            title: "Could not start implementation thread",
+            title:
+              implementationPhase === "started"
+                ? "Implementation started, but navigation failed"
+                : "Could not start implementation thread",
             description:
               error instanceof Error
                 ? error.message
-                : "An error occurred while creating the new thread.",
+                : implementationPhase === "started"
+                  ? "Open the implementation thread from the sidebar."
+                  : "An error occurred while creating the new thread.",
           }),
         );
       }

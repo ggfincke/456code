@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/git/GitConfirmSheet.tsx
+// confirms default-branch actions and optional feature branch creation
+
 import { resolveDefaultBranchActionDialogCopy } from "@t3tools/client-runtime/state/vcs";
 import { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
 import * as Arr from "effect/Array";
@@ -88,7 +91,10 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
         branch.isRemote ? Result.failVoid : Result.succeed(branch.name),
       ),
     );
-    await gitActions.onCreateSelectedThreadBranch(newBranchName);
+    const createdBranch = await gitActions.onCreateSelectedThreadBranch(newBranchName);
+    if (createdBranch === null) {
+      return;
+    }
     await gitActions.onRunSelectedThreadGitAction({ action: confirmAction });
   }, [
     confirmAction,

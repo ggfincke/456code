@@ -59,7 +59,12 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
 }) {
   const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
   const activeQuestion = progress.activeQuestion;
-  const autoAdvanceTimerRef = useRef<number | null>(null);
+  const activeQuestionIdRef = useRef(activeQuestion?.id ?? null);
+  activeQuestionIdRef.current = activeQuestion?.id ?? null;
+  const autoAdvanceTimerRef = useRef<{
+    questionId: string;
+    timeoutId: number;
+  } | null>(null);
   const onAdvanceRef = useRef(onAdvance);
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
     questionId: string;
@@ -91,11 +96,21 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     progress.selectedOptionLabels,
   ]);
 
-  // Clear auto-advance timer on unmount
+  useEffect(() => {
+    const timer = autoAdvanceTimerRef.current;
+    if (timer && timer.questionId !== activeQuestion?.id) {
+      window.clearTimeout(timer.timeoutId);
+      autoAdvanceTimerRef.current = null;
+    }
+  }, [activeQuestion?.id]);
+
+  // clear the auto-advance timer on unmount
   useEffect(() => {
     return () => {
-      if (autoAdvanceTimerRef.current !== null) {
-        window.clearTimeout(autoAdvanceTimerRef.current);
+      const timer = autoAdvanceTimerRef.current;
+      if (timer) {
+        window.clearTimeout(timer.timeoutId);
+        autoAdvanceTimerRef.current = null;
       }
     };
   }, []);
@@ -107,13 +122,21 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     }
     setOptimisticSingleSelect({ questionId, optionLabel });
     onToggleOption(questionId, optionLabel);
-    if (autoAdvanceTimerRef.current !== null) {
-      window.clearTimeout(autoAdvanceTimerRef.current);
+    const armedTimer = autoAdvanceTimerRef.current;
+    if (armedTimer) {
+      window.clearTimeout(armedTimer.timeoutId);
     }
-    autoAdvanceTimerRef.current = window.setTimeout(() => {
+    const timeoutId = window.setTimeout(() => {
+      if (
+        autoAdvanceTimerRef.current?.questionId !== questionId ||
+        activeQuestionIdRef.current !== questionId
+      ) {
+        return;
+      }
       autoAdvanceTimerRef.current = null;
       onAdvanceRef.current();
     }, 200);
+    autoAdvanceTimerRef.current = { questionId, timeoutId };
   });
 
   // Keyboard shortcut: number keys 1-9 select corresponding options when focus is

@@ -1,6 +1,10 @@
+// tests/packages/ssh/tunnel.test.ts
+// verifies ssh remote scripts and managed tunnel lifecycles
+
 import { assert, describe, it } from "@effect/vitest";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import * as NetService from "@t3tools/shared/Net";
+import * as Deferred from "effect/Deferred";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -203,7 +207,15 @@ describe("ssh tunnel scripts", () => {
       buildRemoteLaunchScript(),
       "if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(port))",
     );
-    assert.include(buildRemoteLaunchScript(), 'PID_TO_STOP="${REMOTE_PID:-$DEFAULT_RUNTIME_PID}"');
+    assert.include(
+      buildRemoteLaunchScript(),
+      '[ "$REMOTE_MANAGED" = "managed" ] && [ -n "$REMOTE_PID" ] && [ "$REMOTE_PID" = "$DEFAULT_RUNTIME_PID" ]',
+    );
+    assert.include(buildRemoteLaunchScript(), 'REMOTE_PID="$DEFAULT_RUNTIME_PID"');
+    assert.notInclude(
+      buildRemoteLaunchScript(),
+      'PID_TO_STOP="${REMOTE_PID:-$DEFAULT_RUNTIME_PID}"',
+    );
     assert.include(buildRemoteLaunchScript(), 'REMOTE_PORT="$DEFAULT_REMOTE_PORT"');
     assert.include(buildRemoteLaunchScript(), 'rm -f "$PID_FILE"');
     assert.include(buildRemoteLaunchScript(), "printf 'external\\n' >\"$MANAGED_FILE\"");
@@ -355,7 +367,7 @@ describe("ssh tunnel scripts", () => {
           });
         }
         if (args.includes("sh") && args.includes("--")) {
-          return makeSuccessfulProcess('{"remotePort":3773}\n');
+          return makeSuccessfulProcess('{"remotePort":3773,"serverKind":"managed"}\n');
         }
         if (args.includes("sh")) {
           stopCommandCount += 1;
@@ -393,6 +405,127 @@ describe("ssh tunnel scripts", () => {
 
       assert.equal(spawnedCommands.filter((args) => args.includes("-N")).length, 2);
       assert.equal(tunnelKillCount, 1);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("keeps an alias-shared managed runtime until its final tunnel disconnects", () => {
+    let launchCount = 0;
+    let stopCommandCount = 0;
+    let tunnelKillCount = 0;
+    let nextLocalPort = 41_773;
+    const spawner = ChildProcessSpawner.make((command) =>
+      Effect.sync(() => {
+        const args = commandArgs(command);
+        if (args.includes("-G")) {
+          return makeSuccessfulProcess("hostname shared.example.com\nuser julius\nport 22\n");
+        }
+        if (args.includes("-N")) {
+          return makeRunningProcess(() => {
+            tunnelKillCount += 1;
+          });
+        }
+        if (args.includes("sh") && args.includes("--")) {
+          launchCount += 1;
+          return makeSuccessfulProcess(
+            launchCount === 1
+              ? '{"remotePort":3773,"serverKind":"managed"}\n'
+              : '{"remotePort":3773,"serverKind":"external"}\n',
+          );
+        }
+        if (args.includes("sh")) {
+          stopCommandCount += 1;
+          return makeSuccessfulProcess('{"stopped":true}\n');
+        }
+        return makeSuccessfulProcess("\n");
+      }),
+    );
+    const netService = NetService.NetService.of({
+      ...testNetService,
+      reserveLoopbackPort: () => Effect.sync(() => nextLocalPort++),
+    });
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService.NetService, netService),
+      SshPasswordPrompt.disabledLayer,
+      SshEnvironmentManager.layer(),
+    );
+    const firstAlias = {
+      alias: "devbox-a",
+      hostname: "devbox-a",
+      username: null,
+      port: null,
+    } as const;
+    const secondAlias = {
+      ...firstAlias,
+      alias: "devbox-b",
+      hostname: "devbox-b",
+    } as const;
+
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+      yield* manager.ensureEnvironment(firstAlias);
+      yield* manager.ensureEnvironment(secondAlias);
+
+      yield* manager.disconnectEnvironment(firstAlias);
+      assert.equal(stopCommandCount, 0);
+      assert.equal(tunnelKillCount, 1);
+
+      yield* manager.disconnectEnvironment(secondAlias);
+      assert.equal(stopCommandCount, 1);
+      assert.equal(tunnelKillCount, 2);
+    }).pipe(Effect.provide(layer), Effect.scoped);
+  });
+
+  it.effect("interrupts an in-flight tunnel creator before disconnect returns", () => {
+    let launchInterruptCount = 0;
+    let tunnelSpawnCount = 0;
+    const launchStarted = Deferred.makeUnsafe<void>();
+    const spawner = ChildProcessSpawner.make((command) => {
+      const args = commandArgs(command);
+      if (args.includes("-N")) {
+        tunnelSpawnCount += 1;
+        return Effect.succeed(makeRunningProcess(() => undefined));
+      }
+      if (args.includes("sh") && args.includes("--")) {
+        return Deferred.succeed(launchStarted, undefined).pipe(
+          Effect.andThen(Effect.never),
+          Effect.ensuring(
+            Effect.sync(() => {
+              launchInterruptCount += 1;
+            }),
+          ),
+        );
+      }
+      return Effect.succeed(makeSuccessfulProcess("\n"));
+    });
+    const layer = Layer.mergeAll(
+      NodeServices.layer,
+      Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Layer.succeed(HttpClient.HttpClient, testHttpClient),
+      Layer.succeed(NetService.NetService, testNetService),
+      SshPasswordPrompt.disabledLayer,
+      SshEnvironmentManager.layer(),
+    );
+    const target = {
+      alias: "devbox",
+      hostname: "devbox.example.com",
+      username: "julius",
+      port: 2222,
+    } as const;
+
+    return Effect.gen(function* () {
+      const manager = yield* SshEnvironmentManager;
+      const ensureFiber = yield* Effect.forkChild(Effect.result(manager.ensureEnvironment(target)));
+      yield* Deferred.await(launchStarted);
+
+      yield* manager.disconnectEnvironment(target);
+      const result = yield* Fiber.join(ensureFiber);
+
+      assert.isTrue(Result.isFailure(result));
+      assert.equal(launchInterruptCount, 1);
+      assert.equal(tunnelSpawnCount, 0);
     }).pipe(Effect.provide(layer), Effect.scoped);
   });
 });

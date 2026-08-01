@@ -89,6 +89,7 @@ const protocolMessageQueueCapacity = 256;
 export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(function* (
   options: AcpPatchedProtocolOptions,
 ): Effect.fn.Return<AcpPatchedProtocol, never, Scope.Scope> {
+  const scope = yield* Scope.Scope;
   const parser = parserFactory.makeUnsafe();
   const incomingDecoder = new TextDecoder("utf-8", { fatal: true });
   const incomingEncoder = new TextEncoder();
@@ -374,6 +375,7 @@ export const makeAcpPatchedProtocol = Effect.fn("makeAcpPatchedProtocol")(functi
               ),
             ),
         }),
+        Effect.forkIn(scope),
         Effect.asVoid,
       );
     }

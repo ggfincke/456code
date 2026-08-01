@@ -1,3 +1,5 @@
+// tests/apps/desktop/preview/Manager.test.ts
+// verifies desktop preview tab, picker, automation, and recording behavior
 import { it as effectIt } from "@effect/vitest";
 import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
 import * as Cause from "effect/Cause";
@@ -30,7 +32,7 @@ const {
   writeImage,
 } = vi.hoisted(() => ({
   createFromPath: vi.fn((): { readonly isEmpty: () => boolean } => ({ isEmpty: () => false })),
-  fromId: vi.fn(() => null),
+  fromId: vi.fn((_id?: number): unknown => null),
   getFocusedWebContents: vi.fn(() => null),
   mkdir: vi.fn((_path: string) => undefined),
   showItemInFolder: vi.fn(),
@@ -648,6 +650,166 @@ describe("PreviewManager", () => {
 
         listeners.get("did-start-navigation")?.({}, "https://example.com/next", false, true);
         expect(yield* Fiber.join(pick)).toBeNull();
+      }),
+    ),
+  );
+
+  effectIt.effect("drops picker completions from a cancelled session", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        const listeners = new Map<string, (...args: unknown[]) => void>();
+        const ipcListeners = new Map<string, (...args: unknown[]) => void>();
+        fromId.mockReturnValue({
+          id: 42,
+          isDestroyed: () => false,
+          getType: () => "webview",
+          getURL: () => "https://example.com",
+          getTitle: () => "Example",
+          isLoading: () => false,
+          isFocused: () => true,
+          getZoomFactor: () => 1,
+          setZoomFactor: vi.fn(),
+          on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+            listeners.set(event, listener);
+          }),
+          once: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+            listeners.set(event, listener);
+          }),
+          off: vi.fn(),
+          ipc: {
+            on: vi.fn((channel: string, listener: (...args: unknown[]) => void) => {
+              ipcListeners.set(channel, listener);
+            }),
+            off: vi.fn(),
+            removeListener: vi.fn(),
+          },
+          send: webviewSend,
+          navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+          setWindowOpenHandler: vi.fn(),
+          debugger: {
+            isAttached: () => false,
+            attach: vi.fn(),
+            sendCommand: vi.fn(async () => undefined),
+            on: vi.fn(),
+            off: vi.fn(),
+          },
+        } as never);
+
+        yield* manager.createTab("tab_1");
+        yield* manager.registerWebview("tab_1", 42);
+
+        const firstPick = yield* manager.pickElement("tab_1").pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        const firstStart = webviewSend.mock.calls.find(
+          ([channel]) => channel === "preview:start-pick",
+        );
+        const firstSessionId = firstStart?.[1];
+        expect(typeof firstSessionId).toBe("string");
+
+        yield* manager.cancelPickElement("tab_1");
+        expect(yield* Fiber.join(firstPick)).toBeNull();
+
+        const secondPick = yield* manager.pickElement("tab_1").pipe(Effect.forkChild);
+        yield* Effect.yieldNow;
+        const startCalls = webviewSend.mock.calls.filter(
+          ([channel]) => channel === "preview:start-pick",
+        );
+        const secondSessionId = startCalls.at(-1)?.[1];
+        expect(secondSessionId).not.toBe(firstSessionId);
+
+        const completePick = ipcListeners.get("preview:element-picked");
+        if (!completePick) return yield* Effect.die("picker completion listener was not installed");
+        completePick({}, firstSessionId, null);
+        yield* Effect.yieldNow;
+        expect(secondPick.pollUnsafe()).toBeUndefined();
+
+        completePick({}, secondSessionId, null);
+        expect(yield* Fiber.join(secondPick)).toBeNull();
+      }),
+    ),
+  );
+
+  effectIt.effect("atomically claims recording and releases ownership when its webview dies", () =>
+    withManager((manager) =>
+      Effect.gen(function* () {
+        let releaseFirstStart: (() => void) | undefined;
+        let reportFirstStart: (() => void) | undefined;
+        const firstStartReleased = new Promise<void>((resolve) => {
+          releaseFirstStart = resolve;
+        });
+        const firstStartReported = new Promise<void>((resolve) => {
+          reportFirstStart = resolve;
+        });
+        const listenersByWebContents = new Map<number, Map<string, (...args: unknown[]) => void>>();
+        const webviews = new Map<number, unknown>();
+
+        for (const id of [41, 42]) {
+          const listeners = new Map<string, (...args: unknown[]) => void>();
+          listenersByWebContents.set(id, listeners);
+          webviews.set(id, {
+            id,
+            isDestroyed: () => false,
+            getType: () => "webview",
+            getURL: () => `https://example.com/${id}`,
+            getTitle: () => `Example ${id}`,
+            isLoading: () => false,
+            isDevToolsOpened: () => false,
+            getZoomFactor: () => 1,
+            setZoomFactor: vi.fn(),
+            on: vi.fn((event: string, listener: (...args: unknown[]) => void) => {
+              listeners.set(event, listener);
+            }),
+            off: vi.fn((event: string) => {
+              listeners.delete(event);
+            }),
+            ipc: { on: vi.fn(), off: vi.fn() },
+            send: webviewSend,
+            navigationHistory: { canGoBack: () => false, canGoForward: () => false },
+            setWindowOpenHandler: vi.fn(),
+            debugger: {
+              isAttached: () => false,
+              attach: vi.fn(),
+              sendCommand: vi.fn(async (method: string) => {
+                if (id === 41 && method === "Page.startScreencast") {
+                  reportFirstStart?.();
+                  await firstStartReleased;
+                }
+                return undefined;
+              }),
+              on: vi.fn(),
+              off: vi.fn(),
+              detach: vi.fn(),
+            },
+          });
+        }
+        fromId.mockImplementation((id?: number) => webviews.get(id as number) as never);
+
+        yield* manager.createTab("tab_1");
+        yield* manager.createTab("tab_2");
+        yield* manager.registerWebview("tab_1", 41);
+        yield* manager.registerWebview("tab_2", 42);
+        yield* Effect.yieldNow;
+
+        const firstRecording = yield* manager.startRecording("tab_1").pipe(Effect.forkChild);
+        yield* Effect.promise(() => firstStartReported);
+
+        const conflicting = yield* Effect.exit(manager.startRecording("tab_2"));
+        expect(Exit.isFailure(conflicting)).toBe(true);
+        if (Exit.isFailure(conflicting)) {
+          expect(Option.getOrThrow(Cause.findErrorOption(conflicting.cause))).toMatchObject({
+            _tag: "PreviewRecordingAlreadyActiveError",
+            requestedTabId: "tab_2",
+            activeTabId: "tab_1",
+          });
+        }
+
+        releaseFirstStart?.();
+        yield* Fiber.join(firstRecording);
+        listenersByWebContents.get(41)?.get("destroyed")?.();
+        yield* Effect.yieldNow;
+        yield* Effect.yieldNow;
+
+        yield* manager.startRecording("tab_2");
       }),
     ),
   );

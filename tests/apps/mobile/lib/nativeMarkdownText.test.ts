@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/nativeMarkdownText.test.ts
+// verifies native markdown text conversion behavior
+
 import { describe, expect, it } from "vite-plus/test";
 import type { MarkdownNode } from "react-native-nitro-markdown/headless";
 
@@ -123,6 +126,22 @@ describe("nativeMarkdownTextRuns", () => {
 
     expect(nativeMarkdownTextRuns(node)).toEqual([
       { text: "Keyboard: ⌘ + K; Less than: <; Greater than: >" },
+    ]);
+  });
+
+  it("leaves out-of-range numeric entities as literal text", () => {
+    const node: MarkdownNode = {
+      type: "paragraph",
+      children: [
+        {
+          type: "text",
+          content: "Invalid: &#1114112; &#xD800;; valid: &#x1F642;",
+        },
+      ],
+    };
+
+    expect(nativeMarkdownTextRuns(node)).toEqual([
+      { text: "Invalid: &#1114112; &#xD800;; valid: 🙂" },
     ]);
   });
 

@@ -1,3 +1,6 @@
+// tests/packages/effect-codex-app-server/protocol.test.ts
+// verifies Codex app-server protocol routing, diagnostics, and termination
+
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Fiber from "effect/Fiber";
@@ -361,6 +364,64 @@ it.layer(NodeServices.layer)("effect-codex-app-server protocol", (it) => {
         requestId: "1",
         operation: "receive-response",
       });
+    }),
+  );
+
+  it.effect("routes responses while an inbound request handler is blocked", () =>
+    Effect.gen(function* () {
+      const { stdio, input, output } = yield* makeInMemoryStdio();
+      const handlerStarted = yield* Deferred.make<void>();
+      const releaseHandler = yield* Deferred.make<void>();
+      const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+        stdio,
+        onRequest: () =>
+          Deferred.succeed(handlerStarted, undefined).pipe(
+            Effect.andThen(Deferred.await(releaseHandler)),
+            Effect.as({ handled: true }),
+          ),
+      });
+
+      const pending = yield* transport.request("thread/start", {}).pipe(Effect.forkScoped);
+      yield* Queue.take(output);
+      yield* Queue.offer(
+        input,
+        encodeJsonl({ id: 77, method: "item/tool/requestUserInput", params: {} }),
+      );
+      yield* Deferred.await(handlerStarted);
+      yield* Queue.offer(input, encodeJsonl({ id: 1, result: { thread: "thread-1" } }));
+
+      assert.deepEqual(yield* Fiber.join(pending).pipe(Effect.timeout("1 second")), {
+        thread: "thread-1",
+      });
+      yield* Deferred.succeed(releaseHandler, undefined);
+      assert.deepEqual(yield* decodeJson(yield* Queue.take(output)), {
+        id: 77,
+        result: { handled: true },
+      });
+    }),
+  );
+
+  it.effect("rejects requests started after protocol termination", () =>
+    Effect.gen(function* () {
+      const { stdio, input } = yield* makeInMemoryStdio();
+      const termination = yield* Deferred.make<CodexError.CodexAppServerError>();
+      const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+        stdio,
+        onTermination: (error) => Deferred.succeed(termination, error).pipe(Effect.asVoid),
+      });
+
+      yield* Queue.end(input);
+      const terminationError = yield* Deferred.await(termination);
+      const requestError = yield* transport.request("thread/start", {}).pipe(
+        Effect.timeout("1 second"),
+        Effect.match({
+          onFailure: (error) => error,
+          onSuccess: () => assert.fail("Expected post-termination request to fail"),
+        }),
+      );
+
+      assert.strictEqual(requestError, terminationError);
+      assert.instanceOf(requestError, CodexError.CodexAppServerInputStreamEndedError);
     }),
   );
 

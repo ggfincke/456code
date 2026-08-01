@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/composerImages.ts
+// validates composer image picks and pastes as upload attachments
+
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -224,6 +227,16 @@ function mimeTypeFromUri(uri: string): string {
   }
 }
 
+function mimeTypeFromImageData(base64: string, uri: string): string {
+  const prefix = base64.replace(/\s/g, "").slice(0, 32);
+  if (prefix.startsWith("iVBORw0KGgo")) return "image/png";
+  if (prefix.startsWith("/9j/")) return "image/jpeg";
+  if (prefix.startsWith("R0lGOD")) return "image/gif";
+  if (prefix.startsWith("UklGR") && prefix.slice(12, 16) === "RUJQ") return "image/webp";
+  if (prefix.includes("Z0eXBoZWlj")) return "image/heic";
+  return mimeTypeFromUri(uri);
+}
+
 export function isOwnedPastedImageUri(uri: string): boolean {
   try {
     const url = new URL(uri);
@@ -247,10 +260,10 @@ export async function convertPastedImagesToAttachments(input: {
   const remainingSlots = PROVIDER_SEND_TURN_MAX_ATTACHMENTS - input.existingCount;
   const results: DraftComposerImageAttachment[] = [];
 
-  for (const [index, uri] of input.uris.entries()) {
+  for (const uri of input.uris) {
     const ownedTemporaryFile = isOwnedPastedImageUri(uri);
     try {
-      if (index >= Math.max(0, remainingSlots)) {
+      if (results.length >= Math.max(0, remainingSlots)) {
         continue;
       }
       const file = new File(uri);
@@ -259,7 +272,7 @@ export async function convertPastedImagesToAttachments(input: {
       if (sizeBytes <= 0 || sizeBytes > PROVIDER_SEND_TURN_MAX_IMAGE_BYTES) {
         continue;
       }
-      const mimeType = mimeTypeFromUri(uri);
+      const mimeType = mimeTypeFromImageData(base64, uri);
       results.push({
         id: uuidv4(),
         type: "image",

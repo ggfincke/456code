@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/ThreadTerminalRouteScreen.tsx
+// attaches and drives a thread-scoped mobile terminal session
+
 import { DEFAULT_TERMINAL_ID, EnvironmentId, ThreadId } from "@t3tools/contracts";
 import { type KnownTerminalSession } from "@t3tools/client-runtime/state/terminal";
 import type { MenuAction } from "@react-native-menu/menu";
@@ -352,6 +355,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     readyReplayKey: readyBufferReplayKey,
   });
   const isRunning = terminal.status === "running" || terminal.status === "starting";
+  const isAcceptingInput = terminal.status === "running";
 
   // When the process ends while this screen is attached (e.g. typing `exit`),
   // close the session and leave the screen, mirroring the web drawer's
@@ -609,7 +613,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     if (
       !initialInput ||
       !selectedThread ||
-      terminal.version === 0 ||
+      !isAcceptingInput ||
       sentInitialInputKeyRef.current === launchTargetKey
     ) {
       return;
@@ -625,9 +629,9 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     });
   }, [
     launchTargetKey,
+    isAcceptingInput,
     pendingLaunch?.initialInput,
     selectedThread,
-    terminal.version,
     terminalId,
     writeTerminal,
   ]);
@@ -694,7 +698,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
 
   const writeInput = useCallback(
     (data: string) => {
-      if (!selectedThread || !isRunning) {
+      if (!selectedThread || !isAcceptingInput) {
         return;
       }
 
@@ -707,7 +711,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
         },
       });
     },
-    [isRunning, selectedThread, terminalId, writeTerminal],
+    [isAcceptingInput, selectedThread, terminalId, writeTerminal],
   );
 
   const handleInput = useCallback(
@@ -1222,7 +1226,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
                 autoFocus={!SHOWCASE_ENABLED}
                 buffer={terminalSurfaceBuffer}
                 fontSize={fontSize}
-                isRunning={isRunning}
+                isRunning={isAcceptingInput}
                 keyboardFocusRequest={keyboardFocusRequest}
                 onInput={handleInput}
                 onResize={handleResize}

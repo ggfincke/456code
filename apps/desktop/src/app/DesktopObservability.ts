@@ -1,3 +1,5 @@
+// apps/desktop/src/app/DesktopObservability.ts
+// configures desktop tracing and rotating process output logs
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from "@t3tools/contracts";
 import { makeLocalFileTracer, makeTraceSink } from "@t3tools/shared/observability";
 import { parsePersistedServerObservabilitySettings } from "@t3tools/shared/serverSettings";
@@ -59,7 +61,6 @@ export class DesktopBackendOutputLogFactory extends Context.Service<
 >()("@t3tools/desktop/app/DesktopObservability/DesktopBackendOutputLogFactory") {}
 
 const textEncoder = new TextEncoder();
-const textDecoder = new TextDecoder();
 
 export type DesktopLogAnnotations = Record<string, unknown>;
 
@@ -348,10 +349,39 @@ const makeBackendOutputLogShape = (
 ): DesktopBackendOutputLogShape =>
   Option.match(sink, {
     onNone: () => DesktopBackendOutputLogNoop,
-    onSome: (logFile) =>
-      ({
+    onSome: (logFile) => {
+      const decoders = {
+        stdout: new TextDecoder(),
+        stderr: new TextDecoder(),
+      };
+      const writeDecodedOutput = Effect.fn("desktop.observability.backendOutput.writeDecoded")(
+        function* (streamName: "stdout" | "stderr", text: string) {
+          if (text.length === 0) return;
+          const runId = yield* currentDesktopRunId;
+          yield* writeBackendChildLogRecord(logFile, {
+            message: "backend child process output",
+            level: streamName === "stderr" ? "ERROR" : "INFO",
+            annotations: {
+              component: "desktop-backend-child",
+              runId,
+              instanceId: id,
+              stream: streamName,
+              text,
+            },
+          });
+        },
+      );
+      const flushDecoders = Effect.all(
+        (["stdout", "stderr"] as const).map((streamName) =>
+          writeDecodedOutput(streamName, decoders[streamName].decode()),
+        ),
+        { discard: true },
+      );
+
+      return {
         writeSessionBoundary: Effect.fn("desktop.observability.backendOutput.writeSessionBoundary")(
           function* ({ phase, details }) {
+            if (phase === "END") yield* flushDecoders;
             const runId = yield* currentDesktopRunId;
             yield* writeBackendChildLogRecord(logFile, {
               message: `backend child process session ${phase.toLowerCase()}`,
@@ -371,21 +401,14 @@ const makeBackendOutputLogShape = (
             if (environment.isDevelopment) {
               yield* writeDevelopmentConsoleOutput(streamName, chunk);
             }
-            const runId = yield* currentDesktopRunId;
-            yield* writeBackendChildLogRecord(logFile, {
-              message: "backend child process output",
-              level: streamName === "stderr" ? "ERROR" : "INFO",
-              annotations: {
-                component: "desktop-backend-child",
-                runId,
-                instanceId: id,
-                stream: streamName,
-                text: textDecoder.decode(chunk),
-              },
-            });
+            yield* writeDecodedOutput(
+              streamName,
+              decoders[streamName].decode(chunk, { stream: true }),
+            );
           },
         ),
-      }) satisfies DesktopBackendOutputLogShape,
+      } satisfies DesktopBackendOutputLogShape;
+    },
   });
 
 const backendOutputLogFactoryLayer = Layer.effect(

@@ -1,3 +1,6 @@
+// apps/desktop/src/preview/Manager.ts
+// owns desktop preview tabs, automation, picking, and recording lifecycles
+
 /**
  * Desktop side of the in-app browser preview.
  *
@@ -297,8 +300,19 @@ interface ManagedListeners {
 }
 
 interface PickSession {
+  readonly id: string;
   readonly cancel: Effect.Effect<void>;
 }
+
+interface RecordingOwner {
+  readonly tabId: string;
+  readonly webContentsId: number;
+  readonly token: number;
+}
+
+type RecordingClaim =
+  | { readonly claimed: true; readonly owner: RecordingOwner }
+  | { readonly claimed: false; readonly owner: RecordingOwner };
 
 interface BrowserControlSession {
   readonly webContentsId: number;
@@ -415,7 +429,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
   >(new Map());
   const actionSequenceRef = yield* Ref.make(0);
   const pointerSequenceRef = yield* Ref.make(0);
-  const recordingTabIdRef = yield* Ref.make<Option.Option<string>>(Option.none());
+  const pickSequenceRef = yield* Ref.make(0);
+  const recordingSequenceRef = yield* Ref.make(0);
+  const recordingOwnerRef = yield* Ref.make<Option.Option<RecordingOwner>>(Option.none());
 
   const attempt = <A>(errorContext: PreviewOperationContext, evaluate: () => A) =>
     Effect.try({
@@ -773,6 +789,9 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           const onMessage: BrowserControlSession["onMessage"] = (_event, method, params) => {
             runFork(handleDebuggerMessage(method, params));
           };
+          const onDestroyed = () => {
+            runFork(detachControlSession(wc.id));
+          };
           yield* Scope.addFinalizer(
             scope,
             Effect.all(
@@ -783,6 +802,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                   }),
                 ),
                 attempt({ operation: "detachControlSession", webContentsId: wc.id }, () => {
+                  wc.off("destroyed", onDestroyed);
                   wc.debugger.off("message", onMessage);
                   if (wc.debugger.isAttached()) wc.debugger.detach();
                 }).pipe(Effect.ignore),
@@ -807,6 +827,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
               }),
             );
             yield* attempt({ operation: "attachDebuggerListeners", webContentsId: wc.id }, () => {
+              wc.on("destroyed", onDestroyed);
               wc.debugger.on("message", onMessage);
               wc.debugger.attach("1.3");
             });
@@ -985,7 +1006,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
       Effect.flatMap((rawResponse) => {
         const response = rawResponse as CdpEvaluationResult;
         if (!response.exceptionDetails) {
-          return Effect.succeed(response.result?.value as A);
+          return Effect.succeed((returnByValue ? response.result?.value : response.result) as A);
         }
         const detail = previewAutomationEvaluationDetail(response.exceptionDetails);
         return Effect.fail(
@@ -1565,6 +1586,8 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     const wc = yield* requireWebContents(tabId);
     yield* cancelPickElement(tabId);
     const annotationTheme = yield* Ref.get(annotationThemeRef);
+    const pickSequence = yield* nextCounter(pickSequenceRef);
+    const sessionId = `${tabId}:${pickSequence.toString(36)}`;
     return yield* Effect.callback<PreviewAnnotationPayload | null, PreviewManagerError>(
       (resume) => {
         const cleanup = Effect.fn("PreviewManager.cleanupPickElement")(function* () {
@@ -1575,7 +1598,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           }).pipe(Effect.ignore);
           yield* Ref.update(pickSessionsRef, (sessions) =>
             replaceMap(sessions, (copy) => {
-              copy.delete(tabId);
+              if (copy.get(tabId)?.id === sessionId) copy.delete(tabId);
             }),
           );
         });
@@ -1583,7 +1606,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
           payload: PreviewAnnotationPayload | null,
         ) {
           const active = (yield* Ref.get(pickSessionsRef)).get(tabId);
-          if (!active || active.cancel !== cancel) return;
+          if (!active || active.id !== sessionId) return;
           yield* cleanup();
           resume(Effect.succeed(payload));
         });
@@ -1603,7 +1626,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                   tabId,
                   webContentsId: activeWc.id,
                 },
-                () => activeWc.send(CANCEL_PICK_CHANNEL),
+                () => activeWc.send(CANCEL_PICK_CHANNEL, sessionId),
               ).pipe(Effect.ignore);
             }
           }
@@ -1611,12 +1634,13 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
         });
         const cancel = cancelPickSession();
         const onMessage = (_event: Electron.IpcMainEvent, ...args: unknown[]): void => {
-          const payload = args[0];
+          if (args[0] !== sessionId) return;
+          const payload = args[1];
           if (!isPreviewAnnotationPayload(payload)) {
             settle(null);
             return;
           }
-          const cropRect = normalizeCaptureRect(args[1]);
+          const cropRect = normalizeCaptureRect(args[2]);
           runFork(
             captureAnnotationScreenshot(tabId, wc, cropRect).pipe(
               Effect.matchEffect({
@@ -1627,7 +1651,7 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
                 attempt(
                   { operation: "pickElement.captureComplete", tabId, webContentsId: wc.id },
                   () => {
-                    if (!wc.isDestroyed()) wc.send(ANNOTATION_CAPTURED_CHANNEL);
+                    if (!wc.isDestroyed()) wc.send(ANNOTATION_CAPTURED_CHANNEL, sessionId);
                   },
                 ).pipe(Effect.ignore),
               ),
@@ -1649,11 +1673,11 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
             wc.once("destroyed", onDestroyed);
             wc.once("did-start-navigation", onNavigated);
             if (!wc.isFocused()) wc.focus();
-            wc.send(START_PICK_CHANNEL, annotationTheme);
+            wc.send(START_PICK_CHANNEL, sessionId, annotationTheme);
           });
           yield* Ref.update(pickSessionsRef, (sessions) =>
             replaceMap(sessions, (copy) => {
-              copy.set(tabId, { cancel });
+              copy.set(tabId, { id: sessionId, cancel });
             }),
           );
         });
@@ -1814,27 +1838,49 @@ const makeNativeOperations = Effect.fn("PreviewManager.makeOperations")(function
     });
   });
 
+  const releaseRecordingOwner = (owner: RecordingOwner) =>
+    Ref.update(recordingOwnerRef, (current) =>
+      Option.isSome(current) && current.value.token === owner.token ? Option.none() : current,
+    );
+
   const startRecording = Effect.fn("PreviewManager.startRecording")(function* (tabId: string) {
-    const recordingTabId = yield* Ref.get(recordingTabIdRef);
-    if (Option.isSome(recordingTabId) && recordingTabId.value !== tabId) {
+    const wc = yield* requireWebContents(tabId);
+    const control = yield* ensureControlSession(wc);
+    const owner: RecordingOwner = {
+      tabId,
+      webContentsId: wc.id,
+      token: yield* nextCounter(recordingSequenceRef),
+    };
+    const claim = yield* Ref.modify(
+      recordingOwnerRef,
+      (current): readonly [RecordingClaim, Option.Option<RecordingOwner>] =>
+        Option.isSome(current)
+          ? [{ claimed: false, owner: current.value }, current]
+          : [{ claimed: true, owner }, Option.some(owner)],
+    );
+    if (!claim.claimed && claim.owner.tabId !== tabId) {
       return yield* new PreviewRecordingAlreadyActiveError({
         requestedTabId: tabId,
-        activeTabId: recordingTabId.value,
+        activeTabId: claim.owner.tabId,
       });
     }
-    const wc = yield* requireWebContents(tabId);
-    yield* withControlSession(tabId, wc, "recording.start", startScreencast);
-    yield* Ref.set(recordingTabIdRef, Option.some(tabId));
+    if (!claim.claimed) return;
+
+    yield* Scope.addFinalizer(control.scope, releaseRecordingOwner(owner));
+    yield* withControlSession(tabId, wc, "recording.start", startScreencast).pipe(
+      Effect.onError(() => releaseRecordingOwner(owner)),
+    );
   });
 
   const stopRecording = Effect.fn("PreviewManager.stopRecording")(function* (tabId: string) {
-    const recordingTabId = yield* Ref.get(recordingTabIdRef);
-    if (Option.isNone(recordingTabId) || recordingTabId.value !== tabId) return;
-    const wc = yield* requireWebContents(tabId);
-    yield* withControlSession(tabId, wc, "recording.stop", (send) =>
-      send("Page.stopScreencast").pipe(Effect.asVoid),
-    );
-    yield* Ref.set(recordingTabIdRef, Option.none());
+    const owner = yield* Ref.get(recordingOwnerRef);
+    if (Option.isNone(owner) || owner.value.tabId !== tabId) return;
+    yield* Effect.gen(function* () {
+      const wc = yield* requireWebContents(tabId);
+      yield* withControlSession(tabId, wc, "recording.stop", (send) =>
+        send("Page.stopScreencast").pipe(Effect.asVoid),
+      );
+    }).pipe(Effect.ensuring(releaseRecordingOwner(owner.value)));
   });
 
   const saveRecording = Effect.fn("PreviewManager.saveRecording")(function* (

@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/nativeMarkdownText.ts
+// converts markdown nodes into styled native text runs
+
 import type { MarkdownNode } from "react-native-nitro-markdown/headless";
 
 import type { SelectableMarkdownSkill } from "./SelectableMarkdownText.types";
@@ -74,11 +77,12 @@ function decodeHtmlEntitiesOnce(value: string): string {
   return value.replace(
     /&(?:#(\d+)|#x([0-9a-f]+)|amp|apos|gt|lt|nbsp|quot);/gi,
     (entity, decimal: string | undefined, hexadecimal: string | undefined) => {
-      if (decimal) {
-        return String.fromCodePoint(Number.parseInt(decimal, 10));
-      }
-      if (hexadecimal) {
-        return String.fromCodePoint(Number.parseInt(hexadecimal, 16));
+      if (decimal || hexadecimal) {
+        const codePoint = Number.parseInt(decimal ?? hexadecimal ?? "", decimal ? 10 : 16);
+        if (codePoint > 0x10ffff || (codePoint >= 0xd800 && codePoint <= 0xdfff)) {
+          return entity;
+        }
+        return String.fromCodePoint(codePoint);
       }
       switch (entity.toLowerCase()) {
         case "&amp;":

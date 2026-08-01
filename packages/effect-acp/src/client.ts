@@ -618,8 +618,12 @@ export const layer = (stdio: Stdio.Stdio, options: AcpClientOptions = {}): Layer
 export const layerChildProcess = (
   handle: ChildProcessSpawner.ChildProcessHandle,
   options: AcpClientOptions = {},
-): Layer.Layer<AcpClient> => {
-  const stdio = makeChildStdio(handle);
-  const terminationError = makeTerminationError(handle);
-  return Layer.effect(AcpClient, make(stdio, options, terminationError));
-};
+): Layer.Layer<AcpClient> => Layer.effect(AcpClient, makeChildProcessClient(handle, options));
+
+const makeChildProcessClient = Effect.fn("effect-acp/AcpClient.makeChildProcessClient")(function* (
+  handle: ChildProcessSpawner.ChildProcessHandle,
+  options: AcpClientOptions,
+) {
+  yield* Stream.runDrain(handle.stderr).pipe(Effect.ignore, Effect.forkScoped);
+  return yield* make(makeChildStdio(handle), options, makeTerminationError(handle));
+});
