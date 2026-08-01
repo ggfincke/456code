@@ -1,3 +1,5 @@
+// apps/server/src/cli/project.ts
+// executes project mutations against live or exclusively offline state
 import {
   CommandId,
   AuthAdministrativeScopes,
@@ -32,7 +34,7 @@ import { layerConfig as SqlitePersistenceLayerLive } from "../persistence/Layers
 import * as RepositoryIdentityResolver from "../project/RepositoryIdentityResolver.ts";
 import * as ServerRuntimeStartup from "../serverRuntimeStartup.ts";
 import {
-  clearPersistedServerRuntimeState,
+  clearPersistedServerRuntimeStateIfStale,
   readPersistedServerRuntimeState,
 } from "../serverRuntimeState.ts";
 import * as WorkspacePaths from "../workspace/WorkspacePaths.ts";
@@ -367,7 +369,13 @@ const tryResolveLiveProjectExecutionMode = Effect.fn("tryResolveLiveProjectExecu
       origin: runtimeState.value.origin,
       cause: attempted.failure,
     });
-    yield* clearPersistedServerRuntimeState(config.serverRuntimeStatePath);
+    const cleared = yield* clearPersistedServerRuntimeStateIfStale({
+      path: config.serverRuntimeStatePath,
+      expectedState: runtimeState.value,
+    });
+    if (!cleared) {
+      return yield* attempted.failure;
+    }
     return Option.none<{ readonly origin: string }>();
   },
 );
