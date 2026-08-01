@@ -3562,6 +3562,86 @@ it.layer(GitManagerTestLayer)("GitManager", (it) => {
     }),
   );
 
+  it.effect(
+    "creates a fresh fork PR worktree when the preferred branch has unrelated provenance",
+    () =>
+      Effect.gen(function* () {
+        const repoDir = yield* makeTempDir("t3code-git-manager-");
+        yield* initRepo(repoDir);
+        const originDir = yield* createBareRemote();
+        const forkDir = yield* createBareRemote();
+        yield* runGit(repoDir, ["remote", "add", "origin", originDir]);
+        yield* runGit(repoDir, ["push", "-u", "origin", "main"]);
+        yield* runGit(repoDir, ["remote", "add", "fork-seed", forkDir]);
+        yield* runGit(repoDir, ["checkout", "-b", "feature/provenance"]);
+        NodeFS.writeFileSync(NodePath.join(repoDir, "fork-provenance.txt"), "fork head\n");
+        yield* runGit(repoDir, ["add", "fork-provenance.txt"]);
+        yield* runGit(repoDir, ["commit", "-m", "Fork provenance head"]);
+        yield* runGit(repoDir, ["push", "-u", "fork-seed", "feature/provenance"]);
+        yield* runGit(repoDir, ["checkout", "main"]);
+
+        const preferredBranch = "456code/pr-84/feature/provenance";
+        yield* runGit(repoDir, ["checkout", "-b", preferredBranch]);
+        NodeFS.writeFileSync(NodePath.join(repoDir, "unrelated.txt"), "unrelated\n");
+        yield* runGit(repoDir, ["add", "unrelated.txt"]);
+        yield* runGit(repoDir, ["commit", "-m", "Unrelated local branch"]);
+        const unrelatedCommit = (yield* runGit(repoDir, ["rev-parse", "HEAD"])).stdout.trim();
+        yield* runGit(repoDir, ["checkout", "main"]);
+        const unrelatedWorktreePath = NodePath.join(
+          repoDir,
+          "..",
+          `pr-unrelated-${NodePath.basename(repoDir)}`,
+        );
+        yield* runGit(repoDir, ["worktree", "add", unrelatedWorktreePath, preferredBranch]);
+
+        const { manager } = yield* makeManager({
+          ghScenario: {
+            pullRequest: {
+              number: 84,
+              title: "Provenance guarded fork PR",
+              url: "https://github.com/pingdotgg/codething-mvp/pull/84",
+              baseRefName: "main",
+              headRefName: "feature/provenance",
+              state: "open",
+              isCrossRepository: true,
+              headRepositoryNameWithOwner: "octocat/codething-mvp",
+              headRepositoryOwnerLogin: "octocat",
+            },
+            repositoryCloneUrls: {
+              "octocat/codething-mvp": {
+                url: forkDir,
+                sshUrl: forkDir,
+              },
+            },
+          },
+        });
+
+        const result = yield* preparePullRequestThread(manager, {
+          cwd: repoDir,
+          reference: "84",
+          mode: "worktree",
+        });
+
+        expect(result.branch).toBe(`${preferredBranch}-2`);
+        expect(result.worktreePath && NodeFS.realpathSync.native(result.worktreePath)).not.toBe(
+          NodeFS.realpathSync.native(unrelatedWorktreePath),
+        );
+        expect(
+          (yield* runGit(unrelatedWorktreePath, ["branch", "--show-current"])).stdout.trim(),
+        ).toBe(preferredBranch);
+        expect((yield* runGit(unrelatedWorktreePath, ["rev-parse", "HEAD"])).stdout.trim()).toBe(
+          unrelatedCommit,
+        );
+        expect(
+          (yield* runGit(result.worktreePath as string, [
+            "rev-parse",
+            "--abbrev-ref",
+            "@{upstream}",
+          ])).stdout,
+        ).toContain("fork-seed/feature/provenance");
+      }),
+  );
+
   it.effect("does not fail PR worktree prep when setup terminal startup fails", () =>
     Effect.gen(function* () {
       const repoDir = yield* makeTempDir("t3code-git-manager-");

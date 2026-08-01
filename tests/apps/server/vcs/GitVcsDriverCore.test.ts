@@ -909,6 +909,40 @@ it.layer(TestLayer)("GitVcsDriver core integration", (it) => {
       }),
     );
 
+    it.effect("uses a non-origin primary remote for status and ref classification", () =>
+      Effect.gen(function* () {
+        const cwd = yield* makeTmpDir();
+        const primaryRemote = yield* makeTmpDir("git-vcs-driver-primary-");
+        yield* initRepoWithCommit(cwd);
+        yield* git(primaryRemote, ["init", "--bare"]);
+        yield* git(cwd, ["branch", "-M", "main"]);
+        yield* git(cwd, ["remote", "add", "upstream", primaryRemote]);
+        yield* git(cwd, ["push", "-u", "upstream", "main"]);
+        yield* git(cwd, [
+          "symbolic-ref",
+          "refs/remotes/upstream/HEAD",
+          "refs/remotes/upstream/main",
+        ]);
+        const driver = yield* GitVcsDriver.GitVcsDriver;
+
+        const localStatus = yield* driver.statusDetailsLocal(cwd);
+        const remoteStatus = yield* driver.statusDetailsRemote(cwd, {
+          refreshUpstream: false,
+        });
+        const refs = yield* driver.listRefs({
+          cwd,
+          refresh: true,
+          includeMatchingRemoteRefs: true,
+        });
+
+        assert.equal(localStatus.hasOriginRemote, true);
+        assert.equal(localStatus.isDefaultBranch, true);
+        assert.equal(remoteStatus.isDefaultBranch, true);
+        assert.equal(refs.hasPrimaryRemote, true);
+        assert.equal(refs.refs.find((ref) => ref.name === "upstream/main")?.isDefault, true);
+      }),
+    );
+
     it.effect("makes background upstream status fetches non-interactive", () =>
       Effect.gen(function* () {
         const cwd = yield* makeTmpDir();

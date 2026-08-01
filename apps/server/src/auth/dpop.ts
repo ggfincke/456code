@@ -1,3 +1,5 @@
+// apps/server/src/auth/dpop.ts
+// verifies DPoP proofs and records bounded replay state
 import { verifyDpopProof } from "@t3tools/shared/dpop";
 import * as Crypto from "effect/Crypto";
 import * as DateTime from "effect/DateTime";
@@ -13,6 +15,48 @@ import {
   type ServerAuthInternalError,
 } from "./EnvironmentAuth.ts";
 import * as ServerSecretStore from "./ServerSecretStore.ts";
+
+const DPOP_PROOF_MAX_AGE_SECONDS = 300;
+const DPOP_REPLAY_RECORD_PREFIX = "dpop-proof-";
+
+const readReplayRecordIat = (bytes: Uint8Array): number | null => {
+  const encodedIat = new TextDecoder()
+    .decode(bytes)
+    .split("\n")
+    .find((line) => line.startsWith("iat="))
+    ?.slice("iat=".length);
+  if (encodedIat === undefined) {
+    return null;
+  }
+  const iat = Number.parseInt(encodedIat, 10);
+  return Number.isSafeInteger(iat) ? iat : null;
+};
+
+export const pruneExpiredDpopReplayRecords = (
+  secretStore: ServerSecretStore.ServerSecretStore["Service"],
+  nowEpochSeconds: number,
+) =>
+  Effect.gen(function* () {
+    const names = yield* secretStore.listNames(DPOP_REPLAY_RECORD_PREFIX);
+    yield* Effect.forEach(
+      names,
+      (name) =>
+        secretStore.get(name).pipe(
+          Effect.flatMap(
+            Option.match({
+              onNone: () => Effect.void,
+              onSome: (bytes) => {
+                const iat = readReplayRecordIat(bytes);
+                return iat !== null && nowEpochSeconds - iat > DPOP_PROOF_MAX_AGE_SECONDS
+                  ? secretStore.remove(name)
+                  : Effect.void;
+              },
+            }),
+          ),
+        ),
+      { concurrency: 8, discard: true },
+    );
+  });
 
 export const mapDpopReplayStoreError = (
   error: ServerSecretStore.SecretStoreError,
@@ -40,11 +84,12 @@ export const verifyRequestDpopProof = (input: {
       });
     }
     const now = yield* DateTime.now;
+    const nowEpochSeconds = Math.floor(now.epochMilliseconds / 1_000);
     const result = verifyDpopProof({
       proof,
       method: input.request.method,
       url: url.value.href,
-      nowEpochSeconds: Math.floor(now.epochMilliseconds / 1_000),
+      nowEpochSeconds,
       ...(input.expectedThumbprint ? { expectedThumbprint: input.expectedThumbprint } : {}),
       ...(input.expectedAccessToken ? { expectedAccessToken: input.expectedAccessToken } : {}),
     });
@@ -54,6 +99,11 @@ export const verifyRequestDpopProof = (input: {
       });
     }
     const secretStore = yield* ServerSecretStore.ServerSecretStore;
+    yield* pruneExpiredDpopReplayRecords(secretStore, nowEpochSeconds).pipe(
+      Effect.catchIf(ServerSecretStore.isSecretStoreError, (error) =>
+        Effect.fail(mapDpopReplayStoreError(error)),
+      ),
+    );
     const replayKey = yield* Crypto.Crypto.pipe(
       Effect.flatMap((crypto) =>
         crypto.digest("SHA-256", new TextEncoder().encode(`${result.thumbprint}:${result.jti}`)),
@@ -68,7 +118,7 @@ export const verifyRequestDpopProof = (input: {
     );
     yield* secretStore
       .create(
-        `dpop-proof-${replayKey}`,
+        `${DPOP_REPLAY_RECORD_PREFIX}${replayKey}`,
         new TextEncoder().encode(
           [
             `thumbprint=${result.thumbprint}`,

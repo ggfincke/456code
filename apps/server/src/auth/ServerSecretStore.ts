@@ -1,3 +1,5 @@
+// apps/server/src/auth/ServerSecretStore.ts
+// persists private server credentials and replay records
 import * as Context from "effect/Context";
 import * as Crypto from "effect/Crypto";
 import * as Effect from "effect/Effect";
@@ -145,6 +147,7 @@ export class ServerSecretStore extends Context.Service<
       name: string,
       bytes: number,
     ) => Effect.Effect<Uint8Array, SecretStoreError>;
+    readonly listNames: (prefix: string) => Effect.Effect<ReadonlyArray<string>, SecretStoreError>;
     readonly remove: (name: string) => Effect.Effect<void, SecretStoreError>;
   }
 >()("456code/auth/ServerSecretStore") {}
@@ -286,6 +289,23 @@ export const make = Effect.gen(function* () {
       Effect.withSpan("ServerSecretStore.getOrCreateRandom"),
     );
 
+  const listNames: ServerSecretStore["Service"]["listNames"] = (prefix) =>
+    fileSystem.readDirectory(serverConfig.secretsDir).pipe(
+      Effect.map((entries) =>
+        entries
+          .filter((entry) => entry.startsWith(prefix) && entry.endsWith(".bin"))
+          .map((entry) => entry.slice(0, -".bin".length)),
+      ),
+      Effect.mapError(
+        (cause) =>
+          new SecretStoreReadError({
+            resource: `secrets with prefix ${prefix}`,
+            cause,
+          }),
+      ),
+      Effect.withSpan("ServerSecretStore.listNames"),
+    );
+
   const remove: ServerSecretStore["Service"]["remove"] = (name) =>
     fileSystem.remove(resolveSecretPath(name)).pipe(
       Effect.catch((cause) =>
@@ -306,6 +326,7 @@ export const make = Effect.gen(function* () {
     set,
     create,
     getOrCreateRandom,
+    listNames,
     remove,
   });
 });

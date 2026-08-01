@@ -1,3 +1,6 @@
+// tests/packages/ssh/auth.test.ts
+// verifies ssh authentication detection and scoped askpass helpers
+
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 
@@ -52,6 +55,33 @@ describe("ssh auth", () => {
     }).pipe(
       Effect.provide(Layer.merge(NodeServices.layer, Layer.succeed(HostProcessPlatform, "linux"))),
       Effect.scoped,
+    ),
+  );
+
+  it.effect("removes internally-created askpass helpers when the command scope fails", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      let parentDirectory = "";
+
+      yield* Effect.exit(
+        Effect.scoped(
+          Effect.gen(function* () {
+            const env = yield* buildSshChildEnvironment({
+              authSecret: "super-secret",
+              interactiveAuth: true,
+              baseEnv: {},
+            });
+            parentDirectory = path.dirname(path.dirname(env.SSH_ASKPASS ?? ""));
+            assert.equal(yield* fs.exists(parentDirectory), true);
+            return yield* Effect.fail("command failed");
+          }),
+        ),
+      );
+
+      assert.equal(yield* fs.exists(parentDirectory), false);
+    }).pipe(
+      Effect.provide(Layer.merge(NodeServices.layer, Layer.succeed(HostProcessPlatform, "linux"))),
     ),
   );
 
