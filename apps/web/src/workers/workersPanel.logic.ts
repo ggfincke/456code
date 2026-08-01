@@ -2,6 +2,7 @@
 // pure derivations for the workers right-panel surface
 
 import type {
+  WorkersFailureClass,
   WorkersJobChange,
   WorkersJobStatus,
   WorkersJobSummary,
@@ -62,6 +63,72 @@ export function workerVerificationView(
   };
 }
 
+const FAILURE_CLASS_LABELS: Record<WorkersFailureClass, string> = {
+  environment: "Environment",
+  model: "Model",
+  broker_fault: "Broker fault",
+  scope: "Scope",
+  verification: "Verification",
+  unknown: "Unclassified",
+};
+
+export interface WorkerFailureView {
+  readonly label: string;
+  readonly salvageable: boolean;
+  readonly evidence: string | null;
+}
+
+// first nonzero exit code is the one that failed the job
+function firstFailedExitCode(codes: ReadonlyArray<Option.Option<number>>): number | null {
+  for (const code of codes) {
+    const value = Option.getOrNull(code);
+    if (value !== null && value !== 0) return value;
+  }
+  return null;
+}
+
+// distinguishes "20 minutes of good work, env-failed verification" from "died
+// instantly, nothing done" — the evidence line keeps the proof next to the badge
+export function workerFailureView(job: WorkersJobSummary): WorkerFailureView | null {
+  const failureClass = Option.getOrNull(job.failureClass);
+  if (failureClass === null) return null;
+  const hasPatch = Option.getOrNull(job.hasPatch);
+  const parts: string[] = [];
+  if (hasPatch !== null) parts.push(hasPatch ? "patch available" : "no patch");
+  const changed = Option.getOrNull(job.changedFileCount);
+  if (changed !== null && changed > 0) parts.push(`${changed} file${changed === 1 ? "" : "s"}`);
+  const exitCode = firstFailedExitCode(job.verificationExitCodes);
+  if (exitCode !== null) parts.push(`verify exit ${exitCode}`);
+  return {
+    label: FAILURE_CLASS_LABELS[failureClass],
+    salvageable: hasPatch === true,
+    evidence: parts.length === 0 ? null : parts.join(" · "),
+  };
+}
+
+// run-level replacement for a bare "N failed": salvageable work first, then
+// zero-work causes, e.g. "10 patch available · 2 environment · 2 broker fault"
+export function workerRunFailureBreakdown(jobs: readonly WorkersJobSummary[]): string | null {
+  const failed = jobs.filter((job) => Option.isSome(job.failureClass));
+  if (failed.length === 0) return null;
+  let salvageable = 0;
+  const byClass = new Map<WorkersFailureClass, number>();
+  for (const job of failed) {
+    if (Option.getOrNull(job.hasPatch) === true) {
+      salvageable += 1;
+      continue;
+    }
+    const failureClass = Option.getOrElse(job.failureClass, () => "unknown" as const);
+    byClass.set(failureClass, (byClass.get(failureClass) ?? 0) + 1);
+  }
+  const parts: string[] = [];
+  if (salvageable > 0) parts.push(`${salvageable} patch available`);
+  for (const [failureClass, count] of byClass) {
+    parts.push(`${count} ${FAILURE_CLASS_LABELS[failureClass].toLowerCase()}`);
+  }
+  return parts.join(" · ");
+}
+
 export interface WorkerVerificationRunEntry {
   readonly key: string;
   readonly run: WorkersVerificationRun;
@@ -85,9 +152,9 @@ export function workerElapsedLabel(elapsedMs: Option.Option<number>): string | n
   return value === null ? null : formatDuration(value);
 }
 
-// queued & running are the states the broker is still moving; everything else is terminal
-export function workerJobIsLive(status: WorkersJobStatus): boolean {
-  return status === "running" || status === "queued";
+// unknown stays active so a newer broker status cannot make the UI claim work is finished
+export function workerJobIsActive(status: WorkersJobStatus): boolean {
+  return status === "running" || status === "queued" || status === "unknown";
 }
 
 export type WorkerJobElapsedFields = Pick<
@@ -116,9 +183,8 @@ function clockSpanLabel(spanMs: number): string {
 // start against the caller's clock instead of rendering a dash; the recorded span keeps
 // its measured precision while the clock-derived one stays minute-honest
 export function workerJobElapsedLabel(job: WorkerJobElapsedFields, nowMs: number): string | null {
-  const recorded = Option.getOrNull(job.elapsedMs);
-  const settled = recorded === null ? null : formatDuration(recorded);
-  if (!workerJobIsLive(job.status)) return settled;
+  const settled = workerElapsedLabel(job.elapsedMs);
+  if (!workerJobIsActive(job.status)) return settled;
 
   const start =
     timestampMs(Option.getOrNull(job.startedAt)) ?? timestampMs(Option.getOrNull(job.createdAt));
@@ -145,15 +211,15 @@ export function workerJobPresentation(
   const source =
     summary === null
       ? detail
-      : !workerJobIsLive(summary.status)
+      : !workerJobIsActive(summary.status)
         ? summary
-        : !workerJobIsLive(detail.status)
+        : !workerJobIsActive(detail.status)
           ? detail
           : summary;
 
   return {
     status: source.status,
-    live: workerJobIsLive(source.status),
+    live: workerJobIsActive(source.status),
     elapsedLabel: workerJobElapsedLabel(source, nowMs),
   };
 }
@@ -247,6 +313,7 @@ const RUN_CHIP_STATUSES = [
   "failed",
   "rejected",
   "cancelled",
+  "unknown",
 ] as const;
 
 export type WorkerRunCounts = {
@@ -266,16 +333,23 @@ export function workerRunStatusChips(counts: WorkerRunCounts): readonly WorkerRu
 // a stage group can span workflows, so its chips are counted off the grouped jobs
 // rather than looked up in the run's stage rollups
 export function workerStageCounts(jobs: readonly WorkersJobSummary[]): WorkerRunCounts {
-  const counts = { queued: 0, running: 0, completed: 0, failed: 0, rejected: 0, cancelled: 0 };
+  const counts = {
+    queued: 0,
+    running: 0,
+    completed: 0,
+    failed: 0,
+    rejected: 0,
+    cancelled: 0,
+    unknown: 0,
+  };
   for (const job of jobs) {
-    if (job.status === "unknown") continue;
     counts[job.status] += 1;
   }
   return counts;
 }
 
 export function workerRunIsSettled(counts: WorkerRunCounts): boolean {
-  return counts.queued === 0 && counts.running === 0;
+  return !RUN_CHIP_STATUSES.some((status) => workerJobIsActive(status) && counts[status] > 0);
 }
 
 // a settled run spans two recorded timestamps, so it keeps their measured precision; any

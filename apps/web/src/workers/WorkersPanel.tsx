@@ -1,7 +1,6 @@
 // apps/web/src/workers/WorkersPanel.tsx
 // read-only right-panel surface for worker-broker orchestration runs & jobs
 
-import { parseScopedThreadKey } from "@t3tools/client-runtime/environment";
 import type {
   EnvironmentId,
   WorkersJobDetail,
@@ -32,13 +31,12 @@ import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
 import { useNowMinute } from "~/hooks/useNowMinute";
 import { cn } from "~/lib/utils";
 import {
-  selectActiveRightPanelSurface,
-  useRightPanelStore,
-  type RightPanelSurface,
-} from "~/rightPanelStore";
+  workersActivityEnvironment,
+  workersEnvironment,
+  useWorkersRunDeepLink,
+} from "~/state/workers";
 import { formatDuration } from "~/session-logic";
 import { useEnvironmentQuery } from "~/state/query";
-import { workersActivityEnvironment, workersEnvironment } from "~/state/workers";
 import { formatRelativeTimeLabel } from "~/timestampFormat";
 
 import {
@@ -54,12 +52,14 @@ import {
   repoBasename,
   shortSha,
   sortWorkerRunsNewestFirst,
-  workerElapsedLabel,
+  workerFailureView,
+  workerJobElapsedLabel,
   workerJobPresentation,
   workerJobsHaveStages,
   workerModelLabel,
   workerPatchClipboard,
   workerPatchFileEntries,
+  workerRunFailureBreakdown,
   workerRunSpanLabel,
   workerRunStatusChips,
   workerStageCounts,
@@ -84,29 +84,6 @@ interface WorkersNav {
   readonly view: WorkersView;
   readonly runId: string | null;
   readonly jobId: string | null;
-}
-
-// the workers surface carries an optional run id for deep-links; the surface shape is
-// widened outside this panel, so read the field structurally instead of narrowing
-function surfaceRunId(surface: RightPanelSurface | null): string | null {
-  if (surface === null || surface.kind !== "workers") return null;
-  if (!("run" in surface)) return null;
-  const run = surface.run;
-  return typeof run === "string" && run.length > 0 ? run : null;
-}
-
-// the panel is mounted without a thread ref, so the deep-link is read off whichever
-// thread in this environment currently has the workers surface active
-function useWorkersRunDeepLink(environmentId: EnvironmentId): string | null {
-  return useRightPanelStore((state) => {
-    for (const threadKey of Object.keys(state.byThreadKey)) {
-      const ref = parseScopedThreadKey(threadKey);
-      if (ref === null || ref.environmentId !== environmentId) continue;
-      const run = surfaceRunId(selectActiveRightPanelSurface(state.byThreadKey, ref));
-      if (run !== null) return run;
-    }
-    return null;
-  });
 }
 
 function SectionHeading({ children, inline }: { children: ReactNode; inline?: boolean }) {
@@ -194,6 +171,33 @@ function ScopeViolationBadge({ count }: { count: number }) {
   );
 }
 
+// status chip plus, for terminal failures, the broker's failure class and the
+// salvageability evidence separating recoverable work from lost work
+function JobStatusBadges({ job }: { job: WorkersJobSummary }) {
+  const failure = workerFailureView(job);
+  const failureBadge =
+    failure === null ? null : (
+      <Badge size="sm" variant={failure.salvageable ? "warning" : "outline"}>
+        {failure.label}
+      </Badge>
+    );
+  return (
+    <span className="flex flex-wrap items-center gap-1">
+      <Badge size="sm" variant={workerStatusBadgeVariant(job.status)}>
+        {job.status}
+      </Badge>
+      {failureBadge === null || failure === null ? null : failure.evidence === null ? (
+        failureBadge
+      ) : (
+        <Tooltip>
+          <TooltipTrigger render={failureBadge} />
+          <TooltipPopup>{failure.evidence}</TooltipPopup>
+        </Tooltip>
+      )}
+    </span>
+  );
+}
+
 function JobMetadataBadges({ job }: { job: WorkersJobSummary }) {
   const workflow = Option.getOrNull(job.workflow);
   const stage = Option.getOrNull(job.stage);
@@ -256,13 +260,15 @@ function WorkersRunRow({
 
 function WorkersJobRow({
   job,
+  nowMs,
   onSelect,
 }: {
   job: WorkersJobSummary;
+  nowMs: number;
   onSelect: (jobId: string) => void;
 }) {
   const verification = workerVerificationView(job.verification);
-  const elapsed = workerElapsedLabel(job.elapsedMs);
+  const elapsed = workerJobElapsedLabel(job, nowMs);
   const changedFileCount = Option.getOrNull(job.changedFileCount);
 
   return (
@@ -283,9 +289,7 @@ function WorkersJobRow({
         <JobMetadataBadges job={job} />
       </TableCell>
       <TableCell className="px-2">
-        <Badge size="sm" variant={workerStatusBadgeVariant(job.status)}>
-          {job.status}
-        </Badge>
+        <JobStatusBadges job={job} />
       </TableCell>
       <TableCell className="px-2 text-muted-foreground">{job.provider}</TableCell>
       <TableCell className="px-2 text-muted-foreground">{job.mode}</TableCell>
@@ -310,12 +314,14 @@ function WorkersJobRow({
 // actually vary: model & effort
 function WorkersRunJobRow({
   job,
+  nowMs,
   onSelect,
 }: {
   job: WorkersJobSummary;
+  nowMs: number;
   onSelect: (jobId: string) => void;
 }) {
-  const elapsed = workerElapsedLabel(job.elapsedMs);
+  const elapsed = workerJobElapsedLabel(job, nowMs);
   const changedFileCount = Option.getOrNull(job.changedFileCount);
   const model = workerModelLabel(job);
 
@@ -334,9 +340,7 @@ function WorkersRunJobRow({
     >
       <TableCell className="px-3 font-mono">{job.jobId}</TableCell>
       <TableCell className="px-2">
-        <Badge size="sm" variant={workerStatusBadgeVariant(job.status)}>
-          {job.status}
-        </Badge>
+        <JobStatusBadges job={job} />
       </TableCell>
       <TableCell className="px-2 text-muted-foreground">{job.provider}</TableCell>
       <TableCell className="px-2 text-muted-foreground">{model ?? "—"}</TableCell>
@@ -373,6 +377,9 @@ function WorkersRunDetailView({
             <ScopeViolationBadge count={run.scopeViolationCount} />
           </div>
           <DetailField label="Jobs">{run.total.toLocaleString()}</DetailField>
+          {workerRunFailureBreakdown(jobs) === null ? null : (
+            <DetailField label="Failures">{workerRunFailureBreakdown(jobs)}</DetailField>
+          )}
           <DetailField label="Elapsed">{workerRunSpanLabel(run, nowMs) ?? "—"}</DetailField>
           <DetailField label="Started">{relativeOrDash(run.firstCreatedAt)}</DetailField>
           <DetailField label="Last update">{relativeOrDash(run.lastCompletedAt)}</DetailField>
@@ -416,7 +423,7 @@ function WorkersRunDetailView({
                 </TableCell>
               </TableRow>,
               ...group.jobs.map((job) => (
-                <WorkersRunJobRow key={job.jobId} job={job} onSelect={onSelectJob} />
+                <WorkersRunJobRow key={job.jobId} job={job} nowMs={nowMs} onSelect={onSelectJob} />
               )),
             ])}
           </TableBody>
@@ -775,9 +782,7 @@ function WorkersJobDetailView({
 
       <DetailSection title="Run">
         <DetailField label="Status">
-          <Badge size="sm" variant={workerStatusBadgeVariant(presentation.status)}>
-            {presentation.status}
-          </Badge>
+          <JobStatusBadges job={job} />
         </DetailField>
         <DetailField label="Provider">{job.provider}</DetailField>
         <DetailField label="Mode">{job.mode}</DetailField>
@@ -827,18 +832,23 @@ function WorkersJobDetailView({
               const exitCode = Option.getOrNull(entry.exitCode);
               const runElapsed = Option.getOrNull(entry.elapsedMs);
               const runFailed = entry.timedOut || (exitCode !== null && exitCode !== 0);
+              const runUnknown = !entry.timedOut && exitCode === null;
               return (
                 <li key={key} className="text-xs">
                   <div
                     className={cn(
                       "break-all font-mono",
-                      runFailed ? "text-destructive" : "text-foreground",
+                      runFailed
+                        ? "text-destructive"
+                        : runUnknown
+                          ? "text-muted-foreground"
+                          : "text-foreground",
                     )}
                   >
                     {entry.command}
                   </div>
                   <div className="mt-0.5 text-muted-foreground">
-                    {`exit ${exitCode ?? "—"}`}
+                    {exitCode === null ? "exit unknown" : `exit ${exitCode}`}
                     {runElapsed === null ? "" : ` · ${formatDuration(runElapsed)}`}
                     {entry.timedOut ? " · timed out" : ""}
                   </div>
@@ -912,18 +922,22 @@ function ViewToggle({
 }
 
 export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
-  const deepLinkRun = useWorkersRunDeepLink(environmentId);
+  const deepLink = useWorkersRunDeepLink(environmentId);
+  const deepLinkRun = deepLink.runId;
   const [nav, setNav] = useState<WorkersNav>(() =>
     deepLinkRun === null
       ? { view: "runs", runId: null, jobId: null }
       : { view: "runs", runId: deepLinkRun, jobId: null },
   );
-  // the deep-link wins whenever the surface's run changes; local navigation afterwards
-  // stays put because the applied value only moves with the surface
-  const [appliedDeepLink, setAppliedDeepLink] = useState<string | null>(deepLinkRun);
-  if (appliedDeepLink !== deepLinkRun) {
-    setAppliedDeepLink(deepLinkRun);
-    if (deepLinkRun !== null) setNav({ view: "runs", runId: deepLinkRun, jobId: null });
+  // the deep-link resets when its owning thread or pinned run changes; local navigation
+  // afterwards stays put because the applied identity only moves with that surface
+  const [appliedDeepLink, setAppliedDeepLink] = useState(deepLink);
+  if (
+    appliedDeepLink.threadKey !== deepLink.threadKey ||
+    appliedDeepLink.runId !== deepLink.runId
+  ) {
+    setAppliedDeepLink(deepLink);
+    setNav({ view: "runs", runId: deepLinkRun, jobId: null });
   }
 
   const selectedRunId = nav.runId;
@@ -1125,6 +1139,8 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
                 </EmptyDescription>
               </EmptyHeader>
             </Empty>
+          ) : runsError !== null && runs.length === 0 ? (
+            <div className="p-4 text-xs leading-relaxed text-destructive">{runsError.message}</div>
           ) : runs.length === 0 ? (
             <div className="p-4 text-xs leading-relaxed text-muted-foreground">
               No orchestration runs recorded yet.
@@ -1154,6 +1170,8 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
               </EmptyDescription>
             </EmptyHeader>
           </Empty>
+        ) : listError !== null && jobs.length === 0 ? (
+          <div className="p-4 text-xs leading-relaxed text-destructive">{listError.message}</div>
         ) : jobs.length === 0 ? (
           <div className="p-4 text-xs leading-relaxed text-muted-foreground">
             No worker jobs recorded yet.
@@ -1181,7 +1199,7 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
               <TableBody>
                 {!workerJobsHaveStages(jobs)
                   ? jobs.map((job) => (
-                      <WorkersJobRow key={job.jobId} job={job} onSelect={selectJob} />
+                      <WorkersJobRow key={job.jobId} job={job} nowMs={nowMs} onSelect={selectJob} />
                     ))
                   : workerStageGroups(jobs).flatMap((group) => [
                       <TableRow key={`group:${group.key}`} className="hover:bg-transparent">
@@ -1202,7 +1220,12 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
                         </TableCell>
                       </TableRow>,
                       ...group.jobs.map((job) => (
-                        <WorkersJobRow key={job.jobId} job={job} onSelect={selectJob} />
+                        <WorkersJobRow
+                          key={job.jobId}
+                          job={job}
+                          nowMs={nowMs}
+                          onSelect={selectJob}
+                        />
                       )),
                     ])}
               </TableBody>
