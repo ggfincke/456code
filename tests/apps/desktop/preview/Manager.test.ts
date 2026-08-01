@@ -782,7 +782,7 @@ describe("PreviewManager", () => {
             },
           });
         }
-        fromId.mockImplementation((id: number) => webviews.get(id) as never);
+        fromId.mockImplementation((id?: number) => webviews.get(id as number) as never);
 
         yield* manager.createTab("tab_1");
         yield* manager.createTab("tab_2");
