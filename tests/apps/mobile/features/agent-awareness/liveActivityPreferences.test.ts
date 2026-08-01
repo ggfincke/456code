@@ -1,6 +1,11 @@
+// tests/apps/mobile/features/agent-awareness/liveActivityPreferences.test.ts
+// verifies ordered Live Activity preference updates and rollback behavior
+
 import { beforeEach, vi } from "vite-plus/test";
 import { describe, expect, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
 import type { EnvironmentId } from "@t3tools/contracts";
 import { ManagedRelay } from "@t3tools/client-runtime/relay";
 import * as Layer from "effect/Layer";
@@ -184,4 +189,49 @@ describe("liveActivityPreferences", () => {
       });
     }).pipe(Effect.provide(testLayer));
   });
+
+  it.effect("commits concurrent preference intents in call order", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const firstUpdateStarted = yield* Deferred.make<void>();
+        const releaseFirstUpdate = yield* Deferred.make<void>();
+        vi.mocked(updateAgentAwarenessRegistrationPreferences).mockImplementation(
+          ({ liveActivitiesEnabled }) =>
+            liveActivitiesEnabled
+              ? Deferred.succeed(firstUpdateStarted, undefined).pipe(
+                  Effect.andThen(Deferred.await(releaseFirstUpdate)),
+                )
+              : Effect.void,
+        );
+
+        const olderIntent = yield* setLiveActivityUpdatesEnabled({
+          enabled: true,
+          previousEnabled: false,
+          clerkToken: null,
+          connections: [],
+        }).pipe(Effect.forkScoped);
+        yield* Deferred.await(firstUpdateStarted);
+
+        const newerIntent = yield* setLiveActivityUpdatesEnabled({
+          enabled: false,
+          previousEnabled: true,
+          clerkToken: null,
+          connections: [],
+        }).pipe(Effect.forkScoped);
+        yield* Effect.yieldNow;
+
+        expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledTimes(1);
+        yield* Deferred.succeed(releaseFirstUpdate, undefined);
+        yield* Fiber.join(olderIntent);
+        yield* Fiber.join(newerIntent);
+
+        expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenNthCalledWith(1, {
+          liveActivitiesEnabled: true,
+        });
+        expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenNthCalledWith(2, {
+          liveActivitiesEnabled: false,
+        });
+      }),
+    ).pipe(Effect.provide(testLayer)),
+  );
 });

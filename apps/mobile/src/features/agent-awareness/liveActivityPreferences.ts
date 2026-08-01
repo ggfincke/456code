@@ -1,16 +1,30 @@
+// apps/mobile/src/features/agent-awareness/liveActivityPreferences.ts
+// sequences Live Activity preference updates across device and relay registrations
+
 import * as Effect from "effect/Effect";
+import * as Semaphore from "effect/Semaphore";
 
 import type { SavedRemoteConnection } from "../../lib/connection";
+import { SerializedAsyncQueue } from "../../lib/serialized-async-queue";
 import { linkEnvironmentToCloudWithPreference } from "../cloud/linkEnvironment";
 import { updateAgentAwarenessRegistrationPreferences } from "./remoteRegistration";
 
-export const setLiveActivityUpdatesEnabled = Effect.fn("setLiveActivityUpdatesEnabled")(
-  function* (input: {
-    readonly enabled: boolean;
-    readonly previousEnabled: boolean;
-    readonly clerkToken: string | null;
-    readonly connections: ReadonlyArray<SavedRemoteConnection>;
-  }) {
+interface LiveActivityPreferenceUpdate {
+  readonly enabled: boolean;
+  readonly previousEnabled: boolean;
+  readonly clerkToken: string | null;
+  readonly connections: ReadonlyArray<SavedRemoteConnection>;
+}
+
+const liveActivityPreferenceLock = Semaphore.makeUnsafe(1);
+const liveActivityPreferenceIntentQueue = new SerializedAsyncQueue();
+
+export function runLiveActivityPreferenceIntent<T>(operation: () => Promise<T>): Promise<T> {
+  return liveActivityPreferenceIntentQueue.run(operation);
+}
+
+const setLiveActivityUpdatesEnabledUnlocked = Effect.fn("setLiveActivityUpdatesEnabledUnlocked")(
+  function* (input: LiveActivityPreferenceUpdate) {
     const linkedConnections = input.connections.filter(
       (connection) => connection.bearerToken !== null,
     );
@@ -71,3 +85,9 @@ export const setLiveActivityUpdatesEnabled = Effect.fn("setLiveActivityUpdatesEn
     );
   },
 );
+
+export const setLiveActivityUpdatesEnabled = Effect.fn("setLiveActivityUpdatesEnabled")(function* (
+  input: LiveActivityPreferenceUpdate,
+) {
+  yield* liveActivityPreferenceLock.withPermit(setLiveActivityUpdatesEnabledUnlocked(input));
+});

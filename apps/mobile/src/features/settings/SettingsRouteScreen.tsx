@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/SettingsRouteScreen.tsx
+// renders mobile settings and coordinates cloud preference updates
+
 import { useAuth, useUser } from "@clerk/expo";
 import { useAtomSet, useAtomValue } from "@effect/atom-react";
 import Constants from "expo-constants";
@@ -8,7 +11,7 @@ import { NativeStackScreenOptions } from "../../native/StackHeader";
 import { SymbolView } from "../../components/AppSymbol";
 import * as Effect from "effect/Effect";
 import { AsyncResult } from "effect/unstable/reactivity";
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Alert, Linking, Platform, ScrollView, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -22,7 +25,10 @@ import {
 import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
 import { AppText as Text } from "../../components/AppText";
 import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
-import { setLiveActivityUpdatesEnabled } from "../agent-awareness/liveActivityPreferences";
+import {
+  runLiveActivityPreferenceIntent,
+  setLiveActivityUpdatesEnabled,
+} from "../agent-awareness/liveActivityPreferences";
 import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
 import {
   getAgentAwarenessRegistrationStatus,
@@ -147,10 +153,9 @@ function ConfiguredSettingsRouteScreen() {
   const { savedConnectionsById } = useSavedRemoteConnections();
   const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
   const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
+  const liveActivityIntentRevisionRef = useRef(0);
+  const pendingLiveActivityIntentRef = useRef<number | null>(null);
   const deviceRegistered = useDeviceRegistered();
-  const liveActivitiesPreferenceEnabled = AsyncResult.isSuccess(preferencesResult)
-    ? preferencesResult.value.liveActivitiesEnabled !== false
-    : true;
 
   const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
   const environmentCount = connections.length;
@@ -179,6 +184,9 @@ function ConfiguredSettingsRouteScreen() {
   }, [refreshNotifications]);
 
   useEffect(() => {
+    if (pendingLiveActivityIntentRef.current !== null) {
+      return;
+    }
     if (!isLoaded) {
       setLiveActivityStatus("checking");
       return;
@@ -200,6 +208,18 @@ function ConfiguredSettingsRouteScreen() {
       preferencesResult.value.liveActivitiesEnabled === false ? "disabled" : "enabled",
     );
   }, [isLoaded, isSignedIn, preferencesResult]);
+
+  const finishLiveActivityIntent = useCallback(
+    (intentRevision: number, status: LiveActivityStatus): boolean => {
+      if (liveActivityIntentRevisionRef.current !== intentRevision) {
+        return false;
+      }
+      pendingLiveActivityIntentRef.current = null;
+      setLiveActivityStatus(status);
+      return true;
+    },
+    [],
+  );
 
   const requestNotifications = useCallback(async () => {
     const result = await settleAsyncResult(() =>
@@ -275,79 +295,84 @@ function ConfiguredSettingsRouteScreen() {
     );
   }, [navigation]);
 
-  const linkEnvironments = useCallback(async () => {
-    if (!isSignedIn) {
-      promptSignIn();
-      return;
-    }
+  const linkEnvironments = useCallback(
+    async (intentRevision: number) => {
+      if (!isSignedIn) {
+        finishLiveActivityIntent(intentRevision, "signed-out");
+        promptSignIn();
+        return;
+      }
 
-    setLiveActivityStatus("linking");
-    const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
-    if (tokenResult._tag === "Failure") {
-      setLiveActivityStatus("disabled");
-      const error = squashAtomCommandFailure(tokenResult);
-      Alert.alert(
-        "Live Activities unavailable",
-        error instanceof Error ? error.message : "Could not enable Live Activity updates.",
-      );
-      return;
-    }
-    if (!tokenResult.value) {
-      promptSignIn();
-      setLiveActivityStatus("signed-out");
-      return;
-    }
-
-    const updateResult = await settleAsyncResult(() =>
-      runtime.runPromiseExit(
-        setLiveActivityUpdatesEnabled({
-          enabled: true,
-          previousEnabled: liveActivitiesPreferenceEnabled,
-          clerkToken: tokenResult.value,
-          connections,
-        }),
-      ),
-    );
-    if (updateResult._tag === "Failure") {
-      setLiveActivityStatus("disabled");
-      if (!isAtomCommandInterrupted(updateResult)) {
-        const error = squashAtomCommandFailure(updateResult);
+      const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
+      if (tokenResult._tag === "Failure") {
+        finishLiveActivityIntent(intentRevision, "disabled");
+        const error = squashAtomCommandFailure(tokenResult);
         Alert.alert(
           "Live Activities unavailable",
           error instanceof Error ? error.message : "Could not enable Live Activity updates.",
         );
+        return;
       }
-      return;
-    }
+      if (!tokenResult.value) {
+        promptSignIn();
+        finishLiveActivityIntent(intentRevision, "signed-out");
+        return;
+      }
 
-    savePreferences({ liveActivitiesEnabled: true });
-    refreshManagedRelayEnvironments();
-    setLiveActivityStatus("enabled");
-    // The environment link can succeed while this device's own registration
-    // (the push-to-start token the relay needs) has not — don't claim Live
-    // Activities are live until the device is actually registered.
-    if (getAgentAwarenessRegistrationStatus() === "registered") {
-      Alert.alert(
-        "Live Activities enabled",
-        environmentCount > 0
-          ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for Live Activity updates.`
-          : "Live Activity updates are enabled. Add an environment to start receiving updates.",
+      const updateResult = await settleAsyncResult(() =>
+        runtime.runPromiseExit(
+          setLiveActivityUpdatesEnabled({
+            enabled: true,
+            previousEnabled: false,
+            clerkToken: tokenResult.value,
+            connections,
+          }),
+        ),
       );
-    } else {
-      Alert.alert(
-        "Couldn't finish enabling Live Activities",
-        "This device could not be registered with the cloud relay, so Live Activities won't appear yet. They'll start once registration succeeds.",
-      );
-    }
-  }, [
-    connections,
-    environmentCount,
-    getToken,
-    isSignedIn,
-    liveActivitiesPreferenceEnabled,
-    promptSignIn,
-    savePreferences,
-  ]);
+      if (updateResult._tag === "Failure") {
+        finishLiveActivityIntent(intentRevision, "disabled");
+        if (!isAtomCommandInterrupted(updateResult)) {
+          const error = squashAtomCommandFailure(updateResult);
+          Alert.alert(
+            "Live Activities unavailable",
+            error instanceof Error ? error.message : "Could not enable Live Activity updates.",
+          );
+        }
+        return;
+      }
+
+      savePreferences({ liveActivitiesEnabled: true });
+      refreshManagedRelayEnvironments();
+      if (!finishLiveActivityIntent(intentRevision, "enabled")) {
+        return;
+      }
+      // The environment link can succeed while this device's own registration
+      // (the push-to-start token the relay needs) has not — don't claim Live
+      // Activities are live until the device is actually registered.
+      if (getAgentAwarenessRegistrationStatus() === "registered") {
+        Alert.alert(
+          "Live Activities enabled",
+          environmentCount > 0
+            ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for Live Activity updates.`
+            : "Live Activity updates are enabled. Add an environment to start receiving updates.",
+        );
+      } else {
+        Alert.alert(
+          "Couldn't finish enabling Live Activities",
+          "This device could not be registered with the cloud relay, so Live Activities won't appear yet. They'll start once registration succeeds.",
+        );
+      }
+    },
+    [
+      connections,
+      environmentCount,
+      finishLiveActivityIntent,
+      getToken,
+      isSignedIn,
+      promptSignIn,
+      savePreferences,
+    ],
+  );
 
   const handleDeviceNotificationsChange = useCallback(
     (enabled: boolean) => {
@@ -371,14 +396,18 @@ function ConfiguredSettingsRouteScreen() {
   const handleLiveActivitiesChange = useCallback(
     (enabled: boolean) => {
       if (!enabled) {
+        const intentRevision = liveActivityIntentRevisionRef.current + 1;
+        liveActivityIntentRevisionRef.current = intentRevision;
+        pendingLiveActivityIntentRef.current = intentRevision;
         setLiveActivityStatus("disabled");
-        void (async () => {
+        void runLiveActivityPreferenceIntent(async () => {
           let token: string | null = null;
           if (isSignedIn) {
             const tokenResult = await settlePromise(() =>
               getToken(resolveRelayClerkTokenOptions()),
             );
             if (tokenResult._tag === "Failure") {
+              finishLiveActivityIntent(intentRevision, "enabled");
               reportAtomCommandResult(tokenResult, {
                 label: "live activity disable token lookup",
               });
@@ -391,14 +420,14 @@ function ConfiguredSettingsRouteScreen() {
             runtime.runPromiseExit(
               setLiveActivityUpdatesEnabled({
                 enabled: false,
-                previousEnabled: liveActivitiesPreferenceEnabled,
+                previousEnabled: true,
                 clerkToken: token,
                 connections,
               }),
             ),
           );
           if (updateResult._tag === "Failure") {
-            setLiveActivityStatus("enabled");
+            finishLiveActivityIntent(intentRevision, "enabled");
             reportAtomCommandResult(updateResult, {
               label: "live activity disable",
             });
@@ -406,7 +435,8 @@ function ConfiguredSettingsRouteScreen() {
           }
           savePreferences({ liveActivitiesEnabled: false });
           refreshManagedRelayEnvironments();
-        })();
+          finishLiveActivityIntent(intentRevision, "disabled");
+        });
         return;
       }
 
@@ -415,14 +445,18 @@ function ConfiguredSettingsRouteScreen() {
         return;
       }
 
-      void linkEnvironments();
+      const intentRevision = liveActivityIntentRevisionRef.current + 1;
+      liveActivityIntentRevisionRef.current = intentRevision;
+      pendingLiveActivityIntentRef.current = intentRevision;
+      setLiveActivityStatus("linking");
+      void runLiveActivityPreferenceIntent(() => linkEnvironments(intentRevision));
     },
     [
       connections,
+      finishLiveActivityIntent,
       getToken,
       isSignedIn,
       linkEnvironments,
-      liveActivitiesPreferenceEnabled,
       promptSignIn,
       savePreferences,
     ],
