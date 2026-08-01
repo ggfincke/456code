@@ -77,8 +77,10 @@ import {
   serializeTableElementToCsv,
   serializeTableElementToMarkdown,
 } from "../markdown-clipboard";
+import { remarkLinkInlineCodePaths } from "../markdown-inline-code-paths";
 import { remarkNormalizeListItemIndentation } from "../markdown-list-indentation";
 import {
+  looksLikeInlineCodeFilePath,
   normalizeMarkdownLinkDestination,
   resolveMarkdownFileLinkMeta,
   rewriteMarkdownFileUriHref,
@@ -177,6 +179,7 @@ const CHAT_MARKDOWN_SANITIZE_SCHEMA = {
     ...defaultSchema.attributes,
     "*": (defaultSchema.attributes?.["*"] ?? []).filter((attribute) => attribute !== "title"),
     code: [...(defaultSchema.attributes?.code ?? []), "dataCodeMeta"],
+    a: [...(defaultSchema.attributes?.a ?? []), "dataFilePathChip"],
   },
   protocols: {
     ...defaultSchema.protocols,
@@ -188,6 +191,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS = [
   remarkGfm,
   remarkNormalizeListItemIndentation,
   remarkPreserveCodeMeta,
+  remarkLinkInlineCodePaths,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
 const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
@@ -195,6 +199,7 @@ const CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS = [
   remarkNormalizeListItemIndentation,
   remarkBreaks,
   remarkPreserveCodeMeta,
+  remarkLinkInlineCodePaths,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
 const CHAT_MARKDOWN_REHYPE_PLUGINS = [
@@ -844,6 +849,24 @@ function extractMarkdownLinkHrefs(text: string): string[] {
   return hrefs;
 }
 
+const MARKDOWN_INLINE_CODE_PATTERN = /(`+)([^`\n]+?)\1/g;
+
+function extractInlineCodeFilePaths(text: string): string[] {
+  const paths: string[] = [];
+  for (const match of text.matchAll(MARKDOWN_INLINE_CODE_PATTERN)) {
+    const value = match[2]?.trim();
+    if (!value || !looksLikeInlineCodeFilePath(value)) continue;
+    paths.push(value);
+  }
+  return paths;
+}
+
+function isFilePathChipNode(node: unknown): boolean {
+  if (!node || typeof node !== "object" || !("properties" in node)) return false;
+  const properties = (node as { properties?: Record<string, unknown> }).properties;
+  return properties?.dataFilePathChip === "true";
+}
+
 function normalizeMarkdownLinkHrefKey(href: string): string {
   const normalizedHref = normalizeMarkdownLinkDestination(href);
   return rewriteMarkdownFileUriHref(normalizedHref) ?? normalizedHref;
@@ -1290,7 +1313,8 @@ function ChatMarkdown({
       string,
       NonNullable<ReturnType<typeof resolveMarkdownFileLinkMeta>>
     >();
-    for (const href of extractMarkdownLinkHrefs(text)) {
+    const hrefs = [...extractMarkdownLinkHrefs(text), ...extractInlineCodeFilePaths(text)];
+    for (const href of hrefs) {
       const normalizedHref = normalizeMarkdownLinkHrefKey(href);
       if (metaByHref.has(normalizedHref)) continue;
       const meta = resolveMarkdownFileLinkMeta(normalizedHref, cwd);
@@ -1405,7 +1429,13 @@ function ChatMarkdown({
       a({ node, href, children, ...props }) {
         const normalizedHref = href ? normalizeMarkdownLinkHrefKey(href) : "";
         const fileLinkMeta = normalizedHref ? markdownFileLinkMetaByHref.get(normalizedHref) : null;
+        const isFilePathChip = isFilePathChipNode(node);
         if (!fileLinkMeta) {
+          // inline code we promoted to an anchor but could not resolve (no cwd)
+          // must not stay a navigable link — put the code span back
+          if (isFilePathChip) {
+            return <code>{children}</code>;
+          }
           const faviconHost = resolveExternalWebLinkHost(href);
           const isSameDocumentLink = href?.startsWith("#") ?? false;
           const onClick = props.onClick;
@@ -1494,7 +1524,11 @@ function ChatMarkdown({
             workspaceRelativePath={fileLinkMeta.workspaceRelativePath}
             line={fileLinkMeta.line}
             label={labelParts.join(" · ")}
-            copyMarkdown={`[${fileLinkMeta.basename}](${normalizedHref})`}
+            copyMarkdown={
+              isFilePathChip
+                ? `\`${normalizedHref}\``
+                : `[${fileLinkMeta.basename}](${normalizedHref})`
+            }
             theme={resolvedTheme}
             threadRef={threadRef}
             onOpen={openInPreferredEditor}

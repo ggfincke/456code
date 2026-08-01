@@ -188,6 +188,23 @@ function workspaceRelativePath(path: string, workspaceRoot: string | undefined):
   return normalizedPath.slice(normalizedRoot.length + 1);
 }
 
+const INLINE_CODE_PATH_PATTERN = /^(?:~\/|\.{1,2}\/|\/)?[A-Za-z0-9._@+-]+(?:\/[A-Za-z0-9._@+-]+)*$/;
+const INLINE_CODE_BASENAME_PATTERN = /^.+\.[A-Za-z][A-Za-z0-9_-]{0,11}$/;
+const MAX_INLINE_CODE_PATH_LENGTH = 320;
+
+/**
+ * Inline code only reads as a file path when it is unmistakable: a directory
+ * separator plus a real file extension. Keeps `node.type`, `failure_class`, and
+ * version-ish spans rendering as plain code.
+ */
+export function looksLikeInlineCodeFilePath(value: string): boolean {
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_INLINE_CODE_PATH_LENGTH) return false;
+  const { path } = splitPathAndPosition(trimmed);
+  if (!path.includes("/") || !INLINE_CODE_PATH_PATTERN.test(path)) return false;
+  return INLINE_CODE_BASENAME_PATTERN.test(path.slice(path.lastIndexOf("/") + 1));
+}
+
 export function resolveMarkdownFileLinkMeta(
   href: string | undefined,
   cwd?: string,
