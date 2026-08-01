@@ -161,7 +161,7 @@ it("keeps a missing Codex rate-limit response non-fatal to account status", () =
 it.effect("keeps the Codex snapshot ready when the usage request stalls", () =>
   Effect.gen(function* () {
     const { rateLimitsRequested, spawner } = yield* makeStalledUsageSpawner();
-    const settings = Schema.decodeSync(CodexSettings)({ binaryPath: "codex" });
+    const settings = yield* Schema.decodeEffect(CodexSettings)({ binaryPath: "codex" });
     const statusFiber = yield* checkCodexProviderStatus(settings).pipe(
       Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
       Effect.forkScoped,

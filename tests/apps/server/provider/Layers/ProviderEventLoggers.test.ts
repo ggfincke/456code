@@ -1,11 +1,10 @@
 // tests/apps/server/provider/Layers/ProviderEventLoggers.test.ts
 // verifies shared rotating sink ownership for live provider event loggers
-import * as NodeFS from "node:fs";
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
-
+import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import * as Effect from "effect/Effect";
+import * as FileSystem from "effect/FileSystem";
+import * as Path from "effect/Path";
 import { vi } from "vite-plus/test";
 
 const sinkState = vi.hoisted(() => ({
@@ -35,10 +34,15 @@ it.effect("uses one rotating sink for native and canonical records in the same f
   Effect.gen(function* () {
     sinkState.paths.length = 0;
     sinkState.chunks.length = 0;
-    const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-owner-"));
-    const providerEventLogPath = NodePath.join(tempDir, "provider-events.ndjson");
+    const fileSystem = yield* FileSystem.FileSystem;
+    const path = yield* Path.Path;
+    // scoped, so the temp dir is released without a try/finally around the asserts
+    const tempDir = yield* fileSystem.makeTempDirectoryScoped({
+      prefix: "t3-provider-log-owner-",
+    });
+    const providerEventLogPath = path.join(tempDir, "provider-events.ndjson");
 
-    try {
+    {
       yield* Effect.scoped(
         Effect.gen(function* () {
           const loggers = yield* ProviderEventLoggers;
@@ -58,10 +62,8 @@ it.effect("uses one rotating sink for native and canonical records in the same f
         ),
       );
 
-      assert.deepEqual(sinkState.paths, [NodePath.join(tempDir, "_global.log")]);
+      assert.deepEqual(sinkState.paths, [path.join(tempDir, "_global.log")]);
       assert.equal(sinkState.chunks.length, 1);
-    } finally {
-      NodeFS.rmSync(tempDir, { recursive: true, force: true });
     }
-  }),
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped),
 );
