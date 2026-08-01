@@ -45,7 +45,7 @@ export function truncateUtf8(value: string, maxBytes: number): string {
   const byteBudget = maxBytes - textEncoder.encode(suffix).byteLength;
   let byteLength = 0;
   let truncatedEnd = 0;
-  for (let index = 0; index < value.length; ) {
+  for (let index = 0; index < value.length;) {
     const codePoint = value.codePointAt(index)!;
     const codeUnits = codePoint > 0xffff ? 2 : 1;
     byteLength += codePoint <= 0x7f ? 1 : codePoint <= 0x7ff ? 2 : codePoint <= 0xffff ? 3 : 4;

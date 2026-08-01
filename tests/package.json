@@ -4,7 +4,7 @@
   "description": "Resolution root for the repo-wide tests/ tree. Declares every dependency the extracted test files import; owns no source.",
   "type": "module",
   "devDependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.3.170",
+    "@anthropic-ai/claude-agent-sdk": "^0.3.220",
     "@clerk/expo": "catalog:",
     "@effect/platform-node": "catalog:",
     "@effect/vitest": "catalog:",
