@@ -313,7 +313,7 @@ function parseChangedPaths(stdout: Buffer): {
     | { readonly _tag: "rename"; readonly fromPath: string; readonly toPath: string }
   > = [];
   const unsupportedStatuses: string[] = [];
-  for (let index = 0; index < fields.length; ) {
+  for (let index = 0; index < fields.length;) {
     const status = fields[index++];
     if (!status) break;
     if (status.startsWith("R") || status.startsWith("C")) {
