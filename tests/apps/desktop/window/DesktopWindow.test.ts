@@ -1,3 +1,5 @@
+// tests/apps/desktop/window/DesktopWindow.test.ts
+// verifies desktop window creation, activation, and persistence behavior
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
 import * as Deferred from "effect/Deferred";
@@ -189,6 +191,7 @@ function makeTestLayer(input: {
     bounds: DesktopAppSettings.DesktopWindowBounds,
   ) => Effect.Effect<void>;
   readonly openedExternalUrls?: unknown[];
+  readonly beforeWindowCreate?: Effect.Effect<void>;
 }) {
   let desktopSettings = input.desktopSettings ?? DesktopAppSettings.DEFAULT_DESKTOP_SETTINGS;
   const desktopAppSettingsLayer = Layer.succeed(DesktopAppSettings.DesktopAppSettings, {
@@ -226,12 +229,12 @@ function makeTestLayer(input: {
 
   const electronWindowLayer = Layer.succeed(ElectronWindow.ElectronWindow, {
     create: (options) =>
-      Effect.sync(() => {
+      Effect.gen(function* () {
+        yield* input.beforeWindowCreate ?? Effect.void;
         input.createdWindowOptions?.push(options);
-      }).pipe(
-        Effect.andThen(Ref.update(input.createCount, (count) => count + 1)),
-        Effect.as(input.window),
-      ),
+        yield* Ref.update(input.createCount, (count) => count + 1);
+        return input.window;
+      }),
     main: Ref.get(input.mainWindow),
     currentMainOrFirst: Ref.get(input.mainWindow),
     focusedMainOrFirst: Ref.get(input.mainWindow),
@@ -435,6 +438,41 @@ describe("DesktopWindow", () => {
         assert.deepEqual(fakeWindow.setAutoHideCursor.mock.calls, [[false]]);
         assert.deepEqual(fakeWindow.loadURL.mock.calls[0], ["code456-dev://app/"]);
         assert.equal(fakeWindow.openDevTools.mock.calls.length, 1);
+      }).pipe(Effect.provide(layer));
+    }),
+  );
+
+  it.effect("serializes backend readiness and activation window creation", () =>
+    Effect.gen(function* () {
+      const fakeWindow = makeFakeBrowserWindow();
+      const createCount = yield* Ref.make(0);
+      const mainWindow = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none());
+      const createEntered = yield* Deferred.make<void>();
+      const releaseCreate = yield* Deferred.make<void>();
+      const layer = makeTestLayer({
+        window: fakeWindow.window,
+        createCount,
+        mainWindow,
+        beforeWindowCreate: Deferred.succeed(createEntered, void 0).pipe(
+          Effect.andThen(Deferred.await(releaseCreate)),
+          Effect.asVoid,
+        ),
+      });
+
+      yield* Effect.gen(function* () {
+        const desktopWindow = yield* DesktopWindow.DesktopWindow;
+        const readyFiber = yield* desktopWindow
+          .handleBackendReady(new URL("http://127.0.0.1:3773"))
+          .pipe(Effect.forkChild);
+        yield* Deferred.await(createEntered);
+        const activateFiber = yield* desktopWindow.activate.pipe(Effect.forkChild);
+
+        yield* Deferred.succeed(releaseCreate, void 0);
+        yield* Fiber.join(readyFiber);
+        yield* Fiber.join(activateFiber);
+
+        assert.equal(yield* Ref.get(createCount), 1);
+        assert.isTrue(Option.isSome(yield* Ref.get(mainWindow)));
       }).pipe(Effect.provide(layer));
     }),
   );

@@ -1,3 +1,5 @@
+// apps/desktop/src/updates/DesktopUpdates.ts
+// manages desktop update checks, downloads, installation, and recovery
 import {
   DesktopUpdateChannelSchema,
   type DesktopRuntimeInfo,
@@ -451,6 +453,24 @@ export const make = Effect.gen(function* () {
     { discard: true },
   );
 
+  const recoverFailedInstall = resetInstallAction.pipe(
+    Effect.andThen(
+      pool.list.pipe(
+        Effect.flatMap((instances) =>
+          Effect.forEach(instances, (instance) => instance.start, {
+            concurrency: "unbounded",
+            discard: true,
+          }),
+        ),
+      ),
+    ),
+    Effect.catchCause((cause) =>
+      logUpdaterError("failed to recover desktop after update installation failure", {
+        cause: Cause.pretty(cause),
+      }),
+    ),
+  );
+
   const installDownloadedUpdate = Effect.gen(function* () {
     const state = yield* Ref.get(updateStateRef);
     if (
@@ -488,7 +508,7 @@ export const make = Effect.gen(function* () {
       Effect.catchTags({
         ElectronUpdaterQuitAndInstallError: Effect.fn("desktop.updates.handleInstallFailure")(
           function* (error) {
-            yield* resetInstallAction;
+            yield* recoverFailedInstall;
             yield* updateState((current) =>
               reduceDesktopUpdateStateOnInstallFailure(current, error.message),
             );
@@ -502,13 +522,13 @@ export const make = Effect.gen(function* () {
           },
         ),
       }),
-      Effect.onInterrupt(() => resetInstallAction),
+      Effect.onInterrupt(() => recoverFailedInstall),
       Effect.catchCause((cause) =>
         Effect.gen(function* () {
           if (Cause.hasInterruptsOnly(cause)) {
             return yield* Effect.failCause(cause);
           }
-          yield* resetInstallAction;
+          yield* recoverFailedInstall;
           const error = new DesktopUpdateUnexpectedActionError({ action: "install", cause });
           yield* updateState((current) =>
             reduceDesktopUpdateStateOnInstallFailure(current, error.message),

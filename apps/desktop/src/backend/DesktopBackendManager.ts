@@ -1,3 +1,6 @@
+// apps/desktop/src/backend/DesktopBackendManager.ts
+// manages one restartable desktop backend process
+
 // Per-instance backend factory. Replaces the legacy singleton
 // `DesktopBackendManager` Context.Service: each call to
 // `makeBackendInstance(spec)` constructs an isolated backend lifecycle —
@@ -144,7 +147,10 @@ class BackendProcessSpawnError extends Schema.TaggedErrorClass<BackendProcessSpa
   }
 }
 
-type BackendProcessError = BackendProcessBootstrapEncodeError | BackendProcessSpawnError;
+type BackendProcessError =
+  | BackendProcessBootstrapEncodeError
+  | BackendProcessSpawnError
+  | BackendTimeoutError;
 
 interface RunBackendProcessOptions extends DesktopBackendStartConfig {
   readonly readinessTimeout?: Duration.Duration;
@@ -368,16 +374,21 @@ const runBackendProcess = Effect.fn("runBackendProcess")(function* (
     yield* drainBackendOutput("stdout", handle.stdout, onOutput).pipe(Effect.forkScoped);
     yield* drainBackendOutput("stderr", handle.stderr, onOutput).pipe(Effect.forkScoped);
   }
-  yield* waitForHttpReady(
+  const readiness = waitForHttpReady(
     options.httpBaseUrl,
     options.readinessTimeout ?? DEFAULT_BACKEND_READINESS_TIMEOUT,
   ).pipe(
     Effect.tap(() => options.onReady?.() ?? Effect.void),
-    Effect.catch((error) => options.onReadinessFailure?.(error) ?? Effect.void),
-    Effect.forkScoped,
+    Effect.catch((error) =>
+      (options.onReadinessFailure?.(error) ?? Effect.void).pipe(Effect.andThen(Effect.fail(error))),
+    ),
+    Effect.andThen(Effect.never),
   );
 
-  return describeProcessExit(yield* Effect.result(handle.exitCode));
+  return yield* Effect.raceFirst(
+    readiness,
+    Effect.result(handle.exitCode).pipe(Effect.map(describeProcessExit)),
+  );
 });
 
 // Factory for one pooled backend instance. The returned instance owns
@@ -453,21 +464,6 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
             latest.ready ? { ...latest, ready: false } : latest,
           );
         }
-        const config = yield* spec.configResolve.pipe(
-          Effect.tapError((error) =>
-            logInstanceError("failed to generate desktop backend configuration", {
-              cause: error.message,
-            }),
-          ),
-          Effect.option,
-        );
-        if (Option.isNone(config)) {
-          return;
-        }
-        const entryExists = yield* fileSystem
-          .exists(config.value.entryPath)
-          .pipe(Effect.orElseSucceed(() => false));
-
         const resetFatalPreflightCounter =
           !current.desiredRunning && current.preflightFailureAttempt > 0;
         yield* cancelRestart;
@@ -475,11 +471,27 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           ...latest,
           desiredRunning: true,
           ready: false,
-          config: Option.some(config.value),
           preflightFailureAttempt: resetFatalPreflightCounter ? 0 : latest.preflightFailureAttempt,
         }));
 
-        const preflightFailure = config.value.preflightFailure;
+        const config = yield* Effect.result(spec.configResolve);
+        if (Result.isFailure(config)) {
+          yield* logInstanceError("failed to generate desktop backend configuration", {
+            cause: config.failure.message,
+          });
+          yield* scheduleRestart(config.failure.message);
+          return;
+        }
+        const entryExists = yield* fileSystem
+          .exists(config.success.entryPath)
+          .pipe(Effect.orElseSucceed(() => false));
+
+        yield* Ref.update(state, (latest) => ({
+          ...latest,
+          config: Option.some(config.success),
+        }));
+
+        const preflightFailure = config.success.preflightFailure;
         if (Option.isSome(preflightFailure)) {
           const { reason, fatal, retryLimit } = preflightFailure.value;
           if (!fatal && retryLimit === undefined) {
@@ -547,7 +559,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
         );
 
         if (!entryExists) {
-          yield* scheduleRestart(`missing server entry at ${config.value.entryPath}`);
+          yield* scheduleRestart(`missing server entry at ${config.success.entryPath}`);
           return;
         }
 
@@ -629,7 +641,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
         });
 
         const program = runBackendProcess({
-          ...config.value,
+          ...config.success,
           onStarted: Effect.fn("desktop.backendInstance.onStarted")(function* (pid) {
             yield* updateActiveRun(runId, (run) => ({
               ...run,
@@ -637,7 +649,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
             }));
             yield* backendOutputLog.writeSessionBoundary({
               phase: "START",
-              details: `pid=${pid} port=${config.value.bootstrap.port} cwd=${config.value.cwd}`,
+              details: `pid=${pid} port=${config.success.bootstrap.port} cwd=${config.success.cwd}`,
             });
           }),
           onReady: Effect.fn("desktop.backendInstance.onReady")(function* () {
@@ -660,7 +672,7 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
               return;
             }
 
-            yield* spec.onReady?.(config.value.httpBaseUrl) ?? Effect.void;
+            yield* spec.onReady?.(config.success.httpBaseUrl) ?? Effect.void;
           }),
           onReadinessFailure: (error) =>
             logInstanceWarning("backend readiness check failed during bootstrap", {
@@ -672,7 +684,11 @@ export const makeBackendInstance = Effect.fn("makeBackendInstance")(function* (
           Effect.provideService(HttpClient.HttpClient, httpClient),
           Scope.provide(runScope),
           Effect.matchEffect({
-            onFailure: (error) => finalizeRun(error.message),
+            onFailure: (error) =>
+              Scope.close(runScope, Exit.void).pipe(
+                Effect.ignore,
+                Effect.andThen(finalizeRun(error.message)),
+              ),
             onSuccess: (exit) => finalizeRun(exit.reason),
           }),
           Effect.ensuring(Scope.close(runScope, Exit.void).pipe(Effect.ignore)),

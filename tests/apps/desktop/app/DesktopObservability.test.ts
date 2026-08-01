@@ -1,3 +1,5 @@
+// tests/apps/desktop/app/DesktopObservability.test.ts
+// verifies desktop trace and backend output log persistence
 import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, describe, it } from "@effect/vitest";
@@ -157,6 +159,49 @@ describe("DesktopObservability", () => {
       assert.equal(output.annotations.instanceId, "primary");
       assert.equal(output.annotations.stream, "stdout");
       assert.equal(output.annotations.text, "hello server\n");
+    }).pipe(
+      Effect.scoped,
+      Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)),
+    ),
+  );
+
+  it.effect("decodes UTF-8 backend output split across process chunks", () =>
+    Effect.gen(function* () {
+      const fileSystem = yield* FileSystem.FileSystem;
+      const baseDir = yield* fileSystem.makeTempDirectoryScoped({
+        prefix: "t3-desktop-backend-utf8-log-test-",
+      });
+      const environmentLayer = makeEnvironmentLayer(baseDir);
+      const logPath = yield* Effect.gen(function* () {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment;
+        return environment.path.join(environment.logDir, "server-child.log");
+      }).pipe(Effect.provide(environmentLayer));
+      const encoded = new TextEncoder().encode("🦊");
+
+      yield* Effect.gen(function* () {
+        const factory = yield* DesktopObservability.DesktopBackendOutputLogFactory;
+        const outputLog = yield* factory.forInstance("primary");
+        yield* outputLog.writeSessionBoundary({ phase: "START", details: "pid=123" });
+        yield* outputLog.writeOutputChunk("stdout", encoded.slice(0, 2));
+        yield* outputLog.writeOutputChunk("stdout", encoded.slice(2));
+        yield* outputLog.writeSessionBoundary({ phase: "END", details: "pid=123" });
+      }).pipe(
+        Effect.annotateLogs({ runId: "test-run" }),
+        Effect.provide(DesktopObservability.layer.pipe(Layer.provideMerge(environmentLayer))),
+      );
+
+      const records = yield* Effect.all(
+        (yield* fileSystem.readFileString(logPath))
+          .trimEnd()
+          .split("\n")
+          .map((line) => decodeDesktopBackendChildLogRecord(line)),
+      );
+      const outputText = records
+        .filter((record) => record.message === "backend child process output")
+        .map((record) => record.annotations.text)
+        .join("");
+
+      assert.equal(outputText, "🦊");
     }).pipe(
       Effect.scoped,
       Effect.provide(Layer.mergeAll(NodeServices.layer, NodeHttpClient.layerUndici)),

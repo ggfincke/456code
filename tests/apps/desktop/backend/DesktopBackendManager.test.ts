@@ -1,3 +1,5 @@
+// tests/apps/desktop/backend/DesktopBackendManager.test.ts
+// verifies per-instance desktop backend startup and restart behavior
 import {
   DesktopBackendBootstrap,
   type DesktopBackendBootstrap as DesktopBackendBootstrapValue,
@@ -9,6 +11,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as PlatformError from "effect/PlatformError";
 import * as Queue from "effect/Queue";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
@@ -112,7 +115,10 @@ interface MakeInstanceInput {
     failure: DesktopBackendManager.PreflightFailure,
   ) => Effect.Effect<boolean>;
   readonly config?: DesktopBackendManager.DesktopBackendStartConfig;
-  readonly configResolve?: Effect.Effect<DesktopBackendManager.DesktopBackendStartConfig>;
+  readonly configResolve?: Effect.Effect<
+    DesktopBackendManager.DesktopBackendStartConfig,
+    PlatformError.PlatformError
+  >;
 }
 
 // Helper that constructs a primary backend instance using the factory
@@ -417,6 +423,81 @@ describe("DesktopBackendManager", () => {
         assert.equal(yield* Queue.size(starts), 0);
         yield* TestClock.adjust(Duration.millis(1));
         assert.equal(yield* Queue.take(starts), 3);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("restarts a live backend after its readiness deadline expires", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const starts = yield* Queue.unbounded<number>();
+        let startCount = 0;
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Effect.gen(function* () {
+              startCount += 1;
+              yield* Queue.offer(starts, startCount);
+              return makeProcess({ exitCode: Effect.never });
+            }),
+          ),
+        );
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer,
+          httpClientLayer: httpClientLayer((request) =>
+            Effect.succeed(responseForRequest(request, 503)),
+          ),
+        });
+
+        yield* instance.start;
+        assert.equal(yield* Queue.take(starts), 1);
+
+        yield* TestClock.adjust(Duration.minutes(1));
+        yield* TestClock.adjust(Duration.millis(500));
+
+        assert.equal(yield* Queue.take(starts), 2);
+        assert.equal((yield* instance.snapshot).desiredRunning, true);
+      }).pipe(Effect.provide(TestClock.layer())),
+    ),
+  );
+
+  it.effect("retries startup after configuration resolution fails", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const starts = yield* Queue.unbounded<number>();
+        let resolveCount = 0;
+        const spawnerLayer = Layer.succeed(
+          ChildProcessSpawner.ChildProcessSpawner,
+          ChildProcessSpawner.make(() =>
+            Queue.offer(starts, 123).pipe(Effect.as(makeProcess({ exitCode: Effect.never }))),
+          ),
+        );
+        const resolveError = {
+          _tag: "BadArgument",
+          module: "DesktopBackendManager.test",
+          method: "configResolve",
+          description: "configuration unavailable",
+          message: "configuration unavailable",
+        } as unknown as PlatformError.PlatformError;
+
+        const instance = yield* makeTestInstance({
+          spawnerLayer,
+          configResolve: Effect.suspend(() => {
+            resolveCount += 1;
+            return resolveCount === 1 ? Effect.fail(resolveError) : Effect.succeed(baseConfig);
+          }),
+        });
+
+        yield* instance.start;
+        const failed = yield* instance.snapshot;
+        assert.equal(failed.desiredRunning, true);
+        assert.equal(failed.restartScheduled, true);
+
+        yield* TestClock.adjust(Duration.millis(500));
+
+        assert.equal(yield* Queue.take(starts), 123);
+        assert.equal(resolveCount, 2);
       }).pipe(Effect.provide(TestClock.layer())),
     ),
   );

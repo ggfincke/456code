@@ -1,3 +1,6 @@
+// apps/desktop/src/preview/PickPreload.ts
+// runs the isolated in-page annotation picker for desktop previews
+
 // @effect-diagnostics globalDate:off - This isolated Electron preload does not run inside an Effect runtime.
 import { ipcRenderer } from "electron";
 import { getElementContext } from "react-grab/primitives";
@@ -41,6 +44,7 @@ interface SelectedElement {
 }
 
 interface AnnotationSession {
+  id: string;
   teardown: (notifyMain: boolean) => void;
   applyTheme: (theme: DesktopPreviewAnnotationTheme) => void;
 }
@@ -350,7 +354,7 @@ function strokeBounds(
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
-function startAnnotation(): void {
+function startAnnotation(sessionId: string): void {
   activeSession?.teardown(false);
   let finished = false;
   const host = document.createElement("div");
@@ -935,6 +939,7 @@ function startAnnotation(): void {
   dragHandle.addEventListener("pointercancel", onEditorPointerUp);
 
   const repaint = (): void => {
+    svg.setAttribute("viewBox", `0 0 ${window.innerWidth} ${window.innerHeight}`);
     for (const target of selected.values()) updateSelectedVisual(target);
     queueEditorLayout();
   };
@@ -1160,12 +1165,16 @@ function startAnnotation(): void {
     document.documentElement.removeAttribute("data-code456-annotation-tool");
     cursorStyle.remove();
     host.remove();
-    activeSession = null;
-    if (notifyMain) ipcRenderer.send(ELEMENT_PICKED_CHANNEL, null);
+    if (activeSession?.id === sessionId) activeSession = null;
+    if (notifyMain) ipcRenderer.send(ELEMENT_PICKED_CHANNEL, sessionId, null);
   };
 
-  const onCancel = (): void => teardown(false);
-  const onCaptured = (): void => teardown(false);
+  const onCancel = (_event: unknown, cancelledSessionId: unknown): void => {
+    if (cancelledSessionId === sessionId) teardown(false);
+  };
+  const onCaptured = (_event: unknown, capturedSessionId: unknown): void => {
+    if (capturedSessionId === sessionId) teardown(false);
+  };
   const onKeyDown = (event: KeyboardEvent): void => {
     if (isAnnotationNode(event.target as Element) && event.key !== "Escape") return;
     if (event.key === "Escape") {
@@ -1202,6 +1211,7 @@ function startAnnotation(): void {
         };
       }),
     ).then((captured) => {
+      if (activeSession?.id !== sessionId) return;
       const elements = captured.filter((target) => target !== null);
       const annotation: PreviewAnnotationPayload = {
         id: nextId("annotation"),
@@ -1223,7 +1233,7 @@ function startAnnotation(): void {
         ...regions.map((region) => region.rect),
         ...strokes.map((stroke) => stroke.bounds),
       ]);
-      ipcRenderer.send(ELEMENT_PICKED_CHANNEL, annotation, screenshotRect);
+      ipcRenderer.send(ELEMENT_PICKED_CHANNEL, sessionId, annotation, screenshotRect);
     });
   });
   comment.addEventListener("keydown", (event) => {
@@ -1247,17 +1257,25 @@ function startAnnotation(): void {
   refreshToolButtons();
   updateStatus();
   activeSession = {
+    id: sessionId,
     teardown,
     applyTheme: (theme) => applyAnnotationTheme(host, theme),
   };
 }
 
-ipcRenderer.on(START_PICK_CHANNEL, (_event, theme: DesktopPreviewAnnotationTheme | undefined) => {
-  if (theme) annotationTheme = theme;
-  startAnnotation();
-});
+ipcRenderer.on(
+  START_PICK_CHANNEL,
+  (_event, sessionId: unknown, theme: DesktopPreviewAnnotationTheme | undefined) => {
+    if (typeof sessionId !== "string") return;
+    if (theme) annotationTheme = theme;
+    startAnnotation(sessionId);
+  },
+);
 ipcRenderer.on(ANNOTATION_THEME_CHANNEL, (_event, theme: DesktopPreviewAnnotationTheme) => {
   annotationTheme = theme;
   activeSession?.applyTheme(theme);
 });
-ipcRenderer.on(CANCEL_PICK_CHANNEL, () => activeSession?.teardown(false));
+ipcRenderer.on(CANCEL_PICK_CHANNEL, (_event, sessionId: unknown) => {
+  const session = activeSession;
+  if (session !== null && session.id === sessionId) session.teardown(false);
+});
