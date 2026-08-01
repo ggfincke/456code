@@ -64,6 +64,7 @@ import * as Stream from "effect/Stream";
 import { resolveAttachmentPath } from "../../attachmentStore.ts";
 import { ServerConfig } from "../../config.ts";
 import * as McpProviderSession from "../../mcp/McpProviderSession.ts";
+import { ORCHESTRATE_MODE_INSTRUCTIONS } from "../CollaborationModeInstructions.ts";
 import { resolveClaudeSdkExecutablePath } from "../Drivers/ClaudeExecutable.ts";
 import { makeClaudeEnvironment } from "../Drivers/ClaudeHome.ts";
 import {
@@ -96,6 +97,7 @@ type ClaudeToolResultStreamKind = Extract<
   "command_output" | "file_change_output"
 >;
 type ClaudeSdkEffort = NonNullable<ClaudeQueryOptions["effort"]>;
+type ClaudeSystemPrompt = NonNullable<ClaudeQueryOptions["systemPrompt"]>;
 
 function encodeJsonStringForDiagnostics(input: unknown): string | undefined {
   const result = encodeUnknownJsonStringExit(input);
@@ -181,14 +183,18 @@ interface ClaudeTaskState {
 
 interface ClaudeSessionContext {
   session: ProviderSession;
-  readonly promptQueue: Queue.Queue<PromptQueueItem>;
-  readonly query: ClaudeQueryRuntime;
-  streamFiber: Fiber.Fiber<void, Error> | undefined;
+  promptQueue: Queue.Queue<PromptQueueItem>;
+  query: ClaudeQueryRuntime;
+  readonly baseQueryOptions: ClaudeQueryOptions;
+  readonly runStream: (effect: Effect.Effect<void, never>) => Fiber.Fiber<void, never>;
+  streamFiber: Fiber.Fiber<void, never> | undefined;
   readonly startedAt: string;
   readonly basePermissionMode: PermissionMode | undefined;
   currentApiModelId: string | undefined;
   resumeSessionId: string | undefined;
-  readonly resumeAttempt: ClaudeResumeAttempt | undefined;
+  resumeAttempt: ClaudeResumeAttempt | undefined;
+  hasResumableHistory: boolean;
+  orchestrateSystemPromptActive: boolean;
   readonly pendingApprovals: Map<ApprovalRequestId, PendingApproval>;
   readonly pendingUserInputs: Map<ApprovalRequestId, PendingUserInput>;
   readonly turns: Array<{
@@ -211,6 +217,7 @@ interface ClaudeQueryRuntime extends AsyncIterable<SDKMessage> {
   readonly setModel: (model?: string) => Promise<void>;
   readonly setPermissionMode: (mode: PermissionMode) => Promise<void>;
   readonly setMaxThinkingTokens: (maxThinkingTokens: number | null) => Promise<void>;
+  readonly initializationResult: () => Promise<unknown>;
   readonly getContextUsage?: () => Promise<SDKControlGetContextUsageResponse>;
   readonly close: () => void;
 }
@@ -229,6 +236,18 @@ export interface ClaudeAdapterLiveOptions {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
+function claudeSystemPrompt(orchestrate: boolean): ClaudeSystemPrompt {
+  // intentionally duplicate the mode block in system and user channels: the system append
+  // supplies authority while the existing user wrapper preserves the explicit request boundary
+  return orchestrate
+    ? {
+        type: "preset",
+        preset: "claude_code",
+        append: ORCHESTRATE_MODE_INSTRUCTIONS,
+      }
+    : { type: "preset", preset: "claude_code" };
 }
 
 function isSyntheticClaudeThreadId(value: string): boolean {
@@ -1395,6 +1414,19 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         prompt: input.prompt,
         options: input.options,
       }) as ClaudeQueryRuntime);
+
+  const makePromptChannel = Effect.fn("makeClaudePromptChannel")(function* () {
+    const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
+    const prompt = Stream.fromQueue(promptQueue).pipe(
+      Stream.filter((item) => item.type === "message"),
+      Stream.map((item) => item.message),
+      Stream.catchCause((cause) =>
+        Cause.hasInterruptsOnly(cause) ? Stream.empty : Stream.failCause(cause),
+      ),
+      Stream.toAsyncIterable,
+    );
+    return { promptQueue, prompt };
+  });
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>();
   const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>();
@@ -3105,6 +3137,129 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     });
   });
 
+  const launchSdkStream = (context: ClaudeSessionContext): void => {
+    let streamFiber: Fiber.Fiber<void, never>;
+    streamFiber = context.runStream(
+      Effect.exit(runSdkStream(context)).pipe(
+        Effect.flatMap((exit) => {
+          if (context.stopped || context.streamFiber !== streamFiber) {
+            return Effect.void;
+          }
+          context.streamFiber = undefined;
+          return handleStreamExit(context, exit).pipe(
+            Effect.catch((cause) =>
+              Effect.logError("Failed to close Claude runtime stream.", { cause }),
+            ),
+          );
+        }),
+      ),
+    );
+    context.streamFiber = streamFiber;
+    streamFiber.addObserver(() => {
+      if (context.streamFiber === streamFiber) {
+        context.streamFiber = undefined;
+      }
+    });
+  };
+
+  const awaitQueryInitialization = Effect.fn("awaitClaudeQueryInitialization")(function* (
+    context: ClaudeSessionContext,
+    queryRuntime: ClaudeQueryRuntime,
+  ) {
+    yield* Effect.tryPromise({
+      try: () => queryRuntime.initializationResult(),
+      catch: (cause) =>
+        new ProviderAdapterProcessError({
+          provider: PROVIDER,
+          threadId: context.session.threadId,
+          detail: "Failed to initialize Claude runtime session.",
+          cause,
+        }),
+    });
+  });
+
+  // sdk system prompts are initialization-only, so mode changes restart the query and resume
+  // whenever history exists; this costs one subprocess initialization per transition
+  const replaceQueryForOrchestrateMode = Effect.fn("replaceClaudeQueryForOrchestrateMode")(
+    function* (context: ClaudeSessionContext, orchestrate: boolean) {
+      if (context.orchestrateSystemPromptActive === orchestrate) {
+        return;
+      }
+
+      yield* awaitQueryInitialization(context, context.query);
+
+      const currentSessionId = context.resumeSessionId;
+      if (!currentSessionId) {
+        return yield* new ProviderAdapterProcessError({
+          provider: PROVIDER,
+          threadId: context.session.threadId,
+          detail: "Claude runtime session cannot switch collaboration modes before initialization.",
+          cause: { reason: "missing-resume-session-id" },
+        });
+      }
+
+      const { promptQueue, prompt } = yield* makePromptChannel();
+      const queryOptions: ClaudeQueryOptions = {
+        ...context.baseQueryOptions,
+        ...(context.currentApiModelId ? { model: context.currentApiModelId } : {}),
+        systemPrompt: claudeSystemPrompt(orchestrate),
+        ...(context.hasResumableHistory
+          ? { resume: currentSessionId }
+          : { sessionId: yield* randomUUIDv4 }),
+      };
+      const queryRuntime = yield* Effect.try({
+        try: () =>
+          createQuery({
+            prompt,
+            options: queryOptions,
+          }),
+        catch: (cause) =>
+          new ProviderAdapterProcessError({
+            provider: PROVIDER,
+            threadId: context.session.threadId,
+            detail: CLAUDE_RESUME_FAILURE_MESSAGE,
+            cause,
+          }),
+      });
+
+      const previousPromptQueue = context.promptQueue;
+      const previousQuery = context.query;
+      const previousStreamFiber = context.streamFiber;
+      context.streamFiber = undefined;
+      yield* Queue.shutdown(previousPromptQueue);
+      if (previousStreamFiber && previousStreamFiber.pollUnsafe() === undefined) {
+        yield* Fiber.interrupt(previousStreamFiber);
+      }
+      yield* Effect.try({
+        try: () => previousQuery.close(),
+        catch: (cause) =>
+          new ProviderAdapterProcessError({
+            provider: PROVIDER,
+            threadId: context.session.threadId,
+            detail: "Failed to close Claude runtime query during collaboration mode switch.",
+            cause,
+          }),
+      });
+
+      context.promptQueue = promptQueue;
+      context.query = queryRuntime;
+      if (queryOptions.resume) {
+        context.resumeAttempt = {
+          sessionId: queryOptions.resume,
+          usable: false,
+        };
+      } else {
+        context.resumeSessionId = queryOptions.sessionId;
+        context.resumeAttempt = undefined;
+        context.lastThreadStartedId = undefined;
+        yield* updateResumeCursor(context);
+      }
+      context.orchestrateSystemPromptActive = orchestrate;
+      launchSdkStream(context);
+      yield* awaitQueryInitialization(context, queryRuntime);
+    },
+  );
+
   const stopSessionInternal = Effect.fn("stopSessionInternal")(function* (
     context: ClaudeSessionContext,
     options?: { readonly emitExitEvent?: boolean },
@@ -3266,15 +3421,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       const runFork = Effect.runForkWith(runtimeContext);
       const runPromise = Effect.runPromiseWith(runtimeContext);
 
-      const promptQueue = yield* Queue.unbounded<PromptQueueItem>();
-      const prompt = Stream.fromQueue(promptQueue).pipe(
-        Stream.filter((item) => item.type === "message"),
-        Stream.map((item) => item.message),
-        Stream.catchCause((cause) =>
-          Cause.hasInterruptsOnly(cause) ? Stream.empty : Stream.failCause(cause),
-        ),
-        Stream.toAsyncIterable,
-      );
+      const { promptQueue, prompt } = yield* makePromptChannel();
 
       const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>();
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>();
@@ -3609,11 +3756,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         ...(ultracode ? { ultracode: true } : {}),
       };
       const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId);
-      const queryOptions: ClaudeQueryOptions = {
+      const baseQueryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
         pathToClaudeCodeExecutable: claudeBinaryPath,
-        systemPrompt: { type: "preset", preset: "claude_code" },
+        systemPrompt: claudeSystemPrompt(false),
         settingSources: [...CLAUDE_SETTING_SOURCES],
         // `ultracode` is a Claude Code setting, not an API effort level. It is
         // normalized to `xhigh` above and paired with `settings.ultracode`.
@@ -3627,8 +3774,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           ? { allowDangerouslySkipPermissions: true }
           : {}),
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
-        ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
-        ...(newSessionId ? { sessionId: newSessionId } : {}),
         includePartialMessages: true,
         canUseTool,
         env: claudeEnvironment,
@@ -3647,6 +3792,11 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
               },
             }
           : {}),
+      };
+      const queryOptions: ClaudeQueryOptions = {
+        ...baseQueryOptions,
+        ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
+        ...(newSessionId ? { sessionId: newSessionId } : {}),
       };
 
       yield* Effect.annotateCurrentSpan({
@@ -3715,6 +3865,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         session,
         promptQueue,
         query: queryRuntime,
+        baseQueryOptions,
+        runStream: (effect) => runFork(effect),
         streamFiber: undefined,
         startedAt,
         basePermissionMode: permissionMode,
@@ -3727,6 +3879,8 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
                 usable: false,
               }
             : undefined,
+        hasResumableHistory: existingResumeSessionId !== undefined,
+        orchestrateSystemPromptActive: false,
         pendingApprovals,
         pendingUserInputs,
         turns: [],
@@ -3786,30 +3940,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         providerRefs: {},
       });
 
-      let streamFiber: Fiber.Fiber<void, never>;
-      streamFiber = runFork(
-        Effect.exit(runSdkStream(context)).pipe(
-          Effect.flatMap((exit) => {
-            if (context.stopped) {
-              return Effect.void;
-            }
-            if (context.streamFiber === streamFiber) {
-              context.streamFiber = undefined;
-            }
-            return handleStreamExit(context, exit).pipe(
-              Effect.catch((cause) =>
-                Effect.logError("Failed to close Claude runtime stream.", { cause }),
-              ),
-            );
-          }),
-        ),
-      );
-      context.streamFiber = streamFiber;
-      streamFiber.addObserver(() => {
-        if (context.streamFiber === streamFiber) {
-          context.streamFiber = undefined;
-        }
-      });
+      launchSdkStream(context);
 
       return {
         ...session,
@@ -3833,6 +3964,10 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       context.turnState && context.turnState.synthetic !== true ? context.turnState : null;
     if (context.turnState && steeringTurnState === null) {
       yield* completeTurn(context, "completed");
+    }
+
+    if (steeringTurnState === null) {
+      yield* replaceQueryForOrchestrateMode(context, input.interactionMode === "orchestrate");
     }
 
     if (modelSelection?.model) {
@@ -3910,6 +4045,7 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       type: "message",
       message,
     }).pipe(Effect.mapError((cause) => toRequestError(input.threadId, "turn/start", cause)));
+    context.hasResumableHistory = true;
 
     return {
       threadId: context.session.threadId,

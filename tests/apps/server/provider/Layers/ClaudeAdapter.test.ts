@@ -46,6 +46,7 @@ import {
   makeClaudeAdapter,
   type ClaudeAdapterLiveOptions,
 } from "../../../../../apps/server/src/provider/Layers/ClaudeAdapter.ts";
+import { ORCHESTRATE_MODE_INSTRUCTIONS } from "../../../../../apps/server/src/provider/CollaborationModeInstructions.ts";
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings);
 
 // Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
@@ -66,6 +67,7 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
   public readonly setModelCalls: Array<string | undefined> = [];
   public readonly setPermissionModeCalls: Array<string> = [];
   public readonly setMaxThinkingTokensCalls: Array<number | null> = [];
+  public initializationResultCalls = 0;
   public closeCalls = 0;
 
   emit(message: SDKMessage): void {
@@ -118,6 +120,11 @@ class FakeClaudeQuery implements AsyncIterable<SDKMessage> {
     this.setMaxThinkingTokensCalls.push(maxThinkingTokens);
   };
 
+  readonly initializationResult = async (): Promise<unknown> => {
+    this.initializationResultCalls += 1;
+    return {};
+  };
+
   readonly close = (): void => {
     this.closeCalls += 1;
     this.finish();
@@ -165,18 +172,18 @@ function makeHarness(config?: {
   readonly claudeConfig?: Partial<ClaudeSettings>;
   readonly instanceId?: ProviderInstanceId;
 }) {
-  const query = new FakeClaudeQuery();
-  let createInput:
-    | {
-        readonly prompt: AsyncIterable<SDKUserMessage>;
-        readonly options: ClaudeQueryOptions;
-      }
-    | undefined;
+  const queries: Array<FakeClaudeQuery> = [];
+  const createInputs: Array<{
+    readonly prompt: AsyncIterable<SDKUserMessage>;
+    readonly options: ClaudeQueryOptions;
+  }> = [];
 
   const adapterOptions: ClaudeAdapterLiveOptions = {
     ...(config?.instanceId ? { instanceId: config.instanceId } : {}),
     createQuery: (input) => {
-      createInput = input;
+      const query = new FakeClaudeQuery();
+      queries.push(query);
+      createInputs.push(input);
       return query;
     },
     ...(config?.nativeEventLogger
@@ -208,8 +215,14 @@ function makeHarness(config?: {
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(NodeServices.layer),
     ),
-    query,
-    getLastCreateQueryInput: () => createInput,
+    get query() {
+      const query = queries.at(-1);
+      assert.isDefined(query);
+      return query;
+    },
+    getQueries: () => [...queries],
+    getCreateQueryInputs: () => [...createInputs],
+    getLastCreateQueryInput: () => createInputs.at(-1),
   };
 }
 
@@ -3464,6 +3477,71 @@ describe("ClaudeAdapterLive", () => {
       );
     },
   );
+
+  it.effect("switches orchestrate system instructions on and off between turns", () => {
+    const harness = makeHarness();
+    return Effect.gen(function* () {
+      const adapter = yield* ClaudeAdapter;
+      const session = yield* adapter.startSession({
+        threadId: THREAD_ID,
+        provider: ProviderDriverKind.make("claudeAgent"),
+        runtimeMode: "full-access",
+      });
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "orchestrate this change",
+        interactionMode: "orchestrate",
+        attachments: [],
+      });
+
+      const orchestrateInputs = harness.getCreateQueryInputs();
+      assert.equal(orchestrateInputs.length, 2);
+      assert.deepEqual(orchestrateInputs[1]?.options.systemPrompt, {
+        type: "preset",
+        preset: "claude_code",
+        append: ORCHESTRATE_MODE_INSTRUCTIONS,
+      });
+      const initialSessionId = orchestrateInputs[0]?.options.sessionId;
+      const orchestrateSessionId = orchestrateInputs[1]?.options.sessionId;
+      assert.equal(typeof initialSessionId, "string");
+      assert.equal(typeof orchestrateSessionId, "string");
+      assert.notEqual(orchestrateSessionId, initialSessionId);
+      assert.equal(orchestrateInputs[1]?.options.resume, undefined);
+
+      const turnCompletedFiber = yield* Stream.filter(
+        adapter.streamEvents,
+        (event) => event.type === "turn.completed",
+      ).pipe(Stream.runHead, Effect.forkChild);
+      harness.query.emit({
+        type: "result",
+        subtype: "success",
+        is_error: false,
+        errors: [],
+        session_id: orchestrateSessionId,
+        uuid: "result-orchestrate",
+      } as unknown as SDKMessage);
+      yield* Fiber.join(turnCompletedFiber);
+
+      yield* adapter.sendTurn({
+        threadId: session.threadId,
+        input: "build normally now",
+        interactionMode: "default",
+        attachments: [],
+      });
+
+      const defaultInputs = harness.getCreateQueryInputs();
+      assert.equal(defaultInputs.length, 3);
+      assert.deepEqual(defaultInputs[2]?.options.systemPrompt, {
+        type: "preset",
+        preset: "claude_code",
+      });
+      assert.equal(defaultInputs[2]?.options.resume, orchestrateSessionId);
+    }).pipe(
+      Effect.provideService(Random.Random, makeDeterministicRandomService()),
+      Effect.provide(harness.layer),
+    );
+  });
 
   it.effect("does not call setPermissionMode when interactionMode is absent", () => {
     const harness = makeHarness();

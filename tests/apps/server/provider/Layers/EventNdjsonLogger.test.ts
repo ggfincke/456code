@@ -1,3 +1,5 @@
+// tests/apps/server/provider/Layers/EventNdjsonLogger.test.ts
+// verifies provider event log serialization, batching, and rotation
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
@@ -9,7 +11,10 @@ import * as Effect from "effect/Effect";
 import * as Logger from "effect/Logger";
 import * as Schema from "effect/Schema";
 
-import { makeEventNdjsonLogger } from "../../../../../apps/server/src/provider/Layers/EventNdjsonLogger.ts";
+import {
+  makeEventNdjsonLogger,
+  makeProviderEventNdjsonLoggers,
+} from "../../../../../apps/server/src/provider/Layers/EventNdjsonLogger.ts";
 
 const encodeUnknownJson = Schema.encodeUnknownSync(Schema.UnknownFromJsonString);
 
@@ -184,6 +189,46 @@ describe("EventNdjsonLogger", () => {
           '{"id":"evt-concurrent-1"}',
           '{"id":"evt-concurrent-2"}',
         ]);
+      } finally {
+        NodeFS.rmSync(tempDir, { recursive: true, force: true });
+      }
+    }),
+  );
+
+  it.effect("preserves record integrity and order across threshold batches", () =>
+    Effect.gen(function* () {
+      const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), "t3-provider-log-"));
+      const basePath = NodePath.join(tempDir, "provider-events.ndjson");
+
+      try {
+        const loggers = yield* makeProviderEventNdjsonLoggers(basePath, {
+          batchSize: 3,
+          batchWindowMs: 60_000,
+        });
+        assert.exists(loggers);
+        if (!loggers) {
+          return;
+        }
+
+        for (let index = 0; index < 8; index += 1) {
+          const logger = index % 2 === 0 ? loggers.native : loggers.canonical;
+          yield* logger.write({ id: `evt-${index}` }, ThreadId.make("thread-batched"));
+        }
+        yield* loggers.close();
+
+        const lines = NodeFS.readFileSync(NodePath.join(tempDir, "thread-batched.log"), "utf8")
+          .trim()
+          .split("\n")
+          .map((line) => parseLogLine(line));
+
+        assert.deepEqual(
+          lines.map((line) => line.payload),
+          Array.from({ length: 8 }, (_, index) => `{"id":"evt-${index}"}`),
+        );
+        assert.deepEqual(
+          lines.map((line) => line.stream),
+          ["NTIVE", "CANON", "NTIVE", "CANON", "NTIVE", "CANON", "NTIVE", "CANON"],
+        );
       } finally {
         NodeFS.rmSync(tempDir, { recursive: true, force: true });
       }

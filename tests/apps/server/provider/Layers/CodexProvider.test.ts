@@ -1,13 +1,91 @@
 // tests/apps/server/provider/Layers/CodexProvider.test.ts
-// verifies Codex model capabilities and account usage normalization
+// verifies Codex probing, model capabilities, and account usage normalization
 import { assert, it } from "@effect/vitest";
+import * as Deferred from "effect/Deferred";
+import * as Duration from "effect/Duration";
+import * as Effect from "effect/Effect";
+import * as Fiber from "effect/Fiber";
+import * as Queue from "effect/Queue";
+import * as Schema from "effect/Schema";
+import * as Sink from "effect/Sink";
+import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
+import * as ChildProcessSpawner from "effect/unstable/process/ChildProcessSpawner";
+import { CodexSettings } from "@t3tools/contracts";
 
 import {
   applyPreferredCodexDefaultModel,
+  checkCodexProviderStatus,
   mapCodexAccountUsage,
   mapCodexModelCapabilities,
   resolveCodexAccountUsage,
 } from "../../../../../apps/server/src/provider/Layers/CodexProvider.ts";
+
+const makeStalledUsageSpawner = Effect.fn("makeStalledUsageSpawner")(function* () {
+  const stdout = yield* Queue.unbounded<Uint8Array>();
+  const rateLimitsRequested = yield* Deferred.make<void>();
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  let remainder = "";
+
+  const respond = (id: unknown, result: unknown) =>
+    Queue.offer(stdout, encoder.encode(`${JSON.stringify({ id, result })}\n`));
+
+  const stdin = Sink.forEach((chunk: Uint8Array) => {
+    remainder += decoder.decode(chunk, { stream: true });
+    const lines = remainder.split("\n");
+    remainder = lines.pop() ?? "";
+
+    return Effect.forEach(
+      lines,
+      (line) => {
+        const message = JSON.parse(line) as { readonly id?: unknown; readonly method?: unknown };
+        switch (message.method) {
+          case "initialize":
+            return respond(message.id, {
+              userAgent: "codex-cli/1.0.0",
+              codexHome: process.cwd(),
+              platformFamily: "unix",
+              platformOs: "test",
+            });
+          case "account/read":
+            return respond(message.id, {
+              account: { type: "chatgpt", email: "dev@example.com", planType: "plus" },
+              requiresOpenaiAuth: false,
+            });
+          case "skills/list":
+            return respond(message.id, { data: [] });
+          case "model/list":
+            return respond(message.id, { data: [] });
+          case "account/rateLimits/read":
+            return Deferred.succeed(rateLimitsRequested, undefined);
+          default:
+            return Effect.void;
+        }
+      },
+      { discard: true },
+    );
+  });
+
+  const handle = ChildProcessSpawner.makeHandle({
+    pid: ChildProcessSpawner.ProcessId(1),
+    exitCode: Effect.never,
+    isRunning: Effect.succeed(true),
+    kill: () => Effect.void,
+    unref: Effect.succeed(Effect.void),
+    stdin,
+    stdout: Stream.fromQueue(stdout),
+    stderr: Stream.empty,
+    all: Stream.empty,
+    getInputFd: () => Sink.drain,
+    getOutputFd: () => Stream.empty,
+  });
+
+  return {
+    rateLimitsRequested,
+    spawner: ChildProcessSpawner.make(() => Effect.succeed(handle)),
+  };
+});
 
 it("normalizes and de-duplicates Codex account usage windows", () => {
   const mirrored = {
@@ -79,6 +157,25 @@ it("keeps a missing Codex rate-limit response non-fatal to account status", () =
     message: "Codex plan usage is temporarily unavailable.",
   });
 });
+
+it.effect("keeps the Codex snapshot ready when the usage request stalls", () =>
+  Effect.gen(function* () {
+    const { rateLimitsRequested, spawner } = yield* makeStalledUsageSpawner();
+    const settings = Schema.decodeSync(CodexSettings)({ binaryPath: "codex" });
+    const statusFiber = yield* checkCodexProviderStatus(settings).pipe(
+      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+      Effect.forkScoped,
+    );
+
+    yield* Deferred.await(rateLimitsRequested);
+    yield* TestClock.adjust(Duration.seconds(4));
+    const status = yield* Fiber.join(statusFiber);
+
+    assert.strictEqual(status.status, "ready");
+    assert.strictEqual(status.auth.status, "authenticated");
+    assert.strictEqual(status.accountUsage?.status, "unavailable");
+  }),
+);
 
 it("maps current Codex model capability fields", () => {
   const capabilities = mapCodexModelCapabilities({

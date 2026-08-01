@@ -41,6 +41,7 @@ import packageJson from "../../../package.json" with { type: "json" };
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError);
 
 const CODEX_APP_SERVER_PROBE_FORCE_KILL_AFTER = "2 seconds" as const;
+const CODEX_USAGE_PROBE_TIMEOUT_MS = 4_000;
 
 const CODEX_PRESENTATION = {
   displayName: "Codex",
@@ -566,6 +567,8 @@ const probeCodexAppServerProvider = Effect.fn("probeCodexAppServerProvider")(fun
               errorTag: error._tag,
             }).pipe(Effect.as(undefined)),
           ),
+          Effect.timeoutOption(Duration.millis(CODEX_USAGE_PROBE_TIMEOUT_MS)),
+          Effect.map(Option.getOrUndefined),
         )
       : Effect.succeed(undefined);
   const [skillsResponse, models, rateLimits] = yield* Effect.all(
