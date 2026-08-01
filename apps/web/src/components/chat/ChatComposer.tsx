@@ -217,6 +217,37 @@ import * as Option from "effect/Option";
 // readiness input literal -> the readiness atom family keys on its JSON form
 const WORKERS_READINESS_INPUT = {};
 
+type PendingInputPromptIdentity = {
+  requestId: string | null;
+  questionId: string | null;
+};
+
+export function resolvePendingInputPromptSync(input: {
+  draftPrompt: string;
+  currentPrompt: string;
+  pendingCustomAnswer: string | null;
+  pendingIdentity: PendingInputPromptIdentity;
+  previousIdentity: PendingInputPromptIdentity | null;
+}): { nextIdentity: PendingInputPromptIdentity | null; nextPrompt: string } | null {
+  if (input.pendingCustomAnswer === null) {
+    return input.previousIdentity === null
+      ? null
+      : { nextIdentity: null, nextPrompt: input.draftPrompt };
+  }
+
+  const questionChanged =
+    input.previousIdentity?.requestId !== input.pendingIdentity.requestId ||
+    input.previousIdentity?.questionId !== input.pendingIdentity.questionId;
+  if (!questionChanged && input.currentPrompt === input.pendingCustomAnswer) {
+    return null;
+  }
+
+  return {
+    nextIdentity: input.pendingIdentity,
+    nextPrompt: input.pendingCustomAnswer,
+  };
+}
+
 const runtimeModeConfig: Record<
   RuntimeMode,
   { label: string; description: string; icon: LucideIcon }
@@ -1462,41 +1493,33 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerMenuSearchKey,
   ]);
 
-  const lastSyncedPendingInputRef = useRef<{
-    requestId: string | null;
-    questionId: string | null;
-  } | null>(null);
+  const lastSyncedPendingInputRef = useRef<PendingInputPromptIdentity | null>(null);
 
   useEffect(() => {
     const nextCustomAnswer = activePendingProgress?.customAnswer;
-    if (typeof nextCustomAnswer !== "string") {
-      lastSyncedPendingInputRef.current = null;
-      return;
-    }
-
-    const nextRequestId = activePendingUserInput?.requestId ?? null;
-    const nextQuestionId = activePendingProgress?.activeQuestion?.id ?? null;
-    const questionChanged =
-      lastSyncedPendingInputRef.current?.requestId !== nextRequestId ||
-      lastSyncedPendingInputRef.current?.questionId !== nextQuestionId;
-    const textChangedExternally = promptRef.current !== nextCustomAnswer;
-
-    lastSyncedPendingInputRef.current = {
-      requestId: nextRequestId,
-      questionId: nextQuestionId,
+    const nextIdentity = {
+      requestId: activePendingUserInput?.requestId ?? null,
+      questionId: activePendingProgress?.activeQuestion?.id ?? null,
     };
-
-    if (!questionChanged && !textChangedExternally) {
+    const sync = resolvePendingInputPromptSync({
+      draftPrompt: prompt,
+      currentPrompt: promptRef.current,
+      pendingCustomAnswer: typeof nextCustomAnswer === "string" ? nextCustomAnswer : null,
+      pendingIdentity: nextIdentity,
+      previousIdentity: lastSyncedPendingInputRef.current,
+    });
+    if (!sync) {
       return;
     }
 
-    promptRef.current = nextCustomAnswer;
-    const nextCursor = collapseExpandedComposerCursor(nextCustomAnswer, nextCustomAnswer.length);
+    lastSyncedPendingInputRef.current = sync.nextIdentity;
+    promptRef.current = sync.nextPrompt;
+    const nextCursor = collapseExpandedComposerCursor(sync.nextPrompt, sync.nextPrompt.length);
     setComposerCursor(nextCursor);
     setComposerTrigger(
       detectComposerTrigger(
-        nextCustomAnswer,
-        expandCollapsedComposerCursor(nextCustomAnswer, nextCursor),
+        sync.nextPrompt,
+        expandCollapsedComposerCursor(sync.nextPrompt, nextCursor),
       ),
     );
     setComposerHighlightedItemId(null);
@@ -1504,6 +1527,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     activePendingProgress?.customAnswer,
     activePendingProgress?.activeQuestion?.id,
     activePendingUserInput?.requestId,
+    prompt,
     promptRef,
   ]);
 

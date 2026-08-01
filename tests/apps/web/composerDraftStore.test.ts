@@ -16,6 +16,7 @@ import {
   ProviderInstanceId,
   ThreadId,
   type ModelSelection,
+  type PreviewAnnotationPayload,
   type ProviderOptionSelection,
 } from "@t3tools/contracts";
 import { createModelSelection } from "@t3tools/shared/model";
@@ -1617,6 +1618,55 @@ describe("composerDraftStore runtime and interaction settings", () => {
     store.setInteractionMode(threadRef, "orchestrate");
 
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)?.interactionMode).toBe("orchestrate");
+  });
+
+  it("round-trips legacy orchestrate mode with preview annotations", () => {
+    const annotation: PreviewAnnotationPayload = {
+      id: "annotation-1",
+      pageUrl: "http://localhost:3000",
+      pageTitle: "Dashboard",
+      comment: "Align these cards.",
+      elements: [],
+      regions: [{ id: "region-1", rect: { x: 10, y: 20, width: 100, height: 80 } }],
+      strokes: [],
+      styleChanges: [],
+      screenshot: null,
+      createdAt: "2026-07-31T12:00:00.000Z",
+    };
+    const persistApi = useComposerDraftStore.persist as unknown as {
+      getOptions: () => {
+        merge: (
+          persistedState: unknown,
+          currentState: ReturnType<typeof useComposerDraftStore.getState>,
+        ) => ReturnType<typeof useComposerDraftStore.getState>;
+        partialize: (state: ReturnType<typeof useComposerDraftStore.getState>) => unknown;
+      };
+    };
+    const { merge, partialize } = persistApi.getOptions();
+    const hydratedLegacyState = merge(
+      {
+        draftsByThreadId: {
+          [threadId]: {
+            prompt: "",
+            attachments: [],
+            previewAnnotations: [annotation],
+            orchestrateMode: true,
+          },
+        },
+        draftThreadsByThreadId: {},
+        projectDraftThreadIdByProjectKey: {},
+      },
+      useComposerDraftStore.getInitialState(),
+    );
+    const rehydratedState = merge(
+      partialize(hydratedLegacyState),
+      useComposerDraftStore.getInitialState(),
+    );
+
+    expect(rehydratedState.draftsByThreadKey[threadKeyFor(threadId)]).toMatchObject({
+      interactionMode: "orchestrate",
+      previewAnnotations: [annotation],
+    });
   });
 
   it("removes empty settings-only drafts when overrides are cleared", () => {
