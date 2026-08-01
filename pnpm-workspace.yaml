@@ -43,8 +43,8 @@ catalog:
   effect: 4.0.0-beta.78
   jose: 6.2.2
   typescript: npm:@typescript/typescript6@6.0.2
-  vite: npm:@voidzero-dev/vite-plus-core@0.2.2
-  vite-plus: 0.2.2
+  vite: npm:@voidzero-dev/vite-plus-core@0.2.7
+  vite-plus: 0.2.7
   yaml: ^2.9.0
 
 minimumReleaseAgeExclude:
@@ -109,11 +109,18 @@ patchedDependencies:
   react-native-nitro-modules@0.35.9: patches/react-native-nitro-modules@0.35.9.patch
   react-native-screens@4.25.2: patches/react-native-screens@4.25.2.patch
 
+# utf-8-validate is an optional peer of the old ws@7 that react-devtools-core drags in,
+# & allowBuilds keeps it unbuilt anyway; typescript is deliberately the TS 6 preview alias,
+# which no expo package declares support for yet.
 peerDependencyRules:
   allowAny:
     - vite
+    - utf-8-validate
+    - typescript
   allowedVersions:
     vite: "*"
+    utf-8-validate: "*"
+    typescript: "*"
 
 supportedArchitectures:
   cpu: [current, x64]

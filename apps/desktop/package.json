@@ -23,7 +23,7 @@
     "electron-store": "^8.2.0",
     "electron-updater": "^6.6.2",
     "playwright-core": "1.60.0",
-    "react-grab": "^0.1.32"
+    "react-grab": "^0.1.50"
   },
   "devDependencies": {
     "@effect/vitest": "catalog:",

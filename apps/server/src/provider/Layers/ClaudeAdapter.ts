@@ -9,6 +9,7 @@ import {
   type PermissionUpdate,
   type SDKMessage,
   type SDKControlGetContextUsageResponse,
+  type SDKConversationResetMessage,
   type SDKResultMessage,
   type SettingSource,
   type SDKUserMessage,
@@ -2677,17 +2678,6 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
       },
     };
 
-    // Undeclared-but-real subtypes (absent from the SDK's union, so they can't
-    // be switch cases): consumed intentionally without emitting, otherwise
-    // they fall through to the unknown-subtype warning and surface as spurious
-    // error rows in client work logs. `background_tasks_changed` is a roster
-    // snapshot ({tasks: [...]}) — the task_* lifecycle events carry the
-    // authoritative per-agent data and the typed background_tasks control
-    // request is the reconciliation source.
-    if ((message.subtype as string) === "background_tasks_changed") {
-      return;
-    }
-
     switch (message.subtype) {
       case "init":
         yield* offerRuntimeEvent({
@@ -2886,14 +2876,36 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
           yield* emitRuntimeWarning(context, message.text, message);
         }
         return;
+      case "model_refusal_no_fallback":
+        // Terminal refusal: unlike model_refusal_fallback there is no retry on
+        // another model, so the turn dies here & the user needs to see why.
+        yield* emitRuntimeError(context, message.content, message);
+        return;
+      case "worker_shutting_down":
+        // Host-side teardown (host_exit, remote_control_disabled, ...). The
+        // stream ends right after, so surface the reason before it does.
+        yield* emitRuntimeWarning(
+          context,
+          `Claude worker shutting down: ${message.reason}`,
+          message,
+        );
+        return;
       // Inner protocol/UX details with no T3 surface today — consumed
       // deliberately so they don't masquerade as unknown-subtype warnings.
+      // background_tasks_changed is a roster snapshot ({tasks: [...]}) — the
+      // task_* lifecycle events carry the authoritative per-agent data & the
+      // typed background_tasks control request is the reconciliation source.
+      // control_request_progress is per-attempt retry telemetry for in-flight
+      // control requests; api_retry already has its own session.state.changed.
       case "model_refusal_fallback":
       case "local_command_output":
       case "plugin_install":
       case "commands_changed":
       case "memory_recall":
       case "elicitation_complete":
+      case "background_tasks_changed":
+      case "control_request_progress":
+      case "informational":
         return;
       case "permission_denied":
         yield* offerRuntimeEvent({
@@ -3007,6 +3019,41 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
     }
   });
 
+  // /clear, plan-mode exit & fresh-session flows abandon the current
+  // conversation for a new one. The resume cursor has to follow, or a later
+  // resume replays the dead conversation.
+  const handleConversationReset = Effect.fn("handleConversationReset")(function* (
+    context: ClaudeSessionContext,
+    message: SDKConversationResetMessage,
+  ) {
+    const nextThreadId = message.new_conversation_id;
+    context.resumeSessionId = nextThreadId;
+    context.lastAssistantUuid = undefined;
+    yield* updateResumeCursor(context);
+
+    if (context.lastThreadStartedId === nextThreadId) {
+      return;
+    }
+    context.lastThreadStartedId = nextThreadId;
+    const stamp = yield* makeEventStamp();
+    yield* offerRuntimeEvent({
+      type: "thread.started",
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      payload: {
+        providerThreadId: nextThreadId,
+      },
+      providerRefs: nativeProviderRefs(context),
+      raw: {
+        source: "claude.sdk.message",
+        method: "claude/conversation/reset",
+        payload: message,
+      },
+    });
+  });
+
   const handleSdkMessage = Effect.fn("handleSdkMessage")(function* (
     context: ClaudeSessionContext,
     message: SDKMessage,
@@ -3038,6 +3085,9 @@ export const makeClaudeAdapter = Effect.fn("makeClaudeAdapter")(function* (
         return;
       // Composer prompt suggestions have no T3 surface; consumed deliberately.
       case "prompt_suggestion":
+        return;
+      case "conversation_reset":
+        yield* handleConversationReset(context, message);
         return;
       default: {
         // Exhaustiveness guard (see handleSystemMessage): new SDK top-level
