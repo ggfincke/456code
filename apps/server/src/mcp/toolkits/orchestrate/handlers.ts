@@ -24,6 +24,9 @@ import {
   type OrchestratePlanUpsertInput,
 } from './tools.ts'
 
+// compiled once at module scope; rebuilding per call is a lint-flagged cost
+const decodeOrchestratePlanRevision = Schema.decodeUnknownEffect(OrchestratePlanRevision)
+
 function orchestratePlanError(
   operation: string,
   code: ConstructorParameters<typeof OrchestratePlanUpsertError>[0]['code'],
@@ -146,7 +149,7 @@ const handlers = {
       const createdAt = DateTime.formatIso(yield* DateTime.now)
       const totalWorkers =
         input.totalWorkers ?? input.stages.reduce((total, stage) => total + stage.workers, 0)
-      const plan = yield* Schema.decodeUnknownEffect(OrchestratePlanRevision)({
+      const plan = yield* decodeOrchestratePlanRevision({
         runId: input.runId,
         revision: Math.max(persistedMaxRevision, projectedMaxRevision) + 1,
         turnId: scope.activeTurnId,
