@@ -1102,6 +1102,15 @@ const ThreadProposedPlanUpsertCommand = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+// server-internal: dispatched by the orchestrate MCP toolkit after validation
+const ThreadOrchestratePlanUpsertCommand = Schema.Struct({
+  type: Schema.Literal("thread.orchestrate-plan.upsert"),
+  commandId: CommandId,
+  threadId: ThreadId,
+  plan: OrchestratePlanRevision,
+  createdAt: IsoDateTime,
+});
+
 const ThreadTurnDiffCompleteCommand = Schema.Struct({
   type: Schema.Literal('thread.turn.diff.complete'),
   commandId: CommandId,
@@ -1158,6 +1167,7 @@ const InternalOrchestrationCommand = Schema.Union([
   ThreadMessageAssistantDeltaCommand,
   ThreadMessageAssistantCompleteCommand,
   ThreadProposedPlanUpsertCommand,
+  ThreadOrchestratePlanUpsertCommand,
   ThreadTurnDiffCompleteCommand,
   ThreadActivityAppendCommand,
   ThreadMessagesImportCommand,
