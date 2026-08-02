@@ -470,10 +470,31 @@ const UserInputResolvedPayload = Schema.Struct({
 })
 export type UserInputResolvedPayload = typeof UserInputResolvedPayload.Type
 
+// normalized token counts for one provider-native subagent task; additive next
+// to the raw `usage` passthrough so previously persisted activities still decode
+export const TaskUsageSnapshot = Schema.Struct({
+  totalTokens: NonNegativeInt,
+  toolUses: Schema.optional(NonNegativeInt),
+  durationMs: Schema.optional(NonNegativeInt),
+})
+export type TaskUsageSnapshot = typeof TaskUsageSnapshot.Type
+
+// identity linking a native subagent task to its spawning Agent/Workflow tool
+// call; all optional because providers learn these at different lifecycle
+// points (toolUseId at spawn, agentId/model often only at completion)
+const taskAgentIdentityFields = {
+  toolUseId: Schema.optional(TrimmedNonEmptyStringSchema),
+  agentId: Schema.optional(TrimmedNonEmptyStringSchema),
+  subagentType: Schema.optional(TrimmedNonEmptyStringSchema),
+  model: Schema.optional(TrimmedNonEmptyStringSchema),
+}
+
 const TaskStartedPayload = Schema.Struct({
   taskId: RuntimeTaskId,
   description: Schema.optional(TrimmedNonEmptyStringSchema),
   taskType: Schema.optional(TrimmedNonEmptyStringSchema),
+  workflowName: Schema.optional(TrimmedNonEmptyStringSchema),
+  ...taskAgentIdentityFields,
 })
 export type TaskStartedPayload = typeof TaskStartedPayload.Type
 
@@ -482,7 +503,9 @@ const TaskProgressPayload = Schema.Struct({
   description: TrimmedNonEmptyStringSchema,
   summary: Schema.optional(TrimmedNonEmptyStringSchema),
   usage: Schema.optional(Schema.Unknown),
+  tokenUsage: Schema.optional(TaskUsageSnapshot),
   lastToolName: Schema.optional(TrimmedNonEmptyStringSchema),
+  ...taskAgentIdentityFields,
 })
 export type TaskProgressPayload = typeof TaskProgressPayload.Type
 
@@ -491,6 +514,10 @@ const TaskCompletedPayload = Schema.Struct({
   status: Schema.Literals(['completed', 'failed', 'stopped']),
   summary: Schema.optional(TrimmedNonEmptyStringSchema),
   usage: Schema.optional(Schema.Unknown),
+  tokenUsage: Schema.optional(TaskUsageSnapshot),
+  totalToolUseCount: Schema.optional(NonNegativeInt),
+  totalDurationMs: Schema.optional(NonNegativeInt),
+  ...taskAgentIdentityFields,
 })
 export type TaskCompletedPayload = typeof TaskCompletedPayload.Type
 

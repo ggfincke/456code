@@ -321,6 +321,48 @@ export const OrchestrationProposedPlan = Schema.Struct({
 })
 export type OrchestrationProposedPlan = typeof OrchestrationProposedPlan.Type
 
+export const OrchestratePlanRunId = TrimmedNonEmptyString
+export type OrchestratePlanRunId = typeof OrchestratePlanRunId.Type
+
+export const OrchestratePlanStage = Schema.Struct({
+  id: TrimmedNonEmptyString,
+  provider: TrimmedNonEmptyString,
+  // null -> provider default; the card shows the resolved instance default
+  model: Schema.NullOr(TrimmedNonEmptyString).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  effort: Schema.optional(TrimmedNonEmptyString),
+  mode: Schema.Literals(['read', 'edit']),
+  workers: NonNegativeInt,
+  scope: Schema.optional(Schema.String),
+  phase: Schema.optional(TrimmedNonEmptyString),
+})
+export type OrchestratePlanStage = typeof OrchestratePlanStage.Type
+
+/**
+ * One revision of an orchestrate model plan: the durable server-held
+ * counterpart of the fenced `orchestrate-plan` block, written by the agent
+ * through the orchestrate MCP toolkit (or backfilled from a fence) and
+ * rendered by the plan card. Revisions are immutable; a re-gated plan for the
+ * same run appends the next revision and supersedes earlier pending ones.
+ */
+export const OrchestratePlanRevision = Schema.Struct({
+  runId: OrchestratePlanRunId,
+  revision: NonNegativeInt,
+  turnId: Schema.NullOr(TurnId),
+  workflow: TrimmedNonEmptyString,
+  task: Schema.String,
+  stages: Schema.Array(OrchestratePlanStage),
+  totalWorkers: NonNegativeInt,
+  maxWorkers: NonNegativeInt,
+  source: Schema.Literals(['tool', 'fence']),
+  // discuss responses leave the revision pending
+  status: Schema.Literals(['pending', 'approved', 'rejected', 'superseded']),
+  createdAt: IsoDateTime,
+  updatedAt: IsoDateTime,
+})
+export type OrchestratePlanRevision = typeof OrchestratePlanRevision.Type
+
 const SourceProposedPlanReference = Schema.Struct({
   threadId: ThreadId,
   planId: OrchestrationProposedPlanId,
@@ -493,6 +535,9 @@ export const OrchestrationThread = Schema.Struct({
   deletedAt: Schema.NullOr(IsoDateTime),
   messages: Schema.Array(OrchestrationMessage),
   proposedPlans: Schema.Array(OrchestrationProposedPlan).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
+  orchestratePlans: Schema.Array(OrchestratePlanRevision).pipe(
     Schema.withDecodingDefault(Effect.succeed([])),
   ),
   activities: Schema.Array(OrchestrationThreadActivity),
@@ -882,6 +927,36 @@ const ThreadUserInputRespondCommand = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+export const OrchestratePlanDecision = Schema.Literals(['approve', 'reject', 'discuss'])
+export type OrchestratePlanDecision = typeof OrchestratePlanDecision.Type
+
+// a per-stage binding override chosen in the plan card; only present fields change
+export const OrchestratePlanStageOverride = Schema.Struct({
+  stageId: TrimmedNonEmptyString,
+  provider: Schema.optional(TrimmedNonEmptyString),
+  model: Schema.optional(TrimmedNonEmptyString),
+  effort: Schema.optional(TrimmedNonEmptyString),
+  workers: Schema.optional(NonNegativeInt),
+})
+export type OrchestratePlanStageOverride = typeof OrchestratePlanStageOverride.Type
+
+// typed plan-gate response: replaces the token-grammar chat reply; the server
+// validates revision ownership/staleness, records the decision, and delivers a
+// canonical envelope to the orchestrator through the normal turn path
+const ThreadOrchestratePlanRespondCommand = Schema.Struct({
+  type: Schema.Literal('thread.orchestrate-plan.respond'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  revision: NonNegativeInt,
+  decision: OrchestratePlanDecision,
+  stageOverrides: Schema.optional(Schema.Array(OrchestratePlanStageOverride)),
+  maxWorkers: Schema.optional(NonNegativeInt),
+  // free-text rider for discuss (and optional context on reject)
+  note: Schema.optional(Schema.String),
+  createdAt: IsoDateTime,
+})
+
 const ThreadCheckpointRevertCommand = Schema.Struct({
   type: Schema.Literal('thread.checkpoint.revert'),
   commandId: CommandId,
@@ -917,6 +992,7 @@ const DispatchableClientOrchestrationCommand = Schema.Union([
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
+  ThreadOrchestratePlanRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ])
@@ -943,6 +1019,7 @@ export const ClientOrchestrationCommand = Schema.Union([
   ThreadTurnInterruptCommand,
   ThreadApprovalRespondCommand,
   ThreadUserInputRespondCommand,
+  ThreadOrchestratePlanRespondCommand,
   ThreadCheckpointRevertCommand,
   ThreadSessionStopCommand,
 ])
@@ -1124,6 +1201,8 @@ export const OrchestrationEventType = Schema.Literals([
   'thread.session-stop-requested',
   'thread.session-set',
   'thread.proposed-plan-upserted',
+  'thread.orchestrate-plan-upserted',
+  'thread.orchestrate-plan-response-requested',
   'thread.turn-diff-completed',
   'thread.activity-appended',
 ])
@@ -1338,6 +1417,26 @@ const ThreadUserInputResponseRequestedPayload = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+export const ThreadOrchestratePlanUpsertedPayload = Schema.Struct({
+  threadId: ThreadId,
+  plan: OrchestratePlanRevision,
+  createdAt: IsoDateTime,
+})
+export type ThreadOrchestratePlanUpsertedPayload = typeof ThreadOrchestratePlanUpsertedPayload.Type
+
+export const ThreadOrchestratePlanResponseRequestedPayload = Schema.Struct({
+  threadId: ThreadId,
+  runId: OrchestratePlanRunId,
+  revision: NonNegativeInt,
+  decision: OrchestratePlanDecision,
+  stageOverrides: Schema.optional(Schema.Array(OrchestratePlanStageOverride)),
+  maxWorkers: Schema.optional(NonNegativeInt),
+  note: Schema.optional(Schema.String),
+  createdAt: IsoDateTime,
+})
+export type ThreadOrchestratePlanResponseRequestedPayload =
+  typeof ThreadOrchestratePlanResponseRequestedPayload.Type
+
 export const ThreadCheckpointRevertRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   turnCount: NonNegativeInt,
@@ -1521,6 +1620,16 @@ const knownOrchestrationEventMembers = [
     ...EventBaseFields,
     type: Schema.Literal('thread.user-input-response-requested'),
     payload: ThreadUserInputResponseRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.orchestrate-plan-upserted'),
+    payload: ThreadOrchestratePlanUpsertedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.orchestrate-plan-response-requested'),
+    payload: ThreadOrchestratePlanResponseRequestedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,
