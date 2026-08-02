@@ -1,7 +1,11 @@
 // apps/server/src/provider/claude/ClaudeTokenUsage.ts
 // normalizes Claude context-window and token usage snapshots
 
-import type { ModelSelection, ThreadTokenUsageSnapshot } from '@t3tools/contracts'
+import type {
+  ModelSelection,
+  TaskUsageSnapshot,
+  ThreadTokenUsageSnapshot,
+} from '@t3tools/contracts'
 
 import { resolveClaudeContextWindow } from '../Layers/ClaudeProvider.ts'
 
@@ -44,7 +48,7 @@ export function selectedClaudeContextWindow(
   }
 }
 
-function finiteNonNegativeInteger(value: unknown): number | undefined
+export function finiteNonNegativeInteger(value: unknown): number | undefined
 {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0
     ? Math.round(value)
@@ -259,6 +263,30 @@ export function normalizeClaudeTaskProgressTokenUsage(
   const durationMs = finiteNonNegativeInteger(usage.duration_ms)
   return {
     ...snapshot,
+    ...(toolUses !== undefined ? { toolUses } : {}),
+    ...(durationMs !== undefined ? { durationMs } : {}),
+  }
+}
+
+// per-task usage snapshot from sdk task frames (total_tokens/tool_uses/duration_ms)
+export function normalizeClaudeTaskUsage(value: unknown): TaskUsageSnapshot | undefined
+{
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+  {
+    return undefined
+  }
+
+  const usage = value as Record<string, unknown>
+  const totalTokens = finiteNonNegativeInteger(usage.total_tokens)
+  if (totalTokens === undefined)
+  {
+    return undefined
+  }
+
+  const toolUses = finiteNonNegativeInteger(usage.tool_uses)
+  const durationMs = finiteNonNegativeInteger(usage.duration_ms)
+  return {
+    totalTokens,
     ...(toolUses !== undefined ? { toolUses } : {}),
     ...(durationMs !== undefined ? { durationMs } : {}),
   }
