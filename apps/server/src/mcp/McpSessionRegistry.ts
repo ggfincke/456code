@@ -126,7 +126,7 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
         threadId: ThreadId.make(request.threadId),
         providerSessionId,
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
-        capabilities: new Set(['preview', 'proposal']),
+        capabilities: new Set(['preview', 'proposal', 'orchestrate']),
         issuedAt,
       }
       yield* SynchronizedRef.update(state, ({ records }) =>

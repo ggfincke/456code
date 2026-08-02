@@ -3,10 +3,13 @@
 
 import {
   EventId,
+  type CommandId,
+  type OrchestratePlanRevision,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
+  type ThreadId,
   ThreadImportContinuationActivityPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
 } from '@t3tools/contracts'
@@ -38,6 +41,19 @@ import {
 import { projectEvent } from './projector.ts'
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
+
+// server-internal command: plan upserts arrive through the MCP toolkit, not
+// the client command union
+export interface ThreadOrchestratePlanUpsertCommand
+{
+  readonly type: 'thread.orchestrate-plan.upsert'
+  readonly commandId: CommandId
+  readonly threadId: ThreadId
+  readonly plan: OrchestratePlanRevision
+  readonly createdAt: string
+}
+
+type ServerOrchestrationCommand = OrchestrationCommand | ThreadOrchestratePlanUpsertCommand
 
 // session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
@@ -230,7 +246,7 @@ function threadHasQueuedTurnStart(
 }
 
 function withEventBase(
-  input: Pick<OrchestrationCommand, 'commandId'> & {
+  input: Pick<ServerOrchestrationCommand, 'commandId'> & {
     readonly aggregateKind: OrchestrationEvent['aggregateKind']
     readonly aggregateId: OrchestrationEvent['aggregateId']
     readonly occurredAt: string
@@ -306,7 +322,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
   command,
   readModel,
 }: {
-  readonly command: OrchestrationCommand
+  readonly command: ServerOrchestrationCommand
   readonly readModel: OrchestrationReadModel
 }): Effect.fn.Return<
   DecideOrchestrationCommandResult,
@@ -1612,6 +1628,29 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         payload: {
           threadId: command.threadId,
           proposedPlan: command.proposedPlan,
+        },
+      }
+    }
+
+    case 'thread.orchestrate-plan.upsert':
+    {
+      yield* requireThread({
+        readModel,
+        command: command as unknown as OrchestrationCommand,
+        threadId: command.threadId,
+      })
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.orchestrate-plan-upserted',
+        payload: {
+          threadId: command.threadId,
+          plan: command.plan,
+          createdAt: command.createdAt,
         },
       }
     }

@@ -16,6 +16,8 @@ import packageJson from '../../package.json' with { type: 'json' }
 import * as McpInvocationContext from './McpInvocationContext.ts'
 import * as McpSessionRegistry from './McpSessionRegistry.ts'
 import * as PreviewAutomationBroker from './PreviewAutomationBroker.ts'
+import { OrchestrateToolkitHandlersLive } from './toolkits/orchestrate/handlers.ts'
+import { OrchestrateToolkit } from './toolkits/orchestrate/tools.ts'
 import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
@@ -243,6 +245,10 @@ export const ProposalToolkitRegistrationLive = McpServer.toolkit(ProposalToolkit
   Layer.provide(ProposalToolkitHandlersLive),
 )
 
+export const OrchestrateToolkitRegistrationLive = McpServer.toolkit(OrchestrateToolkit).pipe(
+  Layer.provide(OrchestrateToolkitHandlersLive),
+)
+
 const McpTransportLive = McpServer.layerHttp({
   name: '456code',
   version: packageJson.version,
@@ -252,4 +258,5 @@ const McpTransportLive = McpServer.layerHttp({
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   ProposalToolkitRegistrationLive,
+  OrchestrateToolkitRegistrationLive,
 ).pipe(Layer.provideMerge(McpTransportLive))
