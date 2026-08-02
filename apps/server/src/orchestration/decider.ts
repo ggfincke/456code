@@ -3,13 +3,11 @@
 
 import {
   EventId,
-  type CommandId,
-  type OrchestratePlanRevision,
   type OrchestrationCommand,
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
-  type ThreadId,
+  type ThreadOrchestratePlanResponseRequestedPayload,
   ThreadImportContinuationActivityPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
 } from '@t3tools/contracts'
@@ -42,18 +40,10 @@ import { projectEvent } from './projector.ts'
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-// server-internal command: plan upserts arrive through the MCP toolkit, not
-// the client command union
-export interface ThreadOrchestratePlanUpsertCommand
-{
-  readonly type: 'thread.orchestrate-plan.upsert'
-  readonly commandId: CommandId
-  readonly threadId: ThreadId
-  readonly plan: OrchestratePlanRevision
-  readonly createdAt: string
-}
-
-type ServerOrchestrationCommand = OrchestrationCommand | ThreadOrchestratePlanUpsertCommand
+export type ThreadOrchestratePlanUpsertCommand = Extract<
+  OrchestrationCommand,
+  { readonly type: 'thread.orchestrate-plan.upsert' }
+>
 
 // session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
@@ -246,7 +236,7 @@ function threadHasQueuedTurnStart(
 }
 
 function withEventBase(
-  input: Pick<ServerOrchestrationCommand, 'commandId'> & {
+  input: Pick<OrchestrationCommand, 'commandId'> & {
     readonly aggregateKind: OrchestrationEvent['aggregateKind']
     readonly aggregateId: OrchestrationEvent['aggregateId']
     readonly occurredAt: string
@@ -322,7 +312,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
   command,
   readModel,
 }: {
-  readonly command: ServerOrchestrationCommand
+  readonly command: OrchestrationCommand
   readonly readModel: OrchestrationReadModel
 }): Effect.fn.Return<
   DecideOrchestrationCommandResult,
@@ -1144,6 +1134,69 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       }
     }
 
+    case 'thread.orchestrate-plan.respond':
+    {
+      if (command.runId.trim().length === 0)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: 'Orchestrate plan run id must not be empty.',
+        })
+      }
+      if (!Number.isInteger(command.revision) || command.revision < 0)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: 'Orchestrate plan revision must be a non-negative integer.',
+        })
+      }
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      const runPlans = thread.orchestratePlans.filter((plan) => plan.runId === command.runId)
+      const targetPlan = runPlans.find((plan) => plan.revision === command.revision)
+      if (!targetPlan)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Orchestrate plan '${command.runId}' revision '${command.revision}' does not exist on thread '${command.threadId}'.`,
+        })
+      }
+      const latestRevision = runPlans.reduce(
+        (revision, plan) => Math.max(revision, plan.revision),
+        command.revision,
+      )
+      if (command.revision !== latestRevision || targetPlan.status !== 'pending')
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Orchestrate plan '${command.runId}' revision '${command.revision}' is stale or no longer pending.`,
+        })
+      }
+      const payload = {
+        threadId: command.threadId,
+        runId: command.runId,
+        revision: command.revision,
+        decision: command.decision,
+        ...(command.stageOverrides !== undefined ? { stageOverrides: command.stageOverrides } : {}),
+        ...(command.maxWorkers !== undefined ? { maxWorkers: command.maxWorkers } : {}),
+        ...(command.note !== undefined ? { note: command.note } : {}),
+        createdAt: command.createdAt,
+      } satisfies ThreadOrchestratePlanResponseRequestedPayload
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.orchestrate-plan-response-requested',
+        payload,
+      }
+    }
+
     case 'thread.user-input.respond':
     {
       yield* requireThread({
@@ -1636,7 +1689,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
     {
       yield* requireThread({
         readModel,
-        command: command as unknown as OrchestrationCommand,
+        command,
         threadId: command.threadId,
       })
       return {

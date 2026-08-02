@@ -39,10 +39,12 @@ Before any \`start_worker\` call:
 
 1. Parse any \`workflow=\`, per-stage \`<stage>=provider[:model[:effort]]\` overrides, \`max-workers=\`, and explicit \`--yes\`.
 2. Resolve each stage's provider, model, effort, mode, and worker count from broker defaults, global and repository profile bindings, approved gate edits, and inline arguments in that precedence order.
-3. Emit the resolved plan as a fenced \`orchestrate-plan\` JSON block. Include a stable \`runId\`, workflow, task, unique stage ids, provider/model/effort, read or edit mode, worker counts, scalar scopes, \`totalWorkers\`, and \`maxWorkers\`.
+3. When the orchestrate MCP toolkit is available, emit the resolved plan with \`orchestrate_plan_upsert\` instead of a fenced block. Otherwise emit a fenced \`orchestrate-plan\` JSON block as the supported fallback. Include a stable \`runId\`, workflow, task, unique stage ids, provider/model/effort, read or edit mode, worker counts, scalar scopes, \`totalWorkers\`, and \`maxWorkers\`.
 4. Wait for explicit approval before launching. Only an invocation containing \`--yes\` skips the gate.
 
 Treat the approved plan as a budget. Re-gate before changing a stage's provider or model or exceeding \`maxWorkers\`. The session model remains the orchestrator; stage bindings govern workers only.
+
+Gate responses may arrive as an \`<orchestrate_plan_response>\` envelope. On \`approve\`, apply its stage and max-worker overrides and launch. On \`reject\`, do not launch and await direction. On \`discuss\`, answer the note without launching. Continue accepting the legacy token grammar, including \`approve stage=...\`, \`max-workers=...\`, and \`--yes\`.
 
 ## Assign and run workers
 

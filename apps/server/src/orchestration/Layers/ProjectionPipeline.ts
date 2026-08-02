@@ -7,6 +7,7 @@ import {
   type ApprovalOutcomeStatus,
   type ProviderApprovalDecision,
   type ModelSelection,
+  OrchestratePlanRevision,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
@@ -22,6 +23,7 @@ import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 
 import { toPersistenceSqlError, type ProjectionRepositoryError } from '../../persistence/Errors.ts'
 import { AttachmentLifecycleRepositoryLive } from '../../persistence/Layers/AttachmentLifecycle.ts'
@@ -72,6 +74,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threads: 'projection.threads',
   threadMessages: 'projection.thread-messages',
   threadProposedPlans: 'projection.thread-proposed-plans',
+  threadOrchestratePlans: 'projection.thread-orchestrate-plans',
   threadActivities: 'projection.thread-activities',
   threadSessions: 'projection.thread-sessions',
   threadTurns: 'projection.thread-turns',
@@ -81,6 +84,33 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
 
 const encodeThreadOriginJson = Schema.encodeSync(Schema.fromJsonString(ThreadOrigin))
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeOrchestratePlanStagesJson = Schema.encodeSync(
+  Schema.fromJsonString(OrchestratePlanRevision.fields.stages),
+)
+const ProjectionThreadOrchestratePlanDbRow = Schema.Struct({
+  threadId: ThreadId,
+  runId: OrchestratePlanRevision.fields.runId,
+  revision: OrchestratePlanRevision.fields.revision,
+  turnId: OrchestratePlanRevision.fields.turnId,
+  workflow: OrchestratePlanRevision.fields.workflow,
+  task: OrchestratePlanRevision.fields.task,
+  stages: Schema.fromJsonString(OrchestratePlanRevision.fields.stages),
+  totalWorkers: OrchestratePlanRevision.fields.totalWorkers,
+  maxWorkers: OrchestratePlanRevision.fields.maxWorkers,
+  source: OrchestratePlanRevision.fields.source,
+  status: OrchestratePlanRevision.fields.status,
+  createdAt: OrchestratePlanRevision.fields.createdAt,
+  updatedAt: OrchestratePlanRevision.fields.updatedAt,
+})
+type ProjectionThreadOrchestratePlanDbRow = typeof ProjectionThreadOrchestratePlanDbRow.Type
+const ProjectionThreadOrchestratePlanKey = Schema.Struct({
+  threadId: ThreadId,
+  runId: OrchestratePlanRevision.fields.runId,
+  revision: OrchestratePlanRevision.fields.revision,
+})
+const ProjectionThreadOrchestratePlansByThread = Schema.Struct({
+  threadId: ThreadId,
+})
 
 type ProjectorName =
   (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES]
@@ -374,6 +404,25 @@ function retainProjectionProposedPlansAfterRevert(
   return proposedPlans.filter(
     (proposedPlan) => proposedPlan.turnId === null || retainedTurnIds.has(proposedPlan.turnId),
   )
+}
+
+function retainProjectionOrchestratePlansAfterRevert(
+  orchestratePlans: ReadonlyArray<ProjectionThreadOrchestratePlanDbRow>,
+  turns: ReadonlyArray<ProjectionTurn>,
+  turnCount: number,
+): ReadonlyArray<ProjectionThreadOrchestratePlanDbRow>
+{
+  const retainedTurnIds = new Set<string>(
+    turns
+      .filter(
+        (turn) =>
+          turn.turnId !== null &&
+          turn.checkpointTurnCount !== null &&
+          turn.checkpointTurnCount <= turnCount,
+      )
+      .flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
+  )
+  return orchestratePlans.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId))
 }
 
 function collectThreadAttachmentRelativePaths(
@@ -684,6 +733,125 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       `.pipe(
         Effect.mapError(toPersistenceSqlError('ProjectionPipeline.updateApprovalOutcome:query')),
       )
+
+    const findThreadOrchestratePlanRow = SqlSchema.findOneOption({
+      Request: ProjectionThreadOrchestratePlanKey,
+      Result: ProjectionThreadOrchestratePlanDbRow,
+      execute: ({ threadId, runId, revision }) => sql`
+        SELECT
+          thread_id AS "threadId",
+          run_id AS "runId",
+          revision,
+          turn_id AS "turnId",
+          workflow,
+          task,
+          stages_json AS "stages",
+          total_workers AS "totalWorkers",
+          max_workers AS "maxWorkers",
+          source,
+          status,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_orchestrate_plans
+        WHERE thread_id = ${threadId}
+          AND run_id = ${runId}
+          AND revision = ${revision}
+        LIMIT 1
+      `,
+    })
+
+    const listThreadOrchestratePlanRows = SqlSchema.findAll({
+      Request: ProjectionThreadOrchestratePlansByThread,
+      Result: ProjectionThreadOrchestratePlanDbRow,
+      execute: ({ threadId }) => sql`
+        SELECT
+          thread_id AS "threadId",
+          run_id AS "runId",
+          revision,
+          turn_id AS "turnId",
+          workflow,
+          task,
+          stages_json AS "stages",
+          total_workers AS "totalWorkers",
+          max_workers AS "maxWorkers",
+          source,
+          status,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_orchestrate_plans
+        WHERE thread_id = ${threadId}
+        ORDER BY created_at ASC, run_id ASC, revision ASC
+      `,
+    })
+
+    const upsertThreadOrchestratePlanRow = Effect.fn('upsertThreadOrchestratePlanRow')(function* (
+      row: ProjectionThreadOrchestratePlanDbRow,
+    )
+    {
+      const stagesJson = encodeOrchestratePlanStagesJson(row.stages)
+      yield* sql`
+          INSERT INTO projection_thread_orchestrate_plans (
+            thread_id,
+            run_id,
+            revision,
+            turn_id,
+            workflow,
+            task,
+            stages_json,
+            total_workers,
+            max_workers,
+            source,
+            status,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${row.threadId},
+            ${row.runId},
+            ${row.revision},
+            ${row.turnId},
+            ${row.workflow},
+            ${row.task},
+            ${stagesJson},
+            ${row.totalWorkers},
+            ${row.maxWorkers},
+            ${row.source},
+            ${row.status},
+            ${row.createdAt},
+            ${row.updatedAt}
+          )
+          ON CONFLICT (thread_id, run_id, revision)
+          DO UPDATE SET
+            turn_id = excluded.turn_id,
+            workflow = excluded.workflow,
+            task = excluded.task,
+            stages_json = excluded.stages_json,
+            total_workers = excluded.total_workers,
+            max_workers = excluded.max_workers,
+            source = excluded.source,
+            status = excluded.status,
+            created_at = excluded.created_at,
+            updated_at = excluded.updated_at
+        `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.upsert:query'),
+        ),
+      )
+    })
+
+    const deleteThreadOrchestratePlanRows = Effect.fn('deleteThreadOrchestratePlanRows')(function* (
+      threadId: ThreadId,
+    )
+    {
+      yield* sql`
+          DELETE FROM projection_thread_orchestrate_plans
+          WHERE thread_id = ${threadId}
+        `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.delete:query'),
+        ),
+      )
+    })
 
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -1226,6 +1394,8 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
         }
 
         case 'thread.proposed-plan-upserted':
+        case 'thread.orchestrate-plan-upserted':
+        case 'thread.orchestrate-plan-response-requested':
         case 'thread.approval-response-requested':
         case 'thread.user-input-response-requested':
         {
@@ -1495,6 +1665,117 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             threadId: event.payload.threadId,
           })
           yield* Effect.forEach(keptRows, projectionThreadProposedPlanRepository.upsert, {
+            concurrency: 1,
+          }).pipe(Effect.asVoid)
+          return
+        }
+
+        default:
+          return
+      }
+    })
+
+    const applyThreadOrchestratePlansProjection: ProjectorDefinition['apply'] = Effect.fn(
+      'applyThreadOrchestratePlansProjection',
+    )(function* (event, _attachmentSideEffects)
+    {
+      switch (event.type)
+      {
+        case 'thread.orchestrate-plan-upserted':
+          // a new revision supersedes older pending revisions of the same run
+          yield* sql`
+            UPDATE projection_thread_orchestrate_plans
+            SET
+              status = 'superseded',
+              updated_at = ${event.payload.plan.updatedAt}
+            WHERE thread_id = ${event.payload.threadId}
+              AND run_id = ${event.payload.plan.runId}
+              AND revision < ${event.payload.plan.revision}
+              AND status = 'pending'
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError(
+                'ProjectionThreadOrchestratePlanRepository.supersedePending:query',
+              ),
+            ),
+          )
+          yield* upsertThreadOrchestratePlanRow({
+            threadId: event.payload.threadId,
+            ...event.payload.plan,
+          })
+          return
+
+        case 'thread.orchestrate-plan-response-requested':
+        {
+          const existingRow = yield* findThreadOrchestratePlanRow({
+            threadId: event.payload.threadId,
+            runId: event.payload.runId,
+            revision: event.payload.revision,
+          }).pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.get:query'),
+            ),
+          )
+          if (Option.isNone(existingRow))
+          {
+            yield* Effect.logWarning('ignoring response for unknown orchestrate plan revision', {
+              threadId: event.payload.threadId,
+              runId: event.payload.runId,
+              revision: event.payload.revision,
+            })
+            return
+          }
+          if (event.payload.decision === 'discuss')
+          {
+            return
+          }
+
+          const status = event.payload.decision === 'approve' ? 'approved' : 'rejected'
+          yield* sql`
+            UPDATE projection_thread_orchestrate_plans
+            SET
+              status = ${status},
+              updated_at = ${event.payload.createdAt}
+            WHERE thread_id = ${event.payload.threadId}
+              AND run_id = ${event.payload.runId}
+              AND revision = ${event.payload.revision}
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.respond:query'),
+            ),
+          )
+          return
+        }
+
+        case 'thread.reverted':
+        {
+          const existingRows = yield* listThreadOrchestratePlanRows({
+            threadId: event.payload.threadId,
+          }).pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.list:query'),
+            ),
+          )
+          if (existingRows.length === 0)
+          {
+            return
+          }
+
+          const existingTurns = yield* projectionTurnRepository.listByThreadId({
+            threadId: event.payload.threadId,
+          })
+          const keptRows = retainProjectionOrchestratePlansAfterRevert(
+            existingRows,
+            existingTurns,
+            event.payload.turnCount,
+          )
+          if (keptRows.length === existingRows.length)
+          {
+            return
+          }
+
+          yield* deleteThreadOrchestratePlanRows(event.payload.threadId)
+          yield* Effect.forEach(keptRows, upsertThreadOrchestratePlanRow, {
             concurrency: 1,
           }).pipe(Effect.asVoid)
           return
@@ -2287,6 +2568,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
         apply: applyThreadProposedPlansProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.threadOrchestratePlans,
+        apply: applyThreadOrchestratePlansProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,

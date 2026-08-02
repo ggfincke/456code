@@ -39,7 +39,11 @@ import {
 import { ServerSettingsService } from '../../serverSettings.ts'
 import { proposedPlanIdForTurn } from '../proposedPlanIdentity.ts'
 import { isHiddenTurnRuntimeEvent } from '../../provider/HiddenTurnRegistry.ts'
-import { runtimeEventToActivities, toTurnId } from './ProviderRuntimeEventMapping.ts'
+import {
+  runtimeEventToActivities,
+  taskIdFromToolProgressSummary,
+  toTurnId,
+} from './ProviderRuntimeEventMapping.ts'
 
 export { runtimeEventToActivities }
 
@@ -87,6 +91,39 @@ function findTaskTitleInActivities(
   return undefined
 }
 
+// walk newest-first for the task's most recent recorded tool_use id
+function findTaskToolUseIdInActivities(
+  activities: ReadonlyArray<OrchestrationThreadActivity> | undefined,
+  taskId: string,
+): string | undefined
+{
+  if (!activities)
+  {
+    return undefined
+  }
+  for (let index = activities.length - 1; index >= 0; index -= 1)
+  {
+    const activity = activities[index]
+    if (!activity || !activity.kind.startsWith('task.'))
+    {
+      continue
+    }
+    const payload =
+      activity.payload && typeof activity.payload === 'object'
+        ? (activity.payload as { taskId?: unknown; toolUseId?: unknown })
+        : undefined
+    if (
+      payload?.taskId === taskId &&
+      typeof payload.toolUseId === 'string' &&
+      payload.toolUseId.length > 0
+    )
+    {
+      return payload.toolUseId
+    }
+  }
+  return undefined
+}
+
 interface AssistantSegmentState
 {
   baseKey: string
@@ -102,6 +139,8 @@ const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000
 const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120)
 const TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY = 10_000
 const TASK_DESCRIPTION_BY_TASK_TTL = Duration.minutes(120)
+const TASK_TOOL_USE_ID_BY_TASK_CACHE_CAPACITY = 10_000
+const TASK_TOOL_USE_ID_BY_TASK_TTL = Duration.minutes(120)
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== '0'
 
@@ -340,6 +379,12 @@ const make = Effect.gen(function* ()
     lookup: () => Effect.succeed(''),
   })
 
+  const taskToolUseIdByTaskKey = yield* Cache.make<string, string>({
+    capacity: TASK_TOOL_USE_ID_BY_TASK_CACHE_CAPACITY,
+    timeToLive: TASK_TOOL_USE_ID_BY_TASK_TTL,
+    lookup: () => Effect.succeed(''),
+  })
+
   const rememberTaskDescription = (threadId: ThreadId, taskId: string, description: string) =>
     Cache.set(taskDescriptionByTaskKey, providerTaskKey(threadId, taskId), description)
 
@@ -350,6 +395,16 @@ const make = Effect.gen(function* ()
     Cache.getOption(taskDescriptionByTaskKey, providerTaskKey(threadId, taskId)).pipe(
       Effect.map((description) =>
         Option.filter(description, (value) => value.length > 0).pipe(Option.getOrUndefined),
+      ),
+    )
+
+  const rememberTaskToolUseId = (threadId: ThreadId, taskId: string, toolUseId: string) =>
+    Cache.set(taskToolUseIdByTaskKey, providerTaskKey(threadId, taskId), toolUseId)
+
+  const lookupTaskToolUseId = (threadId: ThreadId, taskId: string) =>
+    Cache.getOption(taskToolUseIdByTaskKey, providerTaskKey(threadId, taskId)).pipe(
+      Effect.map((toolUseId) =>
+        Option.filter(toolUseId, (value) => value.length > 0).pipe(Option.getOrUndefined),
       ),
     )
 
@@ -801,6 +856,7 @@ const make = Effect.gen(function* ()
       const assistantSegmentKeys = Array.from(yield* Cache.keys(assistantSegmentStateByTurnKey))
       const proposedPlanKeys = Array.from(yield* Cache.keys(bufferedProposedPlanById))
       const taskDescriptionKeys = Array.from(yield* Cache.keys(taskDescriptionByTaskKey))
+      const taskToolUseIdKeys = Array.from(yield* Cache.keys(taskToolUseIdByTaskKey))
       yield* Effect.forEach(
         turnKeys,
         (key) =>
@@ -843,6 +899,12 @@ const make = Effect.gen(function* ()
         taskDescriptionKeys,
         (key) =>
           key.startsWith(prefix) ? Cache.invalidate(taskDescriptionByTaskKey, key) : Effect.void,
+        { concurrency: 1 },
+      ).pipe(Effect.asVoid)
+      yield* Effect.forEach(
+        taskToolUseIdKeys,
+        (key) =>
+          key.startsWith(prefix) ? Cache.invalidate(taskToolUseIdByTaskKey, key) : Effect.void,
         { concurrency: 1 },
       ).pipe(Effect.asVoid)
     })
@@ -1480,6 +1542,15 @@ const make = Effect.gen(function* ()
           yield* rememberTaskDescription(thread.id, event.payload.taskId, description)
         }
       }
+      if (
+        (event.type === 'task.started' ||
+          event.type === 'task.progress' ||
+          event.type === 'task.completed') &&
+        event.payload.toolUseId
+      )
+      {
+        yield* rememberTaskToolUseId(thread.id, event.payload.taskId, event.payload.toolUseId)
+      }
       let taskTitle: string | undefined
       if (event.type === 'task.completed')
       {
@@ -1491,7 +1562,24 @@ const make = Effect.gen(function* ()
         }
       }
 
-      const activities = runtimeEventToActivities(event, taskTitle)
+      // resolve the owning task's tool_use id so nested tool rows can nest
+      // under their subagent in the work log
+      let parentToolUseId: string | undefined
+      if (event.type === 'tool.progress')
+      {
+        const taskId = taskIdFromToolProgressSummary(event.payload.summary)
+        if (taskId)
+        {
+          parentToolUseId = yield* lookupTaskToolUseId(thread.id, taskId)
+          if (!parentToolUseId)
+          {
+            const threadDetail = yield* getLoadedThreadDetail()
+            parentToolUseId = findTaskToolUseIdInActivities(threadDetail?.activities, taskId)
+          }
+        }
+      }
+
+      const activities = runtimeEventToActivities(event, taskTitle, parentToolUseId)
       yield* Effect.forEach(activities, (activity) =>
         providerCommandId(event, 'thread-activity-append').pipe(
           Effect.flatMap((commandId) =>

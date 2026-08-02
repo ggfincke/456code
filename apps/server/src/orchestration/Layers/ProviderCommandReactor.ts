@@ -16,6 +16,7 @@ import {
   type OrchestrationSession,
   type OrchestrationThreadActivity,
   ThreadId,
+  type ThreadOrchestratePlanResponseRequestedPayload,
   ProviderSession,
   type RuntimeMode,
   type ThreadImportContinuationAuthority,
@@ -109,6 +110,7 @@ type ProviderIntentEvent = Extract<
       | 'thread.turn-interrupt-requested'
       | 'thread.approval-response-requested'
       | 'thread.user-input-response-requested'
+      | 'thread.orchestrate-plan-response-requested'
       | 'thread.session-stop-requested'
   }
 >
@@ -120,6 +122,38 @@ type ProviderSwitchFailureReasonCode =
   | 'stale-instance'
   | 'internal-error'
   | 'interrupted-by-restart'
+
+function escapeXmlAttribute(value: string): string
+{
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+}
+
+// canonical envelope the orchestrator model reads in place of reply-grammar text
+export function buildOrchestratePlanResponseEnvelope(
+  payload: ThreadOrchestratePlanResponseRequestedPayload,
+): string
+{
+  const body = {
+    ...(payload.stageOverrides !== undefined
+      ? {
+          stageOverrides: payload.stageOverrides.map((stage) => ({
+            stageId: stage.stageId,
+            ...(stage.provider !== undefined ? { provider: stage.provider } : {}),
+            ...(stage.model !== undefined ? { model: stage.model } : {}),
+            ...(stage.effort !== undefined ? { effort: stage.effort } : {}),
+            ...(stage.workers !== undefined ? { workers: stage.workers } : {}),
+          })),
+        }
+      : {}),
+    ...(payload.maxWorkers !== undefined ? { maxWorkers: payload.maxWorkers } : {}),
+    ...(payload.note !== undefined ? { note: payload.note } : {}),
+  }
+  return `<orchestrate_plan_response run="${escapeXmlAttribute(payload.runId)}" revision="${payload.revision}" decision="${payload.decision}">\n${JSON.stringify(body)}\n</orchestrate_plan_response>`
+}
 
 function toNonEmptyProviderInput(value: string | undefined): string | undefined
 {
@@ -352,6 +386,7 @@ function isProviderIntentEvent(event: OrchestrationEvent): event is ProviderInte
     event.type === 'thread.turn-interrupt-requested' ||
     event.type === 'thread.approval-response-requested' ||
     event.type === 'thread.user-input-response-requested' ||
+    event.type === 'thread.orchestrate-plan-response-requested' ||
     event.type === 'thread.session-stop-requested'
   )
 }
@@ -625,6 +660,7 @@ const make = Effect.gen(function* ()
       | 'provider.turn.interrupt.failed'
       | 'provider.approval.respond.failed'
       | 'provider.user-input.respond.failed'
+      | 'provider.orchestrate-plan.respond.failed'
       | 'provider.session.stop.failed'
     readonly summary: string
     readonly detail: string
@@ -2039,6 +2075,62 @@ const make = Effect.gen(function* ()
     },
   )
 
+  const processOrchestratePlanResponseRequested = Effect.fn(
+    'processOrchestratePlanResponseRequested',
+  )(function* (
+    event: Extract<ProviderIntentEvent, { type: 'thread.orchestrate-plan-response-requested' }>,
+  )
+  {
+    const thread = yield* resolveThread(event.payload.threadId)
+    if (!thread)
+    {
+      return
+    }
+    const hasSession = thread.session && thread.session.status !== 'stopped'
+    if (!hasSession)
+    {
+      return yield* appendProviderFailureActivity({
+        threadId: event.payload.threadId,
+        kind: 'provider.orchestrate-plan.respond.failed',
+        summary: 'Provider orchestrate plan response failed',
+        detail: 'No active provider session is bound to this thread.',
+        turnId: null,
+        createdAt: event.payload.createdAt,
+      })
+    }
+
+    yield* buildSendTurnRequestForThread({
+      threadId: event.payload.threadId,
+      messageText: buildOrchestratePlanResponseEnvelope(event.payload),
+      interactionMode: 'orchestrate',
+      createdAt: event.payload.createdAt,
+    }).pipe(
+      Effect.flatMap((built) =>
+        providerService.sendTurn(built.request).pipe(
+          Effect.flatMap(() =>
+            built.handoffDeliveryMarker === undefined
+              ? Effect.void
+              : appendProviderHandoffDeliveredActivity({
+                  threadId: event.payload.threadId,
+                  marker: built.handoffDeliveryMarker,
+                  createdAt: event.payload.createdAt,
+                }),
+          ),
+        ),
+      ),
+      Effect.catchCause((cause) =>
+        appendProviderFailureActivity({
+          threadId: event.payload.threadId,
+          kind: 'provider.orchestrate-plan.respond.failed',
+          summary: 'Provider orchestrate plan response failed',
+          detail: Cause.pretty(cause),
+          turnId: null,
+          createdAt: event.payload.createdAt,
+        }),
+      ),
+    )
+  })
+
   const processSessionStopRequested = Effect.fn('processSessionStopRequested')(function* (
     event: Extract<ProviderIntentEvent, { type: 'thread.session-stop-requested' }>,
   )
@@ -2135,6 +2227,9 @@ const make = Effect.gen(function* ()
         return
       case 'thread.user-input-response-requested':
         yield* processUserInputResponseRequested(event)
+        return
+      case 'thread.orchestrate-plan-response-requested':
+        yield* processOrchestratePlanResponseRequested(event)
         return
       case 'thread.session-stop-requested':
         yield* processSessionStopRequested(event)

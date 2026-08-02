@@ -34,6 +34,8 @@ import {
   ThreadInteractionModeSetPayload,
   ThreadHandoffClearedPayload,
   ThreadMetaUpdatedPayload,
+  ThreadOrchestratePlanResponseRequestedPayload,
+  ThreadOrchestratePlanUpsertedPayload,
   ThreadProviderSwitchedPayload,
   ThreadProviderSwitchFailedPayload,
   ThreadProviderSwitchProgressedPayload,
@@ -280,6 +282,14 @@ function retainThreadProposedPlansAfterRevert(
   return proposedPlans.filter(
     (proposedPlan) => proposedPlan.turnId === null || retainedTurnIds.has(proposedPlan.turnId),
   )
+}
+
+function retainThreadOrchestratePlansAfterRevert(
+  orchestratePlans: ReadonlyArray<OrchestrationThread['orchestratePlans'][number]>,
+  retainedTurnIds: ReadonlySet<string>,
+): ReadonlyArray<OrchestrationThread['orchestratePlans'][number]>
+{
+  return orchestratePlans.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId))
 }
 
 function isImportContinuationActivity(
@@ -956,6 +966,99 @@ export function projectEvent(
         }
       })
 
+    case 'thread.orchestrate-plan-upserted':
+      return Effect.gen(function* ()
+      {
+        const payload = yield* decodeForEvent(
+          ThreadOrchestratePlanUpsertedPayload,
+          event.payload,
+          event.type,
+          'payload',
+        )
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
+        if (!thread)
+        {
+          return nextBase
+        }
+
+        // a new revision supersedes older pending revisions of the same run
+        const orchestratePlans = [
+          ...thread.orchestratePlans
+            .filter(
+              (entry) =>
+                entry.runId !== payload.plan.runId || entry.revision !== payload.plan.revision,
+            )
+            .map((entry) =>
+              entry.runId === payload.plan.runId &&
+              entry.revision < payload.plan.revision &&
+              entry.status === 'pending'
+                ? {
+                    ...entry,
+                    status: 'superseded' as const,
+                    updatedAt: payload.plan.updatedAt,
+                  }
+                : entry,
+            ),
+          payload.plan,
+        ]
+          .toSorted(
+            (left, right) =>
+              left.createdAt.localeCompare(right.createdAt) ||
+              left.runId.localeCompare(right.runId) ||
+              left.revision - right.revision,
+          )
+          .slice(-200)
+
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            orchestratePlans,
+            updatedAt: event.occurredAt,
+          }),
+        }
+      })
+
+    case 'thread.orchestrate-plan-response-requested':
+      return Effect.gen(function* ()
+      {
+        const payload = yield* decodeForEvent(
+          ThreadOrchestratePlanResponseRequestedPayload,
+          event.payload,
+          event.type,
+          'payload',
+        )
+        const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
+        const plan = thread?.orchestratePlans.find(
+          (entry) => entry.runId === payload.runId && entry.revision === payload.revision,
+        )
+        if (!thread || !plan)
+        {
+          yield* Effect.logWarning('ignoring response for unknown orchestrate plan revision', {
+            threadId: payload.threadId,
+            runId: payload.runId,
+            revision: payload.revision,
+          })
+          return nextBase
+        }
+        if (payload.decision === 'discuss')
+        {
+          return nextBase
+        }
+
+        const status = payload.decision === 'approve' ? 'approved' : 'rejected'
+        return {
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            orchestratePlans: thread.orchestratePlans.map((entry) =>
+              entry.runId === payload.runId && entry.revision === payload.revision
+                ? { ...entry, status, updatedAt: payload.createdAt }
+                : entry,
+            ),
+            updatedAt: event.occurredAt,
+          }),
+        }
+      })
+
     case 'thread.turn-diff-completed':
       return Effect.gen(function* ()
       {
@@ -1058,6 +1161,10 @@ export function projectEvent(
             thread.proposedPlans,
             retainedTurnIds,
           ).slice(-200)
+          const orchestratePlans = retainThreadOrchestratePlansAfterRevert(
+            thread.orchestratePlans,
+            retainedTurnIds,
+          ).slice(-200)
           const activities = retainThreadActivitiesAfterRevert(thread.activities, retainedTurnIds)
 
           const latestCheckpoint = checkpoints.at(-1) ?? null
@@ -1079,6 +1186,7 @@ export function projectEvent(
               checkpoints,
               messages,
               proposedPlans,
+              orchestratePlans,
               activities,
               latestTurn,
               updatedAt: event.occurredAt,
