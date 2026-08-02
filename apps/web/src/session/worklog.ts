@@ -47,6 +47,15 @@ export interface WorkLogEntry
   toolLifecycleStatus?: WorkLogToolLifecycleStatus
   // originating orchestration activity kind (e.g. `user-input.requested`) for row chrome.
   sourceActivityKind?: OrchestrationThreadActivity['kind']
+  taskId?: string
+  model?: string
+  subagentType?: string
+  totalTokens?: number
+  toolUses?: number
+  durationMs?: number
+  lastToolName?: string
+  agentId?: string
+  workflowName?: string
 }
 
 interface DerivedWorkLogEntry extends WorkLogEntry
@@ -54,6 +63,8 @@ interface DerivedWorkLogEntry extends WorkLogEntry
   activityKind: OrchestrationThreadActivity['kind']
   collapseKey?: string
   toolCallId?: string
+  taskToolUseId?: string
+  parentToolUseId?: string
 }
 
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean
@@ -289,7 +300,6 @@ export function deriveWorkLogEntries(
   for (const activity of ordered)
   {
     if (activity.kind === 'tool.started') continue
-    if (activity.kind === 'task.started') continue
     if (activity.kind === 'context-window.updated') continue
     // switch outcomes render as timeline dividers instead of work-log rows
     if (activity.kind === PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND) continue
@@ -300,7 +310,13 @@ export function deriveWorkLogEntries(
   }
   return collapseDerivedWorkLogEntries(entries).map((entry) =>
   {
-    const { activityKind, collapseKey: _collapseKey, ...rest } = entry
+    const {
+      activityKind,
+      collapseKey: _collapseKey,
+      taskToolUseId: _taskToolUseId,
+      parentToolUseId: _parentToolUseId,
+      ...rest
+    } = entry
     return Object.assign(rest, { sourceActivityKind: activityKind })
   })
 }
@@ -350,7 +366,10 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   const commandPreview = extractToolCommand(payload)
   const changedFiles = extractChangedFiles(payload)
   const title = extractToolTitle(payload)
-  const isTaskActivity = activity.kind === 'task.progress' || activity.kind === 'task.completed'
+  const isTaskActivity =
+    activity.kind === 'task.started' ||
+    activity.kind === 'task.progress' ||
+    activity.kind === 'task.completed'
   const taskSummary =
     isTaskActivity && typeof payload?.summary === 'string' && payload.summary.length > 0
       ? payload.summary
@@ -383,7 +402,7 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     turnId: activity.turnId,
     label: taskLabel || activity.summary,
     tone:
-      activity.kind === 'task.progress'
+      activity.kind === 'task.started' || activity.kind === 'task.progress'
         ? 'thinking'
         : activity.tone === 'approval'
           ? 'info'
@@ -432,7 +451,46 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
   {
     entry.toolCallId = toolCallId
   }
+  if (isTaskActivity)
+  {
+    // subagent identity + usage captured by the adapter ride on task payloads
+    const taskId = asTrimmedString(payload?.taskId)
+    const taskToolUseId = asTrimmedString(payload?.toolUseId)
+    const tokenUsage = asRecord(payload?.tokenUsage)
+    const totalTokens = asNumber(tokenUsage?.totalTokens)
+    const toolUses = asNumber(payload?.totalToolUseCount) ?? asNumber(tokenUsage?.toolUses)
+    const durationMs = asNumber(payload?.totalDurationMs) ?? asNumber(tokenUsage?.durationMs)
+    const model = asTrimmedString(payload?.model)
+    const subagentType = asTrimmedString(payload?.subagentType)
+    const lastToolName = asTrimmedString(payload?.lastToolName)
+    const agentId = asTrimmedString(payload?.agentId)
+    const workflowName = asTrimmedString(payload?.workflowName)
+    if (taskId) entry.taskId = taskId
+    if (taskToolUseId) entry.taskToolUseId = taskToolUseId
+    if (model) entry.model = model
+    if (subagentType) entry.subagentType = subagentType
+    if (totalTokens !== null) entry.totalTokens = totalTokens
+    if (toolUses !== null) entry.toolUses = toolUses
+    if (durationMs !== null) entry.durationMs = durationMs
+    if (lastToolName) entry.lastToolName = lastToolName
+    if (agentId) entry.agentId = agentId
+    if (workflowName) entry.workflowName = workflowName
+  }
+  else if (activity.kind === 'tool.progress')
+  {
+    const parentToolUseId = asTrimmedString(payload?.parentToolUseId)
+    const lastToolName = asTrimmedString(payload?.toolName)
+    if (parentToolUseId) entry.parentToolUseId = parentToolUseId
+    if (lastToolName) entry.lastToolName = lastToolName
+  }
   let toolLifecycleStatus = extractWorkLogToolLifecycleStatus(payload)
+  if (
+    !toolLifecycleStatus &&
+    (activity.kind === 'task.started' || activity.kind === 'task.progress')
+  )
+  {
+    toolLifecycleStatus = 'inProgress'
+  }
   if (!toolLifecycleStatus && activity.kind === 'tool.completed')
   {
     toolLifecycleStatus = 'completed'
@@ -454,15 +512,75 @@ function collapseDerivedWorkLogEntries(
 ): DerivedWorkLogEntry[]
 {
   const collapsed: DerivedWorkLogEntry[] = []
+  // task lifecycle rows collapse by taskId into one live row; nested
+  // tool.progress rows update their owning task's last-tool label
+  const taskIndexById = new Map<string, number>()
+  const taskIdByToolUseId = new Map<string, string>()
+  let previousActivityWasNonTaskEntry = false
   for (const entry of entries)
   {
+    if (entry.activityKind === 'tool.progress')
+    {
+      const taskId = entry.parentToolUseId
+        ? taskIdByToolUseId.get(entry.parentToolUseId)
+        : undefined
+      const taskIndex = taskId ? taskIndexById.get(taskId) : undefined
+      if (taskIndex !== undefined && entry.lastToolName)
+      {
+        const taskEntry = collapsed[taskIndex]
+        if (taskEntry && taskEntry.activityKind !== 'task.completed')
+        {
+          collapsed[taskIndex] = { ...taskEntry, lastToolName: entry.lastToolName }
+        }
+      }
+      previousActivityWasNonTaskEntry = false
+      continue
+    }
+    if (entry.taskId)
+    {
+      const existingIndex = taskIndexById.get(entry.taskId)
+      if (existingIndex === undefined)
+      {
+        taskIndexById.set(entry.taskId, collapsed.length)
+        collapsed.push(entry)
+      }
+      else
+      {
+        const previous = collapsed[existingIndex]
+        if (
+          previous &&
+          (previous.activityKind !== 'task.completed' || entry.activityKind === 'task.completed')
+        )
+        {
+          collapsed[existingIndex] = {
+            ...mergeDerivedWorkLogEntries(previous, entry),
+            id: previous.id,
+            createdAt: previous.createdAt,
+          }
+        }
+      }
+      const taskIndex = taskIndexById.get(entry.taskId)
+      const taskToolUseId =
+        taskIndex === undefined ? undefined : collapsed[taskIndex]?.taskToolUseId
+      if (taskToolUseId)
+      {
+        taskIdByToolUseId.set(taskToolUseId, entry.taskId)
+      }
+      previousActivityWasNonTaskEntry = false
+      continue
+    }
     const previous = collapsed.at(-1)
-    if (previous && shouldCollapseToolLifecycleEntries(previous, entry))
+    if (
+      previousActivityWasNonTaskEntry &&
+      previous &&
+      shouldCollapseToolLifecycleEntries(previous, entry)
+    )
     {
       collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry)
       continue
     }
     collapsed.push(entry)
+    previousActivityWasNonTaskEntry = true
   }
   return collapsed
 }
