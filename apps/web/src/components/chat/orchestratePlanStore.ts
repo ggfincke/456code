@@ -11,14 +11,16 @@ export interface OrchestrateStageSelection
   instanceId: ProviderInstanceId | null
 }
 
-// idle -> sending -> sent is the approval path; editing means the reply went to
-// the composer instead, which leaves the card interactive
+// idle -> sending -> sent is the response path; editing means the fallback
+// reply went to the composer instead, which leaves the card interactive
 export type OrchestratePlanCardStatus = 'idle' | 'sending' | 'sent' | 'editing'
 
 export interface OrchestratePlanCardState
 {
   readonly selections: Readonly<Record<string, OrchestrateStageSelection>>
   readonly efforts: Readonly<Record<string, string>>
+  readonly workers?: Readonly<Record<string, number>>
+  readonly note?: string
   // null -> the plan's own maxWorkers is still in effect
   readonly maxWorkers: number | null
   readonly status: OrchestratePlanCardStatus
@@ -169,6 +171,19 @@ export function setOrchestrateStageEffort(key: string, rowKey: string, effort: s
     ...current,
     efforts: { ...current.efforts, [rowKey]: effort },
   }))
+}
+
+export function setOrchestrateStageWorkers(key: string, rowKey: string, workers: number): void
+{
+  updateCardState(key, (current) => ({
+    ...current,
+    workers: { ...current.workers, [rowKey]: workers },
+  }))
+}
+
+export function setOrchestratePlanNote(key: string, note: string): void
+{
+  updateCardState(key, (current) => ({ ...current, note }))
 }
 
 export function setOrchestratePlanMaxWorkers(key: string, maxWorkers: number): void

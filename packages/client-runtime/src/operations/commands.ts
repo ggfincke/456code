@@ -49,6 +49,7 @@ export type StartThreadTurnInput = CommandInput<'thread.turn.start'>
 export type InterruptThreadTurnInput = CommandInput<'thread.turn.interrupt'>
 export type RespondToThreadApprovalInput = CommandInput<'thread.approval.respond'>
 export type RespondToThreadUserInputInput = CommandInput<'thread.user-input.respond'>
+export type RespondToThreadOrchestratePlanInput = CommandInput<'thread.orchestrate-plan.respond'>
 export type RevertThreadCheckpointInput = CommandInput<'thread.checkpoint.revert'>
 export type StopThreadSessionInput = CommandInput<'thread.session.stop'>
 export type SwitchThreadProviderInput = CommandInput<'thread.provider.switch'>
@@ -302,6 +303,21 @@ export const respondToThreadUserInput: (input: RespondToThreadUserInputInput) =>
       createdAt: metadata.createdAt,
     })
   })
+
+export const respondToThreadOrchestratePlan: (
+  input: RespondToThreadOrchestratePlanInput,
+) => CommandEffect = Effect.fn('EnvironmentCommands.respondToThreadOrchestratePlan')(
+  function* (input)
+  {
+    const metadata = yield* timestampedCommandMetadata(input)
+    return yield* dispatch({
+      ...input,
+      type: 'thread.orchestrate-plan.respond',
+      commandId: metadata.commandId,
+      createdAt: metadata.createdAt,
+    })
+  },
+)
 
 export const revertThreadCheckpoint: (input: RevertThreadCheckpointInput) => CommandEffect =
   Effect.fn('EnvironmentCommands.revertThreadCheckpoint')(function* (input)
