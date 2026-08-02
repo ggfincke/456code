@@ -54,7 +54,7 @@ const dependencies = [
 
 export const OrchestratePlanUpsertTool = Tool.make('orchestrate_plan_upsert', {
   description:
-    'Persist an immutable orchestrate plan revision for the authenticated active orchestrate turn. When this toolkit is available, call this tool instead of emitting a fenced orchestrate-plan block; the fence remains the fallback when the toolkit is unavailable. The authenticated MCP session supplies thread and turn identity, so do not pass them. Reusing a runId appends its next revision and supersedes earlier pending revisions.',
+    'Persist an immutable orchestrate plan revision for the authenticated active orchestrate turn. When this toolkit is available, call this tool first, then ALSO emit the fenced orchestrate-plan block with the same runId as the render anchor the client mounts the persisted revision into; without this toolkit the fence alone is the supported form. The authenticated MCP session supplies thread and turn identity, so do not pass them. Reusing a runId appends its next revision and supersedes earlier pending revisions.',
   parameters: OrchestratePlanUpsertInput,
   success: OrchestratePlanRevision,
   failure: OrchestratePlanUpsertError,

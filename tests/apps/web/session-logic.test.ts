@@ -915,7 +915,7 @@ describe('deriveWorkLogEntries', () =>
     expect(entries.map((entry) => entry.id)).toEqual(['tool-complete'])
   })
 
-  it('omits task.started but shows task.progress and task.completed', () =>
+  it('keeps task.started visible as a live row alongside task.progress and task.completed', () =>
   {
     const activities: OrchestrationThreadActivity[] = [
       makeActivity({
@@ -942,7 +942,11 @@ describe('deriveWorkLogEntries', () =>
     ]
 
     const entries = deriveWorkLogEntries(activities)
-    expect(entries.map((entry) => entry.id)).toEqual(['task-progress', 'task-complete'])
+    expect(entries.map((entry) => entry.id)).toEqual([
+      'task-start',
+      'task-progress',
+      'task-complete',
+    ])
   })
 
   it('keeps imported work before continued native work after provider sequence resets', () =>

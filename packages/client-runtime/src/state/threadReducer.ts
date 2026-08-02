@@ -752,6 +752,42 @@ export function applyThreadDetailEvent(
       }
     }
 
+    // ── Orchestrate plans ───────────────────────────────────────────
+    // mirror the server projection so live subscribers see plan revisions
+    // and status flips without waiting for a fresh snapshot
+    case "thread.orchestrate-plan-upserted": {
+      const incoming = event.payload.plan;
+      const orchestratePlans = pipe(
+        thread.orchestratePlans,
+        Arr.filter(
+          (plan) => !(plan.runId === incoming.runId && plan.revision === incoming.revision),
+        ),
+        Arr.map((plan) =>
+          plan.runId === incoming.runId && plan.status === "pending"
+            ? { ...plan, status: "superseded" as const, updatedAt: event.occurredAt }
+            : plan,
+        ),
+        Arr.append(incoming),
+      );
+      return {
+        kind: "updated",
+        thread: { ...thread, orchestratePlans, updatedAt: event.occurredAt },
+      };
+    }
+    case "thread.orchestrate-plan-response-requested": {
+      if (event.payload.decision === "discuss") return { kind: "unchanged" };
+      const nextStatus = event.payload.decision === "approve" ? "approved" : "rejected";
+      const orchestratePlans = thread.orchestratePlans.map((plan) =>
+        plan.runId === event.payload.runId && plan.revision === event.payload.revision
+          ? { ...plan, status: nextStatus as "approved" | "rejected", updatedAt: event.occurredAt }
+          : plan,
+      );
+      return {
+        kind: "updated",
+        thread: { ...thread, orchestratePlans, updatedAt: event.occurredAt },
+      };
+    }
+
     // ── Events that don't mutate thread state directly ──────────────
     case 'thread.user-input-response-requested':
     case 'thread.checkpoint-revert-requested':

@@ -1175,6 +1175,23 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           detail: `Orchestrate plan '${command.runId}' revision '${command.revision}' is stale or no longer pending.`,
         })
       }
+      // overrides must target real, distinct stages of the plan they edit
+      if (command.stageOverrides !== undefined)
+      {
+        const stageIds = new Set(targetPlan.stages.map((stage) => stage.id))
+        const seen = new Set<string>()
+        for (const override of command.stageOverrides)
+        {
+          if (!stageIds.has(override.stageId) || seen.has(override.stageId))
+          {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Orchestrate plan stage override '${override.stageId}' is unknown or duplicated for run '${command.runId}'.`,
+            })
+          }
+          seen.add(override.stageId)
+        }
+      }
       const payload = {
         threadId: command.threadId,
         runId: command.runId,
@@ -1687,11 +1704,22 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
 
     case 'thread.orchestrate-plan.upsert':
     {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       })
+      // the serialized decider is the revision authority: concurrent tool
+      // calls can both compute the same next revision before either event
+      // commits, so a stale or colliding suggestion is bumped past the
+      // current max instead of overwriting an existing immutable revision
+      const maxExistingRevision = thread.orchestratePlans
+        .filter((existing) => existing.runId === command.plan.runId)
+        .reduce((max, existing) => Math.max(max, existing.revision), 0)
+      const plan =
+        command.plan.revision > maxExistingRevision
+          ? command.plan
+          : { ...command.plan, revision: maxExistingRevision + 1 }
       return {
         ...(yield* withEventBase({
           aggregateKind: 'thread',
@@ -1702,7 +1730,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         type: 'thread.orchestrate-plan-upserted',
         payload: {
           threadId: command.threadId,
-          plan: command.plan,
+          plan,
           createdAt: command.createdAt,
         },
       }

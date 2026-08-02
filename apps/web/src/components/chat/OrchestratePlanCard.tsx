@@ -1265,7 +1265,10 @@ export function OrchestratePlanCard({
       {
         markOrchestratePlanRevisionStarted(runId, cardRevisionKey)
       }
-      setOrchestratePlanCardStatus(draftKey, didSend ? 'sent' : 'idle', failure)
+      // discuss leaves the revision pending server-side, so the card must stay
+      // actionable for a later approve/reject instead of locking on "sent"
+      const settledStatus = decision === 'discuss' ? 'idle' : 'sent'
+      setOrchestratePlanCardStatus(draftKey, didSend ? settledStatus : 'idle', failure)
     }
   }
 

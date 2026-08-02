@@ -1602,6 +1602,21 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     const isNestedFrame =
       message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined
 
+    // nested subagent frames must never touch root tool tracking: the shared
+    // index-keyed in-flight map would let a subagent block at the same index
+    // replace or delete the root entry (breaking Agent -> task correlation)
+    // and leak subagent tool calls as root work-log items; subagent activity
+    // reaches the timeline through task events instead
+    if (
+      isNestedFrame &&
+      (event.type === 'content_block_start' ||
+        event.type === 'content_block_stop' ||
+        (event.type === 'content_block_delta' && event.delta.type === 'input_json_delta'))
+    )
+    {
+      return
+    }
+
     if (event.type === 'message_delta')
     {
       if (isNestedFrame)
@@ -1986,6 +2001,13 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     )
     {
       context.turnState.items.push(message.message)
+    }
+
+    // nested subagent tool results must not resolve or delete root in-flight
+    // tool entries; the root Agent result itself arrives with a null parent
+    if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined)
+    {
+      return
     }
 
     for (const toolResult of toolResultBlocksFromUserMessage(message))
