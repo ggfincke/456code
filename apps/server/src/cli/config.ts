@@ -130,6 +130,23 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
+  cartographerReconciliationMode: Config.schema(
+    ServerConfig.CartographerReconciliationMode,
+    'T3CODE_CARTOGRAPHER_RECONCILIATION_MODE',
+  ).pipe(Config.withDefault('report')),
+  cartographerReconciliationDeleteEnabled: Config.int(
+    'T3CODE_CARTOGRAPHER_RECONCILIATION_DELETE',
+  ).pipe(
+    Config.withDefault(0),
+    Config.map((value) => value === 1),
+  ),
+  proposalReconciliationMode: Config.schema(
+    ServerConfig.ProposalReconciliationMode,
+    'T3CODE_PROPOSAL_RECONCILIATION_MODE',
+  ).pipe(Config.withDefault('report')),
+  proposalReconciliationDeleteEnabled: Config.boolean('T3CODE_PROPOSAL_RECONCILIATION_DELETE').pipe(
+    Config.withDefault(false),
+  ),
 })
 
 export interface CliServerFlags
@@ -377,6 +394,10 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      cartographerReconciliationMode: env.cartographerReconciliationMode,
+      cartographerReconciliationDeleteEnabled: env.cartographerReconciliationDeleteEnabled,
+      proposalReconciliationMode: env.proposalReconciliationMode,
+      proposalReconciliationDeleteEnabled: env.proposalReconciliationDeleteEnabled,
     }
 
     return config

@@ -1,7 +1,11 @@
 // apps/mobile/src/connection/environment-cache-store.ts
 // persists mobile environment caches
 
-import { ConnectionPersistenceError, EnvironmentCacheStore } from '@t3tools/client-runtime/platform'
+import {
+  ConnectionPersistenceError,
+  EnvironmentCacheStore,
+  THREAD_DETAIL_CACHE_SCHEMA_VERSION,
+} from '@t3tools/client-runtime/platform'
 import {
   type EnvironmentId,
   OrchestrationShellSnapshot,
@@ -17,7 +21,6 @@ import * as Schema from 'effect/Schema'
 import * as MobileDatabase from '../persistence/mobile-database'
 
 const SHELL_SNAPSHOT_CACHE_SCHEMA_VERSION = 1
-const THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION = 2
 const SERVER_CONFIG_CACHE_SCHEMA_VERSION = 1
 const VCS_REFS_CACHE_SCHEMA_VERSION = 1
 
@@ -27,7 +30,7 @@ const StoredShellSnapshot = Schema.Struct({
   snapshot: OrchestrationShellSnapshot,
 })
 const StoredThreadSnapshot = Schema.Struct({
-  schemaVersion: Schema.Literal(THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION),
+  schemaVersion: Schema.Literal(THREAD_DETAIL_CACHE_SCHEMA_VERSION),
   environmentId: Schema.String,
   threadId: Schema.String,
   snapshot: OrchestrationThreadDetailSnapshot,
@@ -158,13 +161,13 @@ export const make = Effect.fn('MobileEnvironmentCacheStore.make')(function* ()
     {
       const threadId = snapshot.thread.id
       const payload = yield* encodeStoredThreadSnapshot({
-        schemaVersion: THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION,
+        schemaVersion: THREAD_DETAIL_CACHE_SCHEMA_VERSION,
         environmentId,
         threadId,
         snapshot,
       }).pipe(Effect.mapError((cause) => persistenceError('save-thread', cause)))
       yield* database
-        .saveCache(environmentId, 'thread', threadId, THREAD_SNAPSHOT_CACHE_SCHEMA_VERSION, payload)
+        .saveCache(environmentId, 'thread', threadId, THREAD_DETAIL_CACHE_SCHEMA_VERSION, payload)
         .pipe(Effect.mapError(mapDatabaseError('save-thread')))
     }),
     removeThread: Effect.fn('MobileEnvironmentCache.removeThread')((environmentId, threadId) =>

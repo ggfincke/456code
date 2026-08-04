@@ -72,6 +72,11 @@ function makeDatabase()
     inspectCaches: Effect.succeed([]),
     loadPreferencesJson: Effect.succeed(Option.none()),
     savePreferencesJson: () => Effect.void,
+    loadEnvironmentCleanupIntents: Effect.succeed([]),
+    prepareEnvironmentCleanup: () => Effect.succeed(1),
+    markEnvironmentCleanupResourceComplete: () => Effect.void,
+    recordEnvironmentCleanupAttempt: () => Effect.void,
+    pruneCompletedEnvironmentCleanupIntent: () => Effect.void,
   })
   return { database, removed, values }
 }

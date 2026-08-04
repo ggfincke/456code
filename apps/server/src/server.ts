@@ -102,8 +102,10 @@ import { cartographerEmbedRouteLayer } from './cartographer/CartographerHttp.ts'
 import * as ProposalGenerationService from './proposal/ProposalGenerationService.ts'
 import * as ProposalImplementationAttemptService from './proposal/ProposalImplementationAttemptService.ts'
 import * as ProposalService from './proposal/ProposalService.ts'
+import * as ProposalRetainedRefAttemptStore from './proposal/ProposalRetainedRefAttemptStore.ts'
+import * as ProposalRetainedRefReconciler from './proposal/ProposalRetainedRefReconciler.ts'
 
-// Effect's default preemptive shutdown waits 20s before finalizing request scopes.
+// effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
 // already closes the websocket gracefully. Do not add an artificial drain before
 // those finalizers get a chance to run.
@@ -273,6 +275,8 @@ const ProposalPreviewLayerLive = Layer.mergeAll(
     Layer.provideMerge(ProcessRunner.layer),
   ),
   CartographerEmbedBroker.layer,
+  ProposalRetainedRefAttemptStore.layer,
+  ProposalRetainedRefReconciler.layer.pipe(Layer.provide(ProposalRetainedRefAttemptStore.layer)),
 )
 
 const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))

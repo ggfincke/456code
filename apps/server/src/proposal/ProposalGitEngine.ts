@@ -1,5 +1,6 @@
 // apps/server/src/proposal/ProposalGitEngine.ts
 // captures exact Git snapshots and builds retained proposed trees in isolation
+
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off preferSchemaOverJson:off
 
 import * as NodeChildProcess from 'node:child_process'
@@ -27,6 +28,7 @@ import {
 } from '@t3tools/contracts'
 import { normalizeGitRemoteUrl } from '@t3tools/shared/git'
 import * as Context from 'effect/Context'
+import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
@@ -37,11 +39,15 @@ import {
   EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT,
   ExactGitSnapshotError,
 } from '../vcs/ExactGitSnapshot.ts'
+import * as ProposalRetainedRefAttemptStore from './ProposalRetainedRefAttemptStore.ts'
 
 const GIT_TIMEOUT_MS = 30_000
 const GIT_DEFAULT_MAX_OUTPUT_BYTES = 2 * 1024 * 1024
 const GIT_MAX_STDERR_BYTES = 1024 * 1024
 const REGULAR_FILE_MODES = new Set(['100644', '100755'])
+const PROPOSAL_RETAINED_REF_PREFIX = 'refs/t3/proposals'
+const PROPOSAL_BASE_RETAINED_REF = /^refs\/t3\/proposals\/([0-9a-f]{64})\/base$/u
+const PROPOSAL_PROPOSED_RETAINED_REF = /^refs\/t3\/proposals\/([0-9a-f]{64})\/proposed$/u
 
 interface GitResult
 {
@@ -236,6 +242,41 @@ function sha256(content: Uint8Array | string): ProposalSha256
   return NodeCrypto.createHash('sha256').update(content).digest('hex') as ProposalSha256
 }
 
+export function proposalRetainedRefPairToken(
+  baseRetainedRef: string,
+  proposedRetainedRef: string,
+): string | null
+{
+  const baseMatch = PROPOSAL_BASE_RETAINED_REF.exec(baseRetainedRef)
+  const proposedMatch = PROPOSAL_PROPOSED_RETAINED_REF.exec(proposedRetainedRef)
+  return baseMatch?.[1] !== undefined && baseMatch[1] === proposedMatch?.[1] ? baseMatch[1] : null
+}
+
+export const enumerateProposalRetainedRefs = Effect.fn(
+  'ProposalGitEngine.enumerateProposalRetainedRefs',
+)(function* (gitCommonDir: string, maxRefs: number)
+{
+  const result = yield* runGit(
+    {
+      cwd: gitCommonDir,
+      args: [
+        `--git-dir=${gitCommonDir}`,
+        'for-each-ref',
+        `--count=${Math.max(0, maxRefs)}`,
+        '--format=%(refname)',
+        PROPOSAL_RETAINED_REF_PREFIX,
+      ],
+      maxOutputBytes: Math.max(1024, maxRefs * 256),
+    },
+    'ProposalGitEngine.enumerateProposalRetainedRefs',
+  )
+  return result.stdout
+    .toString('utf8')
+    .split('\n')
+    .map((refName) => refName.trim())
+    .filter(Boolean)
+})
+
 function validateProposalPath(
   value: string,
   operation: string,
@@ -406,8 +447,9 @@ export class ProposalGitEngine extends Context.Service<
 >()('456code/proposal/ProposalGitEngine')
 {}
 
-export const make = Effect.sync(() =>
+export const make = Effect.gen(function* ()
 {
+  const attemptStore = yield* ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore
   const prepare: ProposalGitEngine['Service']['prepare'] = Effect.fn('ProposalGitEngine.prepare')(
     function* (input)
     {
@@ -1159,6 +1201,24 @@ export const make = Effect.sync(() =>
           },
           operation,
         )
+        yield* attemptStore
+          .register({
+            refToken,
+            gitCommonDir: worktree.gitCommonDir,
+            baseRef: baseRetainedRef,
+            proposedRef: proposedRetainedRef,
+            createdAt: DateTime.formatIso(yield* DateTime.now),
+          })
+          .pipe(
+            Effect.mapError((cause) =>
+              proposalError(
+                operation,
+                'persistence-failed',
+                `Could not register retained refs before creation: ${cause.message}`,
+                { proposalId: input.proposalId },
+              ),
+            ),
+          )
         yield* runGit(
           {
             cwd: rootPath,
@@ -1207,7 +1267,7 @@ export const make = Effect.sync(() =>
                   ).pipe(Effect.ignore),
                 ),
                 { concurrency: 2, discard: true },
-              )
+              ).pipe(Effect.andThen(attemptStore.remove(refToken).pipe(Effect.ignore)))
             : Effect.void,
         ),
         Effect.ensuring(
@@ -1222,7 +1282,15 @@ export const make = Effect.sync(() =>
   )
 
   const deleteRetainedRefs: ProposalGitEngine['Service']['deleteRetainedRefs'] = (input) =>
-    Effect.all(
+  {
+    if (proposalRetainedRefPairToken(input.baseRetainedRef, input.proposedRetainedRef) === null)
+    {
+      return Effect.logWarning('refusing to delete an invalid proposal retained-ref pair', {
+        baseRetainedRef: input.baseRetainedRef,
+        proposedRetainedRef: input.proposedRetainedRef,
+      })
+    }
+    return Effect.all(
       [input.baseRetainedRef, input.proposedRetainedRef].map((refName) =>
         runGit(
           {
@@ -1235,6 +1303,7 @@ export const make = Effect.sync(() =>
       ),
       { concurrency: 2, discard: true },
     )
+  }
 
   return ProposalGitEngine.of({ prepare, deleteRetainedRefs })
 })
