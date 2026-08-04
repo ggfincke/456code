@@ -1,43 +1,57 @@
 # Architecture
 
-456code runs as a **Node.js WebSocket server** that wraps `codex app-server` (JSON-RPC over stdio) and serves a React web app.
+456code runs as a Node.js HTTP/WebSocket server, serves a React web app, and routes agent work
+across the built-in Codex, Claude, Cursor, Grok, and OpenCode providers.
 
 ```
-┌─────────────────────────────────┐
-│  Browser (React + Vite)         │
-│  wsTransport (state machine)    │
-│  Typed push decode at boundary  │
-└──────────┬──────────────────────┘
-           │ ws://localhost:3773
-┌──────────▼──────────────────────┐
-│  apps/server (Node.js)          │
-│  WebSocket + HTTP static server │
-│  ServerPushBus (ordered pushes) │
-│  ServerReadiness (startup gate) │
-│  OrchestrationEngine            │
-│  ProviderService                │
-│  CheckpointReactor              │
-│  RuntimeReceiptBus              │
-└──────────┬──────────────────────┘
-           │ JSON-RPC over stdio
-┌──────────▼──────────────────────┐
-│  codex app-server               │
-└─────────────────────────────────┘
+┌───────────────────────────────────────┐
+│  Web or mobile client                 │
+│  Shared connection runtime            │
+│  RpcSessionFactory                    │
+└────────────────┬──────────────────────┘
+                 │ authenticated /ws
+                 │ Effect RPC + JSON
+┌────────────────▼──────────────────────┐
+│  apps/server                          │
+│  WsRpcGroup                           │
+│  OrchestrationEngine                  │
+│  ProviderService + adapter registry   │
+│  Queue-backed reactors                │
+└────────────────┬──────────────────────┘
+                 │ provider-native protocols
+┌────────────────▼──────────────────────┐
+│  Built-in provider runtimes           │
+│  Codex / Claude / Cursor / Grok /     │
+│  OpenCode                             │
+└───────────────────────────────────────┘
 ```
 
 ## Components
 
-- **Browser app**: The React app renders session state, owns the client-side WebSocket transport, and treats typed push events as the boundary between server runtime details and UI state.
+- **Client apps**: Web and mobile mount the shared connection runtime. The runtime owns endpoint
+  preparation, authentication, WebSocket Effect RPC sessions, and retries; application components
+  consume environment-scoped services and state.
 
-- **Server**: `apps/server` is the main coordinator. It serves the web app, accepts WebSocket requests, waits for startup readiness before welcoming clients, and sends all outbound pushes through a single ordered push path.
+- **Server**: `apps/server` serves the web app and exposes the authenticated `/ws` route. The route
+  serves the shared [`WsRpcGroup`][1] with JSON serialization after authenticating the WebSocket
+  upgrade.
 
-- **Provider runtime**: `codex app-server` does the actual provider/session work. The server talks to it over JSON-RPC on stdio and translates those runtime events into the app's orchestration model.
+- **Provider runtime**: [`ProviderService`][4] routes sessions through the provider adapter
+  registry. The registered built-in drivers create the Codex, Claude, Cursor, Grok, and OpenCode
+  implementations behind that shared service contract.
 
-- **Background workers**: Long-running async flows such as runtime ingestion, command reaction, and checkpoint processing run as queue-backed workers. This keeps work ordered, reduces timing races, and gives tests a deterministic way to wait for the system to go idle.
+- **Background workers**: Long-running async flows such as runtime ingestion, command reaction,
+  and checkpoint processing run as queue-backed workers. This keeps work ordered, reduces timing
+  races, and gives tests a deterministic way to wait for the system to go idle.
 
-- **Runtime signals**: The server emits lightweight typed receipts when important async milestones finish, such as checkpoint capture, diff finalization, or a turn becoming fully quiescent. Tests and orchestration code wait on these signals instead of polling internal state.
+- **Runtime receipts**: [`RuntimeReceiptBus`][8] defines checkpoint and turn-quiescence milestones
+  for tests and harnesses. The production layer intentionally does not retain or broadcast these
+  receipts.
 
-- **Server updates**: A connected environment advertises whether its server can replace itself. When client and server versions differ, the browser selects an automatic, desktop-managed, or manual update path without changing connection ownership. See [Server Update Architecture](./server-updates.md).
+- **Server updates**: A connected environment advertises whether its server can replace itself.
+  When client and server versions differ, the browser selects an automatic, desktop-managed, or
+  manual update path without changing connection ownership. See
+  [Server Update Architecture](./server-updates.md).
 
 ## Event Lifecycle
 
@@ -45,93 +59,95 @@
 
 ```mermaid
 sequenceDiagram
-    participant Browser
-    participant Transport as WsTransport
-    participant Server as wsServer
-    participant Layers as serverLayers
-    participant Ready as ServerReadiness
-    participant Push as ServerPushBus
+    participant Client
+    participant Runtime as Connection runtime
+    participant Session as RpcSessionFactory
+    participant Route as Authenticated /ws route
+    participant Rpc as WsRpcGroup
 
-    Browser->>Transport: Load app and open WebSocket
-    Transport->>Server: Connect
-    Server->>Layers: Start runtime services
-    Server->>Ready: Wait for startup barriers
-    Ready-->>Server: Ready
-    Server->>Push: Publish server.welcome
-    Push-->>Transport: Ordered welcome push
-    Transport-->>Browser: Hydrate initial state
+    Client->>Runtime: Mount platform and connection layers
+    Runtime->>Session: Open one prepared connection
+    Session->>Route: WebSocket upgrade with credentials
+    Route->>Route: Authenticate upgrade
+    Route->>Rpc: Serve Effect RPC with JSON serialization
+    Session->>Rpc: server.getConfig
+    Rpc-->>Session: Initial ServerConfig
+    Session-->>Runtime: Session ready
 ```
 
-1. The browser boots `WsTransport` and registers typed listeners in `wsNativeApi`.
-2. The server accepts the connection in `wsServer` and brings up the runtime graph defined in `serverLayers`.
-3. `ServerReadiness` waits until the key startup barriers are complete.
-4. Once the server is ready, `wsServer` sends `server.welcome` from the contracts in `ws.ts` through `ServerPushBus`.
-5. The browser receives that ordered push through `WsTransport`, and `wsNativeApi` uses it to seed local client state.
+1. Web and mobile mount the shared connection layer at the application root.
+2. The connection runtime prepares an endpoint and asks [`RpcSessionFactory`][2] for one session.
+3. The server's [`/ws` route][3] authenticates the WebSocket upgrade before serving RPC calls.
+4. Client and server use JSON serialization for the shared [`WsRpcGroup`][1].
+5. The session becomes ready after the socket opens and `server.getConfig` succeeds.
 
 ### User turn flow
 
 ```mermaid
 sequenceDiagram
-    participant Browser
-    participant Transport as WsTransport
-    participant Server as wsServer
-    participant Provider as ProviderService
-    participant Codex as codex app-server
-    participant Ingest as ProviderRuntimeIngestion
+    participant Client
+    participant Rpc as WsRpcGroup
     participant Engine as OrchestrationEngine
-    participant Push as ServerPushBus
+    participant Command as ProviderCommandReactor
+    participant Provider as ProviderService
+    participant Adapter as Selected provider adapter
+    participant Ingest as ProviderRuntimeIngestion
 
-    Browser->>Transport: Send user action
-    Transport->>Server: Typed WebSocket request
-    Server->>Provider: Route request
-    Provider->>Codex: JSON-RPC over stdio
-    Codex-->>Ingest: Provider runtime events
-    Ingest->>Engine: Normalize into orchestration events
-    Engine-->>Server: Domain events
-    Server->>Push: Publish orchestration.domainEvent
-    Push-->>Browser: Typed push
+    Client->>Rpc: orchestration.dispatchCommand
+    Rpc->>Engine: Dispatch validated command
+    Engine-->>Rpc: Persisted command result
+    Engine->>Command: Publish orchestration event
+    Command->>Provider: Route provider operation
+    Provider->>Adapter: Start or continue selected provider
+    Adapter-->>Ingest: Provider runtime events
+    Ingest->>Engine: Dispatch normalized orchestration commands
+    Engine-->>Client: Shell/thread subscription updates
 ```
 
-1. A user action in the browser becomes a typed request through `WsTransport` and the browser API layer in `nativeApi`.
-2. `wsServer` decodes that request using the shared WebSocket contracts in `ws.ts` and routes it to the right service.
-3. [`ProviderService`][8] starts or resumes a session and talks to `codex app-server` over JSON-RPC on stdio.
-4. Provider-native events are pulled back into the server by [`ProviderRuntimeIngestion`][9], which converts them into orchestration events.
-5. [`OrchestrationEngine`][10] persists those events, updates the read model, and exposes them as domain events.
-6. `wsServer` pushes those updates to the browser through `ServerPushBus` on channels defined in [`orchestration.ts`][11].
+1. A user action becomes an `orchestration.dispatchCommand` Effect RPC call.
+2. [`OrchestrationEngine`][6] validates the command, persists its events and command receipt, and
+   updates projections.
+3. [`ProviderCommandReactor`][7] reacts to provider intent and calls [`ProviderService`][4], which
+   selects the configured provider adapter.
+4. [`ProviderRuntimeIngestion`][5] converts provider-native runtime events into orchestration
+   commands and events.
+5. Streaming shell and thread RPCs deliver the resulting state to connected clients.
 
 ### Async completion flow
 
 ```mermaid
 sequenceDiagram
-    participant Server as wsServer
-    participant Worker as Queue-backed workers
-    participant Cmd as ProviderCommandReactor
+    participant Worker as DrainableWorker-backed service
+    participant Command as ProviderCommandReactor
     participant Checkpoint as CheckpointReactor
+    participant Engine as OrchestrationEngine
     participant Receipt as RuntimeReceiptBus
-    participant Push as ServerPushBus
-    participant Browser
+    participant Client
 
-    Server->>Worker: Enqueue follow-up work
-    Worker->>Cmd: Process provider commands
-    Worker->>Checkpoint: Process checkpoint tasks
-    Checkpoint->>Receipt: Publish completion receipt
-    Cmd-->>Server: Produce orchestration changes
-    Checkpoint-->>Server: Produce orchestration changes
-    Server->>Push: Publish resulting state updates
-    Push-->>Browser: User-visible push
+    Worker->>Command: Process provider intent
+    Worker->>Checkpoint: Process checkpoint work
+    Command->>Engine: Dispatch follow-up command
+    Checkpoint->>Engine: Dispatch checkpoint result
+    Checkpoint->>Receipt: Publish test synchronization milestone
+    Engine-->>Client: Shell/thread subscription updates
 ```
 
-1. Some work continues after the initial request returns, especially in [`ProviderRuntimeIngestion`][9], [`ProviderCommandReactor`][13], and [`CheckpointReactor`][14].
-2. These flows run as queue-backed workers using [`DrainableWorker`][16], which helps keep side effects ordered and test synchronization deterministic.
-3. When a milestone completes, the server emits a typed receipt on [`RuntimeReceiptBus`][15], such as checkpoint completion or turn quiescence.
-4. Tests and orchestration code wait on those receipts instead of polling git state, projections, or timers.
-5. Any user-visible state changes produced by that async work still go back through `wsServer` and `ServerPushBus`.
+1. Work continues after the initial command result in [`ProviderRuntimeIngestion`][5],
+   [`ProviderCommandReactor`][7], and [`CheckpointReactor`][9].
+2. These flows use [`DrainableWorker`][10] and expose `drain()` for deterministic test
+   synchronization.
+3. `CheckpointReactor` publishes checkpoint and turn-quiescence milestones to
+   [`RuntimeReceiptBus`][8]; only the test layer streams them.
+4. User-visible changes are persisted through [`OrchestrationEngine`][6] and delivered through the
+   Effect RPC subscription streams.
 
-[8]: ../../apps/server/src/provider/Layers/ProviderService.ts
-[9]: ../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
-[10]: ../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts
-[11]: ../../packages/contracts/src/orchestration.ts
-[13]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
-[14]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts
-[15]: ../../apps/server/src/orchestration/Layers/RuntimeReceiptBus.ts
-[16]: ../../packages/shared/src/DrainableWorker.ts
+[1]: ../../packages/contracts/src/rpc.ts
+[2]: ../../packages/client-runtime/src/rpc/session.ts
+[3]: ../../apps/server/src/ws.ts
+[4]: ../../apps/server/src/provider/Layers/ProviderService.ts
+[5]: ../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
+[6]: ../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts
+[7]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+[8]: ../../apps/server/src/orchestration/Services/RuntimeReceiptBus.ts
+[9]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts
+[10]: ../../packages/shared/src/DrainableWorker.ts

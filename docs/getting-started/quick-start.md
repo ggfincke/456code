@@ -55,5 +55,5 @@ Substitute `dist:desktop:linux` or `dist:desktop:win` on other platforms. See th
 [scripts reference](../reference/scripts.md) for the full list.
 
 > [!NOTE]
-> This fork is not published to any package registry, so there is no `npx` entry point —
-> build from source.
+> The commands above are the documented development path for building from source. Published
+> releases also provide the `456code` npm package, including the `npx 456code@latest` entry point.

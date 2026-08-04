@@ -1,3 +1,6 @@
+// scripts/lib/reference-repos.ts
+// run the reference repos repository workflow
+
 export interface ReferenceRepo
 {
   readonly id: string
@@ -24,8 +27,8 @@ export const referenceRepos: ReadonlyArray<ReferenceRepo> = [
     prefix: '.repos/alchemy-effect',
     repository: 'https://github.com/alchemy-run/alchemy-effect.git',
     latestRef: 'main',
-    versionSourcePath: 'infra/relay/package.json',
-    packageVersionPath: ['dependencies', 'alchemy'],
+    versionSourcePath: 'packages/alchemy/package.json',
+    packageVersionPath: ['version'],
     versionTagPrefix: 'v',
   },
 ]

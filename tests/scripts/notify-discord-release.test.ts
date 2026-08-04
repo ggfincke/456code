@@ -1,3 +1,6 @@
+// tests/scripts/notify-discord-release.test.ts
+// verify notify discord release behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -19,23 +22,22 @@ const latestAnnouncement = {
   timestamp: '2026-05-01T01:41:00.000Z',
 } as const
 
+const prereleaseAnnouncement = {
+  target: 'prerelease',
+  roleId: '111111111111111111',
+  releaseName: '456code Nightly 1.2.4-nightly.20260501.17 (abcdef123456)',
+  version: '1.2.4-nightly.20260501.17',
+  tag: 'v1.2.4-nightly.20260501.17',
+  releaseUrl: new URL('https://github.com/t3dotgg/t3-code/releases/tag/v1.2.4-nightly.20260501.17'),
+  timestamp: '2026-05-01T01:41:00.000Z',
+} as const
+
 const webhookUrl = new URL('https://discord.com/api/webhooks/123456/secret-token')
 
-it('builds a prerelease Discord announcement for nightly subscribers', () =>
-{
-  assert.deepStrictEqual(
-    buildDiscordReleaseAnnouncement({
-      target: 'prerelease',
-      roleId: '111111111111111111',
-      releaseName: '456code Nightly 1.2.4-nightly.20260501.17 (abcdef123456)',
-      version: '1.2.4-nightly.20260501.17',
-      tag: 'v1.2.4-nightly.20260501.17',
-      releaseUrl: new URL(
-        'https://github.com/t3dotgg/t3-code/releases/tag/v1.2.4-nightly.20260501.17',
-      ),
-      timestamp: '2026-05-01T01:41:00.000Z',
-    }),
-    {
+const announcementCases = [
+  {
+    input: prereleaseAnnouncement,
+    expected: {
       content:
         '<@&111111111111111111> Prerelease published: 456code Nightly 1.2.4-nightly.20260501.17 (abcdef123456)',
       allowed_mentions: {
@@ -63,38 +65,45 @@ it('builds a prerelease Discord announcement for nightly subscribers', () =>
         },
       ],
     },
-  )
-})
-
-it('builds a latest Discord announcement for stable subscribers', () =>
-{
-  assert.deepStrictEqual(buildDiscordReleaseAnnouncement(latestAnnouncement), {
-    content: '<@&222222222222222222> Latest published: 456code v1.2.3',
-    allowed_mentions: {
-      roles: ['222222222222222222'],
-    },
-    embeds: [
-      {
-        title: '456code v1.2.3',
-        url: 'https://github.com/t3dotgg/t3-code/releases/tag/v1.2.3',
-        description: 'A new 456code latest release is available.',
-        color: 0x2ecc71,
-        fields: [
-          {
-            name: 'Version',
-            value: '1.2.3',
-            inline: true,
-          },
-          {
-            name: 'Tag',
-            value: 'v1.2.3',
-            inline: true,
-          },
-        ],
-        timestamp: '2026-05-01T01:41:00.000Z',
+  },
+  {
+    input: latestAnnouncement,
+    expected: {
+      content: '<@&222222222222222222> Latest published: 456code v1.2.3',
+      allowed_mentions: {
+        roles: ['222222222222222222'],
       },
-    ],
-  })
+      embeds: [
+        {
+          title: '456code v1.2.3',
+          url: 'https://github.com/t3dotgg/t3-code/releases/tag/v1.2.3',
+          description: 'A new 456code latest release is available.',
+          color: 0x2ecc71,
+          fields: [
+            {
+              name: 'Version',
+              value: '1.2.3',
+              inline: true,
+            },
+            {
+              name: 'Tag',
+              value: 'v1.2.3',
+              inline: true,
+            },
+          ],
+          timestamp: '2026-05-01T01:41:00.000Z',
+        },
+      ],
+    },
+  },
+] as const
+
+it('builds Discord announcements for prerelease and latest targets', () =>
+{
+  for (const { input, expected } of announcementCases)
+  {
+    assert.deepStrictEqual(buildDiscordReleaseAnnouncement(input), expected)
+  }
 })
 
 it.effect('preserves webhook request context and the full client cause chain', () =>

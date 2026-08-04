@@ -11,8 +11,10 @@
 - `vp run build` — Builds contracts, web app, and server.
 - `vp run typecheck` — Strict TypeScript checks for all packages.
 - `vp run test` — Runs workspace tests.
+- `vp run sync:repos` — Syncs the read-only reference repositories under `.repos/`. The configured
+  alchemy-effect ref reads the `version` field from `packages/alchemy/package.json`.
 - `node apps/server/scripts/t3-sqlite-state.ts <query|exec> --base-dir <path> ...` — Inspects or seeds an isolated T3 SQLite database; writes create a private backup first.
-- `vp run dist:desktop:artifact -- --platform <mac|linux|win> --target <target> --arch <arch>` — Builds a desktop artifact for a specific platform/target/arch.
+- `vp run dist:desktop:artifact -- --platform <mac|linux|win> --target <target> --arch <arch>` — Builds a desktop artifact for a specific platform/target/arch. For Windows WSL support, also pass `--wsl-prebuild <path-to-pty.node>` or set `T3CODE_DESKTOP_WSL_PREBUILD`.
 - `vp run dist:desktop:dmg` — Builds a shareable macOS `.dmg` into `./release`.
 - `vp run dist:desktop:dmg:x64` — Builds an Intel macOS `.dmg`.
 - `vp run dist:desktop:linux` — Builds a Linux AppImage into `./release`.
@@ -32,6 +34,9 @@
   `AZURE_TRUSTED_SIGNING_CERTIFICATE_PROFILE_NAME`, and `AZURE_TRUSTED_SIGNING_PUBLISHER_NAME`.
 - Azure authentication env vars are also required (for example service principal with secret):
   `AZURE_TENANT_ID`, `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`.
+- Windows release CI supplies a Linux `pty.node` through `--wsl-prebuild`. Local builds without
+  the flag or `T3CODE_DESKTOP_WSL_PREBUILD` warn and continue, but the packaged WSL backend cannot
+  start without that binary.
 
 ## Running multiple dev instances
 

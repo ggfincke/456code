@@ -24,7 +24,7 @@ The root filesystem path for a project. In [the orchestration model][1], it is t
 
 #### Worktree
 
-A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live in [GitCore.ts][3].
+A Git worktree used as an isolated workspace for a thread. If a thread has a `worktreePath` in [the contracts][1], it runs there instead of in the main working tree. Git operations live in [GitVcsDriverCore.ts][3].
 
 ### Thread timeline
 
@@ -89,7 +89,7 @@ Examples include `checkpoint.baseline.captured`, `checkpoint.diff.finalized`, an
 
 ### Provider runtime
 
-The live backend agent implementation and its event stream. The main service is [ProviderService.ts][14], the adapter contract is [ProviderAdapter.ts][15], and the overview is in [provider-architecture.md][16].
+The live backend agent implementation and its event stream. The main service is [ProviderService.ts][14], the adapter contract is [ProviderAdapter.ts][15], and the overview is in [providers.md][16].
 
 #### Provider
 
@@ -149,32 +149,32 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 
 ## Related Docs
 
-- [architecture.md][24]
-- [provider-architecture.md][16]
+- [overview.md][24]
+- [providers.md][16]
 - [runtime-modes.md][18]
 - [workspace-layout.md][2]
 
-[1]: ../packages/contracts/src/orchestration.ts
+[1]: ../../packages/contracts/src/orchestration.ts
 [2]: ./workspace-layout.md
-[3]: ../apps/server/src/git/Layers/GitCore.ts
-[4]: ../apps/server/src/orchestration/projector.ts
-[5]: ../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
-[6]: ../apps/server/src/orchestration/Layers/CheckpointReactor.ts
-[7]: ../apps/server/src/orchestration/Layers/OrchestrationEngine.ts
-[8]: ../apps/server/src/orchestration/decider.ts
-[9]: ../apps/server/src/orchestration/commandInvariants.ts
-[10]: ../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
-[11]: ../apps/server/src/orchestration/Layers/ProjectionPipeline.ts
-[12]: ../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
-[13]: ../apps/server/src/orchestration/Services/RuntimeReceiptBus.ts
-[14]: ../apps/server/src/provider/Layers/ProviderService.ts
-[15]: ../apps/server/src/provider/Services/ProviderAdapter.ts
-[16]: ./provider-architecture.md
-[17]: ../apps/server/src/provider/Layers/CodexAdapter.ts
-[18]: ./runtime-modes.md
-[19]: ../apps/server/src/checkpointing/CheckpointStore.ts
-[20]: ../apps/server/src/checkpointing/CheckpointDiffQuery.ts
-[21]: ../apps/server/src/persistence/Services/ProjectionCheckpoints.ts
-[22]: ../apps/server/src/checkpointing/Utils.ts
-[23]: ../apps/server/src/checkpointing/Diffs.ts
-[24]: ./architecture.md
+[3]: ../../apps/server/src/vcs/GitVcsDriverCore.ts
+[4]: ../../apps/server/src/orchestration/projector.ts
+[5]: ../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts
+[6]: ../../apps/server/src/orchestration/Layers/CheckpointReactor.ts
+[7]: ../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts
+[8]: ../../apps/server/src/orchestration/decider.ts
+[9]: ../../apps/server/src/orchestration/commandInvariants.ts
+[10]: ../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts
+[11]: ../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts
+[12]: ../../apps/server/src/orchestration/Layers/ProviderCommandReactor.ts
+[13]: ../../apps/server/src/orchestration/Services/RuntimeReceiptBus.ts
+[14]: ../../apps/server/src/provider/Layers/ProviderService.ts
+[15]: ../../apps/server/src/provider/Services/ProviderAdapter.ts
+[16]: ../architecture/providers.md
+[17]: ../../apps/server/src/provider/Layers/CodexAdapter.ts
+[18]: ../architecture/runtime-modes.md
+[19]: ../../apps/server/src/checkpointing/CheckpointStore.ts
+[20]: ../../apps/server/src/checkpointing/CheckpointDiffQuery.ts
+[21]: ../../apps/server/src/persistence/Services/ProjectionCheckpoints.ts
+[22]: ../../apps/server/src/checkpointing/Utils.ts
+[23]: ../../apps/server/src/checkpointing/Diffs.ts
+[24]: ../architecture/overview.md

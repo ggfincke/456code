@@ -24,10 +24,40 @@ This document covers the unified release workflow for stable and nightly desktop
 - Publishes the CLI package (`apps/server`, npm package `456code`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
+  - publishing runs through `node apps/server/scripts/cli.ts publish`, which wraps
+    `vp pm publish --filter 456code`
 - Deploys the hosted web app to Vercel only after a release is published:
   - stable releases are aliased to the `latest` hosted app channel
   - nightly releases are aliased to the `nightly` hosted app channel
+- Resolves required public client configuration from three Clerk variables in the
+  `production` environment and stops the release if any are empty.
 - Signing is optional and auto-detected per platform from secrets.
+
+## Release public configuration
+
+The workflow job currently named `relay_public_config` is the release's fail-closed public-config
+producer. It reads these GitHub Actions variables from the `production` environment:
+
+- `CLERK_PUBLISHABLE_KEY`
+- `CLERK_JWT_TEMPLATE`
+- `CLERK_CLI_OAUTH_CLIENT_ID`
+
+If any value is empty, the job exits and blocks desktop builds, CLI publishing, and hosted web
+deployment. Its outputs contain only those three Clerk values; it does not produce a relay URL or a
+tracing configuration artifact. The external relay deployable is retired, and the release workflow
+does not deploy one. Relay schemas and client-runtime utilities that remain in the workspace are
+supported client compatibility surfaces, not release infrastructure.
+
+## Windows WSL prebuild
+
+CI builds a Linux x64 `node-pty` binary in `build_wsl_node_pty`, uploads it as the
+`wsl-node-pty-x64` artifact, and makes the Windows matrix entry download it. Windows packaging
+always passes that binary with `--wsl-prebuild`; a missing CI artifact therefore fails the Windows
+release path instead of silently shipping a broken WSL backend.
+
+Local desktop packaging is intentionally less strict. If neither `--wsl-prebuild <path>` nor
+`T3CODE_DESKTOP_WSL_PREBUILD=<path>` is supplied, the packager logs a warning and continues. The
+resulting Windows package does not contain the Linux `pty.node` required by its WSL backend.
 
 ## Hosted web app release deployment
 
@@ -49,11 +79,15 @@ Optional GitHub Actions variables:
 - `T3CODE_WEB_LATEST_DOMAIN`: defaults to `latest.app.t3.codes`.
 - `T3CODE_WEB_NIGHTLY_DOMAIN`: defaults to `nightly.app.t3.codes`.
 
-Required Vercel domains:
+Configured Vercel domain prerequisites:
 
 - `app.t3.codes`: the router domain users open, updated by stable releases.
 - `latest.app.t3.codes`: channel alias updated by stable releases.
 - `nightly.app.t3.codes`: channel alias updated by nightly releases.
+
+These names are workflow and router defaults, not proof that DNS or Vercel domain ownership is
+configured. Before deployment, configure the three domains in Vercel and DNS, or override the
+workflow variables with domains already attached to the project.
 
 The router domain uses `apps/web/vercel.ts` routes. Users opt into a channel by
 visiting `/__456code/channel?channel=latest` or
@@ -141,8 +175,9 @@ guidance when those environments are available.
 
 ## 0) npm OIDC trusted publishing setup (CLI)
 
-The workflow publishes the CLI with `npm publish` from `apps/server` after bumping
-the package version to the release tag version.
+The workflow publishes the CLI through `node apps/server/scripts/cli.ts publish` after aligning the
+package version to the release tag version. That command temporarily prepares publish metadata and
+runs `vp pm publish --filter 456code` from the workspace root.
 
 Checklist:
 
@@ -156,8 +191,8 @@ Checklist:
 4. Create release tag `vX.Y.Z` and push; workflow will:
    - set `apps/server/package.json` version to `X.Y.Z`
    - build web + server
-   - run `npm publish --access public --tag latest`
-5. Nightly runs from the same workflow file publish with `npm publish --access public --tag nightly`.
+   - run the CLI publish command with `--tag latest`
+5. Nightly runs from the same workflow file use the same CLI publish command with `--tag nightly`.
 
 ## 1) Dry-run release without signing
 

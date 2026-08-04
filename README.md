@@ -3,20 +3,21 @@
 
 # 456code
 
-456code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, and OpenCode, more coming soon).
+456code is a minimal web GUI for coding agents (currently Codex, Claude, Cursor, Grok, and OpenCode, more coming soon).
 
 ## Installation
 
 > [!WARNING]
-> 456code currently supports Codex, Claude, Cursor, and OpenCode.
+> 456code currently supports Codex, Claude, Cursor, Grok, and OpenCode.
 > Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://developers.openai.com/codex/cli) and run `codex login`
 > - Claude: install [Claude Code](https://claude.com/product/claude-code) and run `claude auth login`
 > - Cursor: install [Cursor CLI](https://cursor.com/cli) and run `cursor-agent login`
+> - Grok: install and authenticate the Grok CLI (`grok`), or configure `XAI_API_KEY`
 > - OpenCode: install [OpenCode](https://opencode.ai) and run `opencode auth login`
 
-456code is a personal fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code). It is not published to npm, Homebrew, winget, or the AUR, and there are no release downloads — build it from source.
+456code is a personal fork of [pingdotgg/t3code](https://github.com/pingdotgg/t3code). The release workflow publishes the `456code` npm package, GitHub desktop releases, and a hosted web deployment. The steps below remain the development path for building from source.
 
 ### Build and run from source
 

@@ -1,3 +1,6 @@
+// tests/scripts/sync-reference-repos.test.ts
+// verify sync reference repos behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -158,7 +161,7 @@ it.layer(NodeServices.layer)('sync-reference-repos', (it) =>
       })
       const sourcePath = path.join(rootDir, alchemyEffect.versionSourcePath)
       yield* fs.makeDirectory(path.dirname(sourcePath), { recursive: true })
-      yield* fs.writeFileString(sourcePath, '{"dependencies":{}}')
+      yield* fs.writeFileString(sourcePath, '{}')
 
       const error = yield* resolveReferenceRepoRef(alchemyEffect, rootDir, false).pipe(Effect.flip)
 
@@ -168,12 +171,12 @@ it.layer(NodeServices.layer)('sync-reference-repos', (it) =>
       }
       assert.equal(error.repoId, alchemyEffect.id)
       assert.equal(error.sourcePath, sourcePath)
-      assert.deepStrictEqual(error.packageVersionPath, ['dependencies', 'alchemy'])
+      assert.deepStrictEqual(error.packageVersionPath, ['version'])
       assert.ok(!('cause' in error))
     }),
   )
 
-  it.effect('resolves the alchemy-effect tag from the relay package', () =>
+  it.effect('resolves the alchemy-effect tag from the alchemy package', () =>
     Effect.gen(function* ()
     {
       const fs = yield* FileSystem.FileSystem
@@ -181,10 +184,10 @@ it.layer(NodeServices.layer)('sync-reference-repos', (it) =>
       const rootDir = yield* fs.makeTempDirectoryScoped({
         prefix: 'sync-reference-repos-alchemy-version-',
       })
-      yield* fs.makeDirectory(path.join(rootDir, 'infra', 'relay'), { recursive: true })
+      yield* fs.makeDirectory(path.join(rootDir, 'packages', 'alchemy'), { recursive: true })
       yield* fs.writeFileString(
-        path.join(rootDir, 'infra', 'relay', 'package.json'),
-        '{"dependencies":{"alchemy":"2.0.0-beta.49"}}',
+        path.join(rootDir, 'packages', 'alchemy', 'package.json'),
+        '{"version":"2.0.0-beta.49"}',
       )
 
       assert.equal(yield* resolveReferenceRepoRef(alchemyEffect, rootDir, false), 'v2.0.0-beta.49')
