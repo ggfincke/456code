@@ -1,136 +1,144 @@
-import { AuthStandardClientScopes, EnvironmentId } from "@t3tools/contracts";
-import { describe, expect, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
+import { AuthStandardClientScopes, EnvironmentId } from '@t3tools/contracts'
+import { describe, expect, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 
-import { remoteHttpClientLayer } from "../../../../packages/client-runtime/src/rpc/http.ts";
+import { remoteHttpClientLayer } from '../../../../packages/client-runtime/src/rpc/http.ts'
 import {
   ClientPresentation,
   SshEnvironmentGateway,
-} from "../../../../packages/client-runtime/src/platform/capabilities.ts";
+} from '../../../../packages/client-runtime/src/platform/capabilities.ts'
 import {
   BearerConnectionCredential,
   BearerConnectionProfile,
-} from "../../../../packages/client-runtime/src/connection/catalog.ts";
-import { BearerConnectionTarget } from "../../../../packages/client-runtime/src/connection/model.ts";
+} from '../../../../packages/client-runtime/src/connection/catalog.ts'
+import { BearerConnectionTarget } from '../../../../packages/client-runtime/src/connection/model.ts'
 import {
   prepareBearerConnectionUpdate,
   preparePairingRegistration,
   prepareSshRegistration,
-} from "../../../../packages/client-runtime/src/connection/onboarding.ts";
+} from '../../../../packages/client-runtime/src/connection/onboarding.ts'
 
 const CLIENT_PRESENTATION_LAYER = Layer.succeed(
   ClientPresentation,
   ClientPresentation.of({
     metadata: {
-      label: "456code Test",
-      deviceType: "desktop",
-      os: "Test OS",
+      label: '456code Test',
+      deviceType: 'desktop',
+      os: 'Test OS',
     },
     scopes: AuthStandardClientScopes,
   }),
-);
+)
 
 function pairingHttpLayer(
   calls: Array<{ readonly url: string; readonly init: RequestInit }>,
   options?: { readonly failDescriptor?: boolean },
-) {
-  const fetchFn = ((input, init = {}) => {
-    const url = String(input);
-    calls.push({ url, init });
+)
+{
+  const fetchFn = ((input, init = {}) =>
+  {
+    const url = String(input)
+    calls.push({ url, init })
 
-    if (url.endsWith("/.well-known/t3/environment")) {
-      if (options?.failDescriptor === true) {
+    if (url.endsWith('/.well-known/t3/environment'))
+    {
+      if (options?.failDescriptor === true)
+      {
         return Promise.resolve(
-          Response.json({ message: "descriptor unavailable" }, { status: 503 }),
-        );
+          Response.json({ message: 'descriptor unavailable' }, { status: 503 }),
+        )
       }
       return Promise.resolve(
         Response.json({
-          environmentId: "environment-paired",
-          label: "Paired environment",
+          environmentId: 'environment-paired',
+          label: 'Paired environment',
           platform: {
-            os: "linux",
-            arch: "x64",
+            os: 'linux',
+            arch: 'x64',
           },
-          serverVersion: "0.0.0-test",
+          serverVersion: '0.0.0-test',
           capabilities: {
             repositoryIdentity: true,
           },
         }),
-      );
+      )
     }
 
-    if (url.endsWith("/oauth/token")) {
+    if (url.endsWith('/oauth/token'))
+    {
       return Promise.resolve(
         Response.json({
-          access_token: "bearer-token",
-          issued_token_type: "urn:ietf:params:oauth:token-type:access_token",
-          token_type: "Bearer",
+          access_token: 'bearer-token',
+          issued_token_type: 'urn:ietf:params:oauth:token-type:access_token',
+          token_type: 'Bearer',
           expires_in: 3600,
-          scope: AuthStandardClientScopes.join(" "),
+          scope: AuthStandardClientScopes.join(' '),
         }),
-      );
+      )
     }
 
-    return Promise.reject(new Error(`Unexpected request: ${url}`));
-  }) satisfies typeof fetch;
+    return Promise.reject(new Error(`Unexpected request: ${url}`))
+  }) satisfies typeof fetch
 
-  return remoteHttpClientLayer(fetchFn);
+  return remoteHttpClientLayer(fetchFn)
 }
 
-describe("connection onboarding", () => {
-  it.effect("prepares a persisted bearer registration from pairing details", () =>
-    Effect.gen(function* () {
-      const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+describe('connection onboarding', () =>
+{
+  it.effect('prepares a persisted bearer registration from pairing details', () =>
+    Effect.gen(function* ()
+    {
+      const calls: Array<{ readonly url: string; readonly init: RequestInit }> = []
       const registration = yield* preparePairingRegistration({
-        host: "remote.example.test",
-        pairingCode: "pairing-token",
-      }).pipe(Effect.provide(Layer.mergeAll(CLIENT_PRESENTATION_LAYER, pairingHttpLayer(calls))));
+        host: 'remote.example.test',
+        pairingCode: 'pairing-token',
+      }).pipe(Effect.provide(Layer.mergeAll(CLIENT_PRESENTATION_LAYER, pairingHttpLayer(calls))))
 
       expect(registration).toMatchObject({
-        _tag: "BearerConnectionRegistration",
+        _tag: 'BearerConnectionRegistration',
         target: {
-          environmentId: "environment-paired",
-          label: "Paired environment",
-          connectionId: "bearer:environment-paired",
+          environmentId: 'environment-paired',
+          label: 'Paired environment',
+          connectionId: 'bearer:environment-paired',
         },
         profile: {
-          environmentId: "environment-paired",
-          label: "Paired environment",
-          connectionId: "bearer:environment-paired",
-          httpBaseUrl: "https://remote.example.test/",
-          wsBaseUrl: "wss://remote.example.test/",
+          environmentId: 'environment-paired',
+          label: 'Paired environment',
+          connectionId: 'bearer:environment-paired',
+          httpBaseUrl: 'https://remote.example.test/',
+          wsBaseUrl: 'wss://remote.example.test/',
         },
         credential: {
-          token: "bearer-token",
+          token: 'bearer-token',
         },
-      });
+      })
       expect(calls.map((call) => call.url)).toEqual([
-        "https://remote.example.test/.well-known/t3/environment",
-        "https://remote.example.test/oauth/token",
-      ]);
+        'https://remote.example.test/.well-known/t3/environment',
+        'https://remote.example.test/oauth/token',
+      ])
 
-      const tokenRequest = calls.find((call) => call.url.endsWith("/oauth/token"));
+      const tokenRequest = calls.find((call) => call.url.endsWith('/oauth/token'))
       const tokenBody =
         tokenRequest?.init.body instanceof Uint8Array
           ? new TextDecoder().decode(tokenRequest.init.body)
-          : String(tokenRequest?.init.body);
-      const tokenParams = new URLSearchParams(tokenBody);
-      expect(tokenParams.get("subject_token")).toBe("pairing-token");
-      expect(tokenParams.get("scope")).toBe(AuthStandardClientScopes.join(" "));
-      expect(tokenParams.get("client_label")).toBe("456code Test");
+          : String(tokenRequest?.init.body)
+      const tokenParams = new URLSearchParams(tokenBody)
+      expect(tokenParams.get('subject_token')).toBe('pairing-token')
+      expect(tokenParams.get('scope')).toBe(AuthStandardClientScopes.join(' '))
+      expect(tokenParams.get('client_label')).toBe('456code Test')
     }),
-  );
+  )
 
-  it.effect("does not consume a pairing credential when descriptor discovery fails", () =>
-    Effect.gen(function* () {
-      const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+  it.effect('does not consume a pairing credential when descriptor discovery fails', () =>
+    Effect.gen(function* ()
+    {
+      const calls: Array<{ readonly url: string; readonly init: RequestInit }> = []
 
       yield* preparePairingRegistration({
-        host: "remote.example.test",
-        pairingCode: "pairing-token",
+        host: 'remote.example.test',
+        pairingCode: 'pairing-token',
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -139,87 +147,90 @@ describe("connection onboarding", () => {
           ),
         ),
         Effect.flip,
-      );
+      )
 
       expect(calls.map((call) => call.url)).toEqual([
-        "https://remote.example.test/.well-known/t3/environment",
-      ]);
+        'https://remote.example.test/.well-known/t3/environment',
+      ])
     }),
-  );
+  )
 
-  it.effect("rejects invalid pairing details before making a request", () =>
-    Effect.gen(function* () {
-      const calls: Array<{ readonly url: string; readonly init: RequestInit }> = [];
+  it.effect('rejects invalid pairing details before making a request', () =>
+    Effect.gen(function* ()
+    {
+      const calls: Array<{ readonly url: string; readonly init: RequestInit }> = []
       const error = yield* preparePairingRegistration({
-        host: "",
-        pairingCode: "",
+        host: '',
+        pairingCode: '',
       }).pipe(
         Effect.provide(Layer.mergeAll(CLIENT_PRESENTATION_LAYER, pairingHttpLayer(calls))),
         Effect.flip,
-      );
+      )
 
       expect(error).toMatchObject({
-        _tag: "ConnectionBlockedError",
-        reason: "configuration",
-        message: "Enter a backend URL.",
-      });
-      expect(calls).toEqual([]);
+        _tag: 'ConnectionBlockedError',
+        reason: 'configuration',
+        message: 'Enter a backend URL.',
+      })
+      expect(calls).toEqual([])
     }),
-  );
+  )
 
-  it.effect("updates bearer metadata while preserving the credential and identity", () =>
-    Effect.gen(function* () {
-      const environmentId = EnvironmentId.make("environment-paired");
+  it.effect('updates bearer metadata while preserving the credential and identity', () =>
+    Effect.gen(function* ()
+    {
+      const environmentId = EnvironmentId.make('environment-paired')
       const registration = yield* prepareBearerConnectionUpdate({
         input: {
           environmentId,
-          label: "  Renamed environment  ",
-          httpBaseUrl: "http://100.65.180.100:3773/path",
+          label: '  Renamed environment  ',
+          httpBaseUrl: 'http://100.65.180.100:3773/path',
         },
         entry: Option.some({
           target: new BearerConnectionTarget({
             environmentId,
-            label: "Old label",
-            connectionId: "bearer:environment-paired",
+            label: 'Old label',
+            connectionId: 'bearer:environment-paired',
           }),
           profile: Option.some(
             new BearerConnectionProfile({
-              connectionId: "bearer:environment-paired",
+              connectionId: 'bearer:environment-paired',
               environmentId,
-              label: "Old label",
-              httpBaseUrl: "http://old.example.test/",
-              wsBaseUrl: "ws://old.example.test/",
+              label: 'Old label',
+              httpBaseUrl: 'http://old.example.test/',
+              wsBaseUrl: 'ws://old.example.test/',
             }),
           ),
         }),
-        credential: Option.some(new BearerConnectionCredential({ token: "bearer-token" })),
-      });
+        credential: Option.some(new BearerConnectionCredential({ token: 'bearer-token' })),
+      })
 
       expect(registration).toMatchObject({
         target: {
           environmentId,
-          label: "Renamed environment",
-          connectionId: "bearer:environment-paired",
+          label: 'Renamed environment',
+          connectionId: 'bearer:environment-paired',
         },
         profile: {
           environmentId,
-          label: "Renamed environment",
-          httpBaseUrl: "http://100.65.180.100:3773/",
-          wsBaseUrl: "ws://100.65.180.100:3773/",
+          label: 'Renamed environment',
+          httpBaseUrl: 'http://100.65.180.100:3773/',
+          wsBaseUrl: 'ws://100.65.180.100:3773/',
         },
-        credential: { token: "bearer-token" },
-      });
+        credential: { token: 'bearer-token' },
+      })
     }),
-  );
+  )
 
-  it.effect("prepares an SSH registration from the provisioned platform environment", () =>
-    Effect.gen(function* () {
+  it.effect('prepares an SSH registration from the provisioned platform environment', () =>
+    Effect.gen(function* ()
+    {
       const target = {
-        alias: "devbox",
-        hostname: "devbox.example.test",
-        username: "developer",
+        alias: 'devbox',
+        hostname: 'devbox.example.test',
+        username: 'developer',
         port: 22,
-      };
+      }
       const registration = yield* prepareSshRegistration({
         target,
       }).pipe(
@@ -228,36 +239,36 @@ describe("connection onboarding", () => {
           SshEnvironmentGateway.of({
             provision: () =>
               Effect.succeed({
-                environmentId: EnvironmentId.make("environment-ssh"),
-                label: "Remote development box",
+                environmentId: EnvironmentId.make('environment-ssh'),
+                label: 'Remote development box',
                 bootstrap: {
                   target,
-                  httpBaseUrl: "http://127.0.0.1:3201",
-                  wsBaseUrl: "ws://127.0.0.1:3201",
-                  pairingToken: "pairing-token",
+                  httpBaseUrl: 'http://127.0.0.1:3201',
+                  wsBaseUrl: 'ws://127.0.0.1:3201',
+                  pairingToken: 'pairing-token',
                 },
-                bearerToken: "bearer-token",
+                bearerToken: 'bearer-token',
               }),
-            prepare: () => Effect.die("unused"),
-            disconnect: () => Effect.die("unused"),
+            prepare: () => Effect.die('unused'),
+            disconnect: () => Effect.die('unused'),
           }),
         ),
-      );
+      )
 
       expect(registration).toMatchObject({
-        _tag: "SshConnectionRegistration",
+        _tag: 'SshConnectionRegistration',
         target: {
-          environmentId: "environment-ssh",
-          label: "Remote development box",
-          connectionId: "ssh:environment-ssh",
+          environmentId: 'environment-ssh',
+          label: 'Remote development box',
+          connectionId: 'ssh:environment-ssh',
         },
         profile: {
-          environmentId: "environment-ssh",
-          label: "Remote development box",
-          connectionId: "ssh:environment-ssh",
+          environmentId: 'environment-ssh',
+          label: 'Remote development box',
+          connectionId: 'ssh:environment-ssh',
           target,
         },
-      });
+      })
     }),
-  );
-});
+  )
+})

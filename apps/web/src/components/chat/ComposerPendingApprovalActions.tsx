@@ -1,28 +1,30 @@
-import { type ApprovalRequestId, type ProviderApprovalDecision } from "@t3tools/contracts";
-import { memo } from "react";
-import { Button } from "../ui/button";
+import { type ApprovalRequestId, type ProviderApprovalDecision } from '@t3tools/contracts'
+import { memo } from 'react'
+import { Button } from '../ui/button'
 
-interface ComposerPendingApprovalActionsProps {
-  requestId: ApprovalRequestId;
-  isResponding: boolean;
+interface ComposerPendingApprovalActionsProps
+{
+  requestId: ApprovalRequestId
+  isResponding: boolean
   onRespondToApproval: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
-  ) => Promise<unknown>;
+  ) => Promise<unknown>
 }
 
 export const ComposerPendingApprovalActions = memo(function ComposerPendingApprovalActions({
   requestId,
   isResponding,
   onRespondToApproval,
-}: ComposerPendingApprovalActionsProps) {
+}: ComposerPendingApprovalActionsProps)
+{
   return (
     <>
       <Button
         size="sm"
         variant="ghost"
         disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, "cancel")}
+        onClick={() => void onRespondToApproval(requestId, 'cancel')}
       >
         Cancel turn
       </Button>
@@ -30,7 +32,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         size="sm"
         variant="destructive-outline"
         disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, "decline")}
+        onClick={() => void onRespondToApproval(requestId, 'decline')}
       >
         Decline
       </Button>
@@ -38,7 +40,7 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         size="sm"
         variant="outline"
         disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, "acceptForSession")}
+        onClick={() => void onRespondToApproval(requestId, 'acceptForSession')}
       >
         Always allow this session
       </Button>
@@ -46,10 +48,10 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         size="sm"
         variant="default"
         disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, "accept")}
+        onClick={() => void onRespondToApproval(requestId, 'accept')}
       >
         Approve once
       </Button>
     </>
-  );
-});
+  )
+})

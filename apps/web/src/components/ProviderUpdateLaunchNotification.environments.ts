@@ -1,16 +1,16 @@
-import type { ConnectionCatalogEntry } from "@t3tools/client-runtime/connection";
-import type { ServerConfig } from "@t3tools/contracts";
-import { useMemo } from "react";
+import type { ConnectionCatalogEntry } from '@t3tools/client-runtime/connection'
+import type { ServerConfig } from '@t3tools/contracts'
+import { useMemo } from 'react'
 
-import { useEnvironments, usePrimaryEnvironmentId } from "~/state/environments";
-import { isDesktopLocalConnectionTarget } from "~/connection/desktopLocal";
+import { useEnvironments, usePrimaryEnvironmentId } from '~/state/environments'
+import { isDesktopLocalConnectionTarget } from '~/connection/desktopLocal'
 import {
   buildLocalEnvironmentUpdateGroups,
   deriveEnvironmentDisplayLabel,
   type EnvironmentUpdateConnectionState,
   type LocalEnvironmentProvidersInput,
   type LocalEnvironmentUpdateGroup,
-} from "./ProviderUpdateLaunchNotification.logic";
+} from './ProviderUpdateLaunchNotification.logic'
 
 /**
  * A local environment is either the same-origin primary backend or a
@@ -18,26 +18,29 @@ import {
  * loopback with a bearer token and carries a `local:<backendInstanceId>`
  * connection id. SSH, relay, and other remote targets are excluded.
  */
-function isLocalConnectionTarget(target: ConnectionCatalogEntry["target"]): boolean {
-  return target._tag === "PrimaryConnectionTarget" || isDesktopLocalConnectionTarget(target);
+function isLocalConnectionTarget(target: ConnectionCatalogEntry['target']): boolean
+{
+  return target._tag === 'PrimaryConnectionTarget' || isDesktopLocalConnectionTarget(target)
 }
 
-function normalizeConnectionState(phase: string | undefined): EnvironmentUpdateConnectionState {
-  switch (phase) {
-    case "connected":
-      return "ready";
-    case "connecting":
-    case "reconnecting":
-      return "connecting";
-    case "error":
-      return "error";
-    case "offline":
-      return "disconnected";
+function normalizeConnectionState(phase: string | undefined): EnvironmentUpdateConnectionState
+{
+  switch (phase)
+  {
+    case 'connected':
+      return 'ready'
+    case 'connecting':
+    case 'reconnecting':
+      return 'connecting'
+    case 'error':
+      return 'error'
+    case 'offline':
+      return 'disconnected'
     default:
       // "available" (or anything not yet observed) — the backend has not
       // confirmed it is serving yet, so treat it as still settling so the
       // popover waits for it.
-      return "connecting";
+      return 'connecting'
   }
 }
 
@@ -48,22 +51,26 @@ function normalizeConnectionState(phase: string | undefined): EnvironmentUpdateC
  * and its per-environment update triggers.
  */
 export function useLocalEnvironmentUpdateGroups(): {
-  readonly groups: LocalEnvironmentUpdateGroup[];
-  readonly isAnySettling: boolean;
-} {
-  const { environments } = useEnvironments();
-  const primaryEnvironmentId = usePrimaryEnvironmentId();
+  readonly groups: LocalEnvironmentUpdateGroup[]
+  readonly isAnySettling: boolean
+}
+{
+  const { environments } = useEnvironments()
+  const primaryEnvironmentId = usePrimaryEnvironmentId()
 
-  return useMemo(() => {
-    const inputs: LocalEnvironmentProvidersInput[] = [];
+  return useMemo(() =>
+  {
+    const inputs: LocalEnvironmentProvidersInput[] = []
 
-    for (const environment of environments) {
-      if (!isLocalConnectionTarget(environment.entry.target)) {
-        continue;
+    for (const environment of environments)
+    {
+      if (!isLocalConnectionTarget(environment.entry.target))
+      {
+        continue
       }
 
-      const isPrimary = environment.environmentId === primaryEnvironmentId;
-      const serverConfig: ServerConfig | null = environment.serverConfig;
+      const isPrimary = environment.environmentId === primaryEnvironmentId
+      const serverConfig: ServerConfig | null = environment.serverConfig
 
       inputs.push({
         environmentId: environment.environmentId,
@@ -83,15 +90,15 @@ export function useLocalEnvironmentUpdateGroups(): {
         // whenever its providers are available; secondaries report their live
         // connection phase.
         connectionState: isPrimary
-          ? "ready"
+          ? 'ready'
           : normalizeConnectionState(environment.connection.phase),
         providers: serverConfig?.providers ?? [],
-      });
+      })
     }
 
     // Primary first, then the rest in catalog order.
-    inputs.sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary));
+    inputs.sort((left, right) => Number(right.isPrimary) - Number(left.isPrimary))
 
-    return buildLocalEnvironmentUpdateGroups(inputs);
-  }, [environments, primaryEnvironmentId]);
+    return buildLocalEnvironmentUpdateGroups(inputs)
+  }, [environments, primaryEnvironmentId])
 }

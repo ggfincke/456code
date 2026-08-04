@@ -1,97 +1,101 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   shortcutModifierStateAfterKeyboardEvent,
   type ShortcutModifierState,
-} from "../../../apps/web/src/shortcutModifierState";
+} from '../../../apps/web/src/shortcutModifierState'
 
 const emptyState = (): ShortcutModifierState => ({
   metaKey: false,
   ctrlKey: false,
   altKey: false,
   shiftKey: false,
-});
+})
 
-function keyboardEventLike(type: "keydown" | "keyup", init: Partial<KeyboardEvent>): KeyboardEvent {
+function keyboardEventLike(type: 'keydown' | 'keyup', init: Partial<KeyboardEvent>): KeyboardEvent
+{
   return {
     type,
-    key: "",
+    key: '',
     metaKey: false,
     ctrlKey: false,
     altKey: false,
     shiftKey: false,
     ...init,
-  } as KeyboardEvent;
+  } as KeyboardEvent
 }
 
-describe("shortcutModifierState", () => {
-  it("preserves the current object when modifier values do not change", () => {
-    const initialState = emptyState();
+describe('shortcutModifierState', () =>
+{
+  it('preserves the current object when modifier values do not change', () =>
+  {
+    const initialState = emptyState()
     const nextState = shortcutModifierStateAfterKeyboardEvent(
       initialState,
-      keyboardEventLike("keyup", { key: "Shift" }),
-    );
-    expect(nextState).toBe(initialState);
-  });
+      keyboardEventLike('keyup', { key: 'Shift' }),
+    )
+    expect(nextState).toBe(initialState)
+  })
 
-  it("tracks bare modifier keydown and keyup events explicitly", () => {
-    let state = emptyState();
+  it('tracks bare modifier keydown and keyup events explicitly', () =>
+  {
+    let state = emptyState()
     state = shortcutModifierStateAfterKeyboardEvent(
       state,
-      keyboardEventLike("keydown", {
-        key: "Meta",
+      keyboardEventLike('keydown', {
+        key: 'Meta',
         metaKey: false,
       }),
-    );
+    )
     expect(state).toEqual({
       metaKey: true,
       ctrlKey: false,
       altKey: false,
       shiftKey: false,
-    });
+    })
 
     state = shortcutModifierStateAfterKeyboardEvent(
       state,
-      keyboardEventLike("keydown", {
-        key: "Shift",
+      keyboardEventLike('keydown', {
+        key: 'Shift',
         metaKey: true,
         shiftKey: false,
       }),
-    );
+    )
     expect(state).toEqual({
       metaKey: true,
       ctrlKey: false,
       altKey: false,
       shiftKey: true,
-    });
+    })
 
     state = shortcutModifierStateAfterKeyboardEvent(
       state,
-      keyboardEventLike("keyup", {
-        key: "Meta",
+      keyboardEventLike('keyup', {
+        key: 'Meta',
         metaKey: true,
         shiftKey: true,
       }),
-    );
+    )
     expect(state).toEqual({
       metaKey: false,
       ctrlKey: false,
       altKey: false,
       shiftKey: true,
-    });
+    })
 
     state = shortcutModifierStateAfterKeyboardEvent(
       state,
-      keyboardEventLike("keyup", {
-        key: "Shift",
+      keyboardEventLike('keyup', {
+        key: 'Shift',
         shiftKey: true,
       }),
-    );
+    )
     expect(state).toEqual({
       metaKey: false,
       ctrlKey: false,
       altKey: false,
       shiftKey: false,
-    });
-  });
-});
+    })
+  })
+})

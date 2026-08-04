@@ -1,11 +1,12 @@
 // apps/server/src/persistence/Migrations/037_Proposals.ts
 // installs immutable proposal, revision, and content-addressed blob storage
 
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS proposals (
@@ -22,12 +23,12 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_proposals_scope_updated
     ON proposals(environment_id, project_id, source_thread_id, updated_at DESC)
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS proposal_blobs (
@@ -38,7 +39,7 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       CHECK(length(content) = byte_length)
     )
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS proposal_revisions (
@@ -72,10 +73,10 @@ export default Effect.gen(function* () {
       ),
       UNIQUE(proposal_id, revision)
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_proposal_revisions_proposal_revision
     ON proposal_revisions(proposal_id, revision DESC)
-  `;
-});
+  `
+})

@@ -1,29 +1,30 @@
-import type { ComponentProps } from "react";
-import { Switch, View } from "react-native";
+import type { ComponentProps } from 'react'
+import { Switch, View } from 'react-native'
 
-import { SymbolView } from "../../../components/AppSymbol";
-import { AppText as Text } from "../../../components/AppText";
-import { useThemeColor } from "../../../lib/useThemeColor";
+import { SymbolView } from '../../../components/AppSymbol'
+import { AppText as Text } from '../../../components/AppText'
+import { useThemeColor } from '../../../lib/useThemeColor'
 
-type SymbolName = ComponentProps<typeof SymbolView>["name"];
+type SymbolName = ComponentProps<typeof SymbolView>['name']
 
 export function SettingsSwitchRow(props: {
-  readonly disabled?: boolean;
-  readonly icon: SymbolName;
-  readonly label: string;
-  readonly value: boolean;
-  readonly onValueChange: (value: boolean) => void;
-}) {
-  const icon = useThemeColor("--color-icon");
-  const activeTrack = String(useThemeColor("--color-switch-active"));
-  const track = String(useThemeColor("--color-secondary-border"));
+  readonly disabled?: boolean
+  readonly icon: SymbolName
+  readonly label: string
+  readonly value: boolean
+  readonly onValueChange: (value: boolean) => void
+})
+{
+  const icon = useThemeColor('--color-icon')
+  const activeTrack = String(useThemeColor('--color-switch-active'))
+  const track = String(useThemeColor('--color-secondary-border'))
 
   return (
     <View
       className={
         props.disabled
-          ? "flex-row items-center gap-4 p-4 opacity-[0.45]"
-          : "flex-row items-center gap-4 p-4"
+          ? 'flex-row items-center gap-4 p-4 opacity-[0.45]'
+          : 'flex-row items-center gap-4 p-4'
       }
     >
       <SymbolView name={props.icon} size={22} tintColor={icon} type="monochrome" weight="regular" />
@@ -36,5 +37,5 @@ export function SettingsSwitchRow(props: {
         value={props.value}
       />
     </View>
-  );
+  )
 }

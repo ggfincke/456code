@@ -1,59 +1,64 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
-import type { ServerProviderSkill } from "@t3tools/contracts";
+import type { ServerProviderSkill } from '@t3tools/contracts'
 
-import { searchProviderSkills } from "../../../apps/web/src/providerSkillSearch";
+import { searchProviderSkills } from '../../../apps/web/src/providerSkillSearch'
 
-function makeSkill(input: Partial<ServerProviderSkill> & Pick<ServerProviderSkill, "name">) {
+function makeSkill(input: Partial<ServerProviderSkill> & Pick<ServerProviderSkill, 'name'>)
+{
   return {
     path: `/tmp/${input.name}/SKILL.md`,
     enabled: true,
     ...input,
-  } satisfies ServerProviderSkill;
+  } satisfies ServerProviderSkill
 }
 
-describe("searchProviderSkills", () => {
-  it("moves exact ui matches ahead of broader ui matches", () => {
+describe('searchProviderSkills', () =>
+{
+  it('moves exact ui matches ahead of broader ui matches', () =>
+  {
     const skills = [
       makeSkill({
-        name: "agent-browser",
-        displayName: "Agent Browser",
-        shortDescription: "Browser automation CLI for AI agents",
+        name: 'agent-browser',
+        displayName: 'Agent Browser',
+        shortDescription: 'Browser automation CLI for AI agents',
       }),
       makeSkill({
-        name: "building-native-ui",
-        displayName: "Building Native Ui",
-        shortDescription: "Complete guide for building beautiful apps with Expo Router",
+        name: 'building-native-ui',
+        displayName: 'Building Native Ui',
+        shortDescription: 'Complete guide for building beautiful apps with Expo Router',
       }),
       makeSkill({
-        name: "ui",
-        displayName: "Ui",
-        shortDescription: "Explore, build, and refine UI.",
+        name: 'ui',
+        displayName: 'Ui',
+        shortDescription: 'Explore, build, and refine UI.',
       }),
-    ];
+    ]
 
-    expect(searchProviderSkills(skills, "ui").map((skill) => skill.name)).toEqual([
-      "ui",
-      "building-native-ui",
-    ]);
-  });
+    expect(searchProviderSkills(skills, 'ui').map((skill) => skill.name)).toEqual([
+      'ui',
+      'building-native-ui',
+    ])
+  })
 
-  it("uses fuzzy ranking for abbreviated queries", () => {
+  it('uses fuzzy ranking for abbreviated queries', () =>
+  {
     const skills = [
-      makeSkill({ name: "gh-fix-ci", displayName: "Gh Fix Ci" }),
-      makeSkill({ name: "github", displayName: "Github" }),
-      makeSkill({ name: "agent-browser", displayName: "Agent Browser" }),
-    ];
+      makeSkill({ name: 'gh-fix-ci', displayName: 'Gh Fix Ci' }),
+      makeSkill({ name: 'github', displayName: 'Github' }),
+      makeSkill({ name: 'agent-browser', displayName: 'Agent Browser' }),
+    ]
 
-    expect(searchProviderSkills(skills, "gfc").map((skill) => skill.name)).toEqual(["gh-fix-ci"]);
-  });
+    expect(searchProviderSkills(skills, 'gfc').map((skill) => skill.name)).toEqual(['gh-fix-ci'])
+  })
 
-  it("omits disabled skills from results", () => {
+  it('omits disabled skills from results', () =>
+  {
     const skills = [
-      makeSkill({ name: "ui", displayName: "Ui", enabled: false }),
-      makeSkill({ name: "frontend-design", displayName: "Frontend Design" }),
-    ];
+      makeSkill({ name: 'ui', displayName: 'Ui', enabled: false }),
+      makeSkill({ name: 'frontend-design', displayName: 'Frontend Design' }),
+    ]
 
-    expect(searchProviderSkills(skills, "ui").map((skill) => skill.name)).toEqual([]);
-  });
-});
+    expect(searchProviderSkills(skills, 'ui').map((skill) => skill.name)).toEqual([])
+  })
+})

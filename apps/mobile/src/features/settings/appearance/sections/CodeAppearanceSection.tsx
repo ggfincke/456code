@@ -1,29 +1,28 @@
-import { useCallback } from "react";
+import { useCallback } from 'react'
 
 import {
   CODE_FONT_SIZE_STEP,
   MAX_CODE_FONT_SIZE,
   MIN_CODE_FONT_SIZE,
-} from "../../../../lib/appearancePreferences";
-import { SettingsSection } from "../../components/SettingsSection";
-import { SettingsSwitchRow } from "../../components/SettingsSwitchRow";
-import { useAppearancePreferences } from "../AppearancePreferencesProvider";
-import {
-  AppearancePreviewSeparator,
-  CodeAppearancePreview,
-} from "../components/AppearancePreviews";
-import { FontSizeSliderRow } from "../components/FontSizeSliderRow";
+} from '../../../../lib/appearancePreferences'
+import { SettingsSection } from '../../components/SettingsSection'
+import { SettingsSwitchRow } from '../../components/SettingsSwitchRow'
+import { useAppearancePreferences } from '../AppearancePreferencesProvider'
+import { AppearancePreviewSeparator, CodeAppearancePreview } from '../components/AppearancePreviews'
+import { FontSizeSliderRow } from '../components/FontSizeSliderRow'
 
-export function CodeAppearanceSection() {
-  const { isReady, appearance, setCodeFontSize, setCodeWordBreak } = useAppearancePreferences();
-  const custom = appearance.isCodeFontSizeCustom;
+export function CodeAppearanceSection()
+{
+  const { isReady, appearance, setCodeFontSize, setCodeWordBreak } = useAppearancePreferences()
+  const custom = appearance.isCodeFontSizeCustom
 
   const handleToggleCustom = useCallback(
-    (enabled: boolean) => {
-      setCodeFontSize(enabled ? appearance.codeFontSize : null);
+    (enabled: boolean) =>
+    {
+      setCodeFontSize(enabled ? appearance.codeFontSize : null)
     },
     [appearance.codeFontSize, setCodeFontSize],
-  );
+  )
 
   return (
     <SettingsSection card title="Code & Diffs">
@@ -60,5 +59,5 @@ export function CodeAppearanceSection() {
         value={appearance.codeWordBreak}
       />
     </SettingsSection>
-  );
+  )
 }

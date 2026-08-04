@@ -1,7 +1,7 @@
 // apps/web/src/components/diffs/NativeDiffSurface.tsx
 // renders unified diffs through the shared native review surface
-import type { FileDiffMetadata } from "@pierre/diffs";
-import type { ScopedThreadRef } from "@t3tools/contracts";
+import type { FileDiffMetadata } from '@pierre/diffs'
+import type { ScopedThreadRef } from '@t3tools/contracts'
 import {
   ChevronDownIcon,
   ChevronRightIcon,
@@ -11,7 +11,7 @@ import {
   PilcrowIcon,
   Rows3Icon,
   TextWrapIcon,
-} from "lucide-react";
+} from 'lucide-react'
 import {
   useCallback,
   useEffect,
@@ -19,10 +19,10 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
-} from "react";
+} from 'react'
 
-import { type DraftId } from "~/composerDraftStore";
-import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from "~/lib/diffCollapse";
+import { type DraftId } from '~/composerDraftStore'
+import { areAllDiffFilesCollapsed, toggleAllDiffFiles } from '~/lib/diffCollapse'
 import {
   buildFileDiffRenderKey,
   getDiffCollapseIconClassName,
@@ -31,51 +31,55 @@ import {
   resolveFileDiffPath,
   type DiffLineStat,
   type RenderablePatch,
-} from "~/lib/diffRendering";
-import { useSyntaxThemeName } from "~/hooks/useSyntaxThemeName";
-import { cn } from "~/lib/utils";
+} from '~/lib/diffRendering'
+import { useSyntaxThemeName } from '~/hooks/useSyntaxThemeName'
+import { cn } from '~/lib/utils'
 
-import { DiffPanelLoadingState } from "../DiffPanelShell";
-import { DiffStatLabel } from "../chat/DiffStatLabel";
-import { Button } from "../ui/button";
-import { Toggle, ToggleGroup } from "../ui/toggle-group";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from "./AnnotatableCodeView";
+import { DiffPanelLoadingState } from '../DiffPanelShell'
+import { DiffStatLabel } from '../chat/DiffStatLabel'
+import { Button } from '../ui/button'
+import { Toggle, ToggleGroup } from '../ui/toggle-group'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
+import { AnnotatableCodeView, type AnnotatableCodeViewHandle } from './AnnotatableCodeView'
 
-export type NativeDiffRenderMode = "stacked" | "split";
-type NativeDiffThemeType = "light" | "dark";
+export type NativeDiffRenderMode = 'stacked' | 'split'
+type NativeDiffThemeType = 'light' | 'dark'
 
-export interface NativeDiffSource {
-  readonly patch: string | undefined;
-  readonly cacheScope: string;
-  readonly compactPartialHunkOffsets?: boolean;
+export interface NativeDiffSource
+{
+  readonly patch: string | undefined
+  readonly cacheScope: string
+  readonly compactPartialHunkOffsets?: boolean
 }
 
-interface CollapsedDiffFilesState {
-  readonly scopeKey: string | null;
-  readonly fileKeys: ReadonlySet<string>;
+interface CollapsedDiffFilesState
+{
+  readonly scopeKey: string | null
+  readonly fileKeys: ReadonlySet<string>
 }
 
-interface NativeDiffFile {
-  readonly fileDiff: FileDiffMetadata;
-  readonly filePath: string;
-  readonly fileKey: string;
-  readonly collapsed: boolean;
+interface NativeDiffFile
+{
+  readonly fileDiff: FileDiffMetadata
+  readonly filePath: string
+  readonly fileKey: string
+  readonly collapsed: boolean
 }
 
-export interface NativeDiffSurfaceController {
-  readonly renderablePatch: RenderablePatch | null;
-  readonly files: ReadonlyArray<NativeDiffFile>;
-  readonly lineStat: DiffLineStat;
-  readonly hasResolvedPatch: boolean;
-  readonly hasNoNetChanges: boolean;
-  readonly allFilesCollapsed: boolean;
-  readonly viewerRef: React.RefObject<AnnotatableCodeViewHandle | null>;
-  readonly toggleAllFiles: () => void;
-  readonly toggleFile: (fileKey: string) => void;
+export interface NativeDiffSurfaceController
+{
+  readonly renderablePatch: RenderablePatch | null
+  readonly files: ReadonlyArray<NativeDiffFile>
+  readonly lineStat: DiffLineStat
+  readonly hasResolvedPatch: boolean
+  readonly hasNoNetChanges: boolean
+  readonly allFilesCollapsed: boolean
+  readonly viewerRef: React.RefObject<AnnotatableCodeViewHandle | null>
+  readonly toggleAllFiles: () => void
+  readonly toggleFile: (fileKey: string) => void
 }
 
-const EMPTY_COLLAPSED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set();
+const EMPTY_COLLAPSED_DIFF_FILE_KEYS: ReadonlySet<string> = new Set()
 
 const NATIVE_DIFF_UNSAFE_CSS = `
 [data-diffs-header],
@@ -174,29 +178,30 @@ const NATIVE_DIFF_UNSAFE_CSS = `
   color: color-mix(in srgb, var(--foreground) 84%, var(--primary)) !important;
   text-decoration-color: currentColor;
 }
-`;
+`
 
 export function useNativeDiffSurfaceController(input: {
-  readonly source: NativeDiffSource;
-  readonly collapseScopeKey: string;
-  readonly selectedFilePath?: string | null;
-  readonly selectedFileRevealRequestId?: number;
-}): NativeDiffSurfaceController {
+  readonly source: NativeDiffSource
+  readonly collapseScopeKey: string
+  readonly selectedFilePath?: string | null
+  readonly selectedFileRevealRequestId?: number
+}): NativeDiffSurfaceController
+{
   const {
     source,
     collapseScopeKey,
     selectedFilePath = null,
     selectedFileRevealRequestId = 0,
-  } = input;
+  } = input
   const [collapsedDiffFiles, setCollapsedDiffFiles] = useState<CollapsedDiffFilesState>(() => ({
     scopeKey: null,
     fileKeys: EMPTY_COLLAPSED_DIFF_FILE_KEYS,
-  }));
-  const viewerRef = useRef<AnnotatableCodeViewHandle>(null);
+  }))
+  const viewerRef = useRef<AnnotatableCodeViewHandle>(null)
   const collapsedFileKeys =
     collapsedDiffFiles.scopeKey === collapseScopeKey
       ? collapsedDiffFiles.fileKeys
-      : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
+      : EMPTY_COLLAPSED_DIFF_FILE_KEYS
   const renderablePatch = useMemo(
     () =>
       getRenderablePatch(
@@ -207,69 +212,80 @@ export function useNativeDiffSurfaceController(input: {
           : { compactPartialHunkOffsets: source.compactPartialHunkOffsets },
       ),
     [source.cacheScope, source.compactPartialHunkOffsets, source.patch],
-  );
-  const renderableFiles = useMemo(() => {
-    if (!renderablePatch || renderablePatch.kind !== "files") {
-      return [];
+  )
+  const renderableFiles = useMemo(() =>
+  {
+    if (!renderablePatch || renderablePatch.kind !== 'files')
+    {
+      return []
     }
     return renderablePatch.files.toSorted((left, right) =>
       resolveFileDiffPath(left).localeCompare(resolveFileDiffPath(right), undefined, {
         numeric: true,
-        sensitivity: "base",
+        sensitivity: 'base',
       }),
-    );
-  }, [renderablePatch]);
+    )
+  }, [renderablePatch])
   const files = useMemo(
     () =>
-      renderableFiles.map((fileDiff) => {
-        const fileKey = buildFileDiffRenderKey(fileDiff);
+      renderableFiles.map((fileDiff) =>
+      {
+        const fileKey = buildFileDiffRenderKey(fileDiff)
         return {
           fileDiff,
           filePath: resolveFileDiffPath(fileDiff),
           fileKey,
           collapsed: collapsedFileKeys.has(fileKey),
-        };
+        }
       }),
     [collapsedFileKeys, renderableFiles],
-  );
-  const fileKeys = useMemo(() => files.map((file) => file.fileKey), [files]);
-  const lineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles]);
-  const hasResolvedPatch = typeof source.patch === "string";
-  const hasNoNetChanges = hasResolvedPatch && source.patch.trim().length === 0;
-  const allFilesCollapsed = areAllDiffFilesCollapsed(fileKeys, collapsedFileKeys);
+  )
+  const fileKeys = useMemo(() => files.map((file) => file.fileKey), [files])
+  const lineStat = useMemo(() => getDiffLineStat(renderableFiles), [renderableFiles])
+  const hasResolvedPatch = typeof source.patch === 'string'
+  const hasNoNetChanges = hasResolvedPatch && source.patch.trim().length === 0
+  const allFilesCollapsed = areAllDiffFilesCollapsed(fileKeys, collapsedFileKeys)
 
-  useEffect(() => {
-    if (!selectedFilePath) return;
-    const file = files.find((candidate) => candidate.filePath === selectedFilePath);
-    if (!file) return;
-    viewerRef.current?.scrollTo({ type: "item", id: file.fileKey, align: "start" });
-  }, [files, selectedFilePath, selectedFileRevealRequestId]);
+  useEffect(() =>
+  {
+    if (!selectedFilePath) return
+    const file = files.find((candidate) => candidate.filePath === selectedFilePath)
+    if (!file) return
+    viewerRef.current?.scrollTo({ type: 'item', id: file.fileKey, align: 'start' })
+  }, [files, selectedFilePath, selectedFileRevealRequestId])
 
   const toggleFile = useCallback(
-    (fileKey: string) => {
-      setCollapsedDiffFiles((current) => {
-        const next = new Set(current.scopeKey === collapseScopeKey ? current.fileKeys : []);
-        if (next.has(fileKey)) {
-          next.delete(fileKey);
-        } else {
-          next.add(fileKey);
+    (fileKey: string) =>
+    {
+      setCollapsedDiffFiles((current) =>
+      {
+        const next = new Set(current.scopeKey === collapseScopeKey ? current.fileKeys : [])
+        if (next.has(fileKey))
+        {
+          next.delete(fileKey)
         }
-        return { scopeKey: collapseScopeKey, fileKeys: next };
-      });
+        else
+        {
+          next.add(fileKey)
+        }
+        return { scopeKey: collapseScopeKey, fileKeys: next }
+      })
     },
     [collapseScopeKey],
-  );
+  )
 
-  const toggleAllFiles = useCallback(() => {
-    setCollapsedDiffFiles((current) => {
+  const toggleAllFiles = useCallback(() =>
+  {
+    setCollapsedDiffFiles((current) =>
+    {
       const currentKeys =
-        current.scopeKey === collapseScopeKey ? current.fileKeys : EMPTY_COLLAPSED_DIFF_FILE_KEYS;
+        current.scopeKey === collapseScopeKey ? current.fileKeys : EMPTY_COLLAPSED_DIFF_FILE_KEYS
       return {
         scopeKey: collapseScopeKey,
         fileKeys: toggleAllDiffFiles(fileKeys, currentKeys),
-      };
-    });
-  }, [collapseScopeKey, fileKeys]);
+      }
+    })
+  }, [collapseScopeKey, fileKeys])
 
   return {
     renderablePatch,
@@ -281,18 +297,19 @@ export function useNativeDiffSurfaceController(input: {
     viewerRef,
     toggleAllFiles,
     toggleFile,
-  };
+  }
 }
 
 export function NativeDiffSurfaceControls(props: {
-  readonly controller: NativeDiffSurfaceController;
-  readonly renderMode: NativeDiffRenderMode;
-  readonly onRenderModeChange: (mode: NativeDiffRenderMode) => void;
-  readonly wordWrap: boolean;
-  readonly onWordWrapChange: (wordWrap: boolean) => void;
-  readonly ignoreWhitespace?: boolean;
-  readonly onIgnoreWhitespaceChange?: (ignoreWhitespace: boolean) => void;
-}) {
+  readonly controller: NativeDiffSurfaceController
+  readonly renderMode: NativeDiffRenderMode
+  readonly onRenderModeChange: (mode: NativeDiffRenderMode) => void
+  readonly wordWrap: boolean
+  readonly onWordWrapChange: (wordWrap: boolean) => void
+  readonly ignoreWhitespace?: boolean
+  readonly onIgnoreWhitespaceChange?: (ignoreWhitespace: boolean) => void
+})
+{
   const {
     controller,
     renderMode,
@@ -301,8 +318,8 @@ export function NativeDiffSurfaceControls(props: {
     onWordWrapChange,
     ignoreWhitespace,
     onIgnoreWhitespaceChange,
-  } = props;
-  const hasFiles = controller.files.length > 0;
+  } = props
+  const hasFiles = controller.files.length > 0
 
   return (
     <div className="flex shrink-0 items-center gap-1 [-webkit-app-region:no-drag]">
@@ -323,7 +340,7 @@ export function NativeDiffSurfaceControls(props: {
                 size="icon-xs"
                 variant="outline"
                 aria-label={
-                  controller.allFilesCollapsed ? "Expand all files" : "Collapse all files"
+                  controller.allFilesCollapsed ? 'Expand all files' : 'Collapse all files'
                 }
                 onClick={controller.toggleAllFiles}
               />
@@ -336,7 +353,7 @@ export function NativeDiffSurfaceControls(props: {
             )}
           </TooltipTrigger>
           <TooltipPopup side="top">
-            {controller.allFilesCollapsed ? "Expand all files" : "Collapse all files"}
+            {controller.allFilesCollapsed ? 'Expand all files' : 'Collapse all files'}
           </TooltipPopup>
         </Tooltip>
       )}
@@ -345,10 +362,12 @@ export function NativeDiffSurfaceControls(props: {
         variant="outline"
         size="xs"
         value={[renderMode]}
-        onValueChange={(value) => {
-          const next = value[0];
-          if (next === "stacked" || next === "split") {
-            onRenderModeChange(next);
+        onValueChange={(value) =>
+        {
+          const next = value[0]
+          if (next === 'stacked' || next === 'split')
+          {
+            onRenderModeChange(next)
           }
         }}
       >
@@ -363,12 +382,13 @@ export function NativeDiffSurfaceControls(props: {
         <TooltipTrigger
           render={
             <Toggle
-              aria-label={wordWrap ? "Disable diff line wrapping" : "Enable diff line wrapping"}
+              aria-label={wordWrap ? 'Disable diff line wrapping' : 'Enable diff line wrapping'}
               variant="outline"
               size="xs"
               pressed={wordWrap}
-              onPressedChange={(pressed) => {
-                onWordWrapChange(Boolean(pressed));
+              onPressedChange={(pressed) =>
+              {
+                onWordWrapChange(Boolean(pressed))
               }}
             />
           }
@@ -376,7 +396,7 @@ export function NativeDiffSurfaceControls(props: {
           <TextWrapIcon className="size-3" />
         </TooltipTrigger>
         <TooltipPopup side="top">
-          {wordWrap ? "Disable line wrapping" : "Enable line wrapping"}
+          {wordWrap ? 'Disable line wrapping' : 'Enable line wrapping'}
         </TooltipPopup>
       </Tooltip>
       {onIgnoreWhitespaceChange && (
@@ -385,13 +405,14 @@ export function NativeDiffSurfaceControls(props: {
             render={
               <Toggle
                 aria-label={
-                  ignoreWhitespace ? "Show whitespace changes" : "Hide whitespace changes"
+                  ignoreWhitespace ? 'Show whitespace changes' : 'Hide whitespace changes'
                 }
                 variant="outline"
                 size="xs"
                 pressed={ignoreWhitespace === true}
-                onPressedChange={(pressed) => {
-                  onIgnoreWhitespaceChange(Boolean(pressed));
+                onPressedChange={(pressed) =>
+                {
+                  onIgnoreWhitespaceChange(Boolean(pressed))
                 }}
               />
             }
@@ -399,42 +420,44 @@ export function NativeDiffSurfaceControls(props: {
             <PilcrowIcon className="size-3" />
           </TooltipTrigger>
           <TooltipPopup side="top">
-            {ignoreWhitespace ? "Show whitespace changes" : "Hide whitespace changes"}
+            {ignoreWhitespace ? 'Show whitespace changes' : 'Hide whitespace changes'}
           </TooltipPopup>
         </Tooltip>
       )}
     </div>
-  );
+  )
 }
 
 function openFileFromDiffTitle(
   event: ReactMouseEvent<HTMLDivElement>,
   onOpenFile: (filePath: string) => void,
-): void {
-  const composedPath = event.nativeEvent.composedPath?.() ?? [];
+): void
+{
+  const composedPath = event.nativeEvent.composedPath?.() ?? []
   const title = composedPath.find(
-    (node): node is HTMLElement => node instanceof HTMLElement && node.hasAttribute("data-title"),
-  );
-  const filePath = title?.textContent?.trim();
-  if (filePath) onOpenFile(filePath);
+    (node): node is HTMLElement => node instanceof HTMLElement && node.hasAttribute('data-title'),
+  )
+  const filePath = title?.textContent?.trim()
+  if (filePath) onOpenFile(filePath)
 }
 
 export function NativeDiffSurface(props: {
-  readonly controller: NativeDiffSurfaceController;
-  readonly collapseScopeKey: string;
-  readonly sectionId: string;
-  readonly sectionTitle: string;
-  readonly composerDraftTarget: ScopedThreadRef | DraftId;
-  readonly resolvedTheme: "light" | "dark";
-  readonly renderMode: NativeDiffRenderMode;
-  readonly wordWrap: boolean;
-  readonly loading: boolean;
-  readonly loadingLabel: string;
-  readonly error?: string | null;
-  readonly emptyMessage: string;
-  readonly truncated?: boolean;
-  readonly onOpenFile?: (filePath: string) => void;
-}) {
+  readonly controller: NativeDiffSurfaceController
+  readonly collapseScopeKey: string
+  readonly sectionId: string
+  readonly sectionTitle: string
+  readonly composerDraftTarget: ScopedThreadRef | DraftId
+  readonly resolvedTheme: 'light' | 'dark'
+  readonly renderMode: NativeDiffRenderMode
+  readonly wordWrap: boolean
+  readonly loading: boolean
+  readonly loadingLabel: string
+  readonly error?: string | null
+  readonly emptyMessage: string
+  readonly truncated?: boolean
+  readonly onOpenFile?: (filePath: string) => void
+})
+{
   const {
     controller,
     collapseScopeKey,
@@ -450,9 +473,9 @@ export function NativeDiffSurface(props: {
     emptyMessage,
     truncated = false,
     onOpenFile,
-  } = props;
-  const { renderablePatch } = controller;
-  const syntaxThemeName = useSyntaxThemeName();
+  } = props
+  const { renderablePatch } = controller
+  const syntaxThemeName = useSyntaxThemeName()
 
   return (
     <div
@@ -478,7 +501,7 @@ export function NativeDiffSurface(props: {
             <p>{emptyMessage}</p>
           </div>
         )
-      ) : renderablePatch.kind === "files" ? (
+      ) : renderablePatch.kind === 'files' ? (
         <div
           className="min-h-0 flex-1"
           {...(onOpenFile
@@ -496,8 +519,9 @@ export function NativeDiffSurface(props: {
             sectionId={sectionId}
             sectionTitle={sectionTitle}
             composerDraftTarget={composerDraftTarget}
-            renderHeaderPrefix={(fileDiff, fileKey, collapsed) => {
-              const filePath = resolveFileDiffPath(fileDiff);
+            renderHeaderPrefix={(fileDiff, fileKey, collapsed) =>
+              {
+              const filePath = resolveFileDiffPath(fileDiff)
               return (
                 <Tooltip>
                   <TooltipTrigger
@@ -505,14 +529,15 @@ export function NativeDiffSurface(props: {
                       <button
                         type="button"
                         className={cn(
-                          "inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden",
+                          'inline-flex size-5 shrink-0 cursor-pointer items-center justify-center rounded-sm border-0 bg-transparent p-0 transition-colors hover:bg-foreground/10 focus-visible:outline-hidden',
                           getDiffCollapseIconClassName(fileDiff),
                         )}
                         aria-label={collapsed ? `Expand ${filePath}` : `Collapse ${filePath}`}
                         aria-expanded={!collapsed}
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          controller.toggleFile(fileKey);
+                        onClick={(event) =>
+                          {
+                          event.stopPropagation()
+                          controller.toggleFile(fileKey)
                         }}
                       />
                     }
@@ -524,15 +549,15 @@ export function NativeDiffSurface(props: {
                     )}
                   </TooltipTrigger>
                   <TooltipPopup side="top">
-                    {collapsed ? "Expand diff" : "Collapse diff"}
+                    {collapsed ? 'Expand diff' : 'Collapse diff'}
                   </TooltipPopup>
                 </Tooltip>
-              );
+              )
             }}
             options={{
-              diffStyle: renderMode === "split" ? "split" : "unified",
-              lineDiffType: "none",
-              overflow: wordWrap ? "wrap" : "scroll",
+              diffStyle: renderMode === 'split' ? 'split' : 'unified',
+              lineDiffType: 'none',
+              overflow: wordWrap ? 'wrap' : 'scroll',
               theme: syntaxThemeName,
               themeType: resolvedTheme as NativeDiffThemeType,
               unsafeCSS: NATIVE_DIFF_UNSAFE_CSS,
@@ -548,8 +573,8 @@ export function NativeDiffSurface(props: {
             <p className="text-[11px] text-muted-foreground/75">{renderablePatch.reason}</p>
             <pre
               className={cn(
-                "max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90",
-                wordWrap ? "overflow-auto whitespace-pre-wrap wrap-break-word" : "overflow-auto",
+                'max-h-[72vh] rounded-md border border-border/70 bg-background/70 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground/90',
+                wordWrap ? 'overflow-auto whitespace-pre-wrap wrap-break-word' : 'overflow-auto',
               )}
             >
               {renderablePatch.text}
@@ -558,5 +583,5 @@ export function NativeDiffSurface(props: {
         </div>
       )}
     </div>
-  );
+  )
 }

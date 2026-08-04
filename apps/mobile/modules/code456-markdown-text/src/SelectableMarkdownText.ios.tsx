@@ -1,21 +1,21 @@
-import { useMemo } from "react";
-import { View } from "react-native";
-import { parseMarkdownWithOptions } from "react-native-nitro-markdown/headless";
+import { useMemo } from 'react'
+import { View } from 'react-native'
+import { parseMarkdownWithOptions } from 'react-native-nitro-markdown/headless'
 
 import {
   nativeMarkdownChunkSpacing,
   nativeMarkdownDocumentChunks,
   nativeMarkdownDocumentRuns,
   nativeMarkdownWithPreservedSoftBreaks,
-} from "./nativeMarkdownText";
-import { NativeMarkdownBlock } from "./NativeMarkdownBlock.ios";
-import { NativeMarkdownSelectableText } from "./NativeMarkdownSelectableText.ios";
+} from './nativeMarkdownText'
+import { NativeMarkdownBlock } from './NativeMarkdownBlock.ios'
+import { NativeMarkdownSelectableText } from './NativeMarkdownSelectableText.ios'
 import type {
   SelectableMarkdownSkill,
   SelectableMarkdownTextProps,
-} from "./SelectableMarkdownText.types";
+} from './SelectableMarkdownText.types'
 
-const EMPTY_SKILLS: ReadonlyArray<SelectableMarkdownSkill> = [];
+const EMPTY_SKILLS: ReadonlyArray<SelectableMarkdownSkill> = []
 
 export type {
   MarkdownCodeHighlighter,
@@ -23,10 +23,11 @@ export type {
   NativeMarkdownTextStyle,
   SelectableMarkdownSkill,
   SelectableMarkdownTextProps,
-} from "./SelectableMarkdownText.types";
+} from './SelectableMarkdownText.types'
 
-export function hasNativeSelectableMarkdownText(): boolean {
-  return true;
+export function hasNativeSelectableMarkdownText(): boolean
+{
+  return true
 }
 
 export function SelectableMarkdownText({
@@ -38,25 +39,27 @@ export function SelectableMarkdownText({
   onLinkPress,
   marginTop = 0,
   marginBottom = 0,
-}: SelectableMarkdownTextProps) {
-  const chunks = useMemo(() => {
+}: SelectableMarkdownTextProps)
+{
+  const chunks = useMemo(() =>
+  {
     const parsedDocument = parseMarkdownWithOptions(markdown, {
       gfm: true,
       html: true,
       math: false,
-    });
+    })
     const document = preserveSoftBreaks
       ? nativeMarkdownWithPreservedSoftBreaks(parsedDocument)
-      : parsedDocument;
+      : parsedDocument
     return nativeMarkdownDocumentChunks(document).map((chunk) =>
-      chunk.kind === "selectable"
+      chunk.kind === 'selectable'
         ? {
             ...chunk,
             runs: nativeMarkdownDocumentRuns(chunk.node, skills),
           }
         : chunk,
-    );
-  }, [markdown, preserveSoftBreaks, skills]);
+    )
+  }, [markdown, preserveSoftBreaks, skills])
 
   return (
     // A percentage width here creates a cyclic intrinsic measurement inside
@@ -64,9 +67,10 @@ export function SelectableMarkdownText({
     // the native text node an unbounded second pass and the parent only clips
     // the resulting single-line width instead of reflowing it.
     <View style={{ flexShrink: 1, minWidth: 0, marginTop, marginBottom }}>
-      {chunks.map((chunk, index) => {
+      {chunks.map((chunk, index) =>
+      {
         const content =
-          chunk.kind === "rich" ? (
+          chunk.kind === 'rich' ? (
             <NativeMarkdownBlock
               node={chunk.node}
               textStyle={textStyle}
@@ -79,7 +83,7 @@ export function SelectableMarkdownText({
               textStyle={textStyle}
               onLinkPress={onLinkPress}
             />
-          );
+          )
 
         return (
           <View
@@ -88,8 +92,8 @@ export function SelectableMarkdownText({
           >
             {content}
           </View>
-        );
+        )
       })}
     </View>
-  );
+  )
 }

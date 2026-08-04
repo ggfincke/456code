@@ -28,11 +28,12 @@
  *
  * @module provider/Services/ProviderInstanceRegistryMutator
  */
-import type { ProviderInstanceConfigMap } from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+import type { ProviderInstanceConfigMap } from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
 
-export interface ProviderInstanceRegistryMutatorShape {
+export interface ProviderInstanceRegistryMutatorShape
+{
   /**
    * Bring the live registry in line with the supplied config map. See
    * module docs for the add / remove / replace semantics.
@@ -43,10 +44,11 @@ export interface ProviderInstanceRegistryMutatorShape {
    * `makeProviderInstanceRegistry`. This keeps settings-watcher loops from
    * erroring out on a single bad entry.
    */
-  readonly reconcile: (configMap: ProviderInstanceConfigMap) => Effect.Effect<void>;
+  readonly reconcile: (configMap: ProviderInstanceConfigMap) => Effect.Effect<void>
 }
 
 export class ProviderInstanceRegistryMutator extends Context.Service<
   ProviderInstanceRegistryMutator,
   ProviderInstanceRegistryMutatorShape
->()("456code/provider/Services/ProviderInstanceRegistryMutator") {}
+>()('456code/provider/Services/ProviderInstanceRegistryMutator')
+{}

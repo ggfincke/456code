@@ -13,11 +13,11 @@ import {
   resolveAddProjectPath,
   sortAddProjectProviderSources,
   type AddProjectRemoteSource,
-} from "@t3tools/client-runtime/operations/projects";
+} from '@t3tools/client-runtime/operations/projects'
 import {
   connectionStatusText,
   type EnvironmentConnectionPhase,
-} from "@t3tools/client-runtime/connection";
+} from '@t3tools/client-runtime/connection'
 import {
   appendBrowsePathSegment,
   canNavigateUp,
@@ -28,45 +28,46 @@ import {
   hasTrailingPathSeparator,
   inferProjectTitleFromPath,
   isFilesystemBrowseQuery,
-} from "@t3tools/client-runtime/state/projects";
-import { CommandId, type EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { StackActions, useNavigation } from "@react-navigation/native";
-import { SymbolView } from "../../components/AppSymbol";
-import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import * as Arr from "effect/Array";
-import * as Cause from "effect/Cause";
-import * as Order from "effect/Order";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { cn } from "../../lib/cn";
+} from '@t3tools/client-runtime/state/projects'
+import { CommandId, type EnvironmentId, ProjectId } from '@t3tools/contracts'
+import { StackActions, useNavigation } from '@react-navigation/native'
+import { SymbolView } from '../../components/AppSymbol'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import * as Arr from 'effect/Array'
+import * as Cause from 'effect/Cause'
+import * as Order from 'effect/Order'
+import { AsyncResult } from 'effect/unstable/reactivity'
+import { cn } from '../../lib/cn'
 
-import { useProjects, useServerConfigs } from "../../state/entities";
-import { filesystemEnvironment } from "../../state/filesystem";
-import { projectEnvironment } from "../../state/projects";
-import { useEnvironmentQuery } from "../../state/query";
-import { sourceControlEnvironment } from "../../state/sourceControl";
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
-import { ErrorBanner } from "../../components/ErrorBanner";
-import { SourceControlIcon } from "../../components/SourceControlIcon";
-import { useThemeColor } from "../../lib/useThemeColor";
-import { uuidv4 } from "../../lib/uuid";
-import { useAtomCommand } from "../../state/use-atom-command";
-import { useAtomQueryRunner } from "../../state/use-atom-query-runner";
+import { useProjects, useServerConfigs } from '../../state/entities'
+import { filesystemEnvironment } from '../../state/filesystem'
+import { projectEnvironment } from '../../state/projects'
+import { useEnvironmentQuery } from '../../state/query'
+import { sourceControlEnvironment } from '../../state/sourceControl'
+import { AppText as Text, AppTextInput as TextInput } from '../../components/AppText'
+import { ErrorBanner } from '../../components/ErrorBanner'
+import { SourceControlIcon } from '../../components/SourceControlIcon'
+import { useThemeColor } from '../../lib/useThemeColor'
+import { uuidv4 } from '../../lib/uuid'
+import { useAtomCommand } from '../../state/use-atom-command'
+import { useAtomQueryRunner } from '../../state/use-atom-query-runner'
 import {
   useRemoteConnectionStatus,
   useSavedRemoteConnections,
-} from "../../state/use-remote-environment-registry";
-import { resolveAddProjectEnvironment } from "./AddProjectScreen.logic";
+} from '../../state/use-remote-environment-registry'
+import { resolveAddProjectEnvironment } from './AddProjectScreen.logic'
 
-interface EnvironmentOption {
-  readonly environmentId: EnvironmentId;
-  readonly label: string;
-  readonly platform: string;
-  readonly baseDirectory: string | null;
-  readonly connectionState: EnvironmentConnectionPhase;
-  readonly connectionError: string | null;
-  readonly connectionErrorTraceId: string | null;
+interface EnvironmentOption
+{
+  readonly environmentId: EnvironmentId
+  readonly label: string
+  readonly platform: string
+  readonly baseDirectory: string | null
+  readonly connectionState: EnvironmentConnectionPhase
+  readonly connectionError: string | null
+  readonly connectionErrorTraceId: string | null
 }
 
 const environmentOptionOrder = Order.mapInput(
@@ -74,55 +75,62 @@ const environmentOptionOrder = Order.mapInput(
     label: Order.String,
   }),
   (environment: EnvironmentOption) => ({ label: environment.label }),
-);
+)
 
 const browseEntryOrder = Order.mapInput(
   Order.String,
   (entry: { readonly name: string }) => entry.name,
-);
+)
 
-function platformFromOs(os: string | null | undefined): string {
-  if (os === "windows") return "Win32";
-  if (os === "darwin") return "MacIntel";
-  if (os === "linux") return "Linux";
-  return "";
+function platformFromOs(os: string | null | undefined): string
+{
+  if (os === 'windows') return 'Win32'
+  if (os === 'darwin') return 'MacIntel'
+  if (os === 'linux') return 'Linux'
+  return ''
 }
 
-function errorMessage(error: unknown): string {
+function errorMessage(error: unknown): string
+{
   return error instanceof Error && error.message.trim().length > 0
     ? error.message
-    : "An error occurred.";
+    : 'An error occurred.'
 }
 
-function stringParam(value: string | string[] | undefined): string | null {
-  if (Array.isArray(value)) return value[0] ?? null;
-  return value ?? null;
+function stringParam(value: string | string[] | undefined): string | null
+{
+  if (Array.isArray(value)) return value[0] ?? null
+  return value ?? null
 }
 
-function sourceFromParam(value: string | string[] | undefined): AddProjectRemoteSource {
-  const source = stringParam(value);
+function sourceFromParam(value: string | string[] | undefined): AddProjectRemoteSource
+{
+  const source = stringParam(value)
   if (
-    source === "url" ||
-    source === "github" ||
-    source === "gitlab" ||
-    source === "bitbucket" ||
-    source === "azure-devops"
-  ) {
-    return source;
+    source === 'url' ||
+    source === 'github' ||
+    source === 'gitlab' ||
+    source === 'bitbucket' ||
+    source === 'azure-devops'
+  )
+  {
+    return source
   }
-  return "url";
+  return 'url'
 }
 
-function SectionTitle(props: { readonly children: string }) {
+function SectionTitle(props: { readonly children: string })
+{
   return (
     <Text className="px-1 text-2xs font-sans-bold tracking-[0.7px] uppercase text-foreground-muted">
       {props.children}
     </Text>
-  );
+  )
 }
 
-function AddProjectShell(props: { readonly children: ReactNode }) {
-  const insets = useSafeAreaInsets();
+function AddProjectShell(props: { readonly children: ReactNode })
+{
+  const insets = useSafeAreaInsets()
 
   return (
     // collapsable={false} is load-bearing: if this wrapper is flattened, the
@@ -144,41 +152,43 @@ function AddProjectShell(props: { readonly children: ReactNode }) {
         {props.children}
       </ScrollView>
     </View>
-  );
+  )
 }
 
-function ListSection(props: { readonly children: ReactNode }) {
-  return <View className="overflow-hidden rounded-[24px] bg-card">{props.children}</View>;
+function ListSection(props: { readonly children: ReactNode })
+{
+  return <View className="overflow-hidden rounded-[24px] bg-card">{props.children}</View>
 }
 
 function ListRow(props: {
-  readonly title: string;
-  readonly subtitle?: string | null;
-  readonly icon: ReactNode;
-  readonly disabled?: boolean;
-  readonly selected?: boolean;
-  readonly isFirst?: boolean;
-  readonly right?: ReactNode;
-  readonly onPress?: () => void;
-}) {
-  const chevronColor = useThemeColor("--color-chevron");
+  readonly title: string
+  readonly subtitle?: string | null
+  readonly icon: ReactNode
+  readonly disabled?: boolean
+  readonly selected?: boolean
+  readonly isFirst?: boolean
+  readonly right?: ReactNode
+  readonly onPress?: () => void
+})
+{
+  const chevronColor = useThemeColor('--color-chevron')
 
   return (
     <Pressable
       disabled={props.disabled}
       onPress={props.onPress}
       className={cn(
-        "bg-card px-3.5 py-2.5 active:opacity-70",
-        !props.isFirst && "border-t border-border-subtle",
-        props.disabled && "opacity-[0.45]",
+        'bg-card px-3.5 py-2.5 active:opacity-70',
+        !props.isFirst && 'border-t border-border-subtle',
+        props.disabled && 'opacity-[0.45]',
       )}
     >
       <View className="flex-row items-center gap-3">
         <View
           className={
             props.selected
-              ? "h-7 w-7 items-center justify-center rounded-full bg-primary"
-              : "h-7 w-7 items-center justify-center"
+              ? 'h-7 w-7 items-center justify-center rounded-full bg-primary'
+              : 'h-7 w-7 items-center justify-center'
           }
         >
           {props.icon}
@@ -191,23 +201,24 @@ function ListRow(props: {
             </Text>
           ) : null}
         </View>
-        {"right" in props ? (
+        {'right' in props ? (
           props.right
         ) : !props.disabled ? (
           <SymbolView name="chevron.right" size={13} tintColor={chevronColor} type="monochrome" />
         ) : null}
       </View>
     </Pressable>
-  );
+  )
 }
 
 function PrimaryActionButton(props: {
-  readonly label: string;
-  readonly disabled?: boolean;
-  readonly loading?: boolean;
-  readonly onPress: () => void;
-}) {
-  const primaryForeground = useThemeColor("--color-primary-foreground");
+  readonly label: string
+  readonly disabled?: boolean
+  readonly loading?: boolean
+  readonly onPress: () => void
+})
+{
+  const primaryForeground = useThemeColor('--color-primary-foreground')
 
   return (
     <Pressable
@@ -221,14 +232,15 @@ function PrimaryActionButton(props: {
         <Text className="text-base font-sans-bold text-primary-foreground">{props.label}</Text>
       )}
     </Pressable>
-  );
+  )
 }
 
 function ProjectPathInput(props: {
-  readonly value: string;
-  readonly onChangeText: (value: string) => void;
-  readonly onSubmit: () => void;
-}) {
+  readonly value: string
+  readonly onChangeText: (value: string) => void
+  readonly onSubmit: () => void
+})
+{
   return (
     <TextInput
       className="h-12 min-h-12 rounded-[24px] px-4 py-0 text-base leading-snug"
@@ -240,42 +252,46 @@ function ProjectPathInput(props: {
       returnKeyType="done"
       onSubmitEditing={props.onSubmit}
     />
-  );
+  )
 }
 
-function useEnvironmentOptions(): ReadonlyArray<EnvironmentOption> {
-  const serverConfigByEnvironmentId = useServerConfigs();
-  const { savedConnectionsById } = useSavedRemoteConnections();
-  const { connectedEnvironments } = useRemoteConnectionStatus();
+function useEnvironmentOptions(): ReadonlyArray<EnvironmentOption>
+{
+  const serverConfigByEnvironmentId = useServerConfigs()
+  const { savedConnectionsById } = useSavedRemoteConnections()
+  const { connectedEnvironments } = useRemoteConnectionStatus()
 
-  return useMemo<ReadonlyArray<EnvironmentOption>>(() => {
+  return useMemo<ReadonlyArray<EnvironmentOption>>(() =>
+  {
     const runtimeByEnvironmentId = new Map(
       connectedEnvironments.map((environment) => [environment.environmentId, environment] as const),
-    );
-    const options = Object.values(savedConnectionsById).map((connection) => {
-      const config = serverConfigByEnvironmentId.get(connection.environmentId);
-      const runtime = runtimeByEnvironmentId.get(connection.environmentId);
+    )
+    const options = Object.values(savedConnectionsById).map((connection) =>
+    {
+      const config = serverConfigByEnvironmentId.get(connection.environmentId)
+      const runtime = runtimeByEnvironmentId.get(connection.environmentId)
       return {
         environmentId: connection.environmentId,
         label: connection.environmentLabel,
         platform: platformFromOs(config?.environment.platform.os ?? null),
         baseDirectory: config?.settings.addProjectBaseDirectory ?? null,
-        connectionState: runtime?.connectionState ?? "available",
+        connectionState: runtime?.connectionState ?? 'available',
         connectionError: runtime?.connectionError ?? null,
         connectionErrorTraceId: runtime?.connectionErrorTraceId ?? null,
-      };
-    });
-    return Arr.sort(options, environmentOptionOrder);
-  }, [connectedEnvironments, savedConnectionsById, serverConfigByEnvironmentId]);
+      }
+    })
+    return Arr.sort(options, environmentOptionOrder)
+  }, [connectedEnvironments, savedConnectionsById, serverConfigByEnvironmentId])
 }
 
 function useSelectedEnvironment(): {
-  readonly environmentOptions: ReadonlyArray<EnvironmentOption>;
-  readonly selectedEnvironment: EnvironmentOption | null;
-  readonly setSelectedEnvironmentId: (environmentId: EnvironmentId) => void;
-} {
-  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
-  const environmentOptions = useEnvironmentOptions();
+  readonly environmentOptions: ReadonlyArray<EnvironmentOption>
+  readonly selectedEnvironment: EnvironmentOption | null
+  readonly setSelectedEnvironmentId: (environmentId: EnvironmentId) => void
+}
+{
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null)
+  const environmentOptions = useEnvironmentOptions()
   const selectedEnvironment =
     environmentOptions.find(
       (environment) =>
@@ -285,17 +301,18 @@ function useSelectedEnvironment(): {
     environmentOptions.find((environment) =>
       canCreateProjectInEnvironment(environment.connectionState),
     ) ??
-    null;
+    null
 
   return {
     environmentOptions,
     selectedEnvironment,
     setSelectedEnvironmentId,
-  };
+  }
 }
 
-function EmptyEnvironmentState() {
-  const navigation = useNavigation();
+function EmptyEnvironmentState()
+{
+  const navigation = useNavigation()
 
   return (
     <View className="items-center gap-3 rounded-2xl bg-card px-5 py-8">
@@ -304,41 +321,43 @@ function EmptyEnvironmentState() {
         Start or reconnect an environment before adding a project.
       </Text>
       <Pressable
-        onPress={() => navigation.dispatch(StackActions.replace("ConnectionsNew"))}
+        onPress={() => navigation.dispatch(StackActions.replace('ConnectionsNew'))}
         className="mt-1 rounded-full bg-primary px-4 py-2.5 active:opacity-70"
       >
         <Text className="text-sm font-sans-bold text-primary-foreground">Add environment</Text>
       </Pressable>
     </View>
-  );
+  )
 }
 
 function SourceControlRow(props: {
-  readonly source: AddProjectRemoteSource;
-  readonly selectedEnvironmentId: EnvironmentId;
-  readonly ready: boolean;
-  readonly hint: string;
-  readonly isFirst: boolean;
-}) {
-  const navigation = useNavigation();
-  const iconColor = useThemeColor("--color-icon");
+  readonly source: AddProjectRemoteSource
+  readonly selectedEnvironmentId: EnvironmentId
+  readonly ready: boolean
+  readonly hint: string
+  readonly isFirst: boolean
+})
+{
+  const navigation = useNavigation()
+  const iconColor = useThemeColor('--color-icon')
   const title =
-    props.source === "url" ? "Git URL" : `${addProjectRemoteSourceLabel(props.source)} repository`;
+    props.source === 'url' ? 'Git URL' : `${addProjectRemoteSourceLabel(props.source)} repository`
   const subtitle =
-    props.source === "url"
-      ? "Clone from a remote URL"
-      : `Clone ${addProjectRemoteSourceLabel(props.source)} ${props.hint}`;
+    props.source === 'url'
+      ? 'Clone from a remote URL'
+      : `Clone ${addProjectRemoteSourceLabel(props.source)} ${props.hint}`
   const icon =
-    props.source === "url" ? (
+    props.source === 'url' ? (
       <SymbolView name="link" size={17} tintColor={iconColor} type="monochrome" />
     ) : (
       <SourceControlIcon kind={props.source} size={18} color={String(iconColor)} />
-    );
+    )
 
-  if (!props.ready) {
+  if (!props.ready)
+  {
     return (
       <ListRow title={title} subtitle={props.hint} icon={icon} disabled isFirst={props.isFirst} />
-    );
+    )
   }
 
   return (
@@ -348,8 +367,8 @@ function SourceControlRow(props: {
       icon={icon}
       isFirst={props.isFirst}
       onPress={() =>
-        navigation.navigate("NewTaskSheet", {
-          screen: "AddProjectRepository",
+        navigation.navigate('NewTaskSheet', {
+          screen: 'AddProjectRepository',
           params: {
             environmentId: props.selectedEnvironmentId,
             source: props.source,
@@ -357,15 +376,16 @@ function SourceControlRow(props: {
         })
       }
     />
-  );
+  )
 }
 
-export function AddProjectSourceScreen() {
-  const navigation = useNavigation();
-  const accentColor = useThemeColor("--color-icon-muted");
-  const iconColor = useThemeColor("--color-icon");
+export function AddProjectSourceScreen()
+{
+  const navigation = useNavigation()
+  const accentColor = useThemeColor('--color-icon-muted')
+  const iconColor = useThemeColor('--color-icon')
   const { environmentOptions, selectedEnvironment, setSelectedEnvironmentId } =
-    useSelectedEnvironment();
+    useSelectedEnvironment()
   const discoveryState = useEnvironmentQuery(
     selectedEnvironment === null
       ? null
@@ -373,11 +393,11 @@ export function AddProjectSourceScreen() {
           environmentId: selectedEnvironment.environmentId,
           input: {},
         }),
-  );
+  )
   const readiness = useMemo(
     () => buildAddProjectRemoteSourceReadiness(discoveryState.data),
     [discoveryState.data],
-  );
+  )
 
   return (
     <AddProjectShell>
@@ -444,15 +464,15 @@ export function AddProjectSourceScreen() {
               }
               isFirst
               onPress={() =>
-                navigation.navigate("NewTaskSheet", {
-                  screen: "AddProjectLocal",
+                navigation.navigate('NewTaskSheet', {
+                  screen: 'AddProjectLocal',
                   params: {
                     environmentId: selectedEnvironment.environmentId,
                   },
                 })
               }
             />
-            {(["url", ...sortAddProjectProviderSources(readiness)] as AddProjectRemoteSource[]).map(
+            {(['url', ...sortAddProjectProviderSources(readiness)] as AddProjectRemoteSource[]).map(
               (candidate) => (
                 <SourceControlRow
                   key={candidate}
@@ -462,7 +482,7 @@ export function AddProjectSourceScreen() {
                   hint={
                     readiness[candidate].ready
                       ? addProjectRemoteSourcePathHint(candidate)
-                      : (readiness[candidate].hint ?? "")
+                      : (readiness[candidate].hint ?? '')
                   }
                   isFirst={false}
                 />
@@ -473,102 +493,110 @@ export function AddProjectSourceScreen() {
         </>
       ) : null}
     </AddProjectShell>
-  );
+  )
 }
 
-function useCreateProject(environment: EnvironmentOption | null) {
-  const navigation = useNavigation();
-  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
-  const projects = useProjects();
+function useCreateProject(environment: EnvironmentOption | null)
+{
+  const navigation = useNavigation()
+  const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false })
+  const projects = useProjects()
 
   return useCallback(
-    async (workspaceRoot: string) => {
-      if (!environment || !canCreateProjectInEnvironment(environment.connectionState)) return;
+    async (workspaceRoot: string) =>
+    {
+      if (!environment || !canCreateProjectInEnvironment(environment.connectionState)) return
 
       const existing = findExistingAddProject({
         projects,
         environmentId: environment.environmentId,
         path: workspaceRoot,
-      });
-      if (existing) {
-        Alert.alert("Project already exists", existing.title);
+      })
+      if (existing)
+      {
+        Alert.alert('Project already exists', existing.title)
         navigation.dispatch(
-          StackActions.replace("NewTaskDraft", {
+          StackActions.replace('NewTaskDraft', {
             environmentId: existing.environmentId,
             projectId: existing.id,
             title: existing.title,
           }),
-        );
-        return;
+        )
+        return
       }
 
-      const projectId = ProjectId.make(uuidv4());
+      const projectId = ProjectId.make(uuidv4())
       const command = buildProjectCreateCommand({
         commandId: CommandId.make(uuidv4()),
         projectId,
         workspaceRoot,
         createdAt: new Date().toISOString(),
-      });
+      })
       const result = await createProject({
         environmentId: environment.environmentId,
         input: command,
-      });
-      if (AsyncResult.isFailure(result)) {
-        return result;
+      })
+      if (AsyncResult.isFailure(result))
+      {
+        return result
       }
       navigation.dispatch(
-        StackActions.replace("NewTaskDraft", {
+        StackActions.replace('NewTaskDraft', {
           environmentId: environment.environmentId,
           projectId,
           title: inferProjectTitleFromPath(workspaceRoot),
         }),
-      );
-      return result;
+      )
+      return result
     },
     [createProject, environment, projects, navigation],
-  );
+  )
 }
 
 function useEnvironmentFromParam(
   environmentIdParam: string | string[] | undefined,
-): EnvironmentOption | null {
-  const environmentOptions = useEnvironmentOptions();
-  const environmentId = stringParam(environmentIdParam) as EnvironmentId | null;
-  return resolveAddProjectEnvironment(environmentOptions, environmentId);
+): EnvironmentOption | null
+{
+  const environmentOptions = useEnvironmentOptions()
+  const environmentId = stringParam(environmentIdParam) as EnvironmentId | null
+  return resolveAddProjectEnvironment(environmentOptions, environmentId)
 }
 
 export function AddProjectRepositoryScreen(props: {
-  readonly environmentId?: string | string[];
-  readonly source?: string | string[];
-}) {
+  readonly environmentId?: string | string[]
+  readonly source?: string | string[]
+})
+{
   const lookupRepositoryQuery = useAtomQueryRunner(sourceControlEnvironment.repository, {
     reportFailure: false,
-  });
-  const navigation = useNavigation();
-  const environment = useEnvironmentFromParam(props.environmentId);
-  const source = sourceFromParam(props.source);
-  const [repositoryInput, setRepositoryInput] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  })
+  const navigation = useNavigation()
+  const environment = useEnvironmentFromParam(props.environmentId)
+  const source = sourceFromParam(props.source)
+  const [repositoryInput, setRepositoryInput] = useState('')
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  const lookupRepository = useCallback(async () => {
-    if (!environment || repositoryInput.trim().length === 0 || isSubmitting) return;
-    setError(null);
-    setIsSubmitting(true);
-    const provider = addProjectRemoteSourceProvider(source);
-    if (!provider) {
-      const remoteUrl = repositoryInput.trim();
-      navigation.navigate("NewTaskSheet", {
-        screen: "AddProjectDestination",
+  const lookupRepository = useCallback(async () =>
+  {
+    if (!environment || repositoryInput.trim().length === 0 || isSubmitting) return
+    setError(null)
+    setIsSubmitting(true)
+    const provider = addProjectRemoteSourceProvider(source)
+    if (!provider)
+    {
+      const remoteUrl = repositoryInput.trim()
+      navigation.navigate('NewTaskSheet', {
+        screen: 'AddProjectDestination',
         params: {
           environmentId: environment.environmentId,
           source,
           remoteUrl,
           repositoryTitle: remoteUrl,
         },
-      });
-      setIsSubmitting(false);
-      return;
+      })
+      setIsSubmitting(false)
+      return
     }
 
     const result = await lookupRepositoryQuery({
@@ -577,23 +605,26 @@ export function AddProjectRepositoryScreen(props: {
         provider,
         repository: repositoryInput.trim(),
       },
-    });
-    if (AsyncResult.isFailure(result)) {
-      setError(errorMessage(Cause.squash(result.cause)));
-    } else {
-      const repository = result.value;
-      navigation.navigate("NewTaskSheet", {
-        screen: "AddProjectDestination",
+    })
+    if (AsyncResult.isFailure(result))
+    {
+      setError(errorMessage(Cause.squash(result.cause)))
+    }
+    else
+    {
+      const repository = result.value
+      navigation.navigate('NewTaskSheet', {
+        screen: 'AddProjectDestination',
         params: {
           environmentId: environment.environmentId,
           source,
           remoteUrl: repository.sshUrl,
           repositoryTitle: repository.nameWithOwner,
         },
-      });
+      })
     }
-    setIsSubmitting(false);
-  }, [environment, isSubmitting, lookupRepositoryQuery, repositoryInput, navigation, source]);
+    setIsSubmitting(false)
+  }, [environment, isSubmitting, lookupRepositoryQuery, repositoryInput, navigation, source])
 
   return (
     <AddProjectShell>
@@ -607,15 +638,15 @@ export function AddProjectRepositoryScreen(props: {
             autoCapitalize="none"
             autoCorrect={false}
             placeholder={
-              source === "url"
-                ? "https://github.com/org/repo.git"
+              source === 'url'
+                ? 'https://github.com/org/repo.git'
                 : addProjectRemoteSourcePathHint(source)
             }
             returnKeyType="next"
             onSubmitEditing={() => void lookupRepository()}
           />
           <PrimaryActionButton
-            label={source === "url" ? "Continue" : "Lookup repository"}
+            label={source === 'url' ? 'Continue' : 'Lookup repository'}
             disabled={isSubmitting || repositoryInput.trim().length === 0}
             onPress={() => void lookupRepository()}
             loading={isSubmitting}
@@ -625,30 +656,31 @@ export function AddProjectRepositoryScreen(props: {
         <EmptyEnvironmentState />
       )}
     </AddProjectShell>
-  );
+  )
 }
 
 function FolderBrowser(props: {
-  readonly environment: EnvironmentOption;
-  readonly pathInput: string;
-  readonly setPathInput: (path: string) => void;
-}) {
-  const accentColor = useThemeColor("--color-icon-muted");
+  readonly environment: EnvironmentOption
+  readonly pathInput: string
+  readonly setPathInput: (path: string) => void
+})
+{
+  const accentColor = useThemeColor('--color-icon-muted')
   const browseDirectoryPath = useMemo(
     () =>
       isFilesystemBrowseQuery(props.pathInput, props.environment.platform)
         ? getBrowseDirectoryPath(props.pathInput)
-        : "",
+        : '',
     [props.environment.platform, props.pathInput],
-  );
+  )
   const browseFilterQuery =
     browseDirectoryPath.length > 0 && !hasTrailingPathSeparator(props.pathInput)
       ? getBrowseLeafPathSegment(props.pathInput).toLowerCase()
-      : "";
+      : ''
   const browseInput = useMemo(
     () => (browseDirectoryPath.length > 0 ? { partialPath: browseDirectoryPath } : null),
     [browseDirectoryPath],
-  );
+  )
   const browseState = useEnvironmentQuery(
     browseInput === null
       ? null
@@ -656,21 +688,21 @@ function FolderBrowser(props: {
           environmentId: props.environment.environmentId,
           input: browseInput,
         }),
-  );
+  )
   const visibleBrowseEntries = useMemo(
     () =>
       Arr.sort(
         Arr.filter(
           browseState.data?.entries ?? [],
           (entry) =>
-            !entry.name.startsWith(".") && entry.name.toLowerCase().startsWith(browseFilterQuery),
+            !entry.name.startsWith('.') && entry.name.toLowerCase().startsWith(browseFilterQuery),
         ),
         browseEntryOrder,
       ),
     [browseFilterQuery, browseState.data?.entries],
-  );
-  const parentBrowsePath = getBrowseParentPath(browseDirectoryPath);
-  const canBrowseUpPath = canNavigateUp(browseDirectoryPath);
+  )
+  const parentBrowsePath = getBrowseParentPath(browseDirectoryPath)
+  const canBrowseUpPath = canNavigateUp(browseDirectoryPath)
 
   return (
     <>
@@ -695,8 +727,9 @@ function FolderBrowser(props: {
             }
             isFirst
             right={null}
-            onPress={() => {
-              if (parentBrowsePath) props.setPathInput(parentBrowsePath);
+            onPress={() =>
+              {
+              if (parentBrowsePath) props.setPathInput(parentBrowsePath)
             }}
           />
         ) : null}
@@ -718,43 +751,48 @@ function FolderBrowser(props: {
         ))}
       </ListSection>
     </>
-  );
+  )
 }
 
-export function AddProjectLocalFolderScreen(props: { readonly environmentId?: string | string[] }) {
-  const environment = useEnvironmentFromParam(props.environmentId);
-  const createProject = useCreateProject(environment);
+export function AddProjectLocalFolderScreen(props: { readonly environmentId?: string | string[] })
+{
+  const environment = useEnvironmentFromParam(props.environmentId)
+  const createProject = useCreateProject(environment)
   const [pathInput, setPathInput] = useState(() =>
     getAddProjectInitialQuery(environment?.baseDirectory),
-  );
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  )
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!environment) return;
-    setPathInput(getAddProjectInitialQuery(environment.baseDirectory));
-  }, [environment]);
+  useEffect(() =>
+  {
+    if (!environment) return
+    setPathInput(getAddProjectInitialQuery(environment.baseDirectory))
+  }, [environment])
 
-  const submitPath = useCallback(async () => {
-    if (!environment || isSubmitting) return;
-    setError(null);
+  const submitPath = useCallback(async () =>
+  {
+    if (!environment || isSubmitting) return
+    setError(null)
     const resolved = resolveAddProjectPath({
       rawPath: pathInput,
       currentProjectCwd: null,
       platform: environment.platform,
-    });
-    if (!resolved.ok) {
-      setError(resolved.error);
-      return;
+    })
+    if (!resolved.ok)
+    {
+      setError(resolved.error)
+      return
     }
 
-    setIsSubmitting(true);
-    const result = await createProject(resolved.path);
-    if (result && AsyncResult.isFailure(result)) {
-      setError(errorMessage(Cause.squash(result.cause)));
+    setIsSubmitting(true)
+    const result = await createProject(resolved.path)
+    if (result && AsyncResult.isFailure(result))
+    {
+      setError(errorMessage(Cause.squash(result.cause)))
     }
-    setIsSubmitting(false);
-  }, [createProject, environment, isSubmitting, pathInput]);
+    setIsSubmitting(false)
+  }, [createProject, environment, isSubmitting, pathInput])
 
   return (
     <AddProjectShell>
@@ -782,63 +820,71 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
         <EmptyEnvironmentState />
       )}
     </AddProjectShell>
-  );
+  )
 }
 
 export function AddProjectDestinationScreen(props: {
-  readonly environmentId?: string | string[];
-  readonly remoteUrl?: string | string[];
-  readonly repositoryTitle?: string | string[];
-}) {
+  readonly environmentId?: string | string[]
+  readonly remoteUrl?: string | string[]
+  readonly repositoryTitle?: string | string[]
+})
+{
   const cloneRepository = useAtomCommand(sourceControlEnvironment.cloneRepository, {
     reportFailure: false,
-  });
-  const environment = useEnvironmentFromParam(props.environmentId);
-  const createProject = useCreateProject(environment);
-  const remoteUrl = stringParam(props.remoteUrl);
-  const repositoryTitle = stringParam(props.repositoryTitle);
+  })
+  const environment = useEnvironmentFromParam(props.environmentId)
+  const createProject = useCreateProject(environment)
+  const remoteUrl = stringParam(props.remoteUrl)
+  const repositoryTitle = stringParam(props.repositoryTitle)
   const [pathInput, setPathInput] = useState(() =>
     getAddProjectInitialQuery(environment?.baseDirectory),
-  );
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  )
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (!environment) return;
-    setPathInput(getAddProjectInitialQuery(environment.baseDirectory));
-  }, [environment]);
+  useEffect(() =>
+  {
+    if (!environment) return
+    setPathInput(getAddProjectInitialQuery(environment.baseDirectory))
+  }, [environment])
 
-  const submitPath = useCallback(async () => {
-    if (!environment || !remoteUrl || isSubmitting) return;
-    setError(null);
+  const submitPath = useCallback(async () =>
+  {
+    if (!environment || !remoteUrl || isSubmitting) return
+    setError(null)
     const resolved = resolveAddProjectPath({
       rawPath: pathInput,
       currentProjectCwd: null,
       platform: environment.platform,
-    });
-    if (!resolved.ok) {
-      setError(resolved.error);
-      return;
+    })
+    if (!resolved.ok)
+    {
+      setError(resolved.error)
+      return
     }
 
-    setIsSubmitting(true);
+    setIsSubmitting(true)
     const cloneResult = await cloneRepository({
       environmentId: environment.environmentId,
       input: {
         remoteUrl,
         destinationPath: resolved.path,
       },
-    });
-    if (AsyncResult.isFailure(cloneResult)) {
-      setError(errorMessage(Cause.squash(cloneResult.cause)));
-    } else {
-      const createResult = await createProject(cloneResult.value.cwd);
-      if (createResult && AsyncResult.isFailure(createResult)) {
-        setError(errorMessage(Cause.squash(createResult.cause)));
+    })
+    if (AsyncResult.isFailure(cloneResult))
+    {
+      setError(errorMessage(Cause.squash(cloneResult.cause)))
+    }
+    else
+    {
+      const createResult = await createProject(cloneResult.value.cwd)
+      if (createResult && AsyncResult.isFailure(createResult))
+      {
+        setError(errorMessage(Cause.squash(createResult.cause)))
       }
     }
-    setIsSubmitting(false);
-  }, [cloneRepository, createProject, environment, isSubmitting, pathInput, remoteUrl]);
+    setIsSubmitting(false)
+  }, [cloneRepository, createProject, environment, isSubmitting, pathInput, remoteUrl])
 
   return (
     <AddProjectShell>
@@ -874,5 +920,5 @@ export function AddProjectDestinationScreen(props: {
         <EmptyEnvironmentState />
       )}
     </AddProjectShell>
-  );
+  )
 }

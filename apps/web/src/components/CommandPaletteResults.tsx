@@ -1,11 +1,11 @@
-import { type ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { ChevronRightIcon } from "lucide-react";
-import { shortcutLabelForCommand } from "../keybindings";
+import { type ResolvedKeybindingsConfig } from '@t3tools/contracts'
+import { ChevronRightIcon } from 'lucide-react'
+import { shortcutLabelForCommand } from '../keybindings'
 import {
   type CommandPaletteActionItem,
   type CommandPaletteGroup,
   type CommandPaletteSubmenuItem,
-} from "./CommandPalette.logic";
+} from './CommandPalette.logic'
 import {
   CommandCollection,
   CommandGroup,
@@ -13,28 +13,31 @@ import {
   CommandItem,
   CommandList,
   CommandShortcut,
-} from "./ui/command";
-import { cn } from "~/lib/utils";
+} from './ui/command'
+import { cn } from '~/lib/utils'
 
-interface CommandPaletteResultsProps {
-  emptyStateMessage?: string;
-  groups: ReadonlyArray<CommandPaletteGroup>;
-  highlightedItemValue?: string | null;
-  isActionsOnly: boolean;
-  keybindings: ResolvedKeybindingsConfig;
-  onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
+interface CommandPaletteResultsProps
+{
+  emptyStateMessage?: string
+  groups: ReadonlyArray<CommandPaletteGroup>
+  highlightedItemValue?: string | null
+  isActionsOnly: boolean
+  keybindings: ResolvedKeybindingsConfig
+  onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void
 }
 
-export function CommandPaletteResults(props: CommandPaletteResultsProps) {
-  if (props.groups.length === 0) {
+export function CommandPaletteResults(props: CommandPaletteResultsProps)
+{
+  if (props.groups.length === 0)
+  {
     return (
       <div className="py-10 text-center text-sm text-muted-foreground">
         {props.emptyStateMessage ??
           (props.isActionsOnly
-            ? "No matching actions."
-            : "No matching commands, projects, or threads.")}
+            ? 'No matching actions.'
+            : 'No matching commands, projects, or threads.')}
       </div>
-    );
+    )
   }
 
   return (
@@ -60,12 +63,13 @@ export function CommandPaletteResults(props: CommandPaletteResultsProps) {
         </CommandGroup>
       ))}
     </CommandList>
-  );
+  )
 }
 
 function DisabledCommandPaletteResultRow(props: {
-  item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
-}) {
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem
+})
+{
   return (
     <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
       {props.item.icon}
@@ -87,31 +91,34 @@ function DisabledCommandPaletteResultRow(props: {
       )}
       {props.item.titleTrailingContent}
     </div>
-  );
+  )
 }
 
 function CommandPaletteResultRow(props: {
-  item: CommandPaletteActionItem | CommandPaletteSubmenuItem;
-  isActive: boolean;
-  keybindings: ResolvedKeybindingsConfig;
-  onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void;
-}) {
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem
+  isActive: boolean
+  keybindings: ResolvedKeybindingsConfig
+  onExecuteItem: (item: CommandPaletteActionItem | CommandPaletteSubmenuItem) => void
+})
+{
   const shortcutLabel = props.item.shortcutCommand
     ? shortcutLabelForCommand(props.keybindings, props.item.shortcutCommand)
-    : null;
+    : null
 
   return (
     <CommandItem
       value={props.item.value}
       className={cn(
-        "cursor-pointer gap-2 hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit data-selected:bg-transparent data-selected:text-inherit [&[data-highlighted][data-selected]]:bg-transparent [&[data-highlighted][data-selected]]:text-inherit",
-        props.isActive && "bg-accent! text-accent-foreground!",
+        'cursor-pointer gap-2 hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit data-selected:bg-transparent data-selected:text-inherit [&[data-highlighted][data-selected]]:bg-transparent [&[data-highlighted][data-selected]]:text-inherit',
+        props.isActive && 'bg-accent! text-accent-foreground!',
       )}
-      onMouseDown={(event) => {
-        event.preventDefault();
+      onMouseDown={(event) =>
+      {
+        event.preventDefault()
       }}
-      onClick={() => {
-        props.onExecuteItem(props.item);
+      onClick={() =>
+      {
+        props.onExecuteItem(props.item)
       }}
     >
       {props.item.icon}
@@ -138,9 +145,9 @@ function CommandPaletteResultRow(props: {
         </span>
       ) : null}
       {shortcutLabel ? <CommandShortcut>{shortcutLabel}</CommandShortcut> : null}
-      {props.item.kind === "submenu" ? (
+      {props.item.kind === 'submenu' ? (
         <ChevronRightIcon className="ml-auto size-4 shrink-0 text-muted-foreground/50" />
       ) : null}
     </CommandItem>
-  );
+  )
 }

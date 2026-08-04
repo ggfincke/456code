@@ -6,22 +6,23 @@
  *
  * @module OrchestrationProjectionPipeline
  */
-import type { OrchestrationEvent } from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+import type { OrchestrationEvent } from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
 
-import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import type { ProjectionRepositoryError } from '../../persistence/Errors.ts'
 
 /**
  * OrchestrationProjectionPipelineShape - Service API for projection execution.
  */
-export interface OrchestrationProjectionPipelineShape {
+export interface OrchestrationProjectionPipelineShape
+{
   /**
    * Bootstrap projections by replaying persisted events.
    *
    * Resumes each projector from its stored projection-state cursor.
    */
-  readonly bootstrap: Effect.Effect<void, ProjectionRepositoryError>;
+  readonly bootstrap: Effect.Effect<void, ProjectionRepositoryError>
 
   /**
    * Project a single orchestration event into projection repositories.
@@ -30,7 +31,7 @@ export interface OrchestrationProjectionPipelineShape {
    */
   readonly projectEvent: (
     event: OrchestrationEvent,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  ) => Effect.Effect<void, ProjectionRepositoryError>
 }
 
 /**
@@ -39,4 +40,5 @@ export interface OrchestrationProjectionPipelineShape {
 export class OrchestrationProjectionPipeline extends Context.Service<
   OrchestrationProjectionPipeline,
   OrchestrationProjectionPipelineShape
->()("456code/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline") {}
+>()('456code/orchestration/Services/ProjectionPipeline/OrchestrationProjectionPipeline')
+{}

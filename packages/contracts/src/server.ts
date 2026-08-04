@@ -1,9 +1,9 @@
 // packages/contracts/src/server.ts
 // defines server configuration, provider snapshots, and server lifecycle contracts
-import * as Effect from "effect/Effect";
-import * as Schema from "effect/Schema";
-import { ExecutionEnvironmentDescriptor, ServerSelfUpdateMethod } from "./environment.ts";
-import { ServerAuthDescriptor } from "./auth.ts";
+import * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
+import { ExecutionEnvironmentDescriptor, ServerSelfUpdateMethod } from './environment.ts'
+import { ServerAuthDescriptor } from './auth.ts'
 import {
   IsoDateTime,
   NonNegativeInt,
@@ -11,54 +11,54 @@ import {
   ProjectId,
   ThreadId,
   TrimmedNonEmptyString,
-} from "./baseSchemas.ts";
+} from './baseSchemas.ts'
 import {
   KeybindingCommand,
   KeybindingValue,
   KeybindingWhen,
   ResolvedKeybindingsConfig,
-} from "./keybindings.ts";
-import { EditorId } from "./editor.ts";
-import { ModelCapabilities } from "./model.ts";
-import { ProviderDriverKind, ProviderInstanceId } from "./providerInstance.ts";
-import { ServerSettings } from "./settings.ts";
+} from './keybindings.ts'
+import { EditorId } from './editor.ts'
+import { ModelCapabilities } from './model.ts'
+import { ProviderDriverKind, ProviderInstanceId } from './providerInstance.ts'
+import { ServerSettings } from './settings.ts'
 
 const KeybindingsMalformedConfigIssue = Schema.Struct({
-  kind: Schema.Literal("keybindings.malformed-config"),
+  kind: Schema.Literal('keybindings.malformed-config'),
   message: TrimmedNonEmptyString,
-});
+})
 
 const KeybindingsInvalidEntryIssue = Schema.Struct({
-  kind: Schema.Literal("keybindings.invalid-entry"),
+  kind: Schema.Literal('keybindings.invalid-entry'),
   message: TrimmedNonEmptyString,
   index: Schema.Number,
-});
+})
 
 export const ServerConfigIssue = Schema.Union([
   KeybindingsMalformedConfigIssue,
   KeybindingsInvalidEntryIssue,
-]);
-export type ServerConfigIssue = typeof ServerConfigIssue.Type;
+])
+export type ServerConfigIssue = typeof ServerConfigIssue.Type
 
-const ServerConfigIssues = Schema.Array(ServerConfigIssue);
+const ServerConfigIssues = Schema.Array(ServerConfigIssue)
 
-export const ServerProviderState = Schema.Literals(["ready", "warning", "error", "disabled"]);
-export type ServerProviderState = typeof ServerProviderState.Type;
+export const ServerProviderState = Schema.Literals(['ready', 'warning', 'error', 'disabled'])
+export type ServerProviderState = typeof ServerProviderState.Type
 
 export const ServerProviderAuthStatus = Schema.Literals([
-  "authenticated",
-  "unauthenticated",
-  "unknown",
-]);
-export type ServerProviderAuthStatus = typeof ServerProviderAuthStatus.Type;
+  'authenticated',
+  'unauthenticated',
+  'unknown',
+])
+export type ServerProviderAuthStatus = typeof ServerProviderAuthStatus.Type
 
 export const ServerProviderAuth = Schema.Struct({
   status: ServerProviderAuthStatus,
   type: Schema.optional(TrimmedNonEmptyString),
   label: Schema.optional(TrimmedNonEmptyString),
   email: Schema.optional(TrimmedNonEmptyString),
-});
-export type ServerProviderAuth = typeof ServerProviderAuth.Type;
+})
+export type ServerProviderAuth = typeof ServerProviderAuth.Type
 
 export const ServerProviderModel = Schema.Struct({
   slug: TrimmedNonEmptyString,
@@ -68,20 +68,20 @@ export const ServerProviderModel = Schema.Struct({
   isCustom: Schema.Boolean,
   isDefault: Schema.optional(Schema.Boolean),
   capabilities: Schema.NullOr(ModelCapabilities),
-});
-export type ServerProviderModel = typeof ServerProviderModel.Type;
+})
+export type ServerProviderModel = typeof ServerProviderModel.Type
 
 export const ServerProviderSlashCommandInput = Schema.Struct({
   hint: TrimmedNonEmptyString,
-});
-export type ServerProviderSlashCommandInput = typeof ServerProviderSlashCommandInput.Type;
+})
+export type ServerProviderSlashCommandInput = typeof ServerProviderSlashCommandInput.Type
 
 export const ServerProviderSlashCommand = Schema.Struct({
   name: TrimmedNonEmptyString,
   description: Schema.optional(TrimmedNonEmptyString),
   input: Schema.optional(ServerProviderSlashCommandInput),
-});
-export type ServerProviderSlashCommand = typeof ServerProviderSlashCommand.Type;
+})
+export type ServerProviderSlashCommand = typeof ServerProviderSlashCommand.Type
 
 export const ServerProviderSkill = Schema.Struct({
   name: TrimmedNonEmptyString,
@@ -91,8 +91,8 @@ export const ServerProviderSkill = Schema.Struct({
   enabled: Schema.Boolean,
   displayName: Schema.optional(TrimmedNonEmptyString),
   shortDescription: Schema.optional(TrimmedNonEmptyString),
-});
-export type ServerProviderSkill = typeof ServerProviderSkill.Type;
+})
+export type ServerProviderSkill = typeof ServerProviderSkill.Type
 
 /**
  * Availability of a configured provider instance from the runtime's POV.
@@ -111,20 +111,20 @@ export type ServerProviderSkill = typeof ServerProviderSkill.Type;
  * `installed: false` and `enabled: false`; the runtime refuses turn
  * starts against them with a structured error.
  */
-export const ServerProviderAvailability = Schema.Literals(["available", "unavailable"]);
-export type ServerProviderAvailability = typeof ServerProviderAvailability.Type;
+export const ServerProviderAvailability = Schema.Literals(['available', 'unavailable'])
+export type ServerProviderAvailability = typeof ServerProviderAvailability.Type
 
 export const ServerProviderContinuation = Schema.Struct({
   groupKey: TrimmedNonEmptyString,
-});
-export type ServerProviderContinuation = typeof ServerProviderContinuation.Type;
+})
+export type ServerProviderContinuation = typeof ServerProviderContinuation.Type
 
 export const ServerProviderVersionAdvisoryStatus = Schema.Literals([
-  "unknown",
-  "current",
-  "behind_latest",
-]);
-export type ServerProviderVersionAdvisoryStatus = typeof ServerProviderVersionAdvisoryStatus.Type;
+  'unknown',
+  'current',
+  'behind_latest',
+])
+export type ServerProviderVersionAdvisoryStatus = typeof ServerProviderVersionAdvisoryStatus.Type
 
 export const ServerProviderVersionAdvisory = Schema.Struct({
   status: ServerProviderVersionAdvisoryStatus,
@@ -134,18 +134,18 @@ export const ServerProviderVersionAdvisory = Schema.Struct({
   canUpdate: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   checkedAt: Schema.NullOr(IsoDateTime),
   message: Schema.NullOr(TrimmedNonEmptyString),
-});
-export type ServerProviderVersionAdvisory = typeof ServerProviderVersionAdvisory.Type;
+})
+export type ServerProviderVersionAdvisory = typeof ServerProviderVersionAdvisory.Type
 
 export const ServerProviderUpdateStatus = Schema.Literals([
-  "idle",
-  "queued",
-  "running",
-  "succeeded",
-  "failed",
-  "unchanged",
-]);
-export type ServerProviderUpdateStatus = typeof ServerProviderUpdateStatus.Type;
+  'idle',
+  'queued',
+  'running',
+  'succeeded',
+  'failed',
+  'unchanged',
+])
+export type ServerProviderUpdateStatus = typeof ServerProviderUpdateStatus.Type
 
 export const ServerProviderUpdateState = Schema.Struct({
   status: ServerProviderUpdateStatus,
@@ -153,8 +153,8 @@ export const ServerProviderUpdateState = Schema.Struct({
   finishedAt: Schema.NullOr(IsoDateTime),
   message: Schema.NullOr(TrimmedNonEmptyString),
   output: Schema.NullOr(Schema.String.check(Schema.isMaxLength(10_000))),
-});
-export type ServerProviderUpdateState = typeof ServerProviderUpdateState.Type;
+})
+export type ServerProviderUpdateState = typeof ServerProviderUpdateState.Type
 
 export const ServerProviderAccountUsageWindow = Schema.Struct({
   id: TrimmedNonEmptyString,
@@ -162,39 +162,39 @@ export const ServerProviderAccountUsageWindow = Schema.Struct({
   scopeLabel: Schema.optional(TrimmedNonEmptyString),
   usedPercent: Schema.Number.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
   resetsAt: Schema.NullOr(IsoDateTime),
-});
-export type ServerProviderAccountUsageWindow = typeof ServerProviderAccountUsageWindow.Type;
+})
+export type ServerProviderAccountUsageWindow = typeof ServerProviderAccountUsageWindow.Type
 
 const ServerProviderAvailableAccountUsage = Schema.Struct({
-  status: Schema.Literal("available"),
+  status: Schema.Literal('available'),
   observedAt: IsoDateTime,
   windows: Schema.Array(ServerProviderAccountUsageWindow).check(Schema.isMinLength(1)),
-});
+})
 
 const ServerProviderExternalAccountUsage = Schema.Struct({
-  status: Schema.Literal("external"),
+  status: Schema.Literal('external'),
   dashboardUrl: TrimmedNonEmptyString,
-});
+})
 
 const ServerProviderNotApplicableAccountUsage = Schema.Struct({
-  status: Schema.Literal("notApplicable"),
+  status: Schema.Literal('notApplicable'),
   observedAt: IsoDateTime,
   message: TrimmedNonEmptyString,
-});
+})
 
 const ServerProviderUnavailableAccountUsage = Schema.Struct({
-  status: Schema.Literal("unavailable"),
+  status: Schema.Literal('unavailable'),
   observedAt: Schema.optional(IsoDateTime),
   message: TrimmedNonEmptyString,
-});
+})
 
 export const ServerProviderAccountUsage = Schema.Union([
   ServerProviderAvailableAccountUsage,
   ServerProviderExternalAccountUsage,
   ServerProviderNotApplicableAccountUsage,
   ServerProviderUnavailableAccountUsage,
-]);
-export type ServerProviderAccountUsage = typeof ServerProviderAccountUsage.Type;
+])
+export type ServerProviderAccountUsage = typeof ServerProviderAccountUsage.Type
 
 export const ServerProvider = Schema.Struct({
   // Routing key for the configured instance this snapshot represents. This
@@ -233,11 +233,11 @@ export const ServerProvider = Schema.Struct({
   accountUsage: Schema.optionalKey(ServerProviderAccountUsage),
   versionAdvisory: Schema.optionalKey(ServerProviderVersionAdvisory),
   updateState: Schema.optionalKey(ServerProviderUpdateState),
-});
-export type ServerProvider = typeof ServerProvider.Type;
+})
+export type ServerProvider = typeof ServerProvider.Type
 
-export const ServerProviders = Schema.Array(ServerProvider);
-export type ServerProviders = typeof ServerProviders.Type;
+export const ServerProviders = Schema.Array(ServerProvider)
+export type ServerProviders = typeof ServerProviders.Type
 
 /**
  * Treat the optional `availability` as "available" when absent. This is
@@ -246,7 +246,7 @@ export type ServerProviders = typeof ServerProviders.Type;
  * `?? "available"` defaults through their code paths.
  */
 export const isProviderAvailable = (snapshot: ServerProvider): boolean =>
-  snapshot.availability !== "unavailable";
+  snapshot.availability !== 'unavailable'
 
 export const ServerObservability = Schema.Struct({
   logsDirectoryPath: TrimmedNonEmptyString,
@@ -255,14 +255,14 @@ export const ServerObservability = Schema.Struct({
   otlpTracesEnabled: Schema.Boolean,
   otlpMetricsUrl: Schema.optional(TrimmedNonEmptyString),
   otlpMetricsEnabled: Schema.Boolean,
-});
-export type ServerObservability = typeof ServerObservability.Type;
+})
+export type ServerObservability = typeof ServerObservability.Type
 
 export const ServerTraceDiagnosticsErrorKind = Schema.Literals([
-  "trace-file-not-found",
-  "trace-file-read-failed",
-]);
-export type ServerTraceDiagnosticsErrorKind = typeof ServerTraceDiagnosticsErrorKind.Type;
+  'trace-file-not-found',
+  'trace-file-read-failed',
+])
+export type ServerTraceDiagnosticsErrorKind = typeof ServerTraceDiagnosticsErrorKind.Type
 
 export const ServerTraceDiagnosticsSpanSummary = Schema.Struct({
   name: TrimmedNonEmptyString,
@@ -271,8 +271,8 @@ export const ServerTraceDiagnosticsSpanSummary = Schema.Struct({
   totalDurationMs: Schema.Number,
   averageDurationMs: Schema.Number,
   maxDurationMs: Schema.Number,
-});
-export type ServerTraceDiagnosticsSpanSummary = typeof ServerTraceDiagnosticsSpanSummary.Type;
+})
+export type ServerTraceDiagnosticsSpanSummary = typeof ServerTraceDiagnosticsSpanSummary.Type
 
 export const ServerTraceDiagnosticsFailureSummary = Schema.Struct({
   name: TrimmedNonEmptyString,
@@ -281,8 +281,8 @@ export const ServerTraceDiagnosticsFailureSummary = Schema.Struct({
   lastSeenAt: Schema.DateTimeUtc,
   traceId: TrimmedNonEmptyString,
   spanId: TrimmedNonEmptyString,
-});
-export type ServerTraceDiagnosticsFailureSummary = typeof ServerTraceDiagnosticsFailureSummary.Type;
+})
+export type ServerTraceDiagnosticsFailureSummary = typeof ServerTraceDiagnosticsFailureSummary.Type
 
 export const ServerTraceDiagnosticsRecentFailure = Schema.Struct({
   name: TrimmedNonEmptyString,
@@ -291,8 +291,8 @@ export const ServerTraceDiagnosticsRecentFailure = Schema.Struct({
   endedAt: Schema.DateTimeUtc,
   traceId: TrimmedNonEmptyString,
   spanId: TrimmedNonEmptyString,
-});
-export type ServerTraceDiagnosticsRecentFailure = typeof ServerTraceDiagnosticsRecentFailure.Type;
+})
+export type ServerTraceDiagnosticsRecentFailure = typeof ServerTraceDiagnosticsRecentFailure.Type
 
 export const ServerTraceDiagnosticsSpanOccurrence = Schema.Struct({
   name: TrimmedNonEmptyString,
@@ -300,8 +300,8 @@ export const ServerTraceDiagnosticsSpanOccurrence = Schema.Struct({
   endedAt: Schema.DateTimeUtc,
   traceId: TrimmedNonEmptyString,
   spanId: TrimmedNonEmptyString,
-});
-export type ServerTraceDiagnosticsSpanOccurrence = typeof ServerTraceDiagnosticsSpanOccurrence.Type;
+})
+export type ServerTraceDiagnosticsSpanOccurrence = typeof ServerTraceDiagnosticsSpanOccurrence.Type
 
 export const ServerTraceDiagnosticsLogEvent = Schema.Struct({
   spanName: TrimmedNonEmptyString,
@@ -310,8 +310,8 @@ export const ServerTraceDiagnosticsLogEvent = Schema.Struct({
   seenAt: Schema.DateTimeUtc,
   traceId: TrimmedNonEmptyString,
   spanId: TrimmedNonEmptyString,
-});
-export type ServerTraceDiagnosticsLogEvent = typeof ServerTraceDiagnosticsLogEvent.Type;
+})
+export type ServerTraceDiagnosticsLogEvent = typeof ServerTraceDiagnosticsLogEvent.Type
 
 export const ServerTraceDiagnosticsResult = Schema.Struct({
   traceFilePath: TrimmedNonEmptyString,
@@ -338,11 +338,11 @@ export const ServerTraceDiagnosticsResult = Schema.Struct({
       message: TrimmedNonEmptyString,
     }),
   ),
-});
-export type ServerTraceDiagnosticsResult = typeof ServerTraceDiagnosticsResult.Type;
+})
+export type ServerTraceDiagnosticsResult = typeof ServerTraceDiagnosticsResult.Type
 
-export const ServerProcessSignal = Schema.Literals(["SIGINT", "SIGKILL"]);
-export type ServerProcessSignal = typeof ServerProcessSignal.Type;
+export const ServerProcessSignal = Schema.Literals(['SIGINT', 'SIGKILL'])
+export type ServerProcessSignal = typeof ServerProcessSignal.Type
 
 export const ServerProcessDiagnosticsEntry = Schema.Struct({
   pid: PositiveInt,
@@ -355,8 +355,8 @@ export const ServerProcessDiagnosticsEntry = Schema.Struct({
   command: TrimmedNonEmptyString,
   depth: NonNegativeInt,
   childPids: Schema.Array(PositiveInt),
-});
-export type ServerProcessDiagnosticsEntry = typeof ServerProcessDiagnosticsEntry.Type;
+})
+export type ServerProcessDiagnosticsEntry = typeof ServerProcessDiagnosticsEntry.Type
 
 export const ServerProcessDiagnosticsResult = Schema.Struct({
   serverPid: PositiveInt,
@@ -370,14 +370,14 @@ export const ServerProcessDiagnosticsResult = Schema.Struct({
       message: TrimmedNonEmptyString,
     }),
   ),
-});
-export type ServerProcessDiagnosticsResult = typeof ServerProcessDiagnosticsResult.Type;
+})
+export type ServerProcessDiagnosticsResult = typeof ServerProcessDiagnosticsResult.Type
 
 export const ServerProcessResourceHistoryInput = Schema.Struct({
   windowMs: NonNegativeInt,
   bucketMs: NonNegativeInt,
-});
-export type ServerProcessResourceHistoryInput = typeof ServerProcessResourceHistoryInput.Type;
+})
+export type ServerProcessResourceHistoryInput = typeof ServerProcessResourceHistoryInput.Type
 
 export const ServerProcessResourceHistoryBucket = Schema.Struct({
   startedAt: Schema.DateTimeUtc,
@@ -386,8 +386,8 @@ export const ServerProcessResourceHistoryBucket = Schema.Struct({
   maxCpuPercent: Schema.Number,
   maxRssBytes: NonNegativeInt,
   maxProcessCount: NonNegativeInt,
-});
-export type ServerProcessResourceHistoryBucket = typeof ServerProcessResourceHistoryBucket.Type;
+})
+export type ServerProcessResourceHistoryBucket = typeof ServerProcessResourceHistoryBucket.Type
 
 export const ServerProcessResourceHistorySummary = Schema.Struct({
   processKey: TrimmedNonEmptyString,
@@ -405,18 +405,18 @@ export const ServerProcessResourceHistorySummary = Schema.Struct({
   currentRssBytes: NonNegativeInt,
   maxRssBytes: NonNegativeInt,
   sampleCount: NonNegativeInt,
-});
-export type ServerProcessResourceHistorySummary = typeof ServerProcessResourceHistorySummary.Type;
+})
+export type ServerProcessResourceHistorySummary = typeof ServerProcessResourceHistorySummary.Type
 
 export const ServerProcessResourceHistoryFailureTag = Schema.Literals([
-  "ProcessDiagnosticsQueryTimeoutError",
-  "ProcessDiagnosticsQueryFailedError",
-  "ProcessDiagnosticsServerProcessSignalError",
-  "ProcessDiagnosticsNotDescendantError",
-  "ProcessDiagnosticsSignalFailedError",
-]);
+  'ProcessDiagnosticsQueryTimeoutError',
+  'ProcessDiagnosticsQueryFailedError',
+  'ProcessDiagnosticsServerProcessSignalError',
+  'ProcessDiagnosticsNotDescendantError',
+  'ProcessDiagnosticsSignalFailedError',
+])
 export type ServerProcessResourceHistoryFailureTag =
-  typeof ServerProcessResourceHistoryFailureTag.Type;
+  typeof ServerProcessResourceHistoryFailureTag.Type
 
 export const ServerProcessResourceHistoryResult = Schema.Struct({
   readAt: Schema.DateTimeUtc,
@@ -433,22 +433,22 @@ export const ServerProcessResourceHistoryResult = Schema.Struct({
       message: TrimmedNonEmptyString,
     }),
   ),
-});
-export type ServerProcessResourceHistoryResult = typeof ServerProcessResourceHistoryResult.Type;
+})
+export type ServerProcessResourceHistoryResult = typeof ServerProcessResourceHistoryResult.Type
 
 export const ServerSignalProcessInput = Schema.Struct({
   pid: PositiveInt,
   signal: ServerProcessSignal,
-});
-export type ServerSignalProcessInput = typeof ServerSignalProcessInput.Type;
+})
+export type ServerSignalProcessInput = typeof ServerSignalProcessInput.Type
 
 export const ServerSignalProcessResult = Schema.Struct({
   pid: PositiveInt,
   signal: ServerProcessSignal,
   signaled: Schema.Boolean,
   message: Schema.Option(TrimmedNonEmptyString),
-});
-export type ServerSignalProcessResult = typeof ServerSignalProcessResult.Type;
+})
+export type ServerSignalProcessResult = typeof ServerSignalProcessResult.Type
 
 export const ServerConfig = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
@@ -465,103 +465,103 @@ export const ServerConfig = Schema.Struct({
   shellResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
   /** Whether thread subscriptions can emit an opt-in catch-up completion marker. */
   threadResumeCompletionMarker: Schema.optionalKey(Schema.Boolean),
-});
-export type ServerConfig = typeof ServerConfig.Type;
+})
+export type ServerConfig = typeof ServerConfig.Type
 
 const ServerUpsertKeybindingReplaceTarget = Schema.Struct({
   key: KeybindingValue,
   command: KeybindingCommand,
   when: Schema.optional(KeybindingWhen),
-});
+})
 
 export const ServerUpsertKeybindingInput = Schema.Struct({
   key: KeybindingValue,
   command: KeybindingCommand,
   when: Schema.optional(KeybindingWhen),
   replace: Schema.optional(ServerUpsertKeybindingReplaceTarget),
-});
-export type ServerUpsertKeybindingInput = typeof ServerUpsertKeybindingInput.Type;
+})
+export type ServerUpsertKeybindingInput = typeof ServerUpsertKeybindingInput.Type
 
-export const ServerRemoveKeybindingInput = ServerUpsertKeybindingReplaceTarget;
-export type ServerRemoveKeybindingInput = typeof ServerRemoveKeybindingInput.Type;
+export const ServerRemoveKeybindingInput = ServerUpsertKeybindingReplaceTarget
+export type ServerRemoveKeybindingInput = typeof ServerRemoveKeybindingInput.Type
 
 export const ServerUpsertKeybindingResult = Schema.Struct({
   keybindings: ResolvedKeybindingsConfig,
   issues: ServerConfigIssues,
-});
-export type ServerUpsertKeybindingResult = typeof ServerUpsertKeybindingResult.Type;
+})
+export type ServerUpsertKeybindingResult = typeof ServerUpsertKeybindingResult.Type
 
-export const ServerRemoveKeybindingResult = ServerUpsertKeybindingResult;
-export type ServerRemoveKeybindingResult = typeof ServerRemoveKeybindingResult.Type;
+export const ServerRemoveKeybindingResult = ServerUpsertKeybindingResult
+export type ServerRemoveKeybindingResult = typeof ServerRemoveKeybindingResult.Type
 
 export const ServerConfigUpdatedPayload = Schema.Struct({
   issues: ServerConfigIssues,
   providers: ServerProviders,
   settings: Schema.optional(ServerSettings),
-});
-export type ServerConfigUpdatedPayload = typeof ServerConfigUpdatedPayload.Type;
+})
+export type ServerConfigUpdatedPayload = typeof ServerConfigUpdatedPayload.Type
 
 export const ServerConfigKeybindingsUpdatedPayload = Schema.Struct({
   keybindings: ResolvedKeybindingsConfig,
   issues: ServerConfigIssues,
-});
+})
 export type ServerConfigKeybindingsUpdatedPayload =
-  typeof ServerConfigKeybindingsUpdatedPayload.Type;
+  typeof ServerConfigKeybindingsUpdatedPayload.Type
 
 export const ServerConfigProviderStatusesPayload = Schema.Struct({
   providers: ServerProviders,
-});
-export type ServerConfigProviderStatusesPayload = typeof ServerConfigProviderStatusesPayload.Type;
+})
+export type ServerConfigProviderStatusesPayload = typeof ServerConfigProviderStatusesPayload.Type
 
 export const ServerConfigSettingsUpdatedPayload = Schema.Struct({
   settings: ServerSettings,
-});
-export type ServerConfigSettingsUpdatedPayload = typeof ServerConfigSettingsUpdatedPayload.Type;
+})
+export type ServerConfigSettingsUpdatedPayload = typeof ServerConfigSettingsUpdatedPayload.Type
 
 export const ServerConfigStreamSnapshotEvent = Schema.Struct({
   version: Schema.Literal(1),
-  type: Schema.Literal("snapshot"),
+  type: Schema.Literal('snapshot'),
   config: ServerConfig,
-});
-export type ServerConfigStreamSnapshotEvent = typeof ServerConfigStreamSnapshotEvent.Type;
+})
+export type ServerConfigStreamSnapshotEvent = typeof ServerConfigStreamSnapshotEvent.Type
 
 export const ServerConfigStreamKeybindingsUpdatedEvent = Schema.Struct({
   version: Schema.Literal(1),
-  type: Schema.Literal("keybindingsUpdated"),
+  type: Schema.Literal('keybindingsUpdated'),
   payload: ServerConfigKeybindingsUpdatedPayload,
-});
+})
 export type ServerConfigStreamKeybindingsUpdatedEvent =
-  typeof ServerConfigStreamKeybindingsUpdatedEvent.Type;
+  typeof ServerConfigStreamKeybindingsUpdatedEvent.Type
 
 export const ServerConfigStreamProviderStatusesEvent = Schema.Struct({
   version: Schema.Literal(1),
-  type: Schema.Literal("providerStatuses"),
+  type: Schema.Literal('providerStatuses'),
   payload: ServerConfigProviderStatusesPayload,
-});
+})
 export type ServerConfigStreamProviderStatusesEvent =
-  typeof ServerConfigStreamProviderStatusesEvent.Type;
+  typeof ServerConfigStreamProviderStatusesEvent.Type
 
 export const ServerConfigStreamSettingsUpdatedEvent = Schema.Struct({
   version: Schema.Literal(1),
-  type: Schema.Literal("settingsUpdated"),
+  type: Schema.Literal('settingsUpdated'),
   payload: ServerConfigSettingsUpdatedPayload,
-});
+})
 export type ServerConfigStreamSettingsUpdatedEvent =
-  typeof ServerConfigStreamSettingsUpdatedEvent.Type;
+  typeof ServerConfigStreamSettingsUpdatedEvent.Type
 
 export const ServerConfigStreamEvent = Schema.Union([
   ServerConfigStreamSnapshotEvent,
   ServerConfigStreamKeybindingsUpdatedEvent,
   ServerConfigStreamProviderStatusesEvent,
   ServerConfigStreamSettingsUpdatedEvent,
-]);
-export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type;
+])
+export type ServerConfigStreamEvent = typeof ServerConfigStreamEvent.Type
 
 export const ServerLifecycleReadyPayload = Schema.Struct({
   at: IsoDateTime,
   environment: ExecutionEnvironmentDescriptor,
-});
-export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Type;
+})
+export type ServerLifecycleReadyPayload = typeof ServerLifecycleReadyPayload.Type
 
 export const ServerLifecycleWelcomePayload = Schema.Struct({
   environment: ExecutionEnvironmentDescriptor,
@@ -569,52 +569,54 @@ export const ServerLifecycleWelcomePayload = Schema.Struct({
   projectName: TrimmedNonEmptyString,
   bootstrapProjectId: Schema.optional(ProjectId),
   bootstrapThreadId: Schema.optional(ThreadId),
-});
-export type ServerLifecycleWelcomePayload = typeof ServerLifecycleWelcomePayload.Type;
+})
+export type ServerLifecycleWelcomePayload = typeof ServerLifecycleWelcomePayload.Type
 
 export const ServerLifecycleStreamWelcomeEvent = Schema.Struct({
   version: Schema.Literal(1),
   sequence: NonNegativeInt,
-  type: Schema.Literal("welcome"),
+  type: Schema.Literal('welcome'),
   payload: ServerLifecycleWelcomePayload,
-});
-export type ServerLifecycleStreamWelcomeEvent = typeof ServerLifecycleStreamWelcomeEvent.Type;
+})
+export type ServerLifecycleStreamWelcomeEvent = typeof ServerLifecycleStreamWelcomeEvent.Type
 
 export const ServerLifecycleStreamReadyEvent = Schema.Struct({
   version: Schema.Literal(1),
   sequence: NonNegativeInt,
-  type: Schema.Literal("ready"),
+  type: Schema.Literal('ready'),
   payload: ServerLifecycleReadyPayload,
-});
-export type ServerLifecycleStreamReadyEvent = typeof ServerLifecycleStreamReadyEvent.Type;
+})
+export type ServerLifecycleStreamReadyEvent = typeof ServerLifecycleStreamReadyEvent.Type
 
 export const ServerLifecycleStreamEvent = Schema.Union([
   ServerLifecycleStreamWelcomeEvent,
   ServerLifecycleStreamReadyEvent,
-]);
-export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type;
+])
+export type ServerLifecycleStreamEvent = typeof ServerLifecycleStreamEvent.Type
 
 export const ServerProviderUpdatedPayload = Schema.Struct({
   providers: ServerProviders,
-});
-export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type;
+})
+export type ServerProviderUpdatedPayload = typeof ServerProviderUpdatedPayload.Type
 
 export const ServerProviderUpdateInput = Schema.Struct({
   provider: ProviderDriverKind,
   instanceId: Schema.optionalKey(ProviderInstanceId),
-});
-export type ServerProviderUpdateInput = typeof ServerProviderUpdateInput.Type;
+})
+export type ServerProviderUpdateInput = typeof ServerProviderUpdateInput.Type
 
 export class ServerProviderUpdateError extends Schema.TaggedErrorClass<ServerProviderUpdateError>()(
-  "ServerProviderUpdateError",
+  'ServerProviderUpdateError',
   {
     provider: ProviderDriverKind,
     reason: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Provider update failed for ${this.provider}: ${this.reason}`;
+)
+{
+  override get message(): string
+  {
+    return `Provider update failed for ${this.provider}: ${this.reason}`
   }
 }
 
@@ -622,25 +624,27 @@ export const ServerSelfUpdateInput = Schema.Struct({
   /** Exact npm version of the `t3` package to install (never a dist-tag, so
       the server and the acknowledging client agree on what was requested). */
   targetVersion: TrimmedNonEmptyString,
-});
-export type ServerSelfUpdateInput = typeof ServerSelfUpdateInput.Type;
+})
+export type ServerSelfUpdateInput = typeof ServerSelfUpdateInput.Type
 
 /** Acknowledgement that the update artifact is installed and the server is
     about to restart into it — the connection will drop moments later. */
 export const ServerSelfUpdateResult = Schema.Struct({
   targetVersion: TrimmedNonEmptyString,
   method: ServerSelfUpdateMethod,
-});
-export type ServerSelfUpdateResult = typeof ServerSelfUpdateResult.Type;
+})
+export type ServerSelfUpdateResult = typeof ServerSelfUpdateResult.Type
 
 export class ServerSelfUpdateError extends Schema.TaggedErrorClass<ServerSelfUpdateError>()(
-  "ServerSelfUpdateError",
+  'ServerSelfUpdateError',
   {
     reason: TrimmedNonEmptyString,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Server update failed: ${this.reason}`;
+)
+{
+  override get message(): string
+  {
+    return `Server update failed: ${this.reason}`
   }
 }

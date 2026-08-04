@@ -1,27 +1,29 @@
-import Svg, { Defs, LinearGradient, Path, Stop } from "react-native-svg";
+import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg'
 
-export type SourceControlIconKind = "github" | "gitlab" | "bitbucket" | "azure-devops";
+export type SourceControlIconKind = 'github' | 'gitlab' | 'bitbucket' | 'azure-devops'
 
 export function SourceControlIcon(props: {
-  readonly kind: SourceControlIconKind;
-  readonly size?: number;
-  readonly color?: string;
-}) {
-  const size = props.size ?? 18;
+  readonly kind: SourceControlIconKind
+  readonly size?: number
+  readonly color?: string
+})
+{
+  const size = props.size ?? 18
 
-  switch (props.kind) {
-    case "github":
+  switch (props.kind)
+  {
+    case 'github':
       return (
         <Svg width={size} height={size} viewBox="0 0 16 16" fill="none">
           <Path
             fillRule="evenodd"
             clipRule="evenodd"
             d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82A7.68 7.68 0 0 1 8.02 3.86c.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z"
-            fill={props.color ?? "#24292F"}
+            fill={props.color ?? '#24292F'}
           />
         </Svg>
-      );
-    case "gitlab":
+      )
+    case 'gitlab':
       return (
         <Svg width={size} height={size} viewBox="0 0 32 32" fill="none">
           <Path
@@ -41,8 +43,8 @@ export function SourceControlIcon(props: {
             fill="#FC6D26"
           />
         </Svg>
-      );
-    case "azure-devops":
+      )
+    case 'azure-devops':
       return (
         <Svg width={size} height={size} viewBox="0 0 96 96">
           <Defs>
@@ -68,8 +70,8 @@ export function SourceControlIcon(props: {
             d="M66.6 9.36a4.14 4.14 0 0 0-3.93-2.82H33.65a4.15 4.15 0 0 1 3.93 2.82l25.18 74.62a4.15 4.15 0 0 1-3.93 5.48h29.02a4.15 4.15 0 0 0 3.93-5.48z"
           />
         </Svg>
-      );
-    case "bitbucket":
+      )
+    case 'bitbucket':
       return (
         <Svg width={size} height={size} viewBox="8.4 14.39 2481.29 2231.21">
           <Defs>
@@ -94,6 +96,6 @@ export function SourceControlIcon(props: {
             d="M2379.27,763.06h-745.5l-125.12,730.42H992.31l-609.67,723.67c19.32,16.71,43.96,26,69.5,26.21h1618.13 c39.35,0.51,73.14-27.88,79.44-66.72L2379.27,763.06z"
           />
         </Svg>
-      );
+      )
   }
 }

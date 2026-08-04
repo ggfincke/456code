@@ -1,13 +1,13 @@
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
 
-import { VcsDriverKind, type VcsDriverKind as VcsDriverKindType } from "@t3tools/contracts";
-import { fromLenientJson } from "@t3tools/shared/schemaJson";
+import { VcsDriverKind, type VcsDriverKind as VcsDriverKindType } from '@t3tools/contracts'
+import { fromLenientJson } from '@t3tools/shared/schemaJson'
 
 const ProjectVcsConfig = Schema.Struct({
   vcs: Schema.optional(
@@ -16,28 +16,31 @@ const ProjectVcsConfig = Schema.Struct({
     }),
   ),
   vcsKind: Schema.optional(VcsDriverKind),
-});
-const ProjectVcsConfigJson = fromLenientJson(ProjectVcsConfig);
-const decodeProjectVcsConfigJson = Schema.decodeUnknownEffect(ProjectVcsConfigJson);
+})
+const ProjectVcsConfigJson = fromLenientJson(ProjectVcsConfig)
+const decodeProjectVcsConfigJson = Schema.decodeUnknownEffect(ProjectVcsConfigJson)
 
-type ProjectVcsConfigFile = typeof ProjectVcsConfig.Type;
+type ProjectVcsConfigFile = typeof ProjectVcsConfig.Type
 
-export interface VcsProjectConfigResolveInput {
-  readonly cwd: string;
-  readonly requestedKind?: VcsDriverKindType | "auto";
+export interface VcsProjectConfigResolveInput
+{
+  readonly cwd: string
+  readonly requestedKind?: VcsDriverKindType | 'auto'
 }
 
 export class VcsProjectConfigError extends Schema.TaggedErrorClass<VcsProjectConfigError>()(
-  "VcsProjectConfigError",
+  'VcsProjectConfigError',
   {
-    operation: Schema.Literals(["inspect", "read", "decode"]),
+    operation: Schema.Literals(['inspect', 'read', 'decode']),
     cwd: Schema.String,
     configPath: Schema.String,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to ${this.operation} VCS project config at ${this.configPath}.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to ${this.operation} VCS project config at ${this.configPath}.`
   }
 }
 
@@ -46,12 +49,14 @@ export class VcsProjectConfig extends Context.Service<
   {
     readonly resolveKind: (
       input: VcsProjectConfigResolveInput,
-    ) => Effect.Effect<VcsDriverKindType | "auto">;
+    ) => Effect.Effect<VcsDriverKindType | 'auto'>
   }
->()("456code/vcs/VcsProjectConfig") {}
+>()('456code/vcs/VcsProjectConfig')
+{}
 
-function configuredKind(config: ProjectVcsConfigFile): VcsDriverKindType | "auto" {
-  return config.vcs?.kind ?? config.vcsKind ?? "auto";
+function configuredKind(config: ProjectVcsConfigFile): VcsDriverKindType | 'auto'
+{
+  return config.vcs?.kind ?? config.vcsKind ?? 'auto'
 }
 
 const logVcsProjectConfigError = (error: VcsProjectConfigError) =>
@@ -62,21 +67,24 @@ const logVcsProjectConfigError = (error: VcsProjectConfigError) =>
       configPath: error.configPath,
       errorTag: error._tag,
     }),
-  );
+  )
 
-export const make = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
+export const make = Effect.gen(function* ()
+{
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
 
-  const findConfigPath = Effect.fn("VcsProjectConfig.findConfigPath")(function* (cwd: string) {
-    let current = cwd;
-    while (true) {
-      const candidate = path.join(current, ".456code", "vcs.json");
+  const findConfigPath = Effect.fn('VcsProjectConfig.findConfigPath')(function* (cwd: string)
+  {
+    let current = cwd
+    while (true)
+    {
+      const candidate = path.join(current, '.456code', 'vcs.json')
       const exists = yield* fileSystem.exists(candidate).pipe(
         Effect.mapError(
           (cause) =>
             new VcsProjectConfigError({
-              operation: "inspect",
+              operation: 'inspect',
               cwd,
               configPath: candidate,
               cause,
@@ -85,72 +93,77 @@ export const make = Effect.gen(function* () {
         Effect.catchTags({
           VcsProjectConfigError: (error) => logVcsProjectConfigError(error).pipe(Effect.as(false)),
         }),
-      );
-      if (exists) {
-        return Option.some(candidate);
+      )
+      if (exists)
+      {
+        return Option.some(candidate)
       }
 
-      const parent = path.dirname(current);
-      if (parent === current) {
-        return Option.none();
+      const parent = path.dirname(current)
+      if (parent === current)
+      {
+        return Option.none()
       }
-      current = parent;
+      current = parent
     }
-  });
+  })
 
-  const readConfiguredKind = Effect.fn("VcsProjectConfig.readConfiguredKind")(function* (
+  const readConfiguredKind = Effect.fn('VcsProjectConfig.readConfiguredKind')(function* (
     cwd: string,
     configPath: string,
-  ) {
+  )
+  {
     const raw = yield* fileSystem.readFileString(configPath).pipe(
       Effect.mapError(
         (cause) =>
           new VcsProjectConfigError({
-            operation: "read",
+            operation: 'read',
             cwd,
             configPath,
             cause,
           }),
       ),
-    );
+    )
     const parsed = yield* decodeProjectVcsConfigJson(raw).pipe(
       Effect.mapError(
         (cause) =>
           new VcsProjectConfigError({
-            operation: "decode",
+            operation: 'decode',
             cwd,
             configPath,
             cause,
           }),
       ),
-    );
-    return configuredKind(parsed);
-  });
+    )
+    return configuredKind(parsed)
+  })
 
-  const resolveKind: VcsProjectConfig["Service"]["resolveKind"] = Effect.fn(
-    "VcsProjectConfig.resolveKind",
-  )(function* (input) {
-    if (input.requestedKind !== undefined && input.requestedKind !== "auto") {
-      return input.requestedKind;
+  const resolveKind: VcsProjectConfig['Service']['resolveKind'] = Effect.fn(
+    'VcsProjectConfig.resolveKind',
+  )(function* (input)
+  {
+    if (input.requestedKind !== undefined && input.requestedKind !== 'auto')
+    {
+      return input.requestedKind
     }
 
     return yield* findConfigPath(input.cwd).pipe(
       Effect.flatMap(
         Option.match({
-          onNone: () => Effect.succeed("auto" as const),
+          onNone: () => Effect.succeed('auto' as const),
           onSome: (configPath) => readConfiguredKind(input.cwd, configPath),
         }),
       ),
       Effect.catchTags({
         VcsProjectConfigError: (error) =>
-          logVcsProjectConfigError(error).pipe(Effect.as("auto" as const)),
+          logVcsProjectConfigError(error).pipe(Effect.as('auto' as const)),
       }),
-    );
-  });
+    )
+  })
 
   return VcsProjectConfig.of({
     resolveKind,
-  });
-});
+  })
+})
 
-export const layer = Layer.effect(VcsProjectConfig, make);
+export const layer = Layer.effect(VcsProjectConfig, make)

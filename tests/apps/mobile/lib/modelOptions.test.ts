@@ -1,36 +1,38 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
-import { ProviderInstanceId, type ServerConfig } from "@t3tools/contracts";
+import { ProviderInstanceId, type ServerConfig } from '@t3tools/contracts'
 
-import { buildModelOptions } from "../../../../apps/mobile/src/lib/modelOptions";
+import { buildModelOptions } from '../../../../apps/mobile/src/lib/modelOptions'
 
-describe("mobile model options", () => {
-  it("normalizes a legacy fallback selection against current capabilities", () => {
+describe('mobile model options', () =>
+{
+  it('normalizes a legacy fallback selection against current capabilities', () =>
+  {
     const config = {
       providers: [
         {
-          instanceId: "codex",
-          driver: "codex",
-          displayName: "Codex",
+          instanceId: 'codex',
+          driver: 'codex',
+          displayName: 'Codex',
           enabled: true,
           installed: true,
-          auth: { status: "authenticated" },
+          auth: { status: 'authenticated' },
           models: [
             {
-              slug: "gpt-test",
-              name: "GPT Test",
+              slug: 'gpt-test',
+              name: 'GPT Test',
               isCustom: false,
               capabilities: {
                 optionDescriptors: [
                   {
-                    id: "serviceTier",
-                    label: "Service Tier",
-                    type: "select",
+                    id: 'serviceTier',
+                    label: 'Service Tier',
+                    type: 'select',
                     options: [
-                      { id: "default", label: "Standard", isDefault: true },
-                      { id: "priority", label: "Fast" },
+                      { id: 'default', label: 'Standard', isDefault: true },
+                      { id: 'priority', label: 'Fast' },
                     ],
-                    currentValue: "default",
+                    currentValue: 'default',
                   },
                 ],
               },
@@ -38,15 +40,15 @@ describe("mobile model options", () => {
           ],
         },
       ],
-    } as unknown as ServerConfig;
+    } as unknown as ServerConfig
 
     const [option] = buildModelOptions(config, {
-      instanceId: ProviderInstanceId.make("codex"),
-      model: "gpt-test",
-      options: [{ id: "fastMode", value: true }],
-    });
+      instanceId: ProviderInstanceId.make('codex'),
+      model: 'gpt-test',
+      options: [{ id: 'fastMode', value: true }],
+    })
 
-    expect(option?.capabilities?.optionDescriptors?.[0]?.id).toBe("serviceTier");
-    expect(option?.selection.options).toEqual([{ id: "serviceTier", value: "default" }]);
-  });
-});
+    expect(option?.capabilities?.optionDescriptors?.[0]?.id).toBe('serviceTier')
+    expect(option?.selection.options).toEqual([{ id: 'serviceTier', value: 'default' }])
+  })
+})

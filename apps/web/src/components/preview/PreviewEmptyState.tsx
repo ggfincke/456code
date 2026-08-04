@@ -1,16 +1,17 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import { Globe, RadioTower } from "lucide-react";
+import type { EnvironmentId } from '@t3tools/contracts'
+import { Globe, RadioTower } from 'lucide-react'
 
-import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from "~/components/ui/empty";
+import { Empty, EmptyDescription, EmptyMedia, EmptyTitle } from '~/components/ui/empty'
 
-import { PreviewLocalServerCard } from "./PreviewLocalServerCard";
-import { useDiscoveredLocalServers } from "./useDiscoveredLocalServers";
+import { PreviewLocalServerCard } from './PreviewLocalServerCard'
+import { useDiscoveredLocalServers } from './useDiscoveredLocalServers'
 
-interface Props {
-  environmentId: EnvironmentId;
-  configuredUrls?: ReadonlyArray<string> | undefined;
-  recentlySeenUrls?: ReadonlyArray<string> | undefined;
-  onOpenUrl: (url: string) => void;
+interface Props
+{
+  environmentId: EnvironmentId
+  configuredUrls?: ReadonlyArray<string> | undefined
+  recentlySeenUrls?: ReadonlyArray<string> | undefined
+  onOpenUrl: (url: string) => void
 }
 
 export function PreviewEmptyState({
@@ -18,14 +19,16 @@ export function PreviewEmptyState({
   configuredUrls,
   recentlySeenUrls,
   onOpenUrl,
-}: Props) {
+}: Props)
+{
   const servers = useDiscoveredLocalServers({
     environmentId,
     configuredUrls,
     recentlySeenUrls,
-  });
+  })
 
-  if (servers.length === 0) {
+  if (servers.length === 0)
+  {
     return (
       <Empty>
         <EmptyMedia variant="icon">
@@ -37,7 +40,7 @@ export function PreviewEmptyState({
           automatically.
         </EmptyDescription>
       </Empty>
-    );
+    )
   }
 
   return (
@@ -61,5 +64,5 @@ export function PreviewEmptyState({
         </p>
       </div>
     </div>
-  );
+  )
 }

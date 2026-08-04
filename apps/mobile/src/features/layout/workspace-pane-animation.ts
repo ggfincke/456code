@@ -1,4 +1,4 @@
-import { Easing, ReduceMotion } from "react-native-reanimated";
+import { Easing, ReduceMotion } from 'react-native-reanimated'
 
 /**
  * One timing curve for every workspace pane (primary sidebar + inspector).
@@ -13,4 +13,4 @@ export const WORKSPACE_PANE_TIMING = {
   duration: 260,
   easing: Easing.inOut(Easing.cubic),
   reduceMotion: ReduceMotion.System,
-} as const;
+} as const

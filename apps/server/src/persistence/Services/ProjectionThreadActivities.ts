@@ -13,12 +13,12 @@ import {
   OrchestrationThreadActivityTone,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import * as Schema from "effect/Schema";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+} from '@t3tools/contracts'
+import * as Schema from 'effect/Schema'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
 
-import type { ProjectionRepositoryError } from "../Errors.ts";
+import type { ProjectionRepositoryError } from '../Errors.ts'
 
 export const ProjectionThreadActivity = Schema.Struct({
   activityId: EventId,
@@ -30,32 +30,31 @@ export const ProjectionThreadActivity = Schema.Struct({
   payload: Schema.Unknown,
   sequence: Schema.optional(NonNegativeInt),
   createdAt: IsoDateTime,
-});
-export type ProjectionThreadActivity = typeof ProjectionThreadActivity.Type;
+})
+export type ProjectionThreadActivity = typeof ProjectionThreadActivity.Type
 
 export const ListProjectionThreadActivitiesInput = Schema.Struct({
   threadId: ThreadId,
-});
-export type ListProjectionThreadActivitiesInput = typeof ListProjectionThreadActivitiesInput.Type;
+})
+export type ListProjectionThreadActivitiesInput = typeof ListProjectionThreadActivitiesInput.Type
 
 export const DeleteProjectionThreadActivitiesInput = Schema.Struct({
   threadId: ThreadId,
-});
+})
 export type DeleteProjectionThreadActivitiesInput =
-  typeof DeleteProjectionThreadActivitiesInput.Type;
+  typeof DeleteProjectionThreadActivitiesInput.Type
 
 /**
  * ProjectionThreadActivityRepositoryShape - Service API for projected thread activity.
  */
-export interface ProjectionThreadActivityRepositoryShape {
+export interface ProjectionThreadActivityRepositoryShape
+{
   /**
    * Insert or replace a projected thread activity row.
    *
    * Upserts by `activityId` and JSON-encodes payload.
    */
-  readonly upsert: (
-    row: ProjectionThreadActivity,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly upsert: (row: ProjectionThreadActivity) => Effect.Effect<void, ProjectionRepositoryError>
 
   /**
    * List projected thread activity rows for a thread.
@@ -65,14 +64,14 @@ export interface ProjectionThreadActivityRepositoryShape {
    */
   readonly listByThreadId: (
     input: ListProjectionThreadActivitiesInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>;
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>
 
   /**
    * Delete projected thread activity rows by thread.
    */
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadActivitiesInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  ) => Effect.Effect<void, ProjectionRepositoryError>
 }
 
 /**
@@ -81,4 +80,5 @@ export interface ProjectionThreadActivityRepositoryShape {
 export class ProjectionThreadActivityRepository extends Context.Service<
   ProjectionThreadActivityRepository,
   ProjectionThreadActivityRepositoryShape
->()("456code/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository") {}
+>()('456code/persistence/Services/ProjectionThreadActivities/ProjectionThreadActivityRepository')
+{}

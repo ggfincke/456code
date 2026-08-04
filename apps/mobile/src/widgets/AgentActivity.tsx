@@ -1,5 +1,5 @@
-import { HStack, Image, Spacer, Text, VStack, ZStack } from "@expo/ui/swift-ui";
-import type { ComponentProps } from "react";
+import { HStack, Image, Spacer, Text, VStack, ZStack } from '@expo/ui/swift-ui'
+import type { ComponentProps } from 'react'
 import {
   font,
   foregroundStyle,
@@ -9,42 +9,44 @@ import {
   padding,
   resizable,
   widgetURL,
-} from "@expo/ui/swift-ui/modifiers";
+} from '@expo/ui/swift-ui/modifiers'
 import {
   createLiveActivity,
   type LiveActivityComponent,
   type LiveActivityLayout,
-} from "expo-widgets";
+} from 'expo-widgets'
 
-type LiveActivityEnvironment = Parameters<LiveActivityComponent<AgentActivityProps>>[1];
+type LiveActivityEnvironment = Parameters<LiveActivityComponent<AgentActivityProps>>[1]
 
 export type AgentActivityPhase =
-  | "starting"
-  | "running"
-  | "waiting_for_approval"
-  | "waiting_for_input"
-  | "completed"
-  | "failed"
-  | "stale";
+  | 'starting'
+  | 'running'
+  | 'waiting_for_approval'
+  | 'waiting_for_input'
+  | 'completed'
+  | 'failed'
+  | 'stale'
 
-export interface AgentActivityRowProps {
-  readonly environmentId: string;
-  readonly threadId: string;
-  readonly projectTitle: string;
-  readonly threadTitle: string;
-  readonly modelTitle: string;
-  readonly phase: AgentActivityPhase;
-  readonly status: string;
-  readonly updatedAt: string;
-  readonly deepLink: string;
+export interface AgentActivityRowProps
+{
+  readonly environmentId: string
+  readonly threadId: string
+  readonly projectTitle: string
+  readonly threadTitle: string
+  readonly modelTitle: string
+  readonly phase: AgentActivityPhase
+  readonly status: string
+  readonly updatedAt: string
+  readonly deepLink: string
 }
 
-export interface AgentActivityProps {
-  readonly title: string;
-  readonly subtitle: string;
-  readonly activeCount: number;
-  readonly updatedAt: string;
-  readonly activities: ReadonlyArray<AgentActivityRowProps>;
+export interface AgentActivityProps
+{
+  readonly title: string
+  readonly subtitle: string
+  readonly activeCount: number
+  readonly updatedAt: string
+  readonly activities: ReadonlyArray<AgentActivityRowProps>
 }
 
 // This function is serialized into the widget extension's JS bundle, so it
@@ -53,8 +55,9 @@ export interface AgentActivityProps {
 export function AgentActivity(
   props: AgentActivityProps,
   environment: LiveActivityEnvironment,
-): LiveActivityLayout {
-  "widget";
+): LiveActivityLayout
+{
+  'widget'
 
   // Use SwiftUI's semantic label colors rather than fixed hex keyed off the
   // device color scheme. A Live Activity banner always renders over a dark
@@ -62,8 +65,8 @@ export function AgentActivity(
   // scheme-derived dark text read as unreadable dark-on-dark on the lock
   // screen. Semantic colors adapt to whatever material the OS places them on:
   // the dark LA banner and the (light or dark) home-screen widget alike.
-  const primaryForeground = "primary";
-  const secondaryForeground = "secondary";
+  const primaryForeground = 'primary'
+  const secondaryForeground = 'secondary'
 
   // Status tints mirror the web sidebar's pills
   // (apps/web/src/components/Sidebar.logic.ts resolveThreadStatusPill): amber
@@ -71,57 +74,61 @@ export function AgentActivity(
   // On iPhone the LA sits on a dark material, but macOS (iPhone Mirroring /
   // Mac notification center) renders it on a light one — so pick the web
   // palette's light (-600) or dark (-300) variant off the color scheme.
-  const isLightScheme = environment.colorScheme === "light";
-  const phaseTint = (phase: AgentActivityPhase | undefined): string => {
-    if (environment.isLuminanceReduced) {
-      return secondaryForeground;
+  const isLightScheme = environment.colorScheme === 'light'
+  const phaseTint = (phase: AgentActivityPhase | undefined): string =>
+  {
+    if (environment.isLuminanceReduced)
+    {
+      return secondaryForeground
     }
-    switch (phase) {
-      case "waiting_for_approval":
-        return isLightScheme ? "#d97706" : "#fcd34d"; // amber-600 / amber-300
-      case "waiting_for_input":
-        return isLightScheme ? "#4f46e5" : "#a5b4fc"; // indigo-600 / indigo-300
-      case "failed":
-        return isLightScheme ? "#dc2626" : "#fca5a5"; // red-600 / red-300
-      case "completed":
-        return isLightScheme ? "#059669" : "#6ee7b7"; // emerald-600 / emerald-300
-      case "starting":
-      case "running":
+    switch (phase)
+    {
+      case 'waiting_for_approval':
+        return isLightScheme ? '#d97706' : '#fcd34d' // amber-600 / amber-300
+      case 'waiting_for_input':
+        return isLightScheme ? '#4f46e5' : '#a5b4fc' // indigo-600 / indigo-300
+      case 'failed':
+        return isLightScheme ? '#dc2626' : '#fca5a5' // red-600 / red-300
+      case 'completed':
+        return isLightScheme ? '#059669' : '#6ee7b7' // emerald-600 / emerald-300
+      case 'starting':
+      case 'running':
       default:
-        return isLightScheme ? "#0284c7" : "#7dd3fc"; // sky-600 / sky-300
+        return isLightScheme ? '#0284c7' : '#7dd3fc' // sky-600 / sky-300
     }
-  };
+  }
 
   // Order attention-first so whatever needs the user floats to the top of every
   // presentation, then failures, then in-flight work, then finished/stale.
-  const phasePriority = (phase: AgentActivityPhase): number => {
-    if (phase === "waiting_for_approval" || phase === "waiting_for_input") return 0;
-    if (phase === "failed") return 1;
-    if (phase === "running" || phase === "starting") return 2;
-    return 3;
-  };
+  const phasePriority = (phase: AgentActivityPhase): number =>
+  {
+    if (phase === 'waiting_for_approval' || phase === 'waiting_for_input') return 0
+    if (phase === 'failed') return 1
+    if (phase === 'running' || phase === 'starting') return 2
+    return 3
+  }
   const ordered = [...props.activities].sort(
     (a, b) => phasePriority(a.phase) - phasePriority(b.phase),
-  );
-  const row0 = ordered[0];
-  const row1 = ordered[1];
-  const row2 = ordered[2];
-  const row3 = ordered[3];
-  const row4 = ordered[4];
+  )
+  const row0 = ordered[0]
+  const row1 = ordered[1]
+  const row2 = ordered[2]
+  const row3 = ordered[3]
+  const row4 = ordered[4]
 
   const attentionRows = props.activities.filter(
-    (row) => row.phase === "waiting_for_approval" || row.phase === "waiting_for_input",
-  );
-  const attentionRow = attentionRows[0];
-  const failedRow = props.activities.find((row) => row.phase === "failed");
-  const heroRow = attentionRow ?? failedRow ?? row0;
-  const tint = phaseTint(heroRow?.phase);
+    (row) => row.phase === 'waiting_for_approval' || row.phase === 'waiting_for_input',
+  )
+  const attentionRow = attentionRows[0]
+  const failedRow = props.activities.find((row) => row.phase === 'failed')
+  const heroRow = attentionRow ?? failedRow ?? row0
+  const tint = phaseTint(heroRow?.phase)
   // Headline count leans on the accent when a human is actually blocked.
   const headerTint = attentionRow
     ? phaseTint(attentionRow.phase)
     : failedRow
       ? phaseTint(failedRow.phase)
-      : tint;
+      : tint
 
   // With nothing active the aggregate only carries recently finished work, so
   // "0 active agents" (and a lone "0" in the expanded island) read as broken.
@@ -130,52 +137,54 @@ export function AgentActivity(
   // terminal row): every presentation — header text, tint, count slots,
   // minimal glyph — must agree, and a failure anywhere should dominate a
   // newer success.
-  const allDone = props.activeCount === 0;
-  const doneLabel = failedRow ? "Failed" : "Done";
-  const outcomeLabel = failedRow ? "Agent work failed" : "Agent work completed";
+  const allDone = props.activeCount === 0
+  const doneLabel = failedRow ? 'Failed' : 'Done'
+  const outcomeLabel = failedRow ? 'Agent work failed' : 'Agent work completed'
 
   // Header copy: "5 active agents" + (", 1 needs attention"). The banner renders
   // the two parts in-line so the attention half can carry the accent color;
   // `summary` is the short form for tight spots (expanded center, watch card).
-  const agentWord = props.activeCount === 1 ? "agent" : "agents";
-  const agentsLabel = allDone ? outcomeLabel : `${props.activeCount} active ${agentWord}`;
+  const agentWord = props.activeCount === 1 ? 'agent' : 'agents'
+  const agentsLabel = allDone ? outcomeLabel : `${props.activeCount} active ${agentWord}`
   const attentionSuffix =
     attentionRows.length > 0
-      ? `${attentionRows.length} need${attentionRows.length === 1 ? "s" : ""} attention`
-      : "";
-  const activeLabel = allDone ? doneLabel : `${props.activeCount} active`;
-  const summary = attentionSuffix || activeLabel;
+      ? `${attentionRows.length} need${attentionRows.length === 1 ? 's' : ''} attention`
+      : ''
+  const activeLabel = allDone ? doneLabel : `${props.activeCount} active`
+  const summary = attentionSuffix || activeLabel
 
   // Any registered scheme variant routes back to this app; taps are delivered
   // to the widget's containing app, so the prod scheme is safe for all builds.
-  const deepLinkRow = attentionRow ?? row0;
+  const deepLinkRow = attentionRow ?? row0
   const deepLink =
-    deepLinkRow && deepLinkRow.deepLink.startsWith("/") && !deepLinkRow.deepLink.startsWith("//")
+    deepLinkRow && deepLinkRow.deepLink.startsWith('/') && !deepLinkRow.deepLink.startsWith('//')
       ? `code456://${deepLinkRow.deepLink.slice(1)}`
-      : null;
+      : null
 
   // A scannable status glyph per phase — reads faster than colored words and
   // ties the compact / expanded / banner / watch presentations together.
-  type SFName = NonNullable<ComponentProps<typeof Image>["systemName"]>;
-  const phaseSymbol = (phase: AgentActivityPhase): SFName => {
-    switch (phase) {
-      case "waiting_for_approval":
-        return "exclamationmark.circle.fill";
-      case "waiting_for_input":
-        return "questionmark.circle.fill";
-      case "failed":
-        return "xmark.octagon.fill";
-      case "completed":
-        return "checkmark.circle.fill";
-      case "starting":
-        return "circle.dotted";
-      case "stale":
-        return "clock.arrow.circlepath";
-      case "running":
+  type SFName = NonNullable<ComponentProps<typeof Image>['systemName']>
+  const phaseSymbol = (phase: AgentActivityPhase): SFName =>
+  {
+    switch (phase)
+    {
+      case 'waiting_for_approval':
+        return 'exclamationmark.circle.fill'
+      case 'waiting_for_input':
+        return 'questionmark.circle.fill'
+      case 'failed':
+        return 'xmark.octagon.fill'
+      case 'completed':
+        return 'checkmark.circle.fill'
+      case 'starting':
+        return 'circle.dotted'
+      case 'stale':
+        return 'clock.arrow.circlepath'
+      case 'running':
       default:
-        return "arrow.triangle.2.circlepath";
+        return 'arrow.triangle.2.circlepath'
     }
-  };
+  }
 
   // SF Symbols, like the logo, ignore frame/foregroundStyle applied directly to
   // the image; size + tint them through a container the resizable symbol fills.
@@ -183,7 +192,7 @@ export function AgentActivity(
     <HStack modifiers={[frame({ width: size, height: size }), foregroundStyle(color)]}>
       <Image systemName={systemName} modifiers={[resizable()]} />
     </HStack>
-  );
+  )
 
   // Single-line row used by every presentation: glyph, title, inline project,
   // status. The project and status carry layoutPriority(1) so when space runs
@@ -194,7 +203,7 @@ export function AgentActivity(
     <HStack spacing={7} alignment="center">
       <Text
         modifiers={[
-          font({ weight: "semibold", size: 13 }),
+          font({ weight: 'semibold', size: 13 }),
           foregroundStyle(primaryForeground),
           lineLimit(1),
         ]}
@@ -213,7 +222,7 @@ export function AgentActivity(
       <Spacer minLength={8} />
       <Text
         modifiers={[
-          font({ weight: "semibold", size: 11 }),
+          font({ weight: 'semibold', size: 11 }),
           foregroundStyle(phaseTint(row.phase)),
           layoutPriority(1),
         ]}
@@ -221,7 +230,7 @@ export function AgentActivity(
         {row.status}
       </Text>
     </HStack>
-  );
+  )
 
   // The branded app mark. `assetName` resolves the template image set bundled in
   // the widget extension's asset catalog. Image views only honor `resizable`
@@ -233,7 +242,7 @@ export function AgentActivity(
     <HStack modifiers={[frame({ width: height * 2.365, height }), foregroundStyle(color)]}>
       <Image assetName="Mark" modifiers={[resizable()]} />
     </HStack>
-  );
+  )
 
   return {
     banner: (
@@ -254,7 +263,7 @@ export function AgentActivity(
             <Spacer minLength={0} />
             <Text
               modifiers={[
-                font({ weight: "semibold", size: 13 }),
+                font({ weight: 'semibold', size: 13 }),
                 // The all-done header carries the outcome tint (emerald /
                 // red) the way the Done/Failed status labels do.
                 foregroundStyle(allDone ? headerTint : primaryForeground),
@@ -269,7 +278,7 @@ export function AgentActivity(
             {attentionSuffix ? (
               <Text
                 modifiers={[
-                  font({ weight: "semibold", size: 13 }),
+                  font({ weight: 'semibold', size: 13 }),
                   foregroundStyle(headerTint),
                   lineLimit(1),
                 ]}
@@ -295,7 +304,7 @@ export function AgentActivity(
           {renderLogo(14, primaryForeground)}
           <Text
             modifiers={[
-              font({ weight: "bold", size: 13 }),
+              font({ weight: 'bold', size: 13 }),
               foregroundStyle(headerTint),
               lineLimit(1),
             ]}
@@ -308,7 +317,7 @@ export function AgentActivity(
           <HStack spacing={7} alignment="center">
             <Text
               modifiers={[
-                font({ weight: "semibold", size: 12 }),
+                font({ weight: 'semibold', size: 12 }),
                 foregroundStyle(primaryForeground),
                 lineLimit(1),
               ]}
@@ -325,11 +334,11 @@ export function AgentActivity(
     ),
     compactLeading: renderLogo(14, tint),
     compactTrailing: (
-      <Text modifiers={[font({ weight: "semibold", size: 11 }), foregroundStyle(tint)]}>
+      <Text modifiers={[font({ weight: 'semibold', size: 11 }), foregroundStyle(tint)]}>
         {attentionRow
-          ? attentionRow.phase === "waiting_for_approval"
-            ? "Approval"
-            : "Input"
+          ? attentionRow.phase === 'waiting_for_approval'
+            ? 'Approval'
+            : 'Input'
           : activeLabel}
       </Text>
     ),
@@ -343,7 +352,7 @@ export function AgentActivity(
     expandedLeading: (
       <HStack spacing={5} alignment="center" modifiers={[padding({ leading: 4, vertical: 4 })]}>
         {renderLogo(15, tint)}
-        <Text modifiers={[font({ weight: "bold", size: 13 }), foregroundStyle(tint)]}>
+        <Text modifiers={[font({ weight: 'bold', size: 13 }), foregroundStyle(tint)]}>
           {allDone ? doneLabel : `${props.activeCount}`}
         </Text>
       </HStack>
@@ -375,7 +384,7 @@ export function AgentActivity(
         {row2 ? renderCompactRow(row2) : null}
       </VStack>
     ),
-  };
+  }
 }
 
-export default createLiveActivity<AgentActivityProps>("AgentActivity", AgentActivity);
+export default createLiveActivity<AgentActivityProps>('AgentActivity', AgentActivity)

@@ -1,42 +1,45 @@
 // apps/web/src/components/chat/ComposerUsageMeter.tsx
 // combines provider-plan and context-window usage in the composer footer meter
-import type { ServerProviderAccountUsage } from "@t3tools/contracts";
+import type { ServerProviderAccountUsage } from '@t3tools/contracts'
 
-import { useClientSettings } from "~/hooks/useSettings";
-import { cn } from "~/lib/utils";
-import { type ContextWindowSnapshot, formatContextWindowTokens } from "~/lib/contextWindow";
-import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
+import { useClientSettings } from '~/hooks/useSettings'
+import { cn } from '~/lib/utils'
+import { type ContextWindowSnapshot, formatContextWindowTokens } from '~/lib/contextWindow'
+import { Popover, PopoverPopup, PopoverTrigger } from '../ui/popover'
 import {
   formatProviderUsagePercent,
   isProviderUsageWindowDanger,
   ProviderUsageDetails,
-} from "./ProviderUsage";
+} from './ProviderUsage'
 
-function formatPercentage(value: number | null): string | null {
-  if (value === null || !Number.isFinite(value)) return null;
-  if (value < 10) return `${value.toFixed(1).replace(/\.0$/u, "")}%`;
-  return `${Math.round(value)}%`;
+function formatPercentage(value: number | null): string | null
+{
+  if (value === null || !Number.isFinite(value)) return null
+  if (value < 10) return `${value.toFixed(1).replace(/\.0$/u, '')}%`
+  return `${Math.round(value)}%`
 }
 
-function tightestAccountWindow(usage: ServerProviderAccountUsage | undefined) {
-  if (usage?.status !== "available") return null;
+function tightestAccountWindow(usage: ServerProviderAccountUsage | undefined)
+{
+  if (usage?.status !== 'available') return null
   return usage.windows.reduce((tightest, window) =>
     window.usedPercent > tightest.usedPercent ? window : tightest,
-  );
+  )
 }
 
 function ContextWindowDetails(props: {
-  usage: ContextWindowSnapshot;
-  providerDisplayName?: string | null | undefined;
-}) {
-  const usedPercentage = formatPercentage(props.usage.usedPercentage);
-  const normalizedPercentage = Math.max(0, Math.min(100, props.usage.usedPercentage ?? 0));
-  const totalProcessedTokens = props.usage.totalProcessedTokens ?? null;
-  const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0;
+  usage: ContextWindowSnapshot
+  providerDisplayName?: string | null | undefined
+})
+{
+  const usedPercentage = formatPercentage(props.usage.usedPercentage)
+  const normalizedPercentage = Math.max(0, Math.min(100, props.usage.usedPercentage ?? 0))
+  const totalProcessedTokens = props.usage.totalProcessedTokens ?? null
+  const showTotalProcessed = totalProcessedTokens !== null && totalProcessedTokens > 0
   const usageColor =
     normalizedPercentage > 90
-      ? "var(--color-red-500)"
-      : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+      ? 'var(--color-red-500)'
+      : 'color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)'
 
   return (
     <div className="flex flex-col gap-2">
@@ -82,44 +85,45 @@ function ContextWindowDetails(props: {
       ) : null}
       {props.usage.compactsAutomatically ? (
         <div className="mt-1 text-pretty text-[11px] font-medium text-muted-foreground/70">
-          {props.providerDisplayName ?? "It"} automatically compacts its context when needed.
+          {props.providerDisplayName ?? 'It'} automatically compacts its context when needed.
         </div>
       ) : null}
     </div>
-  );
+  )
 }
 
 export function ComposerUsageMeter(props: {
-  contextUsage: ContextWindowSnapshot | null;
-  accountUsage?: ServerProviderAccountUsage | undefined;
-  providerDisplayName?: string | null;
-}) {
-  const { accountUsage, contextUsage, providerDisplayName } = props;
-  const usageDisplayMode = useClientSettings((settings) => settings.providerUsageDisplayMode);
-  if (!contextUsage && !accountUsage) return null;
+  contextUsage: ContextWindowSnapshot | null
+  accountUsage?: ServerProviderAccountUsage | undefined
+  providerDisplayName?: string | null
+})
+{
+  const { accountUsage, contextUsage, providerDisplayName } = props
+  const usageDisplayMode = useClientSettings((settings) => settings.providerUsageDisplayMode)
+  if (!contextUsage && !accountUsage) return null
 
-  const contextPercentage = Math.max(0, Math.min(100, contextUsage?.usedPercentage ?? 0));
-  const accountWindow = tightestAccountWindow(accountUsage);
-  const normalizedPercentage = contextUsage ? contextPercentage : (accountWindow?.usedPercent ?? 0);
-  const radius = 9.75;
-  const circumference = 2 * Math.PI * radius;
-  const dashOffset = circumference - (normalizedPercentage / 100) * circumference;
-  const contextUsedLabel = contextUsage ? formatPercentage(contextUsage.usedPercentage) : null;
+  const contextPercentage = Math.max(0, Math.min(100, contextUsage?.usedPercentage ?? 0))
+  const accountWindow = tightestAccountWindow(accountUsage)
+  const normalizedPercentage = contextUsage ? contextPercentage : (accountWindow?.usedPercent ?? 0)
+  const radius = 9.75
+  const circumference = 2 * Math.PI * radius
+  const dashOffset = circumference - (normalizedPercentage / 100) * circumference
+  const contextUsedLabel = contextUsage ? formatPercentage(contextUsage.usedPercentage) : null
   const isDanger = contextUsage
     ? normalizedPercentage > 90
     : accountWindow
       ? isProviderUsageWindowDanger(accountWindow)
-      : false;
+      : false
   const usageColor = isDanger
-    ? "var(--color-red-500)"
-    : "color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)";
+    ? 'var(--color-red-500)'
+    : 'color-mix(in oklab, var(--color-muted-foreground) 72%, transparent)'
   const ariaLabel = contextUsage
     ? contextUsage.maxTokens !== null && contextUsedLabel
-      ? `Usage: context window ${contextUsedLabel} used${accountUsage ? "; provider plan usage available" : ""}`
-      : `Usage: context window ${formatContextWindowTokens(contextUsage.usedTokens)} tokens used${accountUsage ? "; provider plan usage available" : ""}`
+      ? `Usage: context window ${contextUsedLabel} used${accountUsage ? '; provider plan usage available' : ''}`
+      : `Usage: context window ${formatContextWindowTokens(contextUsage.usedTokens)} tokens used${accountUsage ? '; provider plan usage available' : ''}`
     : accountWindow
       ? `Provider usage: ${formatProviderUsagePercent(accountWindow, usageDisplayMode)} in the ${accountWindow.label} window`
-      : "Provider usage";
+      : 'Provider usage'
 
   return (
     <Popover>
@@ -131,9 +135,9 @@ export function ComposerUsageMeter(props: {
           <button
             type="button"
             className={cn(
-              "inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors",
-              "hover:bg-accent data-[pressed]:bg-accent",
-              "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background",
+              'inline-flex size-7 cursor-pointer items-center justify-center rounded-full border border-transparent text-muted-foreground outline-none transition-colors',
+              'hover:bg-accent data-[pressed]:bg-accent',
+              'focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 focus-visible:ring-offset-background',
             )}
             aria-label={ariaLabel}
             data-composer-usage-meter="true"
@@ -197,5 +201,5 @@ export function ComposerUsageMeter(props: {
         </div>
       </PopoverPopup>
     </Popover>
-  );
+  )
 }

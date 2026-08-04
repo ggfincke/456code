@@ -1,13 +1,15 @@
-import { BrowserMockup } from "./BrowserMockup";
-import type { PreviewableServer } from "./useDiscoveredLocalServers";
+import { BrowserMockup } from './BrowserMockup'
+import type { PreviewableServer } from './useDiscoveredLocalServers'
 
-interface Props {
-  server: PreviewableServer;
-  onOpen: () => void;
+interface Props
+{
+  server: PreviewableServer
+  onOpen: () => void
 }
 
-export function PreviewLocalServerCard({ server, onOpen }: Props) {
-  const subtitle = describeServer(server);
+export function PreviewLocalServerCard({ server, onOpen }: Props)
+{
+  const subtitle = describeServer(server)
   return (
     <button
       type="button"
@@ -23,30 +25,33 @@ export function PreviewLocalServerCard({ server, onOpen }: Props) {
       </div>
       {server.listening ? <PulsingDot /> : <DimDot />}
     </button>
-  );
+  )
 }
 
-function describeServer(server: PreviewableServer): string {
-  if (server.processName) return server.processName;
-  if (server.listening) return "Listening";
-  if (server.source === "configured") return "Configured";
-  return "Recently seen";
+function describeServer(server: PreviewableServer): string
+{
+  if (server.processName) return server.processName
+  if (server.listening) return 'Listening'
+  if (server.source === 'configured') return 'Configured'
+  return 'Recently seen'
 }
 
-function PulsingDot() {
+function PulsingDot()
+{
   return (
     <span aria-label="Listening" className="relative inline-flex size-2 shrink-0">
       <span className="absolute inset-0 animate-status-ping rounded-full bg-success opacity-60" />
       <span className="relative inline-flex size-2 rounded-full bg-success" />
     </span>
-  );
+  )
 }
 
-function DimDot() {
+function DimDot()
+{
   return (
     <span
       aria-label="Not currently listening"
       className="size-2 shrink-0 rounded-full bg-muted-foreground/40"
     />
-  );
+  )
 }

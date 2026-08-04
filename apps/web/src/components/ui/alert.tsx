@@ -1,41 +1,44 @@
-import { cva, type VariantProps } from "class-variance-authority";
-import { Children, isValidElement } from "react";
-import type * as React from "react";
+import { cva, type VariantProps } from 'class-variance-authority'
+import { Children, isValidElement } from 'react'
+import type * as React from 'react'
 
-import { cn } from "~/lib/utils";
+import { cn } from '~/lib/utils'
 
-const alertVariants = cva("relative rounded-xl border px-3.5 py-3 text-card-foreground text-sm", {
+const alertVariants = cva('relative rounded-xl border px-3.5 py-3 text-card-foreground text-sm', {
   defaultVariants: {
-    variant: "default",
+    variant: 'default',
   },
   variants: {
     variant: {
-      default: "bg-transparent dark:bg-input/32 [&_svg]:text-muted-foreground",
+      default: 'bg-transparent dark:bg-input/32 [&_svg]:text-muted-foreground',
       error:
-        "border-destructive/32 bg-destructive/4 text-destructive-foreground [&_[data-slot=alert-description]]:text-destructive-foreground/80 [&_svg]:text-destructive",
-      info: "border-info/32 bg-info/4 [&_svg]:text-info",
-      success: "border-success/32 bg-success/4 [&_svg]:text-success",
-      warning: "border-warning/32 bg-warning/4 [&_svg]:text-warning",
+        'border-destructive/32 bg-destructive/4 text-destructive-foreground [&_[data-slot=alert-description]]:text-destructive-foreground/80 [&_svg]:text-destructive',
+      info: 'border-info/32 bg-info/4 [&_svg]:text-info',
+      success: 'border-success/32 bg-success/4 [&_svg]:text-success',
+      warning: 'border-warning/32 bg-warning/4 [&_svg]:text-warning',
     },
   },
-});
+})
 
-function alertChildSlot(child: React.ReactElement): string | undefined {
-  const propsSlot = (child.props as Record<string, string | undefined>)["data-slot"];
-  if (propsSlot) {
-    return propsSlot;
+function alertChildSlot(child: React.ReactElement): string | undefined
+{
+  const propsSlot = (child.props as Record<string, string | undefined>)['data-slot']
+  if (propsSlot)
+  {
+    return propsSlot
   }
 
-  const type = child.type as { displayName?: string; name?: string };
-  switch (type.displayName ?? type.name) {
-    case "AlertAction":
-      return "alert-action";
-    case "AlertTitle":
-      return "alert-title";
-    case "AlertDescription":
-      return "alert-description";
+  const type = child.type as { displayName?: string; name?: string }
+  switch (type.displayName ?? type.name)
+  {
+    case 'AlertAction':
+      return 'alert-action'
+    case 'AlertTitle':
+      return 'alert-title'
+    case 'AlertDescription':
+      return 'alert-description'
     default:
-      return undefined;
+      return undefined
   }
 }
 
@@ -44,25 +47,33 @@ function Alert({
   variant,
   children,
   ...props
-}: React.ComponentProps<"div"> & VariantProps<typeof alertVariants>) {
-  const icon: React.ReactNode[] = [];
-  const content: React.ReactNode[] = [];
-  const action: React.ReactNode[] = [];
+}: React.ComponentProps<'div'> & VariantProps<typeof alertVariants>)
+{
+  const icon: React.ReactNode[] = []
+  const content: React.ReactNode[] = []
+  const action: React.ReactNode[] = []
 
-  Children.forEach(children, (child) => {
-    if (!isValidElement(child)) {
-      content.push(child);
-      return;
+  Children.forEach(children, (child) =>
+  {
+    if (!isValidElement(child))
+    {
+      content.push(child)
+      return
     }
-    const slot = alertChildSlot(child);
-    if (slot === "alert-action") {
-      action.push(child);
-    } else if (slot === "alert-title" || slot === "alert-description") {
-      content.push(child);
-    } else {
-      icon.push(child);
+    const slot = alertChildSlot(child)
+    if (slot === 'alert-action')
+    {
+      action.push(child)
     }
-  });
+    else if (slot === 'alert-title' || slot === 'alert-description')
+    {
+      content.push(child)
+    }
+    else
+    {
+      icon.push(child)
+    }
+  })
 
   return (
     <div
@@ -85,29 +96,32 @@ function Alert({
         )}
       </div>
     </div>
-  );
+  )
 }
 
-function AlertTitle({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("font-medium", className)} data-slot="alert-title" {...props} />;
+function AlertTitle({ className, ...props }: React.ComponentProps<'div'>)
+{
+  return <div className={cn('font-medium', className)} data-slot="alert-title" {...props} />
 }
 
-function AlertDescription({ className, ...props }: React.ComponentProps<"div">) {
+function AlertDescription({ className, ...props }: React.ComponentProps<'div'>)
+{
   return (
     <div
-      className={cn("flex flex-col gap-2.5 text-muted-foreground", className)}
+      className={cn('flex flex-col gap-2.5 text-muted-foreground', className)}
       data-slot="alert-description"
       {...props}
     />
-  );
+  )
 }
 
-function AlertAction({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("flex gap-1", className)} data-slot="alert-action" {...props} />;
+function AlertAction({ className, ...props }: React.ComponentProps<'div'>)
+{
+  return <div className={cn('flex gap-1', className)} data-slot="alert-action" {...props} />
 }
 
-AlertTitle.displayName = "AlertTitle";
-AlertDescription.displayName = "AlertDescription";
-AlertAction.displayName = "AlertAction";
+AlertTitle.displayName = 'AlertTitle'
+AlertDescription.displayName = 'AlertDescription'
+AlertAction.displayName = 'AlertAction'
 
-export { Alert, AlertTitle, AlertDescription, AlertAction };
+export { Alert, AlertTitle, AlertDescription, AlertAction }

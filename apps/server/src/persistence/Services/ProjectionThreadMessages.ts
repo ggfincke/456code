@@ -13,13 +13,13 @@ import {
   ThreadId,
   TurnId,
   IsoDateTime,
-} from "@t3tools/contracts";
-import * as Schema from "effect/Schema";
-import * as Context from "effect/Context";
-import type * as Option from "effect/Option";
-import type * as Effect from "effect/Effect";
+} from '@t3tools/contracts'
+import * as Schema from 'effect/Schema'
+import * as Context from 'effect/Context'
+import type * as Option from 'effect/Option'
+import type * as Effect from 'effect/Effect'
 
-import type { ProjectionRepositoryError } from "../Errors.ts";
+import type { ProjectionRepositoryError } from '../Errors.ts'
 
 export const ProjectionThreadMessage = Schema.Struct({
   messageId: MessageId,
@@ -31,28 +31,29 @@ export const ProjectionThreadMessage = Schema.Struct({
   isStreaming: Schema.Boolean,
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
-});
-export type ProjectionThreadMessage = typeof ProjectionThreadMessage.Type;
+})
+export type ProjectionThreadMessage = typeof ProjectionThreadMessage.Type
 
 export const ListProjectionThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
-});
-export type ListProjectionThreadMessagesInput = typeof ListProjectionThreadMessagesInput.Type;
+})
+export type ListProjectionThreadMessagesInput = typeof ListProjectionThreadMessagesInput.Type
 
 export const GetProjectionThreadMessageInput = Schema.Struct({
   messageId: MessageId,
-});
-export type GetProjectionThreadMessageInput = typeof GetProjectionThreadMessageInput.Type;
+})
+export type GetProjectionThreadMessageInput = typeof GetProjectionThreadMessageInput.Type
 
 export const DeleteProjectionThreadMessagesInput = Schema.Struct({
   threadId: ThreadId,
-});
-export type DeleteProjectionThreadMessagesInput = typeof DeleteProjectionThreadMessagesInput.Type;
+})
+export type DeleteProjectionThreadMessagesInput = typeof DeleteProjectionThreadMessagesInput.Type
 
 /**
  * ProjectionThreadMessageRepositoryShape - Service API for projected thread messages.
  */
-export interface ProjectionThreadMessageRepositoryShape {
+export interface ProjectionThreadMessageRepositoryShape
+{
   /**
    * Insert or replace a projected thread message row.
    *
@@ -60,14 +61,14 @@ export interface ProjectionThreadMessageRepositoryShape {
    */
   readonly upsert: (
     message: ProjectionThreadMessage,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  ) => Effect.Effect<void, ProjectionRepositoryError>
 
   /**
    * Read a projected thread message by id.
    */
   readonly getByMessageId: (
     input: GetProjectionThreadMessageInput,
-  ) => Effect.Effect<Option.Option<ProjectionThreadMessage>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<ProjectionThreadMessage>, ProjectionRepositoryError>
 
   /**
    * List projected thread messages for a thread.
@@ -76,14 +77,14 @@ export interface ProjectionThreadMessageRepositoryShape {
    */
   readonly listByThreadId: (
     input: ListProjectionThreadMessagesInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionThreadMessage>, ProjectionRepositoryError>;
+  ) => Effect.Effect<ReadonlyArray<ProjectionThreadMessage>, ProjectionRepositoryError>
 
   /**
    * Delete projected thread messages by thread.
    */
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadMessagesInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  ) => Effect.Effect<void, ProjectionRepositoryError>
 }
 
 /**
@@ -92,4 +93,5 @@ export interface ProjectionThreadMessageRepositoryShape {
 export class ProjectionThreadMessageRepository extends Context.Service<
   ProjectionThreadMessageRepository,
   ProjectionThreadMessageRepositoryShape
->()("456code/persistence/Services/ProjectionThreadMessages/ProjectionThreadMessageRepository") {}
+>()('456code/persistence/Services/ProjectionThreadMessages/ProjectionThreadMessageRepository')
+{}

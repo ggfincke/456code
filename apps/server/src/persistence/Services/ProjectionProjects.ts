@@ -6,13 +6,13 @@
  *
  * @module ProjectionProjectRepository
  */
-import { IsoDateTime, ModelSelection, ProjectId, ProjectScript } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+import { IsoDateTime, ModelSelection, ProjectId, ProjectScript } from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
 
-import type { ProjectionRepositoryError } from "../Errors.ts";
+import type { ProjectionRepositoryError } from '../Errors.ts'
 
 export const ProjectionProject = Schema.Struct({
   projectId: ProjectId,
@@ -23,53 +23,51 @@ export const ProjectionProject = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   deletedAt: Schema.NullOr(IsoDateTime),
-});
-export type ProjectionProject = typeof ProjectionProject.Type;
+})
+export type ProjectionProject = typeof ProjectionProject.Type
 
 export const GetProjectionProjectInput = Schema.Struct({
   projectId: ProjectId,
-});
-export type GetProjectionProjectInput = typeof GetProjectionProjectInput.Type;
+})
+export type GetProjectionProjectInput = typeof GetProjectionProjectInput.Type
 
 export const DeleteProjectionProjectInput = Schema.Struct({
   projectId: ProjectId,
-});
-export type DeleteProjectionProjectInput = typeof DeleteProjectionProjectInput.Type;
+})
+export type DeleteProjectionProjectInput = typeof DeleteProjectionProjectInput.Type
 
 /**
  * ProjectionProjectRepositoryShape - Service API for projected project records.
  */
-export interface ProjectionProjectRepositoryShape {
+export interface ProjectionProjectRepositoryShape
+{
   /**
    * Insert or replace a projected project row.
    *
    * Upserts by `projectId` and persists scripts through JSON encoding.
    */
-  readonly upsert: (row: ProjectionProject) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly upsert: (row: ProjectionProject) => Effect.Effect<void, ProjectionRepositoryError>
 
   /**
    * Read a projected project row by id.
    */
   readonly getById: (
     input: GetProjectionProjectInput,
-  ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>
 
   /**
    * List all projected project rows.
    *
    * Returned in deterministic creation order.
    */
-  readonly listAll: () => Effect.Effect<
-    ReadonlyArray<ProjectionProject>,
-    ProjectionRepositoryError
-  >;
+  readonly listAll: () => Effect.Effect<ReadonlyArray<ProjectionProject>, ProjectionRepositoryError>
 
   /**
    * Soft-delete a projected project row by id.
    */
   readonly deleteById: (
     input: DeleteProjectionProjectInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  ) => Effect.Effect<void, ProjectionRepositoryError>
 }
 
 /**
@@ -78,4 +76,5 @@ export interface ProjectionProjectRepositoryShape {
 export class ProjectionProjectRepository extends Context.Service<
   ProjectionProjectRepository,
   ProjectionProjectRepositoryShape
->()("456code/persistence/Services/ProjectionProjects/ProjectionProjectRepository") {}
+>()('456code/persistence/Services/ProjectionProjects/ProjectionProjectRepository')
+{}

@@ -1,4 +1,4 @@
-import { type ChangeEvent, type KeyboardEvent, useState } from "react";
+import { type ChangeEvent, type KeyboardEvent, useState } from 'react'
 
 /**
  * Buffer text input locally so keystrokes don't cause a settings-wide
@@ -15,29 +15,36 @@ import { type ChangeEvent, type KeyboardEvent, useState } from "react";
  *   const bag = useCommitOnBlur(instance.displayName ?? "", (next) => {...});
  *   <Input {...bag} placeholder="e.g. Work" />
  */
-export function useCommitOnBlur(value: string, onCommit: (next: string) => void) {
-  const [draft, setDraft] = useState<string | null>(null);
+export function useCommitOnBlur(value: string, onCommit: (next: string) => void)
+{
+  const [draft, setDraft] = useState<string | null>(null)
 
   return {
     value: draft ?? value,
-    onChange: (event: ChangeEvent<HTMLInputElement>) => {
-      setDraft(event.target.value);
+    onChange: (event: ChangeEvent<HTMLInputElement>) =>
+    {
+      setDraft(event.target.value)
     },
-    onFocus: () => {
-      setDraft(value);
+    onFocus: () =>
+    {
+      setDraft(value)
     },
-    onBlur: () => {
-      const next = draft ?? value;
-      setDraft(null);
-      if (next !== value) {
-        onCommit(next);
+    onBlur: () =>
+    {
+      const next = draft ?? value
+      setDraft(null)
+      if (next !== value)
+      {
+        onCommit(next)
       }
     },
-    onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
-      if (event.key === "Enter") {
-        event.preventDefault();
-        (event.target as HTMLInputElement).blur();
+    onKeyDown: (event: KeyboardEvent<HTMLInputElement>) =>
+    {
+      if (event.key === 'Enter')
+      {
+        event.preventDefault()
+        ;(event.target as HTMLInputElement).blur()
       }
     },
-  };
+  }
 }

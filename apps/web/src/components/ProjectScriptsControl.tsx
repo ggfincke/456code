@@ -3,12 +3,12 @@ import type {
   ProjectScript,
   ProjectScriptIcon,
   ResolvedKeybindingsConfig,
-} from "@t3tools/contracts";
+} from '@t3tools/contracts'
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
   type AtomCommandResult,
-} from "@t3tools/client-runtime/state/runtime";
+} from '@t3tools/client-runtime/state/runtime'
 import {
   BugIcon,
   ChevronDownIcon,
@@ -20,20 +20,20 @@ import {
   PlusIcon,
   SettingsIcon,
   WrenchIcon,
-} from "lucide-react";
-import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from "react";
+} from 'lucide-react'
+import React, { type FormEvent, type KeyboardEvent, useCallback, useMemo, useState } from 'react'
 
 import {
   keybindingValueForCommand,
   decodeProjectScriptKeybindingRule,
-} from "~/lib/projectScriptKeybindings";
-import { keybindingFromKeyboardEvent } from "~/components/settings/KeybindingsSettings.logic";
+} from '~/lib/projectScriptKeybindings'
+import { keybindingFromKeyboardEvent } from '~/components/settings/KeybindingsSettings.logic'
 import {
   commandForProjectScript,
   nextProjectScriptId,
   primaryProjectScript,
-} from "~/projectScripts";
-import { shortcutLabelForCommand } from "~/keybindings";
+} from '~/projectScripts'
+import { shortcutLabelForCommand } from '~/keybindings'
 import {
   AlertDialog,
   AlertDialogClose,
@@ -42,8 +42,8 @@ import {
   AlertDialogHeader,
   AlertDialogPopup,
   AlertDialogTitle,
-} from "./ui/alert-dialog";
-import { Button } from "./ui/button";
+} from './ui/alert-dialog'
+import { Button } from './ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -52,10 +52,10 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from "./ui/dialog";
-import { Group, GroupSeparator } from "./ui/group";
-import { Input } from "./ui/input";
-import { Label } from "./ui/label";
+} from './ui/dialog'
+import { Group, GroupSeparator } from './ui/group'
+import { Input } from './ui/input'
+import { Label } from './ui/label'
 import {
   Menu,
   MenuGroup,
@@ -65,65 +65,68 @@ import {
   MenuSeparator,
   MenuShortcut,
   MenuTrigger,
-} from "./ui/menu";
-import { Popover, PopoverPopup, PopoverTrigger } from "./ui/popover";
-import { Switch } from "./ui/switch";
-import { Textarea } from "./ui/textarea";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "./ui/tooltip";
+} from './ui/menu'
+import { Popover, PopoverPopup, PopoverTrigger } from './ui/popover'
+import { Switch } from './ui/switch'
+import { Textarea } from './ui/textarea'
+import { Tooltip, TooltipPopup, TooltipTrigger } from './ui/tooltip'
 
 const SCRIPT_ICONS: Array<{ id: ProjectScriptIcon; label: string }> = [
-  { id: "play", label: "Play" },
-  { id: "test", label: "Test" },
-  { id: "lint", label: "Lint" },
-  { id: "configure", label: "Configure" },
-  { id: "build", label: "Build" },
-  { id: "debug", label: "Debug" },
-];
+  { id: 'play', label: 'Play' },
+  { id: 'test', label: 'Test' },
+  { id: 'lint', label: 'Lint' },
+  { id: 'configure', label: 'Configure' },
+  { id: 'build', label: 'Build' },
+  { id: 'debug', label: 'Debug' },
+]
 
 function ScriptIcon({
   icon,
-  className = "size-3.5",
+  className = 'size-3.5',
 }: {
-  icon: ProjectScriptIcon;
-  className?: string;
-}) {
-  if (icon === "test") return <FlaskConicalIcon className={className} />;
-  if (icon === "lint") return <ListChecksIcon className={className} />;
-  if (icon === "configure") return <WrenchIcon className={className} />;
-  if (icon === "build") return <HammerIcon className={className} />;
-  if (icon === "debug") return <BugIcon className={className} />;
-  return <PlayIcon className={className} />;
+  icon: ProjectScriptIcon
+  className?: string
+})
+{
+  if (icon === 'test') return <FlaskConicalIcon className={className} />
+  if (icon === 'lint') return <ListChecksIcon className={className} />
+  if (icon === 'configure') return <WrenchIcon className={className} />
+  if (icon === 'build') return <HammerIcon className={className} />
+  if (icon === 'debug') return <BugIcon className={className} />
+  return <PlayIcon className={className} />
 }
 
-export interface NewProjectScriptInput {
-  name: string;
-  command: string;
-  icon: ProjectScriptIcon;
-  runOnWorktreeCreate: boolean;
-  keybinding: string | null;
+export interface NewProjectScriptInput
+{
+  name: string
+  command: string
+  icon: ProjectScriptIcon
+  runOnWorktreeCreate: boolean
+  keybinding: string | null
   /** Optional URL to open in the in-app preview when this script runs. */
-  previewUrl: string | null;
+  previewUrl: string | null
   /** When true, automatically open the preview panel pointed at `previewUrl`. */
-  autoOpenPreview: boolean;
+  autoOpenPreview: boolean
 }
 
-export type ProjectScriptActionResult = AtomCommandResult<void, unknown>;
+export type ProjectScriptActionResult = AtomCommandResult<void, unknown>
 
-const NO_FILE_SCRIPTS: ReadonlyArray<ProjectFileScript> = [];
+const NO_FILE_SCRIPTS: ReadonlyArray<ProjectFileScript> = []
 
-interface ProjectScriptsControlProps {
-  scripts: ReadonlyArray<ProjectScript>;
+interface ProjectScriptsControlProps
+{
+  scripts: ReadonlyArray<ProjectScript>
   /** Scripts declared in the project's checked-in 456code.json, offered for import. */
-  fileScripts?: ReadonlyArray<ProjectFileScript>;
-  keybindings: ResolvedKeybindingsConfig;
-  preferredScriptId?: string | null;
-  onRunScript: (script: ProjectScript) => void;
-  onAddScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
+  fileScripts?: ReadonlyArray<ProjectFileScript>
+  keybindings: ResolvedKeybindingsConfig
+  preferredScriptId?: string | null
+  onRunScript: (script: ProjectScript) => void
+  onAddScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>
   onUpdateScript: (
     scriptId: string,
     input: NewProjectScriptInput,
-  ) => Promise<ProjectScriptActionResult>;
-  onDeleteScript: (scriptId: string) => Promise<ProjectScriptActionResult>;
+  ) => Promise<ProjectScriptActionResult>
+  onDeleteScript: (scriptId: string) => Promise<ProjectScriptActionResult>
 }
 
 export default function ProjectScriptsControl({
@@ -135,28 +138,31 @@ export default function ProjectScriptsControl({
   onAddScript,
   onUpdateScript,
   onDeleteScript,
-}: ProjectScriptsControlProps) {
-  const addScriptFormId = React.useId();
-  const [editingScriptId, setEditingScriptId] = useState<string | null>(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [name, setName] = useState("");
-  const [command, setCommand] = useState("");
-  const [icon, setIcon] = useState<ProjectScriptIcon>("play");
-  const [iconPickerOpen, setIconPickerOpen] = useState(false);
-  const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false);
-  const [keybinding, setKeybinding] = useState("");
-  const [previewUrl, setPreviewUrl] = useState("");
-  const [autoOpenPreview, setAutoOpenPreview] = useState(false);
-  const [validationError, setValidationError] = useState<string | null>(null);
-  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+}: ProjectScriptsControlProps)
+{
+  const addScriptFormId = React.useId()
+  const [editingScriptId, setEditingScriptId] = useState<string | null>(null)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [name, setName] = useState('')
+  const [command, setCommand] = useState('')
+  const [icon, setIcon] = useState<ProjectScriptIcon>('play')
+  const [iconPickerOpen, setIconPickerOpen] = useState(false)
+  const [runOnWorktreeCreate, setRunOnWorktreeCreate] = useState(false)
+  const [keybinding, setKeybinding] = useState('')
+  const [previewUrl, setPreviewUrl] = useState('')
+  const [autoOpenPreview, setAutoOpenPreview] = useState(false)
+  const [validationError, setValidationError] = useState<string | null>(null)
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false)
 
-  const primaryScript = useMemo(() => {
-    if (preferredScriptId) {
-      const preferred = scripts.find((script) => script.id === preferredScriptId);
-      if (preferred) return preferred;
+  const primaryScript = useMemo(() =>
+  {
+    if (preferredScriptId)
+    {
+      const preferred = scripts.find((script) => script.id === preferredScriptId)
+      if (preferred) return preferred
     }
-    return primaryProjectScript(scripts);
-  }, [preferredScriptId, scripts]);
+    return primaryProjectScript(scripts)
+  }, [preferredScriptId, scripts])
   const importableScripts = useMemo(
     () =>
       fileScripts.filter(
@@ -168,50 +174,56 @@ export default function ProjectScriptsControl({
           ),
       ),
     [fileScripts, scripts],
-  );
-  const isEditing = editingScriptId !== null;
+  )
+  const isEditing = editingScriptId !== null
   const dropdownItemClassName =
-    "data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground";
+    'data-highlighted:bg-transparent data-highlighted:text-foreground hover:bg-accent hover:text-accent-foreground focus-visible:bg-accent focus-visible:text-accent-foreground data-highlighted:hover:bg-accent data-highlighted:hover:text-accent-foreground data-highlighted:focus-visible:bg-accent data-highlighted:focus-visible:text-accent-foreground'
 
-  const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (event.key === "Tab") return;
-    event.preventDefault();
-    if (event.key === "Backspace" || event.key === "Delete") {
-      setKeybinding("");
-      return;
+  const captureKeybinding = (event: KeyboardEvent<HTMLInputElement>) =>
+  {
+    if (event.key === 'Tab') return
+    event.preventDefault()
+    if (event.key === 'Backspace' || event.key === 'Delete')
+    {
+      setKeybinding('')
+      return
     }
-    const next = keybindingFromKeyboardEvent(event, navigator.platform);
-    if (!next) return;
-    setKeybinding(next);
-  };
+    const next = keybindingFromKeyboardEvent(event, navigator.platform)
+    if (!next) return
+    setKeybinding(next)
+  }
 
-  const submitAddScript = async (event: FormEvent) => {
-    event.preventDefault();
-    const trimmedName = name.trim();
-    const trimmedCommand = command.trim();
-    if (trimmedName.length === 0) {
-      setValidationError("Name is required.");
-      return;
+  const submitAddScript = async (event: FormEvent) =>
+  {
+    event.preventDefault()
+    const trimmedName = name.trim()
+    const trimmedCommand = command.trim()
+    if (trimmedName.length === 0)
+    {
+      setValidationError('Name is required.')
+      return
     }
-    if (trimmedCommand.length === 0) {
-      setValidationError("Command is required.");
-      return;
+    if (trimmedCommand.length === 0)
+    {
+      setValidationError('Command is required.')
+      return
     }
 
-    setValidationError(null);
-    let payload: NewProjectScriptInput;
-    try {
+    setValidationError(null)
+    let payload: NewProjectScriptInput
+    try
+    {
       const scriptIdForValidation =
         editingScriptId ??
         nextProjectScriptId(
           trimmedName,
           scripts.map((script) => script.id),
-        );
+        )
       const keybindingRule = decodeProjectScriptKeybindingRule({
         keybinding,
         command: commandForProjectScript(scriptIdForValidation),
-      });
-      const trimmedPreviewUrl = previewUrl.trim();
+      })
+      const trimmedPreviewUrl = previewUrl.trim()
       payload = {
         name: trimmedName,
         command: trimmedCommand,
@@ -220,89 +232,98 @@ export default function ProjectScriptsControl({
         keybinding: keybindingRule?.key ?? null,
         previewUrl: trimmedPreviewUrl.length > 0 ? trimmedPreviewUrl : null,
         autoOpenPreview: trimmedPreviewUrl.length > 0 ? autoOpenPreview : false,
-      } satisfies NewProjectScriptInput;
-    } catch (error) {
-      setValidationError(error instanceof Error ? error.message : "Failed to save action.");
-      return;
+      } satisfies NewProjectScriptInput
+    }
+    catch (error)
+    {
+      setValidationError(error instanceof Error ? error.message : 'Failed to save action.')
+      return
     }
 
     const result = editingScriptId
       ? await onUpdateScript(editingScriptId, payload)
-      : await onAddScript(payload);
-    if (result._tag === "Failure") {
-      if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
-        setValidationError(error instanceof Error ? error.message : "Failed to save action.");
+      : await onAddScript(payload)
+    if (result._tag === 'Failure')
+    {
+      if (!isAtomCommandInterrupted(result))
+      {
+        const error = squashAtomCommandFailure(result)
+        setValidationError(error instanceof Error ? error.message : 'Failed to save action.')
       }
-      return;
+      return
     }
-    setDialogOpen(false);
-    setIconPickerOpen(false);
-  };
+    setDialogOpen(false)
+    setIconPickerOpen(false)
+  }
 
-  const openAddDialog = () => {
-    setEditingScriptId(null);
-    setName("");
-    setCommand("");
-    setIcon("play");
-    setIconPickerOpen(false);
-    setRunOnWorktreeCreate(false);
-    setKeybinding("");
-    setPreviewUrl("");
-    setAutoOpenPreview(false);
-    setValidationError(null);
-    setDialogOpen(true);
-  };
+  const openAddDialog = () =>
+  {
+    setEditingScriptId(null)
+    setName('')
+    setCommand('')
+    setIcon('play')
+    setIconPickerOpen(false)
+    setRunOnWorktreeCreate(false)
+    setKeybinding('')
+    setPreviewUrl('')
+    setAutoOpenPreview(false)
+    setValidationError(null)
+    setDialogOpen(true)
+  }
 
-  const openEditDialog = (script: ProjectScript) => {
-    setEditingScriptId(script.id);
-    setName(script.name);
-    setCommand(script.command);
-    setIcon(script.icon);
-    setIconPickerOpen(false);
-    setRunOnWorktreeCreate(script.runOnWorktreeCreate);
-    setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? "");
-    setPreviewUrl(script.previewUrl ?? "");
-    setAutoOpenPreview(script.autoOpenPreview ?? false);
-    setValidationError(null);
-    setDialogOpen(true);
-  };
+  const openEditDialog = (script: ProjectScript) =>
+  {
+    setEditingScriptId(script.id)
+    setName(script.name)
+    setCommand(script.command)
+    setIcon(script.icon)
+    setIconPickerOpen(false)
+    setRunOnWorktreeCreate(script.runOnWorktreeCreate)
+    setKeybinding(keybindingValueForCommand(keybindings, commandForProjectScript(script.id)) ?? '')
+    setPreviewUrl(script.previewUrl ?? '')
+    setAutoOpenPreview(script.autoOpenPreview ?? false)
+    setValidationError(null)
+    setDialogOpen(true)
+  }
 
-  const confirmDeleteScript = useCallback(() => {
-    if (!editingScriptId) return;
-    setDeleteConfirmOpen(false);
-    setDialogOpen(false);
-    void onDeleteScript(editingScriptId);
-  }, [editingScriptId, onDeleteScript]);
+  const confirmDeleteScript = useCallback(() =>
+  {
+    if (!editingScriptId) return
+    setDeleteConfirmOpen(false)
+    setDialogOpen(false)
+    void onDeleteScript(editingScriptId)
+  }, [editingScriptId, onDeleteScript])
 
-  const importFileScript = async (fileScript: ProjectFileScript) => {
+  const importFileScript = async (fileScript: ProjectFileScript) =>
+  {
     const payload: NewProjectScriptInput = {
       name: fileScript.name,
       command: fileScript.command,
-      icon: fileScript.icon ?? "play",
+      icon: fileScript.icon ?? 'play',
       runOnWorktreeCreate: fileScript.runOnWorktreeCreate ?? false,
       keybinding: null,
       previewUrl: fileScript.previewUrl ?? null,
       autoOpenPreview: fileScript.previewUrl ? (fileScript.autoOpenPreview ?? false) : false,
-    };
-    const result = await onAddScript(payload);
-    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+    }
+    const result = await onAddScript(payload)
+    if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+    {
       // Surface the failure through the regular add dialog, prefilled so the
       // user can adjust and retry.
-      const error = squashAtomCommandFailure(result);
-      setEditingScriptId(null);
-      setName(payload.name);
-      setCommand(payload.command);
-      setIcon(payload.icon);
-      setIconPickerOpen(false);
-      setRunOnWorktreeCreate(payload.runOnWorktreeCreate);
-      setKeybinding("");
-      setPreviewUrl(payload.previewUrl ?? "");
-      setAutoOpenPreview(payload.autoOpenPreview);
-      setValidationError(error instanceof Error ? error.message : "Failed to import action.");
-      setDialogOpen(true);
+      const error = squashAtomCommandFailure(result)
+      setEditingScriptId(null)
+      setName(payload.name)
+      setCommand(payload.command)
+      setIcon(payload.icon)
+      setIconPickerOpen(false)
+      setRunOnWorktreeCreate(payload.runOnWorktreeCreate)
+      setKeybinding('')
+      setPreviewUrl(payload.previewUrl ?? '')
+      setAutoOpenPreview(payload.autoOpenPreview)
+      setValidationError(error instanceof Error ? error.message : 'Failed to import action.')
+      setDialogOpen(true)
     }
-  };
+  }
 
   const importMenuItems = importableScripts.length > 0 && (
     <>
@@ -315,7 +336,7 @@ export default function ProjectScriptsControl({
             className={dropdownItemClassName}
             onClick={() => void importFileScript(fileScript)}
           >
-            <ScriptIcon icon={fileScript.icon ?? "play"} className="size-4" />
+            <ScriptIcon icon={fileScript.icon ?? 'play'} className="size-4" />
             <span className="truncate">{fileScript.name}</span>
             <MenuShortcut className="ms-auto">
               <DownloadIcon className="size-3.5" aria-label="Import" />
@@ -324,7 +345,7 @@ export default function ProjectScriptsControl({
         ))}
       </MenuGroup>
     </>
-  );
+  )
 
   return (
     <>
@@ -356,11 +377,12 @@ export default function ProjectScriptsControl({
               <ChevronDownIcon className="size-4" />
             </MenuTrigger>
             <MenuPopup align="end">
-              {scripts.map((script) => {
+              {scripts.map((script) =>
+                {
                 const shortcutLabel = shortcutLabelForCommand(
                   keybindings,
                   commandForProjectScript(script.id),
-                );
+                )
                 return (
                   <MenuItem
                     key={script.id}
@@ -383,21 +405,23 @@ export default function ProjectScriptsControl({
                         size="icon-xs"
                         className="absolute right-0 top-1/2 size-6 -translate-y-1/2 opacity-0 pointer-events-none transition-opacity group-hover:opacity-100 group-hover:pointer-events-auto group-focus-visible:opacity-100 group-focus-visible:pointer-events-auto"
                         aria-label={`Edit ${script.name}`}
-                        onPointerDown={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
+                        onPointerDown={(event) =>
+                          {
+                          event.preventDefault()
+                          event.stopPropagation()
                         }}
-                        onClick={(event) => {
-                          event.preventDefault();
-                          event.stopPropagation();
-                          openEditDialog(script);
+                        onClick={(event) =>
+                          {
+                          event.preventDefault()
+                          event.stopPropagation()
+                          openEditDialog(script)
                         }}
                       >
                         <SettingsIcon className="size-3.5" />
                       </Button>
                     </span>
                   </MenuItem>
-                );
+                )
               })}
               {importMenuItems}
               <MenuItem className={dropdownItemClassName} onClick={openAddDialog}>
@@ -441,29 +465,32 @@ export default function ProjectScriptsControl({
       )}
 
       <Dialog
-        onOpenChange={(open) => {
-          setDialogOpen(open);
-          if (!open) {
-            setIconPickerOpen(false);
+        onOpenChange={(open) =>
+        {
+          setDialogOpen(open)
+          if (!open)
+          {
+            setIconPickerOpen(false)
           }
         }}
-        onOpenChangeComplete={(open) => {
-          if (open) return;
-          setEditingScriptId(null);
-          setName("");
-          setCommand("");
-          setIcon("play");
-          setRunOnWorktreeCreate(false);
-          setKeybinding("");
-          setPreviewUrl("");
-          setAutoOpenPreview(false);
-          setValidationError(null);
+        onOpenChangeComplete={(open) =>
+        {
+          if (open) return
+          setEditingScriptId(null)
+          setName('')
+          setCommand('')
+          setIcon('play')
+          setRunOnWorktreeCreate(false)
+          setKeybinding('')
+          setPreviewUrl('')
+          setAutoOpenPreview(false)
+          setValidationError(null)
         }}
         open={dialogOpen}
       >
         <DialogPopup>
           <DialogHeader>
-            <DialogTitle>{isEditing ? "Edit Action" : "Add Action"}</DialogTitle>
+            <DialogTitle>{isEditing ? 'Edit Action' : 'Add Action'}</DialogTitle>
             <DialogDescription>
               Actions are project-scoped commands you can run from the top bar or keybindings.
             </DialogDescription>
@@ -488,26 +515,28 @@ export default function ProjectScriptsControl({
                     </PopoverTrigger>
                     <PopoverPopup align="start">
                       <div className="grid grid-cols-3 gap-2">
-                        {SCRIPT_ICONS.map((entry) => {
-                          const isSelected = entry.id === icon;
+                        {SCRIPT_ICONS.map((entry) =>
+                        {
+                          const isSelected = entry.id === icon
                           return (
                             <button
                               key={entry.id}
                               type="button"
                               className={`relative flex flex-col items-center gap-2 rounded-md border px-2 py-2 text-xs dark:border-transparent ${
                                 isSelected
-                                  ? "border-primary/70 bg-primary/10 dark:ring-1 dark:ring-primary/30"
-                                  : "border-border/70 hover:bg-accent/60 dark:bg-white/[0.035]"
+                                  ? 'border-primary/70 bg-primary/10 dark:ring-1 dark:ring-primary/30'
+                                  : 'border-border/70 hover:bg-accent/60 dark:bg-white/[0.035]'
                               }`}
-                              onClick={() => {
-                                setIcon(entry.id);
-                                setIconPickerOpen(false);
+                              onClick={() =>
+                              {
+                                setIcon(entry.id)
+                                setIconPickerOpen(false)
                               }}
                             >
                               <ScriptIcon icon={entry.id} className="size-4" />
                               <span>{entry.label}</span>
                             </button>
-                          );
+                          )
                         })}
                       </div>
                     </PopoverPopup>
@@ -564,7 +593,7 @@ export default function ProjectScriptsControl({
               </label>
               <label
                 className={`flex items-center justify-between gap-3 rounded-md border border-border/70 px-3 py-2 text-sm dark:border-transparent dark:bg-white/[0.035] ${
-                  previewUrl.trim().length === 0 ? "opacity-60" : ""
+                  previewUrl.trim().length === 0 ? 'opacity-60' : ''
                 }`}
               >
                 <span>Open preview automatically when this action runs</span>
@@ -591,14 +620,15 @@ export default function ProjectScriptsControl({
             <Button
               type="button"
               variant="outline"
-              onClick={() => {
-                setDialogOpen(false);
+              onClick={() =>
+              {
+                setDialogOpen(false)
               }}
             >
               Cancel
             </Button>
             <Button form={addScriptFormId} type="submit">
-              {isEditing ? "Save changes" : "Save action"}
+              {isEditing ? 'Save changes' : 'Save action'}
             </Button>
           </DialogFooter>
         </DialogPopup>
@@ -619,5 +649,5 @@ export default function ProjectScriptsControl({
         </AlertDialogPopup>
       </AlertDialog>
     </>
-  );
+  )
 }

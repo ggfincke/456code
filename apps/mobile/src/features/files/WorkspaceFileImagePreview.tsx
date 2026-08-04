@@ -1,24 +1,25 @@
-import { useAtomValue } from "@effect/atom-react";
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Image, Pressable, View } from "react-native";
-import ImageViewing from "react-native-image-viewing";
-import { AsyncResult } from "effect/unstable/reactivity";
+import { useAtomValue } from '@effect/atom-react'
+import { useMemo, useState } from 'react'
+import { ActivityIndicator, Image, Pressable, View } from 'react-native'
+import ImageViewing from 'react-native-image-viewing'
+import { AsyncResult } from 'effect/unstable/reactivity'
 
-import { AppText as Text } from "../../components/AppText";
-import { EmptyState } from "../../components/EmptyState";
-import { workspaceFileImageAtom } from "./workspace-file-image-cache";
+import { AppText as Text } from '../../components/AppText'
+import { EmptyState } from '../../components/EmptyState'
+import { workspaceFileImageAtom } from './workspace-file-image-cache'
 
 function ResolvedWorkspaceFileImagePreview(props: {
-  readonly accessibilityLabel: string;
-  readonly uri: string;
-}) {
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [fullScreenVisible, setFullScreenVisible] = useState(false);
+  readonly accessibilityLabel: string
+  readonly uri: string
+})
+{
+  const [loadError, setLoadError] = useState<string | null>(null)
+  const [fullScreenVisible, setFullScreenVisible] = useState(false)
   const imageSource = useMemo(
-    () => ({ uri: props.uri, cache: "force-cache" as const }),
+    () => ({ uri: props.uri, cache: 'force-cache' as const }),
     [props.uri],
-  );
-  const fullScreenImages = useMemo(() => [imageSource], [imageSource]);
+  )
+  const fullScreenImages = useMemo(() => [imageSource], [imageSource])
 
   return (
     <View className="relative flex-1 bg-subtle">
@@ -35,8 +36,9 @@ function ResolvedWorkspaceFileImagePreview(props: {
           className="h-full w-full"
           resizeMode="contain"
           onLoadStart={() => setLoadError(null)}
-          onError={(event) => {
-            setLoadError(event.nativeEvent.error || "The image could not be rendered.");
+          onError={(event) =>
+          {
+            setLoadError(event.nativeEvent.error || 'The image could not be rendered.')
           }}
         />
       </Pressable>
@@ -56,17 +58,19 @@ function ResolvedWorkspaceFileImagePreview(props: {
         doubleTapToZoomEnabled
       />
     </View>
-  );
+  )
 }
 
 function CachedWorkspaceFileImagePreview(props: {
-  readonly accessibilityLabel: string;
-  readonly uri: string;
-}) {
-  const imageAtom = useMemo(() => workspaceFileImageAtom(props.uri), [props.uri]);
-  const imageResult = useAtomValue(imageAtom);
+  readonly accessibilityLabel: string
+  readonly uri: string
+})
+{
+  const imageAtom = useMemo(() => workspaceFileImageAtom(props.uri), [props.uri])
+  const imageResult = useAtomValue(imageAtom)
 
-  if (AsyncResult.isFailure(imageResult)) {
+  if (AsyncResult.isFailure(imageResult))
+  {
     return (
       <View className="flex-1 items-center justify-center bg-card px-6">
         <EmptyState
@@ -74,16 +78,17 @@ function CachedWorkspaceFileImagePreview(props: {
           detail="The image could not be loaded into the local cache."
         />
       </View>
-    );
+    )
   }
 
-  if (!AsyncResult.isSuccess(imageResult)) {
+  if (!AsyncResult.isSuccess(imageResult))
+  {
     return (
       <View className="flex-1 items-center justify-center gap-3 bg-card px-6">
         <ActivityIndicator />
         <Text className="text-center text-sm text-foreground-muted">Loading image...</Text>
       </View>
-    );
+    )
   }
 
   return (
@@ -91,14 +96,16 @@ function CachedWorkspaceFileImagePreview(props: {
       accessibilityLabel={props.accessibilityLabel}
       uri={imageResult.value}
     />
-  );
+  )
 }
 
 export function WorkspaceFileImagePreview(props: {
-  readonly accessibilityLabel: string;
-  readonly uri: string | null;
-}) {
-  if (props.uri === null) {
+  readonly accessibilityLabel: string
+  readonly uri: string | null
+})
+{
+  if (props.uri === null)
+  {
     return (
       <View className="flex-1 items-center justify-center gap-3 bg-card px-6">
         <ActivityIndicator />
@@ -106,7 +113,7 @@ export function WorkspaceFileImagePreview(props: {
           Preparing image preview...
         </Text>
       </View>
-    );
+    )
   }
 
   return (
@@ -114,5 +121,5 @@ export function WorkspaceFileImagePreview(props: {
       accessibilityLabel={props.accessibilityLabel}
       uri={props.uri}
     />
-  );
+  )
 }

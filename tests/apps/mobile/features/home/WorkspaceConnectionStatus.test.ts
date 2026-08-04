@@ -1,12 +1,13 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
-import type { WorkspaceState } from "../../../../../apps/mobile/src/state/workspaceModel";
+import type { WorkspaceState } from '../../../../../apps/mobile/src/state/workspaceModel'
 import {
   shouldShowWorkspaceConnectionStatus,
   workspaceConnectionStatusLabel,
-} from "../../../../../apps/mobile/src/features/home/workspace-connection-status";
+} from '../../../../../apps/mobile/src/features/home/workspace-connection-status'
 
-function workspaceState(overrides: Partial<WorkspaceState> = {}): WorkspaceState {
+function workspaceState(overrides: Partial<WorkspaceState> = {}): WorkspaceState
+{
   return {
     isLoadingConnections: false,
     hasConnections: true,
@@ -15,73 +16,80 @@ function workspaceState(overrides: Partial<WorkspaceState> = {}): WorkspaceState
     hasReadyEnvironment: true,
     hasConnectingEnvironment: false,
     connectingEnvironments: [],
-    connectionState: "connected",
+    connectionState: 'connected',
     connectionError: null,
     shellSnapshotError: null,
     latestCachedSnapshotReceivedAt: null,
-    networkStatus: "online",
+    networkStatus: 'online',
     ...overrides,
-  };
+  }
 }
 
-describe("workspace connection status", () => {
-  it("stays hidden while a ready environment is connected", () => {
-    expect(shouldShowWorkspaceConnectionStatus(workspaceState())).toBe(false);
-  });
+describe('workspace connection status', () =>
+{
+  it('stays hidden while a ready environment is connected', () =>
+  {
+    expect(shouldShowWorkspaceConnectionStatus(workspaceState())).toBe(false)
+  })
 
-  it("surfaces offline snapshots", () => {
-    const state = workspaceState({ networkStatus: "offline", hasReadyEnvironment: false });
+  it('surfaces offline snapshots', () =>
+  {
+    const state = workspaceState({ networkStatus: 'offline', hasReadyEnvironment: false })
 
-    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true);
-    expect(workspaceConnectionStatusLabel(state)).toBe("You are offline");
-  });
+    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true)
+    expect(workspaceConnectionStatusLabel(state)).toBe('You are offline')
+  })
 
-  it("names the environment while reconnecting", () => {
+  it('names the environment while reconnecting', () =>
+  {
     const state = workspaceState({
       hasConnectingEnvironment: true,
       hasReadyEnvironment: false,
       connectingEnvironments: [
         {
-          environmentId: "environment-1" as never,
-          environmentLabel: "Julius’s Mac mini",
-          displayUrl: "",
+          environmentId: 'environment-1' as never,
+          environmentLabel: 'Julius’s Mac mini',
+          displayUrl: '',
           isRelayManaged: false,
-          connectionState: "reconnecting",
+          connectionState: 'reconnecting',
           connectionError: null,
           connectionErrorTraceId: null,
         },
       ],
-    });
+    })
 
-    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true);
-    expect(workspaceConnectionStatusLabel(state)).toBe("Reconnecting to Julius’s Mac mini");
-  });
+    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true)
+    expect(workspaceConnectionStatusLabel(state)).toBe('Reconnecting to Julius’s Mac mini')
+  })
 
-  it("surfaces connection errors before the generic disconnected fallback", () => {
+  it('surfaces connection errors before the generic disconnected fallback', () =>
+  {
     const state = workspaceState({
-      connectionError: "Could not reach Julius’s Mac mini",
+      connectionError: 'Could not reach Julius’s Mac mini',
       hasLoadedShellSnapshot: false,
       hasReadyEnvironment: false,
-    });
+    })
 
-    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true);
-    expect(workspaceConnectionStatusLabel(state)).toBe("Could not reach Julius’s Mac mini");
-  });
+    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true)
+    expect(workspaceConnectionStatusLabel(state)).toBe('Could not reach Julius’s Mac mini')
+  })
 
-  it("shows shell catch-up while cached threads remain visible", () => {
-    const state = workspaceState({ hasPendingShellSnapshot: true });
+  it('shows shell catch-up while cached threads remain visible', () =>
+  {
+    const state = workspaceState({ hasPendingShellSnapshot: true })
 
-    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true);
-    expect(workspaceConnectionStatusLabel(state)).toBe("Syncing threads...");
-  });
+    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true)
+    expect(workspaceConnectionStatusLabel(state)).toBe('Syncing threads...')
+  })
 
-  it("distinguishes initial shell loading from cached catch-up", () => {
+  it('distinguishes initial shell loading from cached catch-up', () =>
+  {
     const state = workspaceState({
       hasLoadedShellSnapshot: false,
       hasPendingShellSnapshot: true,
-    });
+    })
 
-    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true);
-    expect(workspaceConnectionStatusLabel(state)).toBe("Loading threads...");
-  });
-});
+    expect(shouldShowWorkspaceConnectionStatus(state)).toBe(true)
+    expect(workspaceConnectionStatusLabel(state)).toBe('Loading threads...')
+  })
+})

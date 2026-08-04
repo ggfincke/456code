@@ -1,15 +1,15 @@
 // apps/mobile/src/features/threads/thread-work-log.tsx
 // renders expandable provider activity on mobile
-import * as Haptics from "expo-haptics";
-import { type AppSymbolName, SymbolView } from "../../components/AppSymbol";
-import { LayoutAnimation, Pressable, ScrollView, useColorScheme, View } from "react-native";
+import * as Haptics from 'expo-haptics'
+import { type AppSymbolName, SymbolView } from '../../components/AppSymbol'
+import { LayoutAnimation, Pressable, ScrollView, useColorScheme, View } from 'react-native'
 
-import { AppText as Text } from "../../components/AppText";
-import { scaledTypographyLineHeight } from "../../lib/appearancePreferences";
-import { cn } from "../../lib/cn";
-import type { ThreadFeedActivity } from "../../lib/threadActivity";
-import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
-import Animated, { FadeIn } from "react-native-reanimated";
+import { AppText as Text } from '../../components/AppText'
+import { scaledTypographyLineHeight } from '../../lib/appearancePreferences'
+import { cn } from '../../lib/cn'
+import type { ThreadFeedActivity } from '../../lib/threadActivity'
+import { MOBILE_TYPOGRAPHY } from '../../lib/typography'
+import Animated, { FadeIn } from 'react-native-reanimated'
 
 const WORK_LOG_LAYOUT_ANIMATION = {
   duration: 180,
@@ -22,120 +22,132 @@ const WORK_LOG_LAYOUT_ANIMATION = {
     type: LayoutAnimation.Types.easeInEaseOut,
     property: LayoutAnimation.Properties.opacity,
   },
-} as const;
+} as const
 
-function triggerDisclosureFeedback() {
-  LayoutAnimation.configureNext(WORK_LOG_LAYOUT_ANIMATION);
-  void Haptics.selectionAsync();
+function triggerDisclosureFeedback()
+{
+  LayoutAnimation.configureNext(WORK_LOG_LAYOUT_ANIMATION)
+  void Haptics.selectionAsync()
 }
 
-function stripShellWrapper(value: string): string {
-  const trimmed = value.trim();
-  const match = trimmed.match(/^\/bin\/zsh -lc ['"]?([\s\S]*?)['"]?$/);
-  return (match?.[1] ?? trimmed).trim();
+function stripShellWrapper(value: string): string
+{
+  const trimmed = value.trim()
+  const match = trimmed.match(/^\/bin\/zsh -lc ['"]?([\s\S]*?)['"]?$/)
+  return (match?.[1] ?? trimmed).trim()
 }
 
-function compactActivityDetail(detail: string | null): string | null {
-  if (!detail) {
-    return null;
+function compactActivityDetail(detail: string | null): string | null
+{
+  if (!detail)
+  {
+    return null
   }
 
-  const cleaned = stripShellWrapper(detail).replace(/\s+/g, " ").trim();
-  return cleaned.length > 0 ? cleaned : null;
+  const cleaned = stripShellWrapper(detail).replace(/\s+/g, ' ').trim()
+  return cleaned.length > 0 ? cleaned : null
 }
 
-function workRowSymbolName(icon: ThreadFeedActivity["icon"]): AppSymbolName {
-  switch (icon) {
-    case "agent":
-      return { ios: "sparkles", android: "auto_awesome" };
-    case "alert":
-      return { ios: "exclamationmark.triangle", android: "error" };
-    case "check":
-      return { ios: "checkmark", android: "check" };
-    case "command":
-      return { ios: "terminal", android: "terminal" };
-    case "edit":
-      return { ios: "square.and.pencil", android: "edit" };
-    case "eye":
-      return { ios: "eye", android: "visibility" };
-    case "globe":
-      return { ios: "globe", android: "public" };
-    case "hammer":
-      return { ios: "hammer", android: "construction" };
-    case "message":
-      return { ios: "bubble.left", android: "chat_bubble" };
-    case "warning":
-      return { ios: "xmark", android: "close" };
-    case "wrench":
-      return { ios: "wrench", android: "build" };
-    case "zap":
-      return { ios: "bolt", android: "bolt" };
+function workRowSymbolName(icon: ThreadFeedActivity['icon']): AppSymbolName
+{
+  switch (icon)
+  {
+    case 'agent':
+      return { ios: 'sparkles', android: 'auto_awesome' }
+    case 'alert':
+      return { ios: 'exclamationmark.triangle', android: 'error' }
+    case 'check':
+      return { ios: 'checkmark', android: 'check' }
+    case 'command':
+      return { ios: 'terminal', android: 'terminal' }
+    case 'edit':
+      return { ios: 'square.and.pencil', android: 'edit' }
+    case 'eye':
+      return { ios: 'eye', android: 'visibility' }
+    case 'globe':
+      return { ios: 'globe', android: 'public' }
+    case 'hammer':
+      return { ios: 'hammer', android: 'construction' }
+    case 'message':
+      return { ios: 'bubble.left', android: 'chat_bubble' }
+    case 'warning':
+      return { ios: 'xmark', android: 'close' }
+    case 'wrench':
+      return { ios: 'wrench', android: 'build' }
+    case 'zap':
+      return { ios: 'bolt', android: 'bolt' }
   }
 }
 
 // entering fades only for rows created moments ago: rows remount whenever the
 // list scrolls them back into view, and old rows must not replay an entrance.
-const FRESH_ROW_WINDOW_MS = 3_000;
-function isFreshRow(createdAt: string): boolean {
-  const timestamp = Date.parse(createdAt);
-  return Number.isFinite(timestamp) && Date.now() - timestamp < FRESH_ROW_WINDOW_MS;
+const FRESH_ROW_WINDOW_MS = 3_000
+function isFreshRow(createdAt: string): boolean
+{
+  const timestamp = Date.parse(createdAt)
+  return Number.isFinite(timestamp) && Date.now() - timestamp < FRESH_ROW_WINDOW_MS
 }
 
 // omit neutral tool rows that carry no visible status
 export function visibleWorkLogActivities(
   activities: ReadonlyArray<ThreadFeedActivity>,
-): ReadonlyArray<ThreadFeedActivity> {
-  return activities.filter((activity) => !(activity.toolLike && activity.status === "neutral"));
+): ReadonlyArray<ThreadFeedActivity>
+{
+  return activities.filter((activity) => !(activity.toolLike && activity.status === 'neutral'))
 }
 
 // mirror the collapsed work-log class names for premeasurement
-const WORK_ROW_HEIGHT = 32;
-const WORK_ROW_GAP = 1;
-const WORK_LOG_HEADER_PADDING = 2;
-const WORK_LOG_BOTTOM_MARGIN = 4;
+const WORK_ROW_HEIGHT = 32
+const WORK_ROW_GAP = 1
+const WORK_LOG_HEADER_PADDING = 2
+const WORK_LOG_BOTTOM_MARGIN = 4
 
 // min-h-8 plus mb-1
-export const WORK_GROUP_TOGGLE_HEIGHT = 36;
+export const WORK_GROUP_TOGGLE_HEIGHT = 36
 
 export function collapsedWorkLogHeight(
   activities: ReadonlyArray<ThreadFeedActivity>,
   baseFontSize: number,
-): number {
-  const rows = visibleWorkLogActivities(activities);
-  if (rows.length === 0) {
-    return 0;
+): number
+{
+  const rows = visibleWorkLogActivities(activities)
+  if (rows.length === 0)
+  {
+    return 0
   }
-  const onlyToolRows = rows.every((row) => row.toolLike);
+  const onlyToolRows = rows.every((row) => row.toolLike)
   const headerHeight =
-    scaledTypographyLineHeight(MOBILE_TYPOGRAPHY.caption, baseFontSize) + WORK_LOG_HEADER_PADDING;
+    scaledTypographyLineHeight(MOBILE_TYPOGRAPHY.caption, baseFontSize) + WORK_LOG_HEADER_PADDING
   return (
     WORK_LOG_BOTTOM_MARGIN +
     (onlyToolRows ? 0 : headerHeight) +
     rows.length * WORK_ROW_HEIGHT +
     (rows.length - 1) * WORK_ROW_GAP
-  );
+  )
 }
 
 export function ThreadWorkLog(props: {
-  readonly activities: ReadonlyArray<ThreadFeedActivity>;
-  readonly copiedRowId: string | null;
-  readonly expandedRows: Readonly<Record<string, boolean>>;
-  readonly iconSubtleColor: import("react-native").ColorValue;
-  readonly onCopyRow: (rowId: string, value: string) => void;
-  readonly onToggleRow: (rowId: string) => void;
-}) {
-  const colorScheme = useColorScheme();
-  const pressedBackground = colorScheme === "dark" ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.035)";
+  readonly activities: ReadonlyArray<ThreadFeedActivity>
+  readonly copiedRowId: string | null
+  readonly expandedRows: Readonly<Record<string, boolean>>
+  readonly iconSubtleColor: import('react-native').ColorValue
+  readonly onCopyRow: (rowId: string, value: string) => void
+  readonly onToggleRow: (rowId: string) => void
+})
+{
+  const colorScheme = useColorScheme()
+  const pressedBackground = colorScheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.035)'
   const rows = visibleWorkLogActivities(props.activities).map((activity) => ({
     ...activity,
     detail: compactActivityDetail(activity.detail),
-  }));
+  }))
 
-  if (rows.length === 0) {
-    return null;
+  if (rows.length === 0)
+  {
+    return null
   }
 
-  const onlyToolRows = rows.every((row) => row.toolLike);
+  const onlyToolRows = rows.every((row) => row.toolLike)
 
   return (
     <View className="-mx-1 mb-1 px-1 py-0">
@@ -146,12 +158,13 @@ export function ThreadWorkLog(props: {
       ) : null}
 
       <View className="gap-px">
-        {rows.map((row) => {
-          const expanded = props.expandedRows[row.id] ?? false;
-          const canExpand = row.canExpand;
-          const fullDetail = expanded ? row.getFullDetail() : null;
-          const displayText = row.detail ? `${row.summary} ${row.detail}` : row.summary;
-          const iconIsDestructive = row.icon === "alert" || row.icon === "warning";
+        {rows.map((row) =>
+        {
+          const expanded = props.expandedRows[row.id] ?? false
+          const canExpand = row.canExpand
+          const fullDetail = expanded ? row.getFullDetail() : null
+          const displayText = row.detail ? `${row.summary} ${row.detail}` : row.summary
+          const iconIsDestructive = row.icon === 'alert' || row.icon === 'warning'
 
           return (
             <Animated.View
@@ -159,24 +172,26 @@ export function ThreadWorkLog(props: {
               {...(isFreshRow(row.createdAt) ? { entering: FadeIn.duration(200) } : {})}
             >
               <Pressable
-                accessibilityRole={canExpand ? "button" : undefined}
+                accessibilityRole={canExpand ? 'button' : undefined}
                 accessibilityLabel={displayText}
                 accessibilityHint={
                   canExpand
-                    ? "Double tap to show full details. Long press to copy."
-                    : "Long press to copy."
+                    ? 'Double tap to show full details. Long press to copy.'
+                    : 'Long press to copy.'
                 }
                 accessibilityState={canExpand ? { expanded } : undefined}
                 hitSlop={4}
-                onPress={() => {
-                  if (canExpand) {
-                    triggerDisclosureFeedback();
-                    props.onToggleRow(row.id);
+                onPress={() =>
+                {
+                  if (canExpand)
+                  {
+                    triggerDisclosureFeedback()
+                    props.onToggleRow(row.id)
                   }
                 }}
                 onLongPress={() => props.onCopyRow(row.id, row.getCopyText())}
                 style={({ pressed }) => ({
-                  backgroundColor: pressed ? pressedBackground : "transparent",
+                  backgroundColor: pressed ? pressedBackground : 'transparent',
                 })}
                 className="rounded-md px-0.5 py-0"
               >
@@ -186,7 +201,7 @@ export function ThreadWorkLog(props: {
                       name={workRowSymbolName(row.icon)}
                       size={13}
                       weight="medium"
-                      tintColor={iconIsDestructive ? "#e11d48" : props.iconSubtleColor}
+                      tintColor={iconIsDestructive ? '#e11d48' : props.iconSubtleColor}
                       type="monochrome"
                     />
                   </View>
@@ -194,8 +209,8 @@ export function ThreadWorkLog(props: {
                   <Text className="min-w-0 flex-1 text-xs text-foreground" numberOfLines={1}>
                     <Text
                       className={cn(
-                        "font-sans-medium text-foreground",
-                        iconIsDestructive && "text-rose-600 dark:text-rose-400",
+                        'font-sans-medium text-foreground',
+                        iconIsDestructive && 'text-rose-600 dark:text-rose-400',
                       )}
                     >
                       {row.summary}
@@ -216,8 +231,8 @@ export function ThreadWorkLog(props: {
                         <SymbolView
                           name={
                             expanded
-                              ? { ios: "chevron.up", android: "keyboard_arrow_up" }
-                              : { ios: "chevron.down", android: "keyboard_arrow_down" }
+                              ? { ios: 'chevron.up', android: 'keyboard_arrow_up' }
+                              : { ios: 'chevron.down', android: 'keyboard_arrow_down' }
                           }
                           size={11}
                           tintColor={props.iconSubtleColor}
@@ -229,14 +244,14 @@ export function ThreadWorkLog(props: {
                       {row.status ? (
                         <SymbolView
                           name={
-                            row.status === "failure"
-                              ? { ios: "xmark", android: "close" }
-                              : row.status === "success"
-                                ? { ios: "checkmark", android: "check" }
-                                : { ios: "minus", android: "remove" }
+                            row.status === 'failure'
+                              ? { ios: 'xmark', android: 'close' }
+                              : row.status === 'success'
+                                ? { ios: 'checkmark', android: 'check' }
+                                : { ios: 'minus', android: 'remove' }
                           }
                           size={11}
-                          tintColor={row.status === "failure" ? "#e11d48" : props.iconSubtleColor}
+                          tintColor={row.status === 'failure' ? '#e11d48' : props.iconSubtleColor}
                           type="monochrome"
                         />
                       ) : null}
@@ -264,33 +279,34 @@ export function ThreadWorkLog(props: {
                 </View>
               ) : null}
             </Animated.View>
-          );
+          )
         })}
       </View>
     </View>
-  );
+  )
 }
 
 export function ThreadWorkGroupToggle(props: {
-  readonly expanded: boolean;
-  readonly hiddenCount: number;
-  readonly iconSubtleColor: import("react-native").ColorValue;
-  readonly onlyToolActivities: boolean;
-  readonly onToggle: () => void;
-}) {
-  const colorScheme = useColorScheme();
-  const pressedBackground = colorScheme === "dark" ? "rgba(255,255,255,0.05)" : "rgba(0,0,0,0.035)";
+  readonly expanded: boolean
+  readonly hiddenCount: number
+  readonly iconSubtleColor: import('react-native').ColorValue
+  readonly onlyToolActivities: boolean
+  readonly onToggle: () => void
+})
+{
+  const colorScheme = useColorScheme()
+  const pressedBackground = colorScheme === 'dark' ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.035)'
   const noun = props.onlyToolActivities
     ? props.hiddenCount === 1
-      ? "tool call"
-      : "tool calls"
+      ? 'tool call'
+      : 'tool calls'
     : props.hiddenCount === 1
-      ? "log entry"
-      : "log entries";
-  const collapsedLabel = `Show ${props.hiddenCount} previous ${noun}`;
+      ? 'log entry'
+      : 'log entries'
+  const collapsedLabel = `Show ${props.hiddenCount} previous ${noun}`
   const expandedLabel = props.onlyToolActivities
-    ? "Show fewer tool calls"
-    : "Show fewer log entries";
+    ? 'Show fewer tool calls'
+    : 'Show fewer log entries'
 
   return (
     <View className="-mx-1 mb-1 px-1 py-0">
@@ -299,12 +315,13 @@ export function ThreadWorkGroupToggle(props: {
         accessibilityState={{ expanded: props.expanded }}
         accessibilityLabel={props.expanded ? expandedLabel : collapsedLabel}
         hitSlop={4}
-        onPress={() => {
-          void Haptics.selectionAsync();
-          props.onToggle();
+        onPress={() =>
+        {
+          void Haptics.selectionAsync()
+          props.onToggle()
         }}
         style={({ pressed }) => ({
-          backgroundColor: pressed ? pressedBackground : "transparent",
+          backgroundColor: pressed ? pressedBackground : 'transparent',
         })}
         className="min-h-8 flex-row items-center gap-1.5 rounded-md px-0.5 py-0"
       >
@@ -312,8 +329,8 @@ export function ThreadWorkGroupToggle(props: {
           <SymbolView
             name={
               props.expanded
-                ? { ios: "chevron.up", android: "keyboard_arrow_up" }
-                : { ios: "chevron.down", android: "keyboard_arrow_down" }
+                ? { ios: 'chevron.up', android: 'keyboard_arrow_up' }
+                : { ios: 'chevron.down', android: 'keyboard_arrow_down' }
             }
             size={12}
             tintColor={props.iconSubtleColor}
@@ -325,5 +342,5 @@ export function ThreadWorkGroupToggle(props: {
         </Text>
       </Pressable>
     </View>
-  );
+  )
 }

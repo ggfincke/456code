@@ -9,11 +9,12 @@
  *
  * @module CursorAdapter
  */
-import type { ProviderAdapterError } from "../Errors.ts";
-import type { ProviderAdapterShape } from "./ProviderAdapter.ts";
+import type { ProviderAdapterError } from '../Errors.ts'
+import type { ProviderAdapterShape } from './ProviderAdapter.ts'
 
 /**
  * CursorAdapterShape — per-instance Cursor adapter contract. Carries
  * a branded driver kind as the nominal discriminant.
  */
-export interface CursorAdapterShape extends ProviderAdapterShape<ProviderAdapterError> {}
+export interface CursorAdapterShape extends ProviderAdapterShape<ProviderAdapterError>
+{}

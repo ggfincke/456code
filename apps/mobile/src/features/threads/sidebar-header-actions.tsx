@@ -1,26 +1,28 @@
-import { SymbolView } from "../../components/AppSymbol";
-import { Pressable, StyleSheet, View, useColorScheme } from "react-native";
+import { SymbolView } from '../../components/AppSymbol'
+import { Pressable, StyleSheet, View, useColorScheme } from 'react-native'
 
-import { useThemeColor } from "../../lib/useThemeColor";
+import { useThemeColor } from '../../lib/useThemeColor'
 
-export interface SidebarHeaderActionsProps {
-  readonly onOpenSettings: () => void;
+export interface SidebarHeaderActionsProps
+{
+  readonly onOpenSettings: () => void
   /** Rendered inside a shared capsule group — buttons drop their own chrome. */
-  readonly grouped?: boolean;
+  readonly grouped?: boolean
 }
 
 function FallbackHeaderButton(props: {
-  readonly accessibilityLabel: string;
-  readonly icon: "gearshape" | "square.and.pencil";
-  readonly grouped?: boolean;
-  readonly onPress: () => void;
-}) {
-  const iconColor = useThemeColor("--color-foreground");
-  const pressedBackgroundColor = useThemeColor("--color-subtle");
-  const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
+  readonly accessibilityLabel: string
+  readonly icon: 'gearshape' | 'square.and.pencil'
+  readonly grouped?: boolean
+  readonly onPress: () => void
+})
+{
+  const iconColor = useThemeColor('--color-foreground')
+  const pressedBackgroundColor = useThemeColor('--color-subtle')
+  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light'
   const idleBackgroundColor =
-    colorScheme === "dark" ? "rgba(118,118,128,0.24)" : "rgba(255,255,255,0.72)";
-  const borderColor = colorScheme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
+    colorScheme === 'dark' ? 'rgba(118,118,128,0.24)' : 'rgba(255,255,255,0.72)'
+  const borderColor = colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
 
   return (
     <Pressable
@@ -31,7 +33,7 @@ function FallbackHeaderButton(props: {
       onPress={props.onPress}
       style={({ pressed }) => [
         props.grouped
-          ? { backgroundColor: pressed ? pressedBackgroundColor : "transparent", borderWidth: 0 }
+          ? { backgroundColor: pressed ? pressedBackgroundColor : 'transparent', borderWidth: 0 }
           : {
               backgroundColor: pressed ? pressedBackgroundColor : idleBackgroundColor,
               borderColor,
@@ -41,10 +43,11 @@ function FallbackHeaderButton(props: {
     >
       <SymbolView name={props.icon} size={20} tintColor={iconColor} type="monochrome" />
     </Pressable>
-  );
+  )
 }
 
-export function SidebarHeaderActions(props: SidebarHeaderActionsProps) {
+export function SidebarHeaderActions(props: SidebarHeaderActionsProps)
+{
   return (
     <View className="flex-row items-center gap-0.5">
       <FallbackHeaderButton
@@ -54,5 +57,5 @@ export function SidebarHeaderActions(props: SidebarHeaderActionsProps) {
         onPress={props.onOpenSettings}
       />
     </View>
-  );
+  )
 }

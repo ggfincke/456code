@@ -1,44 +1,50 @@
-import { assert, it } from "@effect/vitest";
+import { assert, it } from '@effect/vitest'
 
-import { retryShowcaseOperation } from "../../../../../apps/mobile/src/features/showcase/showcaseRetry";
+import { retryShowcaseOperation } from '../../../../../apps/mobile/src/features/showcase/showcaseRetry'
 
-it("retries a failed showcase operation until it succeeds", async () => {
-  let attempts = 0;
+it('retries a failed showcase operation until it succeeds', async () =>
+{
+  let attempts = 0
   const succeeded = await retryShowcaseOperation(
-    async () => {
-      attempts += 1;
-      return attempts === 3;
+    async () =>
+    {
+      attempts += 1
+      return attempts === 3
     },
     { isCancelled: () => false, retryDelayMs: 0 },
-  );
+  )
 
-  assert.equal(succeeded, true);
-  assert.equal(attempts, 3);
-});
+  assert.equal(succeeded, true)
+  assert.equal(attempts, 3)
+})
 
-it("recovers when a showcase operation attempt hangs", async () => {
-  let attempts = 0;
+it('recovers when a showcase operation attempt hangs', async () =>
+{
+  let attempts = 0
   const succeeded = await retryShowcaseOperation(
-    () => {
-      attempts += 1;
-      return attempts === 1 ? new Promise<boolean>(() => undefined) : Promise.resolve(true);
+    () =>
+    {
+      attempts += 1
+      return attempts === 1 ? new Promise<boolean>(() => undefined) : Promise.resolve(true)
     },
     { isCancelled: () => false, attemptTimeoutMs: 1, retryDelayMs: 0 },
-  );
+  )
 
-  assert.equal(succeeded, true);
-  assert.equal(attempts, 2);
-});
+  assert.equal(succeeded, true)
+  assert.equal(attempts, 2)
+})
 
-it("stops retrying when the owning showcase effect is cancelled", async () => {
-  let cancelled = false;
+it('stops retrying when the owning showcase effect is cancelled', async () =>
+{
+  let cancelled = false
   const succeeded = await retryShowcaseOperation(
-    async () => {
-      cancelled = true;
-      return false;
+    async () =>
+    {
+      cancelled = true
+      return false
     },
     { isCancelled: () => cancelled, retryDelayMs: 0 },
-  );
+  )
 
-  assert.equal(succeeded, false);
-});
+  assert.equal(succeeded, false)
+})

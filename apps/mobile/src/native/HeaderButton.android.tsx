@@ -1,20 +1,22 @@
-import { requireNativeView } from "expo";
-import type { NativeSyntheticEvent, StyleProp, ViewProps, ViewStyle } from "react-native";
+import { requireNativeView } from 'expo'
+import type { NativeSyntheticEvent, StyleProp, ViewProps, ViewStyle } from 'react-native'
 
-interface NativeHeaderButtonProps extends ViewProps {
-  readonly label: string;
-  readonly systemImage: "gearshape" | "square.and.pencil";
-  readonly onTriggered: (event: NativeSyntheticEvent<Record<string, never>>) => void;
+interface NativeHeaderButtonProps extends ViewProps
+{
+  readonly label: string
+  readonly systemImage: 'gearshape' | 'square.and.pencil'
+  readonly onTriggered: (event: NativeSyntheticEvent<Record<string, never>>) => void
 }
 
-const NativeHeaderButton = requireNativeView<NativeHeaderButtonProps>("Code456NativeControls");
+const NativeHeaderButton = requireNativeView<NativeHeaderButtonProps>('Code456NativeControls')
 
 export function HeaderButton(props: {
-  readonly accessibilityLabel: string;
-  readonly icon: NativeHeaderButtonProps["systemImage"];
-  readonly onPress: () => void;
-  readonly style?: StyleProp<ViewStyle>;
-}) {
+  readonly accessibilityLabel: string
+  readonly icon: NativeHeaderButtonProps['systemImage']
+  readonly onPress: () => void
+  readonly style?: StyleProp<ViewStyle>
+})
+{
   return (
     <NativeHeaderButton
       label={props.accessibilityLabel}
@@ -22,5 +24,5 @@ export function HeaderButton(props: {
       style={[{ width: 44, height: 44 }, props.style]}
       systemImage={props.icon}
     />
-  );
+  )
 }

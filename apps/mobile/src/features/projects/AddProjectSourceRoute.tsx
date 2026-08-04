@@ -1,5 +1,6 @@
-import { AddProjectSourceScreen } from "./AddProjectScreen";
+import { AddProjectSourceScreen } from './AddProjectScreen'
 
-export function AddProjectSourceRoute() {
-  return <AddProjectSourceScreen />;
+export function AddProjectSourceRoute()
+{
+  return <AddProjectSourceScreen />
 }

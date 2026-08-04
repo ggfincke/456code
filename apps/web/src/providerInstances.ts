@@ -23,9 +23,9 @@ import {
   type ServerProviderModel,
   type ServerSettings,
   type ServerProviderState,
-} from "@t3tools/contracts";
+} from '@t3tools/contracts'
 
-import { formatProviderDriverKindLabel } from "./providerModels";
+import { formatProviderDriverKindLabel } from './providerModels'
 
 /**
  * Local-only placeholder used while a draft has no provider it can safely
@@ -33,9 +33,9 @@ import { formatProviderDriverKindLabel } from "./providerModels";
  * send until a live provider replaces it.
  */
 export const NO_PROVIDER_MODEL_SELECTION: ModelSelection = {
-  instanceId: ProviderInstanceId.make("t3code_no_provider"),
-  model: "",
-};
+  instanceId: ProviderInstanceId.make('t3code_no_provider'),
+  model: '',
+}
 
 /**
  * UI-facing projection of one configured provider instance. Carries the
@@ -43,25 +43,26 @@ export const NO_PROVIDER_MODEL_SELECTION: ModelSelection = {
  * hoist here, plus the precomputed `instanceId` / `driverKind` /
  * `displayName` used by every picker and settings view.
  */
-export interface ProviderInstanceEntry {
-  readonly instanceId: ProviderInstanceId;
-  readonly driverKind: ProviderDriverKind;
-  readonly displayName: string;
-  readonly accentColor?: string | undefined;
-  readonly continuationGroupKey?: string | undefined;
-  readonly enabled: boolean;
-  readonly installed: boolean;
-  readonly status: ServerProviderState;
+export interface ProviderInstanceEntry
+{
+  readonly instanceId: ProviderInstanceId
+  readonly driverKind: ProviderDriverKind
+  readonly displayName: string
+  readonly accentColor?: string | undefined
+  readonly continuationGroupKey?: string | undefined
+  readonly enabled: boolean
+  readonly installed: boolean
+  readonly status: ServerProviderState
   /**
    * True when this entry is the default instance for its driver kind —
    * i.e. its instance id equals `defaultInstanceIdForDriver(driverKind)`.
    * The settings panel and picker sort defaults before customs.
    */
-  readonly isDefault: boolean;
+  readonly isDefault: boolean
   /** True when `availability === "unavailable"` is absent or "available". */
-  readonly isAvailable: boolean;
-  readonly snapshot: ServerProvider;
-  readonly models: ReadonlyArray<ServerProviderModel>;
+  readonly isAvailable: boolean
+  readonly snapshot: ServerProvider
+  readonly models: ReadonlyArray<ServerProviderModel>
 }
 
 /**
@@ -70,13 +71,15 @@ export interface ProviderInstanceEntry {
  * Disabling an instance updates `enabled` independently, while its previous
  * `ready` probe status can remain in the streamed snapshot until reconciliation.
  */
-export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boolean {
-  return entry.enabled && entry.isAvailable && entry.status === "ready";
+export function isProviderInstancePickerReady(entry: ProviderInstanceEntry): boolean
+{
+  return entry.enabled && entry.isAvailable && entry.status === 'ready'
 }
 
 /** Picker rails contain configured, enabled instances only. */
-export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean {
-  return entry.enabled;
+export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): boolean
+{
+  return entry.enabled
 }
 
 /**
@@ -93,26 +96,30 @@ export function isProviderInstancePickerVisible(entry: ProviderInstanceEntry): b
  * `ProviderInstanceConfig.displayName` through to the snapshot, that value
  * will take precedence over this fallback.
  */
-function humanizeInstanceId(instanceId: ProviderInstanceId): string {
-  const words: string[] = [];
+function humanizeInstanceId(instanceId: ProviderInstanceId): string
+{
+  const words: string[] = []
   for (const token of instanceId
-    .replace(/[_-]+/g, " ")
-    .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .split(" ")) {
-    if (token.length === 0) continue;
-    words.push(token.charAt(0).toUpperCase() + token.slice(1));
+    .replace(/[_-]+/g, ' ')
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .split(' '))
+    {
+    if (token.length === 0) continue
+    words.push(token.charAt(0).toUpperCase() + token.slice(1))
   }
-  return words.join(" ");
+  return words.join(' ')
 }
 
-function driverKindLabel(driverKind: ProviderDriverKind): string {
-  return PROVIDER_DISPLAY_NAMES[driverKind] ?? formatProviderDriverKindLabel(driverKind);
+function driverKindLabel(driverKind: ProviderDriverKind): string
+{
+  return PROVIDER_DISPLAY_NAMES[driverKind] ?? formatProviderDriverKindLabel(driverKind)
 }
 
-export function normalizeProviderAccentColor(value: string | undefined): string | undefined {
-  const trimmed = value?.trim();
-  if (!trimmed) return undefined;
-  return /^#[0-9a-fA-F]{6}$/u.test(trimmed) ? trimmed : undefined;
+export function normalizeProviderAccentColor(value: string | undefined): string | undefined
+{
+  const trimmed = value?.trim()
+  if (!trimmed) return undefined
+  return /^#[0-9a-fA-F]{6}$/u.test(trimmed) ? trimmed : undefined
 }
 
 /**
@@ -136,17 +143,20 @@ function resolveInstanceDisplayName(
   instanceId: ProviderInstanceId,
   driverKind: ProviderDriverKind,
   isDefault: boolean,
-): string {
-  const trimmedSnapshotName = snapshot.displayName?.trim();
-  const kindLabel = driverKindLabel(driverKind);
-  if (trimmedSnapshotName && trimmedSnapshotName !== kindLabel) {
-    return trimmedSnapshotName;
+): string
+{
+  const trimmedSnapshotName = snapshot.displayName?.trim()
+  const kindLabel = driverKindLabel(driverKind)
+  if (trimmedSnapshotName && trimmedSnapshotName !== kindLabel)
+  {
+    return trimmedSnapshotName
   }
-  if (!isDefault) {
-    const humanized = humanizeInstanceId(instanceId);
-    if (humanized.length > 0) return humanized;
+  if (!isDefault)
+  {
+    const humanized = humanizeInstanceId(instanceId)
+    if (humanized.length > 0) return humanized
   }
-  return trimmedSnapshotName || kindLabel;
+  return trimmedSnapshotName || kindLabel
 }
 
 /**
@@ -158,13 +168,15 @@ function resolveInstanceDisplayName(
  */
 export function deriveProviderInstanceEntries(
   providers: ReadonlyArray<ServerProvider>,
-): ReadonlyArray<ProviderInstanceEntry> {
-  return providers.map((snapshot) => {
-    const instanceId = snapshot.instanceId;
-    const driverKind = snapshot.driver;
-    const defaultId = defaultInstanceIdForDriver(driverKind);
-    const isDefault = instanceId === defaultId;
-    const displayName = resolveInstanceDisplayName(snapshot, instanceId, driverKind, isDefault);
+): ReadonlyArray<ProviderInstanceEntry>
+{
+  return providers.map((snapshot) =>
+  {
+    const instanceId = snapshot.instanceId
+    const driverKind = snapshot.driver
+    const defaultId = defaultInstanceIdForDriver(driverKind)
+    const isDefault = instanceId === defaultId
+    const displayName = resolveInstanceDisplayName(snapshot, instanceId, driverKind, isDefault)
     return {
       instanceId,
       driverKind,
@@ -175,11 +187,11 @@ export function deriveProviderInstanceEntries(
       installed: snapshot.installed,
       status: snapshot.status,
       isDefault,
-      isAvailable: snapshot.availability !== "unavailable",
+      isAvailable: snapshot.availability !== 'unavailable',
       snapshot,
       models: snapshot.models,
-    } satisfies ProviderInstanceEntry;
-  });
+    } satisfies ProviderInstanceEntry
+  })
 }
 
 /**
@@ -194,21 +206,23 @@ export function deriveProviderInstanceEntries(
  */
 export function applyProviderInstanceSettings(
   entries: ReadonlyArray<ProviderInstanceEntry>,
-  settings: Pick<ServerSettings, "providerInstances" | "providers">,
-): ReadonlyArray<ProviderInstanceEntry> {
+  settings: Pick<ServerSettings, 'providerInstances' | 'providers'>,
+): ReadonlyArray<ProviderInstanceEntry>
+{
   const legacyProviders = settings.providers as Readonly<
     Record<string, { readonly enabled?: boolean } | undefined>
-  >;
+  >
 
-  return entries.map((entry) => {
-    const explicitInstance = settings.providerInstances?.[entry.instanceId];
+  return entries.map((entry) =>
+  {
+    const explicitInstance = settings.providerInstances?.[entry.instanceId]
     const enabled = explicitInstance
       ? (explicitInstance.enabled ?? true)
       : entry.isDefault
         ? (legacyProviders[entry.driverKind]?.enabled ?? entry.enabled)
-        : false;
-    return enabled === entry.enabled ? entry : { ...entry, enabled };
-  });
+        : false
+    return enabled === entry.enabled ? entry : { ...entry, enabled }
+  })
 }
 
 /**
@@ -220,27 +234,33 @@ export function applyProviderInstanceSettings(
  */
 export function sortProviderInstanceEntries(
   entries: ReadonlyArray<ProviderInstanceEntry>,
-): ReadonlyArray<ProviderInstanceEntry> {
+): ReadonlyArray<ProviderInstanceEntry>
+{
   // Group by driver kind preserving first-appearance order, then emit
   // default-first within each kind. Using a Map keeps the "first-seen"
   // semantics for kinds whose default instance is absent (unusual but
   // possible during the migration).
-  const byKind = new Map<ProviderDriverKind, ProviderInstanceEntry[]>();
-  for (const entry of entries) {
-    const bucket = byKind.get(entry.driverKind);
-    if (bucket) {
-      bucket.push(entry);
-    } else {
-      byKind.set(entry.driverKind, [entry]);
+  const byKind = new Map<ProviderDriverKind, ProviderInstanceEntry[]>()
+  for (const entry of entries)
+  {
+    const bucket = byKind.get(entry.driverKind)
+    if (bucket)
+    {
+      bucket.push(entry)
+    }
+    else
+    {
+      byKind.set(entry.driverKind, [entry])
     }
   }
-  const sorted: ProviderInstanceEntry[] = [];
-  for (const bucket of byKind.values()) {
-    const defaults = bucket.filter((entry) => entry.isDefault);
-    const customs = bucket.filter((entry) => !entry.isDefault);
-    sorted.push(...defaults, ...customs);
+  const sorted: ProviderInstanceEntry[] = []
+  for (const bucket of byKind.values())
+  {
+    const defaults = bucket.filter((entry) => entry.isDefault)
+    const customs = bucket.filter((entry) => !entry.isDefault)
+    sorted.push(...defaults, ...customs)
   }
-  return sorted;
+  return sorted
 }
 
 /**
@@ -250,8 +270,9 @@ export function sortProviderInstanceEntries(
 export function getProviderInstanceEntry(
   providers: ReadonlyArray<ServerProvider>,
   instanceId: ProviderInstanceId,
-): ProviderInstanceEntry | undefined {
-  return deriveProviderInstanceEntries(providers).find((entry) => entry.instanceId === instanceId);
+): ProviderInstanceEntry | undefined
+{
+  return deriveProviderInstanceEntries(providers).find((entry) => entry.instanceId === instanceId)
 }
 
 /**
@@ -261,8 +282,9 @@ export function getProviderInstanceEntry(
 export function getProviderInstanceModels(
   providers: ReadonlyArray<ServerProvider>,
   instanceId: ProviderInstanceId,
-): ReadonlyArray<ServerProviderModel> {
-  return getProviderInstanceEntry(providers, instanceId)?.models ?? [];
+): ReadonlyArray<ServerProviderModel>
+{
+  return getProviderInstanceEntry(providers, instanceId)?.models ?? []
 }
 
 /**
@@ -275,19 +297,20 @@ export function getProviderInstanceModels(
 export function getDefaultProviderInstanceModel(
   providers: ReadonlyArray<ServerProvider>,
   instanceId: ProviderInstanceId,
-): string | undefined {
-  const entry = getProviderInstanceEntry(providers, instanceId);
-  if (!entry) return undefined;
+): string | undefined
+{
+  const entry = getProviderInstanceEntry(providers, instanceId)
+  if (!entry) return undefined
   return (
     entry.models.find((model) => model.isDefault && !model.isCustom)?.slug ??
     entry.models.find((model) => !model.isCustom)?.slug ??
     entry.models[0]?.slug ??
     DEFAULT_MODEL_BY_PROVIDER[entry.driverKind]
-  );
+  )
 }
 
 const isSelectableProviderInstanceEntry = (entry: ProviderInstanceEntry): boolean =>
-  entry.enabled && entry.isAvailable;
+  entry.enabled && entry.isAvailable
 
 /**
  * Resolve an exact stored instance when it remains enabled and available.
@@ -299,17 +322,20 @@ const isSelectableProviderInstanceEntry = (entry: ProviderInstanceEntry): boolea
 export function resolveSelectableProviderInstanceEntry(
   entries: ReadonlyArray<ProviderInstanceEntry>,
   instanceId: ProviderInstanceId | undefined,
-): ProviderInstanceEntry | undefined {
-  if (instanceId !== undefined) {
-    const requested = entries.find((entry) => entry.instanceId === instanceId);
-    if (requested && isSelectableProviderInstanceEntry(requested)) {
-      return requested;
+): ProviderInstanceEntry | undefined
+{
+  if (instanceId !== undefined)
+  {
+    const requested = entries.find((entry) => entry.instanceId === instanceId)
+    if (requested && isSelectableProviderInstanceEntry(requested))
+    {
+      return requested
     }
   }
   return (
     entries.find(isProviderInstancePickerReady) ??
-    entries.find((entry) => isSelectableProviderInstanceEntry(entry) && entry.status !== "error")
-  );
+    entries.find((entry) => isSelectableProviderInstanceEntry(entry) && entry.status !== 'error')
+  )
 }
 
 /**
@@ -321,9 +347,10 @@ export function resolveSelectableProviderInstanceEntry(
 export function resolveSelectableProviderInstance(
   providers: ReadonlyArray<ServerProvider>,
   instanceId: ProviderInstanceId | undefined,
-): ProviderInstanceId | undefined {
-  const entries = deriveProviderInstanceEntries(providers);
-  return resolveSelectableProviderInstanceEntry(entries, instanceId)?.instanceId;
+): ProviderInstanceId | undefined
+{
+  const entries = deriveProviderInstanceEntries(providers)
+  return resolveSelectableProviderInstanceEntry(entries, instanceId)?.instanceId
 }
 
 /**
@@ -335,12 +362,13 @@ export function resolveSelectableProviderInstance(
 export function resolveDefaultProviderModelSelection(
   providers: ReadonlyArray<ServerProvider>,
   selection: ModelSelection | null | undefined,
-): ModelSelection | null {
-  const instanceId = resolveSelectableProviderInstance(providers, selection?.instanceId);
-  if (instanceId === undefined) return null;
-  if (selection?.instanceId === instanceId) return selection;
-  const model = getDefaultProviderInstanceModel(providers, instanceId);
-  return model ? { instanceId, model } : null;
+): ModelSelection | null
+{
+  const instanceId = resolveSelectableProviderInstance(providers, selection?.instanceId)
+  if (instanceId === undefined) return null
+  if (selection?.instanceId === instanceId) return selection
+  const model = getDefaultProviderInstanceModel(providers, instanceId)
+  return model ? { instanceId, model } : null
 }
 
 /**
@@ -353,10 +381,12 @@ export function resolveProviderDriverKindForInstanceSelection(
   entries: ReadonlyArray<ProviderInstanceEntry>,
   providers: ReadonlyArray<ServerProvider>,
   selection: ProviderInstanceId | ProviderDriverKind | null | undefined,
-): ProviderDriverKind | undefined {
-  const matchedEntry = entries.find((entry) => entry.instanceId === selection);
-  if (matchedEntry) {
-    return matchedEntry.driverKind;
+): ProviderDriverKind | undefined
+{
+  const matchedEntry = entries.find((entry) => entry.instanceId === selection)
+  if (matchedEntry)
+  {
+    return matchedEntry.driverKind
   }
-  return undefined;
+  return undefined
 }

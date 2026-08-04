@@ -8,24 +8,25 @@
  *
  * @module DrainableWorker
  */
-import * as Scope from "effect/Scope";
-import * as Effect from "effect/Effect";
-import * as TxQueue from "effect/TxQueue";
-import * as TxRef from "effect/TxRef";
+import * as Scope from 'effect/Scope'
+import * as Effect from 'effect/Effect'
+import * as TxQueue from 'effect/TxQueue'
+import * as TxRef from 'effect/TxRef'
 
-export interface DrainableWorker<A> {
+export interface DrainableWorker<A>
+{
   /**
    * Enqueue a work item and track it for `drain()`.
    *
    * This wraps `Queue.offer` so drain state is updated atomically with the
    * enqueue path instead of inferring it from queue internals.
    */
-  readonly enqueue: (item: A) => Effect.Effect<void>;
+  readonly enqueue: (item: A) => Effect.Effect<void>
 
   /**
    * Resolves when the queue is empty and the worker is idle (not processing).
    */
-  readonly drain: Effect.Effect<void>;
+  readonly drain: Effect.Effect<void>
 }
 
 /**
@@ -40,9 +41,10 @@ export interface DrainableWorker<A> {
 export const makeDrainableWorker = <A, E, R>(
   process: (item: A) => Effect.Effect<void, E, R>,
 ): Effect.Effect<DrainableWorker<A>, never, Scope.Scope | R> =>
-  Effect.gen(function* () {
-    const queue = yield* Effect.acquireRelease(TxQueue.unbounded<A>(), TxQueue.shutdown);
-    const outstanding = yield* TxRef.make(0);
+  Effect.gen(function* ()
+  {
+    const queue = yield* Effect.acquireRelease(TxQueue.unbounded<A>(), TxQueue.shutdown)
+    const outstanding = yield* TxRef.make(0)
 
     yield* TxQueue.take(queue).pipe(
       Effect.tap((a) =>
@@ -53,18 +55,18 @@ export const makeDrainableWorker = <A, E, R>(
       ),
       Effect.forever,
       Effect.forkScoped,
-    );
+    )
 
-    const drain: DrainableWorker<A>["drain"] = TxRef.get(outstanding).pipe(
+    const drain: DrainableWorker<A>['drain'] = TxRef.get(outstanding).pipe(
       Effect.tap((n) => (n > 0 ? Effect.txRetry : Effect.void)),
       Effect.tx,
-    );
+    )
 
     const enqueue = (element: A): Effect.Effect<boolean, never, never> =>
       TxQueue.offer(queue, element).pipe(
         Effect.tap(() => TxRef.update(outstanding, (n) => n + 1)),
         Effect.tx,
-      );
+      )
 
-    return { enqueue, drain } satisfies DrainableWorker<A>;
-  });
+    return { enqueue, drain } satisfies DrainableWorker<A>
+  })

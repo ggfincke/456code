@@ -1,9 +1,10 @@
-export type AdaptiveNavigationAction = "push" | "replace" | "set-params";
+export type AdaptiveNavigationAction = 'push' | 'replace' | 'set-params'
 
-const BASE_THREAD_ROUTE_PATTERN = /^\/threads\/[^/]+\/[^/]+\/?$/;
+const BASE_THREAD_ROUTE_PATTERN = /^\/threads\/[^/]+\/[^/]+\/?$/
 
-export function isBaseThreadRoute(pathname: string): boolean {
-  return BASE_THREAD_ROUTE_PATTERN.test(pathname);
+export function isBaseThreadRoute(pathname: string): boolean
+{
+  return BASE_THREAD_ROUTE_PATTERN.test(pathname)
 }
 
 /**
@@ -13,14 +14,16 @@ export function isBaseThreadRoute(pathname: string): boolean {
  * thread — collapsing back to a compact width keeps a sane back stack.
  */
 export function resolveThreadSelectionNavigationAction(input: {
-  readonly usesSplitView: boolean;
-  readonly pathname: string;
-}): AdaptiveNavigationAction {
-  if (!input.usesSplitView || input.pathname === "/") {
-    return "push";
+  readonly usesSplitView: boolean
+  readonly pathname: string
+}): AdaptiveNavigationAction
+{
+  if (!input.usesSplitView || input.pathname === '/')
+  {
+    return 'push'
   }
 
-  return isBaseThreadRoute(input.pathname) ? "set-params" : "replace";
+  return isBaseThreadRoute(input.pathname) ? 'set-params' : 'replace'
 }
 
 /**
@@ -29,7 +32,8 @@ export function resolveThreadSelectionNavigationAction(input: {
  * Compact layouts retain the browser as the previous stack screen.
  */
 export function resolveFileSelectionNavigationAction(input: {
-  readonly hasPersistentFileInspector: boolean;
-}): AdaptiveNavigationAction {
-  return input.hasPersistentFileInspector ? "replace" : "push";
+  readonly hasPersistentFileInspector: boolean
+}): AdaptiveNavigationAction
+{
+  return input.hasPersistentFileInspector ? 'replace' : 'push'
 }

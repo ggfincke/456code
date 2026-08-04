@@ -1,9 +1,9 @@
 // tests/apps/web/workers/workersPanel.logic.test.ts
 // verifies worker timing and lifecycle derivations used across the panel
 
-import type { WorkersJobSummary } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import { describe, expect, it } from "vite-plus/test";
+import type { WorkersJobSummary } from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   workerElapsedLabel,
@@ -13,18 +13,19 @@ import {
   workerRunFailureBreakdown,
   workerRunIsSettled,
   workerStageCounts,
-} from "../../../../apps/web/src/workers/workersPanel.logic";
+} from '../../../../apps/web/src/workers/workersPanel.logic'
 
 function workerJob(
-  status: WorkersJobSummary["status"],
+  status: WorkersJobSummary['status'],
   overrides: Partial<WorkersJobSummary> = {},
-): WorkersJobSummary {
+): WorkersJobSummary
+{
   return {
     jobId: `job-${status}`,
     status,
-    provider: "codex",
-    mode: "write",
-    repo: "/workspace/repo",
+    provider: 'codex',
+    mode: 'write',
+    repo: '/workspace/repo',
     branch: Option.none(),
     stage: Option.none(),
     workflow: Option.none(),
@@ -43,122 +44,132 @@ function workerJob(
     hasPatch: Option.none(),
     verificationExitCodes: [],
     ...overrides,
-  };
+  }
 }
 
-describe("worker elapsed labels", () => {
+describe('worker elapsed labels', () =>
+{
   it.each([
     {
-      status: "running" as const,
+      status: 'running' as const,
       timestamps: {
-        startedAt: Option.some("2026-07-31T12:00:00.000Z"),
-        createdAt: Option.some("2026-07-31T11:59:00.000Z"),
+        startedAt: Option.some('2026-07-31T12:00:00.000Z'),
+        createdAt: Option.some('2026-07-31T11:59:00.000Z'),
       },
-      expected: "2m so far",
+      expected: '2m so far',
     },
     {
-      status: "queued" as const,
+      status: 'queued' as const,
       timestamps: {
         startedAt: Option.none<string>(),
-        createdAt: Option.some("2026-07-31T12:01:00.000Z"),
+        createdAt: Option.some('2026-07-31T12:01:00.000Z'),
       },
-      expected: "1m so far",
+      expected: '1m so far',
     },
-  ])("derives live elapsed time for $status jobs", ({ status, timestamps, expected }) => {
-    const job = workerJob(status, timestamps);
+  ])('derives live elapsed time for $status jobs', ({ status, timestamps, expected }) =>
+  {
+    const job = workerJob(status, timestamps)
 
-    expect(workerJobElapsedLabel(job, Date.parse("2026-07-31T12:02:00.000Z"))).toBe(expected);
-  });
+    expect(workerJobElapsedLabel(job, Date.parse('2026-07-31T12:02:00.000Z'))).toBe(expected)
+  })
 
-  it("uses the recorded formatter after a job settles", () => {
-    const job = workerJob("completed", { elapsedMs: Option.some(1_500) });
+  it('uses the recorded formatter after a job settles', () =>
+  {
+    const job = workerJob('completed', { elapsedMs: Option.some(1_500) })
 
-    expect(workerJobElapsedLabel(job, Date.parse("2026-07-31T12:02:00.000Z"))).toBe(
+    expect(workerJobElapsedLabel(job, Date.parse('2026-07-31T12:02:00.000Z'))).toBe(
       workerElapsedLabel(job.elapsedMs),
-    );
-  });
-});
+    )
+  })
+})
 
-describe("worker lifecycle classification", () => {
-  it("keeps unknown jobs active and represented in rollups", () => {
-    const counts = workerStageCounts([workerJob("unknown")]);
+describe('worker lifecycle classification', () =>
+{
+  it('keeps unknown jobs active and represented in rollups', () =>
+  {
+    const counts = workerStageCounts([workerJob('unknown')])
 
-    expect(workerJobIsActive("unknown")).toBe(true);
-    expect(counts.unknown).toBe(1);
-    expect(workerRunIsSettled(counts)).toBe(false);
-  });
+    expect(workerJobIsActive('unknown')).toBe(true)
+    expect(counts.unknown).toBe(1)
+    expect(workerRunIsSettled(counts)).toBe(false)
+  })
 
-  it("settles only when no active classification remains", () => {
+  it('settles only when no active classification remains', () =>
+  {
     const counts = workerStageCounts([
-      workerJob("completed"),
-      workerJob("failed"),
-      workerJob("rejected"),
-      workerJob("cancelled"),
-    ]);
+      workerJob('completed'),
+      workerJob('failed'),
+      workerJob('rejected'),
+      workerJob('cancelled'),
+    ])
 
-    expect(workerRunIsSettled(counts)).toBe(true);
-  });
-});
+    expect(workerRunIsSettled(counts)).toBe(true)
+  })
+})
 
-describe("failure classification views", () => {
-  it("separates an env-failed job with a patch from a zero-work broker fault", () => {
+describe('failure classification views', () =>
+{
+  it('separates an env-failed job with a patch from a zero-work broker fault', () =>
+  {
     const salvageable = workerFailureView(
-      workerJob("failed", {
-        failureClass: Option.some("environment"),
+      workerJob('failed', {
+        failureClass: Option.some('environment'),
         hasPatch: Option.some(true),
         changedFileCount: Option.some(12),
         verificationExitCodes: [Option.some(127)],
       }),
-    );
+    )
     expect(salvageable).toEqual({
-      label: "Environment",
+      label: 'Environment',
       salvageable: true,
-      evidence: "patch available · 12 files · verify exit 127",
-    });
+      evidence: 'patch available · 12 files · verify exit 127',
+    })
 
     const zeroWork = workerFailureView(
-      workerJob("failed", {
-        failureClass: Option.some("broker_fault"),
+      workerJob('failed', {
+        failureClass: Option.some('broker_fault'),
         hasPatch: Option.some(false),
       }),
-    );
+    )
     expect(zeroWork).toEqual({
-      label: "Broker fault",
+      label: 'Broker fault',
       salvageable: false,
-      evidence: "no patch",
-    });
-  });
+      evidence: 'no patch',
+    })
+  })
 
-  it("returns null for non-failed jobs and keeps unknown evidence out of the line", () => {
-    expect(workerFailureView(workerJob("completed"))).toBeNull();
+  it('returns null for non-failed jobs and keeps unknown evidence out of the line', () =>
+  {
+    expect(workerFailureView(workerJob('completed'))).toBeNull()
 
-    const legacy = workerFailureView(workerJob("failed", { failureClass: Option.some("unknown") }));
-    expect(legacy).toEqual({ label: "Unclassified", salvageable: false, evidence: null });
-  });
+    const legacy = workerFailureView(workerJob('failed', { failureClass: Option.some('unknown') }))
+    expect(legacy).toEqual({ label: 'Unclassified', salvageable: false, evidence: null })
+  })
 
-  it("summarizes run failures as salvageable work plus zero-work causes", () => {
+  it('summarizes run failures as salvageable work plus zero-work causes', () =>
+  {
     const jobs = [
-      workerJob("completed"),
-      workerJob("failed", {
-        jobId: "a",
-        failureClass: Option.some("environment"),
+      workerJob('completed'),
+      workerJob('failed', {
+        jobId: 'a',
+        failureClass: Option.some('environment'),
         hasPatch: Option.some(true),
       }),
-      workerJob("failed", {
-        jobId: "b",
-        failureClass: Option.some("environment"),
+      workerJob('failed', {
+        jobId: 'b',
+        failureClass: Option.some('environment'),
         hasPatch: Option.some(true),
       }),
-      workerJob("failed", {
-        jobId: "c",
-        failureClass: Option.some("broker_fault"),
+      workerJob('failed', {
+        jobId: 'c',
+        failureClass: Option.some('broker_fault'),
         hasPatch: Option.some(false),
       }),
-      workerJob("rejected", { jobId: "d", failureClass: Option.some("unknown") }),
-    ];
+      workerJob('rejected', { jobId: 'd', failureClass: Option.some('unknown') }),
+    ]
     expect(workerRunFailureBreakdown(jobs)).toBe(
-      "2 patch available · 1 broker fault · 1 unclassified",
-    );
-    expect(workerRunFailureBreakdown([workerJob("completed")])).toBeNull();
-  });
-});
+      '2 patch available · 1 broker fault · 1 unclassified',
+    )
+    expect(workerRunFailureBreakdown([workerJob('completed')])).toBeNull()
+  })
+})

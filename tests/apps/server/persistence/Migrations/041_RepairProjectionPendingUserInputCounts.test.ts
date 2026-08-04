@@ -1,22 +1,24 @@
 // tests/apps/server/persistence/Migrations/041_RepairProjectionPendingUserInputCounts.test.ts
 // verifies repair of stale pending-input counts from newer provider errors
 
-import { assert, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-import { runMigrations } from "../../../../../apps/server/src/persistence/Migrations.ts";
-import * as NodeSqliteClient from "../../../../../apps/server/src/persistence/NodeSqliteClient.ts";
+import { runMigrations } from '../../../../../apps/server/src/persistence/Migrations.ts'
+import * as NodeSqliteClient from '../../../../../apps/server/src/persistence/NodeSqliteClient.ts'
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()))
 
-layer("041_RepairProjectionPendingUserInputCounts", (it) => {
-  it.effect("clears counts for non-hyphenated unknown-request variants", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
+layer('041_RepairProjectionPendingUserInputCounts', (it) =>
+{
+  it.effect('clears counts for non-hyphenated unknown-request variants', () =>
+    Effect.gen(function* ()
+    {
+      const sql = yield* SqlClient.SqlClient
 
-      yield* runMigrations({ toMigrationInclusive: 40 });
+      yield* runMigrations({ toMigrationInclusive: 40 })
       yield* sql`
         INSERT INTO projection_threads (
           thread_id,
@@ -46,7 +48,7 @@ layer("041_RepairProjectionPendingUserInputCounts", (it) => {
           '2026-07-31T00:00:00.000Z',
           3
         )
-      `;
+      `
       yield* sql`
         INSERT INTO projection_thread_activities (
           activity_id,
@@ -126,16 +128,16 @@ layer("041_RepairProjectionPendingUserInputCounts", (it) => {
             6,
             '2026-07-31T00:00:06.000Z'
           )
-      `;
+      `
 
-      yield* runMigrations({ toMigrationInclusive: 41 });
+      yield* runMigrations({ toMigrationInclusive: 41 })
 
       const rows = yield* sql<{ readonly pendingUserInputCount: number }>`
         SELECT pending_user_input_count AS "pendingUserInputCount"
         FROM projection_threads
         WHERE thread_id = 'thread-1'
-      `;
-      assert.deepStrictEqual(rows, [{ pendingUserInputCount: 1 }]);
+      `
+      assert.deepStrictEqual(rows, [{ pendingUserInputCount: 1 }])
     }),
-  );
-});
+  )
+})

@@ -1,5 +1,5 @@
-import type { ColorValue } from "react-native";
-import { useCSSVariable } from "uniwind";
+import type { ColorValue } from 'react-native'
+import { useCSSVariable } from 'uniwind'
 
 /**
  * Typed wrapper around `useCSSVariable` that returns a `ColorValue` for use
@@ -7,6 +7,7 @@ import { useCSSVariable } from "uniwind";
  *
  * Usage: `const color = useThemeColor("--color-icon");`
  */
-export function useThemeColor(variable: `--color-${string}`): ColorValue {
-  return useCSSVariable(variable) as string as ColorValue;
+export function useThemeColor(variable: `--color-${string}`): ColorValue
+{
+  return useCSSVariable(variable) as string as ColorValue
 }

@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
-import { PREVIEW_WEBVIEW_PREFERENCES } from "../../../../apps/desktop/src/preview/WebviewPreferences.ts";
+import { PREVIEW_WEBVIEW_PREFERENCES } from '../../../../apps/desktop/src/preview/WebviewPreferences.ts'
 
 /**
  * Mirrors Electron's webview attribute parser closely enough to catch the
@@ -25,62 +25,71 @@ import { PREVIEW_WEBVIEW_PREFERENCES } from "../../../../apps/desktop/src/previe
  * keeps the test independent of Electron internals while still failing if
  * we accidentally ship `"contextIsolation=no"` again.
  */
-function parseWebPreferences(input: string): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const pair of input.split(",")) {
-    if (pair !== pair.trim()) {
+function parseWebPreferences(input: string): Record<string, unknown>
+{
+  const out: Record<string, unknown> = {}
+  for (const pair of input.split(','))
+  {
+    if (pair !== pair.trim())
+    {
       // Electron's parser doesn't trim; surface the bug as undefined-key.
-      out[pair] = pair.split("=")[1];
-      continue;
+      out[pair] = pair.split('=')[1]
+      continue
     }
-    const [key, value] = pair.split("=");
-    if (!key) continue;
-    out[key] = value;
+    const [key, value] = pair.split('=')
+    if (!key) continue
+    out[key] = value
   }
-  return out;
+  return out
 }
 
-describe("PREVIEW_WEBVIEW_PREFERENCES", () => {
-  const parsed = parseWebPreferences(PREVIEW_WEBVIEW_PREFERENCES);
+describe('PREVIEW_WEBVIEW_PREFERENCES', () =>
+{
+  const parsed = parseWebPreferences(PREVIEW_WEBVIEW_PREFERENCES)
 
   it.each([
     {
-      key: "contextIsolation",
-      value: "false",
+      key: 'contextIsolation',
+      value: 'false',
       reason: "disables context isolation (so react-grab can see the page's React DevTools hook)",
     },
     {
-      key: "sandbox",
-      value: "true",
-      reason: "keeps the renderer sandbox enabled (so the page cannot reach Node APIs)",
+      key: 'sandbox',
+      value: 'true',
+      reason: 'keeps the renderer sandbox enabled (so the page cannot reach Node APIs)',
     },
     {
-      key: "nodeIntegration",
-      value: "false",
-      reason: "disables nodeIntegration (defense in depth — page never gets Node)",
+      key: 'nodeIntegration',
+      value: 'false',
+      reason: 'disables nodeIntegration (defense in depth — page never gets Node)',
     },
-  ])("$reason", ({ key, value }) => {
-    expect(parsed[key]).toBe(value);
-  });
+  ])('$reason', ({ key, value }) =>
+  {
+    expect(parsed[key]).toBe(value)
+  })
 
-  it("contains exactly the three security-critical keys", () => {
+  it('contains exactly the three security-critical keys', () =>
+  {
     expect(Object.keys(parsed).toSorted()).toEqual(
-      ["contextIsolation", "nodeIntegration", "sandbox"].toSorted(),
-    );
-  });
+      ['contextIsolation', 'nodeIntegration', 'sandbox'].toSorted(),
+    )
+  })
 
-  it("uses canonical JS-boolean string literals (not yes/no, on/off, 1/0)", () => {
+  it('uses canonical JS-boolean string literals (not yes/no, on/off, 1/0)', () =>
+  {
     // `value="no"` is a TRUTHY string when assigned to webPreferences.X — so
     // `contextIsolation="no"` would silently leave isolation ENABLED. Lock
     // the values to `"true"` / `"false"` so the parser does the right thing.
-    for (const value of Object.values(parsed)) {
-      expect(value).toMatch(/^(true|false)$/);
+    for (const value of Object.values(parsed))
+    {
+      expect(value).toMatch(/^(true|false)$/)
     }
-  });
+  })
 
-  it("contains no whitespace (Electron's parser does not trim)", () => {
+  it("contains no whitespace (Electron's parser does not trim)", () =>
+  {
     // Electron splits on `,` without trimming, so any whitespace would turn
     // a key into an unknown one and silently drop the security flag.
-    expect(PREVIEW_WEBVIEW_PREFERENCES).not.toMatch(/\s/);
-  });
-});
+    expect(PREVIEW_WEBVIEW_PREFERENCES).not.toMatch(/\s/)
+  })
+})

@@ -1,12 +1,13 @@
-import { ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { ScrollView, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { CodeAppearanceSection } from "./appearance/sections/CodeAppearanceSection";
-import { TerminalAppearanceSection } from "./appearance/sections/TerminalAppearanceSection";
-import { TextAppearanceSection } from "./appearance/sections/TextAppearanceSection";
+import { CodeAppearanceSection } from './appearance/sections/CodeAppearanceSection'
+import { TerminalAppearanceSection } from './appearance/sections/TerminalAppearanceSection'
+import { TextAppearanceSection } from './appearance/sections/TextAppearanceSection'
 
-export function SettingsAppearanceRouteScreen() {
-  const insets = useSafeAreaInsets();
+export function SettingsAppearanceRouteScreen()
+{
+  const insets = useSafeAreaInsets()
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -24,5 +25,5 @@ export function SettingsAppearanceRouteScreen() {
         <CodeAppearanceSection />
       </ScrollView>
     </View>
-  );
+  )
 }

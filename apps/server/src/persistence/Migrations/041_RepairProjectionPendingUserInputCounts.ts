@@ -1,11 +1,12 @@
 // apps/server/src/persistence/Migrations/041_RepairProjectionPendingUserInputCounts.ts
 // repairs stale pending-input counts for current provider error variants
 
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     UPDATE projection_threads
@@ -46,5 +47,5 @@ export default Effect.gen(function* () {
           AND latest_user_input_states.detail NOT LIKE '%unknown pending codex user input request%'
         )
     ), 0)
-  `;
-});
+  `
+})

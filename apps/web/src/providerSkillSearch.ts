@@ -1,18 +1,19 @@
-import type { ServerProviderSkill } from "@t3tools/contracts";
+import type { ServerProviderSkill } from '@t3tools/contracts'
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
   scoreQueryMatch,
-} from "@t3tools/shared/searchRanking";
+} from '@t3tools/shared/searchRanking'
 
-import { formatProviderSkillDisplayName } from "./providerSkillPresentation";
+import { formatProviderSkillDisplayName } from './providerSkillPresentation'
 
-function scoreProviderSkill(skill: ServerProviderSkill, query: string): number | null {
-  const normalizedName = skill.name.toLowerCase();
-  const normalizedLabel = formatProviderSkillDisplayName(skill).toLowerCase();
-  const normalizedShortDescription = skill.shortDescription?.toLowerCase() ?? "";
-  const normalizedDescription = skill.description?.toLowerCase() ?? "";
-  const normalizedScope = skill.scope?.toLowerCase() ?? "";
+function scoreProviderSkill(skill: ServerProviderSkill, query: string): number | null
+{
+  const normalizedName = skill.name.toLowerCase()
+  const normalizedLabel = formatProviderSkillDisplayName(skill).toLowerCase()
+  const normalizedShortDescription = skill.shortDescription?.toLowerCase() ?? ''
+  const normalizedDescription = skill.description?.toLowerCase() ?? ''
+  const normalizedScope = skill.scope?.toLowerCase() ?? ''
 
   const scores = [
     scoreQueryMatch({
@@ -23,7 +24,7 @@ function scoreProviderSkill(skill: ServerProviderSkill, query: string): number |
       boundaryBase: 4,
       includesBase: 6,
       fuzzyBase: 100,
-      boundaryMarkers: ["-", "_", "/"],
+      boundaryMarkers: ['-', '_', '/'],
     }),
     scoreQueryMatch({
       value: normalizedLabel,
@@ -57,37 +58,42 @@ function scoreProviderSkill(skill: ServerProviderSkill, query: string): number |
       prefixBase: 42,
       includesBase: 44,
     }),
-  ].filter((score): score is number => score !== null);
+  ].filter((score): score is number => score !== null)
 
-  if (scores.length === 0) {
-    return null;
+  if (scores.length === 0)
+  {
+    return null
   }
 
-  return Math.min(...scores);
+  return Math.min(...scores)
 }
 
 export function searchProviderSkills(
   skills: ReadonlyArray<ServerProviderSkill>,
   query: string,
   limit = Number.POSITIVE_INFINITY,
-): ServerProviderSkill[] {
-  const enabledSkills = skills.filter((skill) => skill.enabled);
-  const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ });
+): ServerProviderSkill[]
+{
+  const enabledSkills = skills.filter((skill) => skill.enabled)
+  const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\$+/ })
 
-  if (!normalizedQuery) {
-    return enabledSkills;
+  if (!normalizedQuery)
+  {
+    return enabledSkills
   }
 
   const ranked: Array<{
-    item: ServerProviderSkill;
-    score: number;
-    tieBreaker: string;
-  }> = [];
+    item: ServerProviderSkill
+    score: number
+    tieBreaker: string
+  }> = []
 
-  for (const skill of enabledSkills) {
-    const score = scoreProviderSkill(skill, normalizedQuery);
-    if (score === null) {
-      continue;
+  for (const skill of enabledSkills)
+  {
+    const score = scoreProviderSkill(skill, normalizedQuery)
+    if (score === null)
+    {
+      continue
     }
 
     insertRankedSearchResult(
@@ -98,8 +104,8 @@ export function searchProviderSkills(
         tieBreaker: `${formatProviderSkillDisplayName(skill).toLowerCase()}\u0000${skill.name}`,
       },
       limit,
-    );
+    )
   }
 
-  return ranked.map((entry) => entry.item);
+  return ranked.map((entry) => entry.item)
 }

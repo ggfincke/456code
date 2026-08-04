@@ -1,8 +1,8 @@
-import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from "lucide-react";
-import { useCallback, useState } from "react";
-import { isElectron } from "../../env";
-import { useDesktopUpdateState } from "../../state/desktopUpdate";
-import { stackedThreadToast, toastManager } from "../ui/toast";
+import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
+import { useCallback, useState } from 'react'
+import { isElectron } from '../../env'
+import { useDesktopUpdateState } from '../../state/desktopUpdate'
+import { stackedThreadToast, toastManager } from '../ui/toast'
 import {
   getArm64IntelBuildWarningDescription,
   getDesktopUpdateActionError,
@@ -13,20 +13,22 @@ import {
   shouldShowArm64IntelBuildWarning,
   shouldShowDesktopUpdateButton,
   shouldToastDesktopUpdateActionResult,
-} from "../desktopUpdate.logic";
-import { Alert, AlertDescription, AlertTitle } from "../ui/alert";
-import { Separator } from "../ui/separator";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+} from '../desktopUpdate.logic'
+import { Alert, AlertDescription, AlertTitle } from '../ui/alert'
+import { Separator } from '../ui/separator'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 
 function SidebarUpdateReleaseNotesTooltip({
   state,
   tooltip,
 }: {
-  readonly state: NonNullable<ReturnType<typeof useDesktopUpdateState>>;
-  readonly tooltip: string;
-}) {
-  if (state.channel !== "nightly" || state.releaseNotes.length === 0) {
-    return <>{tooltip}</>;
+  readonly state: NonNullable<ReturnType<typeof useDesktopUpdateState>>
+  readonly tooltip: string
+})
+{
+  if (state.channel !== 'nightly' || state.releaseNotes.length === 0)
+  {
+    return <>{tooltip}</>
   }
 
   return (
@@ -54,93 +56,102 @@ function SidebarUpdateReleaseNotesTooltip({
         ))}
       </div>
     </div>
-  );
+  )
 }
 
-export function SidebarUpdatePill() {
-  const state = useDesktopUpdateState();
-  const [dismissed, setDismissed] = useState(false);
+export function SidebarUpdatePill()
+{
+  const state = useDesktopUpdateState()
+  const [dismissed, setDismissed] = useState(false)
 
-  const visible = isElectron && shouldShowDesktopUpdateButton(state) && !dismissed;
-  const tooltip = state ? getDesktopUpdateButtonTooltip(state) : "Update available";
-  const disabled = isDesktopUpdateButtonDisabled(state);
-  const action = state ? resolveDesktopUpdateButtonAction(state) : "none";
+  const visible = isElectron && shouldShowDesktopUpdateButton(state) && !dismissed
+  const tooltip = state ? getDesktopUpdateButtonTooltip(state) : 'Update available'
+  const disabled = isDesktopUpdateButtonDisabled(state)
+  const action = state ? resolveDesktopUpdateButtonAction(state) : 'none'
 
-  const showArm64Warning = isElectron && shouldShowArm64IntelBuildWarning(state);
+  const showArm64Warning = isElectron && shouldShowArm64IntelBuildWarning(state)
   const arm64Description =
-    state && showArm64Warning ? getArm64IntelBuildWarningDescription(state) : null;
+    state && showArm64Warning ? getArm64IntelBuildWarningDescription(state) : null
 
-  const handleAction = useCallback(() => {
-    const bridge = window.desktopBridge;
-    if (!bridge || !state) return;
-    if (disabled || action === "none") return;
+  const handleAction = useCallback(() =>
+  {
+    const bridge = window.desktopBridge
+    if (!bridge || !state) return
+    if (disabled || action === 'none') return
 
-    if (action === "download") {
+    if (action === 'download')
+    {
       void bridge
         .downloadUpdate()
-        .then((result) => {
-          if (result.completed) {
+        .then((result) =>
+        {
+          if (result.completed)
+          {
             toastManager.add({
-              type: "success",
-              title: "Update downloaded",
-              description: "Restart the app from the update button to install it.",
-            });
+              type: 'success',
+              title: 'Update downloaded',
+              description: 'Restart the app from the update button to install it.',
+            })
           }
-          if (!shouldToastDesktopUpdateActionResult(result)) return;
-          const actionError = getDesktopUpdateActionError(result);
-          if (!actionError) return;
+          if (!shouldToastDesktopUpdateActionResult(result)) return
+          const actionError = getDesktopUpdateActionError(result)
+          if (!actionError) return
           toastManager.add(
             stackedThreadToast({
-              type: "error",
-              title: "Could not download update",
+              type: 'error',
+              title: 'Could not download update',
               description: actionError,
             }),
-          );
+          )
         })
-        .catch((error) => {
+        .catch((error) =>
+        {
           toastManager.add(
             stackedThreadToast({
-              type: "error",
-              title: "Could not start update download",
-              description: error instanceof Error ? error.message : "An unexpected error occurred.",
+              type: 'error',
+              title: 'Could not start update download',
+              description: error instanceof Error ? error.message : 'An unexpected error occurred.',
             }),
-          );
-        });
-      return;
+          )
+        })
+      return
     }
 
-    if (action === "install") {
+    if (action === 'install')
+    {
       const confirmed = window.confirm(
         getDesktopUpdateInstallConfirmationMessage(state, navigator.platform),
-      );
-      if (!confirmed) return;
+      )
+      if (!confirmed) return
       void bridge
         .installUpdate()
-        .then((result) => {
-          if (!shouldToastDesktopUpdateActionResult(result)) return;
-          const actionError = getDesktopUpdateActionError(result);
-          if (!actionError) return;
+        .then((result) =>
+        {
+          if (!shouldToastDesktopUpdateActionResult(result)) return
+          const actionError = getDesktopUpdateActionError(result)
+          if (!actionError) return
           toastManager.add(
             stackedThreadToast({
-              type: "error",
-              title: "Could not install update",
+              type: 'error',
+              title: 'Could not install update',
               description: actionError,
             }),
-          );
+          )
         })
-        .catch((error) => {
+        .catch((error) =>
+        {
           toastManager.add(
             stackedThreadToast({
-              type: "error",
-              title: "Could not install update",
-              description: error instanceof Error ? error.message : "An unexpected error occurred.",
+              type: 'error',
+              title: 'Could not install update',
+              description: error instanceof Error ? error.message : 'An unexpected error occurred.',
             }),
-          );
-        });
+          )
+        })
     }
-  }, [action, disabled, state]);
+  }, [action, disabled, state])
 
-  if (!visible && !showArm64Warning) return null;
+  if (!visible && !showArm64Warning) return null
 
   return (
     <div className="flex flex-col gap-1">
@@ -154,7 +165,7 @@ export function SidebarUpdatePill() {
       {visible && (
         <div
           className={`group/update relative flex h-7 w-full items-center rounded-lg bg-primary/15 text-xs font-medium text-primary ${
-            disabled ? " cursor-not-allowed opacity-60" : ""
+            disabled ? ' cursor-not-allowed opacity-60' : ''
           }`}
         >
           <div className="pointer-events-none absolute inset-0 rounded-lg transition-colors group-has-[button.update-main:hover]/update:bg-primary/22" />
@@ -169,19 +180,19 @@ export function SidebarUpdatePill() {
                   className="update-main relative flex h-full flex-1 items-center gap-2 px-2 enabled:cursor-pointer"
                   onClick={handleAction}
                 >
-                  {action === "install" ? (
+                  {action === 'install' ? (
                     <>
                       <RotateCwIcon className="size-3.5" />
                       <span>Restart to update</span>
                     </>
-                  ) : state?.status === "downloading" ? (
+                  ) : state?.status === 'downloading' ? (
                     <>
                       <DownloadIcon className="size-3.5" />
                       <span>
                         Downloading
-                        {typeof state.downloadPercent === "number"
+                        {typeof state.downloadPercent === 'number'
                           ? ` (${Math.floor(state.downloadPercent)}%)`
-                          : "…"}
+                          : '…'}
                       </span>
                     </>
                   ) : (
@@ -196,8 +207,8 @@ export function SidebarUpdatePill() {
             <TooltipPopup
               align="start"
               className={
-                state?.channel === "nightly" && state.releaseNotes.length > 0
-                  ? "max-w-none text-balance"
+                state?.channel === 'nightly' && state.releaseNotes.length > 0
+                  ? 'max-w-none text-balance'
                   : undefined
               }
               side="top"
@@ -209,7 +220,7 @@ export function SidebarUpdatePill() {
               )}
             </TooltipPopup>
           </Tooltip>
-          {action === "download" && (
+          {action === 'download' && (
             <Tooltip>
               <TooltipTrigger
                 render={
@@ -229,5 +240,5 @@ export function SidebarUpdatePill() {
         </div>
       )}
     </div>
-  );
+  )
 }

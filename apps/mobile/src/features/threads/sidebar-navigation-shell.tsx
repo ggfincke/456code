@@ -3,24 +3,24 @@ import {
   DefaultTheme,
   NavigationContainer,
   NavigationIndependentTree,
-} from "@react-navigation/native";
+} from '@react-navigation/native'
 import {
   createNativeStackNavigator,
   type NativeStackNavigationOptions,
-} from "@react-navigation/native-stack";
-import type { ReactNode } from "react";
-import { Platform, useColorScheme } from "react-native";
+} from '@react-navigation/native-stack'
+import type { ReactNode } from 'react'
+import { Platform, useColorScheme } from 'react-native'
 
-import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
-import { nativeHeaderScrollEdgeEffects } from "../../native/StackHeader";
+import { NATIVE_LIQUID_GLASS_SUPPORTED } from '../../native/native-glass'
+import { nativeHeaderScrollEdgeEffects } from '../../native/StackHeader'
 
-const SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version);
+const SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version)
 
 type SidebarScreenOptions = NativeStackNavigationOptions & {
   // Same patched RNS option the GLASS/SOLID presets in Stack.tsx use — the
   // iOS 26 "editor" navigation-item style leading-aligns the inline title.
-  readonly unstable_navigationItemStyle?: "editor";
-};
+  readonly unstable_navigationItemStyle?: 'editor'
+}
 
 /**
  * Static chrome for the sidebar column: a real UINavigationBar with a fixed
@@ -30,19 +30,19 @@ type SidebarScreenOptions = NativeStackNavigationOptions & {
  * items) are set by the screen content via NativeStackScreenOptions.
  */
 const SIDEBAR_SCREEN_OPTIONS: SidebarScreenOptions = {
-  contentStyle: { backgroundColor: "transparent" },
+  contentStyle: { backgroundColor: 'transparent' },
   headerLargeTitle: false,
   headerShadowVisible: false,
   headerShown: true,
-  headerStyle: NATIVE_LIQUID_GLASS_SUPPORTED ? { backgroundColor: "transparent" } : undefined,
-  headerTitleStyle: { fontSize: 18, fontWeight: "800" },
+  headerStyle: NATIVE_LIQUID_GLASS_SUPPORTED ? { backgroundColor: 'transparent' } : undefined,
+  headerTitleStyle: { fontSize: 18, fontWeight: '800' },
   headerTransparent: NATIVE_LIQUID_GLASS_SUPPORTED,
   scrollEdgeEffects: NATIVE_LIQUID_GLASS_SUPPORTED ? SCROLL_EDGE_EFFECTS : undefined,
-  title: "Threads",
-  unstable_navigationItemStyle: NATIVE_LIQUID_GLASS_SUPPORTED ? "editor" : undefined,
-};
+  title: 'Threads',
+  unstable_navigationItemStyle: NATIVE_LIQUID_GLASS_SUPPORTED ? 'editor' : undefined,
+}
 
-const SidebarStack = createNativeStackNavigator();
+const SidebarStack = createNativeStackNavigator()
 
 /**
  * Hosts the iPad sidebar pane inside its own single-screen native stack.
@@ -55,12 +55,13 @@ const SidebarStack = createNativeStackNavigator();
  * AdaptiveWorkspaceLayout; NavigationIndependentTree only isolates the
  * navigation hooks used for header configuration inside the pane.
  */
-export function SidebarNavigationShell(props: { readonly children: ReactNode }) {
-  const colorScheme = useColorScheme();
+export function SidebarNavigationShell(props: { readonly children: ReactNode })
+{
+  const colorScheme = useColorScheme()
 
   return (
     <NavigationIndependentTree>
-      <NavigationContainer theme={colorScheme === "dark" ? DarkTheme : DefaultTheme}>
+      <NavigationContainer theme={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
         <SidebarStack.Navigator
           screenOptions={SIDEBAR_SCREEN_OPTIONS}
           initialRouteName="SidebarThreads"
@@ -69,5 +70,5 @@ export function SidebarNavigationShell(props: { readonly children: ReactNode }) 
         </SidebarStack.Navigator>
       </NavigationContainer>
     </NavigationIndependentTree>
-  );
+  )
 }

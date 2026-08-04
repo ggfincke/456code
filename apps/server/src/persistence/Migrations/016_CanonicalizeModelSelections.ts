@@ -1,13 +1,14 @@
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     ALTER TABLE projection_projects
     ADD COLUMN default_model_selection_json TEXT
-  `;
+  `
 
   yield* sql`
     UPDATE projection_projects
@@ -24,12 +25,12 @@ export default Effect.gen(function* () {
       )
     END
     WHERE default_model_selection_json IS NULL
-  `;
+  `
 
   yield* sql`
     ALTER TABLE projection_threads
     ADD COLUMN model_selection_json TEXT
-  `;
+  `
 
   yield* sql`
     UPDATE projection_threads
@@ -51,17 +52,17 @@ export default Effect.gen(function* () {
       model
     )
     WHERE model_selection_json IS NULL
-  `;
+  `
 
   yield* sql`
     ALTER TABLE projection_projects
     DROP COLUMN default_model
-  `;
+  `
 
   yield* sql`
     ALTER TABLE projection_threads
     DROP COLUMN model
-  `;
+  `
 
   yield* sql`
     UPDATE orchestration_events
@@ -145,7 +146,7 @@ export default Effect.gen(function* () {
     WHERE event_type IN ('project.created', 'project.meta-updated')
       AND json_type(payload_json, '$.defaultModelSelection') IS NULL
       AND json_type(payload_json, '$.defaultModel') IS NOT NULL
-  `;
+  `
 
   yield* sql`
     UPDATE orchestration_events
@@ -218,7 +219,7 @@ export default Effect.gen(function* () {
     WHERE event_type IN ('thread.created', 'thread.meta-updated', 'thread.turn-start-requested')
       AND json_type(payload_json, '$.modelSelection') IS NULL
       AND json_type(payload_json, '$.model') IS NOT NULL
-  `;
+  `
 
   // Backfill thread.created events that predate the model field entirely
   yield* sql`
@@ -231,5 +232,5 @@ export default Effect.gen(function* () {
     WHERE event_type = 'thread.created'
       AND json_type(payload_json, '$.modelSelection') IS NULL
       AND json_type(payload_json, '$.model') IS NULL
-  `;
-});
+  `
+})

@@ -1,19 +1,19 @@
-import { NativeHeaderToolbar } from "../../native/StackHeader";
-import { useAuth } from "@clerk/expo";
-import { StackActions, useNavigation } from "@react-navigation/native";
-import { useCallback, useEffect, useState } from "react";
-import { Platform, Pressable, RefreshControl, ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { NativeHeaderToolbar } from '../../native/StackHeader'
+import { useAuth } from '@clerk/expo'
+import { StackActions, useNavigation } from '@react-navigation/native'
+import { useCallback, useEffect, useState } from 'react'
+import { Platform, Pressable, RefreshControl, ScrollView, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { reportAtomCommandResult, settlePromise } from "@t3tools/client-runtime/state/runtime";
-import { AndroidSheetHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
-import { useRemoteConnections } from "../../state/use-remote-environment-registry";
-import { CloudEnvironmentRows } from "../connection/CloudEnvironmentRows";
-import { splitEnvironmentSections } from "../connection/environmentSections";
-import { useConnectionController } from "../connection/useConnectionController";
-import { optOutOfConnectOnboarding } from "./connectOnboardingOptOut";
-import { hasCloudPublicConfig } from "./publicConfig";
+import { reportAtomCommandResult, settlePromise } from '@t3tools/client-runtime/state/runtime'
+import { AndroidSheetHeader } from '../../components/AndroidScreenHeader'
+import { AppText as Text } from '../../components/AppText'
+import { useRemoteConnections } from '../../state/use-remote-environment-registry'
+import { CloudEnvironmentRows } from '../connection/CloudEnvironmentRows'
+import { splitEnvironmentSections } from '../connection/environmentSections'
+import { useConnectionController } from '../connection/useConnectionController'
+import { optOutOfConnectOnboarding } from './connectOnboardingOptOut'
+import { hasCloudPublicConfig } from './publicConfig'
 
 /**
  * Post-sign-in onboarding sheet for cloud relay access. Mobile never publishes
@@ -22,70 +22,83 @@ import { hasCloudPublicConfig } from "./publicConfig";
  * device can be connected in one go. It shows on every sign-in: sign-out
  * clears the connected environments, so each new session starts from zero.
  */
-export function ConnectOnboardingRouteScreen() {
-  const navigation = useNavigation();
+export function ConnectOnboardingRouteScreen()
+{
+  const navigation = useNavigation()
 
   // The route is deep-linkable; without cloud config the sheet would present
   // empty with no chrome to dismiss it, so bail back out instead.
-  useEffect(() => {
-    if (hasCloudPublicConfig()) {
-      return;
+  useEffect(() =>
+  {
+    if (hasCloudPublicConfig())
+    {
+      return
     }
-    if (navigation.canGoBack()) {
-      navigation.goBack();
-    } else {
-      navigation.dispatch(StackActions.replace("Home"));
+    if (navigation.canGoBack())
+    {
+      navigation.goBack()
     }
-  }, [navigation]);
+    else
+    {
+      navigation.dispatch(StackActions.replace('Home'))
+    }
+  }, [navigation])
 
-  return hasCloudPublicConfig() ? <ConfiguredConnectOnboardingRouteScreen /> : null;
+  return hasCloudPublicConfig() ? <ConfiguredConnectOnboardingRouteScreen /> : null
 }
 
-function ConfiguredConnectOnboardingRouteScreen() {
-  const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
-  const { isSignedIn, userId } = useAuth({ treatPendingAsSignedOut: false });
-  const { connectedEnvironments, onReconnectEnvironment } = useRemoteConnections();
-  const { refreshRelayEnvironments } = useConnectionController();
+function ConfiguredConnectOnboardingRouteScreen()
+{
+  const navigation = useNavigation()
+  const insets = useSafeAreaInsets()
+  const { isSignedIn, userId } = useAuth({ treatPendingAsSignedOut: false })
+  const { connectedEnvironments, onReconnectEnvironment } = useRemoteConnections()
+  const { refreshRelayEnvironments } = useConnectionController()
   const { connectedCloudEnvironments } = splitEnvironmentSections({
     connectedEnvironments,
     cloudEnvironments: null,
-  });
+  })
 
   // Pull-to-refresh tracks its own spinner instead of discovery's refreshing
   // flag, so background refreshes (e.g. the sign-in one) don't yank the
   // content down.
-  const [isPullRefreshing, setIsPullRefreshing] = useState(false);
-  const handlePullRefresh = useCallback(() => {
-    void (async () => {
-      setIsPullRefreshing(true);
-      await refreshRelayEnvironments();
-      setIsPullRefreshing(false);
-    })();
-  }, [refreshRelayEnvironments]);
+  const [isPullRefreshing, setIsPullRefreshing] = useState(false)
+  const handlePullRefresh = useCallback(() =>
+  {
+    void (async () =>
+    {
+      setIsPullRefreshing(true)
+      await refreshRelayEnvironments()
+      setIsPullRefreshing(false)
+    })()
+  }, [refreshRelayEnvironments])
 
-  const handleClose = useCallback(() => {
-    navigation.goBack();
-  }, [navigation]);
+  const handleClose = useCallback(() =>
+  {
+    navigation.goBack()
+  }, [navigation])
 
   // Persist before dismissing so a quick sign-out/sign-in cannot race ahead
   // of the preference write; the write is a local secure-store update.
-  const handleDontShowAgain = useCallback(() => {
-    void (async () => {
-      if (userId) {
-        const result = await settlePromise(() => optOutOfConnectOnboarding(userId));
-        reportAtomCommandResult(result, { label: "connect onboarding opt-out" });
+  const handleDontShowAgain = useCallback(() =>
+  {
+    void (async () =>
+    {
+      if (userId)
+      {
+        const result = await settlePromise(() => optOutOfConnectOnboarding(userId))
+        reportAtomCommandResult(result, { label: 'connect onboarding opt-out' })
       }
-      navigation.goBack();
-    })();
-  }, [navigation, userId]);
+      navigation.goBack()
+    })()
+  }, [navigation, userId])
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === "android" ? (
+      {Platform.OS === 'android' ? (
         <AndroidSheetHeader
           title="Set up cloud access"
-          actions={[{ accessibilityLabel: "Close", icon: "xmark", onPress: handleClose }]}
+          actions={[{ accessibilityLabel: 'Close', icon: 'xmark', onPress: handleClose }]}
         />
       ) : (
         <NativeHeaderToolbar placement="right">
@@ -133,5 +146,5 @@ function ConfiguredConnectOnboardingRouteScreen() {
         ) : null}
       </ScrollView>
     </View>
-  );
+  )
 }

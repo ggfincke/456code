@@ -13,37 +13,41 @@
  *
  * @module CheckpointStore
  */
-import { VcsUnsupportedOperationError, type CheckpointRef } from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
+import { VcsUnsupportedOperationError, type CheckpointRef } from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
 
-import type { CheckpointStoreError } from "./Errors.ts";
-import type { VcsCheckpointOps } from "../vcs/VcsDriver.ts";
-import * as VcsDriverRegistry from "../vcs/VcsDriverRegistry.ts";
+import type { CheckpointStoreError } from './Errors.ts'
+import type { VcsCheckpointOps } from '../vcs/VcsDriver.ts'
+import * as VcsDriverRegistry from '../vcs/VcsDriverRegistry.ts'
 
-export interface CaptureCheckpointInput {
-  readonly cwd: string;
-  readonly checkpointRef: CheckpointRef;
+export interface CaptureCheckpointInput
+{
+  readonly cwd: string
+  readonly checkpointRef: CheckpointRef
 }
 
-export interface RestoreCheckpointInput {
-  readonly cwd: string;
-  readonly checkpointRef: CheckpointRef;
-  readonly fallbackToHead?: boolean;
+export interface RestoreCheckpointInput
+{
+  readonly cwd: string
+  readonly checkpointRef: CheckpointRef
+  readonly fallbackToHead?: boolean
 }
 
-export interface DiffCheckpointsInput {
-  readonly cwd: string;
-  readonly fromCheckpointRef: CheckpointRef;
-  readonly toCheckpointRef: CheckpointRef;
-  readonly fallbackFromToHead?: boolean;
-  readonly ignoreWhitespace: boolean;
+export interface DiffCheckpointsInput
+{
+  readonly cwd: string
+  readonly fromCheckpointRef: CheckpointRef
+  readonly toCheckpointRef: CheckpointRef
+  readonly fallbackFromToHead?: boolean
+  readonly ignoreWhitespace: boolean
 }
 
-export interface DeleteCheckpointRefsInput {
-  readonly cwd: string;
-  readonly checkpointRefs: ReadonlyArray<CheckpointRef>;
+export interface DeleteCheckpointRefsInput
+{
+  readonly cwd: string
+  readonly checkpointRefs: ReadonlyArray<CheckpointRef>
 }
 
 /** Service tag for checkpoint persistence and restore operations. */
@@ -51,7 +55,7 @@ export class CheckpointStore extends Context.Service<
   CheckpointStore,
   {
     /** Check whether cwd is inside a Git worktree. */
-    readonly isGitRepository: (cwd: string) => Effect.Effect<boolean, CheckpointStoreError>;
+    readonly isGitRepository: (cwd: string) => Effect.Effect<boolean, CheckpointStoreError>
 
     /**
      * Capture a checkpoint commit and store it at the provided checkpoint ref.
@@ -60,12 +64,12 @@ export class CheckpointStore extends Context.Service<
      */
     readonly captureCheckpoint: (
       input: CaptureCheckpointInput,
-    ) => Effect.Effect<void, CheckpointStoreError>;
+    ) => Effect.Effect<void, CheckpointStoreError>
 
     /** Check whether a checkpoint ref exists. */
     readonly hasCheckpointRef: (
-      input: Omit<RestoreCheckpointInput, "fallbackToHead">,
-    ) => Effect.Effect<boolean, CheckpointStoreError>;
+      input: Omit<RestoreCheckpointInput, 'fallbackToHead'>,
+    ) => Effect.Effect<boolean, CheckpointStoreError>
 
     /**
      * Restore workspace and staging state to a checkpoint.
@@ -74,7 +78,7 @@ export class CheckpointStore extends Context.Service<
      */
     readonly restoreCheckpoint: (
       input: RestoreCheckpointInput,
-    ) => Effect.Effect<boolean, CheckpointStoreError>;
+    ) => Effect.Effect<boolean, CheckpointStoreError>
 
     /**
      * Compute a patch diff between two checkpoint refs.
@@ -83,7 +87,7 @@ export class CheckpointStore extends Context.Service<
      */
     readonly diffCheckpoints: (
       input: DiffCheckpointsInput,
-    ) => Effect.Effect<string, CheckpointStoreError>;
+    ) => Effect.Effect<string, CheckpointStoreError>
 
     /**
      * Delete the provided checkpoint refs.
@@ -92,70 +96,76 @@ export class CheckpointStore extends Context.Service<
      */
     readonly deleteCheckpointRefs: (
       input: DeleteCheckpointRefsInput,
-    ) => Effect.Effect<void, CheckpointStoreError>;
+    ) => Effect.Effect<void, CheckpointStoreError>
   }
->()("456code/checkpointing/CheckpointStore") {}
+>()('456code/checkpointing/CheckpointStore')
+{}
 
-export const make = Effect.gen(function* () {
-  const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry;
+export const make = Effect.gen(function* ()
+{
+  const vcsRegistry = yield* VcsDriverRegistry.VcsDriverRegistry
 
-  const resolveCheckpoints = Effect.fn("CheckpointStore.resolveCheckpoints")(function* (
+  const resolveCheckpoints = Effect.fn('CheckpointStore.resolveCheckpoints')(function* (
     operation: string,
     cwd: string,
-  ) {
-    const handle = yield* vcsRegistry.resolve({ cwd });
-    if (!handle.driver.checkpoints) {
+  )
+  {
+    const handle = yield* vcsRegistry.resolve({ cwd })
+    if (!handle.driver.checkpoints)
+    {
       return yield* new VcsUnsupportedOperationError({
         operation,
         kind: handle.kind,
         detail: `${handle.kind} driver does not implement checkpoint operations.`,
-      });
+      })
     }
-    return handle.driver.checkpoints satisfies VcsCheckpointOps;
-  });
+    return handle.driver.checkpoints satisfies VcsCheckpointOps
+  })
 
-  const isGitRepository: CheckpointStore["Service"]["isGitRepository"] = (cwd) =>
+  const isGitRepository: CheckpointStore['Service']['isGitRepository'] = (cwd) =>
     vcsRegistry
-      .detect({ cwd, requestedKind: "git" })
-      .pipe(Effect.map((repository) => repository !== null));
+      .detect({ cwd, requestedKind: 'git' })
+      .pipe(Effect.map((repository) => repository !== null))
 
-  const captureCheckpoint: CheckpointStore["Service"]["captureCheckpoint"] = Effect.fn(
-    "captureCheckpoint",
-  )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.captureCheckpoint", input.cwd);
-    return yield* checkpoints.captureCheckpoint(input);
-  });
+  const captureCheckpoint: CheckpointStore['Service']['captureCheckpoint'] = Effect.fn(
+    'captureCheckpoint',
+  )(function* (input)
+  {
+    const checkpoints = yield* resolveCheckpoints('CheckpointStore.captureCheckpoint', input.cwd)
+    return yield* checkpoints.captureCheckpoint(input)
+  })
 
-  const hasCheckpointRef: CheckpointStore["Service"]["hasCheckpointRef"] = Effect.fn(
-    "hasCheckpointRef",
-  )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.hasCheckpointRef", input.cwd);
-    return yield* checkpoints.hasCheckpointRef(input);
-  });
+  const hasCheckpointRef: CheckpointStore['Service']['hasCheckpointRef'] = Effect.fn(
+    'hasCheckpointRef',
+  )(function* (input)
+  {
+    const checkpoints = yield* resolveCheckpoints('CheckpointStore.hasCheckpointRef', input.cwd)
+    return yield* checkpoints.hasCheckpointRef(input)
+  })
 
-  const restoreCheckpoint: CheckpointStore["Service"]["restoreCheckpoint"] = Effect.fn(
-    "restoreCheckpoint",
-  )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.restoreCheckpoint", input.cwd);
-    return yield* checkpoints.restoreCheckpoint(input);
-  });
+  const restoreCheckpoint: CheckpointStore['Service']['restoreCheckpoint'] = Effect.fn(
+    'restoreCheckpoint',
+  )(function* (input)
+  {
+    const checkpoints = yield* resolveCheckpoints('CheckpointStore.restoreCheckpoint', input.cwd)
+    return yield* checkpoints.restoreCheckpoint(input)
+  })
 
-  const diffCheckpoints: CheckpointStore["Service"]["diffCheckpoints"] = Effect.fn(
-    "diffCheckpoints",
-  )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints("CheckpointStore.diffCheckpoints", input.cwd);
-    return yield* checkpoints.diffCheckpoints(input);
-  });
+  const diffCheckpoints: CheckpointStore['Service']['diffCheckpoints'] = Effect.fn(
+    'diffCheckpoints',
+  )(function* (input)
+  {
+    const checkpoints = yield* resolveCheckpoints('CheckpointStore.diffCheckpoints', input.cwd)
+    return yield* checkpoints.diffCheckpoints(input)
+  })
 
-  const deleteCheckpointRefs: CheckpointStore["Service"]["deleteCheckpointRefs"] = Effect.fn(
-    "deleteCheckpointRefs",
-  )(function* (input) {
-    const checkpoints = yield* resolveCheckpoints(
-      "CheckpointStore.deleteCheckpointRefs",
-      input.cwd,
-    );
-    return yield* checkpoints.deleteCheckpointRefs(input);
-  });
+  const deleteCheckpointRefs: CheckpointStore['Service']['deleteCheckpointRefs'] = Effect.fn(
+    'deleteCheckpointRefs',
+  )(function* (input)
+  {
+    const checkpoints = yield* resolveCheckpoints('CheckpointStore.deleteCheckpointRefs', input.cwd)
+    return yield* checkpoints.deleteCheckpointRefs(input)
+  })
 
   return CheckpointStore.of({
     isGitRepository,
@@ -164,7 +174,7 @@ export const make = Effect.gen(function* () {
     restoreCheckpoint,
     diffCheckpoints,
     deleteCheckpointRefs,
-  });
-});
+  })
+})
 
-export const layer = Layer.effect(CheckpointStore, make);
+export const layer = Layer.effect(CheckpointStore, make)

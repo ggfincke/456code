@@ -9,17 +9,18 @@
  *
  * @module OrchestrationEventStore
  */
-import { OrchestrationEvent } from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
-import type * as Stream from "effect/Stream";
+import { OrchestrationEvent } from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
+import type * as Stream from 'effect/Stream'
 
-import type { OrchestrationEventStoreError } from "../Errors.ts";
+import type { OrchestrationEventStoreError } from '../Errors.ts'
 
 /**
  * OrchestrationEventStoreShape - Service API for orchestration event persistence.
  */
-export interface OrchestrationEventStoreShape {
+export interface OrchestrationEventStoreShape
+{
   /**
    * Persist a new orchestration event.
    *
@@ -29,8 +30,8 @@ export interface OrchestrationEventStoreShape {
    * Actor kind is inferred from command/metadata before persistence.
    */
   readonly append: (
-    event: Omit<OrchestrationEvent, "sequence">,
-  ) => Effect.Effect<OrchestrationEvent, OrchestrationEventStoreError>;
+    event: Omit<OrchestrationEvent, 'sequence'>,
+  ) => Effect.Effect<OrchestrationEvent, OrchestrationEventStoreError>
 
   /**
    * Replay events after the provided sequence.
@@ -44,14 +45,14 @@ export interface OrchestrationEventStoreShape {
   readonly readFromSequence: (
     sequenceExclusive: number,
     limit?: number,
-  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
+  ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>
 
   /**
    * Read all events from the beginning of the stream.
    *
    * @returns Stream containing all stored events.
    */
-  readonly readAll: () => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>;
+  readonly readAll: () => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>
 }
 
 /**
@@ -68,4 +69,5 @@ export interface OrchestrationEventStoreShape {
 export class OrchestrationEventStore extends Context.Service<
   OrchestrationEventStore,
   OrchestrationEventStoreShape
->()("456code/persistence/Services/OrchestrationEventStore") {}
+>()('456code/persistence/Services/OrchestrationEventStore')
+{}

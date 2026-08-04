@@ -1,281 +1,325 @@
-import { splitPromptIntoComposerSegments } from "./composer-editor-mentions";
-import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "./lib/terminalContext";
+import { splitPromptIntoComposerSegments } from './composer-editor-mentions'
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from './lib/terminalContext'
 
-export type ComposerTriggerKind = "path" | "slash-command" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "orchestrate" | "default";
+export type ComposerTriggerKind = 'path' | 'slash-command' | 'skill'
+export type ComposerSlashCommand = 'model' | 'plan' | 'orchestrate' | 'default'
 
-export interface ComposerTrigger {
-  kind: ComposerTriggerKind;
-  query: string;
-  rangeStart: number;
-  rangeEnd: number;
+export interface ComposerTrigger
+{
+  kind: ComposerTriggerKind
+  query: string
+  rangeStart: number
+  rangeEnd: number
 }
 
 export function shouldSubmitComposerOnEnter(input: {
-  isMobileViewport: boolean;
-  shiftKey: boolean;
-}): boolean {
-  return !input.isMobileViewport && !input.shiftKey;
+  isMobileViewport: boolean
+  shiftKey: boolean
+}): boolean
+{
+  return !input.isMobileViewport && !input.shiftKey
 }
 
 const isInlineTokenSegment = (
   segment:
-    | { type: "text"; text: string }
-    | { type: "mention" }
-    | { type: "skill" }
-    | { type: "terminal-context" },
-): boolean => segment.type !== "text";
+    | { type: 'text'; text: string }
+    | { type: 'mention' }
+    | { type: 'skill' }
+    | { type: 'terminal-context' },
+): boolean => segment.type !== 'text'
 
-function clampCursor(text: string, cursor: number): number {
-  if (!Number.isFinite(cursor)) return text.length;
-  return Math.max(0, Math.min(text.length, Math.floor(cursor)));
+function clampCursor(text: string, cursor: number): number
+{
+  if (!Number.isFinite(cursor)) return text.length
+  return Math.max(0, Math.min(text.length, Math.floor(cursor)))
 }
 
-function isWhitespace(char: string): boolean {
+function isWhitespace(char: string): boolean
+{
   return (
-    char === " " ||
-    char === "\n" ||
-    char === "\t" ||
-    char === "\r" ||
+    char === ' ' ||
+    char === '\n' ||
+    char === '\t' ||
+    char === '\r' ||
     char === INLINE_TERMINAL_CONTEXT_PLACEHOLDER
-  );
+  )
 }
 
-function tokenStartForCursor(text: string, cursor: number): number {
-  let index = cursor - 1;
-  while (index >= 0 && !isWhitespace(text[index] ?? "")) {
-    index -= 1;
+function tokenStartForCursor(text: string, cursor: number): number
+{
+  let index = cursor - 1
+  while (index >= 0 && !isWhitespace(text[index] ?? ''))
+  {
+    index -= 1
   }
-  return index + 1;
+  return index + 1
 }
 
-export function expandCollapsedComposerCursor(text: string, cursorInput: number): number {
-  const collapsedCursor = clampCursor(text, cursorInput);
-  const segments = splitPromptIntoComposerSegments(text);
-  if (segments.length === 0) {
-    return collapsedCursor;
+export function expandCollapsedComposerCursor(text: string, cursorInput: number): number
+{
+  const collapsedCursor = clampCursor(text, cursorInput)
+  const segments = splitPromptIntoComposerSegments(text)
+  if (segments.length === 0)
+  {
+    return collapsedCursor
   }
 
-  let remaining = collapsedCursor;
-  let expandedCursor = 0;
+  let remaining = collapsedCursor
+  let expandedCursor = 0
 
-  for (const segment of segments) {
-    if (segment.type === "mention") {
-      const expandedLength = segment.source.length;
-      if (remaining <= 1) {
-        return expandedCursor + (remaining === 0 ? 0 : expandedLength);
+  for (const segment of segments)
+  {
+    if (segment.type === 'mention')
+    {
+      const expandedLength = segment.source.length
+      if (remaining <= 1)
+      {
+        return expandedCursor + (remaining === 0 ? 0 : expandedLength)
       }
-      remaining -= 1;
-      expandedCursor += expandedLength;
-      continue;
+      remaining -= 1
+      expandedCursor += expandedLength
+      continue
     }
-    if (segment.type === "skill") {
-      const expandedLength = segment.name.length + 1;
-      if (remaining <= 1) {
-        return expandedCursor + (remaining === 0 ? 0 : expandedLength);
+    if (segment.type === 'skill')
+    {
+      const expandedLength = segment.name.length + 1
+      if (remaining <= 1)
+      {
+        return expandedCursor + (remaining === 0 ? 0 : expandedLength)
       }
-      remaining -= 1;
-      expandedCursor += expandedLength;
-      continue;
+      remaining -= 1
+      expandedCursor += expandedLength
+      continue
     }
-    if (segment.type === "terminal-context") {
-      if (remaining <= 1) {
-        return expandedCursor + remaining;
+    if (segment.type === 'terminal-context')
+    {
+      if (remaining <= 1)
+      {
+        return expandedCursor + remaining
       }
-      remaining -= 1;
-      expandedCursor += 1;
-      continue;
+      remaining -= 1
+      expandedCursor += 1
+      continue
     }
 
-    const segmentLength = segment.text.length;
-    if (remaining <= segmentLength) {
-      return expandedCursor + remaining;
+    const segmentLength = segment.text.length
+    if (remaining <= segmentLength)
+    {
+      return expandedCursor + remaining
     }
-    remaining -= segmentLength;
-    expandedCursor += segmentLength;
+    remaining -= segmentLength
+    expandedCursor += segmentLength
   }
 
-  return expandedCursor;
+  return expandedCursor
 }
 
 function collapsedSegmentLength(
   segment:
-    | { type: "text"; text: string }
-    | { type: "mention" }
-    | { type: "skill" }
-    | { type: "terminal-context" },
-): number {
-  if (segment.type === "text") {
-    return segment.text.length;
+    | { type: 'text'; text: string }
+    | { type: 'mention' }
+    | { type: 'skill' }
+    | { type: 'terminal-context' },
+): number
+{
+  if (segment.type === 'text')
+  {
+    return segment.text.length
   }
-  return 1;
+  return 1
 }
 
 function clampCollapsedComposerCursorForSegments(
   segments: ReadonlyArray<
-    | { type: "text"; text: string }
-    | { type: "mention" }
-    | { type: "skill" }
-    | { type: "terminal-context" }
+    | { type: 'text'; text: string }
+    | { type: 'mention' }
+    | { type: 'skill' }
+    | { type: 'terminal-context' }
   >,
   cursorInput: number,
-): number {
+): number
+{
   const collapsedLength = segments.reduce(
     (total, segment) => total + collapsedSegmentLength(segment),
     0,
-  );
-  if (!Number.isFinite(cursorInput)) {
-    return collapsedLength;
+  )
+  if (!Number.isFinite(cursorInput))
+  {
+    return collapsedLength
   }
-  return Math.max(0, Math.min(collapsedLength, Math.floor(cursorInput)));
+  return Math.max(0, Math.min(collapsedLength, Math.floor(cursorInput)))
 }
 
-export function clampCollapsedComposerCursor(text: string, cursorInput: number): number {
-  return clampCollapsedComposerCursorForSegments(
-    splitPromptIntoComposerSegments(text),
-    cursorInput,
-  );
+export function clampCollapsedComposerCursor(text: string, cursorInput: number): number
+{
+  return clampCollapsedComposerCursorForSegments(splitPromptIntoComposerSegments(text), cursorInput)
 }
 
-export function collapseExpandedComposerCursor(text: string, cursorInput: number): number {
-  const expandedCursor = clampCursor(text, cursorInput);
-  const segments = splitPromptIntoComposerSegments(text);
-  if (segments.length === 0) {
-    return expandedCursor;
+export function collapseExpandedComposerCursor(text: string, cursorInput: number): number
+{
+  const expandedCursor = clampCursor(text, cursorInput)
+  const segments = splitPromptIntoComposerSegments(text)
+  if (segments.length === 0)
+  {
+    return expandedCursor
   }
 
-  let remaining = expandedCursor;
-  let collapsedCursor = 0;
+  let remaining = expandedCursor
+  let collapsedCursor = 0
 
-  for (const segment of segments) {
-    if (segment.type === "mention") {
-      const expandedLength = segment.source.length;
-      if (remaining === 0) {
-        return collapsedCursor;
+  for (const segment of segments)
+  {
+    if (segment.type === 'mention')
+    {
+      const expandedLength = segment.source.length
+      if (remaining === 0)
+      {
+        return collapsedCursor
       }
-      if (remaining <= expandedLength) {
-        return collapsedCursor + 1;
+      if (remaining <= expandedLength)
+      {
+        return collapsedCursor + 1
       }
-      remaining -= expandedLength;
-      collapsedCursor += 1;
-      continue;
+      remaining -= expandedLength
+      collapsedCursor += 1
+      continue
     }
-    if (segment.type === "skill") {
-      const expandedLength = segment.name.length + 1;
-      if (remaining === 0) {
-        return collapsedCursor;
+    if (segment.type === 'skill')
+    {
+      const expandedLength = segment.name.length + 1
+      if (remaining === 0)
+      {
+        return collapsedCursor
       }
-      if (remaining <= expandedLength) {
-        return collapsedCursor + 1;
+      if (remaining <= expandedLength)
+      {
+        return collapsedCursor + 1
       }
-      remaining -= expandedLength;
-      collapsedCursor += 1;
-      continue;
+      remaining -= expandedLength
+      collapsedCursor += 1
+      continue
     }
-    if (segment.type === "terminal-context") {
-      if (remaining <= 1) {
-        return collapsedCursor + remaining;
+    if (segment.type === 'terminal-context')
+    {
+      if (remaining <= 1)
+      {
+        return collapsedCursor + remaining
       }
-      remaining -= 1;
-      collapsedCursor += 1;
-      continue;
+      remaining -= 1
+      collapsedCursor += 1
+      continue
     }
 
-    const segmentLength = segment.text.length;
-    if (remaining <= segmentLength) {
-      return collapsedCursor + remaining;
+    const segmentLength = segment.text.length
+    if (remaining <= segmentLength)
+    {
+      return collapsedCursor + remaining
     }
-    remaining -= segmentLength;
-    collapsedCursor += segmentLength;
+    remaining -= segmentLength
+    collapsedCursor += segmentLength
   }
 
-  return collapsedCursor;
+  return collapsedCursor
 }
 
 export function isCollapsedCursorAdjacentToInlineToken(
   text: string,
   cursorInput: number,
-  direction: "left" | "right",
-): boolean {
-  const segments = splitPromptIntoComposerSegments(text);
-  if (!segments.some(isInlineTokenSegment)) {
-    return false;
+  direction: 'left' | 'right',
+): boolean
+{
+  const segments = splitPromptIntoComposerSegments(text)
+  if (!segments.some(isInlineTokenSegment))
+  {
+    return false
   }
 
-  const cursor = clampCollapsedComposerCursorForSegments(segments, cursorInput);
-  let collapsedOffset = 0;
+  const cursor = clampCollapsedComposerCursorForSegments(segments, cursorInput)
+  let collapsedOffset = 0
 
-  for (const segment of segments) {
-    if (isInlineTokenSegment(segment)) {
-      if (direction === "left" && cursor === collapsedOffset + 1) {
-        return true;
+  for (const segment of segments)
+  {
+    if (isInlineTokenSegment(segment))
+    {
+      if (direction === 'left' && cursor === collapsedOffset + 1)
+      {
+        return true
       }
-      if (direction === "right" && cursor === collapsedOffset) {
-        return true;
+      if (direction === 'right' && cursor === collapsedOffset)
+      {
+        return true
       }
     }
-    collapsedOffset += collapsedSegmentLength(segment);
+    collapsedOffset += collapsedSegmentLength(segment)
   }
 
-  return false;
+  return false
 }
 
-export const isCollapsedCursorAdjacentToMention = isCollapsedCursorAdjacentToInlineToken;
+export const isCollapsedCursorAdjacentToMention = isCollapsedCursorAdjacentToInlineToken
 
-export function detectComposerTrigger(text: string, cursorInput: number): ComposerTrigger | null {
-  const cursor = clampCursor(text, cursorInput);
-  const tokenStart = tokenStartForCursor(text, cursor);
-  const token = text.slice(tokenStart, cursor);
+export function detectComposerTrigger(text: string, cursorInput: number): ComposerTrigger | null
+{
+  const cursor = clampCursor(text, cursorInput)
+  const tokenStart = tokenStartForCursor(text, cursor)
+  const token = text.slice(tokenStart, cursor)
 
   // `/` is a whitespace-bounded token trigger (same as `$` / `@`) so another
   // slash works after a skill chip, not only at line start.
-  if (token.startsWith("/")) {
+  if (token.startsWith('/'))
+  {
     return {
-      kind: "slash-command",
+      kind: 'slash-command',
       query: token.slice(1),
       rangeStart: tokenStart,
       rangeEnd: cursor,
-    };
+    }
   }
-  if (token.startsWith("$")) {
+  if (token.startsWith('$'))
+  {
     return {
-      kind: "skill",
+      kind: 'skill',
       query: token.slice(1),
       rangeStart: tokenStart,
       rangeEnd: cursor,
-    };
+    }
   }
-  if (!token.startsWith("@")) {
-    return null;
+  if (!token.startsWith('@'))
+  {
+    return null
   }
 
   return {
-    kind: "path",
+    kind: 'path',
     query: token.slice(1),
     rangeStart: tokenStart,
     rangeEnd: cursor,
-  };
+  }
 }
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
-  const match = /^\/(plan|orchestrate|default)\s*$/i.exec(text.trim());
-  if (!match) {
-    return null;
+): Exclude<ComposerSlashCommand, 'model'> | null
+{
+  const match = /^\/(plan|orchestrate|default)\s*$/i.exec(text.trim())
+  if (!match)
+  {
+    return null
   }
-  const command = match[1]?.toLowerCase();
-  if (command === "plan") return "plan";
-  if (command === "orchestrate") return "orchestrate";
-  return "default";
+  const command = match[1]?.toLowerCase()
+  if (command === 'plan') return 'plan'
+  if (command === 'orchestrate') return 'orchestrate'
+  return 'default'
 }
 
-export function parseLegacyOrchestrateInvocation(text: string): { readonly prompt: string } | null {
-  const match = /^\s*\$orchestrate(?:\s+|$)/i.exec(text);
-  if (!match) {
-    return null;
+export function parseLegacyOrchestrateInvocation(text: string): { readonly prompt: string } | null
+{
+  const match = /^\s*\$orchestrate(?:\s+|$)/i.exec(text)
+  if (!match)
+  {
+    return null
   }
-  return { prompt: text.slice(match[0].length).trimStart() };
+  return { prompt: text.slice(match[0].length).trimStart() }
 }
 
 export function replaceTextRange(
@@ -283,9 +327,10 @@ export function replaceTextRange(
   rangeStart: number,
   rangeEnd: number,
   replacement: string,
-): { text: string; cursor: number } {
-  const safeStart = Math.max(0, Math.min(text.length, rangeStart));
-  const safeEnd = Math.max(safeStart, Math.min(text.length, rangeEnd));
-  const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`;
-  return { text: nextText, cursor: safeStart + replacement.length };
+): { text: string; cursor: number }
+{
+  const safeStart = Math.max(0, Math.min(text.length, rangeStart))
+  const safeEnd = Math.max(safeStart, Math.min(text.length, rangeEnd))
+  const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`
+  return { text: nextText, cursor: safeStart + replacement.length }
 }

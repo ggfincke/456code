@@ -1,8 +1,9 @@
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Effect from "effect/Effect";
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as Effect from 'effect/Effect'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_projects (
@@ -15,7 +16,7 @@ export default Effect.gen(function* () {
       updated_at TEXT NOT NULL,
       deleted_at TEXT
     )
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_threads (
@@ -30,7 +31,7 @@ export default Effect.gen(function* () {
       updated_at TEXT NOT NULL,
       deleted_at TEXT
     )
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_thread_messages (
@@ -43,7 +44,7 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_thread_activities (
@@ -56,7 +57,7 @@ export default Effect.gen(function* () {
       payload_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     )
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_thread_sessions (
@@ -69,7 +70,7 @@ export default Effect.gen(function* () {
       last_error TEXT,
       updated_at TEXT NOT NULL
     )
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_turns (
@@ -89,7 +90,7 @@ export default Effect.gen(function* () {
       UNIQUE (thread_id, turn_id),
       UNIQUE (thread_id, checkpoint_turn_count)
     )
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_pending_approvals (
@@ -101,7 +102,7 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       resolved_at TEXT
     )
-  `;
+  `
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_state (
@@ -109,45 +110,45 @@ export default Effect.gen(function* () {
       last_applied_sequence INTEGER NOT NULL,
       updated_at TEXT NOT NULL
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_projects_updated_at
     ON projection_projects(updated_at)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_threads_project_id
     ON projection_threads(project_id)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_thread_messages_thread_created
     ON projection_thread_messages(thread_id, created_at)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_thread_activities_thread_created
     ON projection_thread_activities(thread_id, created_at)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_thread_sessions_provider_session
     ON projection_thread_sessions(provider_session_id)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_turns_thread_requested
     ON projection_turns(thread_id, requested_at)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_turns_thread_checkpoint_completed
     ON projection_turns(thread_id, checkpoint_turn_count, completed_at)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_pending_approvals_thread_status
     ON projection_pending_approvals(thread_id, status)
-  `;
-});
+  `
+})

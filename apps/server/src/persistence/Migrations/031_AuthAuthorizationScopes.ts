@@ -1,15 +1,16 @@
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 /**
  * This is an intentional alpha cutover: role-bearing credentials and sessions
  * cannot safely be assigned new capabilities implicitly.
  */
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
-  yield* sql`DROP TABLE IF EXISTS auth_pairing_links`;
-  yield* sql`DROP TABLE IF EXISTS auth_sessions`;
+  yield* sql`DROP TABLE IF EXISTS auth_pairing_links`
+  yield* sql`DROP TABLE IF EXISTS auth_sessions`
 
   yield* sql`
     CREATE TABLE auth_pairing_links (
@@ -24,12 +25,12 @@ export default Effect.gen(function* () {
       consumed_at TEXT,
       revoked_at TEXT
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX idx_auth_pairing_links_active
     ON auth_pairing_links(revoked_at, consumed_at, expires_at)
-  `;
+  `
 
   yield* sql`
     CREATE TABLE auth_sessions (
@@ -48,10 +49,10 @@ export default Effect.gen(function* () {
       last_connected_at TEXT,
       revoked_at TEXT
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX idx_auth_sessions_active
     ON auth_sessions(revoked_at, expires_at, issued_at)
-  `;
-});
+  `
+})

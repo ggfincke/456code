@@ -1,27 +1,29 @@
-import type { ReactNode } from "react";
-import { Pressable, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { ReactNode } from 'react'
+import { Pressable, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { SymbolView, type AppSymbolName } from "./AppSymbol";
-import { AppText as Text } from "./AppText";
-import { cn } from "../lib/cn";
-import { useThemeColor } from "../lib/useThemeColor";
+import { SymbolView, type AppSymbolName } from './AppSymbol'
+import { AppText as Text } from './AppText'
+import { cn } from '../lib/cn'
+import { useThemeColor } from '../lib/useThemeColor'
 
-export interface AndroidHeaderAction {
-  readonly accessibilityLabel: string;
-  readonly icon: AppSymbolName;
-  readonly onPress: () => void;
-  readonly disabled?: boolean;
+export interface AndroidHeaderAction
+{
+  readonly accessibilityLabel: string
+  readonly icon: AppSymbolName
+  readonly onPress: () => void
+  readonly disabled?: boolean
 }
 
 export function AndroidHeaderIconButton(props: {
-  readonly accessibilityLabel: string;
-  readonly icon: AppSymbolName;
-  readonly onPress?: () => void;
-  readonly disabled?: boolean;
-}) {
-  const foregroundColor = useThemeColor("--color-foreground");
-  const disabledColor = useThemeColor("--color-icon-subtle");
+  readonly accessibilityLabel: string
+  readonly icon: AppSymbolName
+  readonly onPress?: () => void
+  readonly disabled?: boolean
+})
+{
+  const foregroundColor = useThemeColor('--color-foreground')
+  const disabledColor = useThemeColor('--color-icon-subtle')
 
   return (
     <Pressable
@@ -31,8 +33,8 @@ export function AndroidHeaderIconButton(props: {
       hitSlop={8}
       onPress={props.onPress}
       className={cn(
-        "size-11 items-center justify-center rounded-full bg-subtle",
-        props.disabled && "opacity-55",
+        'size-11 items-center justify-center rounded-full bg-subtle',
+        props.disabled && 'opacity-55',
       )}
     >
       <SymbolView
@@ -42,19 +44,20 @@ export function AndroidHeaderIconButton(props: {
         type="monochrome"
       />
     </Pressable>
-  );
+  )
 }
 
 export function AndroidScreenHeader(props: {
-  readonly title: string;
-  readonly subtitle?: string | null;
-  readonly actions?: ReadonlyArray<AndroidHeaderAction>;
-  readonly trailing?: ReactNode;
-  readonly onBack?: () => void;
-  readonly embedded?: boolean;
-}) {
-  const insets = useSafeAreaInsets();
-  const foregroundColor = useThemeColor("--color-foreground");
+  readonly title: string
+  readonly subtitle?: string | null
+  readonly actions?: ReadonlyArray<AndroidHeaderAction>
+  readonly trailing?: ReactNode
+  readonly onBack?: () => void
+  readonly embedded?: boolean
+})
+{
+  const insets = useSafeAreaInsets()
+  const foregroundColor = useThemeColor('--color-foreground')
 
   return (
     <View
@@ -81,7 +84,7 @@ export function AndroidScreenHeader(props: {
           </Pressable>
         ) : null}
 
-        <View className={cn("min-w-0 flex-1", !props.onBack && "pl-1")}>
+        <View className={cn('min-w-0 flex-1', !props.onBack && 'pl-1')}>
           <Text numberOfLines={1} className="text-lg font-sans-bold text-foreground">
             {props.title}
           </Text>
@@ -107,11 +110,12 @@ export function AndroidScreenHeader(props: {
         {props.trailing}
       </View>
     </View>
-  );
+  )
 }
 
 export function AndroidSheetHeader(
-  props: Omit<Parameters<typeof AndroidScreenHeader>[0], "embedded">,
-) {
-  return <AndroidScreenHeader {...props} embedded />;
+  props: Omit<Parameters<typeof AndroidScreenHeader>[0], 'embedded'>,
+)
+{
+  return <AndroidScreenHeader {...props} embedded />
 }

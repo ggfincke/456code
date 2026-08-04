@@ -17,16 +17,17 @@
  *
  * @module provider/Services/ProviderInstanceRegistry
  */
-import type { ProviderInstanceId, ServerProvider } from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
-import type * as PubSub from "effect/PubSub";
-import type * as Scope from "effect/Scope";
-import type * as Stream from "effect/Stream";
+import type { ProviderInstanceId, ServerProvider } from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
+import type * as PubSub from 'effect/PubSub'
+import type * as Scope from 'effect/Scope'
+import type * as Stream from 'effect/Stream'
 
-import type { ProviderInstance } from "../ProviderDriver.ts";
+import type { ProviderInstance } from '../ProviderDriver.ts'
 
-export interface ProviderInstanceRegistryShape {
+export interface ProviderInstanceRegistryShape
+{
   /**
    * Look up one instance by id. Returns `undefined` (not Option) when the
    * id is unknown — callers branch on falsy and emit
@@ -34,18 +35,18 @@ export interface ProviderInstanceRegistryShape {
    */
   readonly getInstance: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderInstance | undefined>;
+  ) => Effect.Effect<ProviderInstance | undefined>
   /**
    * Every available (driver-registered, successfully created) instance,
    * in stable settings-author order.
    */
-  readonly listInstances: Effect.Effect<ReadonlyArray<ProviderInstance>>;
+  readonly listInstances: Effect.Effect<ReadonlyArray<ProviderInstance>>
   /**
    * Wire-shape shadow snapshots for instances whose driver is unknown to
    * this build (or whose config failed to decode). Suitable for merging
    * directly into `ProviderRegistry` output.
    */
-  readonly listUnavailable: Effect.Effect<ReadonlyArray<ServerProvider>>;
+  readonly listUnavailable: Effect.Effect<ReadonlyArray<ServerProvider>>
   /**
    * Push notification stream emitted whenever the registry's contents
    * change — instance added, removed, or rebuilt. The payload is `void`
@@ -61,7 +62,7 @@ export interface ProviderInstanceRegistryShape {
    * subscription synchronously in the caller's fiber before the consumer
    * loop is forked.
    */
-  readonly streamChanges: Stream.Stream<void>;
+  readonly streamChanges: Stream.Stream<void>
   /**
    * Acquire a subscription to the registry's change channel synchronously
    * in the caller's fiber. Returns a `PubSub.Subscription<void>` whose
@@ -78,10 +79,11 @@ export interface ProviderInstanceRegistryShape {
    * consumption can miss a publish that lands in the narrow window
    * between "fiber scheduled" and "fiber starts running".
    */
-  readonly subscribeChanges: Effect.Effect<PubSub.Subscription<void>, never, Scope.Scope>;
+  readonly subscribeChanges: Effect.Effect<PubSub.Subscription<void>, never, Scope.Scope>
 }
 
 export class ProviderInstanceRegistry extends Context.Service<
   ProviderInstanceRegistry,
   ProviderInstanceRegistryShape
->()("456code/provider/Services/ProviderInstanceRegistry") {}
+>()('456code/provider/Services/ProviderInstanceRegistry')
+{}

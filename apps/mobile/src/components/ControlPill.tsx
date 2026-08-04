@@ -1,68 +1,69 @@
-import { MenuView } from "@react-native-menu/menu";
-import * as Haptics from "expo-haptics";
+import { MenuView } from '@react-native-menu/menu'
+import * as Haptics from 'expo-haptics'
 import {
   cloneElement,
   isValidElement,
   type ComponentProps,
   type ReactElement,
   type ReactNode,
-} from "react";
-import { Platform, Pressable, useColorScheme, View } from "react-native";
-import { useThemeColor } from "../lib/useThemeColor";
+} from 'react'
+import { Platform, Pressable, useColorScheme, View } from 'react-native'
+import { useThemeColor } from '../lib/useThemeColor'
 
-import { cn } from "../lib/cn";
-import { AndroidAnchoredMenu } from "./AndroidAnchoredMenu";
-import { SymbolView } from "./AppSymbol";
-import { AppText as Text } from "./AppText";
+import { cn } from '../lib/cn'
+import { AndroidAnchoredMenu } from './AndroidAnchoredMenu'
+import { SymbolView } from './AppSymbol'
+import { AppText as Text } from './AppText'
 
 export function ControlPill(props: {
-  readonly icon?: ComponentProps<typeof SymbolView>["name"];
-  readonly iconNode?: ReactNode;
-  readonly label?: string;
-  readonly accessibilityLabel?: string;
-  readonly onPress?: () => void;
-  readonly variant?: "circle" | "pill" | "primary" | "danger";
-  readonly disabled?: boolean;
-}) {
-  const variant = props.variant ?? "circle";
+  readonly icon?: ComponentProps<typeof SymbolView>['name']
+  readonly iconNode?: ReactNode
+  readonly label?: string
+  readonly accessibilityLabel?: string
+  readonly onPress?: () => void
+  readonly variant?: 'circle' | 'pill' | 'primary' | 'danger'
+  readonly disabled?: boolean
+})
+{
+  const variant = props.variant ?? 'circle'
 
-  const iconColor = useThemeColor("--color-icon");
-  const iconSubtle = useThemeColor("--color-icon-subtle");
-  const primaryFg = useThemeColor("--color-primary-foreground");
-  const dangerFg = useThemeColor("--color-danger-foreground");
+  const iconColor = useThemeColor('--color-icon')
+  const iconSubtle = useThemeColor('--color-icon-subtle')
+  const primaryFg = useThemeColor('--color-primary-foreground')
+  const dangerFg = useThemeColor('--color-danger-foreground')
   const iconTintColor =
-    variant === "primary"
+    variant === 'primary'
       ? props.disabled
         ? iconSubtle
         : primaryFg
-      : variant === "danger"
+      : variant === 'danger'
         ? dangerFg
-        : iconColor;
+        : iconColor
 
   const isCircle =
-    variant === "circle" || variant === "danger" || (variant === "primary" && !props.label);
+    variant === 'circle' || variant === 'danger' || (variant === 'primary' && !props.label)
   const containerClassName = cn(
     isCircle
-      ? "h-11 w-11 items-center justify-center rounded-full"
-      : variant === "primary"
-        ? "h-11 flex-row items-center justify-center gap-2 rounded-full px-5"
-        : "h-11 flex-row items-center justify-center gap-2 rounded-full px-3.5",
-    variant === "primary"
+      ? 'h-11 w-11 items-center justify-center rounded-full'
+      : variant === 'primary'
+        ? 'h-11 flex-row items-center justify-center gap-2 rounded-full px-5'
+        : 'h-11 flex-row items-center justify-center gap-2 rounded-full px-3.5',
+    variant === 'primary'
       ? props.disabled
-        ? "bg-subtle-strong"
-        : "bg-primary"
-      : variant === "danger"
-        ? "bg-danger"
-        : "bg-subtle",
-  );
+        ? 'bg-subtle-strong'
+        : 'bg-primary'
+      : variant === 'danger'
+        ? 'bg-danger'
+        : 'bg-subtle',
+  )
   const labelClassName = cn(
-    "text-center text-xs font-sans-bold",
-    variant === "primary"
+    'text-center text-xs font-sans-bold',
+    variant === 'primary'
       ? props.disabled
-        ? "text-foreground-muted"
-        : "text-primary-foreground"
-      : "",
-  );
+        ? 'text-foreground-muted'
+        : 'text-primary-foreground'
+      : '',
+  )
 
   return (
     <Pressable
@@ -79,7 +80,7 @@ export function ControlPill(props: {
       ) : null}
       {props.label ? <Text className={labelClassName}>{props.label}</Text> : null}
     </Pressable>
-  );
+  )
 }
 
 // iOS renders the native UIMenu (standard checkmark for `state: "on"`);
@@ -87,19 +88,22 @@ export function ControlPill(props: {
 // AppCompat popup can't be themed past its stock animation, metrics, and
 // submenu chrome.
 export function ControlPillMenu(
-  props: Omit<ComponentProps<typeof MenuView>, "children" | "themeVariant"> & {
-    readonly children: ReactNode;
-    readonly className?: string;
+  props: Omit<ComponentProps<typeof MenuView>, 'children' | 'themeVariant'> & {
+    readonly children: ReactNode
+    readonly className?: string
   },
-) {
-  const isDarkMode = useColorScheme() === "dark";
+)
+{
+  const isDarkMode = useColorScheme() === 'dark'
 
-  if (Platform.OS === "android") {
+  if (Platform.OS === 'android')
+  {
     // Long-press menus keep their child interactive: the child element gets
     // an injected onLongPress (mirroring the iOS context-menu interaction)
     // so its own tap handling still works.
-    if (props.shouldOpenOnLongPress && isValidElement(props.children)) {
-      const child = props.children as ReactElement<{ onLongPress?: () => void }>;
+    if (props.shouldOpenOnLongPress && isValidElement(props.children))
+    {
+      const child = props.children as ReactElement<{ onLongPress?: () => void }>
       return (
         <AndroidAnchoredMenu
           actions={props.actions}
@@ -110,14 +114,15 @@ export function ControlPillMenu(
         >
           {(open) =>
             cloneElement(child, {
-              onLongPress: () => {
-                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                open();
+              onLongPress: () =>
+              {
+                void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)
+                open()
               },
             })
           }
         </AndroidAnchoredMenu>
-      );
+      )
     }
     return (
       <AndroidAnchoredMenu
@@ -129,13 +134,13 @@ export function ControlPillMenu(
       >
         {props.children}
       </AndroidAnchoredMenu>
-    );
+    )
   }
 
-  const { className: _className, ...menuProps } = props;
+  const { className: _className, ...menuProps } = props
   return (
-    <MenuView {...menuProps} themeVariant={isDarkMode ? "dark" : "light"}>
+    <MenuView {...menuProps} themeVariant={isDarkMode ? 'dark' : 'light'}>
       {menuProps.children}
     </MenuView>
-  );
+  )
 }

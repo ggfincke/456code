@@ -1,54 +1,60 @@
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
 
 import {
   type VcsDriverKind,
   type VcsError,
   type VcsInitInput,
   VcsUnsupportedOperationError,
-} from "@t3tools/contracts";
-import * as VcsDriverRegistry from "./VcsDriverRegistry.ts";
+} from '@t3tools/contracts'
+import * as VcsDriverRegistry from './VcsDriverRegistry.ts'
 
 export class VcsProvisioningService extends Context.Service<
   VcsProvisioningService,
   {
-    readonly initRepository: (input: VcsInitInput) => Effect.Effect<void, VcsError>;
+    readonly initRepository: (input: VcsInitInput) => Effect.Effect<void, VcsError>
   }
->()("456code/vcs/VcsProvisioningService") {}
+>()('456code/vcs/VcsProvisioningService')
+{}
 
 function resolveRequestedKind(
   kind: VcsDriverKind | undefined,
-): Effect.Effect<VcsDriverKind, VcsUnsupportedOperationError> {
-  if (kind === undefined) {
-    return Effect.succeed("git");
+): Effect.Effect<VcsDriverKind, VcsUnsupportedOperationError>
+{
+  if (kind === undefined)
+  {
+    return Effect.succeed('git')
   }
-  if (kind === "unknown") {
+  if (kind === 'unknown')
+  {
     return Effect.fail(
       new VcsUnsupportedOperationError({
-        operation: "VcsProvisioningService.resolveRequestedKind",
+        operation: 'VcsProvisioningService.resolveRequestedKind',
         kind,
-        detail: "A concrete VCS driver kind is required for repository provisioning.",
+        detail: 'A concrete VCS driver kind is required for repository provisioning.',
       }),
-    );
+    )
   }
-  return Effect.succeed(kind);
+  return Effect.succeed(kind)
 }
 
-export const make = Effect.gen(function* () {
-  const registry = yield* VcsDriverRegistry.VcsDriverRegistry;
+export const make = Effect.gen(function* ()
+{
+  const registry = yield* VcsDriverRegistry.VcsDriverRegistry
 
-  const initRepository: VcsProvisioningService["Service"]["initRepository"] = Effect.fn(
-    "VcsProvisioningService.initRepository",
-  )(function* (input) {
-    const kind = yield* resolveRequestedKind(input.kind);
-    const driver = yield* registry.get(kind);
-    return yield* driver.initRepository(input);
-  });
+  const initRepository: VcsProvisioningService['Service']['initRepository'] = Effect.fn(
+    'VcsProvisioningService.initRepository',
+  )(function* (input)
+  {
+    const kind = yield* resolveRequestedKind(input.kind)
+    const driver = yield* registry.get(kind)
+    return yield* driver.initRepository(input)
+  })
 
   return VcsProvisioningService.of({
     initRepository,
-  });
-});
+  })
+})
 
-export const layer = Layer.effect(VcsProvisioningService, make);
+export const layer = Layer.effect(VcsProvisioningService, make)

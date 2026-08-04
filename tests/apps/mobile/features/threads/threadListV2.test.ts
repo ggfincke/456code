@@ -1,31 +1,32 @@
 // tests/apps/mobile/features/threads/threadListV2.test.ts
 // verifies mobile thread list ordering and status presentation
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from '@t3tools/contracts'
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   buildThreadListV2Items,
   resolveThreadListV2Status,
   sortThreadsForListV2,
-} from "../../../../../apps/mobile/src/features/threads/threadListV2";
+} from '../../../../../apps/mobile/src/features/threads/threadListV2'
 
-const environmentId = EnvironmentId.make("environment-1");
+const environmentId = EnvironmentId.make('environment-1')
 
 function makeThread(
-  input: Partial<EnvironmentThreadShell> & Pick<EnvironmentThreadShell, "id" | "title">,
-): EnvironmentThreadShell {
+  input: Partial<EnvironmentThreadShell> & Pick<EnvironmentThreadShell, 'id' | 'title'>,
+): EnvironmentThreadShell
+{
   return {
     environmentId,
-    projectId: ProjectId.make("project-1"),
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-    runtimeMode: "full-access",
-    interactionMode: "default",
+    projectId: ProjectId.make('project-1'),
+    modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
+    runtimeMode: 'full-access',
+    interactionMode: 'default',
     branch: null,
     worktreePath: null,
     latestTurn: null,
-    createdAt: "2026-06-01T00:00:00.000Z",
-    updatedAt: "2026-06-01T00:00:00.000Z",
+    createdAt: '2026-06-01T00:00:00.000Z',
+    updatedAt: '2026-06-01T00:00:00.000Z',
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
@@ -36,266 +37,282 @@ function makeThread(
     hasActionableProposedPlan: false,
     ...input,
     origin: input.origin ?? null,
-  };
+  }
 }
 
-const NOW = "2026-06-02T00:00:00.000Z";
+const NOW = '2026-06-02T00:00:00.000Z'
 
-describe("resolveThreadListV2Status", () => {
-  it("prioritizes approval over a running session", () => {
+describe('resolveThreadListV2Status', () =>
+{
+  it('prioritizes approval over a running session', () =>
+  {
     const thread = makeThread({
-      id: ThreadId.make("t"),
-      title: "t",
+      id: ThreadId.make('t'),
+      title: 't',
       hasPendingApprovals: true,
       session: {
-        threadId: ThreadId.make("t"),
-        status: "running",
-        providerName: "Codex",
-        providerInstanceId: ProviderInstanceId.make("codex"),
-        runtimeMode: "full-access",
+        threadId: ThreadId.make('t'),
+        status: 'running',
+        providerName: 'Codex',
+        providerInstanceId: ProviderInstanceId.make('codex'),
+        runtimeMode: 'full-access',
         activeTurnId: null,
         lastError: null,
         updatedAt: NOW,
       },
-    });
-    expect(resolveThreadListV2Status(thread)).toBe("approval");
-  });
+    })
+    expect(resolveThreadListV2Status(thread)).toBe('approval')
+  })
 
-  it("resolves ready for quiescent threads", () => {
-    expect(resolveThreadListV2Status(makeThread({ id: ThreadId.make("t"), title: "t" }))).toBe(
-      "ready",
-    );
-  });
-});
+  it('resolves ready for quiescent threads', () =>
+  {
+    expect(resolveThreadListV2Status(makeThread({ id: ThreadId.make('t'), title: 't' }))).toBe(
+      'ready',
+    )
+  })
+})
 
-describe("sortThreadsForListV2", () => {
-  it("orders by creation time, newest first, ignoring activity", () => {
+describe('sortThreadsForListV2', () =>
+{
+  it('orders by creation time, newest first, ignoring activity', () =>
+  {
     const sorted = sortThreadsForListV2([
-      { id: "oldest", createdAt: "2026-06-01T08:00:00.000Z" },
-      { id: "newest", createdAt: "2026-06-01T12:00:00.000Z" },
-      { id: "middle", createdAt: "2026-06-01T10:00:00.000Z" },
-    ]);
-    expect(sorted.map((thread) => thread.id)).toEqual(["newest", "middle", "oldest"]);
-  });
-});
+      { id: 'oldest', createdAt: '2026-06-01T08:00:00.000Z' },
+      { id: 'newest', createdAt: '2026-06-01T12:00:00.000Z' },
+      { id: 'middle', createdAt: '2026-06-01T10:00:00.000Z' },
+    ])
+    expect(sorted.map((thread) => thread.id)).toEqual(['newest', 'middle', 'oldest'])
+  })
+})
 
-describe("buildThreadListV2Items", () => {
-  it("hides snoozed threads and counts them — visibility parity with web", () => {
+describe('buildThreadListV2Items', () =>
+{
+  it('hides snoozed threads and counts them — visibility parity with web', () =>
+  {
     const layout = buildThreadListV2Items({
       threads: [
-        makeThread({ id: ThreadId.make("active"), title: "Active" }),
+        makeThread({ id: ThreadId.make('active'), title: 'Active' }),
         makeThread({
-          id: ThreadId.make("snoozed"),
-          title: "Snoozed",
-          snoozedUntil: "2026-06-03T09:00:00.000Z",
-          snoozedAt: "2026-06-01T12:00:00.000Z",
+          id: ThreadId.make('snoozed'),
+          title: 'Snoozed',
+          snoozedUntil: '2026-06-03T09:00:00.000Z',
+          snoozedAt: '2026-06-01T12:00:00.000Z',
         }),
         makeThread({
-          id: ThreadId.make("woken"),
-          title: "Woken",
+          id: ThreadId.make('woken'),
+          title: 'Woken',
           // Wake time already passed: back in the active list.
-          snoozedUntil: "2026-06-01T18:00:00.000Z",
-          snoozedAt: "2026-06-01T12:00:00.000Z",
+          snoozedUntil: '2026-06-01T18:00:00.000Z',
+          snoozedAt: '2026-06-01T12:00:00.000Z',
         }),
       ],
       environmentId: null,
-      searchQuery: "",
+      searchQuery: '',
       now: NOW,
-    });
+    })
 
     // Same createdAt → static sort tiebreaks by id; the point is the woken
     // thread is BACK in the card block and the snoozed one is gone.
-    expect(layout.items.map((item) => item.thread.id)).toEqual(["active", "woken"]);
-    expect(layout.snoozedCount).toBe(1);
-  });
+    expect(layout.items.map((item) => item.thread.id)).toEqual(['active', 'woken'])
+    expect(layout.snoozedCount).toBe(1)
+  })
 
-  it("classifies snooze with the second-precise clock and reports the next wake", () => {
+  it('classifies snooze with the second-precise clock and reports the next wake', () =>
+  {
     const layout = buildThreadListV2Items({
       threads: [
         makeThread({
-          id: ThreadId.make("just-woke"),
-          title: "Just woke",
+          id: ThreadId.make('just-woke'),
+          title: 'Just woke',
           // Woke 30s ago: hidden under the minute-floored clock, visible
           // under the precise one.
-          snoozedUntil: "2026-06-02T00:00:30.000Z",
-          snoozedAt: "2026-06-01T12:00:00.000Z",
+          snoozedUntil: '2026-06-02T00:00:30.000Z',
+          snoozedAt: '2026-06-01T12:00:00.000Z',
         }),
         makeThread({
-          id: ThreadId.make("still-snoozed"),
-          title: "Still snoozed",
-          snoozedUntil: "2026-06-02T09:00:00.000Z",
-          snoozedAt: "2026-06-01T12:00:00.000Z",
+          id: ThreadId.make('still-snoozed'),
+          title: 'Still snoozed',
+          snoozedUntil: '2026-06-02T09:00:00.000Z',
+          snoozedAt: '2026-06-01T12:00:00.000Z',
         }),
       ],
       environmentId: null,
-      searchQuery: "",
+      searchQuery: '',
       // Minute-floored partition clock vs precise snooze clock.
-      now: "2026-06-02T00:01:00.000Z",
-      snoozeNow: "2026-06-02T00:01:07.500Z",
-    });
+      now: '2026-06-02T00:01:00.000Z',
+      snoozeNow: '2026-06-02T00:01:07.500Z',
+    })
 
-    expect(layout.items.map((item) => item.thread.id)).toEqual(["just-woke"]);
-    expect(layout.snoozedCount).toBe(1);
-    expect(layout.nextSnoozeWakeAt).toBe("2026-06-02T09:00:00.000Z");
-  });
+    expect(layout.items.map((item) => item.thread.id)).toEqual(['just-woke'])
+    expect(layout.snoozedCount).toBe(1)
+    expect(layout.nextSnoozeWakeAt).toBe('2026-06-02T09:00:00.000Z')
+  })
 
-  it("keeps snoozed threads visible on environments without the snooze capability", () => {
+  it('keeps snoozed threads visible on environments without the snooze capability', () =>
+  {
     const layout = buildThreadListV2Items({
       threads: [
         makeThread({
-          id: ThreadId.make("snoozed"),
-          title: "Snoozed",
-          snoozedUntil: "2026-06-03T09:00:00.000Z",
-          snoozedAt: "2026-06-01T12:00:00.000Z",
+          id: ThreadId.make('snoozed'),
+          title: 'Snoozed',
+          snoozedUntil: '2026-06-03T09:00:00.000Z',
+          snoozedAt: '2026-06-01T12:00:00.000Z',
         }),
       ],
       environmentId: null,
-      searchQuery: "",
+      searchQuery: '',
       snoozeEnvironmentIds: new Set(),
       now: NOW,
-    });
+    })
 
-    expect(layout.items.map((item) => item.thread.id)).toEqual(["snoozed"]);
-    expect(layout.snoozedCount).toBe(0);
-  });
+    expect(layout.items.map((item) => item.thread.id)).toEqual(['snoozed'])
+    expect(layout.snoozedCount).toBe(0)
+  })
 
-  it("partitions settled threads into a slim tail with one divider", () => {
+  it('partitions settled threads into a slim tail with one divider', () =>
+  {
     const { items } = buildThreadListV2Items({
       threads: [
-        makeThread({ id: ThreadId.make("active"), title: "Active" }),
+        makeThread({ id: ThreadId.make('active'), title: 'Active' }),
         makeThread({
-          id: ThreadId.make("settled"),
-          title: "Settled",
-          settledOverride: "settled",
+          id: ThreadId.make('settled'),
+          title: 'Settled',
+          settledOverride: 'settled',
           settledAt: NOW,
         }),
         makeThread({
-          id: ThreadId.make("settled-2"),
-          title: "Settled 2",
-          settledOverride: "settled",
+          id: ThreadId.make('settled-2'),
+          title: 'Settled 2',
+          settledOverride: 'settled',
           settledAt: NOW,
         }),
       ],
       environmentId: null,
-      searchQuery: "",
+      searchQuery: '',
       now: NOW,
-    });
+    })
 
     expect(items.map((item) => [item.thread.id, item.variant])).toEqual([
-      ["active", "card"],
-      ["settled", "slim"],
-      ["settled-2", "slim"],
-    ]);
-    expect(items.map((item) => item.showSettledDivider)).toEqual([false, true, false]);
-    expect(items.map((item) => item.isLast)).toEqual([false, false, true]);
-  });
+      ['active', 'card'],
+      ['settled', 'slim'],
+      ['settled-2', 'slim'],
+    ])
+    expect(items.map((item) => item.showSettledDivider)).toEqual([false, true, false])
+    expect(items.map((item) => item.isLast)).toEqual([false, false, true])
+  })
 
-  it("keeps cards in creation order while settled sorts by recency", () => {
+  it('keeps cards in creation order while settled sorts by recency', () =>
+  {
     const { items } = buildThreadListV2Items({
       threads: [
         makeThread({
-          id: ThreadId.make("older-created"),
-          title: "Older",
-          createdAt: "2026-06-01T08:00:00.000Z",
+          id: ThreadId.make('older-created'),
+          title: 'Older',
+          createdAt: '2026-06-01T08:00:00.000Z',
           updatedAt: NOW, // recent activity must NOT promote it
         }),
         makeThread({
-          id: ThreadId.make("newer-created"),
-          title: "Newer",
-          createdAt: "2026-06-01T12:00:00.000Z",
+          id: ThreadId.make('newer-created'),
+          title: 'Newer',
+          createdAt: '2026-06-01T12:00:00.000Z',
         }),
       ],
       environmentId: null,
-      searchQuery: "",
+      searchQuery: '',
       now: NOW,
-    });
+    })
 
-    expect(items.map((item) => item.thread.id)).toEqual(["newer-created", "older-created"]);
-  });
+    expect(items.map((item) => item.thread.id)).toEqual(['newer-created', 'older-created'])
+  })
 
-  it("keeps settled threads in the tail and filters by search query", () => {
+  it('keeps settled threads in the tail and filters by search query', () =>
+  {
     const { items } = buildThreadListV2Items({
       threads: [
-        makeThread({ id: ThreadId.make("match"), title: "Fix login bug" }),
-        makeThread({ id: ThreadId.make("miss"), title: "Greeting" }),
+        makeThread({ id: ThreadId.make('match'), title: 'Fix login bug' }),
+        makeThread({ id: ThreadId.make('miss'), title: 'Greeting' }),
         makeThread({
-          id: ThreadId.make("settled"),
-          title: "Fix login again",
-          settledOverride: "settled",
+          id: ThreadId.make('settled'),
+          title: 'Fix login again',
+          settledOverride: 'settled',
           settledAt: NOW,
         }),
       ],
       environmentId: null,
-      searchQuery: "login",
+      searchQuery: 'login',
       now: NOW,
-    });
+    })
 
     expect(items.map((item) => [item.thread.id, item.variant])).toEqual([
-      ["match", "card"],
-      ["settled", "slim"],
-    ]);
-  });
+      ['match', 'card'],
+      ['settled', 'slim'],
+    ])
+  })
 
-  it("scopes the flat list to one project", () => {
-    const otherProjectId = ProjectId.make("project-2");
+  it('scopes the flat list to one project', () =>
+  {
+    const otherProjectId = ProjectId.make('project-2')
     const { items } = buildThreadListV2Items({
       threads: [
-        makeThread({ id: ThreadId.make("included"), title: "Included" }),
+        makeThread({ id: ThreadId.make('included'), title: 'Included' }),
         makeThread({
-          id: ThreadId.make("excluded"),
+          id: ThreadId.make('excluded'),
           projectId: otherProjectId,
-          title: "Excluded",
+          title: 'Excluded',
         }),
       ],
       environmentId: null,
-      projectRefs: [{ environmentId, projectId: ProjectId.make("project-1") }],
-      searchQuery: "",
+      projectRefs: [{ environmentId, projectId: ProjectId.make('project-1') }],
+      searchQuery: '',
       now: NOW,
-    });
+    })
 
-    expect(items.map((item) => item.thread.id)).toEqual(["included"]);
-  });
+    expect(items.map((item) => item.thread.id)).toEqual(['included'])
+  })
 
-  it("scopes the flat list to every environment member of a logical project", () => {
-    const remoteEnvironmentId = EnvironmentId.make("environment-remote");
+  it('scopes the flat list to every environment member of a logical project', () =>
+  {
+    const remoteEnvironmentId = EnvironmentId.make('environment-remote')
     const { items } = buildThreadListV2Items({
       threads: [
-        makeThread({ id: ThreadId.make("local"), title: "Local" }),
+        makeThread({ id: ThreadId.make('local'), title: 'Local' }),
         makeThread({
           environmentId: remoteEnvironmentId,
-          id: ThreadId.make("remote"),
-          title: "Remote",
+          id: ThreadId.make('remote'),
+          title: 'Remote',
         }),
       ],
       environmentId: null,
       projectRefs: [
-        { environmentId, projectId: ProjectId.make("project-1") },
-        { environmentId: remoteEnvironmentId, projectId: ProjectId.make("project-1") },
+        { environmentId, projectId: ProjectId.make('project-1') },
+        { environmentId: remoteEnvironmentId, projectId: ProjectId.make('project-1') },
       ],
-      searchQuery: "",
+      searchQuery: '',
       now: NOW,
-    });
+    })
 
-    expect(items.map((item) => item.thread.id)).toEqual(["local", "remote"]);
-  });
-});
+    expect(items.map((item) => item.thread.id)).toEqual(['local', 'remote'])
+  })
+})
 
-describe("buildThreadListV2Items settled paging", () => {
-  it("caps the settled tail at settledLimit and reports the hidden count", () => {
+describe('buildThreadListV2Items settled paging', () =>
+{
+  it('caps the settled tail at settledLimit and reports the hidden count', () =>
+  {
     const threads = [
-      makeThread({ id: ThreadId.make("active"), title: "Active" }),
+      makeThread({ id: ThreadId.make('active'), title: 'Active' }),
       ...Array.from({ length: 4 }, (_, index) =>
         makeThread({
           id: ThreadId.make(`settled-${index}`),
           title: `Settled ${index}`,
-          settledOverride: "settled",
+          settledOverride: 'settled',
           settledAt: NOW,
           latestUserMessageAt: `2026-06-01T0${index}:00:00.000Z`,
           // A turn adopted the message (same requestedAt): without it the
           // thread reads as a queued turn start, which never settles.
           latestTurn: {
             turnId: TurnId.make(`turn-${index}`),
-            state: "completed",
+            state: 'completed',
             requestedAt: `2026-06-01T0${index}:00:00.000Z`,
             startedAt: `2026-06-01T0${index}:00:00.000Z`,
             completedAt: `2026-06-01T0${index}:10:00.000Z`,
@@ -303,23 +320,19 @@ describe("buildThreadListV2Items settled paging", () => {
           },
         }),
       ),
-    ];
+    ]
 
     const layout = buildThreadListV2Items({
       threads,
       environmentId: null,
-      searchQuery: "",
+      searchQuery: '',
       settledLimit: 2,
       now: NOW,
-    });
+    })
 
-    expect(layout.hiddenSettledCount).toBe(2);
-    expect(layout.items.filter((item) => item.variant === "slim")).toHaveLength(2);
+    expect(layout.hiddenSettledCount).toBe(2)
+    expect(layout.items.filter((item) => item.variant === 'slim')).toHaveLength(2)
     // Most recent settled first — the hidden ones are the oldest.
-    expect(layout.items.map((item) => item.thread.id)).toEqual([
-      "active",
-      "settled-3",
-      "settled-2",
-    ]);
-  });
-});
+    expect(layout.items.map((item) => item.thread.id)).toEqual(['active', 'settled-3', 'settled-2'])
+  })
+})

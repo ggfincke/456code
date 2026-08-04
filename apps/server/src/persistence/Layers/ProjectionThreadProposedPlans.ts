@@ -1,19 +1,20 @@
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 
-import { toPersistenceSqlError } from "../Errors.ts";
+import { toPersistenceSqlError } from '../Errors.ts'
 import {
   DeleteProjectionThreadProposedPlansInput,
   ListProjectionThreadProposedPlansInput,
   ProjectionThreadProposedPlan,
   ProjectionThreadProposedPlanRepository,
   type ProjectionThreadProposedPlanRepositoryShape,
-} from "../Services/ProjectionThreadProposedPlans.ts";
+} from '../Services/ProjectionThreadProposedPlans.ts'
 
-const makeProjectionThreadProposedPlanRepository = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+const makeProjectionThreadProposedPlanRepository = Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   const upsertProjectionThreadProposedPlanRow = SqlSchema.void({
     Request: ProjectionThreadProposedPlan,
@@ -48,7 +49,7 @@ const makeProjectionThreadProposedPlanRepository = Effect.gen(function* () {
         created_at = excluded.created_at,
         updated_at = excluded.updated_at
     `,
-  });
+  })
 
   const listProjectionThreadProposedPlanRows = SqlSchema.findAll({
     Request: ListProjectionThreadProposedPlansInput,
@@ -67,7 +68,7 @@ const makeProjectionThreadProposedPlanRepository = Effect.gen(function* () {
       WHERE thread_id = ${threadId}
       ORDER BY created_at ASC, plan_id ASC
     `,
-  });
+  })
 
   const deleteProjectionThreadProposedPlanRows = SqlSchema.void({
     Request: DeleteProjectionThreadProposedPlansInput,
@@ -75,37 +76,37 @@ const makeProjectionThreadProposedPlanRepository = Effect.gen(function* () {
       DELETE FROM projection_thread_proposed_plans
       WHERE thread_id = ${threadId}
     `,
-  });
+  })
 
-  const upsert: ProjectionThreadProposedPlanRepositoryShape["upsert"] = (row) =>
+  const upsert: ProjectionThreadProposedPlanRepositoryShape['upsert'] = (row) =>
     upsertProjectionThreadProposedPlanRow(row).pipe(
-      Effect.mapError(toPersistenceSqlError("ProjectionThreadProposedPlanRepository.upsert:query")),
-    );
+      Effect.mapError(toPersistenceSqlError('ProjectionThreadProposedPlanRepository.upsert:query')),
+    )
 
-  const listByThreadId: ProjectionThreadProposedPlanRepositoryShape["listByThreadId"] = (input) =>
+  const listByThreadId: ProjectionThreadProposedPlanRepositoryShape['listByThreadId'] = (input) =>
     listProjectionThreadProposedPlanRows(input).pipe(
       Effect.mapError(
-        toPersistenceSqlError("ProjectionThreadProposedPlanRepository.listByThreadId:query"),
+        toPersistenceSqlError('ProjectionThreadProposedPlanRepository.listByThreadId:query'),
       ),
-    );
+    )
 
-  const deleteByThreadId: ProjectionThreadProposedPlanRepositoryShape["deleteByThreadId"] = (
+  const deleteByThreadId: ProjectionThreadProposedPlanRepositoryShape['deleteByThreadId'] = (
     input,
   ) =>
     deleteProjectionThreadProposedPlanRows(input).pipe(
       Effect.mapError(
-        toPersistenceSqlError("ProjectionThreadProposedPlanRepository.deleteByThreadId:query"),
+        toPersistenceSqlError('ProjectionThreadProposedPlanRepository.deleteByThreadId:query'),
       ),
-    );
+    )
 
   return {
     upsert,
     listByThreadId,
     deleteByThreadId,
-  } satisfies ProjectionThreadProposedPlanRepositoryShape;
-});
+  } satisfies ProjectionThreadProposedPlanRepositoryShape
+})
 
 export const ProjectionThreadProposedPlanRepositoryLive = Layer.effect(
   ProjectionThreadProposedPlanRepository,
   makeProjectionThreadProposedPlanRepository,
-);
+)

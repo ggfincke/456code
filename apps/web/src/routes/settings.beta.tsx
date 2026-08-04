@@ -1,11 +1,12 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from '@tanstack/react-router'
 
-import { BetaSettingsPanel } from "../components/settings/BetaSettingsPanel";
+import { BetaSettingsPanel } from '../components/settings/BetaSettingsPanel'
 
-function SettingsBetaRoute() {
-  return <BetaSettingsPanel />;
+function SettingsBetaRoute()
+{
+  return <BetaSettingsPanel />
 }
 
-export const Route = createFileRoute("/settings/beta")({
+export const Route = createFileRoute('/settings/beta')({
   component: SettingsBetaRoute,
-});
+})

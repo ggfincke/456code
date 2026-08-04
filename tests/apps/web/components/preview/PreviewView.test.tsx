@@ -1,207 +1,213 @@
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vite-plus/test";
+import { EnvironmentId, ThreadId } from '@t3tools/contracts'
+import { renderToStaticMarkup } from 'react-dom/server'
+import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const mocks = vi.hoisted(() => ({
   navigate: vi.fn(async (_tabId: string, _url: string): Promise<void> => undefined),
   rememberPreviewUrl: vi.fn(),
-  readPreparedConnection: vi.fn(() => ({ httpBaseUrl: "http://172.25.85.75:3773" })),
+  readPreparedConnection: vi.fn(() => ({ httpBaseUrl: 'http://172.25.85.75:3773' })),
   submittedUrl: null as ((url: string) => void) | null,
   emptyStateUrl: null as ((url: string) => void) | null,
   showEmptyState: false,
-}));
+}))
 
-vi.mock("~/state/session", () => ({
+vi.mock('~/state/session', () => ({
   readPreparedConnection: mocks.readPreparedConnection,
-}));
+}))
 
-vi.mock("~/composerDraftStore", () => ({
+vi.mock('~/composerDraftStore', () => ({
   useComposerDraftStore: (
     select: (store: { addPreviewAnnotation: () => void; addImage: () => void }) => unknown,
   ) => select({ addPreviewAnnotation: vi.fn(), addImage: vi.fn() }),
-}));
+}))
 
-vi.mock("~/lib/previewAnnotation", () => ({
+vi.mock('~/lib/previewAnnotation', () => ({
   previewAnnotationScreenshotFile: vi.fn(),
-}));
+}))
 
-vi.mock("~/localApi", () => ({
+vi.mock('~/localApi', () => ({
   ensureLocalApi: vi.fn(),
-}));
+}))
 
-vi.mock("~/previewStateStore", () => ({
+vi.mock('~/previewStateStore', () => ({
   rememberPreviewUrl: mocks.rememberPreviewUrl,
   updatePreviewServerSnapshot: vi.fn(),
   useThreadPreviewState: () => ({
-    activeTabId: "tab-1",
+    activeTabId: 'tab-1',
     desktopByTabId: {
-      "tab-1": {
+      'tab-1': {
         canGoBack: false,
         canGoForward: false,
         loading: false,
         zoomFactor: 1,
-        colorScheme: "system",
-        controller: "none",
+        colorScheme: 'system',
+        controller: 'none',
       },
     },
     recentlySeenUrls: [],
     sessions: mocks.showEmptyState
       ? {}
       : {
-          "tab-1": {
-            threadId: "thread-1",
-            tabId: "tab-1",
+          'tab-1': {
+            threadId: 'thread-1',
+            tabId: 'tab-1',
             navStatus: {
-              _tag: "Success",
-              url: "http://example.com/",
-              title: "Example",
+              _tag: 'Success',
+              url: 'http://example.com/',
+              title: 'Example',
             },
             canGoBack: false,
             canGoForward: false,
-            updatedAt: "2026-07-13T00:00:00.000Z",
+            updatedAt: '2026-07-13T00:00:00.000Z',
           },
         },
   }),
-}));
+}))
 
-vi.mock("~/state/environments", () => ({
-  useEnvironment: () => ({ label: "WSL" }),
-  useEnvironmentHttpBaseUrl: () => "http://172.25.85.75:3773",
-}));
+vi.mock('~/state/environments', () => ({
+  useEnvironment: () => ({ label: 'WSL' }),
+  useEnvironmentHttpBaseUrl: () => 'http://172.25.85.75:3773',
+}))
 
-vi.mock("~/state/preview", () => ({
+vi.mock('~/state/preview', () => ({
   previewEnvironment: { open: {}, resize: {} },
-}));
+}))
 
-vi.mock("~/state/use-atom-command", () => ({
+vi.mock('~/state/use-atom-command', () => ({
   useAtomCommand: () => vi.fn(),
-}));
+}))
 
-vi.mock("~/browser/browserRecording", () => ({
+vi.mock('~/browser/browserRecording', () => ({
   startBrowserRecording: vi.fn(),
   stopBrowserRecording: vi.fn(),
   useActiveBrowserRecordingTabId: () => null,
-}));
+}))
 
-vi.mock("~/browser/browserSurfaceStore", () => ({
+vi.mock('~/browser/browserSurfaceStore', () => ({
   useBrowserSurfaceStore: (
     select: (state: { byTabId: Record<string, { rect?: unknown }> }) => unknown,
   ) => select({ byTabId: {} }),
-}));
+}))
 
-vi.mock("~/components/ui/toast", () => ({
+vi.mock('~/components/ui/toast', () => ({
   stackedThreadToast: vi.fn(),
   toastManager: { add: vi.fn() },
-}));
+}))
 
-vi.mock("../../../../../apps/web/src/components/preview/previewBridge", () => ({
+vi.mock('../../../../../apps/web/src/components/preview/previewBridge', () => ({
   previewBridge: { navigate: mocks.navigate },
-}));
+}))
 
-vi.mock("../../../../../apps/web/src/components/preview/PreviewChromeRow", () => ({
-  PreviewChromeRow: (props: { onSubmit: (url: string) => void }) => {
-    mocks.submittedUrl = props.onSubmit;
-    return null;
+vi.mock('../../../../../apps/web/src/components/preview/PreviewChromeRow', () => ({
+  PreviewChromeRow: (props: { onSubmit: (url: string) => void }) =>
+  {
+    mocks.submittedUrl = props.onSubmit
+    return null
   },
-}));
+}))
 
-vi.mock("../../../../../apps/web/src/components/preview/PreviewEmptyState", () => ({
-  PreviewEmptyState: (props: { onOpenUrl: (url: string) => void }) => {
-    mocks.emptyStateUrl = props.onOpenUrl;
-    return null;
+vi.mock('../../../../../apps/web/src/components/preview/PreviewEmptyState', () => ({
+  PreviewEmptyState: (props: { onOpenUrl: (url: string) => void }) =>
+  {
+    mocks.emptyStateUrl = props.onOpenUrl
+    return null
   },
-}));
-vi.mock("../../../../../apps/web/src/components/preview/PreviewMoreMenu", () => ({
+}))
+vi.mock('../../../../../apps/web/src/components/preview/PreviewMoreMenu', () => ({
   PreviewMoreMenu: () => null,
-}));
-vi.mock("../../../../../apps/web/src/components/preview/PreviewUnreachable", () => ({
+}))
+vi.mock('../../../../../apps/web/src/components/preview/PreviewUnreachable', () => ({
   PreviewUnreachable: () => null,
-}));
-vi.mock("../../../../../apps/web/src/components/preview/ZoomIndicator", () => ({
+}))
+vi.mock('../../../../../apps/web/src/components/preview/ZoomIndicator', () => ({
   ZoomIndicator: () => null,
-}));
-vi.mock("../../../../../apps/web/src/components/preview/AgentBrowserCursor", () => ({
+}))
+vi.mock('../../../../../apps/web/src/components/preview/AgentBrowserCursor', () => ({
   AgentBrowserCursor: () => null,
-}));
-vi.mock("~/browser/BrowserSurfaceSlot", () => ({ BrowserSurfaceSlot: () => null }));
-vi.mock("../../../../../apps/web/src/components/preview/useLoadingProgress", () => ({
+}))
+vi.mock('~/browser/BrowserSurfaceSlot', () => ({ BrowserSurfaceSlot: () => null }))
+vi.mock('../../../../../apps/web/src/components/preview/useLoadingProgress', () => ({
   useLoadingProgress: () => 0,
-}));
-vi.mock("../../../../../apps/web/src/components/preview/usePreviewSession", () => ({
+}))
+vi.mock('../../../../../apps/web/src/components/preview/usePreviewSession', () => ({
   usePreviewSession: vi.fn(),
-}));
+}))
 
-import { PreviewView } from "../../../../../apps/web/src/components/preview/PreviewView";
+import { PreviewView } from '../../../../../apps/web/src/components/preview/PreviewView'
 
-describe("PreviewView navigation", () => {
-  beforeEach(() => {
-    mocks.navigate.mockClear();
-    mocks.rememberPreviewUrl.mockClear();
-    mocks.readPreparedConnection.mockClear();
-    mocks.submittedUrl = null;
-    mocks.emptyStateUrl = null;
-    mocks.showEmptyState = false;
-  });
+describe('PreviewView navigation', () =>
+{
+  beforeEach(() =>
+  {
+    mocks.navigate.mockClear()
+    mocks.rememberPreviewUrl.mockClear()
+    mocks.readPreparedConnection.mockClear()
+    mocks.submittedUrl = null
+    mocks.emptyStateUrl = null
+    mocks.showEmptyState = false
+  })
 
   it.each([
     [
-      "https://localhost:8000/dashboard?mode=test#top",
-      "https://localhost:8000/dashboard?mode=test#top",
+      'https://localhost:8000/dashboard?mode=test#top',
+      'https://localhost:8000/dashboard?mode=test#top',
     ],
-    ["localhost:5173/app", "http://localhost:5173/app"],
-  ])("preserves a direct localhost URL in a WSL environment", async (submitted, expected) => {
+    ['localhost:5173/app', 'http://localhost:5173/app'],
+  ])('preserves a direct localhost URL in a WSL environment', async (submitted, expected) =>
+  {
     renderToStaticMarkup(
       <PreviewView
         threadRef={{
-          environmentId: EnvironmentId.make("environment-1"),
-          threadId: ThreadId.make("thread-1"),
+          environmentId: EnvironmentId.make('environment-1'),
+          threadId: ThreadId.make('thread-1'),
         }}
         tabId="tab-1"
         visible
       />,
-    );
+    )
 
-    expect(mocks.submittedUrl).not.toBeNull();
-    mocks.submittedUrl?.(submitted);
+    expect(mocks.submittedUrl).not.toBeNull()
+    mocks.submittedUrl?.(submitted)
 
-    await vi.waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith("tab-1", expected));
+    await vi.waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('tab-1', expected))
     expect(mocks.rememberPreviewUrl).toHaveBeenCalledWith(
       {
-        environmentId: "environment-1",
-        threadId: "thread-1",
+        environmentId: 'environment-1',
+        threadId: 'thread-1',
       },
       expected,
-    );
-  });
+    )
+  })
 
-  it("maps an empty-state localhost server onto the WSL host", async () => {
-    mocks.showEmptyState = true;
+  it('maps an empty-state localhost server onto the WSL host', async () =>
+  {
+    mocks.showEmptyState = true
     renderToStaticMarkup(
       <PreviewView
         threadRef={{
-          environmentId: EnvironmentId.make("environment-1"),
-          threadId: ThreadId.make("thread-1"),
+          environmentId: EnvironmentId.make('environment-1'),
+          threadId: ThreadId.make('thread-1'),
         }}
         tabId="tab-1"
         visible
       />,
-    );
+    )
 
-    expect(mocks.emptyStateUrl).not.toBeNull();
-    mocks.emptyStateUrl?.("http://localhost:5173/app?mode=test#top");
+    expect(mocks.emptyStateUrl).not.toBeNull()
+    mocks.emptyStateUrl?.('http://localhost:5173/app?mode=test#top')
 
     await vi.waitFor(() =>
       expect(mocks.navigate).toHaveBeenCalledWith(
-        "tab-1",
-        "http://172.25.85.75:5173/app?mode=test#top",
+        'tab-1',
+        'http://172.25.85.75:5173/app?mode=test#top',
       ),
-    );
+    )
     expect(mocks.rememberPreviewUrl).toHaveBeenCalledWith(
       {
-        environmentId: "environment-1",
-        threadId: "thread-1",
+        environmentId: 'environment-1',
+        threadId: 'thread-1',
       },
-      "http://172.25.85.75:5173/app?mode=test#top",
-    );
-  });
-});
+      'http://172.25.85.75:5173/app?mode=test#top',
+    )
+  })
+})

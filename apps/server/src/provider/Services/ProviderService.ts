@@ -27,28 +27,30 @@ import type {
   ProviderStopSessionInput,
   ThreadId,
   ProviderTurnStartResult,
-} from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
-import type * as Stream from "effect/Stream";
+} from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
+import type * as Stream from 'effect/Stream'
 
-import type { ProviderServiceError } from "../Errors.ts";
-import type { ProviderAdapterCapabilities } from "./ProviderAdapter.ts";
-import type { ProviderInstanceRoutingInfo } from "./ProviderAdapterRegistry.ts";
+import type { ProviderServiceError } from '../Errors.ts'
+import type { ProviderAdapterCapabilities } from './ProviderAdapter.ts'
+import type { ProviderInstanceRoutingInfo } from './ProviderAdapterRegistry.ts'
 
 /**
  * Immutable routing identity that the selected provider adapter must satisfy.
  */
-export interface ProviderRoutingAuthority {
-  readonly provider: ProviderDriverKind;
-  readonly providerInstanceId: ProviderInstanceId;
-  readonly continuationIdentity: ProviderContinuationIdentity | null;
+export interface ProviderRoutingAuthority
+{
+  readonly provider: ProviderDriverKind
+  readonly providerInstanceId: ProviderInstanceId
+  readonly continuationIdentity: ProviderContinuationIdentity | null
 }
 
 /**
  * ProviderServiceShape - Service API for provider session and turn orchestration.
  */
-export interface ProviderServiceShape {
+export interface ProviderServiceShape
+{
   /**
    * Start a provider session.
    */
@@ -56,7 +58,7 @@ export interface ProviderServiceShape {
     threadId: ThreadId,
     input: ProviderSessionStartInput,
     routingAuthority?: ProviderRoutingAuthority,
-  ) => Effect.Effect<ProviderSession, ProviderServiceError>;
+  ) => Effect.Effect<ProviderSession, ProviderServiceError>
 
   /**
    * Send a provider turn.
@@ -64,78 +66,79 @@ export interface ProviderServiceShape {
   readonly sendTurn: (
     input: ProviderSendTurnInput,
     routingAuthority?: ProviderRoutingAuthority,
-  ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>;
+  ) => Effect.Effect<ProviderTurnStartResult, ProviderServiceError>
 
   /**
    * Interrupt a running provider turn.
    */
   readonly interruptTurn: (
     input: ProviderInterruptTurnInput,
-  ) => Effect.Effect<void, ProviderServiceError>;
+  ) => Effect.Effect<void, ProviderServiceError>
 
   /**
    * Respond to a provider approval request.
    */
   readonly respondToRequest: (
     input: ProviderRespondToRequestInput,
-  ) => Effect.Effect<void, ProviderServiceError>;
+  ) => Effect.Effect<void, ProviderServiceError>
 
   /**
    * Respond to a provider structured user-input request.
    */
   readonly respondToUserInput: (
     input: ProviderRespondToUserInputInput,
-  ) => Effect.Effect<void, ProviderServiceError>;
+  ) => Effect.Effect<void, ProviderServiceError>
 
   /**
    * Stop a provider session.
    */
   readonly stopSession: (
     input: ProviderStopSessionInput,
-  ) => Effect.Effect<void, ProviderServiceError>;
+  ) => Effect.Effect<void, ProviderServiceError>
 
   /**
    * List active provider sessions.
    *
    * Aggregates runtime session lists from all registered adapters.
    */
-  readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>>;
+  readonly listSessions: () => Effect.Effect<ReadonlyArray<ProviderSession>>
 
   /**
    * Read capabilities for the adapter bound to a configured provider instance.
    */
   readonly getCapabilities: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderAdapterCapabilities, ProviderServiceError>;
+  ) => Effect.Effect<ProviderAdapterCapabilities, ProviderServiceError>
 
   readonly getInstanceInfo: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderInstanceRoutingInfo, ProviderServiceError>;
+  ) => Effect.Effect<ProviderInstanceRoutingInfo, ProviderServiceError>
 
   readonly hasRecoverableSession?: (
     threadId: ThreadId,
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<boolean, ProviderServiceError>;
+  ) => Effect.Effect<boolean, ProviderServiceError>
 
   /**
    * Roll back provider conversation state by a number of turns.
    */
   readonly rollbackConversation: (input: {
-    readonly threadId: ThreadId;
-    readonly numTurns: number;
-  }) => Effect.Effect<void, ProviderServiceError>;
+    readonly threadId: ThreadId
+    readonly numTurns: number
+  }) => Effect.Effect<void, ProviderServiceError>
 
   /**
    * Canonical provider runtime event stream.
    *
    * Fan-out is owned by ProviderService (not by a standalone event-bus service).
    */
-  readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>;
+  readonly streamEvents: Stream.Stream<ProviderRuntimeEvent>
 }
 
 /**
  * ProviderService - Service tag for provider orchestration.
  */
 export class ProviderService extends Context.Service<ProviderService, ProviderServiceShape>()(
-  "456code/provider/Services/ProviderService",
-) {}
+  '456code/provider/Services/ProviderService',
+)
+{}

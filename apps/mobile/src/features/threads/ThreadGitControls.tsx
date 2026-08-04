@@ -4,234 +4,260 @@ import {
   type ProjectScript,
   ThreadId,
   type VcsStatusResult,
-} from "@t3tools/contracts";
+} from '@t3tools/contracts'
 import {
   type GitActionRequestInput,
   requiresDefaultBranchConfirmation,
   resolveQuickAction,
-} from "@t3tools/client-runtime/state/vcs";
-import { useNavigation } from "@react-navigation/native";
-import { NativeHeaderToolbar } from "../../native/StackHeader";
-import { useCallback, useMemo } from "react";
-import { Alert } from "react-native";
-import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
+} from '@t3tools/client-runtime/state/vcs'
+import { useNavigation } from '@react-navigation/native'
+import { NativeHeaderToolbar } from '../../native/StackHeader'
+import { useCallback, useMemo } from 'react'
+import { Alert } from 'react-native'
+import { tryOpenExternalUrl } from '../../lib/openExternalUrl'
 import {
   basename,
   getTerminalStatusLabel,
   projectScriptMenuIcon,
   projectScriptMenuLabel,
   type TerminalMenuSession,
-} from "../terminal/terminalMenu";
+} from '../terminal/terminalMenu'
 
-function truncateMiddle(value: string, maxLength: number): string {
-  if (value.length <= maxLength) {
-    return value;
+function truncateMiddle(value: string, maxLength: number): string
+{
+  if (value.length <= maxLength)
+  {
+    return value
   }
 
-  const headLength = Math.ceil((maxLength - 1) / 2);
-  const tailLength = Math.floor((maxLength - 1) / 2);
-  return `${value.slice(0, headLength)}…${value.slice(value.length - tailLength)}`;
+  const headLength = Math.ceil((maxLength - 1) / 2)
+  const tailLength = Math.floor((maxLength - 1) / 2)
+  return `${value.slice(0, headLength)}…${value.slice(value.length - tailLength)}`
 }
 
-function compactMenuBranchLabel(branch: string): string {
-  return truncateMiddle(branch, 24);
+function compactMenuBranchLabel(branch: string): string
+{
+  return truncateMiddle(branch, 24)
 }
 
-function compactMenuStatus(gitStatus: VcsStatusResult | null): string {
-  if (!gitStatus) {
-    return "Checking status";
+function compactMenuStatus(gitStatus: VcsStatusResult | null): string
+{
+  if (!gitStatus)
+  {
+    return 'Checking status'
   }
-  if (!gitStatus.isRepo) {
-    return "Not a repo";
-  }
-
-  const parts: string[] = [];
-  if (gitStatus.hasWorkingTreeChanges) {
-    parts.push(`${gitStatus.workingTree.files.length} changed`);
-  } else if (gitStatus.aheadCount === 0 && gitStatus.behindCount === 0) {
-    parts.push("Clean");
-  }
-  if (gitStatus.aheadCount > 0) {
-    parts.push(`${gitStatus.aheadCount} ahead`);
-  }
-  if (gitStatus.behindCount > 0) {
-    parts.push(`${gitStatus.behindCount} behind`);
-  }
-  if (gitStatus.pr?.state === "open") {
-    parts.push(`PR #${gitStatus.pr.number}`);
+  if (!gitStatus.isRepo)
+  {
+    return 'Not a repo'
   }
 
-  return parts.join(" · ");
+  const parts: string[] = []
+  if (gitStatus.hasWorkingTreeChanges)
+  {
+    parts.push(`${gitStatus.workingTree.files.length} changed`)
+  }
+  else if (gitStatus.aheadCount === 0 && gitStatus.behindCount === 0)
+  {
+    parts.push('Clean')
+  }
+  if (gitStatus.aheadCount > 0)
+  {
+    parts.push(`${gitStatus.aheadCount} ahead`)
+  }
+  if (gitStatus.behindCount > 0)
+  {
+    parts.push(`${gitStatus.behindCount} behind`)
+  }
+  if (gitStatus.pr?.state === 'open')
+  {
+    parts.push(`PR #${gitStatus.pr.number}`)
+  }
+
+  return parts.join(' · ')
 }
 
-type HeaderItem = Record<string, unknown>;
-type HeaderItems = HeaderItem[];
+type HeaderItem = Record<string, unknown>
+type HeaderItems = HeaderItem[]
 type ThreadGitHeaderActionItems = {
-  readonly terminal: HeaderItem;
-  readonly files: HeaderItem;
-  readonly git: HeaderItem;
-};
+  readonly terminal: HeaderItem
+  readonly files: HeaderItem
+  readonly git: HeaderItem
+}
 type QuickActionIcon =
-  | "arrow.down.circle"
-  | "arrow.up.right.circle"
-  | "checkmark.circle"
-  | "arrow.up.circle";
+  'arrow.down.circle' | 'arrow.up.right.circle' | 'checkmark.circle' | 'arrow.up.circle'
 
 /** The subset of git-control wiring the standalone git menu needs. */
 export type ThreadGitMenuProps = {
-  readonly environmentId: EnvironmentId | string;
-  readonly threadId: ThreadId | string;
-  readonly currentBranch: string | null;
-  readonly gitStatus: VcsStatusResult | null;
-  readonly gitOperationLabel: string | null;
-  readonly onOpenFilesInspector?: () => void;
-  readonly onOpenGitInspector?: () => void;
-  readonly onPull: () => Promise<void>;
-  readonly onRunAction: (input: GitActionRequestInput) => Promise<GitRunStackedActionResult | null>;
-};
+  readonly environmentId: EnvironmentId | string
+  readonly threadId: ThreadId | string
+  readonly currentBranch: string | null
+  readonly gitStatus: VcsStatusResult | null
+  readonly gitOperationLabel: string | null
+  readonly onOpenFilesInspector?: () => void
+  readonly onOpenGitInspector?: () => void
+  readonly onPull: () => Promise<void>
+  readonly onRunAction: (input: GitActionRequestInput) => Promise<GitRunStackedActionResult | null>
+}
 
 type ThreadGitControlsProps = ThreadGitMenuProps & {
   readonly auxiliaryPaneControl?: {
-    readonly accessibilityLabel: string;
-    readonly onPress: () => void;
-  };
-  readonly canOpenTerminal: boolean;
-  readonly canOpenFiles: boolean;
-  readonly projectScripts: ReadonlyArray<ProjectScript>;
-  readonly terminalSessions: ReadonlyArray<TerminalMenuSession>;
-  readonly showActionControls?: boolean;
-  readonly showDirectFileControl?: boolean;
-  readonly onOpenTerminal: (terminalId?: string | null) => void;
-  readonly onOpenNewTerminal: () => void;
-  readonly onRunProjectScript: (script: ProjectScript) => Promise<void>;
-};
+    readonly accessibilityLabel: string
+    readonly onPress: () => void
+  }
+  readonly canOpenTerminal: boolean
+  readonly canOpenFiles: boolean
+  readonly projectScripts: ReadonlyArray<ProjectScript>
+  readonly terminalSessions: ReadonlyArray<TerminalMenuSession>
+  readonly showActionControls?: boolean
+  readonly showDirectFileControl?: boolean
+  readonly onOpenTerminal: (terminalId?: string | null) => void
+  readonly onOpenNewTerminal: () => void
+  readonly onRunProjectScript: (script: ProjectScript) => Promise<void>
+}
 
-function useThreadGitControlModel(props: ThreadGitMenuProps) {
-  const navigation = useNavigation();
-  const environmentId = props.environmentId;
-  const threadId = props.threadId;
-  const { gitStatus, gitOperationLabel, onPull, onRunAction } = props;
+function useThreadGitControlModel(props: ThreadGitMenuProps)
+{
+  const navigation = useNavigation()
+  const environmentId = props.environmentId
+  const threadId = props.threadId
+  const { gitStatus, gitOperationLabel, onPull, onRunAction } = props
 
-  const currentBranchLabel = gitStatus?.refName ?? props.currentBranch ?? "Detached HEAD";
-  const busy = gitOperationLabel !== null;
-  const isRepo = gitStatus?.isRepo ?? true;
-  const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false;
-  const isDefaultRef = gitStatus?.isDefaultRef ?? false;
+  const currentBranchLabel = gitStatus?.refName ?? props.currentBranch ?? 'Detached HEAD'
+  const busy = gitOperationLabel !== null
+  const isRepo = gitStatus?.isRepo ?? true
+  const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false
+  const isDefaultRef = gitStatus?.isDefaultRef ?? false
 
   const quickAction = useMemo(
     () =>
       isRepo
         ? resolveQuickAction(gitStatus, busy, isDefaultRef, hasPrimaryRemote)
         : {
-            label: "Git unavailable",
+            label: 'Git unavailable',
             disabled: true,
-            kind: "show_hint" as const,
-            hint: "This workspace is not a git repository.",
+            kind: 'show_hint' as const,
+            hint: 'This workspace is not a git repository.',
           },
     [busy, gitStatus, hasPrimaryRemote, isDefaultRef, isRepo],
-  );
+  )
 
   const quickActionHint = quickAction.disabled
-    ? (quickAction.hint ?? "This action is unavailable.")
-    : null;
+    ? (quickAction.hint ?? 'This action is unavailable.')
+    : null
 
-  const quickActionIcon: QuickActionIcon = (() => {
-    if (quickAction.kind === "run_pull") return "arrow.down.circle";
-    if (quickAction.kind === "open_pr") return "arrow.up.right.circle";
-    if (quickAction.kind === "run_action") {
-      if (quickAction.action === "commit") return "checkmark.circle";
-      if (quickAction.action === "push" || quickAction.action === "commit_push")
-        return "arrow.up.circle";
+  const quickActionIcon: QuickActionIcon = (() =>
+  {
+    if (quickAction.kind === 'run_pull') return 'arrow.down.circle'
+    if (quickAction.kind === 'open_pr') return 'arrow.up.right.circle'
+    if (quickAction.kind === 'run_action')
+    {
+      if (quickAction.action === 'commit') return 'checkmark.circle'
+      if (quickAction.action === 'push' || quickAction.action === 'commit_push')
+        return 'arrow.up.circle'
     }
-    return "arrow.up.right.circle";
-  })();
+    return 'arrow.up.right.circle'
+  })()
 
-  const openExistingPr = useCallback(async () => {
-    const prUrl = gitStatus?.pr?.state === "open" ? gitStatus.pr.url : null;
-    if (!prUrl) {
-      Alert.alert("No open PR", "This branch does not have an open pull request.");
-      return;
+  const openExistingPr = useCallback(async () =>
+  {
+    const prUrl = gitStatus?.pr?.state === 'open' ? gitStatus.pr.url : null
+    if (!prUrl)
+    {
+      Alert.alert('No open PR', 'This branch does not have an open pull request.')
+      return
     }
-    if (!(await tryOpenExternalUrl(prUrl, "pull-request"))) {
-      Alert.alert("Unable to open PR", "The pull request could not be opened.");
+    if (!(await tryOpenExternalUrl(prUrl, 'pull-request')))
+    {
+      Alert.alert('Unable to open PR', 'The pull request could not be opened.')
     }
-  }, [gitStatus]);
+  }, [gitStatus])
 
   const runActionWithPrompt = useCallback(
-    async (input: GitActionRequestInput) => {
+    async (input: GitActionRequestInput) =>
+    {
       const confirmableAction =
-        input.action === "push" ||
-        input.action === "create_pr" ||
-        input.action === "commit_push" ||
-        input.action === "commit_push_pr"
+        input.action === 'push' ||
+        input.action === 'create_pr' ||
+        input.action === 'commit_push' ||
+        input.action === 'commit_push_pr'
           ? input.action
-          : null;
-      const branchName = gitStatus?.refName;
+          : null
+      const branchName = gitStatus?.refName
       if (
         branchName &&
         confirmableAction &&
         !input.featureBranch &&
         requiresDefaultBranchConfirmation(input.action, isDefaultRef)
-      ) {
-        navigation.navigate("GitConfirm", {
+      )
+      {
+        navigation.navigate('GitConfirm', {
           environmentId: String(environmentId),
           threadId: String(threadId),
           confirmAction: confirmableAction,
           branchName,
           includesCommit: String(
-            input.action === "commit_push" || input.action === "commit_push_pr",
+            input.action === 'commit_push' || input.action === 'commit_push_pr',
           ),
-        });
-        return;
+        })
+        return
       }
 
-      await onRunAction(input);
+      await onRunAction(input)
     },
     [environmentId, gitStatus, isDefaultRef, onRunAction, navigation, threadId],
-  );
+  )
 
-  const runQuickAction = useCallback(async () => {
-    if (quickAction.kind === "open_pr") {
-      await openExistingPr();
-      return;
+  const runQuickAction = useCallback(async () =>
+  {
+    if (quickAction.kind === 'open_pr')
+    {
+      await openExistingPr()
+      return
     }
-    if (quickAction.kind === "run_pull") {
-      await onPull();
-      return;
+    if (quickAction.kind === 'run_pull')
+    {
+      await onPull()
+      return
     }
-    if (quickAction.kind === "run_action" && quickAction.action) {
-      await runActionWithPrompt({ action: quickAction.action });
+    if (quickAction.kind === 'run_action' && quickAction.action)
+    {
+      await runActionWithPrompt({ action: quickAction.action })
     }
-  }, [onPull, openExistingPr, quickAction, runActionWithPrompt]);
+  }, [onPull, openExistingPr, quickAction, runActionWithPrompt])
 
-  const openFiles = useCallback(() => {
-    if (props.onOpenFilesInspector) {
-      props.onOpenFilesInspector();
-      return;
+  const openFiles = useCallback(() =>
+  {
+    if (props.onOpenFilesInspector)
+    {
+      props.onOpenFilesInspector()
+      return
     }
-    navigation.navigate("ThreadFiles", {
+    navigation.navigate('ThreadFiles', {
       environmentId: String(environmentId),
       threadId: String(threadId),
-    });
-  }, [environmentId, props.onOpenFilesInspector, navigation, threadId]);
+    })
+  }, [environmentId, props.onOpenFilesInspector, navigation, threadId])
 
-  const openReview = useCallback(() => {
-    navigation.navigate("ThreadReview", {
+  const openReview = useCallback(() =>
+  {
+    navigation.navigate('ThreadReview', {
       environmentId: EnvironmentId.make(String(environmentId)),
       threadId: ThreadId.make(String(threadId)),
-    });
-  }, [environmentId, navigation, threadId]);
+    })
+  }, [environmentId, navigation, threadId])
 
-  const openGitInspector = useCallback(() => {
-    if (props.onOpenGitInspector) {
-      props.onOpenGitInspector();
-      return;
+  const openGitInspector = useCallback(() =>
+  {
+    if (props.onOpenGitInspector)
+    {
+      props.onOpenGitInspector()
+      return
     }
-    navigation.navigate("GitOverview", {
+    navigation.navigate('GitOverview', {
       environmentId: String(environmentId),
       threadId: String(threadId),
-    });
-  }, [environmentId, props.onOpenGitInspector, navigation, threadId]);
+    })
+  }, [environmentId, props.onOpenGitInspector, navigation, threadId])
 
   return {
     currentBranchLabel,
@@ -243,38 +269,40 @@ function useThreadGitControlModel(props: ThreadGitMenuProps) {
     quickActionHint,
     quickActionIcon,
     runQuickAction,
-  };
+  }
 }
 
-function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGitHeaderActionItems {
-  const model = useThreadGitControlModel(props);
+function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGitHeaderActionItems
+{
+  const model = useThreadGitControlModel(props)
 
   return useMemo(
     () => ({
       terminal: {
-        accessibilityLabel: "Open terminal",
+        accessibilityLabel: 'Open terminal',
         disabled: !props.canOpenTerminal,
-        icon: { name: "terminal", type: "sfSymbol" },
-        identifier: "thread-right-terminal",
-        label: "Terminal",
+        icon: { name: 'terminal', type: 'sfSymbol' },
+        identifier: 'thread-right-terminal',
+        label: 'Terminal',
         menu: {
           items: [
             ...props.projectScripts.map((script) => ({
               description: script.command,
-              icon: { name: projectScriptMenuIcon(script.icon), type: "sfSymbol" as const },
+              icon: { name: projectScriptMenuIcon(script.icon), type: 'sfSymbol' as const },
               label: projectScriptMenuLabel(script),
               onPress: () => void props.onRunProjectScript(script),
-              type: "action" as const,
+              type: 'action' as const,
             })),
             ...(props.projectScripts.length === 0
               ? [
                   {
-                    description: "This project has no saved scripts yet",
+                    description: 'This project has no saved scripts yet',
                     disabled: true,
-                    icon: { name: "play", type: "sfSymbol" as const },
-                    label: "No project scripts",
-                    onPress: () => {},
-                    type: "action" as const,
+                    icon: { name: 'play', type: 'sfSymbol' as const },
+                    label: 'No project scripts',
+                    onPress: () =>
+                      {},
+                    type: 'action' as const,
                   },
                 ]
               : []),
@@ -287,84 +315,85 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
                 basename(session.cwd),
               ]
                 .filter(Boolean)
-                .join(" · "),
-              icon: { name: "terminal", type: "sfSymbol" as const },
+                .join(' · '),
+              icon: { name: 'terminal', type: 'sfSymbol' as const },
               label: session.displayLabel,
               onPress: () => props.onOpenTerminal(session.terminalId),
-              type: "action" as const,
+              type: 'action' as const,
             })),
             {
-              description: "Start another shell for this thread",
-              icon: { name: "plus", type: "sfSymbol" },
-              label: "Open new terminal",
+              description: 'Start another shell for this thread',
+              icon: { name: 'plus', type: 'sfSymbol' },
+              label: 'Open new terminal',
               onPress: props.onOpenNewTerminal,
-              type: "action",
+              type: 'action',
             },
           ],
-          title: "Terminal",
+          title: 'Terminal',
         },
         sharesBackground: true,
-        type: "menu",
-        variant: "plain",
+        type: 'menu',
+        variant: 'plain',
       },
       files: {
-        accessibilityLabel: "Open files",
+        accessibilityLabel: 'Open files',
         disabled: !props.canOpenFiles,
-        icon: { name: "folder", type: "sfSymbol" },
-        identifier: "thread-right-files",
-        label: "Files",
+        icon: { name: 'folder', type: 'sfSymbol' },
+        identifier: 'thread-right-files',
+        label: 'Files',
         onPress: model.openFiles,
         sharesBackground: true,
-        type: "button",
-        variant: "plain",
+        type: 'button',
+        variant: 'plain',
       },
       git: {
-        accessibilityLabel: "Git actions",
-        icon: { name: "point.topleft.down.curvedto.point.bottomright.up", type: "sfSymbol" },
-        identifier: "thread-right-git",
-        label: "Git",
+        accessibilityLabel: 'Git actions',
+        icon: { name: 'point.topleft.down.curvedto.point.bottomright.up', type: 'sfSymbol' },
+        identifier: 'thread-right-git',
+        label: 'Git',
         menu: {
           items: [
             {
               description: compactMenuStatus(props.gitStatus),
               disabled: true,
               icon: {
-                name: "point.topleft.down.curvedto.point.bottomright.up",
-                type: "sfSymbol",
+                name: 'point.topleft.down.curvedto.point.bottomright.up',
+                type: 'sfSymbol',
               },
               label: compactMenuBranchLabel(model.currentBranchLabel),
-              onPress: (): void => {},
-              type: "action",
+              onPress: (): void =>
+              {},
+              type: 'action',
             },
             {
               description: model.quickActionHint ?? undefined,
               disabled: model.quickAction.disabled,
-              icon: { name: model.quickActionIcon, type: "sfSymbol" },
+              icon: { name: model.quickActionIcon, type: 'sfSymbol' },
               label: model.quickAction.label,
               onPress: (): void => void model.runQuickAction(),
-              type: "action",
+              type: 'action',
             },
             {
-              description: "Turn diffs and worktree changes",
+              description: 'Turn diffs and worktree changes',
               disabled: !model.isRepo,
-              icon: { name: "text.bubble", type: "sfSymbol" },
-              label: "Review changes",
+              icon: { name: 'text.bubble', type: 'sfSymbol' },
+              label: 'Review changes',
               onPress: model.openReview,
-              type: "action",
+              type: 'action',
             },
             {
-              description: "Commit, files, branches",
-              icon: { name: "ellipsis", type: "sfSymbol" },
-              label: "More",
+              description: 'Commit, files, branches',
+              icon: { name: 'ellipsis', type: 'sfSymbol' },
+              label: 'More',
               onPress: model.openGitInspector,
-              type: "action",
+              type: 'action',
             },
           ],
-          title: "Git",
+          title: 'Git',
         },
         sharesBackground: true,
-        type: "menu",
-        variant: "plain",
+        type: 'menu',
+        variant: 'plain',
       },
     }),
     [
@@ -387,31 +416,35 @@ function useThreadGitHeaderActionItems(props: ThreadGitControlsProps): ThreadGit
       props.projectScripts,
       props.terminalSessions,
     ],
-  );
+  )
 }
 
-export function useThreadGitRightHeaderItems(props: ThreadGitControlsProps): HeaderItems {
-  const actionItems = useThreadGitHeaderActionItems(props);
+export function useThreadGitRightHeaderItems(props: ThreadGitControlsProps): HeaderItems
+{
+  const actionItems = useThreadGitHeaderActionItems(props)
   return useMemo(
     () => [actionItems.git, actionItems.files, actionItems.terminal] as HeaderItems,
     [actionItems],
-  );
+  )
 }
 
-export function useThreadGitCenterHeaderItems(props: ThreadGitControlsProps): HeaderItems {
-  const actionItems = useThreadGitHeaderActionItems(props);
+export function useThreadGitCenterHeaderItems(props: ThreadGitControlsProps): HeaderItems
+{
+  const actionItems = useThreadGitHeaderActionItems(props)
   return useMemo(
     () => [actionItems.files, actionItems.git, actionItems.terminal] as HeaderItems,
     [actionItems],
-  );
+  )
 }
 
-export function ThreadGitControls(props: ThreadGitControlsProps) {
-  const model = useThreadGitControlModel(props);
-  const showActionControls = props.showActionControls ?? true;
+export function ThreadGitControls(props: ThreadGitControlsProps)
+{
+  const model = useThreadGitControlModel(props)
+  const showActionControls = props.showActionControls ?? true
 
-  if (!showActionControls) {
-    return null;
+  if (!showActionControls)
+  {
+    return null
   }
 
   return (
@@ -447,7 +480,8 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
             <NativeHeaderToolbar.MenuAction
               icon="play"
               disabled
-              onPress={() => {}}
+              onPress={() =>
+                {}}
               subtitle="This project has no saved scripts yet"
             >
               <NativeHeaderToolbar.Label>No project scripts</NativeHeaderToolbar.Label>
@@ -466,7 +500,7 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
                 basename(session.cwd),
               ]
                 .filter(Boolean)
-                .join(" · ")}
+                .join(' · ')}
             >
               <NativeHeaderToolbar.Label>{session.displayLabel}</NativeHeaderToolbar.Label>
             </NativeHeaderToolbar.MenuAction>
@@ -491,7 +525,7 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
       ) : null}
       {showActionControls ? <ThreadGitMenu {...props} /> : null}
     </NativeHeaderToolbar>
-  );
+  )
 }
 
 /**
@@ -499,15 +533,17 @@ export function ThreadGitControls(props: ThreadGitControlsProps) {
  * review, more). Rendered inside a NativeHeaderToolbar by both the thread
  * chat header and the review screen's toolbar.
  */
-export function ThreadGitMenu(props: ThreadGitMenuProps) {
-  const model = useThreadGitControlModel(props);
+export function ThreadGitMenu(props: ThreadGitMenuProps)
+{
+  const model = useThreadGitControlModel(props)
 
   return (
     <NativeHeaderToolbar.Menu icon="point.topleft.down.curvedto.point.bottomright.up">
       <NativeHeaderToolbar.MenuAction
         icon="point.topleft.down.curvedto.point.bottomright.up"
         disabled
-        onPress={() => {}}
+        onPress={() =>
+        {}}
         subtitle={compactMenuStatus(props.gitStatus)}
       >
         <NativeHeaderToolbar.Label>
@@ -538,5 +574,5 @@ export function ThreadGitMenu(props: ThreadGitMenuProps) {
         <NativeHeaderToolbar.Label>More</NativeHeaderToolbar.Label>
       </NativeHeaderToolbar.MenuAction>
     </NativeHeaderToolbar.Menu>
-  );
+  )
 }

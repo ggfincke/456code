@@ -8,62 +8,69 @@ import type {
   OrchestrationThread,
   ProjectId,
   ThreadId,
-} from "@t3tools/contracts";
-import { normalizeProjectPathForComparison } from "@t3tools/shared/path";
-import * as Effect from "effect/Effect";
+} from '@t3tools/contracts'
+import { normalizeProjectPathForComparison } from '@t3tools/shared/path'
+import * as Effect from 'effect/Effect'
 
-import { OrchestrationCommandInvariantError } from "./Errors.ts";
+import { OrchestrationCommandInvariantError } from './Errors.ts'
 
-function invariantError(commandType: string, detail: string): OrchestrationCommandInvariantError {
+function invariantError(commandType: string, detail: string): OrchestrationCommandInvariantError
+{
   return new OrchestrationCommandInvariantError({
     commandType,
     detail,
-  });
+  })
 }
 
 export function findThreadById(
   readModel: OrchestrationReadModel,
   threadId: ThreadId,
-): OrchestrationThread | undefined {
-  return readModel.threads.find((thread) => thread.id === threadId);
+): OrchestrationThread | undefined
+{
+  return readModel.threads.find((thread) => thread.id === threadId)
 }
 
 export function findProjectById(
   readModel: OrchestrationReadModel,
   projectId: ProjectId,
-): OrchestrationProject | undefined {
-  return readModel.projects.find((project) => project.id === projectId);
+): OrchestrationProject | undefined
+{
+  return readModel.projects.find((project) => project.id === projectId)
 }
 
 export function listThreadsByProjectId(
   readModel: OrchestrationReadModel,
   projectId: ProjectId,
-): ReadonlyArray<OrchestrationThread> {
-  return readModel.threads.filter((thread) => thread.projectId === projectId);
+): ReadonlyArray<OrchestrationThread>
+{
+  return readModel.threads.filter((thread) => thread.projectId === projectId)
 }
 
 export function requireProject(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly projectId: ProjectId;
-}): Effect.Effect<OrchestrationProject, OrchestrationCommandInvariantError> {
-  const project = findProjectById(input.readModel, input.projectId);
-  if (project) {
-    return Effect.succeed(project);
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly projectId: ProjectId
+}): Effect.Effect<OrchestrationProject, OrchestrationCommandInvariantError>
+{
+  const project = findProjectById(input.readModel, input.projectId)
+  if (project)
+  {
+    return Effect.succeed(project)
   }
   return Effect.fail(
     invariantError(
       input.command.type,
       `Project '${input.projectId}' does not exist for command '${input.command.type}'.`,
     ),
-  );
+  )
 }
 
 export function requireActiveProject(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly projectId: ProjectId;
-}): Effect.Effect<OrchestrationProject, OrchestrationCommandInvariantError> {
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly projectId: ProjectId
+}): Effect.Effect<OrchestrationProject, OrchestrationCommandInvariantError>
+{
   return requireProject(input).pipe(
     Effect.flatMap((project) =>
       project.deletedAt === null
@@ -75,71 +82,78 @@ export function requireActiveProject(input: {
             ),
           ),
     ),
-  );
+  )
 }
 
 export function requireProjectAbsent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly projectId: ProjectId;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  if (!findProjectById(input.readModel, input.projectId)) {
-    return Effect.void;
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly projectId: ProjectId
+}): Effect.Effect<void, OrchestrationCommandInvariantError>
+{
+  if (!findProjectById(input.readModel, input.projectId))
+  {
+    return Effect.void
   }
   return Effect.fail(
     invariantError(
       input.command.type,
       `Project '${input.projectId}' already exists and cannot be created twice.`,
     ),
-  );
+  )
 }
 
 export function requireActiveProjectWorkspaceRootAbsent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly workspaceRoot: string;
-  readonly exceptProjectId?: ProjectId;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  const normalizedWorkspaceRoot = normalizeProjectPathForComparison(input.workspaceRoot);
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly workspaceRoot: string
+  readonly exceptProjectId?: ProjectId
+}): Effect.Effect<void, OrchestrationCommandInvariantError>
+{
+  const normalizedWorkspaceRoot = normalizeProjectPathForComparison(input.workspaceRoot)
   const existingProject = input.readModel.projects.find(
     (project) =>
       project.deletedAt === null &&
       normalizeProjectPathForComparison(project.workspaceRoot) === normalizedWorkspaceRoot &&
       project.id !== input.exceptProjectId,
-  );
-  if (existingProject === undefined) {
-    return Effect.void;
+  )
+  if (existingProject === undefined)
+  {
+    return Effect.void
   }
   return Effect.fail(
     invariantError(
       input.command.type,
       `Active project '${existingProject.id}' already exists for workspace root '${normalizedWorkspaceRoot}'.`,
     ),
-  );
+  )
 }
 
 export function requireThread(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly threadId: ThreadId;
-}): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError> {
-  const thread = findThreadById(input.readModel, input.threadId);
-  if (thread) {
-    return Effect.succeed(thread);
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly threadId: ThreadId
+}): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError>
+{
+  const thread = findThreadById(input.readModel, input.threadId)
+  if (thread)
+  {
+    return Effect.succeed(thread)
   }
   return Effect.fail(
     invariantError(
       input.command.type,
       `Thread '${input.threadId}' does not exist for command '${input.command.type}'.`,
     ),
-  );
+  )
 }
 
 export function requireThreadArchived(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly threadId: ThreadId;
-}): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError> {
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly threadId: ThreadId
+}): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError>
+{
   return requireThread(input).pipe(
     Effect.flatMap((thread) =>
       thread.archivedAt !== null
@@ -151,14 +165,15 @@ export function requireThreadArchived(input: {
             ),
           ),
     ),
-  );
+  )
 }
 
 export function requireThreadNotArchived(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly threadId: ThreadId;
-}): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError> {
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly threadId: ThreadId
+}): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError>
+{
   return requireThread(input).pipe(
     Effect.flatMap((thread) =>
       thread.archivedAt === null
@@ -170,21 +185,23 @@ export function requireThreadNotArchived(input: {
             ),
           ),
     ),
-  );
+  )
 }
 
 export function requireThreadAbsent(input: {
-  readonly readModel: OrchestrationReadModel;
-  readonly command: OrchestrationCommand;
-  readonly threadId: ThreadId;
-}): Effect.Effect<void, OrchestrationCommandInvariantError> {
-  if (!findThreadById(input.readModel, input.threadId)) {
-    return Effect.void;
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly threadId: ThreadId
+}): Effect.Effect<void, OrchestrationCommandInvariantError>
+{
+  if (!findThreadById(input.readModel, input.threadId))
+  {
+    return Effect.void
   }
   return Effect.fail(
     invariantError(
       input.command.type,
       `Thread '${input.threadId}' already exists and cannot be created twice.`,
     ),
-  );
+  )
 }

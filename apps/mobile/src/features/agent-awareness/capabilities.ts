@@ -1,5 +1,6 @@
-import Constants from "expo-constants";
+import Constants from 'expo-constants'
 
-export function supportsAgentAwarenessPush() {
-  return Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true;
+export function supportsAgentAwarenessPush()
+{
+  return Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true
 }

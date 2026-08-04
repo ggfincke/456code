@@ -2,14 +2,15 @@ import {
   createFileTreeIconResolver,
   getBuiltInSpriteSheet,
   type FileTreeIcons,
-} from "@pierre/trees";
+} from '@pierre/trees'
 
-export interface PierreIconResolution {
-  name: string;
-  token?: string;
+export interface PierreIconResolution
+{
+  name: string
+  token?: string
 }
 
-const PIERRE_ICON_SPRITE_ID = "456code-pierre-file-icon-sprite";
+const PIERRE_ICON_SPRITE_ID = '456code-pierre-file-icon-sprite'
 
 const FILE_ICON_SPRITE = `
 <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true">
@@ -35,83 +36,89 @@ const FILE_ICON_SPRITE = `
     <path fill="#f9ad00" d="M30 10.75h-8.749V2H30Zm-9.626 0h-8.75V2h8.75Zm-9.625 0H2V2h8.749ZM30 20.375h-8.749v-8.75H30Z" />
     <path fill="currentColor" d="M20.374 20.375h-8.75v-8.75h8.75Zm0 9.625h-8.75v-8.75h8.75ZM30 30h-8.749v-8.75H30Zm-19.251 0H2v-8.75h8.749Z" />
   </symbol>
-</svg>`;
+</svg>`
 
 export const PIERRE_ICONS = {
-  set: "complete",
+  set: 'complete',
   colored: true,
   spriteSheet: FILE_ICON_SPRITE,
   byFileName: {
-    "package.json": "t3-file-icon-package-json",
-    "tsconfig.json": "t3-file-icon-tsconfig",
-    "agents.md": "t3-file-icon-agents",
-    "claude.md": "t3-file-icon-claude",
-    "readme.md": "t3-file-icon-readme",
-    "pnpm-lock.yaml": "t3-file-icon-pnpm",
-    "pnpm-workspace.yaml": "t3-file-icon-pnpm",
+    'package.json': 't3-file-icon-package-json',
+    'tsconfig.json': 't3-file-icon-tsconfig',
+    'agents.md': 't3-file-icon-agents',
+    'claude.md': 't3-file-icon-claude',
+    'readme.md': 't3-file-icon-readme',
+    'pnpm-lock.yaml': 't3-file-icon-pnpm',
+    'pnpm-workspace.yaml': 't3-file-icon-pnpm',
   },
-} satisfies FileTreeIcons;
+} satisfies FileTreeIcons
 
-const completeIconResolver = createFileTreeIconResolver(PIERRE_ICONS);
+const completeIconResolver = createFileTreeIconResolver(PIERRE_ICONS)
 
 const LANGUAGE_EXTENSION_ALIASES: Record<string, string> = {
-  bash: "sh",
-  csharp: "cs",
-  dockerfile: "dockerfile",
-  javascript: "js",
-  jsx: "jsx",
-  markdown: "md",
-  mdx: "mdx",
-  plaintext: "txt",
-  python: "py",
-  ruby: "rb",
-  rust: "rs",
-  shell: "sh",
-  shellscript: "sh",
-  swift: "swift",
-  typescript: "ts",
-  tsx: "tsx",
-  yaml: "yml",
-};
-
-export function basenameOfPath(pathValue: string): string {
-  const slashIndex = pathValue.lastIndexOf("/");
-  return slashIndex === -1 ? pathValue : pathValue.slice(slashIndex + 1);
+  bash: 'sh',
+  csharp: 'cs',
+  dockerfile: 'dockerfile',
+  javascript: 'js',
+  jsx: 'jsx',
+  markdown: 'md',
+  mdx: 'mdx',
+  plaintext: 'txt',
+  python: 'py',
+  ruby: 'rb',
+  rust: 'rs',
+  shell: 'sh',
+  shellscript: 'sh',
+  swift: 'swift',
+  typescript: 'ts',
+  tsx: 'tsx',
+  yaml: 'yml',
 }
 
-export function inferEntryKindFromPath(pathValue: string): "file" | "directory" {
-  const base = basenameOfPath(pathValue);
-  if (base.startsWith(".") && !base.slice(1).includes(".")) return "directory";
-  return base.includes(".") ? "file" : "directory";
+export function basenameOfPath(pathValue: string): string
+{
+  const slashIndex = pathValue.lastIndexOf('/')
+  return slashIndex === -1 ? pathValue : pathValue.slice(slashIndex + 1)
 }
 
-export function syntheticFileNameForLanguageId(languageId: string): string {
-  const normalized = languageId.toLowerCase();
-  return `file.${LANGUAGE_EXTENSION_ALIASES[normalized] ?? normalized}`;
+export function inferEntryKindFromPath(pathValue: string): 'file' | 'directory'
+{
+  const base = basenameOfPath(pathValue)
+  if (base.startsWith('.') && !base.slice(1).includes('.')) return 'directory'
+  return base.includes('.') ? 'file' : 'directory'
+}
+
+export function syntheticFileNameForLanguageId(languageId: string): string
+{
+  const normalized = languageId.toLowerCase()
+  return `file.${LANGUAGE_EXTENSION_ALIASES[normalized] ?? normalized}`
 }
 
 export function resolvePierreIconForEntry(
   pathValue: string,
-  kind: "file" | "directory",
-): PierreIconResolution | null {
-  if (kind === "directory") return null;
-  return completeIconResolver.resolveIcon("file-tree-icon-file", pathValue);
+  kind: 'file' | 'directory',
+): PierreIconResolution | null
+{
+  if (kind === 'directory') return null
+  return completeIconResolver.resolveIcon('file-tree-icon-file', pathValue)
 }
 
-export function hasSpecificPierreIconForFileName(fileName: string): boolean {
-  return resolvePierreIconForEntry(fileName, "file")?.token !== "default";
+export function hasSpecificPierreIconForFileName(fileName: string): boolean
+{
+  return resolvePierreIconForEntry(fileName, 'file')?.token !== 'default'
 }
 
-export function ensurePierreIconSprite(): void {
-  if (typeof document === "undefined" || document.getElementById(PIERRE_ICON_SPRITE_ID)) return;
-  const container = document.createElement("div");
-  container.id = PIERRE_ICON_SPRITE_ID;
-  container.setAttribute("aria-hidden", "true");
-  container.style.position = "absolute";
-  container.style.width = "0";
-  container.style.height = "0";
-  container.style.overflow = "hidden";
-  container.style.pointerEvents = "none";
-  container.innerHTML = `${getBuiltInSpriteSheet("complete")}${FILE_ICON_SPRITE}`;
-  document.body.prepend(container);
+export function ensurePierreIconSprite(): void
+{
+  if (typeof document === 'undefined' || document.getElementById(PIERRE_ICON_SPRITE_ID)) return
+  const container = document.createElement('div')
+  container.id = PIERRE_ICON_SPRITE_ID
+  container.setAttribute('aria-hidden', 'true')
+  container.style.position = 'absolute'
+  container.style.width = '0'
+  container.style.height = '0'
+  container.style.overflow = 'hidden'
+  container.style.pointerEvents = 'none'
+  container.innerHTML = `${getBuiltInSpriteSheet('complete')}${FILE_ICON_SPRITE}`
+  document.body.prepend(container)
 }

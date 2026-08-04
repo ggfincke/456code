@@ -1,3 +1,3 @@
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { AtomRegistry } from 'effect/unstable/reactivity'
 
-export const appAtomRegistry = AtomRegistry.make();
+export const appAtomRegistry = AtomRegistry.make()

@@ -1,214 +1,245 @@
 // apps/mobile/src/state/thread-outbox-manager.ts
 // persists and publishes queued mobile messages
 
-import { EnvironmentId, MessageId, ThreadId } from "@t3tools/contracts";
-import * as Schema from "effect/Schema";
-import { Atom, type AtomRegistry } from "effect/unstable/reactivity";
+import { EnvironmentId, MessageId, ThreadId } from '@t3tools/contracts'
+import * as Schema from 'effect/Schema'
+import { Atom, type AtomRegistry } from 'effect/unstable/reactivity'
 
 import {
   flattenQueuedThreadMessages,
   groupQueuedThreadMessages,
   type QueuedThreadMessage,
-} from "./thread-outbox-model";
-import type { ThreadOutboxStorage } from "./thread-outbox-storage";
+} from './thread-outbox-model'
+import type { ThreadOutboxStorage } from './thread-outbox-storage'
 
 export class ThreadOutboxManagerError extends Schema.TaggedErrorClass<ThreadOutboxManagerError>()(
-  "ThreadOutboxManagerError",
+  'ThreadOutboxManagerError',
   {
     operation: Schema.Literals([
-      "load",
-      "enqueue",
-      "update",
-      "remove",
-      "clear-environment-load",
-      "clear-environment-remove",
+      'load',
+      'enqueue',
+      'update',
+      'remove',
+      'clear-environment-load',
+      'clear-environment-remove',
     ]),
     environmentId: Schema.NullOr(EnvironmentId),
     threadId: Schema.NullOr(ThreadId),
     messageId: Schema.NullOr(MessageId),
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Thread outbox operation ${this.operation} failed for environment ${this.environmentId ?? "unknown"}, thread ${this.threadId ?? "unknown"}, message ${this.messageId ?? "unknown"}.`;
+)
+{
+  override get message(): string
+  {
+    return `Thread outbox operation ${this.operation} failed for environment ${this.environmentId ?? 'unknown'}, thread ${this.threadId ?? 'unknown'}, message ${this.messageId ?? 'unknown'}.`
   }
 }
 
-export interface ThreadOutboxManagerOptions {
-  readonly registry: AtomRegistry.AtomRegistry;
-  readonly storage: ThreadOutboxStorage;
-  readonly warn?: (message: string, error: unknown) => void;
+export interface ThreadOutboxManagerOptions
+{
+  readonly registry: AtomRegistry.AtomRegistry
+  readonly storage: ThreadOutboxStorage
+  readonly warn?: (message: string, error: unknown) => void
 }
 
-export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
+export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
+{
   const queuedMessagesByThreadKeyAtom = Atom.make<
     Record<string, ReadonlyArray<QueuedThreadMessage>>
-  >({}).pipe(Atom.keepAlive, Atom.withLabel("mobile:thread-outbox:queued-messages"));
+  >({}).pipe(Atom.keepAlive, Atom.withLabel('mobile:thread-outbox:queued-messages'))
   const warn =
     options.warn ??
-    ((message: string, error: unknown) => {
-      console.warn(message, error);
-    });
-  let loadPromise: Promise<void> | null = null;
-  let mutationQueue: Promise<void> = Promise.resolve();
+    ((message: string, error: unknown) =>
+    {
+      console.warn(message, error)
+    })
+  let loadPromise: Promise<void> | null = null
+  let mutationQueue: Promise<void> = Promise.resolve()
 
-  const serialize = <A>(mutation: () => Promise<A>): Promise<A> => {
-    const result = mutationQueue.then(mutation, mutation);
+  const serialize = <A>(mutation: () => Promise<A>): Promise<A> =>
+  {
+    const result = mutationQueue.then(mutation, mutation)
     mutationQueue = result.then(
       () => undefined,
       () => undefined,
-    );
-    return result;
-  };
+    )
+    return result
+  }
 
   const currentMessages = (): ReadonlyArray<QueuedThreadMessage> =>
-    flattenQueuedThreadMessages(options.registry.get(queuedMessagesByThreadKeyAtom));
+    flattenQueuedThreadMessages(options.registry.get(queuedMessagesByThreadKeyAtom))
 
-  const setMessages = (messages: ReadonlyArray<QueuedThreadMessage>): void => {
-    options.registry.set(queuedMessagesByThreadKeyAtom, groupQueuedThreadMessages(messages));
-  };
+  const setMessages = (messages: ReadonlyArray<QueuedThreadMessage>): void =>
+  {
+    options.registry.set(queuedMessagesByThreadKeyAtom, groupQueuedThreadMessages(messages))
+  }
 
-  const load = (): Promise<void> => {
-    if (loadPromise !== null) {
-      return loadPromise;
+  const load = (): Promise<void> =>
+  {
+    if (loadPromise !== null)
+    {
+      return loadPromise
     }
-    loadPromise = serialize(async () => {
-      const persistedMessages = await options.storage.load();
-      setMessages([...persistedMessages, ...currentMessages()]);
-    }).catch((cause) => {
-      loadPromise = null;
+    loadPromise = serialize(async () =>
+    {
+      const persistedMessages = await options.storage.load()
+      setMessages([...persistedMessages, ...currentMessages()])
+    }).catch((cause) =>
+    {
+      loadPromise = null
       warn(
-        "[thread-outbox] failed to load persisted messages",
+        '[thread-outbox] failed to load persisted messages',
         new ThreadOutboxManagerError({
-          operation: "load",
+          operation: 'load',
           environmentId: null,
           threadId: null,
           messageId: null,
           cause,
         }),
-      );
-    });
-    return loadPromise;
-  };
+      )
+    })
+    return loadPromise
+  }
 
   // publish immediately and roll back if durable storage fails
-  const enqueue = (message: QueuedThreadMessage): Promise<void> => {
+  const enqueue = (message: QueuedThreadMessage): Promise<void> =>
+  {
     setMessages([
       ...currentMessages().filter((candidate) => candidate.messageId !== message.messageId),
       message,
-    ]);
-    return serialize(async () => {
-      try {
-        await options.storage.write(message);
-      } catch (cause) {
+    ])
+    return serialize(async () =>
+    {
+      try
+      {
+        await options.storage.write(message)
+      }
+      catch (cause)
+      {
         // preserve a replacement attempt that reused the message id
-        setMessages(currentMessages().filter((candidate) => candidate !== message));
+        setMessages(currentMessages().filter((candidate) => candidate !== message))
         throw new ThreadOutboxManagerError({
-          operation: "enqueue",
+          operation: 'enqueue',
           environmentId: message.environmentId,
           threadId: message.threadId,
           messageId: message.messageId,
           cause,
-        });
+        })
       }
-    });
-  };
+    })
+  }
 
   // wait for pending writes before confirming delivery eligibility
   const confirmQueued = (message: QueuedThreadMessage): Promise<boolean> =>
-    serialize(async () => currentMessages().some((candidate) => candidate === message));
+    serialize(async () => currentMessages().some((candidate) => candidate === message))
 
   // Rewrites an already-queued message. A no-op when the message has been
   // removed in the meantime (e.g. deleted or delivered), so a trailing editor
   // flush can never resurrect it. Returns whether the message was updated.
   const update = (message: QueuedThreadMessage): Promise<boolean> =>
-    serialize(async () => {
+    serialize(async () =>
+    {
       const exists = currentMessages().some(
         (candidate) => candidate.messageId === message.messageId,
-      );
-      if (!exists) {
-        return false;
+      )
+      if (!exists)
+      {
+        return false
       }
-      try {
-        await options.storage.write(message);
-      } catch (cause) {
+      try
+      {
+        await options.storage.write(message)
+      }
+      catch (cause)
+      {
         throw new ThreadOutboxManagerError({
-          operation: "update",
+          operation: 'update',
           environmentId: message.environmentId,
           threadId: message.threadId,
           messageId: message.messageId,
           cause,
-        });
+        })
       }
       setMessages([
         ...currentMessages().filter((candidate) => candidate.messageId !== message.messageId),
         message,
-      ]);
-      return true;
-    });
+      ])
+      return true
+    })
 
   const remove = (message: QueuedThreadMessage): Promise<void> =>
-    serialize(async () => {
-      try {
-        await options.storage.remove(message);
-      } catch (cause) {
+    serialize(async () =>
+    {
+      try
+      {
+        await options.storage.remove(message)
+      }
+      catch (cause)
+      {
         throw new ThreadOutboxManagerError({
-          operation: "remove",
+          operation: 'remove',
           environmentId: message.environmentId,
           threadId: message.threadId,
           messageId: message.messageId,
           cause,
-        });
+        })
       }
       setMessages(
         currentMessages().filter((candidate) => candidate.messageId !== message.messageId),
-      );
-    });
+      )
+    })
 
   const clearEnvironment = (environmentId: EnvironmentId): Promise<void> =>
-    serialize(async () => {
-      const persisted = await options.storage.load().catch((cause) => {
+    serialize(async () =>
+    {
+      const persisted = await options.storage.load().catch((cause) =>
+      {
         warn(
-          "[thread-outbox] failed to load messages while clearing environment",
+          '[thread-outbox] failed to load messages while clearing environment',
           new ThreadOutboxManagerError({
-            operation: "clear-environment-load",
+            operation: 'clear-environment-load',
             environmentId,
             threadId: null,
             messageId: null,
             cause,
           }),
-        );
-        return [];
-      });
+        )
+        return []
+      })
       const allMessages = flattenQueuedThreadMessages(
         groupQueuedThreadMessages([...persisted, ...currentMessages()]),
-      );
-      const removedMessageIds = new Set<MessageId>();
+      )
+      const removedMessageIds = new Set<MessageId>()
 
       await Promise.all(
         allMessages
           .filter((message) => message.environmentId === environmentId)
-          .map(async (message) => {
-            try {
-              await options.storage.remove(message);
-              removedMessageIds.add(message.messageId);
-            } catch (cause) {
+          .map(async (message) =>
+          {
+            try
+            {
+              await options.storage.remove(message)
+              removedMessageIds.add(message.messageId)
+            }
+            catch (cause)
+            {
               warn(
-                "[thread-outbox] failed to clear persisted message",
+                '[thread-outbox] failed to clear persisted message',
                 new ThreadOutboxManagerError({
-                  operation: "clear-environment-remove",
+                  operation: 'clear-environment-remove',
                   environmentId: message.environmentId,
                   threadId: message.threadId,
                   messageId: message.messageId,
                   cause,
                 }),
-              );
+              )
             }
           }),
-      );
+      )
 
-      setMessages(allMessages.filter((message) => !removedMessageIds.has(message.messageId)));
-    });
+      setMessages(allMessages.filter((message) => !removedMessageIds.has(message.messageId)))
+    })
 
   return {
     queuedMessagesByThreadKeyAtom,
@@ -219,5 +250,5 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions) {
     update,
     remove,
     clearEnvironment,
-  };
+  }
 }

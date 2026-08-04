@@ -1,9 +1,9 @@
-import type { ConnectionTarget } from "@t3tools/client-runtime/connection";
+import type { ConnectionTarget } from '@t3tools/client-runtime/connection'
 import {
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   type DesktopBridge,
   type DesktopEnvironmentBootstrap,
-} from "@t3tools/contracts";
+} from '@t3tools/contracts'
 
 /**
  * Desktop-local secondary backends (e.g. a parallel WSL backend) are registered
@@ -17,40 +17,44 @@ import {
  * via {@link isDesktopLocalConnectionTarget}, so the convention can never drift
  * between the two.
  */
-export const DESKTOP_LOCAL_CONNECTION_ID_PREFIX = "local:";
+export const DESKTOP_LOCAL_CONNECTION_ID_PREFIX = 'local:'
 
-export function desktopLocalConnectionId(backendId: string): string {
-  return `${DESKTOP_LOCAL_CONNECTION_ID_PREFIX}${backendId}`;
+export function desktopLocalConnectionId(backendId: string): string
+{
+  return `${DESKTOP_LOCAL_CONNECTION_ID_PREFIX}${backendId}`
 }
 
 export function isDesktopLocalConnectionTarget(
   target: ConnectionTarget,
-): target is Extract<ConnectionTarget, { readonly _tag: "BearerConnectionTarget" }> {
+): target is Extract<ConnectionTarget, { readonly _tag: 'BearerConnectionTarget' }>
+{
   return (
-    target._tag === "BearerConnectionTarget" &&
+    target._tag === 'BearerConnectionTarget' &&
     target.connectionId.startsWith(DESKTOP_LOCAL_CONNECTION_ID_PREFIX)
-  );
+  )
 }
 
-export function desktopLocalBackendId(target: ConnectionTarget): string | null {
+export function desktopLocalBackendId(target: ConnectionTarget): string | null
+{
   return isDesktopLocalConnectionTarget(target)
     ? target.connectionId.slice(DESKTOP_LOCAL_CONNECTION_ID_PREFIX.length)
-    : null;
+    : null
 }
 
 export type DesktopSecondaryBootstrapsRead =
   | {
-      readonly _tag: "Success";
-      readonly bootstraps: ReadonlyArray<DesktopEnvironmentBootstrap>;
+      readonly _tag: 'Success'
+      readonly bootstraps: ReadonlyArray<DesktopEnvironmentBootstrap>
     }
   | {
-      readonly _tag: "Failure";
-      readonly cause: unknown;
-    };
+      readonly _tag: 'Failure'
+      readonly cause: unknown
+    }
 
-export interface DesktopSecondaryBootstrapsReader {
-  readonly readResult: () => DesktopSecondaryBootstrapsRead;
-  readonly readSnapshot: () => ReadonlyArray<DesktopEnvironmentBootstrap>;
+export interface DesktopSecondaryBootstrapsReader
+{
+  readonly readResult: () => DesktopSecondaryBootstrapsRead
+  readonly readSnapshot: () => ReadonlyArray<DesktopEnvironmentBootstrap>
 }
 
 /**
@@ -60,45 +64,54 @@ export interface DesktopSecondaryBootstrapsReader {
  * platform's retained registrations.
  */
 export function createDesktopSecondaryBootstrapsReader(
-  resolveBridge: () => Pick<DesktopBridge, "getLocalEnvironmentBootstraps"> | undefined,
-): DesktopSecondaryBootstrapsReader {
-  let snapshot: ReadonlyArray<DesktopEnvironmentBootstrap> = [];
+  resolveBridge: () => Pick<DesktopBridge, 'getLocalEnvironmentBootstraps'> | undefined,
+): DesktopSecondaryBootstrapsReader
+{
+  let snapshot: ReadonlyArray<DesktopEnvironmentBootstrap> = []
 
-  const readResult = (): DesktopSecondaryBootstrapsRead => {
-    const bridge = resolveBridge();
-    if (bridge === undefined) {
-      snapshot = [];
-      return { _tag: "Success", bootstraps: snapshot };
+  const readResult = (): DesktopSecondaryBootstrapsRead =>
+  {
+    const bridge = resolveBridge()
+    if (bridge === undefined)
+    {
+      snapshot = []
+      return { _tag: 'Success', bootstraps: snapshot }
     }
-    try {
+    try
+    {
       snapshot = bridge
         .getLocalEnvironmentBootstraps()
-        .filter((entry) => entry.id !== PRIMARY_LOCAL_ENVIRONMENT_ID);
-      return { _tag: "Success", bootstraps: snapshot };
-    } catch (cause) {
-      return { _tag: "Failure", cause };
+        .filter((entry) => entry.id !== PRIMARY_LOCAL_ENVIRONMENT_ID)
+      return { _tag: 'Success', bootstraps: snapshot }
     }
-  };
+    catch (cause)
+    {
+      return { _tag: 'Failure', cause }
+    }
+  }
 
   return {
     readResult,
-    readSnapshot: () => {
-      const result = readResult();
-      return result._tag === "Success" ? result.bootstraps : snapshot;
+    readSnapshot: () =>
+    {
+      const result = readResult()
+      return result._tag === 'Success' ? result.bootstraps : snapshot
     },
-  };
+  }
 }
 
 const desktopSecondaryBootstrapsReader = createDesktopSecondaryBootstrapsReader(
   () => window.desktopBridge,
-);
+)
 
 /** Read the topology while preserving failures for platform cache policy. */
-export function readDesktopSecondaryBootstrapsResult(): DesktopSecondaryBootstrapsRead {
-  return desktopSecondaryBootstrapsReader.readResult();
+export function readDesktopSecondaryBootstrapsResult(): DesktopSecondaryBootstrapsRead
+{
+  return desktopSecondaryBootstrapsReader.readResult()
 }
 
 /** Read the latest successful topology snapshot for renderer consumers. */
-export function readDesktopSecondaryBootstraps(): ReadonlyArray<DesktopEnvironmentBootstrap> {
-  return desktopSecondaryBootstrapsReader.readSnapshot();
+export function readDesktopSecondaryBootstraps(): ReadonlyArray<DesktopEnvironmentBootstrap>
+{
+  return desktopSecondaryBootstrapsReader.readSnapshot()
 }

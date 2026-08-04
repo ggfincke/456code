@@ -1,15 +1,15 @@
 // apps/mobile/src/features/threads/ThreadFeed.tsx
 // renders the virtualized mobile thread feed
 
-import * as Haptics from "expo-haptics";
-import { KeyboardAwareLegendList } from "@legendapp/list/keyboard";
-import { type LegendListRef } from "@legendapp/list/react-native";
-import type { EnvironmentId, MessageId, ThreadId, TurnId } from "@t3tools/contracts";
-import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from "@t3tools/shared/chatList";
-import { formatElapsed } from "@t3tools/shared/orchestrationTiming";
-import { SymbolView } from "../../components/AppSymbol";
-import { HeaderHeightContext } from "@react-navigation/elements";
-import { useNavigation } from "@react-navigation/native";
+import * as Haptics from 'expo-haptics'
+import { KeyboardAwareLegendList } from '@legendapp/list/keyboard'
+import { type LegendListRef } from '@legendapp/list/react-native'
+import type { EnvironmentId, MessageId, ThreadId, TurnId } from '@t3tools/contracts'
+import { CHAT_LIST_ANCHOR_OFFSET, resolveChatListAnchoredEndSpace } from '@t3tools/shared/chatList'
+import { formatElapsed } from '@t3tools/shared/orchestrationTiming'
+import { SymbolView } from '../../components/AppSymbol'
+import { HeaderHeightContext } from '@react-navigation/elements'
+import { useNavigation } from '@react-navigation/native'
 import {
   memo,
   useCallback,
@@ -21,13 +21,13 @@ import {
   useState,
   type ReactNode,
   type RefObject,
-} from "react";
+} from 'react'
 import {
   Markdown,
   type CustomRenderers,
   type NodeStyleOverrides,
   type PartialMarkdownTheme,
-} from "react-native-nitro-markdown";
+} from 'react-native-nitro-markdown'
 import {
   ActivityIndicator,
   Image,
@@ -44,10 +44,10 @@ import {
   useColorScheme,
   useWindowDimensions,
   View,
-} from "react-native";
-import { TouchableOpacity } from "react-native-gesture-handler";
-import ImageViewing from "react-native-image-viewing";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+} from 'react-native'
+import { TouchableOpacity } from 'react-native-gesture-handler'
+import ImageViewing from 'react-native-image-viewing'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import Animated, {
   FadeIn,
   FadeInUp,
@@ -55,201 +55,210 @@ import Animated, {
   withTiming,
   type LayoutAnimationsValues,
   type SharedValue,
-} from "react-native-reanimated";
-import { useThemeColor } from "../../lib/useThemeColor";
-import { useFontFamily } from "../../lib/useFontFamily";
-import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
+} from 'react-native-reanimated'
+import { useThemeColor } from '../../lib/useThemeColor'
+import { useFontFamily } from '../../lib/useFontFamily'
+import { copyTextWithHaptic } from '../../lib/copyTextWithHaptic'
 import {
   hasNativeSelectableMarkdownText,
   SelectableMarkdownText,
   type NativeMarkdownTextStyle,
   type SelectableMarkdownSkill,
-} from "../../native/SelectableMarkdownText";
+} from '../../native/SelectableMarkdownText'
 
-import { AppText as Text } from "../../components/AppText";
-import { CopyTextButton } from "../../components/CopyTextButton";
+import { AppText as Text } from '../../components/AppText'
+import { CopyTextButton } from '../../components/CopyTextButton'
 import {
   parseReviewCommentMessageSegments,
   type ReviewInlineComment,
-} from "../review/reviewCommentSelection";
-import type { ReviewDiffTheme } from "../review/shikiReviewHighlighter";
-import { resolveNativeReviewDiffView } from "../diffs/nativeReviewDiffSurface";
+} from '../review/reviewCommentSelection'
+import type { ReviewDiffTheme } from '../review/shikiReviewHighlighter'
+import { resolveNativeReviewDiffView } from '../diffs/nativeReviewDiffSurface'
 import {
   buildNativeReviewDiffData,
   createNativeReviewDiffTheme,
   NATIVE_REVIEW_DIFF_CONTENT_WIDTH,
-} from "../review/nativeReviewDiffAdapter";
-import { buildReviewParsedDiff } from "../review/reviewModel";
-import { cn } from "../../lib/cn";
-import { deriveCenteredContentHorizontalPadding, type LayoutVariant } from "../../lib/layout";
+} from '../review/nativeReviewDiffAdapter'
+import { buildReviewParsedDiff } from '../review/reviewModel'
+import { cn } from '../../lib/cn'
+import { deriveCenteredContentHorizontalPadding, type LayoutVariant } from '../../lib/layout'
 import {
   resolveMarkdownFontSizes,
   resolveNativeMarkdownTypography,
   scaledTypographyLineHeight,
-} from "../../lib/appearancePreferences";
-import { MOBILE_TYPOGRAPHY } from "../../lib/typography";
-import { useAppearancePreferences } from "../settings/appearance/AppearancePreferencesProvider";
-import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
-import { markdownFileIconSource } from "@t3tools/mobile-markdown-text/file-icons";
-import { resolveMarkdownLinkPresentation } from "@t3tools/mobile-markdown-text/links";
+} from '../../lib/appearancePreferences'
+import { MOBILE_TYPOGRAPHY } from '../../lib/typography'
+import { useAppearancePreferences } from '../settings/appearance/AppearancePreferencesProvider'
+import { useAppearanceCodeSurface } from '../settings/appearance/useAppearanceCodeSurface'
+import { markdownFileIconSource } from '@t3tools/mobile-markdown-text/file-icons'
+import { resolveMarkdownLinkPresentation } from '@t3tools/mobile-markdown-text/links'
 import {
   deriveThreadFeedPresentation,
   type ThreadFeedEntry,
   type ThreadFeedLatestTurn,
-} from "../../lib/threadActivity";
-import type { ThreadContentPresentation } from "./threadContentPresentation";
+} from '../../lib/threadActivity'
+import type { ThreadContentPresentation } from './threadContentPresentation'
 import {
   collapsedWorkLogHeight,
   ThreadWorkGroupToggle,
   ThreadWorkLog,
   WORK_GROUP_TOGGLE_HEIGHT,
-} from "./thread-work-log";
-import { useMarkdownCodeHighlight } from "./markdownCodeHighlightState";
-import { useAssetUrl } from "../../state/assets";
-import { resolveWorkspaceRelativeFilePath } from "../files/filePath";
+} from './thread-work-log'
+import { useMarkdownCodeHighlight } from './markdownCodeHighlightState'
+import { useAssetUrl } from '../../state/assets'
+import { resolveWorkspaceRelativeFilePath } from '../files/filePath'
 
 const MESSAGE_TIME_FORMATTER = new Intl.DateTimeFormat(undefined, {
-  hour: "numeric",
-  minute: "2-digit",
-});
-function formatMessageTime(input: string): string {
-  const timestamp = Date.parse(input);
-  if (Number.isNaN(timestamp)) {
-    return "";
+  hour: 'numeric',
+  minute: '2-digit',
+})
+function formatMessageTime(input: string): string
+{
+  const timestamp = Date.parse(input)
+  if (Number.isNaN(timestamp))
+  {
+    return ''
   }
-  return MESSAGE_TIME_FORMATTER.format(timestamp);
+  return MESSAGE_TIME_FORMATTER.format(timestamp)
 }
 
 // animate content shifts only near the live end of the feed
-const FEED_ITEM_LAYOUT_DURATION_MS = 180;
+const FEED_ITEM_LAYOUT_DURATION_MS = 180
 
 // min-h-11 plus mb-3
-const TURN_FOLD_HEIGHT = 56;
+const TURN_FOLD_HEIGHT = 56
 // py-1 plus mb-4 around the scaled working label
-const WORKING_ROW_VERTICAL_EXTRAS = 24;
+const WORKING_ROW_VERTICAL_EXTRAS = 24
 
 // Entering animations must only play for rows born just now — LegendList
 // remounts rows when they scroll back into view, and replaying an entrance for
 // old content would be its own kind of jank.
-const FRESH_ENTRY_WINDOW_MS = 3_000;
-function isFreshTimestamp(input: string): boolean {
-  const timestamp = Date.parse(input);
-  return Number.isFinite(timestamp) && Date.now() - timestamp < FRESH_ENTRY_WINDOW_MS;
+const FRESH_ENTRY_WINDOW_MS = 3_000
+function isFreshTimestamp(input: string): boolean
+{
+  const timestamp = Date.parse(input)
+  return Number.isFinite(timestamp) && Date.now() - timestamp < FRESH_ENTRY_WINDOW_MS
 }
 
-export interface ThreadFeedProps {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly workspaceRoot?: string | null;
-  readonly feed: ReadonlyArray<ThreadFeedEntry>;
-  readonly contentPresentation: ThreadContentPresentation;
-  readonly agentLabel: string;
-  readonly latestTurn: ThreadFeedLatestTurn | null;
-  readonly activeWorkStartedAt: string | null;
-  readonly listRef: RefObject<LegendListRef | null>;
-  readonly freeze: SharedValue<boolean>;
-  readonly anchorMessageId: MessageId | null;
-  readonly contentInsetEndAdjustment: SharedValue<number>;
-  readonly contentTopInset?: number;
-  readonly contentBottomInset?: number;
-  readonly contentMaxWidth?: number;
-  readonly layoutVariant?: LayoutVariant;
-  readonly usesAutomaticContentInsets?: boolean;
-  readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void;
-  readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
+export interface ThreadFeedProps
+{
+  readonly environmentId: EnvironmentId
+  readonly threadId: ThreadId
+  readonly workspaceRoot?: string | null
+  readonly feed: ReadonlyArray<ThreadFeedEntry>
+  readonly contentPresentation: ThreadContentPresentation
+  readonly agentLabel: string
+  readonly latestTurn: ThreadFeedLatestTurn | null
+  readonly activeWorkStartedAt: string | null
+  readonly listRef: RefObject<LegendListRef | null>
+  readonly freeze: SharedValue<boolean>
+  readonly anchorMessageId: MessageId | null
+  readonly contentInsetEndAdjustment: SharedValue<number>
+  readonly contentTopInset?: number
+  readonly contentBottomInset?: number
+  readonly contentMaxWidth?: number
+  readonly layoutVariant?: LayoutVariant
+  readonly usesAutomaticContentInsets?: boolean
+  readonly onHeaderMaterialVisibilityChange?: (visible: boolean) => void
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill>
 }
 
 function MessageAttachmentImage(props: {
-  readonly environmentId: EnvironmentId;
-  readonly attachmentId: string;
-  readonly className: string;
-  readonly onPressImage: (uri: string, headers?: Record<string, string>) => void;
-}) {
+  readonly environmentId: EnvironmentId
+  readonly attachmentId: string
+  readonly className: string
+  readonly onPressImage: (uri: string, headers?: Record<string, string>) => void
+})
+{
   const uri = useAssetUrl(props.environmentId, {
-    _tag: "attachment",
+    _tag: 'attachment',
     attachmentId: props.attachmentId,
-  });
+  })
 
-  if (uri === null) {
+  if (uri === null)
+  {
     return (
       <View className={`${props.className} items-center justify-center`}>
         <ActivityIndicator />
       </View>
-    );
+    )
   }
 
   return (
     <TouchableOpacity activeOpacity={0.7} onPress={() => props.onPressImage(uri)}>
       <Image source={{ uri }} className={props.className} resizeMode="cover" />
     </TouchableOpacity>
-  );
+  )
 }
 
 const MARKDOWN_COLORS = {
   light: {
-    body: "#111111",
-    strong: "#000000",
-    link: "#2563eb",
-    blockquoteBorder: "rgba(0, 0, 0, 0.08)",
-    blockquoteBackground: "rgba(0, 0, 0, 0.02)",
-    codeBackground: "rgba(0, 0, 0, 0.04)",
-    codeText: "#262626",
-    inlineCodeText: "#5f6368",
-    horizontalRule: "rgba(0, 0, 0, 0.08)",
-    userBody: "#ffffff",
-    userCodeBackground: "rgba(255, 255, 255, 0.22)",
-    userCodeText: "#ffffff",
-    userInlineCodeText: "rgba(255, 255, 255, 0.82)",
-    userFenceBackground: "rgba(0, 0, 0, 0.16)",
-    userFenceText: "#ffffff",
+    body: '#111111',
+    strong: '#000000',
+    link: '#2563eb',
+    blockquoteBorder: 'rgba(0, 0, 0, 0.08)',
+    blockquoteBackground: 'rgba(0, 0, 0, 0.02)',
+    codeBackground: 'rgba(0, 0, 0, 0.04)',
+    codeText: '#262626',
+    inlineCodeText: '#5f6368',
+    horizontalRule: 'rgba(0, 0, 0, 0.08)',
+    userBody: '#ffffff',
+    userCodeBackground: 'rgba(255, 255, 255, 0.22)',
+    userCodeText: '#ffffff',
+    userInlineCodeText: 'rgba(255, 255, 255, 0.82)',
+    userFenceBackground: 'rgba(0, 0, 0, 0.16)',
+    userFenceText: '#ffffff',
   },
   dark: {
-    body: "#e5e5e5",
-    strong: "#f5f5f5",
-    link: "#60a5fa",
-    blockquoteBorder: "rgba(255, 255, 255, 0.1)",
-    blockquoteBackground: "rgba(255, 255, 255, 0.03)",
-    codeBackground: "rgba(255, 255, 255, 0.06)",
-    codeText: "#e5e5e5",
-    inlineCodeText: "#b8bcc2",
-    horizontalRule: "rgba(255, 255, 255, 0.08)",
-    userBody: "#ffffff",
-    userCodeBackground: "rgba(255, 255, 255, 0.18)",
-    userCodeText: "#ffffff",
-    userInlineCodeText: "rgba(255, 255, 255, 0.82)",
-    userFenceBackground: "rgba(0, 0, 0, 0.28)",
-    userFenceText: "#ffffff",
+    body: '#e5e5e5',
+    strong: '#f5f5f5',
+    link: '#60a5fa',
+    blockquoteBorder: 'rgba(255, 255, 255, 0.1)',
+    blockquoteBackground: 'rgba(255, 255, 255, 0.03)',
+    codeBackground: 'rgba(255, 255, 255, 0.06)',
+    codeText: '#e5e5e5',
+    inlineCodeText: '#b8bcc2',
+    horizontalRule: 'rgba(255, 255, 255, 0.08)',
+    userBody: '#ffffff',
+    userCodeBackground: 'rgba(255, 255, 255, 0.18)',
+    userCodeText: '#ffffff',
+    userInlineCodeText: 'rgba(255, 255, 255, 0.82)',
+    userFenceBackground: 'rgba(0, 0, 0, 0.28)',
+    userFenceText: '#ffffff',
   },
-} as const;
+} as const
 
 const MARKDOWN_MONO_FONT = Platform.select({
-  ios: "ui-monospace",
-  android: "monospace",
-  default: "monospace",
-});
+  ios: 'ui-monospace',
+  android: 'monospace',
+  default: 'monospace',
+})
 
-interface MarkdownStyleSets {
-  readonly user: MarkdownStyleSet;
-  readonly assistant: MarkdownStyleSet;
+interface MarkdownStyleSets
+{
+  readonly user: MarkdownStyleSet
+  readonly assistant: MarkdownStyleSet
 }
 
-interface MarkdownStyleSet {
-  readonly theme: PartialMarkdownTheme;
-  readonly styles: NodeStyleOverrides;
-  readonly renderers: CustomRenderers;
-  readonly nativeTextStyle: NativeMarkdownTextStyle;
+interface MarkdownStyleSet
+{
+  readonly theme: PartialMarkdownTheme
+  readonly styles: NodeStyleOverrides
+  readonly renderers: CustomRenderers
+  readonly nativeTextStyle: NativeMarkdownTextStyle
 }
 
-interface ReviewCommentColors {
-  readonly background: ColorValue;
-  readonly border: ColorValue;
-  readonly mutedBackground: ColorValue;
-  readonly text: ColorValue;
-  readonly mutedText: ColorValue;
-  readonly codeBackground: ColorValue;
+interface ReviewCommentColors
+{
+  readonly background: ColorValue
+  readonly border: ColorValue
+  readonly mutedBackground: ColorValue
+  readonly text: ColorValue
+  readonly mutedText: ColorValue
+  readonly codeBackground: ColorValue
 }
 
-const failedMarkdownFaviconHosts = new Set<string>();
+const failedMarkdownFaviconHosts = new Set<string>()
 const markdownLinkStyles = StyleSheet.create({
   inlineIcon: {
     width: 14,
@@ -260,25 +269,27 @@ const markdownLinkStyles = StyleSheet.create({
   favicon: {
     borderRadius: 3,
   },
-});
+})
 
 const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
-  readonly children: ReactNode;
-  readonly color: string;
-  readonly host: string;
-  readonly href: string;
-}) {
-  const [failed, setFailed] = useState(() => failedMarkdownFaviconHosts.has(props.host));
+  readonly children: ReactNode
+  readonly color: string
+  readonly host: string
+  readonly href: string
+})
+{
+  const [failed, setFailed] = useState(() => failedMarkdownFaviconHosts.has(props.host))
 
   return (
     <NativeText
       className="font-sans"
-      onPress={() => {
-        void Linking.openURL(props.href);
+      onPress={() =>
+      {
+        void Linking.openURL(props.href)
       }}
       style={{
         color: props.color,
-        textDecorationLine: "none",
+        textDecorationLine: 'none',
       }}
     >
       {!failed ? (
@@ -287,41 +298,43 @@ const MarkdownExternalLink = memo(function MarkdownExternalLink(props: {
             uri: `https://www.google.com/s2/favicons?domain=${encodeURIComponent(props.host)}&sz=32`,
           }}
           style={[markdownLinkStyles.inlineIcon, markdownLinkStyles.favicon]}
-          onError={() => {
-            failedMarkdownFaviconHosts.add(props.host);
-            setFailed(true);
+          onError={() =>
+            {
+            failedMarkdownFaviconHosts.add(props.host)
+            setFailed(true)
           }}
         />
       ) : (
-        <NativeText style={{ color: props.color }}>{" ◉ "}</NativeText>
+        <NativeText style={{ color: props.color }}>{' ◉ '}</NativeText>
       )}
       {props.children}
     </NativeText>
-  );
-});
+  )
+})
 
 function MarkdownCodeBlock(props: {
-  readonly backgroundColor: string;
-  readonly borderColor: string;
-  readonly content: string;
-  readonly copyTintColor: ColorValue;
-  readonly headerTextColor: string;
-  readonly fontSize: number;
-  readonly highlightCode: boolean;
-  readonly language?: string | null;
-  readonly lineHeight: number;
-  readonly textColor: string;
-  readonly theme: ReviewDiffTheme;
-}) {
-  const content = props.content.replace(/\n$/, "");
-  const languageLabel = props.language?.trim() || "text";
+  readonly backgroundColor: string
+  readonly borderColor: string
+  readonly content: string
+  readonly copyTintColor: ColorValue
+  readonly headerTextColor: string
+  readonly fontSize: number
+  readonly highlightCode: boolean
+  readonly language?: string | null
+  readonly lineHeight: number
+  readonly textColor: string
+  readonly theme: ReviewDiffTheme
+})
+{
+  const content = props.content.replace(/\n$/, '')
+  const languageLabel = props.language?.trim() || 'text'
   const highlighted = useMarkdownCodeHighlight({
     code: content,
     enabled: props.highlightCode && Boolean(props.language?.trim()),
     language: props.language,
     theme: props.theme,
-  });
-  let tokenOffset = 0;
+  })
+  let tokenOffset = 0
 
   return (
     <View
@@ -338,7 +351,7 @@ function MarkdownCodeBlock(props: {
           style={{
             color: props.headerTextColor,
             fontSize: props.fontSize,
-            ...(Platform.OS === "android" ? { includeFontPadding: false } : null),
+            ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
           }}
         >
           {languageLabel}
@@ -354,7 +367,7 @@ function MarkdownCodeBlock(props: {
       <ScrollView
         horizontal
         bounces={false}
-        nestedScrollEnabled={Platform.OS === "android"}
+        nestedScrollEnabled={Platform.OS === 'android'}
         showsHorizontalScrollIndicator={false}
         contentContainerClassName="px-3.5 py-3"
       >
@@ -365,31 +378,33 @@ function MarkdownCodeBlock(props: {
             color: props.textColor,
             fontSize: props.fontSize,
             lineHeight: props.lineHeight,
-            ...(Platform.OS === "android" ? { includeFontPadding: false } : null),
+            ...(Platform.OS === 'android' ? { includeFontPadding: false } : null),
           }}
         >
           {highlighted
-            ? highlighted.map((line, lineIndex) => {
-                const lineStartOffset = tokenOffset;
-                const lineText = line.map((token) => token.content).join("");
+            ? highlighted.map((line, lineIndex) =>
+              {
+                const lineStartOffset = tokenOffset
+                const lineText = line.map((token) => token.content).join('')
                 const renderedLine = (
                   <NativeText key={`line:${lineStartOffset}:${lineText}`}>
-                    {line.map((token) => {
-                      const startOffset = tokenOffset;
-                      tokenOffset += token.content.length;
+                    {line.map((token) =>
+                      {
+                      const startOffset = tokenOffset
+                      tokenOffset += token.content.length
                       const fontStyle =
                         token.fontStyle !== null && (token.fontStyle & 1) === 1
-                          ? ("italic" as const)
-                          : ("normal" as const);
+                          ? ('italic' as const)
+                          : ('normal' as const)
                       const fontWeight =
                         token.fontStyle !== null && (token.fontStyle & 2) === 2
-                          ? ("700" as const)
-                          : ("400" as const);
+                          ? ('700' as const)
+                          : ('400' as const)
 
                       return (
                         <NativeText
-                          key={`${startOffset}:${token.content}:${token.color ?? ""}:${
-                            token.fontStyle ?? ""
+                          key={`${startOffset}:${token.content}:${token.color ?? ''}:${
+                            token.fontStyle ?? ''
                           }`}
                           style={{
                             color: token.color ?? props.textColor,
@@ -399,32 +414,34 @@ function MarkdownCodeBlock(props: {
                         >
                           {token.content}
                         </NativeText>
-                      );
+                      )
                     })}
-                    {lineIndex + 1 < highlighted.length ? "\n" : ""}
+                    {lineIndex + 1 < highlighted.length ? '\n' : ''}
                   </NativeText>
-                );
-                if (lineIndex + 1 < highlighted.length) {
-                  tokenOffset += 1;
+                )
+                if (lineIndex + 1 < highlighted.length)
+                  {
+                  tokenOffset += 1
                 }
-                return renderedLine;
+                return renderedLine
               })
             : content}
         </NativeText>
       </ScrollView>
     </View>
-  );
+  )
 }
 
-function useReviewCommentColors(): ReviewCommentColors {
-  const colorScheme = useColorScheme();
-  const isDark = colorScheme === "dark";
-  const background = isDark ? "#151515" : "#ffffff";
-  const border = isDark ? "#2a2a2a" : "#d7d7d7";
-  const mutedBackground = isDark ? "#242424" : "#f2f2f2";
-  const text = isDark ? "#f3f3f3" : "#111111";
-  const mutedText = isDark ? "#8f8f8f" : "#666666";
-  const codeBackground = isDark ? "#0f0f0f" : "#ffffff";
+function useReviewCommentColors(): ReviewCommentColors
+{
+  const colorScheme = useColorScheme()
+  const isDark = colorScheme === 'dark'
+  const background = isDark ? '#151515' : '#ffffff'
+  const border = isDark ? '#2a2a2a' : '#d7d7d7'
+  const mutedBackground = isDark ? '#242424' : '#f2f2f2'
+  const text = isDark ? '#f3f3f3' : '#111111'
+  const mutedText = isDark ? '#8f8f8f' : '#666666'
+  const codeBackground = isDark ? '#0f0f0f' : '#ffffff'
 
   return useMemo(
     () => ({
@@ -436,44 +453,46 @@ function useReviewCommentColors(): ReviewCommentColors {
       codeBackground,
     }),
     [background, border, codeBackground, mutedBackground, mutedText, text],
-  );
+  )
 }
 
-function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSets {
-  const colorScheme = useColorScheme();
-  const { appearance } = useAppearancePreferences();
+function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSets
+{
+  const colorScheme = useColorScheme()
+  const { appearance } = useAppearancePreferences()
   const markdownFontSizes = useMemo(
     () => resolveMarkdownFontSizes(appearance.baseFontSize),
     [appearance.baseFontSize],
-  );
+  )
   const nativeMarkdownTypography = useMemo(
     () => resolveNativeMarkdownTypography(appearance.baseFontSize),
     [appearance.baseFontSize],
-  );
-  const themeMode = colorScheme === "dark" ? "dark" : "light";
-  const colors = MARKDOWN_COLORS[themeMode];
-  const iconSubtleColor = String(useThemeColor("--color-icon-subtle"));
-  const inlineSkillForeground = String(useThemeColor("--color-inline-skill-foreground"));
-  const userBubbleForegroundMuted = String(useThemeColor("--color-user-bubble-foreground-muted"));
-  const regularFontFamily = useFontFamily("regular");
-  const boldFontFamily = useFontFamily("bold");
+  )
+  const themeMode = colorScheme === 'dark' ? 'dark' : 'light'
+  const colors = MARKDOWN_COLORS[themeMode]
+  const iconSubtleColor = String(useThemeColor('--color-icon-subtle'))
+  const inlineSkillForeground = String(useThemeColor('--color-inline-skill-foreground'))
+  const userBubbleForegroundMuted = String(useThemeColor('--color-user-bubble-foreground-muted'))
+  const regularFontFamily = useFontFamily('regular')
+  const boldFontFamily = useFontFamily('bold')
 
-  return useMemo(() => {
-    const markdownBodyColor = colors.body;
-    const markdownStrongColor = colors.strong;
-    const markdownLinkColor = colors.link;
-    const markdownBlockquoteBg = colors.blockquoteBackground;
-    const markdownBlockquoteBorder = colors.blockquoteBorder;
-    const markdownCodeBg = colors.codeBackground;
-    const markdownCodeText = colors.codeText;
-    const markdownInlineCodeText = colors.inlineCodeText;
-    const markdownHrColor = colors.horizontalRule;
-    const markdownUserBodyColor = colors.userBody;
-    const markdownUserCodeBg = colors.userCodeBackground;
-    const markdownUserCodeText = colors.userCodeText;
-    const markdownUserInlineCodeText = colors.userInlineCodeText;
-    const markdownUserFenceBg = colors.userFenceBackground;
-    const markdownUserFenceText = colors.userFenceText;
+  return useMemo(() =>
+  {
+    const markdownBodyColor = colors.body
+    const markdownStrongColor = colors.strong
+    const markdownLinkColor = colors.link
+    const markdownBlockquoteBg = colors.blockquoteBackground
+    const markdownBlockquoteBorder = colors.blockquoteBorder
+    const markdownCodeBg = colors.codeBackground
+    const markdownCodeText = colors.codeText
+    const markdownInlineCodeText = colors.inlineCodeText
+    const markdownHrColor = colors.horizontalRule
+    const markdownUserBodyColor = colors.userBody
+    const markdownUserCodeBg = colors.userCodeBackground
+    const markdownUserCodeText = colors.userCodeText
+    const markdownUserInlineCodeText = colors.userInlineCodeText
+    const markdownUserFenceBg = colors.userFenceBackground
+    const markdownUserFenceText = colors.userFenceText
 
     const baseTheme: PartialMarkdownTheme = {
       colors: {
@@ -482,14 +501,14 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         link: markdownLinkColor,
         blockquote: markdownBlockquoteBorder,
         border: markdownHrColor,
-        surface: "transparent",
+        surface: 'transparent',
         surfaceLight: markdownBlockquoteBg,
         accent: markdownLinkColor,
         tableBorder: markdownHrColor,
         tableHeader: markdownBlockquoteBg,
         tableHeaderText: markdownStrongColor,
-        tableRowOdd: "transparent",
-        tableRowEven: "transparent",
+        tableRowOdd: 'transparent',
+        tableRowEven: 'transparent',
       },
       spacing: {
         xs: 4,
@@ -513,14 +532,14 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         heading: boldFontFamily,
         mono: MARKDOWN_MONO_FONT,
       },
-      headingWeight: "700",
+      headingWeight: '700',
       borderRadius: {
         s: 4,
         m: 8,
         l: 12,
       },
       showCodeLanguage: false,
-    };
+    }
 
     const baseStyles: NodeStyleOverrides = {
       document: { flexShrink: 1 },
@@ -530,14 +549,14 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       task_list_item: { marginTop: 0, marginBottom: 4 },
       text: { lineHeight: markdownFontSizes.bodyLineHeight },
       bold: {
-        fontWeight: "700",
+        fontWeight: '700',
         color: markdownStrongColor,
         fontFamily: boldFontFamily,
       },
-      italic: { fontStyle: "italic" },
+      italic: { fontStyle: 'italic' },
       link: {
         color: markdownLinkColor,
-        textDecorationLine: "underline" as const,
+        textDecorationLine: 'underline' as const,
       },
       blockquote: {
         borderLeftWidth: 2,
@@ -558,7 +577,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         height: 1,
         marginVertical: 12,
       },
-    };
+    }
 
     const createMarkdownRenderers = (
       inlineTextColor: string,
@@ -569,9 +588,11 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       preserveSoftBreaks: boolean,
       highlightCode: boolean,
     ): CustomRenderers => ({
-      link: ({ children, href = "" }) => {
-        const presentation = resolveMarkdownLinkPresentation(href);
-        if (presentation.kind === "file") {
+      link: ({ children, href = '' }) =>
+      {
+        const presentation = resolveMarkdownLinkPresentation(href)
+        if (presentation.kind === 'file')
+        {
           return (
             <NativeText
               className="font-sans-bold"
@@ -584,9 +605,10 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
               />
               {presentation.label}
             </NativeText>
-          );
+          )
         }
-        if (presentation.kind === "external") {
+        if (presentation.kind === 'external')
+        {
           return (
             <MarkdownExternalLink
               href={presentation.href}
@@ -595,16 +617,17 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
             >
               {children}
             </MarkdownExternalLink>
-          );
+          )
         }
-        const linkHref = presentation.href;
+        const linkHref = presentation.href
         return (
           <NativeText
             className="underline"
             onPress={
               linkHref
-                ? () => {
-                    void Linking.openURL(linkHref);
+                ? () =>
+                  {
+                    void Linking.openURL(linkHref)
                   }
                 : undefined
             }
@@ -612,16 +635,18 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           >
             {children}
           </NativeText>
-        );
+        )
       },
       list: ({ node, Renderer, ordered = false, start = 1 }) => (
         <View className="mt-0.5 mb-2">
-          {node.children?.map((child, index) => {
-            const childKey = `${child.type}:${child.beg ?? "unknown"}:${child.end ?? "unknown"}`;
-            if (child.type === "task_list_item") {
+          {node.children?.map((child, index) =>
+          {
+            const childKey = `${child.type}:${child.beg ?? 'unknown'}:${child.end ?? 'unknown'}`
+            if (child.type === 'task_list_item')
+            {
               return (
                 <Renderer key={childKey} node={child} depth={1} inListItem parentIsText={false} />
-              );
+              )
             }
             return (
               <View className="mb-[3px] flex-row items-start" key={childKey}>
@@ -633,21 +658,22 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
                     color: inlineTextColor,
                     fontSize: markdownFontSizes.m,
                     lineHeight: markdownFontSizes.bodyLineHeight,
-                    textAlign: ordered ? "right" : "center",
+                    textAlign: ordered ? 'right' : 'center',
                   }}
                 >
-                  {ordered ? `${start + index}.` : "•"}
+                  {ordered ? `${start + index}.` : '•'}
                 </NativeText>
                 <View className="min-w-0 flex-1">
                   <Renderer node={child} depth={1} inListItem parentIsText={false} />
                 </View>
               </View>
-            );
+            )
           })}
         </View>
       ),
-      code_inline: ({ content }) => {
-        const value = content ?? "";
+      code_inline: ({ content }) =>
+      {
+        const value = content ?? ''
         return (
           <NativeText
             className="font-mono"
@@ -659,14 +685,14 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           >
             {value}
           </NativeText>
-        );
+        )
       },
       ...(preserveSoftBreaks
         ? {
-            soft_break: () => <NativeText>{"\n"}</NativeText>,
+            soft_break: () => <NativeText>{'\n'}</NativeText>,
           }
         : {}),
-      code_block: ({ content = "", language }) => (
+      code_block: ({ content = '', language }) => (
         <MarkdownCodeBlock
           backgroundColor={blockBackgroundColor}
           borderColor={markdownHrColor}
@@ -681,7 +707,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           theme={themeMode}
         />
       ),
-    });
+    })
 
     const userTheme: PartialMarkdownTheme = {
       ...baseTheme,
@@ -694,12 +720,12 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         codeBackground: markdownUserCodeBg,
         border: markdownUserFenceBg,
       },
-    };
+    }
     const userStyles: NodeStyleOverrides = {
       ...baseStyles,
       paragraph: { marginTop: 0, marginBottom: 0 },
       bold: {
-        fontWeight: "700",
+        fontWeight: '700',
         color: markdownUserBodyColor,
         fontFamily: boldFontFamily,
       },
@@ -711,9 +737,9 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
       },
       link: {
         color: markdownUserBodyColor,
-        textDecorationLine: "underline" as const,
+        textDecorationLine: 'underline' as const,
       },
-    };
+    }
 
     const assistantTheme: PartialMarkdownTheme = {
       ...baseTheme,
@@ -723,10 +749,10 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
         codeBackground: markdownCodeBg,
         border: markdownCodeBg,
       },
-    };
+    }
     const assistantStyles: NodeStyleOverrides = {
       ...baseStyles,
-    };
+    }
 
     return {
       user: {
@@ -750,8 +776,8 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           codeColor: markdownUserCodeText,
           codeBackgroundColor: markdownUserCodeBg,
           codeBlockBackgroundColor: markdownUserFenceBg,
-          fileTextColor: "#ffffff",
-          skillTextColor: "#f0abfc",
+          fileTextColor: '#ffffff',
+          skillTextColor: '#f0abfc',
           quoteMarkerColor: markdownUserBodyColor,
           dividerColor: markdownUserBodyColor,
           fontSize: nativeMarkdownTypography.fontSize,
@@ -795,7 +821,7 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
           boldFontFamily,
         },
       },
-    };
+    }
   }, [
     boldFontFamily,
     colors,
@@ -807,38 +833,41 @@ function useMarkdownStyles(onLinkPress: (href: string) => void): MarkdownStyleSe
     regularFontFamily,
     themeMode,
     userBubbleForegroundMuted,
-  ]);
+  ])
 }
 
 function renderFeedEntry(
   info: { item: ThreadFeedEntry; index: number },
-  props: Pick<ThreadFeedProps, "environmentId" | "skills"> & {
-    readonly copiedRowId: string | null;
-    readonly expandedWorkRows: Record<string, boolean>;
-    readonly terminalAssistantMessageIds: ReadonlySet<string>;
-    readonly unsettledTurnId: TurnId | null;
-    readonly onCopyWorkRow: (rowId: string, value: string) => void;
-    readonly onToggleWorkGroup: (groupId: string) => void;
-    readonly onToggleWorkRow: (rowId: string) => void;
-    readonly onToggleTurnFold: (turnId: TurnId) => void;
-    readonly onPressImage: (uri: string, headers?: Record<string, string>) => void;
-    readonly onMarkdownLinkPress: (href: string) => void;
-    readonly iconSubtleColor: string | import("react-native").ColorValue;
-    readonly userBubbleColor: string | import("react-native").ColorValue;
-    readonly markdownStyles: MarkdownStyleSets;
-    readonly reviewCommentColors: ReviewCommentColors;
-    readonly reviewCommentBubbleWidth: number;
-    readonly userBubbleMaxWidth: number;
+  props: Pick<ThreadFeedProps, 'environmentId' | 'skills'> & {
+    readonly copiedRowId: string | null
+    readonly expandedWorkRows: Record<string, boolean>
+    readonly terminalAssistantMessageIds: ReadonlySet<string>
+    readonly unsettledTurnId: TurnId | null
+    readonly onCopyWorkRow: (rowId: string, value: string) => void
+    readonly onToggleWorkGroup: (groupId: string) => void
+    readonly onToggleWorkRow: (rowId: string) => void
+    readonly onToggleTurnFold: (turnId: TurnId) => void
+    readonly onPressImage: (uri: string, headers?: Record<string, string>) => void
+    readonly onMarkdownLinkPress: (href: string) => void
+    readonly iconSubtleColor: string | import('react-native').ColorValue
+    readonly userBubbleColor: string | import('react-native').ColorValue
+    readonly markdownStyles: MarkdownStyleSets
+    readonly reviewCommentColors: ReviewCommentColors
+    readonly reviewCommentBubbleWidth: number
+    readonly userBubbleMaxWidth: number
   },
-) {
-  const entry = info.item;
-  const { markdownStyles, iconSubtleColor, userBubbleColor } = props;
+)
+{
+  const entry = info.item
+  const { markdownStyles, iconSubtleColor, userBubbleColor } = props
 
-  if (entry.type === "working") {
-    return <WorkingTimelineRow startedAt={entry.createdAt} />;
+  if (entry.type === 'working')
+  {
+    return <WorkingTimelineRow startedAt={entry.createdAt} />
   }
 
-  if (entry.type === "turn-fold") {
+  if (entry.type === 'turn-fold')
+  {
     return (
       <Pressable
         accessibilityRole="button"
@@ -851,16 +880,17 @@ function renderFeedEntry(
           {entry.label}
         </Text>
         <SymbolView
-          name={entry.expanded ? "chevron.down" : "chevron.right"}
+          name={entry.expanded ? 'chevron.down' : 'chevron.right'}
           size={15}
           tintColor={iconSubtleColor}
           type="monochrome"
         />
       </Pressable>
-    );
+    )
   }
 
-  if (entry.type === "work-toggle") {
+  if (entry.type === 'work-toggle')
+  {
     return (
       <ThreadWorkGroupToggle
         expanded={entry.expanded}
@@ -869,28 +899,30 @@ function renderFeedEntry(
         onlyToolActivities={entry.onlyToolActivities}
         onToggle={() => props.onToggleWorkGroup(entry.groupId)}
       />
-    );
+    )
   }
 
-  if (entry.type === "message") {
-    const { message } = entry;
-    const isUser = message.role === "user";
-    const styles = isUser ? markdownStyles.user : markdownStyles.assistant;
-    const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt);
-    const attachments = message.attachments ?? [];
-    const hasReviewCommentContext = message.text.includes("<review_comment");
+  if (entry.type === 'message')
+  {
+    const { message } = entry
+    const isUser = message.role === 'user'
+    const styles = isUser ? markdownStyles.user : markdownStyles.assistant
+    const timestampLabel = formatMessageTime(isUser ? message.createdAt : message.updatedAt)
+    const attachments = message.attachments ?? []
+    const hasReviewCommentContext = message.text.includes('<review_comment')
     const assistantTurnStillInProgress =
-      message.role === "assistant" &&
+      message.role === 'assistant' &&
       props.unsettledTurnId !== null &&
-      message.turnId === props.unsettledTurnId;
+      message.turnId === props.unsettledTurnId
     const showAssistantMeta =
-      message.role === "assistant" &&
+      message.role === 'assistant' &&
       props.terminalAssistantMessageIds.has(message.id) &&
       !assistantTurnStillInProgress &&
-      !message.streaming;
+      !message.streaming
 
-    if (isUser) {
-      const enterAnimated = isFreshTimestamp(message.createdAt);
+    if (isUser)
+    {
+      const enterAnimated = isFreshTimestamp(message.createdAt)
       return (
         <Animated.View
           className="mb-5 items-end"
@@ -913,7 +945,8 @@ function renderFeedEntry(
                 onLinkPress={props.onMarkdownLinkPress}
               />
             ) : null}
-            {attachments.map((attachment) => {
+            {attachments.map((attachment) =>
+            {
               return (
                 <MessageAttachmentImage
                   key={attachment.id}
@@ -922,7 +955,7 @@ function renderFeedEntry(
                   className="aspect-[1.3] w-full rounded-[14px] bg-white/15"
                   onPressImage={props.onPressImage}
                 />
-              );
+              )
             })}
           </View>
           <View className="mt-1 flex-row items-center justify-end gap-1 pr-0.5">
@@ -940,19 +973,20 @@ function renderFeedEntry(
             ) : null}
           </View>
         </Animated.View>
-      );
+      )
     }
 
     // Skip empty assistant messages (no text, no attachments) — they would
     // render as an orphaned timestamp and break adjacent activity-group merging.
-    if (message.text.trim().length === 0 && attachments.length === 0) {
-      return null;
+    if (message.text.trim().length === 0 && attachments.length === 0)
+    {
+      return null
     }
 
-    const enterAnimated = isFreshTimestamp(message.createdAt);
+    const enterAnimated = isFreshTimestamp(message.createdAt)
     return (
       <Animated.View
-        className={cn(showAssistantMeta ? "mb-5 px-1" : "mb-2 px-1")}
+        className={cn(showAssistantMeta ? 'mb-5 px-1' : 'mb-2 px-1')}
         {...(enterAnimated ? { entering: FadeIn.duration(220) } : {})}
       >
         {message.text.trim().length > 0 ? (
@@ -974,7 +1008,8 @@ function renderFeedEntry(
             </Markdown>
           )
         ) : null}
-        {attachments.map((attachment) => {
+        {attachments.map((attachment) =>
+        {
           return (
             <MessageAttachmentImage
               key={attachment.id}
@@ -983,7 +1018,7 @@ function renderFeedEntry(
               className="mt-1.5 aspect-[1.3] w-full rounded-[18px] bg-neutral-200 dark:bg-neutral-800"
               onPressImage={props.onPressImage}
             />
-          );
+          )
         })}
         {showAssistantMeta ? (
           <View className="mt-1 flex-row items-center gap-1">
@@ -1000,7 +1035,7 @@ function renderFeedEntry(
           </View>
         ) : null}
       </Animated.View>
-    );
+    )
   }
 
   return (
@@ -1012,20 +1047,23 @@ function renderFeedEntry(
       onCopyRow={props.onCopyWorkRow}
       onToggleRow={props.onToggleWorkRow}
     />
-  );
+  )
 }
 
-const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly startedAt: string }) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
+const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly startedAt: string })
+{
+  const [nowMs, setNowMs] = useState(() => Date.now())
 
-  useEffect(() => {
-    const intervalId = setInterval(() => {
-      setNowMs(Date.now());
-    }, 1_000);
-    return () => clearInterval(intervalId);
-  }, [props.startedAt]);
+  useEffect(() =>
+  {
+    const intervalId = setInterval(() =>
+    {
+      setNowMs(Date.now())
+    }, 1_000)
+    return () => clearInterval(intervalId)
+  }, [props.startedAt])
 
-  const durationLabel = formatElapsed(props.startedAt, new Date(nowMs).toISOString()) ?? "0s";
+  const durationLabel = formatElapsed(props.startedAt, new Date(nowMs).toISOString()) ?? '0s'
 
   return (
     <View className="mb-4 flex-row items-center gap-2 px-1.5 py-1">
@@ -1038,20 +1076,23 @@ const WorkingTimelineRow = memo(function WorkingTimelineRow(props: { readonly st
         Working for {durationLabel}
       </Text>
     </View>
-  );
-});
+  )
+})
 
 function UserMessageContent(props: {
-  readonly text: string;
-  readonly markdownStyles: MarkdownStyleSet;
-  readonly reviewCommentColors: ReviewCommentColors;
-  readonly skills?: ReadonlyArray<SelectableMarkdownSkill>;
-  readonly onLinkPress: (href: string) => void;
-}) {
-  const segments = parseReviewCommentMessageSegments(props.text);
-  const hasReviewComment = segments.some((segment) => segment.kind === "review-comment");
-  if (!hasReviewComment) {
-    if (hasNativeSelectableMarkdownText()) {
+  readonly text: string
+  readonly markdownStyles: MarkdownStyleSet
+  readonly reviewCommentColors: ReviewCommentColors
+  readonly skills?: ReadonlyArray<SelectableMarkdownSkill>
+  readonly onLinkPress: (href: string) => void
+})
+{
+  const segments = parseReviewCommentMessageSegments(props.text)
+  const hasReviewComment = segments.some((segment) => segment.kind === 'review-comment')
+  if (!hasReviewComment)
+  {
+    if (hasNativeSelectableMarkdownText())
+    {
       return (
         <SelectableMarkdownText
           markdown={props.text}
@@ -1060,7 +1101,7 @@ function UserMessageContent(props: {
           preserveSoftBreaks
           onLinkPress={props.onLinkPress}
         />
-      );
+      )
     }
     return (
       <Markdown
@@ -1071,25 +1112,28 @@ function UserMessageContent(props: {
       >
         {props.text}
       </Markdown>
-    );
+    )
   }
 
   return (
     <View className="w-full gap-2">
-      {segments.map((segment) => {
-        if (segment.kind === "review-comment") {
+      {segments.map((segment) =>
+      {
+        if (segment.kind === 'review-comment')
+        {
           return (
             <ReviewCommentCard
               key={segment.comment.id}
               comment={segment.comment}
               colors={props.reviewCommentColors}
             />
-          );
+          )
         }
 
-        const text = segment.text.trim();
-        if (text.length === 0) {
-          return null;
+        const text = segment.text.trim()
+        if (text.length === 0)
+        {
+          return null
         }
 
         return hasNativeSelectableMarkdownText() ? (
@@ -1111,43 +1155,44 @@ function UserMessageContent(props: {
           >
             {text}
           </Markdown>
-        );
+        )
       })}
     </View>
-  );
+  )
 }
 
 const ReviewCommentCard = memo(function ReviewCommentCard(props: {
-  readonly comment: ReviewInlineComment;
-  readonly colors: ReviewCommentColors;
-}) {
-  const { codeSurface, nativeReviewDiffStyle } = useAppearanceCodeSurface();
-  const colorScheme = useColorScheme();
-  const appearanceScheme = colorScheme === "light" ? "light" : "dark";
-  const NativeReviewDiffView = resolveNativeReviewDiffView();
-  const patch = useMemo(() => buildReviewCommentPatch(props.comment), [props.comment]);
+  readonly comment: ReviewInlineComment
+  readonly colors: ReviewCommentColors
+})
+{
+  const { codeSurface, nativeReviewDiffStyle } = useAppearanceCodeSurface()
+  const colorScheme = useColorScheme()
+  const appearanceScheme = colorScheme === 'light' ? 'light' : 'dark'
+  const NativeReviewDiffView = resolveNativeReviewDiffView()
+  const patch = useMemo(() => buildReviewCommentPatch(props.comment), [props.comment])
   const parsedDiff = useMemo(
     () => buildReviewParsedDiff(patch, `thread-review-comment:${props.comment.id}`),
     [patch, props.comment.id],
-  );
-  const nativeReviewDiffData = useMemo(() => buildNativeReviewDiffData(parsedDiff), [parsedDiff]);
+  )
+  const nativeReviewDiffData = useMemo(() => buildNativeReviewDiffData(parsedDiff), [parsedDiff])
   const compactNativeRows = useMemo(
-    () => nativeReviewDiffData.rows.filter((row) => row.kind !== "file"),
+    () => nativeReviewDiffData.rows.filter((row) => row.kind !== 'file'),
     [nativeReviewDiffData.rows],
-  );
+  )
   const nativeReviewDiffTheme = useMemo(
     () => createNativeReviewDiffTheme(appearanceScheme),
     [appearanceScheme],
-  );
-  const nativeRowsJson = useMemo(() => JSON.stringify(compactNativeRows), [compactNativeRows]);
+  )
+  const nativeRowsJson = useMemo(() => JSON.stringify(compactNativeRows), [compactNativeRows])
   const nativeThemeJson = useMemo(
     () => JSON.stringify(nativeReviewDiffTheme),
     [nativeReviewDiffTheme],
-  );
+  )
   const nativeStyleJson = useMemo(
     () => JSON.stringify(nativeReviewDiffStyle),
     [nativeReviewDiffStyle],
-  );
+  )
   const nativeDiffHeight = useMemo(
     () =>
       Math.min(
@@ -1159,8 +1204,8 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
         ),
       ),
     [compactNativeRows.length, nativeReviewDiffStyle],
-  );
-  const shouldRenderNativeDiff = NativeReviewDiffView != null && compactNativeRows.length > 0;
+  )
+  const shouldRenderNativeDiff = NativeReviewDiffView != null && compactNativeRows.length > 0
 
   return (
     <View
@@ -1248,51 +1293,57 @@ const ReviewCommentCard = memo(function ReviewCommentCard(props: {
         </View>
       ) : null}
     </View>
-  );
-});
+  )
+})
 
-function buildReviewCommentPatch(comment: ReviewInlineComment): string {
-  if ((comment.fenceLanguage ?? "diff") !== "diff") {
-    return "";
+function buildReviewCommentPatch(comment: ReviewInlineComment): string
+{
+  if ((comment.fenceLanguage ?? 'diff') !== 'diff')
+  {
+    return ''
   }
-  const diff = comment.diff.trim();
-  if (!diff) {
-    return "";
+  const diff = comment.diff.trim()
+  if (!diff)
+  {
+    return ''
   }
 
-  if (diff.startsWith("diff --git ")) {
-    return diff;
+  if (diff.startsWith('diff --git '))
+  {
+    return diff
   }
 
-  const normalizedPath = comment.filePath.replaceAll("\\", "/");
+  const normalizedPath = comment.filePath.replaceAll('\\', '/')
   return [
     `diff --git a/${normalizedPath} b/${normalizedPath}`,
     `--- a/${normalizedPath}`,
     `+++ b/${normalizedPath}`,
     diff,
-  ].join("\n");
+  ].join('\n')
 }
 
-function compactFileName(filePath: string): string {
-  const normalized = filePath.replaceAll("\\", "/");
-  const lastSlashIndex = normalized.lastIndexOf("/");
-  return lastSlashIndex >= 0 ? normalized.slice(lastSlashIndex + 1) : normalized;
+function compactFileName(filePath: string): string
+{
+  const normalized = filePath.replaceAll('\\', '/')
+  const lastSlashIndex = normalized.lastIndexOf('/')
+  return lastSlashIndex >= 0 ? normalized.slice(lastSlashIndex + 1) : normalized
 }
 
 function ThreadFeedPlaceholder(props: {
-  readonly bottomInset: number;
-  readonly detail: string;
-  readonly horizontalPadding: number;
-  readonly title: string;
-  readonly topInset: number;
-}) {
+  readonly bottomInset: number
+  readonly detail: string
+  readonly horizontalPadding: number
+  readonly title: string
+  readonly topInset: number
+})
+{
   return (
     <View
       style={{
         flex: 1,
         flexGrow: 1,
-        alignItems: "center",
-        justifyContent: "center",
+        alignItems: 'center',
+        justifyContent: 'center',
         paddingTop: props.topInset,
         paddingBottom: props.bottomInset,
         paddingHorizontal: props.horizontalPadding + 24,
@@ -1305,54 +1356,55 @@ function ThreadFeedPlaceholder(props: {
         </Text>
       </View>
     </View>
-  );
+  )
 }
 
-export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
-  const navigation = useNavigation();
-  const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const foldSettleFrameRef = useRef<number | null>(null);
-  const foldSettleSecondFrameRef = useRef<number | null>(null);
-  const disclosureAnchorKeyRef = useRef<string | null>(null);
-  const headerMaterialVisibleRef = useRef(false);
-  const previousLatestTurnRef = useRef(props.latestTurn);
-  const { width: windowWidth } = useWindowDimensions();
-  const { appearance } = useAppearancePreferences();
+export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
+{
+  const navigation = useNavigation()
+  const copyFeedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const foldSettleFrameRef = useRef<number | null>(null)
+  const foldSettleSecondFrameRef = useRef<number | null>(null)
+  const disclosureAnchorKeyRef = useRef<string | null>(null)
+  const headerMaterialVisibleRef = useRef(false)
+  const previousLatestTurnRef = useRef(props.latestTurn)
+  const { width: windowWidth } = useWindowDimensions()
+  const { appearance } = useAppearancePreferences()
   const [viewportWidth, setViewportWidth] = useState(() =>
-    props.layoutVariant === "split" ? 0 : windowWidth,
-  );
-  const [viewportHeight, setViewportHeight] = useState(0);
-  const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false);
+    props.layoutVariant === 'split' ? 0 : windowWidth,
+  )
+  const [viewportHeight, setViewportHeight] = useState(0)
+  const [disclosureToggleSettling, setDisclosureToggleSettling] = useState(false)
   const [interactionState, setInteractionState] = useState<{
-    readonly copiedRowId: string | null;
-    readonly expandedWorkGroups: Record<string, boolean>;
-    readonly expandedWorkRows: Record<string, boolean>;
-    readonly expandedTurnIds: ReadonlySet<TurnId>;
+    readonly copiedRowId: string | null
+    readonly expandedWorkGroups: Record<string, boolean>
+    readonly expandedWorkRows: Record<string, boolean>
+    readonly expandedTurnIds: ReadonlySet<TurnId>
   }>({
     copiedRowId: null,
     expandedWorkGroups: {},
     expandedWorkRows: {},
     expandedTurnIds: new Set(),
-  });
-  const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedTurnIds } = interactionState;
+  })
+  const { copiedRowId, expandedWorkGroups, expandedWorkRows, expandedTurnIds } = interactionState
   const [expandedImage, setExpandedImage] = useState<{
-    uri: string;
-    headers?: Record<string, string>;
-  } | null>(null);
-  const horizontalPadding = props.layoutVariant === "split" ? 20 : 16;
+    uri: string
+    headers?: Record<string, string>
+  } | null>(null)
+  const horizontalPadding = props.layoutVariant === 'split' ? 20 : 16
   const contentHorizontalPadding = deriveCenteredContentHorizontalPadding({
     viewportWidth,
     maxContentWidth: props.contentMaxWidth ?? null,
     minimumPadding: horizontalPadding,
-  });
-  const contentWidth = Math.max(0, viewportWidth - contentHorizontalPadding * 2);
-  const userBubbleMaxWidth = contentWidth * 0.85;
-  const reviewCommentBubbleWidth = Math.min(Math.max(280, contentWidth * 0.85), contentWidth);
-  const insets = useSafeAreaInsets();
-  const topContentInset = props.contentTopInset ?? insets.top + 44;
-  const bottomContentInset = props.contentBottomInset ?? 18;
+  })
+  const contentWidth = Math.max(0, viewportWidth - contentHorizontalPadding * 2)
+  const userBubbleMaxWidth = contentWidth * 0.85
+  const reviewCommentBubbleWidth = Math.min(Math.max(280, contentWidth * 0.85), contentWidth)
+  const insets = useSafeAreaInsets()
+  const topContentInset = props.contentTopInset ?? insets.top + 44
+  const bottomContentInset = props.contentBottomInset ?? 18
   const usesNativeAutomaticInsets =
-    props.usesAutomaticContentInsets === true && Platform.OS === "ios";
+    props.usesAutomaticContentInsets === true && Platform.OS === 'ios'
   // With automatic insets the header inset lives in UIKit's adjustedContentInset,
   // which LegendList's JS anchoring math cannot see — it measures the anchored
   // end space from the scroll view's frame top. Fold the header height back into
@@ -1360,41 +1412,45 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // the oversized end space keeps maintainScrollAtEnd snapping away from earlier
   // messages. Read the context directly (useHeaderHeight throws outside a
   // header-providing screen) and fall back to the standard iOS bar height.
-  const navigationHeaderHeight = useContext(HeaderHeightContext);
+  const navigationHeaderHeight = useContext(HeaderHeightContext)
   const anchorTopInset = usesNativeAutomaticInsets
     ? navigationHeaderHeight || insets.top + 44
-    : topContentInset;
+    : topContentInset
 
-  const iconSubtleColor = useThemeColor("--color-icon-subtle");
-  const userBubbleColor = useThemeColor("--color-user-bubble");
+  const iconSubtleColor = useThemeColor('--color-icon-subtle')
+  const userBubbleColor = useThemeColor('--color-user-bubble')
   const onMarkdownLinkPress = useCallback(
-    (href: string) => {
-      const presentation = resolveMarkdownLinkPresentation(href);
-      if (presentation.kind === "file") {
+    (href: string) =>
+    {
+      const presentation = resolveMarkdownLinkPresentation(href)
+      if (presentation.kind === 'file')
+      {
         const relativePath = resolveWorkspaceRelativeFilePath(
           props.workspaceRoot,
           presentation.path,
-        );
-        if (relativePath) {
-          void Haptics.selectionAsync();
-          navigation.navigate("ThreadFile", {
+        )
+        if (relativePath)
+        {
+          void Haptics.selectionAsync()
+          navigation.navigate('ThreadFile', {
             environmentId: String(props.environmentId),
             threadId: String(props.threadId),
-            path: relativePath.split("/").filter((segment) => segment.length > 0),
+            path: relativePath.split('/').filter((segment) => segment.length > 0),
             ...(presentation.line ? { line: String(presentation.line) } : {}),
-          });
+          })
         }
-        return;
+        return
       }
 
-      if (presentation.href) {
-        void Linking.openURL(presentation.href);
+      if (presentation.href)
+      {
+        void Linking.openURL(presentation.href)
       }
     },
     [props.environmentId, props.threadId, props.workspaceRoot, navigation],
-  );
-  const markdownStyles = useMarkdownStyles(onMarkdownLinkPress);
-  const reviewCommentColors = useReviewCommentColors();
+  )
+  const markdownStyles = useMarkdownStyles(onMarkdownLinkPress)
+  const reviewCommentColors = useReviewCommentColors()
   // LegendList does not invalidate visible rows when only the renderItem closure changes.
   // Keep row-local interaction props in extraData so disclosures and copy feedback repaint.
   const listAppearanceData = useMemo(
@@ -1416,39 +1472,44 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       userBubbleColor,
       viewportWidth,
     ],
-  );
+  )
   const reportHeaderMaterialVisibility = useCallback(
-    (visible: boolean) => {
-      if (headerMaterialVisibleRef.current === visible) {
-        return;
+    (visible: boolean) =>
+    {
+      if (headerMaterialVisibleRef.current === visible)
+      {
+        return
       }
-      headerMaterialVisibleRef.current = visible;
-      props.onHeaderMaterialVisibilityChange?.(visible);
+      headerMaterialVisibleRef.current = visible
+      props.onHeaderMaterialVisibilityChange?.(visible)
     },
     [props.onHeaderMaterialVisibilityChange],
-  );
+  )
   // start near the live end where layout shifts should animate
-  const nearListEnd = useSharedValue(true);
+  const nearListEnd = useSharedValue(true)
 
   const handleScroll = useCallback(
-    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+    (event: NativeSyntheticEvent<NativeScrollEvent>) =>
+    {
       // anchorTopInset, not topContentInset: under automatic insets the list
       // rests at contentOffset.y = -headerHeight (the inset lives only in
       // UIKit's adjustedContentInset, so topContentInset is 0 here). Add the
       // header height back or the material toggles a full header too late.
-      reportHeaderMaterialVisibility(event.nativeEvent.contentOffset.y + anchorTopInset > 6);
-      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+      reportHeaderMaterialVisibility(event.nativeEvent.contentOffset.y + anchorTopInset > 6)
+      const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent
       nearListEnd.value =
-        contentSize.height - layoutMeasurement.height - contentOffset.y < layoutMeasurement.height;
+        contentSize.height - layoutMeasurement.height - contentOffset.y < layoutMeasurement.height
     },
     [reportHeaderMaterialVisibility, anchorTopInset, nearListEnd],
-  );
+  )
 
   // keep history corrections instant while smoothing live-end growth
-  const feedItemLayoutTransition = useMemo(() => {
-    return (values: LayoutAnimationsValues) => {
-      "worklet";
-      const duration = nearListEnd.value ? FEED_ITEM_LAYOUT_DURATION_MS : 0;
+  const feedItemLayoutTransition = useMemo(() =>
+  {
+    return (values: LayoutAnimationsValues) =>
+    {
+      'worklet'
+      const duration = nearListEnd.value ? FEED_ITEM_LAYOUT_DURATION_MS : 0
       return {
         initialValues: {
           originX: values.currentOriginX,
@@ -1462,29 +1523,34 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
           width: withTiming(values.targetWidth, { duration }),
           height: withTiming(values.targetHeight, { duration }),
         },
-      };
-    };
-  }, [nearListEnd]);
-  const handleViewportLayout = useCallback((event: LayoutChangeEvent) => {
-    const nextWidth = Math.round(event.nativeEvent.layout.width);
-    const nextHeight = Math.round(event.nativeEvent.layout.height);
-    setViewportWidth((current) => (Math.abs(current - nextWidth) > 1 ? nextWidth : current));
-    setViewportHeight((current) => (Math.abs(current - nextHeight) > 1 ? nextHeight : current));
-  }, []);
-
-  useEffect(() => {
-    reportHeaderMaterialVisibility(false);
-  }, [props.threadId, reportHeaderMaterialVisibility]);
-
-  const expandedWorkGroupIds = useMemo(() => {
-    const ids = new Set<string>();
-    for (const [groupId, expanded] of Object.entries(expandedWorkGroups)) {
-      if (expanded) {
-        ids.add(groupId);
       }
     }
-    return ids;
-  }, [expandedWorkGroups]);
+  }, [nearListEnd])
+  const handleViewportLayout = useCallback((event: LayoutChangeEvent) =>
+  {
+    const nextWidth = Math.round(event.nativeEvent.layout.width)
+    const nextHeight = Math.round(event.nativeEvent.layout.height)
+    setViewportWidth((current) => (Math.abs(current - nextWidth) > 1 ? nextWidth : current))
+    setViewportHeight((current) => (Math.abs(current - nextHeight) > 1 ? nextHeight : current))
+  }, [])
+
+  useEffect(() =>
+  {
+    reportHeaderMaterialVisibility(false)
+  }, [props.threadId, reportHeaderMaterialVisibility])
+
+  const expandedWorkGroupIds = useMemo(() =>
+  {
+    const ids = new Set<string>()
+    for (const [groupId, expanded] of Object.entries(expandedWorkGroups))
+    {
+      if (expanded)
+      {
+        ids.add(groupId)
+      }
+    }
+    return ids
+  }, [expandedWorkGroups])
   const presentedFeed = useMemo(
     () =>
       deriveThreadFeedPresentation(
@@ -1501,7 +1567,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.feed,
       props.latestTurn,
     ],
-  );
+  )
 
   // The empty↔filled key below remounts the list, which resets its imperative
   // content-inset override — and useKeyboardChatComposerInset (mounted above
@@ -1510,102 +1576,124 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
   // initial scroll-to-end computes with a zero end inset and rests one
   // composer-height short of the end. Layout effect: it must land before the
   // list's first positioning tick or the one-shot initial scroll misses it.
-  const listMountKey = `${props.threadId}:${props.feed.length === 0 ? "empty" : "filled"}`;
-  useLayoutEffect(() => {
-    const bottom = props.contentInsetEndAdjustment.value;
-    if (bottom > 0) {
-      props.listRef.current?.reportContentInset({ bottom });
+  const listMountKey = `${props.threadId}:${props.feed.length === 0 ? 'empty' : 'filled'}`
+  useLayoutEffect(() =>
+  {
+    const bottom = props.contentInsetEndAdjustment.value
+    if (bottom > 0)
+    {
+      props.listRef.current?.reportContentInset({ bottom })
     }
-  }, [listMountKey, props.contentInsetEndAdjustment, props.listRef]);
+  }, [listMountKey, props.contentInsetEndAdjustment, props.listRef])
 
   const anchoredEndSpace = useMemo(
     () =>
       resolveChatListAnchoredEndSpace(
         presentedFeed,
         props.anchorMessageId,
-        (entry) => (entry.type === "message" ? entry.id : null),
+        (entry) => (entry.type === 'message' ? entry.id : null),
         { anchorOffset: anchorTopInset + CHAT_LIST_ANCHOR_OFFSET },
       ),
     [presentedFeed, props.anchorMessageId, anchorTopInset],
-  );
-  const terminalAssistantMessageIds = useMemo(() => {
-    const terminalIdsByTurn = new Map<TurnId, string>();
-    for (const entry of props.feed) {
-      if (entry.type === "message" && entry.message.role === "assistant" && entry.message.turnId) {
-        terminalIdsByTurn.set(entry.message.turnId, entry.message.id);
+  )
+  const terminalAssistantMessageIds = useMemo(() =>
+  {
+    const terminalIdsByTurn = new Map<TurnId, string>()
+    for (const entry of props.feed)
+    {
+      if (entry.type === 'message' && entry.message.role === 'assistant' && entry.message.turnId)
+      {
+        terminalIdsByTurn.set(entry.message.turnId, entry.message.id)
       }
     }
-    return new Set(terminalIdsByTurn.values());
-  }, [props.feed]);
+    return new Set(terminalIdsByTurn.values())
+  }, [props.feed])
   const unsettledTurnId =
     props.latestTurn &&
-    (props.latestTurn.completedAt === null || props.latestTurn.state === "running")
+    (props.latestTurn.completedAt === null || props.latestTurn.state === 'running')
       ? props.latestTurn.turnId
-      : null;
+      : null
 
-  useEffect(() => {
-    const previous = previousLatestTurnRef.current;
-    previousLatestTurnRef.current = props.latestTurn;
-    if (!props.latestTurn || !previous) {
-      return;
+  useEffect(() =>
+  {
+    const previous = previousLatestTurnRef.current
+    previousLatestTurnRef.current = props.latestTurn
+    if (!props.latestTurn || !previous)
+    {
+      return
     }
-    if (props.latestTurn.turnId === previous.turnId) {
-      if (previous.state === "running" && props.latestTurn.state === "interrupted") {
-        const interruptedTurnId = props.latestTurn.turnId;
+    if (props.latestTurn.turnId === previous.turnId)
+    {
+      if (previous.state === 'running' && props.latestTurn.state === 'interrupted')
+      {
+        const interruptedTurnId = props.latestTurn.turnId
         setInteractionState((current) => ({
           ...current,
           expandedTurnIds: new Set(current.expandedTurnIds).add(interruptedTurnId),
-        }));
+        }))
       }
-      return;
+      return
     }
-    setInteractionState((current) => {
-      if (!current.expandedTurnIds.has(previous.turnId)) {
-        return current;
+    setInteractionState((current) =>
+    {
+      if (!current.expandedTurnIds.has(previous.turnId))
+      {
+        return current
       }
-      const next = new Set(current.expandedTurnIds);
-      next.delete(previous.turnId);
-      return { ...current, expandedTurnIds: next };
-    });
-  }, [props.latestTurn]);
+      const next = new Set(current.expandedTurnIds)
+      next.delete(previous.turnId)
+      return { ...current, expandedTurnIds: next }
+    })
+  }, [props.latestTurn])
 
-  useEffect(() => {
-    return () => {
-      if (copyFeedbackTimeoutRef.current) {
-        clearTimeout(copyFeedbackTimeoutRef.current);
+  useEffect(() =>
+  {
+    return () =>
+    {
+      if (copyFeedbackTimeoutRef.current)
+      {
+        clearTimeout(copyFeedbackTimeoutRef.current)
       }
-      if (foldSettleFrameRef.current !== null) {
-        cancelAnimationFrame(foldSettleFrameRef.current);
+      if (foldSettleFrameRef.current !== null)
+      {
+        cancelAnimationFrame(foldSettleFrameRef.current)
       }
-      if (foldSettleSecondFrameRef.current !== null) {
-        cancelAnimationFrame(foldSettleSecondFrameRef.current);
+      if (foldSettleSecondFrameRef.current !== null)
+      {
+        cancelAnimationFrame(foldSettleSecondFrameRef.current)
       }
-    };
-  }, []);
-
-  const suspendEndScrollMaintenanceForDisclosure = useCallback((anchorKey: string | null) => {
-    disclosureAnchorKeyRef.current = anchorKey;
-    setDisclosureToggleSettling(true);
-    if (foldSettleFrameRef.current !== null) {
-      cancelAnimationFrame(foldSettleFrameRef.current);
     }
-    if (foldSettleSecondFrameRef.current !== null) {
-      cancelAnimationFrame(foldSettleSecondFrameRef.current);
-    }
-    foldSettleFrameRef.current = requestAnimationFrame(() => {
-      foldSettleSecondFrameRef.current = requestAnimationFrame(() => {
-        disclosureAnchorKeyRef.current = null;
-        setDisclosureToggleSettling(false);
-        foldSettleFrameRef.current = null;
-        foldSettleSecondFrameRef.current = null;
-      });
-    });
-  }, []);
+  }, [])
 
-  const shouldRestoreVisibleContentPosition = useCallback((entry: ThreadFeedEntry) => {
-    const disclosureAnchorKey = disclosureAnchorKeyRef.current;
-    return disclosureAnchorKey === null || entry.id === disclosureAnchorKey;
-  }, []);
+  const suspendEndScrollMaintenanceForDisclosure = useCallback((anchorKey: string | null) =>
+  {
+    disclosureAnchorKeyRef.current = anchorKey
+    setDisclosureToggleSettling(true)
+    if (foldSettleFrameRef.current !== null)
+    {
+      cancelAnimationFrame(foldSettleFrameRef.current)
+    }
+    if (foldSettleSecondFrameRef.current !== null)
+    {
+      cancelAnimationFrame(foldSettleSecondFrameRef.current)
+    }
+    foldSettleFrameRef.current = requestAnimationFrame(() =>
+    {
+      foldSettleSecondFrameRef.current = requestAnimationFrame(() =>
+      {
+        disclosureAnchorKeyRef.current = null
+        setDisclosureToggleSettling(false)
+        foldSettleFrameRef.current = null
+        foldSettleSecondFrameRef.current = null
+      })
+    })
+  }, [])
+
+  const shouldRestoreVisibleContentPosition = useCallback((entry: ThreadFeedEntry) =>
+  {
+    const disclosureAnchorKey = disclosureAnchorKeyRef.current
+    return disclosureAnchorKey === null || entry.id === disclosureAnchorKey
+  }, [])
 
   const maintainVisibleContentPosition = useMemo(
     () => ({
@@ -1614,97 +1702,110 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       shouldRestorePosition: shouldRestoreVisibleContentPosition,
     }),
     [shouldRestoreVisibleContentPosition],
-  );
+  )
 
-  const onCopyWorkRow = useCallback((rowId: string, value: string) => {
+  const onCopyWorkRow = useCallback((rowId: string, value: string) =>
+  {
     copyTextWithHaptic(value, {
-      target: "thread-work-row",
-      feedback: "selection",
-    });
-    setInteractionState((current) => ({ ...current, copiedRowId: rowId }));
-    if (copyFeedbackTimeoutRef.current) {
-      clearTimeout(copyFeedbackTimeoutRef.current);
+      target: 'thread-work-row',
+      feedback: 'selection',
+    })
+    setInteractionState((current) => ({ ...current, copiedRowId: rowId }))
+    if (copyFeedbackTimeoutRef.current)
+    {
+      clearTimeout(copyFeedbackTimeoutRef.current)
     }
-    copyFeedbackTimeoutRef.current = setTimeout(() => {
+    copyFeedbackTimeoutRef.current = setTimeout(() =>
+    {
       setInteractionState((current) =>
         current.copiedRowId === rowId ? { ...current, copiedRowId: null } : current,
-      );
-      copyFeedbackTimeoutRef.current = null;
-    }, 1200);
-  }, []);
+      )
+      copyFeedbackTimeoutRef.current = null
+    }, 1200)
+  }, [])
 
   const onToggleWorkGroup = useCallback(
-    (groupId: string) => {
-      suspendEndScrollMaintenanceForDisclosure(`work-toggle:${groupId}`);
+    (groupId: string) =>
+    {
+      suspendEndScrollMaintenanceForDisclosure(`work-toggle:${groupId}`)
       setInteractionState((current) => ({
         ...current,
         expandedWorkGroups: {
           ...current.expandedWorkGroups,
           [groupId]: !(current.expandedWorkGroups[groupId] ?? false),
         },
-      }));
+      }))
     },
     [suspendEndScrollMaintenanceForDisclosure],
-  );
+  )
 
   const onToggleWorkRow = useCallback(
-    (rowId: string) => {
-      suspendEndScrollMaintenanceForDisclosure(rowId);
+    (rowId: string) =>
+    {
+      suspendEndScrollMaintenanceForDisclosure(rowId)
       setInteractionState((current) => ({
         ...current,
         expandedWorkRows: {
           ...current.expandedWorkRows,
           [rowId]: !(current.expandedWorkRows[rowId] ?? false),
         },
-      }));
+      }))
     },
     [suspendEndScrollMaintenanceForDisclosure],
-  );
+  )
 
   const onToggleTurnFold = useCallback(
-    (turnId: TurnId) => {
-      suspendEndScrollMaintenanceForDisclosure(`turn-fold:${turnId}`);
-      setInteractionState((current) => {
-        const next = new Set(current.expandedTurnIds);
-        if (next.has(turnId)) {
-          next.delete(turnId);
-        } else {
-          next.add(turnId);
+    (turnId: TurnId) =>
+    {
+      suspendEndScrollMaintenanceForDisclosure(`turn-fold:${turnId}`)
+      setInteractionState((current) =>
+      {
+        const next = new Set(current.expandedTurnIds)
+        if (next.has(turnId))
+        {
+          next.delete(turnId)
         }
-        return { ...current, expandedTurnIds: next };
-      });
+        else
+        {
+          next.add(turnId)
+        }
+        return { ...current, expandedTurnIds: next }
+      })
     },
     [suspendEndScrollMaintenanceForDisclosure],
-  );
+  )
 
-  const onPressImage = useCallback((uri: string, headers?: Record<string, string>) => {
-    setExpandedImage({ uri, headers });
-  }, []);
+  const onPressImage = useCallback((uri: string, headers?: Record<string, string>) =>
+  {
+    setExpandedImage({ uri, headers })
+  }, [])
 
   // premeasure fixed chrome rows and let messages use per-type estimates
   const workingRowHeight =
     WORKING_ROW_VERTICAL_EXTRAS +
-    scaledTypographyLineHeight(MOBILE_TYPOGRAPHY.label, appearance.baseFontSize);
+    scaledTypographyLineHeight(MOBILE_TYPOGRAPHY.label, appearance.baseFontSize)
   const getFixedItemSize = useCallback(
-    (entry: ThreadFeedEntry) => {
-      switch (entry.type) {
-        case "turn-fold":
-          return TURN_FOLD_HEIGHT;
-        case "work-toggle":
-          return WORK_GROUP_TOGGLE_HEIGHT;
-        case "working":
-          return workingRowHeight;
-        case "activity-group":
+    (entry: ThreadFeedEntry) =>
+    {
+      switch (entry.type)
+      {
+        case 'turn-fold':
+          return TURN_FOLD_HEIGHT
+        case 'work-toggle':
+          return WORK_GROUP_TOGGLE_HEIGHT
+        case 'working':
+          return workingRowHeight
+        case 'activity-group':
           // expanded detail rows require measurement
           return entry.activities.some((activity) => expandedWorkRows[activity.id])
             ? undefined
-            : collapsedWorkLogHeight(entry.activities, appearance.baseFontSize);
+            : collapsedWorkLogHeight(entry.activities, appearance.baseFontSize)
         default:
-          return undefined;
+          return undefined
       }
     },
     [expandedWorkRows, workingRowHeight, appearance.baseFontSize],
-  );
+  )
 
   const renderItem = useCallback(
     (info: { item: ThreadFeedEntry; index: number }) =>
@@ -1748,9 +1849,10 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
       props.environmentId,
       props.skills,
     ],
-  );
+  )
 
-  if (props.contentPresentation.kind === "unavailable") {
+  if (props.contentPresentation.kind === 'unavailable')
+  {
     return (
       <ThreadFeedPlaceholder
         title={props.contentPresentation.title}
@@ -1759,7 +1861,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         bottomInset={bottomContentInset}
         horizontalPadding={horizontalPadding}
       />
-    );
+    )
   }
 
   return (
@@ -1780,7 +1882,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             // (facebook/react-native#54123); the anchored end space after a send
             // is pure inset, so without this the blank region can't be scrolled.
             applyWorkaroundForContentInsetHitTestBug
-            contentInsetAdjustmentBehavior={usesNativeAutomaticInsets ? "automatic" : "never"}
+            contentInsetAdjustmentBehavior={usesNativeAutomaticInsets ? 'automatic' : 'never'}
             automaticallyAdjustsScrollIndicatorInsets={usesNativeAutomaticInsets}
             {...(usesNativeAutomaticInsets
               ? {
@@ -1837,7 +1939,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
             renderItem={renderItem}
             keyExtractor={(entry) => entry.id}
             getItemType={(entry) =>
-              entry.type === "message" ? `message:${entry.message.role}` : entry.type
+              entry.type === 'message' ? `message:${entry.message.role}` : entry.type
             }
             getFixedItemSize={getFixedItemSize}
             // measure rows before they enter the viewport
@@ -1877,7 +1979,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         </View>
         {props.feed.length === 0 &&
         props.activeWorkStartedAt === null &&
-        props.contentPresentation.kind === "ready" ? (
+        props.contentPresentation.kind === 'ready' ? (
           <View pointerEvents="none" style={StyleSheet.absoluteFill}>
             <ThreadFeedPlaceholder
               title="No conversation yet"
@@ -1908,5 +2010,5 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps) {
         doubleTapToZoomEnabled
       />
     </>
-  );
-});
+  )
+})

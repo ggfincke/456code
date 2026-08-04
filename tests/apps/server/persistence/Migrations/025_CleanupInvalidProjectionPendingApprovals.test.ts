@@ -1,19 +1,21 @@
-import { assert, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-import { runMigrations } from "../../../../../apps/server/src/persistence/Migrations.ts";
-import * as NodeSqliteClient from "../../../../../apps/server/src/persistence/NodeSqliteClient.ts";
+import { runMigrations } from '../../../../../apps/server/src/persistence/Migrations.ts'
+import * as NodeSqliteClient from '../../../../../apps/server/src/persistence/NodeSqliteClient.ts'
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()))
 
-layer("025_CleanupInvalidProjectionPendingApprovals", (it) => {
-  it.effect("removes pending-approval rows that do not come from approval requests", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
+layer('025_CleanupInvalidProjectionPendingApprovals', (it) =>
+{
+  it.effect('removes pending-approval rows that do not come from approval requests', () =>
+    Effect.gen(function* ()
+    {
+      const sql = yield* SqlClient.SqlClient
 
-      yield* runMigrations({ toMigrationInclusive: 24 });
+      yield* runMigrations({ toMigrationInclusive: 24 })
 
       yield* sql`
         INSERT INTO projection_threads (
@@ -74,7 +76,7 @@ layer("025_CleanupInvalidProjectionPendingApprovals", (it) => {
             0,
             NULL
           )
-      `;
+      `
 
       yield* sql`
         INSERT INTO projection_thread_activities (
@@ -111,7 +113,7 @@ layer("025_CleanupInvalidProjectionPendingApprovals", (it) => {
             NULL,
             '2026-04-13T00:02:00.000Z'
           )
-      `;
+      `
 
       yield* sql`
         INSERT INTO projection_pending_approvals (
@@ -151,47 +153,47 @@ layer("025_CleanupInvalidProjectionPendingApprovals", (it) => {
             '2026-04-13T00:03:00.000Z',
             '2026-04-13T00:04:00.000Z'
           )
-      `;
+      `
 
-      yield* runMigrations({ toMigrationInclusive: 25 });
+      yield* runMigrations({ toMigrationInclusive: 25 })
 
       const approvalRows = yield* sql<{
-        readonly requestId: string;
-        readonly status: string;
+        readonly requestId: string
+        readonly status: string
       }>`
         SELECT
           request_id AS "requestId",
           status
         FROM projection_pending_approvals
         ORDER BY request_id ASC
-      `;
+      `
       assert.deepStrictEqual(approvalRows, [
         {
-          requestId: "approval-valid",
-          status: "pending",
+          requestId: 'approval-valid',
+          status: 'pending',
         },
-      ]);
+      ])
 
       const threadCounts = yield* sql<{
-        readonly threadId: string;
-        readonly pendingApprovalCount: number;
+        readonly threadId: string
+        readonly pendingApprovalCount: number
       }>`
         SELECT
           thread_id AS "threadId",
           pending_approval_count AS "pendingApprovalCount"
         FROM projection_threads
         ORDER BY thread_id ASC
-      `;
+      `
       assert.deepStrictEqual(threadCounts, [
         {
-          threadId: "thread-invalid",
+          threadId: 'thread-invalid',
           pendingApprovalCount: 0,
         },
         {
-          threadId: "thread-valid",
+          threadId: 'thread-valid',
           pendingApprovalCount: 1,
         },
-      ]);
+      ])
     }),
-  );
-});
+  )
+})

@@ -16,146 +16,150 @@ import {
   type ThreadImportContinuationConsent,
   type ThreadId,
   type TurnId,
-} from "@t3tools/contracts";
-import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from "../types";
-import { type ComposerImageAttachment, type DraftThreadState } from "../composerDraftStore";
-import * as Schema from "effect/Schema";
-import { appAtomRegistry } from "../rpc/atomRegistry";
-import { environmentThreadDetails } from "../state/threads";
+} from '@t3tools/contracts'
+import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from '../types'
+import { type ComposerImageAttachment, type DraftThreadState } from '../composerDraftStore'
+import * as Schema from 'effect/Schema'
+import { appAtomRegistry } from '../rpc/atomRegistry'
+import { environmentThreadDetails } from '../state/threads'
 import {
   filterTerminalContextsWithText,
   stripInlineTerminalContextPlaceholders,
   type TerminalContextDraft,
-} from "../lib/terminalContext";
-import type { DraftThreadEnvMode } from "../composerDraftStore";
+} from '../lib/terminalContext'
+import type { DraftThreadEnvMode } from '../composerDraftStore'
 
-export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = "456code:last-invoked-script-by-project";
-export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10;
-export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3;
+export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = '456code:last-invoked-script-by-project'
+export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10
+export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3
 
-export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String);
-const isThreadImportContinuationActivityPayload = Schema.is(
-  ThreadImportContinuationActivityPayload,
-);
+export const LastInvokedScriptByProjectSchema = Schema.Record(ProjectId, Schema.String)
+const isThreadImportContinuationActivityPayload = Schema.is(ThreadImportContinuationActivityPayload)
 
 export type ImportContinuationGate =
   | {
-      readonly state: "not-required";
+      readonly state: 'not-required'
     }
   | {
-      readonly state: "unknown";
-      readonly unknownKind: "missing" | "invalid";
-      readonly providerInstanceId: null;
-      readonly driverKind: null;
-      readonly providerState: "missing";
-      readonly reason: string;
+      readonly state: 'unknown'
+      readonly unknownKind: 'missing' | 'invalid'
+      readonly providerInstanceId: null
+      readonly driverKind: null
+      readonly providerState: 'missing'
+      readonly reason: string
     }
   | {
-      readonly state: "verified" | "history-only";
-      readonly providerInstanceId: ProviderInstanceId;
-      readonly driverKind: ProviderDriverKind;
-      readonly providerState: "ready" | "unavailable";
-      readonly reason: string | null;
-      readonly consent: ThreadImportContinuationConsent;
-    };
+      readonly state: 'verified' | 'history-only'
+      readonly providerInstanceId: ProviderInstanceId
+      readonly driverKind: ProviderDriverKind
+      readonly providerState: 'ready' | 'unavailable'
+      readonly reason: string | null
+      readonly consent: ThreadImportContinuationConsent
+    }
 
 type LatestImportContinuationPayload =
   | {
-      readonly state: "absent" | "invalid";
+      readonly state: 'absent' | 'invalid'
     }
   | {
-      readonly state: "valid";
-      readonly activityId: EventId;
-      readonly payload: ThreadImportContinuationActivityPayloadType;
-    };
+      readonly state: 'valid'
+      readonly activityId: EventId
+      readonly payload: ThreadImportContinuationActivityPayloadType
+    }
 
-function isImportContinuationMarker(payload: unknown): boolean {
+function isImportContinuationMarker(payload: unknown): boolean
+{
   return (
-    typeof payload === "object" &&
+    typeof payload === 'object' &&
     payload !== null &&
-    "type" in payload &&
-    payload.type === "import.continuation"
-  );
+    'type' in payload &&
+    payload.type === 'import.continuation'
+  )
 }
 
 function latestImportContinuationPayload(
-  activities: ReadonlyArray<Thread["activities"][number]>,
-): LatestImportContinuationPayload {
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const activity = activities[index];
-    if (!activity) {
-      continue;
+  activities: ReadonlyArray<Thread['activities'][number]>,
+): LatestImportContinuationPayload
+{
+  for (let index = activities.length - 1; index >= 0; index -= 1)
+  {
+    const activity = activities[index]
+    if (!activity)
+    {
+      continue
     }
-    const payload = activity.payload;
-    if (!isImportContinuationMarker(payload)) {
-      continue;
+    const payload = activity.payload
+    if (!isImportContinuationMarker(payload))
+    {
+      continue
     }
     return isThreadImportContinuationActivityPayload(payload)
-      ? { state: "valid", activityId: activity.id, payload }
-      : { state: "invalid" };
+      ? { state: 'valid', activityId: activity.id, payload }
+      : { state: 'invalid' }
   }
-  return { state: "absent" };
+  return { state: 'absent' }
 }
 
 export function resolveImportContinuationGate(input: {
-  thread:
-    | Pick<Thread, "activities" | "latestTurn" | "modelSelection" | "origin">
-    | null
-    | undefined;
-  providers: ReadonlyArray<ServerProvider>;
-}): ImportContinuationGate {
-  const thread = input.thread;
-  if (!thread?.origin || thread.latestTurn !== null) {
-    return { state: "not-required" };
+  thread: Pick<Thread, 'activities' | 'latestTurn' | 'modelSelection' | 'origin'> | null | undefined
+  providers: ReadonlyArray<ServerProvider>
+}): ImportContinuationGate
+{
+  const thread = input.thread
+  if (!thread?.origin || thread.latestTurn !== null)
+  {
+    return { state: 'not-required' }
   }
 
-  const latestPayload = latestImportContinuationPayload(thread.activities);
-  if (latestPayload.state !== "valid") {
+  const latestPayload = latestImportContinuationPayload(thread.activities)
+  if (latestPayload.state !== 'valid')
+  {
     return {
-      state: "unknown",
-      unknownKind: latestPayload.state === "invalid" ? "invalid" : "missing",
+      state: 'unknown',
+      unknownKind: latestPayload.state === 'invalid' ? 'invalid' : 'missing',
       providerInstanceId: null,
       driverKind: null,
-      providerState: "missing",
+      providerState: 'missing',
       reason:
-        latestPayload.state === "invalid"
-          ? "Continuation details for this imported transcript are invalid or require a newer 456code version."
-          : "Continuation details for this imported transcript are missing. Retry the import before sending.",
-    };
+        latestPayload.state === 'invalid'
+          ? 'Continuation details for this imported transcript are invalid or require a newer 456code version.'
+          : 'Continuation details for this imported transcript are missing. Retry the import before sending.',
+    }
   }
-  const payload = latestPayload.payload;
-  const continuationIdentity = payload.continuation.continuationIdentity;
-  if (continuationIdentity === null) {
+  const payload = latestPayload.payload
+  const continuationIdentity = payload.continuation.continuationIdentity
+  if (continuationIdentity === null)
+  {
     return {
-      state: "unknown",
-      unknownKind: "invalid",
+      state: 'unknown',
+      unknownKind: 'invalid',
       providerInstanceId: null,
       driverKind: null,
-      providerState: "missing",
+      providerState: 'missing',
       reason:
-        "Continuation source identity for this imported transcript is missing. Retry the import before sending.",
-    };
+        'Continuation source identity for this imported transcript is missing. Retry the import before sending.',
+    }
   }
 
-  const providerInstanceId = payload.continuation.providerInstanceId;
+  const providerInstanceId = payload.continuation.providerInstanceId
   const provider = resolveImportContinuationProviderSnapshot(
     input.providers,
     providerInstanceId,
     payload.driverKind,
     continuationIdentity,
-  );
+  )
   const providerReady =
     provider !== null &&
     provider.enabled &&
     provider.installed &&
-    provider.availability !== "unavailable" &&
-    provider.status === "ready";
+    provider.availability !== 'unavailable' &&
+    provider.status === 'ready'
 
   return {
     state: payload.continuation.state,
     providerInstanceId,
     driverKind: payload.driverKind,
-    providerState: providerReady ? "ready" : "unavailable",
+    providerState: providerReady ? 'ready' : 'unavailable',
     reason: payload.continuation.reason,
     consent: {
       originContentHash: thread.origin.contentHash,
@@ -164,7 +168,7 @@ export function resolveImportContinuationGate(input: {
       targetProviderInstanceId: providerInstanceId,
       continuation: payload.continuation,
     },
-  };
+  }
 }
 
 export function resolveImportContinuationProviderSnapshot(
@@ -172,9 +176,11 @@ export function resolveImportContinuationProviderSnapshot(
   providerInstanceId: ProviderInstanceId | null,
   driverKind: ProviderDriverKind | null,
   continuationIdentity: ProviderContinuationIdentity | null,
-): ServerProvider | null {
-  if (providerInstanceId === null || driverKind === null || continuationIdentity === null) {
-    return null;
+): ServerProvider | null
+{
+  if (providerInstanceId === null || driverKind === null || continuationIdentity === null)
+  {
+    return null
   }
   return (
     providers.find(
@@ -184,71 +190,77 @@ export function resolveImportContinuationProviderSnapshot(
         continuationIdentity.driverKind === driverKind &&
         provider.continuation?.groupKey === continuationIdentity.continuationKey,
     ) ?? null
-  );
+  )
 }
 
-export interface ImportContinuationBannerCopy {
-  readonly action: "consent" | "import-settings" | "provider-settings";
-  readonly actionLabel: string;
-  readonly description: string;
-  readonly isReady: boolean;
-  readonly title: string;
+export interface ImportContinuationBannerCopy
+{
+  readonly action: 'consent' | 'import-settings' | 'provider-settings'
+  readonly actionLabel: string
+  readonly description: string
+  readonly isReady: boolean
+  readonly title: string
 }
 
 export function resolveImportContinuationBannerCopy(input: {
-  readonly gate: Exclude<ImportContinuationGate, { readonly state: "not-required" }>;
-  readonly providerDisplayName: string;
-  readonly sourceName: string;
-}): ImportContinuationBannerCopy {
-  const { gate, providerDisplayName, sourceName } = input;
-  if (gate.state === "unknown") {
+  readonly gate: Exclude<ImportContinuationGate, { readonly state: 'not-required' }>
+  readonly providerDisplayName: string
+  readonly sourceName: string
+}): ImportContinuationBannerCopy
+{
+  const { gate, providerDisplayName, sourceName } = input
+  if (gate.state === 'unknown')
+  {
     return {
-      action: "import-settings",
-      actionLabel: "Repair import",
+      action: 'import-settings',
+      actionLabel: 'Repair import',
       description: `${gate.reason} Sending is blocked to prevent starting the wrong provider session.`,
       isReady: false,
       title:
-        gate.unknownKind === "invalid"
-          ? "Imported session needs repair"
-          : "Imported session is incomplete",
-    };
+        gate.unknownKind === 'invalid'
+          ? 'Imported session needs repair'
+          : 'Imported session is incomplete',
+    }
   }
 
-  const isReady = gate.providerState === "ready";
-  if (gate.state === "verified") {
+  const isReady = gate.providerState === 'ready'
+  if (gate.state === 'verified')
+  {
     return {
-      action: isReady ? "consent" : "provider-settings",
-      actionLabel: isReady ? `Continue with ${providerDisplayName}` : "Open provider settings",
+      action: isReady ? 'consent' : 'provider-settings',
+      actionLabel: isReady ? `Continue with ${providerDisplayName}` : 'Open provider settings',
       description: isReady
         ? `Imported from ${sourceName}. Continue with ${providerDisplayName} to resume the verified native session.`
         : `This import is bound to ${providerDisplayName}, but that exact provider instance is not ready. Sending is blocked so 456code cannot substitute another instance.`,
       isReady,
-      title: "Resume imported session",
-    };
+      title: 'Resume imported session',
+    }
   }
 
   return {
-    action: isReady ? "consent" : "provider-settings",
-    actionLabel: isReady ? `Start fresh with ${providerDisplayName}` : "Open provider settings",
+    action: isReady ? 'consent' : 'provider-settings',
+    actionLabel: isReady ? `Start fresh with ${providerDisplayName}` : 'Open provider settings',
     description: isReady
       ? `Imported from ${sourceName} as history only. Starting fresh with ${providerDisplayName} creates a new provider session. The provider will not know or receive the imported transcript.`
       : `This transcript is history only, and ${providerDisplayName} is not ready. A fresh session cannot start until that exact provider instance is available.`,
     isReady,
-    title: "Imported transcript is history only",
-  };
+    title: 'Imported transcript is history only',
+  }
 }
 
 export function importContinuationConsentToken(
   threadKey: string | null,
   gate: ImportContinuationGate,
-): string | null {
+): string | null
+{
   if (
     threadKey === null ||
-    gate.state === "not-required" ||
-    gate.state === "unknown" ||
-    gate.providerState !== "ready"
-  ) {
-    return null;
+    gate.state === 'not-required' ||
+    gate.state === 'unknown' ||
+    gate.providerState !== 'ready'
+  )
+  {
+    return null
   }
   return JSON.stringify([
     threadKey,
@@ -261,78 +273,86 @@ export function importContinuationConsentToken(
     gate.consent.continuation.continuationIdentity?.driverKind ?? null,
     gate.consent.continuation.continuationIdentity?.continuationKey ?? null,
     gate.consent.continuation.reason,
-  ]);
+  ])
 }
 
 export function isImportContinuationSendBlocked(
   gate: ImportContinuationGate,
   consentToken: string | null,
   acceptedConsentToken: string | null,
-): boolean {
-  if (gate.state === "not-required") {
-    return false;
+): boolean
+{
+  if (gate.state === 'not-required')
+  {
+    return false
   }
-  return consentToken === null || acceptedConsentToken !== consentToken;
+  return consentToken === null || acceptedConsentToken !== consentToken
 }
 
 export function handleImportContinuationSendBlock(
   blocked: boolean,
   onBlocked: () => void,
-): boolean {
-  if (!blocked) {
-    return false;
+): boolean
+{
+  if (!blocked)
+  {
+    return false
   }
-  onBlocked();
-  return true;
+  onBlocked()
+  return true
 }
 
 export function startNewThreadForProject(
   projectRef: ScopedProjectRef | null,
   handleNewThread: (projectRef: ScopedProjectRef) => Promise<void>,
-): boolean {
-  if (projectRef === null) return false;
-  void handleNewThread(projectRef);
+): boolean
+{
+  if (projectRef === null) return false
+  void handleNewThread(projectRef)
 
-  return true;
+  return true
 }
 
 export function resolveThreadMetadataUpdateForNextTurn(input: {
-  currentModelSelection: ModelSelection;
-  nextModelSelection?: ModelSelection;
-  currentBranch: string | null;
-  nextBranch?: string;
+  currentModelSelection: ModelSelection
+  nextModelSelection?: ModelSelection
+  currentBranch: string | null
+  nextBranch?: string
 }): {
-  modelSelection?: ModelSelection;
-  branch?: string;
-  worktreePath?: null;
-} | null {
-  const nextModelSelection = input.nextModelSelection;
+  modelSelection?: ModelSelection
+  branch?: string
+  worktreePath?: null
+} | null
+{
+  const nextModelSelection = input.nextModelSelection
   const modelSelectionChanged =
     nextModelSelection !== undefined &&
     (nextModelSelection.model !== input.currentModelSelection.model ||
       nextModelSelection.instanceId !== input.currentModelSelection.instanceId ||
       JSON.stringify(nextModelSelection.options ?? null) !==
-        JSON.stringify(input.currentModelSelection.options ?? null));
-  const branchChanged = input.nextBranch !== undefined && input.nextBranch !== input.currentBranch;
-  if (!modelSelectionChanged && !branchChanged) {
-    return null;
+        JSON.stringify(input.currentModelSelection.options ?? null))
+  const branchChanged = input.nextBranch !== undefined && input.nextBranch !== input.currentBranch
+  if (!modelSelectionChanged && !branchChanged)
+  {
+    return null
   }
   return {
     ...(modelSelectionChanged ? { modelSelection: nextModelSelection } : {}),
     ...(branchChanged ? { branch: input.nextBranch, worktreePath: null } : {}),
-  };
+  }
 }
 
 export function buildLocalDraftThread(
   threadId: ThreadId,
   draftThread: DraftThreadState,
   fallbackModelSelection: ModelSelection,
-): Thread {
+): Thread
+{
   return {
     id: threadId,
     environmentId: draftThread.environmentId,
     projectId: draftThread.projectId,
-    title: "New thread",
+    title: 'New thread',
     modelSelection: fallbackModelSelection,
     runtimeMode: draftThread.runtimeMode,
     interactionMode: draftThread.interactionMode,
@@ -351,10 +371,11 @@ export function buildLocalDraftThread(
     checkpoints: [],
     activities: [],
     proposedPlans: [],
-  };
+  }
 }
 
-export function buildLoadingThreadFromShell(shell: ThreadShell): Thread {
+export function buildLoadingThreadFromShell(shell: ThreadShell): Thread
+{
   return {
     ...shell,
     messages: [],
@@ -362,184 +383,211 @@ export function buildLoadingThreadFromShell(shell: ThreadShell): Thread {
     activities: [],
     checkpoints: [],
     deletedAt: null,
-  };
+  }
 }
 
 export function shouldWriteThreadErrorToCurrentServerThread(input: {
   activeServerThread:
     | {
-        environmentId: EnvironmentId;
-        id: ThreadId;
+        environmentId: EnvironmentId
+        id: ThreadId
       }
     | null
-    | undefined;
-  routeThreadRef: ScopedThreadRef;
-  targetThreadId: ThreadId;
-}): boolean {
+    | undefined
+  routeThreadRef: ScopedThreadRef
+  targetThreadId: ThreadId
+}): boolean
+{
   return Boolean(
     input.activeServerThread &&
     input.targetThreadId === input.routeThreadRef.threadId &&
     input.activeServerThread.environmentId === input.routeThreadRef.environmentId &&
     input.activeServerThread.id === input.targetThreadId,
-  );
+  )
 }
 
-export function buildThreadTurnInterruptInput(thread: Pick<Thread, "id" | "session">): {
-  threadId: ThreadId;
-  turnId?: TurnId;
-} {
-  const runningTurnId = thread.session?.status === "running" ? thread.session.activeTurnId : null;
+export function buildThreadTurnInterruptInput(thread: Pick<Thread, 'id' | 'session'>): {
+  threadId: ThreadId
+  turnId?: TurnId
+}
+{
+  const runningTurnId = thread.session?.status === 'running' ? thread.session.activeTurnId : null
   return {
     threadId: thread.id,
     ...(runningTurnId !== null ? { turnId: runningTurnId } : {}),
-  };
+  }
 }
 
 export function reconcileMountedTerminalThreadIds(input: {
-  currentThreadIds: ReadonlyArray<string>;
-  openThreadIds: ReadonlyArray<string>;
-  activeThreadId: string | null;
-  activeThreadTerminalOpen: boolean;
-  maxHiddenThreadCount?: number;
-}): string[] {
+  currentThreadIds: ReadonlyArray<string>
+  openThreadIds: ReadonlyArray<string>
+  activeThreadId: string | null
+  activeThreadTerminalOpen: boolean
+  maxHiddenThreadCount?: number
+}): string[]
+{
   return reconcileRetainedMountedThreadIds({
     currentThreadIds: input.currentThreadIds,
     openThreadIds: input.openThreadIds,
     activeThreadId: input.activeThreadId,
     activeThreadOpen: input.activeThreadTerminalOpen,
     maxHiddenThreadCount: input.maxHiddenThreadCount ?? MAX_HIDDEN_MOUNTED_TERMINAL_THREADS,
-  });
+  })
 }
 
 export function reconcileRetainedMountedThreadIds(input: {
-  currentThreadIds: ReadonlyArray<string>;
-  openThreadIds: ReadonlyArray<string>;
-  activeThreadId: string | null;
-  activeThreadOpen: boolean;
-  maxHiddenThreadCount: number;
-  retainInactiveActiveThread?: boolean;
-}): string[] {
-  const openThreadIdSet = new Set(input.openThreadIds);
+  currentThreadIds: ReadonlyArray<string>
+  openThreadIds: ReadonlyArray<string>
+  activeThreadId: string | null
+  activeThreadOpen: boolean
+  maxHiddenThreadCount: number
+  retainInactiveActiveThread?: boolean
+}): string[]
+{
+  const openThreadIdSet = new Set(input.openThreadIds)
   const hiddenThreadIds = input.currentThreadIds.filter(
     (threadId) =>
       (threadId !== input.activeThreadId || input.retainInactiveActiveThread === true) &&
       openThreadIdSet.has(threadId),
-  );
-  const maxHiddenThreadCount = Math.max(0, input.maxHiddenThreadCount);
+  )
+  const maxHiddenThreadCount = Math.max(0, input.maxHiddenThreadCount)
   const nextThreadIds =
     hiddenThreadIds.length > maxHiddenThreadCount
       ? hiddenThreadIds.slice(-maxHiddenThreadCount)
-      : hiddenThreadIds;
+      : hiddenThreadIds
 
   if (
     input.activeThreadId &&
     input.activeThreadOpen &&
     !nextThreadIds.includes(input.activeThreadId)
-  ) {
-    nextThreadIds.push(input.activeThreadId);
+  )
+  {
+    nextThreadIds.push(input.activeThreadId)
   }
 
-  return nextThreadIds;
+  return nextThreadIds
 }
 
-export function revokeBlobPreviewUrl(previewUrl: string | undefined): void {
-  if (!previewUrl || typeof URL === "undefined" || !previewUrl.startsWith("blob:")) {
-    return;
+export function revokeBlobPreviewUrl(previewUrl: string | undefined): void
+{
+  if (!previewUrl || typeof URL === 'undefined' || !previewUrl.startsWith('blob:'))
+  {
+    return
   }
-  URL.revokeObjectURL(previewUrl);
+  URL.revokeObjectURL(previewUrl)
 }
 
-export function revokeUserMessagePreviewUrls(message: ChatMessage): void {
-  if (message.role !== "user" || !message.attachments) {
-    return;
+export function revokeUserMessagePreviewUrls(message: ChatMessage): void
+{
+  if (message.role !== 'user' || !message.attachments)
+  {
+    return
   }
-  for (const attachment of message.attachments) {
-    if (attachment.type !== "image") {
-      continue;
+  for (const attachment of message.attachments)
+  {
+    if (attachment.type !== 'image')
+    {
+      continue
     }
-    revokeBlobPreviewUrl(attachment.previewUrl);
+    revokeBlobPreviewUrl(attachment.previewUrl)
   }
 }
 
-export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[] {
-  if (message.role !== "user" || !message.attachments) {
-    return [];
+export function collectUserMessageBlobPreviewUrls(message: ChatMessage): string[]
+{
+  if (message.role !== 'user' || !message.attachments)
+  {
+    return []
   }
-  const previewUrls: string[] = [];
-  for (const attachment of message.attachments) {
-    if (attachment.type !== "image") continue;
-    if (!attachment.previewUrl || !attachment.previewUrl.startsWith("blob:")) continue;
-    previewUrls.push(attachment.previewUrl);
+  const previewUrls: string[] = []
+  for (const attachment of message.attachments)
+  {
+    if (attachment.type !== 'image') continue
+    if (!attachment.previewUrl || !attachment.previewUrl.startsWith('blob:')) continue
+    previewUrls.push(attachment.previewUrl)
   }
-  return previewUrls;
+  return previewUrls
 }
 
-export interface PullRequestDialogState {
-  initialReference: string | null;
-  key: number;
+export interface PullRequestDialogState
+{
+  initialReference: string | null
+  key: number
 }
 
-export function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.addEventListener("load", () => {
-      if (typeof reader.result === "string") {
-        resolve(reader.result);
-        return;
+export function readFileAsDataUrl(file: File): Promise<string>
+{
+  return new Promise((resolve, reject) =>
+  {
+    const reader = new FileReader()
+    reader.addEventListener('load', () =>
+    {
+      if (typeof reader.result === 'string')
+      {
+        resolve(reader.result)
+        return
       }
-      reject(new Error("Could not read image data."));
-    });
-    reader.addEventListener("error", () => {
-      reject(reader.error ?? new Error("Failed to read image."));
-    });
-    reader.readAsDataURL(file);
-  });
+      reject(new Error('Could not read image data.'))
+    })
+    reader.addEventListener('error', () =>
+    {
+      reject(reader.error ?? new Error('Failed to read image.'))
+    })
+    reader.readAsDataURL(file)
+  })
 }
 
 export function resolveSendEnvMode(input: {
-  requestedEnvMode: DraftThreadEnvMode;
-  isGitRepo: boolean;
-}): DraftThreadEnvMode {
-  return input.isGitRepo ? input.requestedEnvMode : "local";
+  requestedEnvMode: DraftThreadEnvMode
+  isGitRepo: boolean
+}): DraftThreadEnvMode
+{
+  return input.isGitRepo ? input.requestedEnvMode : 'local'
 }
 
 export function cloneComposerImageForRetry(
   image: ComposerImageAttachment,
-): ComposerImageAttachment {
-  if (typeof URL === "undefined" || !image.previewUrl.startsWith("blob:")) {
-    return image;
+): ComposerImageAttachment
+{
+  if (typeof URL === 'undefined' || !image.previewUrl.startsWith('blob:'))
+  {
+    return image
   }
-  try {
+  try
+  {
     return {
       ...image,
       previewUrl: URL.createObjectURL(image.file),
-    };
-  } catch {
-    return image;
+    }
+  }
+  catch
+  {
+    return image
   }
 }
 
 export function deriveComposerSendState(options: {
-  prompt: string;
-  imageCount: number;
-  terminalContexts: ReadonlyArray<TerminalContextDraft>;
+  prompt: string
+  imageCount: number
+  terminalContexts: ReadonlyArray<TerminalContextDraft>
   /**
    * Optional element-pick attachment count. Element contexts contribute to
    * "sendable content" exactly like images and (text-bearing) terminal
    * contexts do: a prompt of just element chips is still a valid send.
    */
-  elementContextCount?: number;
+  elementContextCount?: number
 }): {
-  trimmedPrompt: string;
-  sendableTerminalContexts: TerminalContextDraft[];
-  expiredTerminalContextCount: number;
-  hasSendableContent: boolean;
-} {
-  const trimmedPrompt = stripInlineTerminalContextPlaceholders(options.prompt).trim();
-  const sendableTerminalContexts = filterTerminalContextsWithText(options.terminalContexts);
+  trimmedPrompt: string
+  sendableTerminalContexts: TerminalContextDraft[]
+  expiredTerminalContextCount: number
+  hasSendableContent: boolean
+}
+{
+  const trimmedPrompt = stripInlineTerminalContextPlaceholders(options.prompt).trim()
+  const sendableTerminalContexts = filterTerminalContextsWithText(options.terminalContexts)
   const expiredTerminalContextCount =
-    options.terminalContexts.length - sendableTerminalContexts.length;
-  const elementContextCount = options.elementContextCount ?? 0;
+    options.terminalContexts.length - sendableTerminalContexts.length
+  const elementContextCount = options.elementContextCount ?? 0
   return {
     trimmedPrompt,
     sendableTerminalContexts,
@@ -549,35 +597,39 @@ export function deriveComposerSendState(options: {
       options.imageCount > 0 ||
       sendableTerminalContexts.length > 0 ||
       elementContextCount > 0,
-  };
+  }
 }
 
 export function buildExpiredTerminalContextToastCopy(
   expiredTerminalContextCount: number,
-  variant: "omitted" | "empty",
-): { title: string; description: string } {
-  const count = Math.max(1, Math.floor(expiredTerminalContextCount));
-  const noun = count === 1 ? "Expired terminal context" : "Expired terminal contexts";
-  if (variant === "empty") {
+  variant: 'omitted' | 'empty',
+): { title: string; description: string }
+{
+  const count = Math.max(1, Math.floor(expiredTerminalContextCount))
+  const noun = count === 1 ? 'Expired terminal context' : 'Expired terminal contexts'
+  if (variant === 'empty')
+  {
     return {
       title: `${noun} won't be sent`,
-      description: "Remove it or re-add it to include terminal output.",
-    };
+      description: 'Remove it or re-add it to include terminal output.',
+    }
   }
   return {
     title: `${noun} omitted from message`,
-    description: "Re-add it if you want that terminal output included.",
-  };
+    description: 'Re-add it if you want that terminal output included.',
+  }
 }
 
 export function branchMismatchKey(
   threadId: string | null,
   mismatch: { threadBranch: string; currentBranch: string } | null,
-): string | null {
-  if (!threadId || !mismatch) {
-    return null;
+): string | null
+{
+  if (!threadId || !mismatch)
+  {
+    return null
   }
-  return `${threadId}:${mismatch.threadBranch}:${mismatch.currentBranch}`;
+  return `${threadId}:${mismatch.threadBranch}:${mismatch.currentBranch}`
 }
 
 // The mismatch banner only matters when the user is about to send: passive
@@ -587,177 +639,206 @@ export function branchMismatchKey(
 // thread open. `wasShownForCurrentMismatch` keeps the banner mounted once
 // revealed so it doesn't flicker away when the draft is cleared.
 export function shouldShowBranchMismatchBanner(input: {
-  hasMismatch: boolean;
-  isDismissed: boolean;
-  composerHasContent: boolean;
-  wasShownForCurrentMismatch: boolean;
-}): boolean {
-  if (!input.hasMismatch || input.isDismissed) {
-    return false;
+  hasMismatch: boolean
+  isDismissed: boolean
+  composerHasContent: boolean
+  wasShownForCurrentMismatch: boolean
+}): boolean
+{
+  if (!input.hasMismatch || input.isDismissed)
+  {
+    return false
   }
-  return input.composerHasContent || input.wasShownForCurrentMismatch;
+  return input.composerHasContent || input.wasShownForCurrentMismatch
 }
 
 // Session-scoped (module-level so it survives ChatView remounts, e.g. route
 // changes). Durable cross-device dismissal is planned as a server-side ack.
-const sessionDismissedBranchMismatchKeys = new Set<string>();
+const sessionDismissedBranchMismatchKeys = new Set<string>()
 
-export function dismissBranchMismatchForSession(key: string): void {
-  sessionDismissedBranchMismatchKeys.add(key);
+export function dismissBranchMismatchForSession(key: string): void
+{
+  sessionDismissedBranchMismatchKeys.add(key)
 }
 
-export function isBranchMismatchDismissedForSession(key: string | null): boolean {
-  return key !== null && sessionDismissedBranchMismatchKeys.has(key);
+export function isBranchMismatchDismissedForSession(key: string | null): boolean
+{
+  return key !== null && sessionDismissedBranchMismatchKeys.has(key)
 }
 
-export function threadHasStarted(thread: Thread | null | undefined): boolean {
+export function threadHasStarted(thread: Thread | null | undefined): boolean
+{
   return Boolean(
     thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
-  );
+  )
 }
 
 export function deriveLockedProvider(input: {
-  thread: Thread | null | undefined;
-  selectedProvider: string | null;
-  threadProvider: string | null;
-  providers: ReadonlyArray<Pick<ServerProvider, "driver" | "instanceId">>;
-  importContinuationGate?: ImportContinuationGate;
-}): ProviderDriverKind | null {
+  thread: Thread | null | undefined
+  selectedProvider: string | null
+  threadProvider: string | null
+  providers: ReadonlyArray<Pick<ServerProvider, 'driver' | 'instanceId'>>
+  importContinuationGate?: ImportContinuationGate
+}): ProviderDriverKind | null
+{
   if (
-    input.importContinuationGate?.state === "verified" ||
-    input.importContinuationGate?.state === "history-only"
-  ) {
-    return input.importContinuationGate.driverKind;
+    input.importContinuationGate?.state === 'verified' ||
+    input.importContinuationGate?.state === 'history-only'
+  )
+  {
+    return input.importContinuationGate.driverKind
   }
-  return null;
+  return null
 }
 
 export function getStartedThreadProviderSwitchBlockReason(input: {
-  isSwitchingProvider: boolean;
-  isTurnRunning: boolean;
-  hasPendingApproval: boolean;
-  hasPendingUserInput: boolean;
-}): string | null {
-  if (input.isSwitchingProvider) {
-    return "A provider handoff is already in progress.";
+  isSwitchingProvider: boolean
+  isTurnRunning: boolean
+  hasPendingApproval: boolean
+  hasPendingUserInput: boolean
+}): string | null
+{
+  if (input.isSwitchingProvider)
+  {
+    return 'A provider handoff is already in progress.'
   }
-  if (input.isTurnRunning) {
-    return "Wait for the current response to finish before switching providers.";
+  if (input.isTurnRunning)
+  {
+    return 'Wait for the current response to finish before switching providers.'
   }
-  if (input.hasPendingApproval) {
-    return "Resolve the pending approval before switching providers.";
+  if (input.hasPendingApproval)
+  {
+    return 'Resolve the pending approval before switching providers.'
   }
-  if (input.hasPendingUserInput) {
-    return "Answer the pending question before switching providers.";
+  if (input.hasPendingUserInput)
+  {
+    return 'Answer the pending question before switching providers.'
   }
-  return null;
+  return null
 }
 
 export function getStartedThreadModelChangeBlockReason(input: {
-  providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "requiresNewThreadForModelChange">>;
-  hasStartedSession: boolean;
-  currentModelSelection: ModelSelection;
-  currentProviderInstanceId?: ModelSelection["instanceId"] | null | undefined;
-  nextModelSelection: ModelSelection;
-}): { title: string; description: string } | null {
-  if (!input.hasStartedSession) {
-    return null;
+  providers: ReadonlyArray<Pick<ServerProvider, 'instanceId' | 'requiresNewThreadForModelChange'>>
+  hasStartedSession: boolean
+  currentModelSelection: ModelSelection
+  currentProviderInstanceId?: ModelSelection['instanceId'] | null | undefined
+  nextModelSelection: ModelSelection
+}): { title: string; description: string } | null
+{
+  if (!input.hasStartedSession)
+  {
+    return null
   }
   const currentModelSelection = {
     ...input.currentModelSelection,
     instanceId: input.currentProviderInstanceId ?? input.currentModelSelection.instanceId,
-  };
+  }
   if (
     currentModelSelection.instanceId === input.nextModelSelection.instanceId &&
     currentModelSelection.model === input.nextModelSelection.model
-  ) {
-    return null;
+  )
+  {
+    return null
   }
-  if (currentModelSelection.instanceId !== input.nextModelSelection.instanceId) {
-    return null;
+  if (currentModelSelection.instanceId !== input.nextModelSelection.instanceId)
+  {
+    return null
   }
   const currentProvider = input.providers.find(
     (snapshot) => snapshot.instanceId === currentModelSelection.instanceId,
-  );
+  )
   const nextProvider = input.providers.find(
     (snapshot) => snapshot.instanceId === input.nextModelSelection.instanceId,
-  );
+  )
   if (
     currentProvider?.requiresNewThreadForModelChange !== true &&
     nextProvider?.requiresNewThreadForModelChange !== true
-  ) {
-    return null;
+  )
+  {
+    return null
   }
   return {
-    title: "Start a new chat to change models",
-    description: "This provider does not allow switching models after a conversation has started.",
-  };
+    title: 'Start a new chat to change models',
+    description: 'This provider does not allow switching models after a conversation has started.',
+  }
 }
 
 export async function waitForStartedServerThread(
   threadRef: ScopedThreadRef,
   timeoutMs = 1_000,
-): Promise<boolean> {
-  const threadAtom = environmentThreadDetails.detailAtom(threadRef);
-  const getThread = () => appAtomRegistry.get(threadAtom);
-  const thread = getThread();
+): Promise<boolean>
+{
+  const threadAtom = environmentThreadDetails.detailAtom(threadRef)
+  const getThread = () => appAtomRegistry.get(threadAtom)
+  const thread = getThread()
 
-  if (threadHasStarted(thread)) {
-    return true;
+  if (threadHasStarted(thread))
+  {
+    return true
   }
 
-  return await new Promise<boolean>((resolve) => {
-    let settled = false;
-    let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null;
-    const finish = (result: boolean) => {
-      if (settled) {
-        return;
+  return await new Promise<boolean>((resolve) =>
+  {
+    let settled = false
+    let timeoutId: ReturnType<typeof globalThis.setTimeout> | null = null
+    const finish = (result: boolean) =>
+    {
+      if (settled)
+      {
+        return
       }
-      settled = true;
-      if (timeoutId !== null) {
-        globalThis.clearTimeout(timeoutId);
+      settled = true
+      if (timeoutId !== null)
+      {
+        globalThis.clearTimeout(timeoutId)
       }
-      unsubscribe();
-      resolve(result);
-    };
-
-    const unsubscribe = appAtomRegistry.subscribe(threadAtom, (thread) => {
-      if (!threadHasStarted(thread)) {
-        return;
-      }
-      finish(true);
-    });
-
-    if (threadHasStarted(getThread())) {
-      finish(true);
-      return;
+      unsubscribe()
+      resolve(result)
     }
 
-    timeoutId = globalThis.setTimeout(() => {
-      finish(false);
-    }, timeoutMs);
-  });
+    const unsubscribe = appAtomRegistry.subscribe(threadAtom, (thread) =>
+    {
+      if (!threadHasStarted(thread))
+      {
+        return
+      }
+      finish(true)
+    })
+
+    if (threadHasStarted(getThread()))
+    {
+      finish(true)
+      return
+    }
+
+    timeoutId = globalThis.setTimeout(() =>
+    {
+      finish(false)
+    }, timeoutMs)
+  })
 }
 
-export interface LocalDispatchSnapshot {
-  startedAt: string;
-  preparingWorktree: boolean;
-  latestUserMessageId: ChatMessage["id"] | null;
-  latestTurnTurnId: TurnId | null;
-  latestTurnRequestedAt: string | null;
-  latestTurnStartedAt: string | null;
-  latestTurnCompletedAt: string | null;
-  sessionStatus: NonNullable<Thread["session"]>["status"] | null;
-  sessionUpdatedAt: string | null;
+export interface LocalDispatchSnapshot
+{
+  startedAt: string
+  preparingWorktree: boolean
+  latestUserMessageId: ChatMessage['id'] | null
+  latestTurnTurnId: TurnId | null
+  latestTurnRequestedAt: string | null
+  latestTurnStartedAt: string | null
+  latestTurnCompletedAt: string | null
+  sessionStatus: NonNullable<Thread['session']>['status'] | null
+  sessionUpdatedAt: string | null
 }
 
 export function createLocalDispatchSnapshot(
   activeThread: Thread | undefined,
   options?: { preparingWorktree?: boolean },
-): LocalDispatchSnapshot {
-  const latestTurn = activeThread?.latestTurn ?? null;
-  const session = activeThread?.session ?? null;
-  const latestUserMessage = activeThread?.messages.findLast((message) => message.role === "user");
+): LocalDispatchSnapshot
+{
+  const latestTurn = activeThread?.latestTurn ?? null
+  const session = activeThread?.session ?? null
+  const latestUserMessage = activeThread?.messages.findLast((message) => message.role === 'user')
   return {
     startedAt: new Date().toISOString(),
     preparingWorktree: Boolean(options?.preparingWorktree),
@@ -768,63 +849,71 @@ export function createLocalDispatchSnapshot(
     latestTurnCompletedAt: latestTurn?.completedAt ?? null,
     sessionStatus: session?.status ?? null,
     sessionUpdatedAt: session?.updatedAt ?? null,
-  };
+  }
 }
 
 export function hasServerAcknowledgedLocalDispatch(input: {
-  localDispatch: LocalDispatchSnapshot | null;
-  phase: SessionPhase;
-  latestTurn: Thread["latestTurn"] | null;
-  latestUserMessageId: ChatMessage["id"] | null;
-  session: Thread["session"] | null;
-  hasPendingApproval: boolean;
-  hasPendingUserInput: boolean;
-  threadError: string | null | undefined;
-}): boolean {
-  if (!input.localDispatch) {
-    return false;
+  localDispatch: LocalDispatchSnapshot | null
+  phase: SessionPhase
+  latestTurn: Thread['latestTurn'] | null
+  latestUserMessageId: ChatMessage['id'] | null
+  session: Thread['session'] | null
+  hasPendingApproval: boolean
+  hasPendingUserInput: boolean
+  threadError: string | null | undefined
+}): boolean
+{
+  if (!input.localDispatch)
+  {
+    return false
   }
-  if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError)) {
-    return true;
+  if (input.hasPendingApproval || input.hasPendingUserInput || Boolean(input.threadError))
+  {
+    return true
   }
 
-  const latestTurn = input.latestTurn ?? null;
-  const session = input.session ?? null;
+  const latestTurn = input.latestTurn ?? null
+  const session = input.session ?? null
   const latestUserMessageChanged =
-    input.localDispatch.latestUserMessageId !== input.latestUserMessageId;
+    input.localDispatch.latestUserMessageId !== input.latestUserMessageId
   const latestTurnChanged =
     input.localDispatch.latestTurnTurnId !== (latestTurn?.turnId ?? null) ||
     input.localDispatch.latestTurnRequestedAt !== (latestTurn?.requestedAt ?? null) ||
     input.localDispatch.latestTurnStartedAt !== (latestTurn?.startedAt ?? null) ||
-    input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null);
+    input.localDispatch.latestTurnCompletedAt !== (latestTurn?.completedAt ?? null)
 
-  if (input.phase === "running") {
+  if (input.phase === 'running')
+  {
     // Steering adds a user message to the current running turn without
     // necessarily changing any of the turn timestamps. Treat that projected
     // message as the server acknowledgment so the composer does not remain
     // stuck in its local "Sending" state until the turn settles.
-    if (latestUserMessageChanged) {
-      return true;
+    if (latestUserMessageChanged)
+    {
+      return true
     }
-    if (!latestTurnChanged) {
-      return false;
+    if (!latestTurnChanged)
+    {
+      return false
     }
-    if (latestTurn?.startedAt === null || latestTurn === null) {
-      return false;
+    if (latestTurn?.startedAt === null || latestTurn === null)
+    {
+      return false
     }
     if (
       session?.activeTurnId !== null &&
       session?.activeTurnId !== undefined &&
       latestTurn?.turnId !== session.activeTurnId
-    ) {
-      return false;
+    )
+    {
+      return false
     }
-    return true;
+    return true
   }
 
   return (
     latestTurnChanged ||
     input.localDispatch.sessionStatus !== (session?.status ?? null) ||
     input.localDispatch.sessionUpdatedAt !== (session?.updatedAt ?? null)
-  );
+  )
 }

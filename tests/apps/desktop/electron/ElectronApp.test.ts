@@ -1,6 +1,6 @@
-import { assert, describe, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import { beforeEach, vi } from "vite-plus/test";
+import { assert, describe, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import { beforeEach, vi } from 'vite-plus/test'
 
 const {
   appendSwitchMock,
@@ -24,8 +24,8 @@ const {
 } = vi.hoisted(() => ({
   appendSwitchMock: vi.fn(),
   exitMock: vi.fn(),
-  getAppPathMock: vi.fn(() => "/app"),
-  getVersionMock: vi.fn(() => "1.2.3"),
+  getAppPathMock: vi.fn(() => '/app'),
+  getVersionMock: vi.fn(() => '1.2.3'),
   isDefaultProtocolClientMock: vi.fn(() => false),
   onMock: vi.fn(),
   quitMock: vi.fn(),
@@ -40,9 +40,9 @@ const {
   setNameMock: vi.fn(),
   setPathMock: vi.fn(),
   whenReadyMock: vi.fn(() => Promise.resolve()),
-}));
+}))
 
-vi.mock("electron", () => ({
+vi.mock('electron', () => ({
   app: {
     commandLine: {
       appendSwitch: appendSwitchMock,
@@ -54,7 +54,7 @@ vi.mock("electron", () => ({
     getVersion: getVersionMock,
     isDefaultProtocolClient: isDefaultProtocolClientMock,
     isPackaged: true,
-    name: "456code",
+    name: '456code',
     on: onMock,
     quit: quitMock,
     relaunch: relaunchMock,
@@ -70,72 +70,79 @@ vi.mock("electron", () => ({
     whenReady: whenReadyMock,
     exit: exitMock,
   },
-}));
+}))
 
-import * as ElectronApp from "../../../../apps/desktop/src/electron/ElectronApp.ts";
+import * as ElectronApp from '../../../../apps/desktop/src/electron/ElectronApp.ts'
 
-describe("ElectronApp", () => {
-  beforeEach(() => {
-    appendSwitchMock.mockClear();
-    exitMock.mockClear();
-    onMock.mockClear();
-    quitMock.mockClear();
-    relaunchMock.mockClear();
-    removeListenerMock.mockClear();
-    setPathMock.mockClear();
-  });
+describe('ElectronApp', () =>
+{
+  beforeEach(() =>
+  {
+    appendSwitchMock.mockClear()
+    exitMock.mockClear()
+    onMock.mockClear()
+    quitMock.mockClear()
+    relaunchMock.mockClear()
+    removeListenerMock.mockClear()
+    setPathMock.mockClear()
+  })
 
-  it.effect("reports which app metadata property failed", () =>
-    Effect.gen(function* () {
-      const cause = new Error("version unavailable");
-      getVersionMock.mockImplementationOnce(() => {
-        throw cause;
-      });
+  it.effect('reports which app metadata property failed', () =>
+    Effect.gen(function* ()
+    {
+      const cause = new Error('version unavailable')
+      getVersionMock.mockImplementationOnce(() =>
+      {
+        throw cause
+      })
 
-      const electronApp = yield* ElectronApp.ElectronApp;
-      const error = yield* electronApp.metadata.pipe(Effect.flip);
+      const electronApp = yield* ElectronApp.ElectronApp
+      const error = yield* electronApp.metadata.pipe(Effect.flip)
 
-      assert.instanceOf(error, ElectronApp.ElectronAppMetadataReadError);
-      assert.strictEqual(error.property, "app-version");
-      assert.strictEqual(error.cause, cause);
+      assert.instanceOf(error, ElectronApp.ElectronAppMetadataReadError)
+      assert.strictEqual(error.property, 'app-version')
+      assert.strictEqual(error.cause, cause)
       assert.strictEqual(
         error.message,
         'Failed to read Electron app metadata property "app-version".',
-      );
+      )
     }).pipe(Effect.provide(ElectronApp.layer)),
-  );
+  )
 
-  it.effect("preserves Electron readiness failures", () =>
-    Effect.gen(function* () {
-      const cause = new Error("ready failed");
-      whenReadyMock.mockRejectedValueOnce(cause);
+  it.effect('preserves Electron readiness failures', () =>
+    Effect.gen(function* ()
+    {
+      const cause = new Error('ready failed')
+      whenReadyMock.mockRejectedValueOnce(cause)
 
-      const electronApp = yield* ElectronApp.ElectronApp;
-      const error = yield* electronApp.whenReady.pipe(Effect.flip);
+      const electronApp = yield* ElectronApp.ElectronApp
+      const error = yield* electronApp.whenReady.pipe(Effect.flip)
 
-      assert.instanceOf(error, ElectronApp.ElectronAppWhenReadyError);
-      assert.strictEqual(error.isPackaged, true);
-      assert.strictEqual(error.cause, cause);
+      assert.instanceOf(error, ElectronApp.ElectronAppWhenReadyError)
+      assert.strictEqual(error.isPackaged, true)
+      assert.strictEqual(error.cause, cause)
       assert.strictEqual(
         error.message,
-        "Failed to wait for the Electron app to become ready (packaged: true).",
-      );
+        'Failed to wait for the Electron app to become ready (packaged: true).',
+      )
     }).pipe(Effect.provide(ElectronApp.layer)),
-  );
+  )
 
-  it.effect("scopes app event listeners", () =>
-    Effect.gen(function* () {
-      const listener = vi.fn();
+  it.effect('scopes app event listeners', () =>
+    Effect.gen(function* ()
+    {
+      const listener = vi.fn()
 
       yield* Effect.scoped(
-        Effect.gen(function* () {
-          const electronApp = yield* ElectronApp.ElectronApp;
-          yield* electronApp.on("activate", listener);
+        Effect.gen(function* ()
+        {
+          const electronApp = yield* ElectronApp.ElectronApp
+          yield* electronApp.on('activate', listener)
         }),
-      );
+      )
 
-      assert.deepEqual(onMock.mock.calls, [["activate", listener]]);
-      assert.deepEqual(removeListenerMock.mock.calls, [["activate", listener]]);
+      assert.deepEqual(onMock.mock.calls, [['activate', listener]])
+      assert.deepEqual(removeListenerMock.mock.calls, [['activate', listener]])
     }).pipe(Effect.provide(ElectronApp.layer)),
-  );
-});
+  )
+})

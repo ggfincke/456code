@@ -1,134 +1,143 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   buildModelPickerSearchText,
   scoreModelPickerSearch,
-} from "../../../../../apps/web/src/components/chat/modelPickerSearch";
+} from '../../../../../apps/web/src/components/chat/modelPickerSearch'
 
-describe("buildModelPickerSearchText", () => {
-  it("builds provider-agnostic search text from generic fields", () => {
+describe('buildModelPickerSearchText', () =>
+{
+  it('builds provider-agnostic search text from generic fields', () =>
+  {
     expect(
       buildModelPickerSearchText({
-        driverKind: "opencode",
-        providerDisplayName: "opencode",
-        name: "Claude Opus 4.7",
-        subProvider: "GitHub Copilot",
+        driverKind: 'opencode',
+        providerDisplayName: 'opencode',
+        name: 'Claude Opus 4.7',
+        subProvider: 'GitHub Copilot',
       }),
-    ).toBe("claude opus 4.7 github copilot opencode opencode");
-  });
-});
+    ).toBe('claude opus 4.7 github copilot opencode opencode')
+  })
+})
 
-describe("scoreModelPickerSearch", () => {
-  it("matches typo-tolerant multi-token queries", () => {
+describe('scoreModelPickerSearch', () =>
+{
+  it('matches typo-tolerant multi-token queries', () =>
+  {
     expect(
       scoreModelPickerSearch(
         {
-          driverKind: "opencode",
-          providerDisplayName: "opencode",
-          name: "Claude Opus 4.7",
-          subProvider: "GitHub Copilot",
+          driverKind: 'opencode',
+          providerDisplayName: 'opencode',
+          name: 'Claude Opus 4.7',
+          subProvider: 'GitHub Copilot',
         },
-        "coplt op",
+        'coplt op',
       ),
-    ).not.toBeNull();
-  });
+    ).not.toBeNull()
+  })
 
-  it("rejects results when any query token does not match", () => {
+  it('rejects results when any query token does not match', () =>
+  {
     expect(
       scoreModelPickerSearch(
         {
-          driverKind: "codex",
-          providerDisplayName: "codex",
-          name: "GPT-5 Codex",
+          driverKind: 'codex',
+          providerDisplayName: 'codex',
+          name: 'GPT-5 Codex',
         },
-        "coplt op",
+        'coplt op',
       ),
-    ).toBeNull();
-  });
+    ).toBeNull()
+  })
 
-  it("ranks exact token matches ahead of fuzzier matches", () => {
+  it('ranks exact token matches ahead of fuzzier matches', () =>
+  {
     const exactScore = scoreModelPickerSearch(
       {
-        driverKind: "opencode",
-        providerDisplayName: "opencode",
-        name: "Claude Opus 4.7",
-        subProvider: "GitHub Copilot",
+        driverKind: 'opencode',
+        providerDisplayName: 'opencode',
+        name: 'Claude Opus 4.7',
+        subProvider: 'GitHub Copilot',
       },
-      "copilot opus",
-    );
+      'copilot opus',
+    )
     const fuzzyScore = scoreModelPickerSearch(
       {
-        driverKind: "opencode",
-        providerDisplayName: "opencode",
-        name: "Claude Opus 4.7",
-        subProvider: "GitHub Copilot",
+        driverKind: 'opencode',
+        providerDisplayName: 'opencode',
+        name: 'Claude Opus 4.7',
+        subProvider: 'GitHub Copilot',
       },
-      "coplt op",
-    );
+      'coplt op',
+    )
 
-    expect(exactScore).not.toBeNull();
-    expect(fuzzyScore).not.toBeNull();
-    expect(exactScore!).toBeLessThan(fuzzyScore!);
-  });
+    expect(exactScore).not.toBeNull()
+    expect(fuzzyScore).not.toBeNull()
+    expect(exactScore!).toBeLessThan(fuzzyScore!)
+  })
 
-  it("gives favorite models a strong enough ranking boost for partial queries", () => {
+  it('gives favorite models a strong enough ranking boost for partial queries', () =>
+  {
     const favoriteScore = scoreModelPickerSearch(
       {
-        driverKind: "claudeAgent",
-        providerDisplayName: "Claude",
-        name: "Claude Opus 4.7",
+        driverKind: 'claudeAgent',
+        providerDisplayName: 'Claude',
+        name: 'Claude Opus 4.7',
         isFavorite: true,
       },
-      "opu",
-    );
+      'opu',
+    )
     const nonFavoriteScore = scoreModelPickerSearch(
       {
-        driverKind: "cursor",
-        providerDisplayName: "Cursor",
-        name: "Opus 4.5",
+        driverKind: 'cursor',
+        providerDisplayName: 'Cursor',
+        name: 'Opus 4.5',
       },
-      "opu",
-    );
+      'opu',
+    )
 
-    expect(favoriteScore).not.toBeNull();
-    expect(nonFavoriteScore).not.toBeNull();
-    expect(favoriteScore!).toBeLessThan(nonFavoriteScore!);
-  });
+    expect(favoriteScore).not.toBeNull()
+    expect(nonFavoriteScore).not.toBeNull()
+    expect(favoriteScore!).toBeLessThan(nonFavoriteScore!)
+  })
 
-  it("does not let the favorite boost outrank clearly better textual matches", () => {
+  it('does not let the favorite boost outrank clearly better textual matches', () =>
+  {
     const favoriteScore = scoreModelPickerSearch(
       {
-        driverKind: "claudeAgent",
-        providerDisplayName: "Claude",
-        name: "Claude Opus 4.7",
+        driverKind: 'claudeAgent',
+        providerDisplayName: 'Claude',
+        name: 'Claude Opus 4.7',
         isFavorite: true,
       },
-      "opus 4.7",
-    );
+      'opus 4.7',
+    )
     const nonFavoriteExactScore = scoreModelPickerSearch(
       {
-        driverKind: "cursor",
-        providerDisplayName: "Cursor",
-        name: "Opus 4.7",
+        driverKind: 'cursor',
+        providerDisplayName: 'Cursor',
+        name: 'Opus 4.7',
       },
-      "opus 4.7",
-    );
+      'opus 4.7',
+    )
 
-    expect(favoriteScore).not.toBeNull();
-    expect(nonFavoriteExactScore).not.toBeNull();
-    expect(nonFavoriteExactScore!).toBeLessThan(favoriteScore!);
-  });
+    expect(favoriteScore).not.toBeNull()
+    expect(nonFavoriteExactScore).not.toBeNull()
+    expect(nonFavoriteExactScore!).toBeLessThan(favoriteScore!)
+  })
 
-  it("matches a custom instance's display name against its models", () => {
+  it("matches a custom instance's display name against its models", () =>
+  {
     expect(
       scoreModelPickerSearch(
         {
-          driverKind: "codex",
-          providerDisplayName: "Codex Personal",
-          name: "GPT-5 Codex",
+          driverKind: 'codex',
+          providerDisplayName: 'Codex Personal',
+          name: 'GPT-5 Codex',
         },
-        "personal",
+        'personal',
       ),
-    ).not.toBeNull();
-  });
-});
+    ).not.toBeNull()
+  })
+})

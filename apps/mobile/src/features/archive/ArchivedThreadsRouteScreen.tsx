@@ -1,28 +1,29 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import * as Arr from "effect/Array";
-import * as Order from "effect/Order";
-import { useFocusEffect } from "@react-navigation/native";
-import { useCallback, useMemo, useState } from "react";
+import type { EnvironmentId } from '@t3tools/contracts'
+import * as Arr from 'effect/Array'
+import * as Order from 'effect/Order'
+import { useFocusEffect } from '@react-navigation/native'
+import { useCallback, useMemo, useState } from 'react'
 
-import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
-import { useClerkSettingsSheetDetent } from "../cloud/ClerkSettingsSheetDetent";
-import { useArchivedThreadListActions } from "../home/useThreadListActions";
+import { useSavedRemoteConnections } from '../../state/use-remote-environment-registry'
+import { useClerkSettingsSheetDetent } from '../cloud/ClerkSettingsSheetDetent'
+import { useArchivedThreadListActions } from '../home/useThreadListActions'
 import {
   ArchivedThreadsScreen,
   type ArchivedThreadsHeaderEnvironment,
-} from "./ArchivedThreadsScreen";
-import { buildArchivedThreadGroups, type ArchivedThreadSortOrder } from "./archivedThreadList";
+} from './ArchivedThreadsScreen'
+import { buildArchivedThreadGroups, type ArchivedThreadSortOrder } from './archivedThreadList'
 import {
   refreshArchivedThreadsForEnvironment,
   useArchivedThreadSnapshots,
-} from "./useArchivedThreadSnapshots";
+} from './useArchivedThreadSnapshots'
 
-export function ArchivedThreadsRouteScreen() {
-  const { expand } = useClerkSettingsSheetDetent();
-  const { savedConnectionsById } = useSavedRemoteConnections();
-  const [searchQuery, setSearchQuery] = useState("");
-  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null);
-  const [sortOrder, setSortOrder] = useState<ArchivedThreadSortOrder>("newest");
+export function ArchivedThreadsRouteScreen()
+{
+  const { expand } = useClerkSettingsSheetDetent()
+  const { savedConnectionsById } = useSavedRemoteConnections()
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedEnvironmentId, setSelectedEnvironmentId] = useState<EnvironmentId | null>(null)
+  const [sortOrder, setSortOrder] = useState<ArchivedThreadSortOrder>('newest')
   const environments = useMemo<ReadonlyArray<ArchivedThreadsHeaderEnvironment>>(
     () =>
       Arr.sort(
@@ -35,19 +36,19 @@ export function ArchivedThreadsRouteScreen() {
         ),
       ),
     [savedConnectionsById],
-  );
+  )
   const environmentIds = useMemo(
     () => environments.map((environment) => environment.environmentId),
     [environments],
-  );
+  )
   const environmentLabels = useMemo(
     () =>
       Object.fromEntries(
         environments.map((environment) => [environment.environmentId, environment.label]),
       ),
     [environments],
-  );
-  const { error, isLoading, refresh, snapshots } = useArchivedThreadSnapshots(environmentIds);
+  )
+  const { error, isLoading, refresh, snapshots } = useArchivedThreadSnapshots(environmentIds)
   const groups = useMemo(
     () =>
       buildArchivedThreadGroups({
@@ -58,22 +59,24 @@ export function ArchivedThreadsRouteScreen() {
         sortOrder,
       }),
     [environmentLabels, searchQuery, selectedEnvironmentId, snapshots, sortOrder],
-  );
+  )
   const refreshChangedEnvironment = useCallback(
-    (thread: { readonly environmentId: EnvironmentId }) => {
-      refreshArchivedThreadsForEnvironment(thread.environmentId);
+    (thread: { readonly environmentId: EnvironmentId }) =>
+    {
+      refreshArchivedThreadsForEnvironment(thread.environmentId)
     },
     [],
-  );
+  )
   const { unarchiveThread, confirmDeleteThread } =
-    useArchivedThreadListActions(refreshChangedEnvironment);
+    useArchivedThreadListActions(refreshChangedEnvironment)
 
   useFocusEffect(
-    useCallback(() => {
-      expand();
-      refresh();
+    useCallback(() =>
+    {
+      expand()
+      refresh()
     }, [expand, refresh]),
-  );
+  )
 
   return (
     <ArchivedThreadsScreen
@@ -91,5 +94,5 @@ export function ArchivedThreadsRouteScreen() {
       selectedEnvironmentId={selectedEnvironmentId}
       sortOrder={sortOrder}
     />
-  );
+  )
 }

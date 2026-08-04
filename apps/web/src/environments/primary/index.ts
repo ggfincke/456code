@@ -6,12 +6,12 @@ export {
   writePrimaryEnvironmentDescriptor,
   __resetPrimaryEnvironmentBootstrapForTests,
   __resetPrimaryEnvironmentDescriptorBootstrapForTests,
-} from "./context";
+} from './context'
 
 export {
   resolveInitialPrimaryEnvironmentDescriptor as ensurePrimaryEnvironmentReady,
   writePrimaryEnvironmentDescriptor as updatePrimaryEnvironmentDescriptor,
-} from "./context";
+} from './context'
 
 export {
   createServerPairingCredential,
@@ -34,11 +34,11 @@ export {
   type ServerClientSessionRecord,
   type ServerPairingLinkRecord,
   __resetServerAuthBootstrapForTests,
-} from "./auth";
+} from './auth'
 
-export { refreshPrimarySessionState, usePrimarySessionState } from "./sessionState";
+export { refreshPrimarySessionState, usePrimarySessionState } from './sessionState'
 
-export { PrimaryEnvironmentHttpClient } from "./httpClient";
+export { PrimaryEnvironmentHttpClient } from './httpClient'
 
 export {
   DesktopEnvironmentBootstrapIncompleteError,
@@ -51,4 +51,4 @@ export {
   resolvePrimaryEnvironmentHttpUrl,
   isLoopbackHostname,
   type PrimaryEnvironmentTarget,
-} from "./target";
+} from './target'

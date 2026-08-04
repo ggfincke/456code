@@ -1,48 +1,50 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   isPickedElementPayload,
   isPreviewAnnotationPayload,
-} from "../../../../apps/desktop/src/preview/PickedElementPayload.ts";
+} from '../../../../apps/desktop/src/preview/PickedElementPayload.ts'
 
-function validPayload(overrides?: Record<string, unknown>): Record<string, unknown> {
+function validPayload(overrides?: Record<string, unknown>): Record<string, unknown>
+{
   return {
-    pageUrl: "https://example.com/",
-    pageTitle: "Example",
-    tagName: "button",
-    selector: "button.submit",
-    htmlPreview: "<button>Save</button>",
-    componentName: "SubmitButton",
+    pageUrl: 'https://example.com/',
+    pageTitle: 'Example',
+    tagName: 'button',
+    selector: 'button.submit',
+    htmlPreview: '<button>Save</button>',
+    componentName: 'SubmitButton',
     source: {
-      functionName: "SubmitButton",
-      fileName: "/repo/src/Button.tsx",
+      functionName: 'SubmitButton',
+      fileName: '/repo/src/Button.tsx',
       lineNumber: 12,
       columnNumber: 5,
     },
     stack: [
       {
-        functionName: "SubmitButton",
-        fileName: "/repo/src/Button.tsx",
+        functionName: 'SubmitButton',
+        fileName: '/repo/src/Button.tsx',
         lineNumber: 12,
         columnNumber: 5,
       },
     ],
-    styles: ".submit { color: white; }",
-    pickedAt: "2026-05-03T18:00:00.000Z",
+    styles: '.submit { color: white; }',
+    pickedAt: '2026-05-03T18:00:00.000Z',
     ...overrides,
-  };
+  }
 }
 
-describe("isPickedElementPayload", () => {
+describe('isPickedElementPayload', () =>
+{
   it.each([
-    ["complete well-typed payload", validPayload()],
+    ['complete well-typed payload', validPayload()],
     [
-      "nullable string fields when null",
+      'nullable string fields when null',
       validPayload({ pageTitle: null, selector: null, componentName: null, source: null }),
     ],
-    ["empty stack array", validPayload({ stack: [] })],
+    ['empty stack array', validPayload({ stack: [] })],
     [
-      "stack frames with null fields",
+      'stack frames with null fields',
       validPayload({
         stack: [
           {
@@ -54,33 +56,37 @@ describe("isPickedElementPayload", () => {
         ],
       }),
     ],
-  ])("accepts %s", (_label, value) => {
-    expect(isPickedElementPayload(value)).toBe(true);
-  });
+  ])('accepts %s', (_label, value) =>
+  {
+    expect(isPickedElementPayload(value)).toBe(true)
+  })
 
-  it("rejects null and primitive inputs", () => {
-    expect(isPickedElementPayload(null)).toBe(false);
-    expect(isPickedElementPayload(undefined)).toBe(false);
-    expect(isPickedElementPayload("string")).toBe(false);
-    expect(isPickedElementPayload(42)).toBe(false);
-    expect(isPickedElementPayload([])).toBe(false);
-  });
+  it('rejects null and primitive inputs', () =>
+  {
+    expect(isPickedElementPayload(null)).toBe(false)
+    expect(isPickedElementPayload(undefined)).toBe(false)
+    expect(isPickedElementPayload('string')).toBe(false)
+    expect(isPickedElementPayload(42)).toBe(false)
+    expect(isPickedElementPayload([])).toBe(false)
+  })
 
   it.each<[string, Record<string, unknown>]>([
-    ["missing pageUrl", validPayload({ pageUrl: undefined })],
-    ["wrong-type pageUrl", validPayload({ pageUrl: 123 })],
-    ["missing tagName", validPayload({ tagName: undefined })],
-    ["missing htmlPreview", validPayload({ htmlPreview: undefined })],
-    ["missing styles", validPayload({ styles: undefined })],
-    ["missing pickedAt", validPayload({ pickedAt: undefined })],
-    ["wrong-type pageTitle", validPayload({ pageTitle: 99 })],
-    ["wrong-type selector", validPayload({ selector: 99 })],
-    ["wrong-type componentName", validPayload({ componentName: 99 })],
-  ])("rejects payloads with %s", (_label, value) => {
-    expect(isPickedElementPayload(value)).toBe(false);
-  });
+    ['missing pageUrl', validPayload({ pageUrl: undefined })],
+    ['wrong-type pageUrl', validPayload({ pageUrl: 123 })],
+    ['missing tagName', validPayload({ tagName: undefined })],
+    ['missing htmlPreview', validPayload({ htmlPreview: undefined })],
+    ['missing styles', validPayload({ styles: undefined })],
+    ['missing pickedAt', validPayload({ pickedAt: undefined })],
+    ['wrong-type pageTitle', validPayload({ pageTitle: 99 })],
+    ['wrong-type selector', validPayload({ selector: 99 })],
+    ['wrong-type componentName', validPayload({ componentName: 99 })],
+  ])('rejects payloads with %s', (_label, value) =>
+  {
+    expect(isPickedElementPayload(value)).toBe(false)
+  })
 
-  it("rejects malformed source frames", () => {
+  it('rejects malformed source frames', () =>
+  {
     expect(
       isPickedElementPayload(
         validPayload({
@@ -92,10 +98,11 @@ describe("isPickedElementPayload", () => {
           },
         }),
       ),
-    ).toBe(false);
-  });
+    ).toBe(false)
+  })
 
-  it("rejects non-finite numeric line/column numbers", () => {
+  it('rejects non-finite numeric line/column numbers', () =>
+  {
     expect(
       isPickedElementPayload(
         validPayload({
@@ -107,7 +114,7 @@ describe("isPickedElementPayload", () => {
           },
         }),
       ),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       isPickedElementPayload(
         validPayload({
@@ -119,33 +126,35 @@ describe("isPickedElementPayload", () => {
           },
         }),
       ),
-    ).toBe(false);
-  });
+    ).toBe(false)
+  })
 
-  it("rejects malformed stack arrays", () => {
-    expect(isPickedElementPayload(validPayload({ stack: "not-an-array" }))).toBe(false);
-    expect(isPickedElementPayload(validPayload({ stack: [{ bogus: true }] }))).toBe(false);
-  });
-});
+  it('rejects malformed stack arrays', () =>
+  {
+    expect(isPickedElementPayload(validPayload({ stack: 'not-an-array' }))).toBe(false)
+    expect(isPickedElementPayload(validPayload({ stack: [{ bogus: true }] }))).toBe(false)
+  })
+})
 
-function validAnnotation(overrides?: Record<string, unknown>): Record<string, unknown> {
+function validAnnotation(overrides?: Record<string, unknown>): Record<string, unknown>
+{
   return {
-    id: "annotation_1",
-    pageUrl: "https://example.com/",
-    pageTitle: "Example",
-    comment: "Make this clearer",
+    id: 'annotation_1',
+    pageUrl: 'https://example.com/',
+    pageTitle: 'Example',
+    comment: 'Make this clearer',
     elements: [
       {
-        id: "element_1",
+        id: 'element_1',
         element: validPayload(),
         rect: { x: 10, y: 20, width: 100, height: 40 },
       },
     ],
-    regions: [{ id: "region_1", rect: { x: 5, y: 6, width: 20, height: 30 } }],
+    regions: [{ id: 'region_1', rect: { x: 5, y: 6, width: 20, height: 30 } }],
     strokes: [
       {
-        id: "stroke_1",
-        color: "#7c3aed",
+        id: 'stroke_1',
+        color: '#7c3aed',
         width: 4,
         points: [
           { x: 10, y: 10 },
@@ -156,37 +165,40 @@ function validAnnotation(overrides?: Record<string, unknown>): Record<string, un
     ],
     styleChanges: [
       {
-        targetId: "element_1",
-        selector: "button.submit",
-        property: "opacity",
-        previousValue: "1",
-        value: "0.5",
+        targetId: 'element_1',
+        selector: 'button.submit',
+        property: 'opacity',
+        previousValue: '1',
+        value: '0.5',
       },
     ],
     screenshot: null,
-    createdAt: "2026-06-11T00:00:00.000Z",
+    createdAt: '2026-06-11T00:00:00.000Z',
     ...overrides,
-  };
+  }
 }
 
-describe("isPreviewAnnotationPayload", () => {
-  it("accepts structured drafts and rejects guest screenshots", () => {
-    expect(isPreviewAnnotationPayload(validAnnotation())).toBe(true);
-    expect(isPreviewAnnotationPayload(validAnnotation({ screenshot: { dataUrl: "bad" } }))).toBe(
+describe('isPreviewAnnotationPayload', () =>
+{
+  it('accepts structured drafts and rejects guest screenshots', () =>
+  {
+    expect(isPreviewAnnotationPayload(validAnnotation())).toBe(true)
+    expect(isPreviewAnnotationPayload(validAnnotation({ screenshot: { dataUrl: 'bad' } }))).toBe(
       false,
-    );
-  });
+    )
+  })
 
-  it("rejects malformed geometry and nested element payloads", () => {
+  it('rejects malformed geometry and nested element payloads', () =>
+  {
     expect(
       isPreviewAnnotationPayload(
-        validAnnotation({ regions: [{ id: "region_1", rect: { x: 0, y: 0, width: "wide" } }] }),
+        validAnnotation({ regions: [{ id: 'region_1', rect: { x: 0, y: 0, width: 'wide' } }] }),
       ),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       isPreviewAnnotationPayload(
-        validAnnotation({ elements: [{ id: "element_1", element: {}, rect: {} }] }),
+        validAnnotation({ elements: [{ id: 'element_1', element: {}, rect: {} }] }),
       ),
-    ).toBe(false);
-  });
-});
+    ).toBe(false)
+  })
+})

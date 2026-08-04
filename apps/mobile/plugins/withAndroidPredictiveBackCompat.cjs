@@ -1,4 +1,4 @@
-const { withMainActivity } = require("expo/config-plugins");
+const { withMainActivity } = require('expo/config-plugins')
 
 // predictiveBackGestureEnabled writes android:enableOnBackInvokedCallback="true",
 // which retires the legacy KEYCODE_BACK/onBackPressed() delivery on Android 13+.
@@ -22,12 +22,12 @@ const CALLBACK_PROPERTY = `
       isEnabled = true
     }
   }
-`;
+`
 
 const CALLBACK_REGISTRATION = `
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && Build.VERSION.SDK_INT < Build.VERSION_CODES.BAKLAVA) {
       onBackPressedDispatcher.addCallback(this, predictiveBackCompatCallback)
-    }`;
+    }`
 
 // Wraps the template's invokeDefaultOnBackPressed: the default action ends in
 // ComponentActivity.onBackPressed(), which re-enters the dispatcher — with the
@@ -42,63 +42,71 @@ const INVOKE_DEFAULT_WRAPPER = `override fun invokeDefaultOnBackPressed() {
     }
   }
 
-  private fun invokeDefaultOnBackPressedLegacy() {`;
+  private fun invokeDefaultOnBackPressedLegacy() {`
 
-function insertAfter(contents, anchor, insertion, description) {
-  const index = contents.indexOf(anchor);
-  if (index === -1) {
+function insertAfter(contents, anchor, insertion, description)
+{
+  const index = contents.indexOf(anchor)
+  if (index === -1)
+  {
     throw new Error(
       `withAndroidPredictiveBackCompat: could not find ${description} in MainActivity — the Expo template changed; update the plugin anchors.`,
-    );
+    )
   }
-  const end = index + anchor.length;
-  return contents.slice(0, end) + insertion + contents.slice(end);
+  const end = index + anchor.length
+  return contents.slice(0, end) + insertion + contents.slice(end)
 }
 
-module.exports = function withAndroidPredictiveBackCompat(config) {
-  if (config.android?.predictiveBackGestureEnabled !== true) {
-    return config;
+module.exports = function withAndroidPredictiveBackCompat(config)
+{
+  if (config.android?.predictiveBackGestureEnabled !== true)
+  {
+    return config
   }
 
-  return withMainActivity(config, (nextConfig) => {
-    let contents = nextConfig.modResults.contents;
-    if (nextConfig.modResults.language !== "kt") {
-      throw new Error("withAndroidPredictiveBackCompat: MainActivity must be Kotlin.");
+  return withMainActivity(config, (nextConfig) =>
+  {
+    let contents = nextConfig.modResults.contents
+    if (nextConfig.modResults.language !== 'kt')
+    {
+      throw new Error('withAndroidPredictiveBackCompat: MainActivity must be Kotlin.')
     }
-    if (contents.includes("predictiveBackCompatCallback")) {
-      return nextConfig;
+    if (contents.includes('predictiveBackCompatCallback'))
+    {
+      return nextConfig
     }
 
     contents = insertAfter(
       contents,
-      "import android.os.Bundle",
-      "\nimport androidx.activity.OnBackPressedCallback",
-      "the android.os.Bundle import",
-    );
+      'import android.os.Bundle',
+      '\nimport androidx.activity.OnBackPressedCallback',
+      'the android.os.Bundle import',
+    )
     contents = insertAfter(
       contents,
-      "class MainActivity : ReactActivity() {",
+      'class MainActivity : ReactActivity() {',
       CALLBACK_PROPERTY,
-      "the MainActivity class declaration",
-    );
+      'the MainActivity class declaration',
+    )
     contents = insertAfter(
       contents,
-      "super.onCreate(null)",
+      'super.onCreate(null)',
       CALLBACK_REGISTRATION,
-      "the super.onCreate call",
-    );
+      'the super.onCreate call',
+    )
 
-    if (!contents.includes("override fun invokeDefaultOnBackPressed() {")) {
+    if (!contents.includes('override fun invokeDefaultOnBackPressed() {'))
+    {
       throw new Error(
-        "withAndroidPredictiveBackCompat: could not find invokeDefaultOnBackPressed in MainActivity — the Expo template changed; update the plugin anchors.",
-      );
+        'withAndroidPredictiveBackCompat: could not find invokeDefaultOnBackPressed in MainActivity — the Expo template changed; update the plugin anchors.',
+      )
     }
     contents = contents.replace(
-      "override fun invokeDefaultOnBackPressed() {",
+      'override fun invokeDefaultOnBackPressed() {',
       INVOKE_DEFAULT_WRAPPER,
-    );
+    )
 
-    nextConfig.modResults.contents = contents;
-    return nextConfig;
-  });
-};
+    nextConfig.modResults.contents = contents
+    return nextConfig
+  })
+}

@@ -14,13 +14,13 @@ import {
   OrchestrationCommandReceiptStatus,
   ProjectId,
   ThreadId,
-} from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+} from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
 
-import type { OrchestrationCommandReceiptRepositoryError } from "../Errors.ts";
+import type { OrchestrationCommandReceiptRepositoryError } from '../Errors.ts'
 
 export const OrchestrationCommandReceipt = Schema.Struct({
   commandId: CommandId,
@@ -30,18 +30,19 @@ export const OrchestrationCommandReceipt = Schema.Struct({
   resultSequence: NonNegativeInt,
   status: OrchestrationCommandReceiptStatus,
   error: Schema.NullOr(Schema.String),
-});
-export type OrchestrationCommandReceipt = typeof OrchestrationCommandReceipt.Type;
+})
+export type OrchestrationCommandReceipt = typeof OrchestrationCommandReceipt.Type
 
 export const GetByCommandIdInput = Schema.Struct({
   commandId: CommandId,
-});
-export type GetByCommandIdInput = typeof GetByCommandIdInput.Type;
+})
+export type GetByCommandIdInput = typeof GetByCommandIdInput.Type
 
 /**
  * OrchestrationCommandReceiptRepositoryShape - Service API for command receipts.
  */
-export interface OrchestrationCommandReceiptRepositoryShape {
+export interface OrchestrationCommandReceiptRepositoryShape
+{
   /**
    * Insert or replace a command receipt row.
    *
@@ -49,7 +50,7 @@ export interface OrchestrationCommandReceiptRepositoryShape {
    */
   readonly upsert: (
     receipt: OrchestrationCommandReceipt,
-  ) => Effect.Effect<void, OrchestrationCommandReceiptRepositoryError>;
+  ) => Effect.Effect<void, OrchestrationCommandReceiptRepositoryError>
 
   /**
    * Read a command receipt by command id.
@@ -59,7 +60,7 @@ export interface OrchestrationCommandReceiptRepositoryShape {
   ) => Effect.Effect<
     Option.Option<OrchestrationCommandReceipt>,
     OrchestrationCommandReceiptRepositoryError
-  >;
+  >
 }
 
 /**
@@ -69,5 +70,6 @@ export class OrchestrationCommandReceiptRepository extends Context.Service<
   OrchestrationCommandReceiptRepository,
   OrchestrationCommandReceiptRepositoryShape
 >()(
-  "456code/persistence/Services/OrchestrationCommandReceipts/OrchestrationCommandReceiptRepository",
-) {}
+  '456code/persistence/Services/OrchestrationCommandReceipts/OrchestrationCommandReceiptRepository',
+)
+{}

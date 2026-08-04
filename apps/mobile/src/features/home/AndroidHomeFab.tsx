@@ -1,31 +1,34 @@
-import type { ReactNode } from "react";
-import { Platform, Pressable, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { ReactNode } from 'react'
+import { Platform, Pressable, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { SymbolView } from "../../components/AppSymbol";
-import { useThemeColor } from "../../lib/useThemeColor";
+import { SymbolView } from '../../components/AppSymbol'
+import { useThemeColor } from '../../lib/useThemeColor'
 
 /**
  * Android-only wrapper that overlays a bottom-right new-task FAB on the home
  * screen. Other platforms render children unchanged.
  */
 export function AndroidHomeFabLayout(props: {
-  readonly onStartNewTask: () => void;
-  readonly children: ReactNode;
-}) {
-  if (Platform.OS !== "android") {
-    return <>{props.children}</>;
+  readonly onStartNewTask: () => void
+  readonly children: ReactNode
+})
+{
+  if (Platform.OS !== 'android')
+  {
+    return <>{props.children}</>
   }
 
-  return <AndroidHomeFab {...props} />;
+  return <AndroidHomeFab {...props} />
 }
 
 function AndroidHomeFab(props: {
-  readonly onStartNewTask: () => void;
-  readonly children: ReactNode;
-}) {
-  const insets = useSafeAreaInsets();
-  const primaryForegroundColor = useThemeColor("--color-primary-foreground");
+  readonly onStartNewTask: () => void
+  readonly children: ReactNode
+})
+{
+  const insets = useSafeAreaInsets()
+  const primaryForegroundColor = useThemeColor('--color-primary-foreground')
 
   return (
     <View className="flex-1">
@@ -47,5 +50,5 @@ function AndroidHomeFab(props: {
         />
       </Pressable>
     </View>
-  );
+  )
 }

@@ -1,43 +1,44 @@
 // packages/client-runtime/src/state/sourceControl.ts
 // coordinates source control publication state
 
-import { WS_METHODS } from "@t3tools/contracts";
-import { Atom } from "effect/unstable/reactivity";
+import { WS_METHODS } from '@t3tools/contracts'
+import { Atom } from 'effect/unstable/reactivity'
 
 import {
   createAtomCommandScheduler,
   createEnvironmentRpcCommand,
   createEnvironmentRpcQueryAtomFamily,
-} from "./runtime.ts";
-import type { EnvironmentRegistry } from "../connection/registry.ts";
-import { EnvironmentCacheStore } from "../platform/persistence.ts";
-import { vcsCommandConcurrency, vcsCommandScheduler } from "./vcsCommandScheduler.ts";
-import { invalidateCachedVcsRefs } from "./vcsRefInvalidation.ts";
+} from './runtime.ts'
+import type { EnvironmentRegistry } from '../connection/registry.ts'
+import { EnvironmentCacheStore } from '../platform/persistence.ts'
+import { vcsCommandConcurrency, vcsCommandScheduler } from './vcsCommandScheduler.ts'
+import { invalidateCachedVcsRefs } from './vcsRefInvalidation.ts'
 
 export function createSourceControlEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | EnvironmentCacheStore | R, E>,
-) {
-  const commandScheduler = createAtomCommandScheduler();
+)
+{
+  const commandScheduler = createAtomCommandScheduler()
   return {
     discovery: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:server:source-control-discovery",
+      label: 'environment-data:server:source-control-discovery',
       tag: WS_METHODS.serverDiscoverSourceControl,
     }),
     repository: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:source-control:repository",
+      label: 'environment-data:source-control:repository',
       tag: WS_METHODS.sourceControlLookupRepository,
     }),
     cloneRepository: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:source-control:clone-repository",
+      label: 'environment-data:source-control:clone-repository',
       tag: WS_METHODS.sourceControlCloneRepository,
       scheduler: commandScheduler,
       concurrency: {
-        mode: "serial",
+        mode: 'serial',
         key: ({ environmentId }) => environmentId,
       },
     }),
     publishRepository: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:source-control:publish-repository",
+      label: 'environment-data:source-control:publish-repository',
       tag: WS_METHODS.sourceControlPublishRepository,
       scheduler: vcsCommandScheduler,
       concurrency: vcsCommandConcurrency,
@@ -47,5 +48,5 @@ export function createSourceControlEnvironmentAtoms<R, E>(
           cwd: target.input.cwd,
         }),
     }),
-  };
+  }
 }

@@ -1,118 +1,126 @@
-import { describe, expect, it } from "vite-plus/test";
-import { ProviderDriverKind } from "@t3tools/contracts";
+import { describe, expect, it } from 'vite-plus/test'
+import { ProviderDriverKind } from '@t3tools/contracts'
 
-import { DRIVER_OPTION_BY_VALUE } from "../../../../../apps/web/src/components/settings/providerDriverMeta";
+import { DRIVER_OPTION_BY_VALUE } from '../../../../../apps/web/src/components/settings/providerDriverMeta'
 import {
   deriveProviderSettingsFields,
   nextProviderConfigWithFieldValue,
-} from "../../../../../apps/web/src/components/settings/ProviderSettingsForm";
+} from '../../../../../apps/web/src/components/settings/ProviderSettingsForm'
 
-describe("ProviderSettingsForm helpers", () => {
-  it("derives visible provider config fields from the client definition schema", () => {
-    const codex = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("codex")];
+describe('ProviderSettingsForm helpers', () =>
+{
+  it('derives visible provider config fields from the client definition schema', () =>
+  {
+    const codex = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make('codex')]
 
-    expect(codex).toBeDefined();
+    expect(codex).toBeDefined()
     expect(deriveProviderSettingsFields(codex!).map((field) => field.key)).toEqual([
-      "binaryPath",
-      "homePath",
-      "shadowHomePath",
-      "launchArgs",
-    ]);
-  });
+      'binaryPath',
+      'homePath',
+      'shadowHomePath',
+      'launchArgs',
+    ])
+  })
 
-  it("sources labels and descriptions from schema annotations", () => {
-    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
-    expect(opencode).toBeDefined();
+  it('sources labels and descriptions from schema annotations', () =>
+  {
+    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make('opencode')]
+    expect(opencode).toBeDefined()
 
     const serverPassword = deriveProviderSettingsFields(opencode!).find(
-      (field) => field.key === "serverPassword",
-    );
+      (field) => field.key === 'serverPassword',
+    )
 
     expect(serverPassword).toMatchObject({
-      label: "Server password",
-      description: "Stored in plain text on disk.",
-      control: "password",
-    });
-  });
+      label: 'Server password',
+      description: 'Stored in plain text on disk.',
+      control: 'password',
+    })
+  })
 
-  it("preserves unknown config keys while omitting empty configurable fields", () => {
-    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make("opencode")];
-    expect(opencode).toBeDefined();
+  it('preserves unknown config keys while omitting empty configurable fields', () =>
+  {
+    const opencode = DRIVER_OPTION_BY_VALUE[ProviderDriverKind.make('opencode')]
+    expect(opencode).toBeDefined()
 
     const serverUrl = deriveProviderSettingsFields(opencode!).find(
-      (field) => field.key === "serverUrl",
-    );
-    expect(serverUrl).toBeDefined();
+      (field) => field.key === 'serverUrl',
+    )
+    expect(serverUrl).toBeDefined()
 
     const next = nextProviderConfigWithFieldValue(
-      { forkOwned: 1, serverUrl: "http://127.0.0.1:4096" },
+      { forkOwned: 1, serverUrl: 'http://127.0.0.1:4096' },
       serverUrl!,
-      "",
-    );
+      '',
+    )
 
-    expect(next).toEqual({ forkOwned: 1 });
-  });
+    expect(next).toEqual({ forkOwned: 1 })
+  })
 
-  it("omits false boolean fields when clearWhenEmpty is omit", () => {
+  it('omits false boolean fields when clearWhenEmpty is omit', () =>
+  {
     const next = nextProviderConfigWithFieldValue(
       { forkOwned: 1, experimental: true },
       {
-        key: "experimental",
-        control: "switch",
-        label: "Experimental",
-        clearWhenEmpty: "omit",
+        key: 'experimental',
+        control: 'switch',
+        label: 'Experimental',
+        clearWhenEmpty: 'omit',
         defaultBooleanValue: false,
       },
       false,
-    );
+    )
 
-    expect(next).toEqual({ forkOwned: 1 });
-  });
+    expect(next).toEqual({ forkOwned: 1 })
+  })
 
-  it("omits true boolean fields when true is the default", () => {
+  it('omits true boolean fields when true is the default', () =>
+  {
     const next = nextProviderConfigWithFieldValue(
       { forkOwned: 1, experimental: false },
       {
-        key: "experimental",
-        control: "switch",
-        label: "Experimental",
-        clearWhenEmpty: "omit",
+        key: 'experimental',
+        control: 'switch',
+        label: 'Experimental',
+        clearWhenEmpty: 'omit',
         defaultBooleanValue: true,
       },
       true,
-    );
+    )
 
-    expect(next).toEqual({ forkOwned: 1 });
-  });
+    expect(next).toEqual({ forkOwned: 1 })
+  })
 
-  it("stores false boolean fields when true is the default", () => {
+  it('stores false boolean fields when true is the default', () =>
+  {
     const next = nextProviderConfigWithFieldValue(
       undefined,
       {
-        key: "experimental",
-        control: "switch",
-        label: "Experimental",
-        clearWhenEmpty: "omit",
+        key: 'experimental',
+        control: 'switch',
+        label: 'Experimental',
+        clearWhenEmpty: 'omit',
         defaultBooleanValue: true,
       },
       false,
-    );
+    )
 
-    expect(next).toEqual({ experimental: false });
-  });
+    expect(next).toEqual({ experimental: false })
+  })
 
-  it("preserves false boolean fields when clearWhenEmpty is persist", () => {
+  it('preserves false boolean fields when clearWhenEmpty is persist', () =>
+  {
     const next = nextProviderConfigWithFieldValue(
       undefined,
       {
-        key: "experimental",
-        control: "switch",
-        label: "Experimental",
-        clearWhenEmpty: "persist",
+        key: 'experimental',
+        control: 'switch',
+        label: 'Experimental',
+        clearWhenEmpty: 'persist',
       },
       false,
-    );
+    )
 
-    expect(next).toEqual({ experimental: false });
-  });
-});
+    expect(next).toEqual({ experimental: false })
+  })
+})

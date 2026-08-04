@@ -1,56 +1,59 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import { assert, describe, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 
-import type * as Electron from "electron";
+import type * as Electron from 'electron'
 
-import * as ElectronApp from "../../../../apps/desktop/src/electron/ElectronApp.ts";
-import * as DesktopAppIdentity from "../../../../apps/desktop/src/app/DesktopAppIdentity.ts";
-import * as DesktopAssets from "../../../../apps/desktop/src/app/DesktopAssets.ts";
-import * as DesktopConfig from "../../../../apps/desktop/src/app/DesktopConfig.ts";
-import * as DesktopEnvironment from "../../../../apps/desktop/src/app/DesktopEnvironment.ts";
+import * as ElectronApp from '../../../../apps/desktop/src/electron/ElectronApp.ts'
+import * as DesktopAppIdentity from '../../../../apps/desktop/src/app/DesktopAppIdentity.ts'
+import * as DesktopAssets from '../../../../apps/desktop/src/app/DesktopAssets.ts'
+import * as DesktopConfig from '../../../../apps/desktop/src/app/DesktopConfig.ts'
+import * as DesktopEnvironment from '../../../../apps/desktop/src/app/DesktopEnvironment.ts'
 
 const defaultEnvironmentInput = {
-  dirname: "/repo/apps/desktop/dist-electron",
-  homeDirectory: "/Users/alice",
-  platform: "darwin",
-  processArch: "arm64",
-  appVersion: "1.2.3",
-  appPath: "/Applications/456code.app/Contents/Resources/app.asar",
+  dirname: '/repo/apps/desktop/dist-electron',
+  homeDirectory: '/Users/alice',
+  platform: 'darwin',
+  processArch: 'arm64',
+  appVersion: '1.2.3',
+  appPath: '/Applications/456code.app/Contents/Resources/app.asar',
   isPackaged: true,
-  resourcesPath: "/Applications/456code.app/Contents/Resources",
+  resourcesPath: '/Applications/456code.app/Contents/Resources',
   runningUnderArm64Translation: false,
-} satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
+} satisfies DesktopEnvironment.MakeDesktopEnvironmentInput
 
 type TestEnvironmentInput = Partial<DesktopEnvironment.MakeDesktopEnvironmentInput> & {
-  readonly env?: Record<string, string | undefined>;
-};
+  readonly env?: Record<string, string | undefined>
+}
 
-interface ElectronAppCalls {
-  readonly setAboutPanelOptions: Array<Electron.AboutPanelOptionsOptions>;
-  readonly setDockIcon: string[];
-  readonly setName: string[];
+interface ElectronAppCalls
+{
+  readonly setAboutPanelOptions: Array<Electron.AboutPanelOptionsOptions>
+  readonly setDockIcon: string[]
+  readonly setName: string[]
 }
 
 const makeElectronAppLayer = (calls: ElectronAppCalls) =>
   Layer.succeed(ElectronApp.ElectronApp, {
-    metadata: Effect.die("unexpected metadata read"),
-    name: Effect.succeed("456code"),
+    metadata: Effect.die('unexpected metadata read'),
+    name: Effect.succeed('456code'),
     whenReady: Effect.void,
     quit: Effect.void,
     exit: () => Effect.void,
     relaunch: () => Effect.void,
     setPath: () => Effect.void,
     setName: (name) =>
-      Effect.sync(() => {
-        calls.setName.push(name);
+      Effect.sync(() =>
+      {
+        calls.setName.push(name)
       }),
     setAboutPanelOptions: (options) =>
-      Effect.sync(() => {
-        calls.setAboutPanelOptions.push(options);
+      Effect.sync(() =>
+      {
+        calls.setAboutPanelOptions.push(options)
       }),
     setAppUserModelId: () => Effect.void,
     requestSingleInstanceLock: Effect.succeed(true),
@@ -58,12 +61,13 @@ const makeElectronAppLayer = (calls: ElectronAppCalls) =>
     setAsDefaultProtocolClient: () => Effect.succeed(true),
     setDesktopName: () => Effect.void,
     setDockIcon: (iconPath) =>
-      Effect.sync(() => {
-        calls.setDockIcon.push(iconPath);
+      Effect.sync(() =>
+      {
+        calls.setDockIcon.push(iconPath)
       }),
     appendCommandLineSwitch: () => Effect.void,
     on: () => Effect.void,
-  } satisfies ElectronApp.ElectronApp["Service"]);
+  } satisfies ElectronApp.ElectronApp['Service'])
 
 const makeAssetsLayer = (png: Option.Option<string>) =>
   Layer.succeed(DesktopAssets.DesktopAssets, {
@@ -73,10 +77,11 @@ const makeAssetsLayer = (png: Option.Option<string>) =>
       png,
     }),
     resolveResourcePath: () => Effect.succeed(Option.none()),
-  } satisfies DesktopAssets.DesktopAssets["Service"]);
+  } satisfies DesktopAssets.DesktopAssets['Service'])
 
-const makeEnvironmentLayer = (overrides: TestEnvironmentInput = {}) => {
-  const { env, ...environmentOverrides } = overrides;
+const makeEnvironmentLayer = (overrides: TestEnvironmentInput = {}) =>
+{
+  const { env, ...environmentOverrides } = overrides
   return DesktopEnvironment.layer({
     ...defaultEnvironmentInput,
     ...environmentOverrides,
@@ -89,8 +94,8 @@ const makeEnvironmentLayer = (overrides: TestEnvironmentInput = {}) => {
         }),
       ),
     ),
-  );
-};
+  )
+}
 
 const withIdentity = <A, E, R>(
   effect: Effect.Effect<
@@ -102,17 +107,18 @@ const withIdentity = <A, E, R>(
     | FileSystem.FileSystem
   >,
   input: {
-    readonly calls?: ElectronAppCalls;
-    readonly environment?: TestEnvironmentInput;
-    readonly packageJson?: string;
-    readonly pngIconPath?: Option.Option<string>;
+    readonly calls?: ElectronAppCalls
+    readonly environment?: TestEnvironmentInput
+    readonly packageJson?: string
+    readonly pngIconPath?: Option.Option<string>
   } = {},
-) => {
+) =>
+{
   const calls: ElectronAppCalls = input.calls ?? {
     setAboutPanelOptions: [],
     setDockIcon: [],
     setName: [],
-  };
+  }
 
   return effect.pipe(
     Effect.provide(
@@ -128,48 +134,52 @@ const withIdentity = <A, E, R>(
         Layer.provideMerge(makeEnvironmentLayer(input.environment)),
       ),
     ),
-  );
-};
+  )
+}
 
-describe("DesktopAppIdentity", () => {
-  it.effect("resolves the userData path from the app data directory", () =>
+describe('DesktopAppIdentity', () =>
+{
+  it.effect('resolves the userData path from the app data directory', () =>
     withIdentity(
-      Effect.gen(function* () {
-        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
-        const userDataPath = yield* identity.resolveUserDataPath;
+      Effect.gen(function* ()
+      {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity
+        const userDataPath = yield* identity.resolveUserDataPath
 
-        assert.equal(userDataPath, "/Users/alice/Library/Application Support/456code");
+        assert.equal(userDataPath, '/Users/alice/Library/Application Support/456code')
       }),
     ),
-  );
+  )
 
-  it.effect("configures app identity from the environment commit override", () => {
+  it.effect('configures app identity from the environment commit override', () =>
+  {
     const calls: ElectronAppCalls = {
       setAboutPanelOptions: [],
       setDockIcon: [],
       setName: [],
-    };
+    }
 
     return withIdentity(
-      Effect.gen(function* () {
-        const identity = yield* DesktopAppIdentity.DesktopAppIdentity;
-        yield* identity.configure;
+      Effect.gen(function* ()
+      {
+        const identity = yield* DesktopAppIdentity.DesktopAppIdentity
+        yield* identity.configure
 
-        assert.deepEqual(calls.setName, ["456code (Alpha)"]);
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, "456code (Alpha)");
-        assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, "1.2.3");
-        assert.equal(calls.setAboutPanelOptions[0]?.version, "0123456789ab");
-        assert.deepEqual(calls.setDockIcon, ["/icon.png"]);
+        assert.deepEqual(calls.setName, ['456code (Alpha)'])
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationName, '456code (Alpha)')
+        assert.equal(calls.setAboutPanelOptions[0]?.applicationVersion, '1.2.3')
+        assert.equal(calls.setAboutPanelOptions[0]?.version, '0123456789ab')
+        assert.deepEqual(calls.setDockIcon, ['/icon.png'])
       }),
       {
         calls,
         environment: {
           env: {
-            T3CODE_COMMIT_HASH: "0123456789abcdef",
+            T3CODE_COMMIT_HASH: '0123456789abcdef',
           },
         },
-        pngIconPath: Option.some("/icon.png"),
+        pngIconPath: Option.some('/icon.png'),
       },
-    );
-  });
-});
+    )
+  })
+})

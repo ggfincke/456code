@@ -39,4 +39,4 @@
  * security-critical flags can't regress on preview tabs.
  */
 export const PREVIEW_WEBVIEW_PREFERENCES =
-  "contextIsolation=false,sandbox=true,nodeIntegration=false";
+  'contextIsolation=false,sandbox=true,nodeIntegration=false'

@@ -1,90 +1,98 @@
-import { assert, beforeEach, it } from "vite-plus/test";
-import { AtomRegistry } from "effect/unstable/reactivity";
+import { assert, beforeEach, it } from 'vite-plus/test'
+import { AtomRegistry } from 'effect/unstable/reactivity'
 
 import {
   createReviewHighlighterManager,
   IDLE_REVIEW_HIGHLIGHTER_STATE,
-} from "../../../../../apps/mobile/src/features/review/reviewHighlighterState";
+} from '../../../../../apps/mobile/src/features/review/reviewHighlighterState'
 
-let registry = AtomRegistry.make();
+let registry = AtomRegistry.make()
 
-beforeEach(() => {
-  registry.dispose();
-  registry = AtomRegistry.make();
-});
+beforeEach(() =>
+{
+  registry.dispose()
+  registry = AtomRegistry.make()
+})
 
-function flushAsyncWork(): Promise<void> {
-  return Promise.resolve().then(() => undefined);
+function flushAsyncWork(): Promise<void>
+{
+  return Promise.resolve().then(() => undefined)
 }
 
-it("initializes review highlighter state once", async () => {
-  let prepareCalls = 0;
-  let languageCalls = 0;
-  let engineCalls = 0;
+it('initializes review highlighter state once', async () =>
+{
+  let prepareCalls = 0
+  let languageCalls = 0
+  let engineCalls = 0
   const manager = createReviewHighlighterManager({
     getRegistry: () => registry,
     loader: {
-      prepare: async () => {
-        prepareCalls += 1;
+      prepare: async () =>
+      {
+        prepareCalls += 1
       },
-      prepareLanguages: async () => {
-        languageCalls += 1;
+      prepareLanguages: async () =>
+      {
+        languageCalls += 1
       },
-      getEngine: async () => {
-        engineCalls += 1;
-        return "javascript";
+      getEngine: async () =>
+      {
+        engineCalls += 1
+        return 'javascript'
       },
     },
-  });
+  })
 
-  assert.deepStrictEqual(manager.getSnapshot(), IDLE_REVIEW_HIGHLIGHTER_STATE);
+  assert.deepStrictEqual(manager.getSnapshot(), IDLE_REVIEW_HIGHLIGHTER_STATE)
 
-  await Promise.all([manager.initialize(), manager.initialize()]);
-  await manager.initialize();
+  await Promise.all([manager.initialize(), manager.initialize()])
+  await manager.initialize()
 
-  assert.strictEqual(prepareCalls, 1);
-  assert.strictEqual(languageCalls, 1);
-  assert.strictEqual(engineCalls, 1);
+  assert.strictEqual(prepareCalls, 1)
+  assert.strictEqual(languageCalls, 1)
+  assert.strictEqual(engineCalls, 1)
   assert.deepStrictEqual(manager.getSnapshot(), {
-    engine: "javascript",
+    engine: 'javascript',
     error: null,
-    status: "ready",
-  });
-});
+    status: 'ready',
+  })
+})
 
-it("stores initialization failures in atom state", async () => {
-  const cause = new Error("load failed");
+it('stores initialization failures in atom state', async () =>
+{
+  const cause = new Error('load failed')
   const manager = createReviewHighlighterManager({
     getRegistry: () => registry,
     loader: {
-      prepare: async () => {
-        throw cause;
+      prepare: async () =>
+      {
+        throw cause
       },
       prepareLanguages: async () => undefined,
-      getEngine: async () => "javascript",
+      getEngine: async () => 'javascript',
     },
-  });
+  })
 
-  void manager.initialize();
-  await flushAsyncWork();
+  void manager.initialize()
+  await flushAsyncWork()
 
-  const snapshot = manager.getSnapshot();
-  assert.strictEqual(snapshot.engine, null);
-  assert.strictEqual(snapshot.status, "error");
-  assert.strictEqual(snapshot.error?._tag, "ReviewHighlighterManagerError");
-  assert.strictEqual(snapshot.error?.operation, "prepare");
+  const snapshot = manager.getSnapshot()
+  assert.strictEqual(snapshot.engine, null)
+  assert.strictEqual(snapshot.status, 'error')
+  assert.strictEqual(snapshot.error?._tag, 'ReviewHighlighterManagerError')
+  assert.strictEqual(snapshot.error?.operation, 'prepare')
   assert.deepStrictEqual(snapshot.error?.languages, [
-    "typescript",
-    "tsx",
-    "javascript",
-    "jsx",
-    "json",
-    "yaml",
-    "bash",
-  ]);
-  assert.strictEqual(snapshot.error?.cause, cause);
+    'typescript',
+    'tsx',
+    'javascript',
+    'jsx',
+    'json',
+    'yaml',
+    'bash',
+  ])
+  assert.strictEqual(snapshot.error?.cause, cause)
   assert.strictEqual(
     snapshot.error?.message,
-    "Review highlighter operation prepare failed for languages typescript, tsx, javascript, jsx, json, yaml, bash.",
-  );
-});
+    'Review highlighter operation prepare failed for languages typescript, tsx, javascript, jsx, json, yaml, bash.',
+  )
+})

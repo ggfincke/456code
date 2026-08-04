@@ -1,34 +1,40 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   isSvgImagePreviewFile,
   resolveWorkspaceRelativeFilePath,
-} from "../../../../../apps/mobile/src/features/files/filePath";
+} from '../../../../../apps/mobile/src/features/files/filePath'
 
-describe("resolveWorkspaceRelativeFilePath", () => {
-  it("keeps normalized workspace-relative paths", () => {
-    expect(resolveWorkspaceRelativeFilePath("/repo", "./src/../src/main.ts")).toBe("src/main.ts");
-  });
+describe('resolveWorkspaceRelativeFilePath', () =>
+{
+  it('keeps normalized workspace-relative paths', () =>
+  {
+    expect(resolveWorkspaceRelativeFilePath('/repo', './src/../src/main.ts')).toBe('src/main.ts')
+  })
 
-  it("converts absolute paths inside the workspace", () => {
+  it('converts absolute paths inside the workspace', () =>
+  {
     expect(
-      resolveWorkspaceRelativeFilePath("/Users/julius/repo", "/Users/julius/repo/src/main.ts"),
-    ).toBe("src/main.ts");
-    expect(resolveWorkspaceRelativeFilePath("C:\\repo", "c:\\repo\\src\\main.ts")).toBe(
-      "src/main.ts",
-    );
-  });
+      resolveWorkspaceRelativeFilePath('/Users/julius/repo', '/Users/julius/repo/src/main.ts'),
+    ).toBe('src/main.ts')
+    expect(resolveWorkspaceRelativeFilePath('C:\\repo', 'c:\\repo\\src\\main.ts')).toBe(
+      'src/main.ts',
+    )
+  })
 
-  it("rejects paths outside the workspace", () => {
-    expect(resolveWorkspaceRelativeFilePath("/repo", "/other/main.ts")).toBeNull();
-    expect(resolveWorkspaceRelativeFilePath("/repo", "../other/main.ts")).toBeNull();
-    expect(resolveWorkspaceRelativeFilePath(null, "/repo/main.ts")).toBeNull();
-  });
-});
+  it('rejects paths outside the workspace', () =>
+  {
+    expect(resolveWorkspaceRelativeFilePath('/repo', '/other/main.ts')).toBeNull()
+    expect(resolveWorkspaceRelativeFilePath('/repo', '../other/main.ts')).toBeNull()
+    expect(resolveWorkspaceRelativeFilePath(null, '/repo/main.ts')).toBeNull()
+  })
+})
 
-describe("file preview types", () => {
-  it("identifies SVG images that need web rendering", () => {
-    expect(isSvgImagePreviewFile("assets/diagram.svg#icon")).toBe(true);
-    expect(isSvgImagePreviewFile("assets/photo.png")).toBe(false);
-  });
-});
+describe('file preview types', () =>
+{
+  it('identifies SVG images that need web rendering', () =>
+  {
+    expect(isSvgImagePreviewFile('assets/diagram.svg#icon')).toBe(true)
+    expect(isSvgImagePreviewFile('assets/photo.png')).toBe(false)
+  })
+})

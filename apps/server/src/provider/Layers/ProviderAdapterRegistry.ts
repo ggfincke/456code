@@ -21,29 +21,32 @@ import {
   defaultInstanceIdForDriver,
   ProviderInstanceId,
   type ProviderDriverKind,
-} from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
+} from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
 
-import { ProviderUnsupportedError } from "../Errors.ts";
-import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
+import { ProviderUnsupportedError } from '../Errors.ts'
+import { ProviderInstanceRegistry } from '../Services/ProviderInstanceRegistry.ts'
 import {
   ProviderAdapterRegistry,
   type ProviderAdapterRegistryShape,
-} from "../Services/ProviderAdapterRegistry.ts";
+} from '../Services/ProviderAdapterRegistry.ts'
 
-const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(function* () {
-  const registry = yield* ProviderInstanceRegistry;
+const makeProviderAdapterRegistry = Effect.fn('makeProviderAdapterRegistry')(function* ()
+{
+  const registry = yield* ProviderInstanceRegistry
 
-  const getRoute: ProviderAdapterRegistryShape["getRoute"] = (instanceId) =>
+  const getRoute: ProviderAdapterRegistryShape['getRoute'] = (instanceId) =>
     registry.getInstance(instanceId).pipe(
-      Effect.flatMap((instance) => {
-        if (instance === undefined) {
+      Effect.flatMap((instance) =>
+      {
+        if (instance === undefined)
+        {
           return Effect.fail(
             new ProviderUnsupportedError({
               provider: instanceId,
             }),
-          );
+          )
         }
         return instance.resolveContinuationIdentity.pipe(
           Effect.map((continuationIdentity) => ({
@@ -60,37 +63,40 @@ const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(fun
             },
             adapter: instance.adapter,
           })),
-        );
+        )
       }),
-    );
+    )
 
-  const getByInstance: ProviderAdapterRegistryShape["getByInstance"] = (instanceId) =>
-    getRoute(instanceId).pipe(Effect.map((route) => route.adapter));
+  const getByInstance: ProviderAdapterRegistryShape['getByInstance'] = (instanceId) =>
+    getRoute(instanceId).pipe(Effect.map((route) => route.adapter))
 
-  const getInstanceInfo: ProviderAdapterRegistryShape["getInstanceInfo"] = (instanceId) =>
-    getRoute(instanceId).pipe(Effect.map((route) => route.info));
+  const getInstanceInfo: ProviderAdapterRegistryShape['getInstanceInfo'] = (instanceId) =>
+    getRoute(instanceId).pipe(Effect.map((route) => route.info))
 
-  const listInstances: ProviderAdapterRegistryShape["listInstances"] = () =>
+  const listInstances: ProviderAdapterRegistryShape['listInstances'] = () =>
     registry.listInstances.pipe(
       Effect.map((instances) => instances.map((instance) => instance.instanceId)),
-    );
+    )
 
-  const listProviders: ProviderAdapterRegistryShape["listProviders"] = () =>
+  const listProviders: ProviderAdapterRegistryShape['listProviders'] = () =>
     registry.listInstances.pipe(
-      Effect.map((instances) => {
-        const kinds = new Set<ProviderDriverKind>();
-        for (const instance of instances) {
-          const defaultId = defaultInstanceIdForDriver(instance.driverKind);
-          if (instance.instanceId === defaultId) {
+      Effect.map((instances) =>
+      {
+        const kinds = new Set<ProviderDriverKind>()
+        for (const instance of instances)
+        {
+          const defaultId = defaultInstanceIdForDriver(instance.driverKind)
+          if (instance.instanceId === defaultId)
+          {
             // Only the default-instance rows show up through the legacy
             // shim — custom instances like `codex_personal` have no
             // `ProviderDriverKind` equivalent.
-            kinds.add(instance.driverKind);
+            kinds.add(instance.driverKind)
           }
         }
-        return Array.from(kinds);
+        return Array.from(kinds)
       }),
-    );
+    )
 
   return {
     getRoute,
@@ -102,21 +108,21 @@ const makeProviderAdapterRegistry = Effect.fn("makeProviderAdapterRegistry")(fun
     // registry already coalesces adds/removes/rebuilds into one emission.
     streamChanges: registry.streamChanges,
     subscribeChanges: registry.subscribeChanges,
-  } satisfies ProviderAdapterRegistryShape;
-});
+  } satisfies ProviderAdapterRegistryShape
+})
 
 export const ProviderAdapterRegistryLive = Layer.effect(
   ProviderAdapterRegistry,
   makeProviderAdapterRegistry(),
-);
+)
 
 // Exposed for tests that want to build a facade over a pre-assembled
 // `ProviderInstanceRegistry` without pulling in the whole boot graph.
-export { makeProviderAdapterRegistry };
+export { makeProviderAdapterRegistry }
 
 // Re-export for consumers that need the accessor shape. The service tag
 // itself lives in `Services/ProviderAdapterRegistry.ts`.
-export { ProviderAdapterRegistry } from "../Services/ProviderAdapterRegistry.ts";
+export { ProviderAdapterRegistry } from '../Services/ProviderAdapterRegistry.ts'
 // Re-export for consumers (including tests) that construct a
 // `ProviderInstanceId` before calling `getByInstance`.
-export { ProviderInstanceId };
+export { ProviderInstanceId }

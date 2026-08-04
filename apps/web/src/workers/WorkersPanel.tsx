@@ -8,16 +8,16 @@ import type {
   WorkersJobSummary,
   WorkersListInput,
   WorkersRunSummary,
-} from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import { Check, ChevronLeft, ChevronRight, Copy, RefreshCw, TriangleAlert } from "lucide-react";
-import { type ReactNode, useEffect, useId, useMemo, useState } from "react";
+} from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import { Check, ChevronLeft, ChevronRight, Copy, RefreshCw, TriangleAlert } from 'lucide-react'
+import { type ReactNode, useEffect, useId, useMemo, useState } from 'react'
 
-import { Badge } from "~/components/ui/badge";
-import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from "~/components/ui/collapsible";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "~/components/ui/empty";
-import { ScrollArea } from "~/components/ui/scroll-area";
-import { Skeleton } from "~/components/ui/skeleton";
+import { Badge } from '~/components/ui/badge'
+import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from '~/components/ui/collapsible'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '~/components/ui/empty'
+import { ScrollArea } from '~/components/ui/scroll-area'
+import { Skeleton } from '~/components/ui/skeleton'
 import {
   Table,
   TableBody,
@@ -25,19 +25,19 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "~/components/ui/table";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { useNowMinute } from "~/hooks/useNowMinute";
-import { cn } from "~/lib/utils";
+} from '~/components/ui/table'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '~/components/ui/tooltip'
+import { useCopyToClipboard } from '~/hooks/useCopyToClipboard'
+import { useNowMinute } from '~/hooks/useNowMinute'
+import { cn } from '~/lib/utils'
 import {
   workersActivityEnvironment,
   workersEnvironment,
   useWorkersRunDeepLink,
-} from "~/state/workers";
-import { formatDuration } from "~/session-logic";
-import { useEnvironmentQuery } from "~/state/query";
-import { formatRelativeTimeLabel } from "~/timestampFormat";
+} from '~/state/workers'
+import { formatDuration } from '~/session-logic'
+import { useEnvironmentQuery } from '~/state/query'
+import { formatRelativeTimeLabel } from '~/timestampFormat'
 
 import {
   workerActivityAgeLabel,
@@ -47,7 +47,7 @@ import {
   workerActivityView,
   type WorkerActivityHeadline,
   type WorkerActivityHistoryEntry,
-} from "./workersActivity.logic";
+} from './workersActivity.logic'
 import {
   repoBasename,
   shortSha,
@@ -68,56 +68,62 @@ import {
   workerVerificationRunEntries,
   workerVerificationView,
   type WorkerRunStatusChip,
-} from "./workersPanel.logic";
+} from './workersPanel.logic'
 
-interface WorkersPanelProps {
-  environmentId: EnvironmentId;
+interface WorkersPanelProps
+{
+  environmentId: EnvironmentId
 }
 
 // the atom family keys on JSON.stringify([environmentId, input]); a module-level
 // literal keeps the unfiltered list & runs keys stable across renders
-const WORKERS_LIST_INPUT: WorkersListInput = {};
+const WORKERS_LIST_INPUT: WorkersListInput = {}
 
-type WorkersView = "runs" | "jobs";
+type WorkersView = 'runs' | 'jobs'
 
-interface WorkersNav {
-  readonly view: WorkersView;
-  readonly runId: string | null;
-  readonly jobId: string | null;
+interface WorkersNav
+{
+  readonly view: WorkersView
+  readonly runId: string | null
+  readonly jobId: string | null
 }
 
-function SectionHeading({ children, inline }: { children: ReactNode; inline?: boolean }) {
+function SectionHeading({ children, inline }: { children: ReactNode; inline?: boolean })
+{
   return (
     <h4
       className={cn(
-        "text-[10px] font-medium uppercase tracking-wide text-muted-foreground",
-        inline ? null : "mb-1.5",
+        'text-[10px] font-medium uppercase tracking-wide text-muted-foreground',
+        inline ? null : 'mb-1.5',
       )}
     >
       {children}
     </h4>
-  );
+  )
 }
 
-function DetailSection({ title, children }: { title: string; children: ReactNode }) {
+function DetailSection({ title, children }: { title: string; children: ReactNode })
+{
   return (
     <section className="border-b border-border/60 px-3 py-2.5 last:border-b-0">
       <SectionHeading>{title}</SectionHeading>
       {children}
     </section>
-  );
+  )
 }
 
-function DetailField({ label, children }: { label: string; children: ReactNode }) {
+function DetailField({ label, children }: { label: string; children: ReactNode })
+{
   return (
     <div className="flex gap-2 py-0.5 text-xs">
       <span className="w-24 shrink-0 text-muted-foreground">{label}</span>
       <span className="min-w-0 flex-1 break-all text-foreground">{children}</span>
     </div>
-  );
+  )
 }
 
-function StringList({ items }: { items: readonly string[] }) {
+function StringList({ items }: { items: readonly string[] })
+{
   return (
     <ul className="space-y-1 text-xs leading-relaxed text-foreground">
       {items.map((item) => (
@@ -129,20 +135,22 @@ function StringList({ items }: { items: readonly string[] }) {
         </li>
       ))}
     </ul>
-  );
+  )
 }
 
-function SkeletonRows() {
+function SkeletonRows()
+{
   return (
     <div className="space-y-2 p-3">
       {[0, 1, 2, 3, 4].map((row) => (
         <Skeleton key={row} className="h-6 w-full" />
       ))}
     </div>
-  );
+  )
 }
 
-function StatusChips({ chips }: { chips: readonly WorkerRunStatusChip[] }) {
+function StatusChips({ chips }: { chips: readonly WorkerRunStatusChip[] })
+{
   return (
     <>
       {chips.map((chip) => (
@@ -151,36 +159,39 @@ function StatusChips({ chips }: { chips: readonly WorkerRunStatusChip[] }) {
         </Badge>
       ))}
     </>
-  );
+  )
 }
 
-function relativeOrDash(timestamp: Option.Option<string>): string {
-  const iso = Option.getOrNull(timestamp);
-  if (iso === null) return "—";
-  const label = formatRelativeTimeLabel(iso);
-  return label.length === 0 ? iso : label;
+function relativeOrDash(timestamp: Option.Option<string>): string
+{
+  const iso = Option.getOrNull(timestamp)
+  if (iso === null) return '—'
+  const label = formatRelativeTimeLabel(iso)
+  return label.length === 0 ? iso : label
 }
 
-function ScopeViolationBadge({ count }: { count: number }) {
-  if (count === 0) return null;
+function ScopeViolationBadge({ count }: { count: number })
+{
+  if (count === 0) return null
   return (
     <Badge size="sm" variant="destructive">
       <TriangleAlert />
       {count} scope
     </Badge>
-  );
+  )
 }
 
 // status chip plus, for terminal failures, the broker's failure class and the
 // salvageability evidence separating recoverable work from lost work
-function JobStatusBadges({ job }: { job: WorkersJobSummary }) {
-  const failure = workerFailureView(job);
+function JobStatusBadges({ job }: { job: WorkersJobSummary })
+{
+  const failure = workerFailureView(job)
   const failureBadge =
     failure === null ? null : (
-      <Badge size="sm" variant={failure.salvageable ? "warning" : "outline"}>
+      <Badge size="sm" variant={failure.salvageable ? 'warning' : 'outline'}>
         {failure.label}
       </Badge>
-    );
+    )
   return (
     <span className="flex flex-wrap items-center gap-1">
       <Badge size="sm" variant={workerStatusBadgeVariant(job.status)}>
@@ -195,13 +206,14 @@ function JobStatusBadges({ job }: { job: WorkersJobSummary }) {
         </Tooltip>
       )}
     </span>
-  );
+  )
 }
 
-function JobMetadataBadges({ job }: { job: WorkersJobSummary }) {
-  const workflow = Option.getOrNull(job.workflow);
-  const stage = Option.getOrNull(job.stage);
-  if (workflow === null && stage === null) return null;
+function JobMetadataBadges({ job }: { job: WorkersJobSummary })
+{
+  const workflow = Option.getOrNull(job.workflow)
+  const stage = Option.getOrNull(job.stage)
+  if (workflow === null && stage === null) return null
 
   return (
     <span className="mt-1 flex flex-wrap gap-1">
@@ -216,7 +228,7 @@ function JobMetadataBadges({ job }: { job: WorkersJobSummary }) {
         </Badge>
       )}
     </span>
-  );
+  )
 }
 
 function WorkersRunRow({
@@ -224,11 +236,12 @@ function WorkersRunRow({
   nowMs,
   onSelect,
 }: {
-  run: WorkersRunSummary;
-  nowMs: number;
-  onSelect: (runId: string) => void;
-}) {
-  const span = workerRunSpanLabel(run, nowMs);
+  run: WorkersRunSummary
+  nowMs: number
+  onSelect: (runId: string) => void
+})
+{
+  const span = workerRunSpanLabel(run, nowMs)
 
   return (
     <button
@@ -239,7 +252,7 @@ function WorkersRunRow({
     >
       <span className="flex items-baseline gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-xs text-foreground">{run.run}</span>
-        <span className="shrink-0 text-[10px] text-muted-foreground">{span ?? "—"}</span>
+        <span className="shrink-0 text-[10px] text-muted-foreground">{span ?? '—'}</span>
       </span>
       <span className="mt-1 flex flex-wrap items-center gap-1">
         {run.workflows.map((workflow) => (
@@ -251,11 +264,11 @@ function WorkersRunRow({
         <ScopeViolationBadge count={run.scopeViolationCount} />
       </span>
       <span className="mt-1 block text-[10px] text-muted-foreground">
-        {run.total.toLocaleString()} job{run.total === 1 ? "" : "s"} ·{" "}
-        {run.stages.length.toLocaleString()} stage{run.stages.length === 1 ? "" : "s"}
+        {run.total.toLocaleString()} job{run.total === 1 ? '' : 's'} ·{' '}
+        {run.stages.length.toLocaleString()} stage{run.stages.length === 1 ? '' : 's'}
       </span>
     </button>
-  );
+  )
 }
 
 function WorkersJobRow({
@@ -263,13 +276,14 @@ function WorkersJobRow({
   nowMs,
   onSelect,
 }: {
-  job: WorkersJobSummary;
-  nowMs: number;
-  onSelect: (jobId: string) => void;
-}) {
-  const verification = workerVerificationView(job.verification);
-  const elapsed = workerJobElapsedLabel(job, nowMs);
-  const changedFileCount = Option.getOrNull(job.changedFileCount);
+  job: WorkersJobSummary
+  nowMs: number
+  onSelect: (jobId: string) => void
+})
+{
+  const verification = workerVerificationView(job.verification)
+  const elapsed = workerJobElapsedLabel(job, nowMs)
+  const changedFileCount = Option.getOrNull(job.changedFileCount)
 
   return (
     <TableRow
@@ -278,10 +292,11 @@ function WorkersJobRow({
       aria-label={`Open worker job ${job.jobId}`}
       className="cursor-pointer"
       onClick={() => onSelect(job.jobId)}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        onSelect(job.jobId);
+      onKeyDown={(event) =>
+      {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onSelect(job.jobId)
       }}
     >
       <TableCell className="px-3 font-mono">
@@ -299,15 +314,15 @@ function WorkersJobRow({
           <TooltipPopup>{job.repo}</TooltipPopup>
         </Tooltip>
       </TableCell>
-      <TableCell className="px-2 text-muted-foreground">{elapsed ?? "—"}</TableCell>
-      <TableCell className="px-2 text-muted-foreground">{changedFileCount ?? "—"}</TableCell>
+      <TableCell className="px-2 text-muted-foreground">{elapsed ?? '—'}</TableCell>
+      <TableCell className="px-2 text-muted-foreground">{changedFileCount ?? '—'}</TableCell>
       <TableCell
-        className={cn("px-3", verification?.failed ? "text-destructive" : "text-muted-foreground")}
+        className={cn('px-3', verification?.failed ? 'text-destructive' : 'text-muted-foreground')}
       >
-        {verification?.label ?? "—"}
+        {verification?.label ?? '—'}
       </TableCell>
     </TableRow>
-  );
+  )
 }
 
 // the run detail drops repo/mode (constant within a run) for the per-stage columns that
@@ -317,13 +332,14 @@ function WorkersRunJobRow({
   nowMs,
   onSelect,
 }: {
-  job: WorkersJobSummary;
-  nowMs: number;
-  onSelect: (jobId: string) => void;
-}) {
-  const elapsed = workerJobElapsedLabel(job, nowMs);
-  const changedFileCount = Option.getOrNull(job.changedFileCount);
-  const model = workerModelLabel(job);
+  job: WorkersJobSummary
+  nowMs: number
+  onSelect: (jobId: string) => void
+})
+{
+  const elapsed = workerJobElapsedLabel(job, nowMs)
+  const changedFileCount = Option.getOrNull(job.changedFileCount)
+  const model = workerModelLabel(job)
 
   return (
     <TableRow
@@ -332,10 +348,11 @@ function WorkersRunJobRow({
       aria-label={`Open worker job ${job.jobId}`}
       className="cursor-pointer"
       onClick={() => onSelect(job.jobId)}
-      onKeyDown={(event) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-        event.preventDefault();
-        onSelect(job.jobId);
+      onKeyDown={(event) =>
+      {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        onSelect(job.jobId)
       }}
     >
       <TableCell className="px-3 font-mono">{job.jobId}</TableCell>
@@ -343,11 +360,11 @@ function WorkersRunJobRow({
         <JobStatusBadges job={job} />
       </TableCell>
       <TableCell className="px-2 text-muted-foreground">{job.provider}</TableCell>
-      <TableCell className="px-2 text-muted-foreground">{model ?? "—"}</TableCell>
-      <TableCell className="px-2 text-muted-foreground">{elapsed ?? "—"}</TableCell>
-      <TableCell className="px-3 text-muted-foreground">{changedFileCount ?? "—"}</TableCell>
+      <TableCell className="px-2 text-muted-foreground">{model ?? '—'}</TableCell>
+      <TableCell className="px-2 text-muted-foreground">{elapsed ?? '—'}</TableCell>
+      <TableCell className="px-3 text-muted-foreground">{changedFileCount ?? '—'}</TableCell>
     </TableRow>
-  );
+  )
 }
 
 function WorkersRunDetailView({
@@ -356,12 +373,13 @@ function WorkersRunDetailView({
   nowMs,
   onSelectJob,
 }: {
-  run: WorkersRunSummary | null;
-  jobs: readonly WorkersJobSummary[];
-  nowMs: number;
-  onSelectJob: (jobId: string) => void;
-}) {
-  const groups = workerStageGroups(jobs);
+  run: WorkersRunSummary | null
+  jobs: readonly WorkersJobSummary[]
+  nowMs: number
+  onSelectJob: (jobId: string) => void
+})
+{
+  const groups = workerStageGroups(jobs)
 
   return (
     <div className="pb-4">
@@ -380,7 +398,7 @@ function WorkersRunDetailView({
           {workerRunFailureBreakdown(jobs) === null ? null : (
             <DetailField label="Failures">{workerRunFailureBreakdown(jobs)}</DetailField>
           )}
-          <DetailField label="Elapsed">{workerRunSpanLabel(run, nowMs) ?? "—"}</DetailField>
+          <DetailField label="Elapsed">{workerRunSpanLabel(run, nowMs) ?? '—'}</DetailField>
           <DetailField label="Started">{relativeOrDash(run.firstCreatedAt)}</DetailField>
           <DetailField label="Last update">{relativeOrDash(run.lastCompletedAt)}</DetailField>
         </DetailSection>
@@ -416,7 +434,7 @@ function WorkersRunDetailView({
                       </Badge>
                     )}
                     <Badge size="sm" variant="outline">
-                      {group.stage ?? "other"}
+                      {group.stage ?? 'other'}
                     </Badge>
                     <StatusChips chips={workerRunStatusChips(workerStageCounts(group.jobs))} />
                   </span>
@@ -430,15 +448,16 @@ function WorkersRunDetailView({
         </Table>
       )}
     </div>
-  );
+  )
 }
 
 // the broker never ships patch text to the client, so the "patch" view is the per-file
 // change listing plus a copy affordance for the patch path the broker wrote
-function WorkersJobPatchSection({ job }: { job: WorkersJobDetail }) {
-  const entries = workerPatchFileEntries(job);
-  const clipboard = workerPatchClipboard(job);
-  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: "patch" });
+function WorkersJobPatchSection({ job }: { job: WorkersJobDetail })
+{
+  const entries = workerPatchFileEntries(job)
+  const clipboard = workerPatchClipboard(job)
+  const { copyToClipboard, isCopied } = useCopyToClipboard({ target: 'patch' })
 
   return (
     <section className="border-b border-border/60 last:border-b-0">
@@ -451,7 +470,7 @@ function WorkersJobPatchSection({ job }: { job: WorkersJobDetail }) {
             />
             <SectionHeading
               inline
-            >{`Patch (${entries.length} file${entries.length === 1 ? "" : "s"})`}</SectionHeading>
+            >{`Patch (${entries.length} file${entries.length === 1 ? '' : 's'})`}</SectionHeading>
           </CollapsibleTrigger>
           {clipboard === null ? null : (
             <button
@@ -473,7 +492,7 @@ function WorkersJobPatchSection({ job }: { job: WorkersJobDetail }) {
                 {entries.map((entry) => (
                   <li key={entry.path} className="flex gap-2">
                     <span className="w-6 shrink-0 uppercase text-muted-foreground">
-                      {entry.status ?? "—"}
+                      {entry.status ?? '—'}
                     </span>
                     <span className="min-w-0 flex-1 break-all">{entry.path}</span>
                   </li>
@@ -481,13 +500,13 @@ function WorkersJobPatchSection({ job }: { job: WorkersJobDetail }) {
               </ul>
             )}
             <p className="mt-2 break-all font-mono text-[10px] text-muted-foreground">
-              {Option.getOrNull(job.patchPath) ?? "No patch file recorded."}
+              {Option.getOrNull(job.patchPath) ?? 'No patch file recorded.'}
             </p>
           </div>
         </CollapsiblePanel>
       </Collapsible>
     </section>
-  );
+  )
 }
 
 // whether three lines hide anything is a question about the rendered width, not the
@@ -495,42 +514,46 @@ function WorkersJobPatchSection({ job }: { job: WorkersJobDetail }) {
 // fit in a wide one. the clamped paragraph measures itself instead, and re-measures as
 // the panel resizes, so the disclosure appears exactly when text is actually clipped
 function useTaskClipped(collapsed: boolean): {
-  readonly ref: (node: HTMLParagraphElement | null) => void;
-  readonly clipped: boolean;
-} {
-  const [node, setNode] = useState<HTMLParagraphElement | null>(null);
-  const [clipped, setClipped] = useState(false);
+  readonly ref: (node: HTMLParagraphElement | null) => void
+  readonly clipped: boolean
+}
+{
+  const [node, setNode] = useState<HTMLParagraphElement | null>(null)
+  const [clipped, setClipped] = useState(false)
 
   // an expanded paragraph carries no clamp to overflow, so it is left unmeasured & keeps
   // the verdict that opened it; collapsing re-measures at the current width
-  useEffect(() => {
-    if (node === null || !collapsed) return;
+  useEffect(() =>
+  {
+    if (node === null || !collapsed) return
 
-    const measure = () => {
-      const next = node.scrollHeight - node.clientHeight > 1;
-      setClipped((current) => (current === next ? current : next));
-    };
+    const measure = () =>
+    {
+      const next = node.scrollHeight - node.clientHeight > 1
+      setClipped((current) => (current === next ? current : next))
+    }
 
-    measure();
-    if (typeof ResizeObserver === "undefined") return;
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
 
-    const observer = new ResizeObserver(measure);
-    observer.observe(node);
-    return () => observer.disconnect();
-  }, [node, collapsed]);
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [node, collapsed])
 
-  return { ref: setNode, clipped };
+  return { ref: setNode, clipped }
 }
 
 // a broker task runs to hundreds of lines, which used to push everything below it off
 // screen; the clamp keeps the detail scannable & the disclosure keeps the full text one
 // keystroke away
-function WorkersJobTaskSection({ task }: { task: string }) {
-  const [expanded, setExpanded] = useState(false);
-  const bodyId = useId();
-  const text = task.trim();
-  const collapsed = text.length > 0 && !expanded;
-  const { ref, clipped } = useTaskClipped(collapsed);
+function WorkersJobTaskSection({ task }: { task: string })
+{
+  const [expanded, setExpanded] = useState(false)
+  const bodyId = useId()
+  const text = task.trim()
+  const collapsed = text.length > 0 && !expanded
+  const { ref, clipped } = useTaskClipped(collapsed)
 
   return (
     <section className="border-b border-border/60 px-3 py-2.5 last:border-b-0">
@@ -544,7 +567,7 @@ function WorkersJobTaskSection({ task }: { task: string }) {
             className="ml-auto shrink-0 rounded-md px-1 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-accent hover:text-foreground"
             onClick={() => setExpanded((current) => !current)}
           >
-            {expanded ? "Hide full task" : "Show full task"}
+            {expanded ? 'Hide full task' : 'Show full task'}
           </button>
         ) : null}
       </div>
@@ -552,15 +575,15 @@ function WorkersJobTaskSection({ task }: { task: string }) {
         id={bodyId}
         ref={ref}
         className={cn(
-          "whitespace-pre-wrap break-words text-xs leading-relaxed",
-          text.length === 0 ? "text-muted-foreground" : "text-foreground",
-          collapsed ? "line-clamp-3" : null,
+          'whitespace-pre-wrap break-words text-xs leading-relaxed',
+          text.length === 0 ? 'text-muted-foreground' : 'text-foreground',
+          collapsed ? 'line-clamp-3' : null,
         )}
       >
-        {text.length > 0 ? text : "No task text recorded."}
+        {text.length > 0 ? text : 'No task text recorded.'}
       </p>
     </section>
-  );
+  )
 }
 
 // the headline is the one part that changes while a job runs; it renders inside the
@@ -573,11 +596,12 @@ function WorkersActivityHeadlineBlock({
   note,
   actionSummary,
 }: {
-  headline: WorkerActivityHeadline;
-  message: string | null;
-  note: string | null;
-  actionSummary: string | null;
-}) {
+  headline: WorkerActivityHeadline
+  message: string | null
+  note: string | null
+  actionSummary: string | null
+})
+{
   return (
     <div className="min-w-0">
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
@@ -594,16 +618,17 @@ function WorkersActivityHeadlineBlock({
         <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{note}</p>
       ) : null}
     </div>
-  );
+  )
 }
 
 function WorkersActivityHistory({
   entries,
   nowMs,
 }: {
-  entries: readonly WorkerActivityHistoryEntry[];
-  nowMs: number;
-}) {
+  entries: readonly WorkerActivityHistoryEntry[]
+  nowMs: number
+})
+{
   return (
     <Collapsible>
       <CollapsibleTrigger className="-ml-1 mt-1.5 flex items-center gap-1.5 rounded-md px-1 py-0.5 text-[10px] font-medium text-muted-foreground hover:text-foreground data-panel-open:[&_svg]:rotate-90">
@@ -626,7 +651,7 @@ function WorkersActivityHistory({
         </ol>
       </CollapsiblePanel>
     </Collapsible>
-  );
+  )
 }
 
 // the only subscription in this panel that is scoped to a single job; it is mounted from
@@ -639,28 +664,29 @@ function WorkersJobActivitySection({
   nowMs,
   elapsedLabel,
 }: {
-  environmentId: EnvironmentId;
-  job: WorkersJobDetail;
-  status: WorkersJobStatus;
-  live: boolean;
-  nowMs: number;
-  elapsedLabel: string | null;
-}) {
+  environmentId: EnvironmentId
+  job: WorkersJobDetail
+  status: WorkersJobStatus
+  live: boolean
+  nowMs: number
+  elapsedLabel: string | null
+})
+{
   // the atom family keys on JSON.stringify([environmentId, input]), so the inline input
   // stays one stable key for as long as this job is the selected one
   const activityQuery = useEnvironmentQuery(
     workersActivityEnvironment({ environmentId, input: { jobId: job.jobId } }),
-  );
+  )
 
   // a failed stream still hands back the last snapshot it read, so the two are disclosed
   // independently: the transport line qualifies whatever trace remains below it
-  const snapshot = activityQuery.data;
-  const view = snapshot === null ? null : workerActivityView(snapshot.entries, snapshot.truncated);
-  const snapshotError = snapshot === null ? null : Option.getOrNull(snapshot.error);
-  const notice = snapshot === null ? null : workerActivityNoticeLabel(snapshot);
-  const transport = workerActivityTransportLabel(activityQuery.error, snapshot !== null);
-  const headline = workerActivityHeadline(status, view?.latestPhase ?? null);
-  const hasTrace = view !== null && view.history.length > 0;
+  const snapshot = activityQuery.data
+  const view = snapshot === null ? null : workerActivityView(snapshot.entries, snapshot.truncated)
+  const snapshotError = snapshot === null ? null : Option.getOrNull(snapshot.error)
+  const notice = snapshot === null ? null : workerActivityNoticeLabel(snapshot)
+  const transport = workerActivityTransportLabel(activityQuery.error, snapshot !== null)
+  const headline = workerActivityHeadline(status, view?.latestPhase ?? null)
+  const hasTrace = view !== null && view.history.length > 0
 
   return (
     <section className="border-b border-border/60 px-3 py-2.5 last:border-b-0">
@@ -700,7 +726,7 @@ function WorkersJobActivitySection({
             <WorkersActivityHeadlineBlock
               headline={headline}
               message={view?.latestMessage ?? null}
-              note={hasTrace ? null : "Waiting for the first activity update…"}
+              note={hasTrace ? null : 'Waiting for the first activity update…'}
               actionSummary={view?.actionSummary ?? null}
             />
             {notice === null ? null : (
@@ -714,7 +740,7 @@ function WorkersJobActivitySection({
         <WorkersActivityHistory entries={view.history} nowMs={nowMs} />
       )}
     </section>
-  );
+  )
 }
 
 function WorkersJobDetailView({
@@ -723,12 +749,13 @@ function WorkersJobDetailView({
   summary: listSummary,
   nowMs,
 }: {
-  environmentId: EnvironmentId;
-  job: WorkersJobDetail;
-  summary: WorkersJobSummary | null;
-  nowMs: number;
-}) {
-  const verification = workerVerificationView(job.verification);
+  environmentId: EnvironmentId
+  job: WorkersJobDetail
+  summary: WorkersJobSummary | null
+  nowMs: number
+})
+{
+  const verification = workerVerificationView(job.verification)
   // the live list row wins over the 30s detail read for status & timing alone; every
   // terminal field below still comes from the detail payload. the id check drops a row
   // that belongs to a newly selected job whose detail read has not landed yet
@@ -736,20 +763,20 @@ function WorkersJobDetailView({
     job,
     listSummary?.jobId === job.jobId ? listSummary : null,
     nowMs,
-  );
-  const elapsed = presentation.elapsedLabel;
-  const model = workerModelLabel(job);
-  const workflow = Option.getOrNull(job.workflow);
-  const stage = Option.getOrNull(job.stage);
-  const run = Option.getOrNull(job.run);
-  const error = Option.getOrNull(job.error);
-  const summary = Option.getOrNull(job.summary);
-  const baseSha = Option.getOrNull(job.baseSha);
-  const headSha = Option.getOrNull(job.headSha);
-  const baseRef = Option.getOrNull(job.baseRef);
-  const branch = Option.getOrNull(job.branch);
-  const worktree = Option.getOrNull(job.worktree);
-  const processExitCode = Option.getOrNull(job.processExitCode);
+  )
+  const elapsed = presentation.elapsedLabel
+  const model = workerModelLabel(job)
+  const workflow = Option.getOrNull(job.workflow)
+  const stage = Option.getOrNull(job.stage)
+  const run = Option.getOrNull(job.run)
+  const error = Option.getOrNull(job.error)
+  const summary = Option.getOrNull(job.summary)
+  const baseSha = Option.getOrNull(job.baseSha)
+  const headSha = Option.getOrNull(job.headSha)
+  const baseRef = Option.getOrNull(job.baseRef)
+  const branch = Option.getOrNull(job.branch)
+  const worktree = Option.getOrNull(job.worktree)
+  const processExitCode = Option.getOrNull(job.processExitCode)
 
   return (
     <div className="pb-4">
@@ -786,7 +813,7 @@ function WorkersJobDetailView({
         </DetailField>
         <DetailField label="Provider">{job.provider}</DetailField>
         <DetailField label="Mode">{job.mode}</DetailField>
-        <DetailField label="Model">{model ?? "—"}</DetailField>
+        <DetailField label="Model">{model ?? '—'}</DetailField>
         {run === null ? null : (
           <DetailField label="Run">
             <span className="font-mono">{run}</span>
@@ -794,7 +821,7 @@ function WorkersJobDetailView({
         )}
         {workflow === null ? null : <DetailField label="Workflow">{workflow}</DetailField>}
         {stage === null ? null : <DetailField label="Stage">{stage}</DetailField>}
-        <DetailField label="Elapsed">{elapsed ?? "—"}</DetailField>
+        <DetailField label="Elapsed">{elapsed ?? '—'}</DetailField>
         {processExitCode === null ? null : (
           <DetailField label="Exit code">
             <span className="font-mono">{processExitCode}</span>
@@ -806,16 +833,16 @@ function WorkersJobDetailView({
         <DetailField label="Repo">
           <span className="font-mono">{job.repo}</span>
         </DetailField>
-        <DetailField label="Branch">{branch ?? "—"}</DetailField>
-        <DetailField label="Base ref">{baseRef ?? "—"}</DetailField>
+        <DetailField label="Branch">{branch ?? '—'}</DetailField>
+        <DetailField label="Base ref">{baseRef ?? '—'}</DetailField>
         <DetailField label="Base sha">
-          <span className="font-mono">{baseSha === null ? "—" : shortSha(baseSha)}</span>
+          <span className="font-mono">{baseSha === null ? '—' : shortSha(baseSha)}</span>
         </DetailField>
         <DetailField label="Head sha">
-          <span className="font-mono">{headSha === null ? "—" : shortSha(headSha)}</span>
+          <span className="font-mono">{headSha === null ? '—' : shortSha(headSha)}</span>
         </DetailField>
         <DetailField label="Worktree">
-          <span className="font-mono">{worktree ?? "—"}</span>
+          <span className="font-mono">{worktree ?? '—'}</span>
         </DetailField>
       </DetailSection>
 
@@ -824,36 +851,37 @@ function WorkersJobDetailView({
       <DetailSection title="Verification">
         {job.verificationRuns.length === 0 ? (
           <p className="text-xs text-muted-foreground">
-            {verification === null ? "No verification recorded." : `${verification.label} passed`}
+            {verification === null ? 'No verification recorded.' : `${verification.label} passed`}
           </p>
         ) : (
           <ul className="space-y-2">
-            {workerVerificationRunEntries(job.verificationRuns).map(({ key, run: entry }) => {
-              const exitCode = Option.getOrNull(entry.exitCode);
-              const runElapsed = Option.getOrNull(entry.elapsedMs);
-              const runFailed = entry.timedOut || (exitCode !== null && exitCode !== 0);
-              const runUnknown = !entry.timedOut && exitCode === null;
+            {workerVerificationRunEntries(job.verificationRuns).map(({ key, run: entry }) =>
+              {
+              const exitCode = Option.getOrNull(entry.exitCode)
+              const runElapsed = Option.getOrNull(entry.elapsedMs)
+              const runFailed = entry.timedOut || (exitCode !== null && exitCode !== 0)
+              const runUnknown = !entry.timedOut && exitCode === null
               return (
                 <li key={key} className="text-xs">
                   <div
                     className={cn(
-                      "break-all font-mono",
+                      'break-all font-mono',
                       runFailed
-                        ? "text-destructive"
+                        ? 'text-destructive'
                         : runUnknown
-                          ? "text-muted-foreground"
-                          : "text-foreground",
+                          ? 'text-muted-foreground'
+                          : 'text-foreground',
                     )}
                   >
                     {entry.command}
                   </div>
                   <div className="mt-0.5 text-muted-foreground">
-                    {exitCode === null ? "exit unknown" : `exit ${exitCode}`}
-                    {runElapsed === null ? "" : ` · ${formatDuration(runElapsed)}`}
-                    {entry.timedOut ? " · timed out" : ""}
+                    {exitCode === null ? 'exit unknown' : `exit ${exitCode}`}
+                    {runElapsed === null ? '' : ` · ${formatDuration(runElapsed)}`}
+                    {entry.timedOut ? ' · timed out' : ''}
                   </div>
                 </li>
-              );
+              )
             })}
           </ul>
         )}
@@ -889,140 +917,145 @@ function WorkersJobDetailView({
         </DetailSection>
       )}
     </div>
-  );
+  )
 }
 
 function ViewToggle({
   view,
   onChange,
 }: {
-  view: WorkersView;
-  onChange: (next: WorkersView) => void;
-}) {
+  view: WorkersView
+  onChange: (next: WorkersView) => void
+})
+{
   return (
     <div className="flex shrink-0 items-center gap-2 border-b border-border/60 px-3 py-1.5">
-      {(["runs", "jobs"] as const).map((value) => (
+      {(['runs', 'jobs'] as const).map((value) => (
         <button
           key={value}
           type="button"
           aria-pressed={view === value}
           className={cn(
-            "rounded-md px-2 py-0.5 text-[11px] font-medium",
+            'rounded-md px-2 py-0.5 text-[11px] font-medium',
             view === value
-              ? "bg-accent text-foreground"
-              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground",
+              ? 'bg-accent text-foreground'
+              : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground',
           )}
           onClick={() => onChange(value)}
         >
-          {value === "runs" ? "Runs" : "All jobs"}
+          {value === 'runs' ? 'Runs' : 'All jobs'}
         </button>
       ))}
     </div>
-  );
+  )
 }
 
-export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
-  const deepLink = useWorkersRunDeepLink(environmentId);
-  const deepLinkRun = deepLink.runId;
+export default function WorkersPanel({ environmentId }: WorkersPanelProps)
+{
+  const deepLink = useWorkersRunDeepLink(environmentId)
+  const deepLinkRun = deepLink.runId
   const [nav, setNav] = useState<WorkersNav>(() =>
     deepLinkRun === null
-      ? { view: "runs", runId: null, jobId: null }
-      : { view: "runs", runId: deepLinkRun, jobId: null },
-  );
+      ? { view: 'runs', runId: null, jobId: null }
+      : { view: 'runs', runId: deepLinkRun, jobId: null },
+  )
   // the deep-link resets when its owning thread or pinned run changes; local navigation
   // afterwards stays put because the applied identity only moves with that surface
-  const [appliedDeepLink, setAppliedDeepLink] = useState(deepLink);
+  const [appliedDeepLink, setAppliedDeepLink] = useState(deepLink)
   if (
     appliedDeepLink.threadKey !== deepLink.threadKey ||
     appliedDeepLink.runId !== deepLink.runId
-  ) {
-    setAppliedDeepLink(deepLink);
-    setNav({ view: "runs", runId: deepLinkRun, jobId: null });
+  )
+  {
+    setAppliedDeepLink(deepLink)
+    setNav({ view: 'runs', runId: deepLinkRun, jobId: null })
   }
 
-  const selectedRunId = nav.runId;
-  const selectedJobId = nav.jobId;
+  const selectedRunId = nav.runId
+  const selectedJobId = nav.jobId
   const listQuery = useEnvironmentQuery(
     workersEnvironment.list({ environmentId, input: WORKERS_LIST_INPUT }),
-  );
+  )
   const runsQuery = useEnvironmentQuery(
     workersEnvironment.listRuns({ environmentId, input: WORKERS_LIST_INPUT }),
-  );
+  )
   const runDetailQuery = useEnvironmentQuery(
     selectedRunId === null
       ? null
       : workersEnvironment.getRun({ environmentId, input: { run: selectedRunId } }),
-  );
+  )
   const detailQuery = useEnvironmentQuery(
     selectedJobId === null
       ? null
       : workersEnvironment.getJob({ environmentId, input: { jobId: selectedJobId } }),
-  );
+  )
 
   const activeQuery =
     selectedJobId !== null
       ? detailQuery
       : selectedRunId !== null
         ? runDetailQuery
-        : nav.view === "runs"
+        : nav.view === 'runs'
           ? runsQuery
-          : listQuery;
-  const readAt = activeQuery.data?.readAt ?? null;
+          : listQuery
+  const readAt = activeQuery.data?.readAt ?? null
 
   // the minute clock only drives the re-render; labels re-read the wall clock
-  const nowMinute = useNowMinute();
+  const nowMinute = useNowMinute()
   const readAtLabel = useMemo(
     () => (readAt === null ? null : formatRelativeTimeLabel(readAt)),
     [readAt, nowMinute],
-  );
+  )
   // elapsed spans for in-flight runs tick with the shared minute clock rather than a
   // panel-local interval
-  const nowMs = useMemo(() => Date.parse(`${nowMinute}:00Z`), [nowMinute]);
+  const nowMs = useMemo(() => Date.parse(`${nowMinute}:00Z`), [nowMinute])
 
-  const listData = listQuery.data;
-  const listError = listData === null ? null : Option.getOrNull(listData.error);
-  const jobs = listData?.jobs ?? [];
+  const listData = listQuery.data
+  const listError = listData === null ? null : Option.getOrNull(listData.error)
+  const jobs = listData?.jobs ?? []
 
-  const runsData = runsQuery.data;
-  const runsError = runsData === null ? null : Option.getOrNull(runsData.error);
-  const runs = useMemo(() => sortWorkerRunsNewestFirst(runsData?.runs ?? []), [runsData?.runs]);
+  const runsData = runsQuery.data
+  const runsError = runsData === null ? null : Option.getOrNull(runsData.error)
+  const runs = useMemo(() => sortWorkerRunsNewestFirst(runsData?.runs ?? []), [runsData?.runs])
 
-  const detailOpen = selectedJobId !== null;
-  const runOpen = !detailOpen && selectedRunId !== null;
-  const listOpen = !detailOpen && !runOpen;
+  const detailOpen = selectedJobId !== null
+  const runOpen = !detailOpen && selectedRunId !== null
+  const listOpen = !detailOpen && !runOpen
 
   // the list subscription is already mounted for every view, so the selected job's row is
   // the freshest record the panel holds while the detail read waits out its 30s interval
-  const selectedSummary = useMemo(() => {
-    if (selectedJobId === null) return null;
-    return jobs.find((job) => job.jobId === selectedJobId) ?? null;
-  }, [jobs, selectedJobId]);
+  const selectedSummary = useMemo(() =>
+  {
+    if (selectedJobId === null) return null
+    return jobs.find((job) => job.jobId === selectedJobId) ?? null
+  }, [jobs, selectedJobId])
 
-  const title = detailOpen ? "Worker job" : runOpen ? "Orchestration run" : "Workers";
+  const title = detailOpen ? 'Worker job' : runOpen ? 'Orchestration run' : 'Workers'
   const subtitle = detailOpen
     ? selectedJobId
     : runOpen
       ? selectedRunId
-      : nav.view === "runs"
+      : nav.view === 'runs'
         ? runsData === null
-          ? "Reading broker state…"
-          : `${runs.length.toLocaleString()} run${runs.length === 1 ? "" : "s"}`
+          ? 'Reading broker state…'
+          : `${runs.length.toLocaleString()} run${runs.length === 1 ? '' : 's'}`
         : listData === null
-          ? "Reading broker state…"
-          : `${jobs.length.toLocaleString()} job${jobs.length === 1 ? "" : "s"}${
-              listData.skippedJobCount > 0 ? ` · ${listData.skippedJobCount} skipped` : ""
-            }`;
+          ? 'Reading broker state…'
+          : `${jobs.length.toLocaleString()} job${jobs.length === 1 ? '' : 's'}${
+              listData.skippedJobCount > 0 ? ` · ${listData.skippedJobCount} skipped` : ''
+            }`
 
-  const goBack = () => {
+  const goBack = () =>
+  {
     setNav((current) =>
       current.jobId !== null
         ? { ...current, jobId: null }
         : { view: current.view, runId: null, jobId: null },
-    );
-  };
-  const selectJob = (jobId: string) => setNav((current) => ({ ...current, jobId }));
-  const selectRun = (runId: string) => setNav({ view: "runs", runId, jobId: null });
-  const selectView = (view: WorkersView) => setNav({ view, runId: null, jobId: null });
+    )
+  }
+  const selectJob = (jobId: string) => setNav((current) => ({ ...current, jobId }))
+  const selectRun = (runId: string) => setNav({ view: 'runs', runId, jobId: null })
+  const selectView = (view: WorkersView) => setNav({ view, runId: null, jobId: null })
 
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-background" data-workers-panel={environmentId}>
@@ -1033,10 +1066,10 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
             className="-ml-1 rounded-md p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
             aria-label={
               !detailOpen
-                ? "Back to orchestration runs"
+                ? 'Back to orchestration runs'
                 : selectedRunId === null
-                  ? "Back to worker jobs"
-                  : "Back to run jobs"
+                  ? 'Back to worker jobs'
+                  : 'Back to run jobs'
             }
             onClick={goBack}
           >
@@ -1056,7 +1089,7 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
           aria-label="Refresh worker jobs"
           onClick={activeQuery.refresh}
         >
-          <RefreshCw className={cn("size-3.5", activeQuery.isPending && "animate-spin")} />
+          <RefreshCw className={cn('size-3.5', activeQuery.isPending && 'animate-spin')} />
         </button>
       </div>
 
@@ -1069,18 +1102,20 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
           ) : detailQuery.error && detailQuery.data === null ? (
             <div className="p-4 text-xs leading-relaxed text-destructive">{detailQuery.error}</div>
           ) : (
-            (() => {
-              const detail = detailQuery.data;
-              if (!detail) return null;
-              const job = Option.getOrNull(detail.job);
-              const detailError = Option.getOrNull(detail.error);
-              if (job === null) {
+            (() =>
+              {
+              const detail = detailQuery.data
+              if (!detail) return null
+              const job = Option.getOrNull(detail.job)
+              const detailError = Option.getOrNull(detail.error)
+              if (job === null)
+                {
                 return (
                   <div className="p-4 text-xs leading-relaxed text-muted-foreground">
                     {detailError?.message ??
-                      "This worker job is no longer in the broker state directory."}
+                      'This worker job is no longer in the broker state directory.'}
                   </div>
-                );
+                )
               }
               // keyed by job so the task disclosure & activity stream reset per selection
               return (
@@ -1091,7 +1126,7 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
                   summary={selectedSummary}
                   nowMs={nowMs}
                 />
-              );
+              )
             })()
           )
         ) : runOpen ? (
@@ -1102,18 +1137,20 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
               {runDetailQuery.error}
             </div>
           ) : (
-            (() => {
-              const detail = runDetailQuery.data;
-              if (!detail) return null;
-              const run = Option.getOrNull(detail.run);
-              const runError = Option.getOrNull(detail.error);
-              if (run === null && detail.jobs.length === 0) {
+            (() =>
+              {
+              const detail = runDetailQuery.data
+              if (!detail) return null
+              const run = Option.getOrNull(detail.run)
+              const runError = Option.getOrNull(detail.error)
+              if (run === null && detail.jobs.length === 0)
+                {
                 return (
                   <div className="p-4 text-xs leading-relaxed text-muted-foreground">
                     {runError?.message ??
-                      "This orchestration run is no longer in the broker state directory."}
+                      'This orchestration run is no longer in the broker state directory.'}
                   </div>
-                );
+                )
               }
               return (
                 <WorkersRunDetailView
@@ -1122,15 +1159,15 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
                   nowMs={nowMs}
                   onSelectJob={selectJob}
                 />
-              );
+              )
             })()
           )
-        ) : nav.view === "runs" ? (
+        ) : nav.view === 'runs' ? (
           runsQuery.isPending && runsData === null ? (
             <SkeletonRows />
           ) : runsQuery.error && runsData === null ? (
             <div className="p-4 text-xs leading-relaxed text-destructive">{runsQuery.error}</div>
-          ) : runsData === null ? null : runsData.state === "state-dir-missing" ? (
+          ) : runsData === null ? null : runsData.state === 'state-dir-missing' ? (
             <Empty>
               <EmptyHeader>
                 <EmptyTitle>No worker state</EmptyTitle>
@@ -1161,7 +1198,7 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
           <SkeletonRows />
         ) : listQuery.error && listData === null ? (
           <div className="p-4 text-xs leading-relaxed text-destructive">{listQuery.error}</div>
-        ) : listData === null ? null : listData.state === "state-dir-missing" ? (
+        ) : listData === null ? null : listData.state === 'state-dir-missing' ? (
           <Empty>
             <EmptyHeader>
               <EmptyTitle>No worker state</EmptyTitle>
@@ -1214,7 +1251,7 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
                               </Badge>
                             )}
                             <Badge size="sm" variant="outline">
-                              {group.stage ?? "other"}
+                              {group.stage ?? 'other'}
                             </Badge>
                           </span>
                         </TableCell>
@@ -1234,5 +1271,5 @@ export default function WorkersPanel({ environmentId }: WorkersPanelProps) {
         )}
       </ScrollArea>
     </div>
-  );
+  )
 }

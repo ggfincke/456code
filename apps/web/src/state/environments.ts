@@ -1,40 +1,43 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from '@effect/atom-react'
 import {
   connectionCatalogDisplayUrl,
   type EnvironmentPresentation as BaseEnvironmentPresentation,
-} from "@t3tools/client-runtime/connection";
-import type { EnvironmentId } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import { useMemo } from "react";
+} from '@t3tools/client-runtime/connection'
+import type { EnvironmentId } from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import { useMemo } from 'react'
 
-import { environmentCatalog } from "../connection/catalog";
-import { environmentPresentations, useEnvironmentPresentation } from "./presentation";
-import { primaryEnvironmentIdAtom } from "./primaryEnvironment";
-import { useEnvironmentQuery } from "./query";
-import { usePreparedConnection } from "./session";
+import { environmentCatalog } from '../connection/catalog'
+import { environmentPresentations, useEnvironmentPresentation } from './presentation'
+import { primaryEnvironmentIdAtom } from './primaryEnvironment'
+import { useEnvironmentQuery } from './query'
+import { usePreparedConnection } from './session'
 
-export interface EnvironmentPresentation extends BaseEnvironmentPresentation {
-  readonly environmentId: EnvironmentId;
-  readonly label: string;
-  readonly displayUrl: string | null;
+export interface EnvironmentPresentation extends BaseEnvironmentPresentation
+{
+  readonly environmentId: EnvironmentId
+  readonly label: string
+  readonly displayUrl: string | null
 }
 
 function projectEnvironmentPresentation(
   environmentId: EnvironmentId,
   presentation: BaseEnvironmentPresentation,
-): EnvironmentPresentation {
+): EnvironmentPresentation
+{
   return {
     ...presentation,
     environmentId,
     label: presentation.entry.target.label,
     displayUrl: connectionCatalogDisplayUrl(presentation.entry),
-  };
+  }
 }
 
-export function useEnvironments() {
-  const catalog = useAtomValue(environmentCatalog.catalogValueAtom);
-  const networkStatus = useAtomValue(environmentCatalog.networkStatusValueAtom);
-  const presentationById = useAtomValue(environmentPresentations.presentationsAtom);
+export function useEnvironments()
+{
+  const catalog = useAtomValue(environmentCatalog.catalogValueAtom)
+  const networkStatus = useAtomValue(environmentCatalog.networkStatusValueAtom)
+  const presentationById = useAtomValue(environmentPresentations.presentationsAtom)
 
   const environments = useMemo(
     () =>
@@ -42,42 +45,47 @@ export function useEnvironments() {
         projectEnvironmentPresentation(environmentId, presentation),
       ),
     [presentationById],
-  );
+  )
 
   return {
     isReady: catalog.isReady,
     networkStatus,
     environments,
     presentationById,
-  };
+  }
 }
 
-export function usePrimaryEnvironmentId(): EnvironmentId | null {
-  return useAtomValue(primaryEnvironmentIdAtom);
+export function usePrimaryEnvironmentId(): EnvironmentId | null
+{
+  return useAtomValue(primaryEnvironmentIdAtom)
 }
 
 export function useEnvironment(
   environmentId: EnvironmentId | null,
-): EnvironmentPresentation | null {
-  const { presentation } = useEnvironmentPresentation(environmentId);
+): EnvironmentPresentation | null
+{
+  const { presentation } = useEnvironmentPresentation(environmentId)
   return useMemo(
     () =>
       environmentId === null || presentation === null
         ? null
         : projectEnvironmentPresentation(environmentId, presentation),
     [environmentId, presentation],
-  );
+  )
 }
 
-export function usePrimaryEnvironment(): EnvironmentPresentation | null {
-  return useEnvironment(usePrimaryEnvironmentId());
+export function usePrimaryEnvironment(): EnvironmentPresentation | null
+{
+  return useEnvironment(usePrimaryEnvironmentId())
 }
 
-export function useEnvironmentHttpBaseUrl(environmentId: EnvironmentId | null): string | null {
-  const prepared = usePreparedConnection(environmentId);
-  return Option.isSome(prepared) ? prepared.value.httpBaseUrl : null;
+export function useEnvironmentHttpBaseUrl(environmentId: EnvironmentId | null): string | null
+{
+  const prepared = usePreparedConnection(environmentId)
+  return Option.isSome(prepared) ? prepared.value.httpBaseUrl : null
 }
 
-export function useEnvironmentConnectionState(environmentId: EnvironmentId) {
-  return useEnvironmentQuery(environmentCatalog.stateAtom(environmentId));
+export function useEnvironmentConnectionState(environmentId: EnvironmentId)
+{
+  return useEnvironmentQuery(environmentCatalog.stateAtom(environmentId))
 }

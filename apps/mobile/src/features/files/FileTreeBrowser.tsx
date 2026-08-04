@@ -1,82 +1,91 @@
-import type { ProjectEntry } from "@t3tools/contracts";
-import { SymbolView } from "../../components/AppSymbol";
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIndicator, FlatList, Pressable, RefreshControl, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { ProjectEntry } from '@t3tools/contracts'
+import { SymbolView } from '../../components/AppSymbol'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { ActivityIndicator, FlatList, Pressable, RefreshControl, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { AppText as Text } from "../../components/AppText";
-import { PierreEntryIcon } from "../../components/PierreEntryIcon";
-import { cn } from "../../lib/cn";
-import { useThemeColor } from "../../lib/useThemeColor";
-import { NATIVE_LIQUID_GLASS_SUPPORTED } from "../../native/native-glass";
+import { AppText as Text } from '../../components/AppText'
+import { PierreEntryIcon } from '../../components/PierreEntryIcon'
+import { cn } from '../../lib/cn'
+import { useThemeColor } from '../../lib/useThemeColor'
+import { NATIVE_LIQUID_GLASS_SUPPORTED } from '../../native/native-glass'
 import {
   buildFileTree,
   defaultExpandedTreePaths,
   flattenFileTree,
   type FileTreeNode,
   type VisibleFileTreeNode,
-} from "./fileTree";
+} from './fileTree'
 
-const fileTreeCache = new WeakMap<ReadonlyArray<ProjectEntry>, ReadonlyArray<FileTreeNode>>();
-const FILE_TREE_INITIAL_RENDER_COUNT = 20;
-const FILE_TREE_RENDER_BATCH_SIZE = 12;
-const OPTIMISTIC_SELECTION_TIMEOUT_MS = 1_000;
+const fileTreeCache = new WeakMap<ReadonlyArray<ProjectEntry>, ReadonlyArray<FileTreeNode>>()
+const FILE_TREE_INITIAL_RENDER_COUNT = 20
+const FILE_TREE_RENDER_BATCH_SIZE = 12
+const OPTIMISTIC_SELECTION_TIMEOUT_MS = 1_000
 
-function cachedFileTree(entries: ReadonlyArray<ProjectEntry>): ReadonlyArray<FileTreeNode> {
-  const cached = fileTreeCache.get(entries);
-  if (cached !== undefined) {
-    return cached;
+function cachedFileTree(entries: ReadonlyArray<ProjectEntry>): ReadonlyArray<FileTreeNode>
+{
+  const cached = fileTreeCache.get(entries)
+  if (cached !== undefined)
+  {
+    return cached
   }
-  const tree = buildFileTree(entries);
-  fileTreeCache.set(entries, tree);
-  return tree;
+  const tree = buildFileTree(entries)
+  fileTreeCache.set(entries, tree)
+  return tree
 }
 
-function ancestorPaths(path: string): ReadonlyArray<string> {
-  const parts = path.split("/").filter(Boolean);
-  const ancestors: string[] = [];
-  for (let index = 1; index < parts.length; index += 1) {
-    ancestors.push(parts.slice(0, index).join("/"));
+function ancestorPaths(path: string): ReadonlyArray<string>
+{
+  const parts = path.split('/').filter(Boolean)
+  const ancestors: string[] = []
+  for (let index = 1; index < parts.length; index += 1)
+  {
+    ancestors.push(parts.slice(0, index).join('/'))
   }
-  return ancestors;
+  return ancestors
 }
 
 const FileTreeRow = memo(function FileTreeRow(props: {
-  readonly item: VisibleFileTreeNode;
-  readonly selected: boolean;
-  readonly expanded: boolean;
-  readonly iconColor: string;
-  readonly onPressDirectory: (path: string) => void;
-  readonly onPreviewFile?: (path: string) => void;
-  readonly onPressFile: (path: string) => void;
-}) {
-  const { node, depth } = props.item;
+  readonly item: VisibleFileTreeNode
+  readonly selected: boolean
+  readonly expanded: boolean
+  readonly iconColor: string
+  readonly onPressDirectory: (path: string) => void
+  readonly onPreviewFile?: (path: string) => void
+  readonly onPressFile: (path: string) => void
+})
+{
+  const { node, depth } = props.item
 
   return (
     <Pressable
       accessibilityRole="button"
       accessibilityLabel={node.path}
-      onPressIn={() => {
-        if (node.kind === "file") {
-          props.onPreviewFile?.(node.path);
+      onPressIn={() =>
+      {
+        if (node.kind === 'file')
+        {
+          props.onPreviewFile?.(node.path)
         }
       }}
-      onPress={() => {
-        if (node.kind === "directory") {
-          props.onPressDirectory(node.path);
-          return;
+      onPress={() =>
+      {
+        if (node.kind === 'directory')
+        {
+          props.onPressDirectory(node.path)
+          return
         }
-        props.onPressFile(node.path);
+        props.onPressFile(node.path)
       }}
       className={cn(
-        "mx-2 min-h-[42px] flex-row items-center gap-2 rounded-[12px] px-2 active:bg-subtle",
-        props.selected && "bg-subtle-strong",
+        'mx-2 min-h-[42px] flex-row items-center gap-2 rounded-[12px] px-2 active:bg-subtle',
+        props.selected && 'bg-subtle-strong',
       )}
       style={{ paddingLeft: 8 + depth * 18 }}
     >
-      {node.kind === "directory" ? (
+      {node.kind === 'directory' ? (
         <SymbolView
-          name={props.expanded ? "chevron.down" : "chevron.right"}
+          name={props.expanded ? 'chevron.down' : 'chevron.right'}
           size={12}
           tintColor={props.iconColor}
           type="monochrome"
@@ -87,55 +96,56 @@ const FileTreeRow = memo(function FileTreeRow(props: {
       <PierreEntryIcon path={node.path} kind={node.kind} size={17} />
       <Text
         className={cn(
-          "min-w-0 flex-1 text-sm leading-normal",
+          'min-w-0 flex-1 text-sm leading-normal',
           props.selected
-            ? "font-sans-bold text-foreground"
-            : "font-sans-medium text-foreground-secondary",
+            ? 'font-sans-bold text-foreground'
+            : 'font-sans-medium text-foreground-secondary',
         )}
         numberOfLines={1}
       >
         {node.name}
       </Text>
-      {node.kind === "directory" ? (
+      {node.kind === 'directory' ? (
         <Text className="text-2xs font-sans-medium text-foreground-tertiary">
           {node.children.length}
         </Text>
       ) : null}
     </Pressable>
-  );
-});
+  )
+})
 
 export function FileTreeBrowser(props: {
-  readonly entries: ReadonlyArray<ProjectEntry>;
-  readonly error: string | null;
-  readonly isPending: boolean;
-  readonly searchQuery: string;
-  readonly selectedPath: string | null;
-  readonly onPreviewFile?: (path: string) => void;
-  readonly onRefresh: () => void;
-  readonly onSelectFile: (path: string) => void;
-}) {
-  const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set());
+  readonly entries: ReadonlyArray<ProjectEntry>
+  readonly error: string | null
+  readonly isPending: boolean
+  readonly searchQuery: string
+  readonly selectedPath: string | null
+  readonly onPreviewFile?: (path: string) => void
+  readonly onRefresh: () => void
+  readonly onSelectFile: (path: string) => void
+})
+{
+  const [expandedPaths, setExpandedPaths] = useState<ReadonlySet<string>>(() => new Set())
   const [pendingSelection, setPendingSelection] = useState<{
-    readonly path: string;
-    readonly selectedPathAtPress: string | null;
-  } | null>(null);
-  const insets = useSafeAreaInsets();
+    readonly path: string
+    readonly selectedPathAtPress: string | null
+  } | null>(null)
+  const insets = useSafeAreaInsets()
   // Native transparent-header height ≈ safe-area top + nav bar (~44). Matches the
   // observed adjustedContentInset bottom (~102) seen in the native trace.
-  const headerInset = NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 44 : 0;
-  const iconColor = String(useThemeColor("--color-icon-muted"));
-  const { onPreviewFile, onSelectFile, selectedPath: controlledSelectedPath } = props;
-  const controlledSelectedPathRef = useRef(controlledSelectedPath);
-  const pendingSelectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  controlledSelectedPathRef.current = controlledSelectedPath;
+  const headerInset = NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 44 : 0
+  const iconColor = String(useThemeColor('--color-icon-muted'))
+  const { onPreviewFile, onSelectFile, selectedPath: controlledSelectedPath } = props
+  const controlledSelectedPathRef = useRef(controlledSelectedPath)
+  const pendingSelectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  controlledSelectedPathRef.current = controlledSelectedPath
 
   const selectedPath =
     pendingSelection?.selectedPathAtPress === controlledSelectedPath
       ? pendingSelection.path
-      : controlledSelectedPath;
-  const tree = useMemo(() => cachedFileTree(props.entries), [props.entries]);
-  const defaultExpanded = useMemo(() => defaultExpandedTreePaths(tree), [tree]);
+      : controlledSelectedPath
+  const tree = useMemo(() => cachedFileTree(props.entries), [props.entries])
+  const defaultExpanded = useMemo(() => defaultExpandedTreePaths(tree), [tree])
   const visibleNodes = useMemo(
     () =>
       flattenFileTree({
@@ -144,76 +154,94 @@ export function FileTreeBrowser(props: {
         searchQuery: props.searchQuery,
       }),
     [expandedPaths, props.searchQuery, tree],
-  );
+  )
 
-  useEffect(() => {
-    setExpandedPaths((current) => {
-      if (current.size > 0 || defaultExpanded.size === 0) {
-        return current;
+  useEffect(() =>
+  {
+    setExpandedPaths((current) =>
+    {
+      if (current.size > 0 || defaultExpanded.size === 0)
+      {
+        return current
       }
-      return new Set(defaultExpanded);
-    });
-  }, [defaultExpanded]);
+      return new Set(defaultExpanded)
+    })
+  }, [defaultExpanded])
 
-  useEffect(() => {
-    if (!controlledSelectedPath) {
-      return;
+  useEffect(() =>
+  {
+    if (!controlledSelectedPath)
+    {
+      return
     }
-    setExpandedPaths((current) => {
-      const ancestors = ancestorPaths(controlledSelectedPath);
-      if (ancestors.every((ancestor) => current.has(ancestor))) {
-        return current;
+    setExpandedPaths((current) =>
+    {
+      const ancestors = ancestorPaths(controlledSelectedPath)
+      if (ancestors.every((ancestor) => current.has(ancestor)))
+      {
+        return current
       }
-      const next = new Set(current);
-      for (const ancestor of ancestors) {
-        next.add(ancestor);
+      const next = new Set(current)
+      for (const ancestor of ancestors)
+      {
+        next.add(ancestor)
       }
-      return next;
-    });
-  }, [controlledSelectedPath]);
+      return next
+    })
+  }, [controlledSelectedPath])
 
   useEffect(
-    () => () => {
-      if (pendingSelectionTimeoutRef.current !== null) {
-        clearTimeout(pendingSelectionTimeoutRef.current);
+    () => () =>
+    {
+      if (pendingSelectionTimeoutRef.current !== null)
+      {
+        clearTimeout(pendingSelectionTimeoutRef.current)
       }
     },
     [],
-  );
+  )
 
-  const toggleDirectory = useCallback((path: string) => {
-    setExpandedPaths((current) => {
-      const next = new Set(current);
-      if (next.has(path)) {
-        next.delete(path);
-      } else {
-        next.add(path);
+  const toggleDirectory = useCallback((path: string) =>
+  {
+    setExpandedPaths((current) =>
+    {
+      const next = new Set(current)
+      if (next.has(path))
+      {
+        next.delete(path)
       }
-      return next;
-    });
-  }, []);
+      else
+      {
+        next.add(path)
+      }
+      return next
+    })
+  }, [])
   const handleSelectFile = useCallback(
-    (path: string) => {
-      if (pendingSelectionTimeoutRef.current !== null) {
-        clearTimeout(pendingSelectionTimeoutRef.current);
+    (path: string) =>
+    {
+      if (pendingSelectionTimeoutRef.current !== null)
+      {
+        clearTimeout(pendingSelectionTimeoutRef.current)
       }
       setPendingSelection({
         path,
         selectedPathAtPress: controlledSelectedPathRef.current,
-      });
-      pendingSelectionTimeoutRef.current = setTimeout(() => {
-        pendingSelectionTimeoutRef.current = null;
-        setPendingSelection((current) => (current?.path === path ? null : current));
-      }, OPTIMISTIC_SELECTION_TIMEOUT_MS);
-      onSelectFile(path);
+      })
+      pendingSelectionTimeoutRef.current = setTimeout(() =>
+      {
+        pendingSelectionTimeoutRef.current = null
+        setPendingSelection((current) => (current?.path === path ? null : current))
+      }, OPTIMISTIC_SELECTION_TIMEOUT_MS)
+      onSelectFile(path)
     },
     [onSelectFile],
-  );
+  )
   const renderItem = useCallback(
     ({ item }: { readonly item: VisibleFileTreeNode }) => (
       <FileTreeRow
         item={item}
-        selected={item.node.kind === "file" && item.node.path === selectedPath}
+        selected={item.node.kind === 'file' && item.node.path === selectedPath}
         expanded={expandedPaths.has(item.node.path)}
         iconColor={iconColor}
         onPressDirectory={toggleDirectory}
@@ -222,15 +250,16 @@ export function FileTreeBrowser(props: {
       />
     ),
     [expandedPaths, handleSelectFile, iconColor, onPreviewFile, selectedPath, toggleDirectory],
-  );
+  )
 
-  if (props.error && props.entries.length === 0) {
+  if (props.error && props.entries.length === 0)
+  {
     return (
       <View className="flex-1 bg-sheet px-4 py-5">
         <Text className="text-sm font-sans-bold text-foreground">Files unavailable</Text>
         <Text className="mt-1 text-xs leading-normal text-foreground-muted">{props.error}</Text>
       </View>
-    );
+    )
   }
 
   // SPIKE: render the FlatList as the screen's DIRECT content (no wrapping View), and
@@ -243,7 +272,7 @@ export function FileTreeBrowser(props: {
       className="flex-1"
       data={visibleNodes}
       keyExtractor={(item) => item.node.path}
-      contentInsetAdjustmentBehavior={NATIVE_LIQUID_GLASS_SUPPORTED ? "automatic" : "never"}
+      contentInsetAdjustmentBehavior={NATIVE_LIQUID_GLASS_SUPPORTED ? 'automatic' : 'never'}
       scrollIndicatorInsets={
         NATIVE_LIQUID_GLASS_SUPPORTED
           ? { top: headerInset, left: 0, right: 0, bottom: 0 }
@@ -267,13 +296,13 @@ export function FileTreeBrowser(props: {
               <Text className="text-sm font-sans-bold text-foreground">No files found</Text>
               <Text className="mt-1 text-xs leading-normal text-foreground-muted">
                 {props.searchQuery.trim().length > 0
-                  ? "Try a different search."
-                  : "The workspace file index is empty."}
+                  ? 'Try a different search.'
+                  : 'The workspace file index is empty.'}
               </Text>
             </>
           )}
         </View>
       }
     />
-  );
+  )
 }

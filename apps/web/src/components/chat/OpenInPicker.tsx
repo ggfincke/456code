@@ -1,11 +1,11 @@
-import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from "@t3tools/contracts";
-import { memo, useCallback, useEffect, useMemo } from "react";
-import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from "../../keybindings";
-import { usePreferredEditor } from "../../editorPreferences";
-import { ChevronDownIcon, FolderClosedIcon } from "lucide-react";
-import { Button } from "../ui/button";
-import { Group, GroupSeparator } from "../ui/group";
-import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from "../ui/menu";
+import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from '@t3tools/contracts'
+import { memo, useCallback, useEffect, useMemo } from 'react'
+import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from '../../keybindings'
+import { usePreferredEditor } from '../../editorPreferences'
+import { ChevronDownIcon, FolderClosedIcon } from 'lucide-react'
+import { Button } from '../ui/button'
+import { Group, GroupSeparator } from '../ui/group'
+import { Menu, MenuItem, MenuPopup, MenuShortcut, MenuTrigger } from '../ui/menu'
 import {
   AntigravityIcon,
   CursorIcon,
@@ -16,7 +16,7 @@ import {
   VisualStudioCodeInsiders,
   VSCodium,
   Zed,
-} from "../Icons";
+} from '../Icons'
 import {
   AquaIcon,
   CLionIcon,
@@ -30,157 +30,159 @@ import {
   RubyMineIcon,
   RustRoverIcon,
   WebStormIcon,
-} from "../JetBrainsIcons";
-import { cn, isMacPlatform, isWindowsPlatform } from "~/lib/utils";
-import { shellEnvironment } from "~/state/shell";
-import { useAtomCommand } from "~/state/use-atom-command";
+} from '../JetBrainsIcons'
+import { cn, isMacPlatform, isWindowsPlatform } from '~/lib/utils'
+import { shellEnvironment } from '~/state/shell'
+import { useAtomCommand } from '~/state/use-atom-command'
 
 type OpenInOption = {
-  label: string;
-  Icon: Icon;
-  value: EditorId;
-  kind: "brand" | "generic";
-};
+  label: string
+  Icon: Icon
+  value: EditorId
+  kind: 'brand' | 'generic'
+}
 
-const resolveOptions = (platform: string, availableEditors: ReadonlyArray<EditorId>) => {
+const resolveOptions = (platform: string, availableEditors: ReadonlyArray<EditorId>) =>
+{
   const baseOptions: ReadonlyArray<OpenInOption> = [
     {
-      label: "Cursor",
+      label: 'Cursor',
       Icon: CursorIcon,
-      value: "cursor",
-      kind: "brand",
+      value: 'cursor',
+      kind: 'brand',
     },
     {
-      label: "Trae",
+      label: 'Trae',
       Icon: TraeIcon,
-      value: "trae",
-      kind: "brand",
+      value: 'trae',
+      kind: 'brand',
     },
     {
-      label: "Kiro",
+      label: 'Kiro',
       Icon: KiroIcon,
-      value: "kiro",
-      kind: "brand",
+      value: 'kiro',
+      kind: 'brand',
     },
     {
-      label: "VS Code",
+      label: 'VS Code',
       Icon: VisualStudioCode,
-      value: "vscode",
-      kind: "brand",
+      value: 'vscode',
+      kind: 'brand',
     },
     {
-      label: "VS Code Insiders",
+      label: 'VS Code Insiders',
       Icon: VisualStudioCodeInsiders,
-      value: "vscode-insiders",
-      kind: "brand",
+      value: 'vscode-insiders',
+      kind: 'brand',
     },
     {
-      label: "VSCodium",
+      label: 'VSCodium',
       Icon: VSCodium,
-      value: "vscodium",
-      kind: "brand",
+      value: 'vscodium',
+      kind: 'brand',
     },
     {
-      label: "Zed",
+      label: 'Zed',
       Icon: Zed,
-      value: "zed",
-      kind: "brand",
+      value: 'zed',
+      kind: 'brand',
     },
     {
-      label: "Antigravity",
+      label: 'Antigravity',
       Icon: AntigravityIcon,
-      value: "antigravity",
-      kind: "brand",
+      value: 'antigravity',
+      kind: 'brand',
     },
     {
-      label: "IntelliJ IDEA",
+      label: 'IntelliJ IDEA',
       Icon: IntelliJIdeaIcon,
-      value: "idea",
-      kind: "brand",
+      value: 'idea',
+      kind: 'brand',
     },
     {
-      label: "Aqua",
+      label: 'Aqua',
       Icon: AquaIcon,
-      value: "aqua",
-      kind: "brand",
+      value: 'aqua',
+      kind: 'brand',
     },
     {
-      label: "CLion",
+      label: 'CLion',
       Icon: CLionIcon,
-      value: "clion",
-      kind: "brand",
+      value: 'clion',
+      kind: 'brand',
     },
     {
-      label: "DataGrip",
+      label: 'DataGrip',
       Icon: DataGripIcon,
-      value: "datagrip",
-      kind: "brand",
+      value: 'datagrip',
+      kind: 'brand',
     },
     {
-      label: "DataSpell",
+      label: 'DataSpell',
       Icon: DataSpellIcon,
-      value: "dataspell",
-      kind: "brand",
+      value: 'dataspell',
+      kind: 'brand',
     },
     {
-      label: "GoLand",
+      label: 'GoLand',
       Icon: GoLandIcon,
-      value: "goland",
-      kind: "brand",
+      value: 'goland',
+      kind: 'brand',
     },
     {
-      label: "PhpStorm",
+      label: 'PhpStorm',
       Icon: PhpStormIcon,
-      value: "phpstorm",
-      kind: "brand",
+      value: 'phpstorm',
+      kind: 'brand',
     },
     {
-      label: "PyCharm",
+      label: 'PyCharm',
       Icon: PyCharmIcon,
-      value: "pycharm",
-      kind: "brand",
+      value: 'pycharm',
+      kind: 'brand',
     },
     {
-      label: "Rider",
+      label: 'Rider',
       Icon: RiderIcon,
-      value: "rider",
-      kind: "brand",
+      value: 'rider',
+      kind: 'brand',
     },
     {
-      label: "RubyMine",
+      label: 'RubyMine',
       Icon: RubyMineIcon,
-      value: "rubymine",
-      kind: "brand",
+      value: 'rubymine',
+      kind: 'brand',
     },
     {
-      label: "RustRover",
+      label: 'RustRover',
       Icon: RustRoverIcon,
-      value: "rustrover",
-      kind: "brand",
+      value: 'rustrover',
+      kind: 'brand',
     },
     {
-      label: "WebStorm",
+      label: 'WebStorm',
       Icon: WebStormIcon,
-      value: "webstorm",
-      kind: "brand",
+      value: 'webstorm',
+      kind: 'brand',
     },
     {
       label: isMacPlatform(platform)
-        ? "Finder"
+        ? 'Finder'
         : isWindowsPlatform(platform)
-          ? "Explorer"
-          : "Files",
+          ? 'Explorer'
+          : 'Files',
       Icon: FolderClosedIcon,
-      value: "file-manager",
-      kind: "generic",
+      value: 'file-manager',
+      kind: 'generic',
     },
-  ];
-  const availableEditorSet = new Set(availableEditors);
-  return baseOptions.filter((option) => availableEditorSet.has(option.value));
-};
+  ]
+  const availableEditorSet = new Set(availableEditors)
+  return baseOptions.filter((option) => availableEditorSet.has(option.value))
+}
 
-function getOpenInIconClass(kind: OpenInOption["kind"]) {
-  return cn(kind === "brand" ? "text-foreground opacity-100" : "text-muted-foreground");
+function getOpenInIconClass(kind: OpenInOption['kind'])
+{
+  return cn(kind === 'brand' ? 'text-foreground opacity-100' : 'text-muted-foreground')
 }
 
 export const OpenInPicker = memo(function OpenInPicker({
@@ -191,75 +193,72 @@ export const OpenInPicker = memo(function OpenInPicker({
   compact = false,
   enableShortcut = true,
 }: {
-  environmentId: EnvironmentId;
-  keybindings: ResolvedKeybindingsConfig;
-  availableEditors: ReadonlyArray<EditorId>;
-  openInCwd: string | null;
-  compact?: boolean;
-  enableShortcut?: boolean;
-}) {
-  const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, "open in editor");
-  const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors);
+  environmentId: EnvironmentId
+  keybindings: ResolvedKeybindingsConfig
+  availableEditors: ReadonlyArray<EditorId>
+  openInCwd: string | null
+  compact?: boolean
+  enableShortcut?: boolean
+})
+{
+  const openInEditorMutation = useAtomCommand(shellEnvironment.openInEditor, 'open in editor')
+  const [preferredEditor, setPreferredEditor] = usePreferredEditor(availableEditors)
   const options = useMemo(
     () => resolveOptions(navigator.platform, availableEditors),
     [availableEditors],
-  );
-  const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null;
+  )
+  const primaryOption = options.find(({ value }) => value === preferredEditor) ?? null
 
   const openInEditor = useCallback(
-    (editorId: EditorId | null) => {
-      if (!openInCwd) return;
-      const editor = editorId ?? preferredEditor;
-      if (!editor) return;
+    (editorId: EditorId | null) =>
+    {
+      if (!openInCwd) return
+      const editor = editorId ?? preferredEditor
+      if (!editor) return
       const result = openInEditorMutation({
         environmentId,
         input: {
           cwd: openInCwd,
           editor,
         },
-      });
-      setPreferredEditor(editor);
-      return result;
+      })
+      setPreferredEditor(editor)
+      return result
     },
     [environmentId, openInCwd, openInEditorMutation, preferredEditor, setPreferredEditor],
-  );
+  )
 
   const openFavoriteEditorShortcutLabel = useMemo(
-    () => shortcutLabelForCommand(keybindings, "editor.openFavorite"),
+    () => shortcutLabelForCommand(keybindings, 'editor.openFavorite'),
     [keybindings],
-  );
+  )
 
-  useEffect(() => {
-    if (!enableShortcut) return;
-    const handler = (e: globalThis.KeyboardEvent) => {
-      if (!isOpenFavoriteEditorShortcut(e, keybindings)) return;
-      if (!openInCwd) return;
-      if (!preferredEditor) return;
+  useEffect(() =>
+  {
+    if (!enableShortcut) return
+    const handler = (e: globalThis.KeyboardEvent) =>
+    {
+      if (!isOpenFavoriteEditorShortcut(e, keybindings)) return
+      if (!openInCwd) return
+      if (!preferredEditor) return
 
-      e.preventDefault();
+      e.preventDefault()
       void openInEditorMutation({
         environmentId,
         input: {
           cwd: openInCwd,
           editor: preferredEditor,
         },
-      });
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [
-    enableShortcut,
-    environmentId,
-    keybindings,
-    openInCwd,
-    openInEditorMutation,
-    preferredEditor,
-  ]);
+      })
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [enableShortcut, environmentId, keybindings, openInCwd, openInEditorMutation, preferredEditor])
 
   return (
     <Group aria-label="Open in editor">
       <Button
-        aria-label={compact ? "Open file in preferred editor" : undefined}
+        aria-label={compact ? 'Open file in preferred editor' : undefined}
         size="xs"
         variant="outline"
         disabled={!preferredEditor || !openInCwd}
@@ -268,25 +267,25 @@ export const OpenInPicker = memo(function OpenInPicker({
         {primaryOption?.Icon && (
           <primaryOption.Icon
             aria-hidden="true"
-            className={cn("size-3.5", getOpenInIconClass(primaryOption.kind))}
+            className={cn('size-3.5', getOpenInIconClass(primaryOption.kind))}
           />
         )}
         <span
           className={
             compact
-              ? "sr-only"
-              : "sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5"
+              ? 'sr-only'
+              : 'sr-only @3xl/header-actions:not-sr-only @3xl/header-actions:ml-0.5'
           }
         >
           Open
         </span>
       </Button>
-      <GroupSeparator {...(!compact ? { className: "hidden @3xl/header-actions:block" } : {})} />
+      <GroupSeparator {...(!compact ? { className: 'hidden @3xl/header-actions:block' } : {})} />
       <Menu>
         <MenuTrigger
           render={
             <Button
-              aria-label={compact ? "Choose editor" : "Copy options"}
+              aria-label={compact ? 'Choose editor' : 'Copy options'}
               size="icon-xs"
               variant="outline"
             />
@@ -308,5 +307,5 @@ export const OpenInPicker = memo(function OpenInPicker({
         </MenuPopup>
       </Menu>
     </Group>
-  );
-});
+  )
+})

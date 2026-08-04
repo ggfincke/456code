@@ -1,223 +1,241 @@
-import { assert, describe, it } from "@effect/vitest";
-import * as Cause from "effect/Cause";
-import * as Effect from "effect/Effect";
-import { beforeEach, vi } from "vite-plus/test";
+import { assert, describe, it } from '@effect/vitest'
+import * as Cause from 'effect/Cause'
+import * as Effect from 'effect/Effect'
+import { beforeEach, vi } from 'vite-plus/test'
 
 const { handleMock, netFetchMock, unhandleMock } = vi.hoisted(() => ({
   handleMock: vi.fn(),
   netFetchMock: vi.fn(),
   unhandleMock: vi.fn(),
-}));
+}))
 
-vi.mock("electron", () => ({
+vi.mock('electron', () => ({
   net: { fetch: netFetchMock },
   protocol: { handle: handleMock, unhandle: unhandleMock },
-}));
+}))
 
-import * as ElectronProtocol from "../../../../apps/desktop/src/electron/ElectronProtocol.ts";
+import * as ElectronProtocol from '../../../../apps/desktop/src/electron/ElectronProtocol.ts'
 
-describe("ElectronProtocol", () => {
-  beforeEach(() => {
-    handleMock.mockReset();
-    netFetchMock.mockReset();
-    unhandleMock.mockReset();
-  });
+describe('ElectronProtocol', () =>
+{
+  beforeEach(() =>
+  {
+    handleMock.mockReset()
+    netFetchMock.mockReset()
+    unhandleMock.mockReset()
+  })
 
-  it.effect("proxies the stable renderer origin to the current app server", () =>
-    Effect.gen(function* () {
-      let handler: ((request: Request) => Promise<Response>) | undefined;
-      handleMock.mockImplementation((_scheme, nextHandler) => {
-        handler = nextHandler;
-      });
-      netFetchMock.mockResolvedValue(new Response("ok"));
+  it.effect('proxies the stable renderer origin to the current app server', () =>
+    Effect.gen(function* ()
+    {
+      let handler: ((request: Request) => Promise<Response>) | undefined
+      handleMock.mockImplementation((_scheme, nextHandler) =>
+      {
+        handler = nextHandler
+      })
+      netFetchMock.mockResolvedValue(new Response('ok'))
 
       yield* Effect.scoped(
-        Effect.gen(function* () {
-          const protocol = yield* ElectronProtocol.ElectronProtocol;
+        Effect.gen(function* ()
+        {
+          const protocol = yield* ElectronProtocol.ElectronProtocol
           yield* protocol.registerDesktopProtocol({
-            scheme: "code456-dev",
-            targetOrigin: new URL("http://127.0.0.1:3773/"),
-            backendOrigin: new URL("http://127.0.0.1:3774/"),
-          });
-          assert.isDefined(handler);
+            scheme: 'code456-dev',
+            targetOrigin: new URL('http://127.0.0.1:3773/'),
+            backendOrigin: new URL('http://127.0.0.1:3774/'),
+          })
+          assert.isDefined(handler)
 
           const response = yield* Effect.promise(() =>
             handler!(
-              new Request("code456-dev://app/api/health?verbose=1", {
+              new Request('code456-dev://app/api/health?verbose=1', {
                 headers: {
-                  accept: "application/json",
-                  origin: "code456-dev://app",
-                  referer: "code456-dev://app/",
-                  "sec-fetch-site": "same-origin",
+                  accept: 'application/json',
+                  origin: 'code456-dev://app',
+                  referer: 'code456-dev://app/',
+                  'sec-fetch-site': 'same-origin',
                 },
               }),
             ),
-          );
-          assert.equal(yield* Effect.promise(() => response.text()), "ok");
+          )
+          assert.equal(yield* Effect.promise(() => response.text()), 'ok')
           assert.include(
-            response.headers.get("content-security-policy") ?? "",
+            response.headers.get('content-security-policy') ?? '',
             "script-src 'self' 'unsafe-inline'",
-          );
+          )
           assert.include(
-            response.headers.get("content-security-policy") ?? "",
+            response.headers.get('content-security-policy') ?? '',
             "connect-src 'self' http: https: ws: wss:",
-          );
+          )
           assert.include(
-            response.headers.get("content-security-policy") ?? "",
+            response.headers.get('content-security-policy') ?? '',
             "img-src 'self' code456-dev: blob: data: http: https:",
-          );
+          )
           assert.include(
-            response.headers.get("content-security-policy") ?? "",
+            response.headers.get('content-security-policy') ?? '',
             "font-src 'self' code456-dev: data:",
-          );
+          )
           assert.include(
-            response.headers.get("content-security-policy") ?? "",
+            response.headers.get('content-security-policy') ?? '',
             "frame-src 'self' http: https:",
-          );
+          )
         }),
-      );
+      )
 
       assert.deepEqual(
         handleMock.mock.calls.map((call) => call[0]),
-        ["code456-dev"],
-      );
-      assert.equal(netFetchMock.mock.calls[0]?.[0], "http://127.0.0.1:3773/api/health?verbose=1");
-      const forwardedHeaders = new Headers(netFetchMock.mock.calls[0]?.[1]?.headers);
-      assert.equal(forwardedHeaders.get("accept"), "application/json");
-      assert.isNull(forwardedHeaders.get("origin"));
-      assert.isNull(forwardedHeaders.get("referer"));
-      assert.isNull(forwardedHeaders.get("sec-fetch-site"));
-      assert.deepEqual(unhandleMock.mock.calls, [["code456-dev"]]);
+        ['code456-dev'],
+      )
+      assert.equal(netFetchMock.mock.calls[0]?.[0], 'http://127.0.0.1:3773/api/health?verbose=1')
+      const forwardedHeaders = new Headers(netFetchMock.mock.calls[0]?.[1]?.headers)
+      assert.equal(forwardedHeaders.get('accept'), 'application/json')
+      assert.isNull(forwardedHeaders.get('origin'))
+      assert.isNull(forwardedHeaders.get('referer'))
+      assert.isNull(forwardedHeaders.get('sec-fetch-site'))
+      assert.deepEqual(unhandleMock.mock.calls, [['code456-dev']])
     }).pipe(Effect.provide(ElectronProtocol.layer)),
-  );
+  )
 
-  it.effect("rejects custom protocol requests for another host", () =>
-    Effect.gen(function* () {
-      let handler: ((request: Request) => Promise<Response>) | undefined;
-      handleMock.mockImplementation((_scheme, nextHandler) => {
-        handler = nextHandler;
-      });
+  it.effect('rejects custom protocol requests for another host', () =>
+    Effect.gen(function* ()
+    {
+      let handler: ((request: Request) => Promise<Response>) | undefined
+      handleMock.mockImplementation((_scheme, nextHandler) =>
+      {
+        handler = nextHandler
+      })
 
       const response = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const protocol = yield* ElectronProtocol.ElectronProtocol;
+        Effect.gen(function* ()
+        {
+          const protocol = yield* ElectronProtocol.ElectronProtocol
           yield* protocol.registerDesktopProtocol({
-            scheme: "code456",
-            targetOrigin: new URL("http://127.0.0.1:3773/"),
-            backendOrigin: new URL("http://127.0.0.1:3773/"),
-          });
-          return yield* Effect.promise(() => handler!(new Request("code456://other/")));
+            scheme: 'code456',
+            targetOrigin: new URL('http://127.0.0.1:3773/'),
+            backendOrigin: new URL('http://127.0.0.1:3773/'),
+          })
+          return yield* Effect.promise(() => handler!(new Request('code456://other/')))
         }),
-      );
+      )
 
-      assert.equal(response.status, 404);
-      assert.equal(netFetchMock.mock.calls.length, 0);
+      assert.equal(response.status, 404)
+      assert.equal(netFetchMock.mock.calls.length, 0)
     }).pipe(Effect.provide(ElectronProtocol.layer)),
-  );
+  )
 
-  it.effect("retries transient renderer target failures", () =>
-    Effect.gen(function* () {
-      let handler: ((request: Request) => Promise<Response>) | undefined;
-      handleMock.mockImplementation((_scheme, nextHandler) => {
-        handler = nextHandler;
-      });
+  it.effect('retries transient renderer target failures', () =>
+    Effect.gen(function* ()
+    {
+      let handler: ((request: Request) => Promise<Response>) | undefined
+      handleMock.mockImplementation((_scheme, nextHandler) =>
+      {
+        handler = nextHandler
+      })
       netFetchMock
-        .mockRejectedValueOnce(new Error("connect ECONNREFUSED 127.0.0.1:5733"))
-        .mockResolvedValueOnce(new Response("ready"));
+        .mockRejectedValueOnce(new Error('connect ECONNREFUSED 127.0.0.1:5733'))
+        .mockResolvedValueOnce(new Response('ready'))
 
       const response = yield* Effect.scoped(
-        Effect.gen(function* () {
-          const protocol = yield* ElectronProtocol.ElectronProtocol;
+        Effect.gen(function* ()
+        {
+          const protocol = yield* ElectronProtocol.ElectronProtocol
           yield* protocol.registerDesktopProtocol({
-            scheme: "code456-dev",
-            targetOrigin: new URL("http://127.0.0.1:5733/"),
-            backendOrigin: new URL("http://127.0.0.1:3773/"),
-          });
-          return yield* Effect.promise(() => handler!(new Request("code456-dev://app/")));
+            scheme: 'code456-dev',
+            targetOrigin: new URL('http://127.0.0.1:5733/'),
+            backendOrigin: new URL('http://127.0.0.1:3773/'),
+          })
+          return yield* Effect.promise(() => handler!(new Request('code456-dev://app/')))
         }),
-      );
+      )
 
-      assert.equal(yield* Effect.promise(() => response.text()), "ready");
-      assert.equal(netFetchMock.mock.calls.length, 2);
+      assert.equal(yield* Effect.promise(() => response.text()), 'ready')
+      assert.equal(netFetchMock.mock.calls.length, 2)
     }).pipe(Effect.provide(ElectronProtocol.layer)),
-  );
+  )
 
-  it.effect("preserves protocol registration failures", () =>
-    Effect.gen(function* () {
-      const cause = new Error("protocol registration failed");
-      handleMock.mockImplementationOnce(() => {
-        throw cause;
-      });
+  it.effect('preserves protocol registration failures', () =>
+    Effect.gen(function* ()
+    {
+      const cause = new Error('protocol registration failed')
+      handleMock.mockImplementationOnce(() =>
+      {
+        throw cause
+      })
 
-      const protocol = yield* ElectronProtocol.ElectronProtocol;
+      const protocol = yield* ElectronProtocol.ElectronProtocol
       const error = yield* Effect.scoped(
         protocol.registerDesktopProtocol({
-          scheme: "code456-dev",
-          targetOrigin: new URL("http://127.0.0.1:3773/"),
-          backendOrigin: new URL("http://127.0.0.1:3774/"),
+          scheme: 'code456-dev',
+          targetOrigin: new URL('http://127.0.0.1:3773/'),
+          backendOrigin: new URL('http://127.0.0.1:3774/'),
         }),
-      ).pipe(Effect.flip);
+      ).pipe(Effect.flip)
 
-      assert.instanceOf(error, ElectronProtocol.ElectronProtocolRegistrationError);
-      assert.equal(error.scheme, "code456-dev");
-      assert.strictEqual(error.cause, cause);
-      assert.equal(error.message, 'Failed to register Electron protocol scheme "code456-dev".');
+      assert.instanceOf(error, ElectronProtocol.ElectronProtocolRegistrationError)
+      assert.equal(error.scheme, 'code456-dev')
+      assert.strictEqual(error.cause, cause)
+      assert.equal(error.message, 'Failed to register Electron protocol scheme "code456-dev".')
     }).pipe(Effect.provide(ElectronProtocol.layer)),
-  );
+  )
 
-  it.effect("preserves protocol unregistration failures", () =>
-    Effect.gen(function* () {
-      const cause = new Error("protocol unregistration failed");
-      unhandleMock.mockImplementationOnce(() => {
-        throw cause;
-      });
+  it.effect('preserves protocol unregistration failures', () =>
+    Effect.gen(function* ()
+    {
+      const cause = new Error('protocol unregistration failed')
+      unhandleMock.mockImplementationOnce(() =>
+      {
+        throw cause
+      })
 
-      const protocol = yield* ElectronProtocol.ElectronProtocol;
+      const protocol = yield* ElectronProtocol.ElectronProtocol
       const exit = yield* Effect.exit(
         Effect.scoped(
           protocol.registerDesktopProtocol({
-            scheme: "code456",
-            targetOrigin: new URL("http://127.0.0.1:3773/"),
-            backendOrigin: new URL("http://127.0.0.1:3773/"),
+            scheme: 'code456',
+            targetOrigin: new URL('http://127.0.0.1:3773/'),
+            backendOrigin: new URL('http://127.0.0.1:3773/'),
           }),
         ),
-      );
+      )
 
-      assert.equal(exit._tag, "Failure");
-      if (exit._tag === "Failure") {
-        const error = Cause.squash(exit.cause);
-        assert.instanceOf(error, ElectronProtocol.ElectronProtocolUnregistrationError);
-        assert.equal(error.scheme, "code456");
-        assert.strictEqual(error.cause, cause);
-        assert.equal(error.message, 'Failed to unregister Electron protocol scheme "code456".');
+      assert.equal(exit._tag, 'Failure')
+      if (exit._tag === 'Failure')
+      {
+        const error = Cause.squash(exit.cause)
+        assert.instanceOf(error, ElectronProtocol.ElectronProtocolUnregistrationError)
+        assert.equal(error.scheme, 'code456')
+        assert.strictEqual(error.cause, cause)
+        assert.equal(error.message, 'Failed to unregister Electron protocol scheme "code456".')
       }
     }).pipe(Effect.provide(ElectronProtocol.layer)),
-  );
+  )
 
-  it("keeps executable sources host-restricted while allowing runtime network resources", () => {
+  it('keeps executable sources host-restricted while allowing runtime network resources', () =>
+  {
     const policy = ElectronProtocol.makeDesktopContentSecurityPolicy({
-      scheme: "code456",
-      targetOrigin: new URL("http://127.0.0.1:3773/"),
-      backendOrigin: new URL("http://127.0.0.1:3773/"),
-    });
+      scheme: 'code456',
+      targetOrigin: new URL('http://127.0.0.1:3773/'),
+      backendOrigin: new URL('http://127.0.0.1:3773/'),
+    })
     const directives = Object.fromEntries(
-      policy.split("; ").map((directive) => {
-        const [name, ...sources] = directive.split(" ");
-        return [name, sources];
+      policy.split('; ').map((directive) =>
+      {
+        const [name, ...sources] = directive.split(' ')
+        return [name, sources]
       }),
-    );
+    )
 
-    assert.deepEqual(directives["script-src"], ["'self'", "'unsafe-inline'"]);
-    assert.deepEqual(directives["connect-src"], ["'self'", "http:", "https:", "ws:", "wss:"]);
-    assert.deepEqual(directives["img-src"], [
+    assert.deepEqual(directives['script-src'], ["'self'", "'unsafe-inline'"])
+    assert.deepEqual(directives['connect-src'], ["'self'", 'http:', 'https:', 'ws:', 'wss:'])
+    assert.deepEqual(directives['img-src'], [
       "'self'",
-      "code456:",
-      "blob:",
-      "data:",
-      "http:",
-      "https:",
-    ]);
-    assert.deepEqual(directives["font-src"], ["'self'", "code456:", "data:"]);
-    assert.deepEqual(directives["frame-src"], ["'self'", "http:", "https:"]);
-  });
-});
+      'code456:',
+      'blob:',
+      'data:',
+      'http:',
+      'https:',
+    ])
+    assert.deepEqual(directives['font-src'], ["'self'", 'code456:', 'data:'])
+    assert.deepEqual(directives['frame-src'], ["'self'", 'http:', 'https:'])
+  })
+})

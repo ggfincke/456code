@@ -1,66 +1,80 @@
-import type { ContextMenuItem, LocalApi } from "@t3tools/contracts";
+import type { ContextMenuItem, LocalApi } from '@t3tools/contracts'
 
-import { resetRequestLatencyStateForTests } from "./rpc/requestLatencyState";
-import { showContextMenuFallback } from "./contextMenuFallback";
-import { readBrowserClientSettings, writeBrowserClientSettings } from "./clientPersistenceStorage";
+import { resetRequestLatencyStateForTests } from './rpc/requestLatencyState'
+import { showContextMenuFallback } from './contextMenuFallback'
+import { readBrowserClientSettings, writeBrowserClientSettings } from './clientPersistenceStorage'
 
-let cachedApi: LocalApi | undefined;
+let cachedApi: LocalApi | undefined
 
-function unavailableLocalBackendError(): Error {
-  return new Error("Local backend API is unavailable before a backend is paired.");
+function unavailableLocalBackendError(): Error
+{
+  return new Error('Local backend API is unavailable before a backend is paired.')
 }
 
-function createBrowserLocalApi(): LocalApi {
+function createBrowserLocalApi(): LocalApi
+{
   return {
     dialogs: {
-      pickFolder: async (options) => {
-        if (!window.desktopBridge) return null;
-        return window.desktopBridge.pickFolder(options);
+      pickFolder: async (options) =>
+      {
+        if (!window.desktopBridge) return null
+        return window.desktopBridge.pickFolder(options)
       },
-      confirm: async (message) => {
-        if (window.desktopBridge) {
-          return window.desktopBridge.confirm(message);
+      confirm: async (message) =>
+      {
+        if (window.desktopBridge)
+        {
+          return window.desktopBridge.confirm(message)
         }
-        return window.confirm(message);
+        return window.confirm(message)
       },
     },
     shell: {
       openInEditor: () => Promise.reject(unavailableLocalBackendError()),
-      openExternal: async (url) => {
-        if (window.desktopBridge) {
-          const opened = await window.desktopBridge.openExternal(url);
-          if (!opened) {
-            throw new Error("Unable to open link.");
+      openExternal: async (url) =>
+      {
+        if (window.desktopBridge)
+        {
+          const opened = await window.desktopBridge.openExternal(url)
+          if (!opened)
+          {
+            throw new Error('Unable to open link.')
           }
-          return;
+          return
         }
 
-        window.open(url, "_blank", "noopener,noreferrer");
+        window.open(url, '_blank', 'noopener,noreferrer')
       },
     },
     contextMenu: {
       show: async <T extends string>(
         items: readonly ContextMenuItem<T>[],
         position?: { x: number; y: number },
-      ): Promise<T | null> => {
-        if (window.desktopBridge) {
-          return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>;
+      ): Promise<T | null> =>
+      {
+        if (window.desktopBridge)
+        {
+          return window.desktopBridge.showContextMenu(items, position) as Promise<T | null>
         }
-        return showContextMenuFallback(items, position);
+        return showContextMenuFallback(items, position)
       },
     },
     persistence: {
-      getClientSettings: async () => {
-        if (window.desktopBridge) {
-          return window.desktopBridge.getClientSettings();
+      getClientSettings: async () =>
+      {
+        if (window.desktopBridge)
+        {
+          return window.desktopBridge.getClientSettings()
         }
-        return readBrowserClientSettings();
+        return readBrowserClientSettings()
       },
-      setClientSettings: async (settings) => {
-        if (window.desktopBridge) {
-          return window.desktopBridge.setClientSettings(settings);
+      setClientSettings: async (settings) =>
+      {
+        if (window.desktopBridge)
+        {
+          return window.desktopBridge.setClientSettings(settings)
         }
-        writeBrowserClientSettings(settings);
+        writeBrowserClientSettings(settings)
       },
     },
     server: {
@@ -77,37 +91,43 @@ function createBrowserLocalApi(): LocalApi {
       getProcessResourceHistory: () => Promise.reject(unavailableLocalBackendError()),
       signalProcess: () => Promise.reject(unavailableLocalBackendError()),
     },
-  };
+  }
 }
 
-export function createLocalApi(): LocalApi {
-  return createBrowserLocalApi();
+export function createLocalApi(): LocalApi
+{
+  return createBrowserLocalApi()
 }
 
-export function readLocalApi(): LocalApi | undefined {
-  if (typeof window === "undefined") return undefined;
-  if (cachedApi) return cachedApi;
+export function readLocalApi(): LocalApi | undefined
+{
+  if (typeof window === 'undefined') return undefined
+  if (cachedApi) return cachedApi
 
-  if (window.nativeApi) {
-    cachedApi = window.nativeApi;
-    return cachedApi;
+  if (window.nativeApi)
+  {
+    cachedApi = window.nativeApi
+    return cachedApi
   }
 
-  cachedApi = createBrowserLocalApi();
-  return cachedApi;
+  cachedApi = createBrowserLocalApi()
+  return cachedApi
 }
 
-export function ensureLocalApi(): LocalApi {
-  const api = readLocalApi();
-  if (!api) {
-    throw new Error("Local API not found");
+export function ensureLocalApi(): LocalApi
+{
+  const api = readLocalApi()
+  if (!api)
+  {
+    throw new Error('Local API not found')
   }
-  return api;
+  return api
 }
 
-export async function __resetLocalApiForTests() {
-  cachedApi = undefined;
-  const { __resetClientSettingsPersistenceForTests } = await import("./hooks/useSettings");
-  __resetClientSettingsPersistenceForTests();
-  resetRequestLatencyStateForTests();
+export async function __resetLocalApiForTests()
+{
+  cachedApi = undefined
+  const { __resetClientSettingsPersistenceForTests } = await import('./hooks/useSettings')
+  __resetClientSettingsPersistenceForTests()
+  resetRequestLatencyStateForTests()
 }

@@ -1,11 +1,12 @@
-import { SymbolView } from "../../components/AppSymbol";
-import { Pressable, View } from "react-native";
+import { SymbolView } from '../../components/AppSymbol'
+import { Pressable, View } from 'react-native'
 
-import { AppText as Text } from "../../components/AppText";
-import { useThemeColor } from "../../lib/useThemeColor";
+import { AppText as Text } from '../../components/AppText'
+import { useThemeColor } from '../../lib/useThemeColor'
 
-export function WorkspaceEmptyDetail(props: { readonly onStartNewTask?: () => void }) {
-  const iconColor = useThemeColor("--color-icon-subtle");
+export function WorkspaceEmptyDetail(props: { readonly onStartNewTask?: () => void })
+{
+  const iconColor = useThemeColor('--color-icon-subtle')
 
   return (
     <View className="flex-1 items-center justify-center bg-screen px-10">
@@ -26,5 +27,5 @@ export function WorkspaceEmptyDetail(props: { readonly onStartNewTask?: () => vo
         ) : null}
       </View>
     </View>
-  );
+  )
 }

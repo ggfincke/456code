@@ -10,28 +10,29 @@ import {
   ThreadId,
   TurnId,
   type OrchestrationEvent,
-} from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+} from '@t3tools/contracts'
+import { describe, expect, it } from 'vite-plus/test'
 
-import { deriveOrchestrationBatchEffects } from "../../../apps/web/src/orchestrationEventEffects";
+import { deriveOrchestrationBatchEffects } from '../../../apps/web/src/orchestrationEventEffects'
 
-function makeEvent<T extends OrchestrationEvent["type"]>(
+function makeEvent<T extends OrchestrationEvent['type']>(
   type: T,
-  payload: Extract<OrchestrationEvent, { type: T }>["payload"],
+  payload: Extract<OrchestrationEvent, { type: T }>['payload'],
   overrides: Partial<Extract<OrchestrationEvent, { type: T }>> = {},
-): Extract<OrchestrationEvent, { type: T }> {
-  const sequence = overrides.sequence ?? 1;
+): Extract<OrchestrationEvent, { type: T }>
+{
+  const sequence = overrides.sequence ?? 1
   return {
     sequence,
     eventId: EventId.make(`event-${sequence}`),
-    aggregateKind: "thread",
+    aggregateKind: 'thread',
     aggregateId:
-      "threadId" in payload
+      'threadId' in payload
         ? payload.threadId
-        : "projectId" in payload
+        : 'projectId' in payload
           ? payload.projectId
-          : ProjectId.make("project-1"),
-    occurredAt: "2026-02-27T00:00:00.000Z",
+          : ProjectId.make('project-1'),
+    occurredAt: '2026-02-27T00:00:00.000Z',
     commandId: null,
     causationEventId: null,
     correlationId: null,
@@ -39,102 +40,106 @@ function makeEvent<T extends OrchestrationEvent["type"]>(
     type,
     payload,
     ...overrides,
-  } as Extract<OrchestrationEvent, { type: T }>;
+  } as Extract<OrchestrationEvent, { type: T }>
 }
 
-describe("deriveOrchestrationBatchEffects", () => {
-  it("targets draft promotion and terminal cleanup from thread lifecycle events", () => {
-    const createdThreadId = ThreadId.make("thread-created");
-    const deletedThreadId = ThreadId.make("thread-deleted");
-    const archivedThreadId = ThreadId.make("thread-archived");
+describe('deriveOrchestrationBatchEffects', () =>
+{
+  it('targets draft promotion and terminal cleanup from thread lifecycle events', () =>
+  {
+    const createdThreadId = ThreadId.make('thread-created')
+    const deletedThreadId = ThreadId.make('thread-deleted')
+    const archivedThreadId = ThreadId.make('thread-archived')
 
     const effects = deriveOrchestrationBatchEffects([
-      makeEvent("thread.created", {
+      makeEvent('thread.created', {
         threadId: createdThreadId,
-        projectId: ProjectId.make("project-1"),
-        title: "Created thread",
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
-        runtimeMode: "full-access",
-        interactionMode: "default",
+        projectId: ProjectId.make('project-1'),
+        title: 'Created thread',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5-codex' },
+        runtimeMode: 'full-access',
+        interactionMode: 'default',
         branch: null,
         worktreePath: null,
         origin: null,
-        createdAt: "2026-02-27T00:00:00.000Z",
-        updatedAt: "2026-02-27T00:00:00.000Z",
+        createdAt: '2026-02-27T00:00:00.000Z',
+        updatedAt: '2026-02-27T00:00:00.000Z',
       }),
-      makeEvent("thread.deleted", {
+      makeEvent('thread.deleted', {
         threadId: deletedThreadId,
-        deletedAt: "2026-02-27T00:00:01.000Z",
+        deletedAt: '2026-02-27T00:00:01.000Z',
       }),
-      makeEvent("thread.archived", {
+      makeEvent('thread.archived', {
         threadId: archivedThreadId,
-        archivedAt: "2026-02-27T00:00:02.000Z",
-        updatedAt: "2026-02-27T00:00:02.000Z",
+        archivedAt: '2026-02-27T00:00:02.000Z',
+        updatedAt: '2026-02-27T00:00:02.000Z',
       }),
-    ]);
+    ])
 
-    expect(effects.promoteDraftThreadIds).toEqual([createdThreadId]);
-    expect(effects.clearDeletedThreadIds).toEqual([deletedThreadId]);
-    expect(effects.removeTerminalUiStateThreadIds).toEqual([deletedThreadId, archivedThreadId]);
-    expect(effects.needsProviderInvalidation).toBe(false);
-  });
+    expect(effects.promoteDraftThreadIds).toEqual([createdThreadId])
+    expect(effects.clearDeletedThreadIds).toEqual([deletedThreadId])
+    expect(effects.removeTerminalUiStateThreadIds).toEqual([deletedThreadId, archivedThreadId])
+    expect(effects.needsProviderInvalidation).toBe(false)
+  })
 
-  it("keeps only the final lifecycle outcome for a thread within one batch", () => {
-    const threadId = ThreadId.make("thread-1");
+  it('keeps only the final lifecycle outcome for a thread within one batch', () =>
+  {
+    const threadId = ThreadId.make('thread-1')
 
     const effects = deriveOrchestrationBatchEffects([
-      makeEvent("thread.deleted", {
+      makeEvent('thread.deleted', {
         threadId,
-        deletedAt: "2026-02-27T00:00:01.000Z",
+        deletedAt: '2026-02-27T00:00:01.000Z',
       }),
-      makeEvent("thread.created", {
+      makeEvent('thread.created', {
         threadId,
-        projectId: ProjectId.make("project-1"),
-        title: "Recreated thread",
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5-codex" },
-        runtimeMode: "full-access",
-        interactionMode: "default",
+        projectId: ProjectId.make('project-1'),
+        title: 'Recreated thread',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5-codex' },
+        runtimeMode: 'full-access',
+        interactionMode: 'default',
         branch: null,
         worktreePath: null,
         origin: null,
-        createdAt: "2026-02-27T00:00:02.000Z",
-        updatedAt: "2026-02-27T00:00:02.000Z",
+        createdAt: '2026-02-27T00:00:02.000Z',
+        updatedAt: '2026-02-27T00:00:02.000Z',
       }),
-      makeEvent("thread.turn-diff-completed", {
+      makeEvent('thread.turn-diff-completed', {
         threadId,
-        turnId: TurnId.make("turn-1"),
+        turnId: TurnId.make('turn-1'),
         checkpointTurnCount: 1,
-        checkpointRef: CheckpointRef.make("checkpoint-1"),
-        status: "ready",
+        checkpointRef: CheckpointRef.make('checkpoint-1'),
+        status: 'ready',
         files: [],
-        assistantMessageId: MessageId.make("assistant-1"),
-        completedAt: "2026-02-27T00:00:03.000Z",
+        assistantMessageId: MessageId.make('assistant-1'),
+        completedAt: '2026-02-27T00:00:03.000Z',
       }),
-    ]);
+    ])
 
-    expect(effects.promoteDraftThreadIds).toEqual([threadId]);
-    expect(effects.clearDeletedThreadIds).toEqual([]);
-    expect(effects.removeTerminalUiStateThreadIds).toEqual([]);
-    expect(effects.needsProviderInvalidation).toBe(true);
-  });
+    expect(effects.promoteDraftThreadIds).toEqual([threadId])
+    expect(effects.clearDeletedThreadIds).toEqual([])
+    expect(effects.removeTerminalUiStateThreadIds).toEqual([])
+    expect(effects.needsProviderInvalidation).toBe(true)
+  })
 
-  it("does not retain archive cleanup when a thread is unarchived later in the same batch", () => {
-    const threadId = ThreadId.make("thread-1");
+  it('does not retain archive cleanup when a thread is unarchived later in the same batch', () =>
+  {
+    const threadId = ThreadId.make('thread-1')
 
     const effects = deriveOrchestrationBatchEffects([
-      makeEvent("thread.archived", {
+      makeEvent('thread.archived', {
         threadId,
-        archivedAt: "2026-02-27T00:00:01.000Z",
-        updatedAt: "2026-02-27T00:00:01.000Z",
+        archivedAt: '2026-02-27T00:00:01.000Z',
+        updatedAt: '2026-02-27T00:00:01.000Z',
       }),
-      makeEvent("thread.unarchived", {
+      makeEvent('thread.unarchived', {
         threadId,
-        updatedAt: "2026-02-27T00:00:02.000Z",
+        updatedAt: '2026-02-27T00:00:02.000Z',
       }),
-    ]);
+    ])
 
-    expect(effects.promoteDraftThreadIds).toEqual([]);
-    expect(effects.clearDeletedThreadIds).toEqual([]);
-    expect(effects.removeTerminalUiStateThreadIds).toEqual([]);
-  });
-});
+    expect(effects.promoteDraftThreadIds).toEqual([])
+    expect(effects.clearDeletedThreadIds).toEqual([])
+    expect(effects.removeTerminalUiStateThreadIds).toEqual([])
+  })
+})

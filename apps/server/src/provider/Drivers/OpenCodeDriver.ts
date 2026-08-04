@@ -14,70 +14,71 @@
  *
  * @module provider/Drivers/OpenCodeDriver
  */
-import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
-import * as Duration from "effect/Duration";
-import * as Crypto from "effect/Crypto";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
-import { HttpClient } from "effect/unstable/http";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
+import * as Duration from 'effect/Duration'
+import * as Crypto from 'effect/Crypto'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
+import { HttpClient } from 'effect/unstable/http'
+import { ChildProcessSpawner } from 'effect/unstable/process'
 
-import { makeOpenCodeTextGeneration } from "../../textGeneration/OpenCodeTextGeneration.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
+import { makeOpenCodeTextGeneration } from '../../textGeneration/OpenCodeTextGeneration.ts'
+import { ServerConfig } from '../../config.ts'
+import { ServerSettingsService } from '../../serverSettings.ts'
 import {
   normalizeOpenCodeRuntimeEnvironment,
   resolveOpenCodeContinuationIdentity,
-} from "../continuationIdentity.ts";
-import { ProviderDriverError } from "../Errors.ts";
-import { makeOpenCodeAdapter } from "../Layers/OpenCodeAdapter.ts";
+} from '../continuationIdentity.ts'
+import { ProviderDriverError } from '../Errors.ts'
+import { makeOpenCodeAdapter } from '../Layers/OpenCodeAdapter.ts'
 import {
   checkOpenCodeProviderStatus,
   makePendingOpenCodeProvider,
-} from "../Layers/OpenCodeProvider.ts";
-import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import { OpenCodeRuntime } from "../opencodeRuntime.ts";
-import { type ProviderDriver, type ProviderInstance } from "../ProviderDriver.ts";
-import type { ServerProviderDraft } from "../providerSnapshot.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+} from '../Layers/OpenCodeProvider.ts'
+import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
+import { makeManagedServerProvider } from '../makeManagedServerProvider.ts'
+import { OpenCodeRuntime } from '../opencodeRuntime.ts'
+import { type ProviderDriver, type ProviderInstance } from '../ProviderDriver.ts'
+import type { ServerProviderDraft } from '../providerSnapshot.ts'
+import { mergeProviderInstanceEnvironment } from '../ProviderInstanceEnvironment.ts'
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
+} from '../providerMaintenance.ts'
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
-const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
+} from '../providerUpdateSettings.ts'
+const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings)
 
-const DRIVER_KIND = ProviderDriverKind.make("opencode");
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+const DRIVER_KIND = ProviderDriverKind.make('opencode')
+const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
 
-function isOpenCodeNativeCommandPath(commandPath: string): boolean {
-  const normalized = normalizeCommandPath(commandPath);
+function isOpenCodeNativeCommandPath(commandPath: string): boolean
+{
+  const normalized = normalizeCommandPath(commandPath)
   return (
-    normalized.endsWith("/.opencode/bin/opencode") ||
-    normalized.endsWith("/.opencode/bin/opencode.exe")
-  );
+    normalized.endsWith('/.opencode/bin/opencode') ||
+    normalized.endsWith('/.opencode/bin/opencode.exe')
+  )
 }
 
 const UPDATE = makePackageManagedProviderMaintenanceResolver({
   provider: DRIVER_KIND,
-  npmPackageName: "opencode-ai",
-  homebrewFormula: "anomalyco/tap/opencode",
+  npmPackageName: 'opencode-ai',
+  homebrewFormula: 'anomalyco/tap/opencode',
   nativeUpdate: {
-    executable: "opencode",
-    args: ["upgrade"],
-    lockKey: "opencode-native",
+    executable: 'opencode',
+    args: ['upgrade'],
+    lockKey: 'opencode-native',
     isCommandPath: isOpenCodeNativeCommandPath,
   },
-});
+})
 
 export type OpenCodeDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
@@ -88,14 +89,14 @@ export type OpenCodeDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | ServerConfig
-  | ServerSettingsService;
+  | ServerSettingsService
 
 const withInstanceIdentity =
   (input: {
-    readonly instanceId: ProviderInstance["instanceId"];
-    readonly displayName: string | undefined;
-    readonly accentColor: string | undefined;
-    readonly continuationGroupKey: string;
+    readonly instanceId: ProviderInstance['instanceId']
+    readonly displayName: string | undefined
+    readonly accentColor: string | undefined
+    readonly continuationGroupKey: string
   }) =>
   (snapshot: ServerProviderDraft): ServerProvider => ({
     ...snapshot,
@@ -104,32 +105,33 @@ const withInstanceIdentity =
     ...(input.displayName ? { displayName: input.displayName } : {}),
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     continuation: { groupKey: input.continuationGroupKey },
-  });
+  })
 
 export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
-    displayName: "OpenCode",
+    displayName: 'OpenCode',
     supportsMultipleInstances: true,
   },
   configSchema: OpenCodeSettings,
   defaultConfig: (): OpenCodeSettings => decodeOpenCodeSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* () {
-      const openCodeRuntime = yield* OpenCodeRuntime;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const serverConfig = yield* ServerConfig;
-      const httpClient = yield* HttpClient.HttpClient;
-      const serverSettings = yield* ServerSettingsService;
-      const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
-      const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings;
+    Effect.gen(function* ()
+    {
+      const openCodeRuntime = yield* OpenCodeRuntime
+      const fileSystem = yield* FileSystem.FileSystem
+      const serverConfig = yield* ServerConfig
+      const httpClient = yield* HttpClient.HttpClient
+      const serverSettings = yield* ServerSettingsService
+      const eventLoggers = yield* ProviderEventLoggers
+      const processEnv = mergeProviderInstanceEnvironment(environment)
+      const effectiveConfig = { ...config, enabled } satisfies OpenCodeSettings
       const runtimeEnvironment =
         effectiveConfig.serverUrl.trim().length > 0
           ? processEnv
           : normalizeOpenCodeRuntimeEnvironment(processEnv, {
               cwd: serverConfig.cwd,
-            });
+            })
       const resolveContinuationIdentity = resolveOpenCodeContinuationIdentity(
         DRIVER_KIND,
         effectiveConfig,
@@ -137,33 +139,33 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
           environment: runtimeEnvironment,
           cwd: serverConfig.cwd,
         },
-      ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
-      const continuationIdentity = yield* resolveContinuationIdentity;
+      ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem))
+      const continuationIdentity = yield* resolveContinuationIdentity
       const stampIdentity = withInstanceIdentity({
         instanceId,
         displayName,
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
-      });
+      })
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
-      });
+      })
 
       const adapter = yield* makeOpenCodeAdapter(effectiveConfig, {
         instanceId,
         environment: runtimeEnvironment,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-      });
-      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, runtimeEnvironment);
+      })
+      const textGeneration = yield* makeOpenCodeTextGeneration(effectiveConfig, runtimeEnvironment)
 
       const checkProvider = checkOpenCodeProviderStatus(
         effectiveConfig,
         serverConfig.cwd,
         runtimeEnvironment,
-      ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime));
+      ).pipe(Effect.map(stampIdentity), Effect.provideService(OpenCodeRuntime, openCodeRuntime))
 
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<OpenCodeSettings>>(
         {
           maintenanceCapabilities,
@@ -192,7 +194,7 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
               cause,
             }),
         ),
-      );
+      )
 
       return {
         instanceId,
@@ -205,6 +207,6 @@ export const OpenCodeDriver: ProviderDriver<OpenCodeSettings, OpenCodeDriverEnv>
         snapshot,
         adapter,
         textGeneration,
-      } satisfies ProviderInstance;
+      } satisfies ProviderInstance
     }),
-};
+}

@@ -1,18 +1,18 @@
-import * as Schema from "effect/Schema";
+import * as Schema from 'effect/Schema'
 
 import {
   type ConnectionRegistration,
   ConnectionCredential,
   ConnectionProfile,
-} from "../connection/catalog.ts";
-import { type ConnectionTarget, PersistedConnectionTarget } from "../connection/model.ts";
-import * as TokenStore from "../authorization/tokenStore.ts";
+} from '../connection/catalog.ts'
+import { type ConnectionTarget, PersistedConnectionTarget } from '../connection/model.ts'
+import * as TokenStore from '../authorization/tokenStore.ts'
 
 export const StoredConnectionCredential = Schema.Struct({
   connectionId: Schema.String,
   credential: ConnectionCredential,
-});
-export type StoredConnectionCredential = typeof StoredConnectionCredential.Type;
+})
+export type StoredConnectionCredential = typeof StoredConnectionCredential.Type
 
 export const ConnectionCatalogDocument = Schema.Struct({
   schemaVersion: Schema.Literal(1),
@@ -20,8 +20,8 @@ export const ConnectionCatalogDocument = Schema.Struct({
   profiles: Schema.Array(ConnectionProfile),
   credentials: Schema.Array(StoredConnectionCredential),
   remoteDpopTokens: Schema.Array(TokenStore.RemoteDpopAccessToken),
-});
-export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type;
+})
+export type ConnectionCatalogDocument = typeof ConnectionCatalogDocument.Type
 
 export const EMPTY_CONNECTION_CATALOG_DOCUMENT: ConnectionCatalogDocument = Object.freeze({
   schemaVersion: 1,
@@ -29,33 +29,37 @@ export const EMPTY_CONNECTION_CATALOG_DOCUMENT: ConnectionCatalogDocument = Obje
   profiles: [],
   credentials: [],
   remoteDpopTokens: [],
-});
+})
 
 export function replaceCatalogValue<A>(
   values: ReadonlyArray<A>,
   key: (value: A) => string,
   next: A,
-): ReadonlyArray<A> {
-  const nextKey = key(next);
-  return [...values.filter((value) => key(value) !== nextKey), next];
+): ReadonlyArray<A>
+{
+  const nextKey = key(next)
+  return [...values.filter((value) => key(value) !== nextKey), next]
 }
 
 export function removeCatalogValue<A>(
   values: ReadonlyArray<A>,
   key: (value: A) => string,
   removedKey: string,
-): ReadonlyArray<A> {
-  return values.filter((value) => key(value) !== removedKey);
+): ReadonlyArray<A>
+{
+  return values.filter((value) => key(value) !== removedKey)
 }
 
-function connectionIdOf(target: ConnectionTarget): string | null {
-  switch (target._tag) {
-    case "PrimaryConnectionTarget":
-    case "RelayConnectionTarget":
-      return null;
-    case "BearerConnectionTarget":
-    case "SshConnectionTarget":
-      return target.connectionId;
+function connectionIdOf(target: ConnectionTarget): string | null
+{
+  switch (target._tag)
+  {
+    case 'PrimaryConnectionTarget':
+    case 'RelayConnectionTarget':
+      return null
+    case 'BearerConnectionTarget':
+    case 'SshConnectionTarget':
+      return target.connectionId
   }
 }
 
@@ -63,8 +67,9 @@ function removeConnectionMetadata(
   document: ConnectionCatalogDocument,
   target: ConnectionTarget,
   removeRemoteToken: boolean,
-): ConnectionCatalogDocument {
-  const connectionId = connectionIdOf(target);
+): ConnectionCatalogDocument
+{
+  const connectionId = connectionIdOf(target)
   return {
     ...document,
     targets: removeCatalogValue(
@@ -87,28 +92,30 @@ function removeConnectionMetadata(
           target.environmentId,
         )
       : document.remoteDpopTokens,
-  };
+  }
 }
 
 export function registerConnectionInCatalog(
   document: ConnectionCatalogDocument,
   registration: ConnectionRegistration,
-): ConnectionCatalogDocument {
-  const target = registration.target;
+): ConnectionCatalogDocument
+{
+  const target = registration.target
   const previous = document.targets.find(
     (candidate) => candidate.environmentId === target.environmentId,
-  );
+  )
   const cleaned =
-    previous === undefined ? document : removeConnectionMetadata(document, previous, false);
+    previous === undefined ? document : removeConnectionMetadata(document, previous, false)
   const next: ConnectionCatalogDocument = {
     ...cleaned,
     targets: replaceCatalogValue(cleaned.targets, (value) => value.environmentId, target),
-  };
+  }
 
-  switch (registration._tag) {
-    case "RelayConnectionRegistration":
-      return next;
-    case "BearerConnectionRegistration":
+  switch (registration._tag)
+  {
+    case 'RelayConnectionRegistration':
+      return next
+    case 'BearerConnectionRegistration':
       return {
         ...next,
         profiles: replaceCatalogValue(
@@ -120,8 +127,8 @@ export function registerConnectionInCatalog(
           connectionId: registration.target.connectionId,
           credential: registration.credential,
         }),
-      };
-    case "SshConnectionRegistration":
+      }
+    case 'SshConnectionRegistration':
       return {
         ...next,
         profiles: replaceCatalogValue(
@@ -129,13 +136,14 @@ export function registerConnectionInCatalog(
           (value) => value.connectionId,
           registration.profile,
         ),
-      };
+      }
   }
 }
 
 export function removeConnectionFromCatalog(
   document: ConnectionCatalogDocument,
   target: ConnectionTarget,
-): ConnectionCatalogDocument {
-  return removeConnectionMetadata(document, target, true);
+): ConnectionCatalogDocument
+{
+  return removeConnectionMetadata(document, target, true)
 }

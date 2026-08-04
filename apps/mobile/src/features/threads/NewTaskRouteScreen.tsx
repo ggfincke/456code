@@ -1,124 +1,133 @@
 // apps/mobile/src/features/threads/NewTaskRouteScreen.tsx
 // routes new mobile tasks through an eligible connected environment
 
-import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
-import { useIsFocused, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { SymbolView } from "../../components/AppSymbol";
-import type { EnvironmentId, ProjectId } from "@t3tools/contracts";
-import { useEffect, useMemo, useRef } from "react";
-import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useThemeColor } from "../../lib/useThemeColor";
-import { cn } from "../../lib/cn";
+import { NativeHeaderToolbar, NativeStackScreenOptions } from '../../native/StackHeader'
+import { useIsFocused, useNavigation, type StaticScreenProps } from '@react-navigation/native'
+import { SymbolView } from '../../components/AppSymbol'
+import type { EnvironmentId, ProjectId } from '@t3tools/contracts'
+import { useEffect, useMemo, useRef } from 'react'
+import { ActivityIndicator, Alert, Platform, Pressable, ScrollView, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useThemeColor } from '../../lib/useThemeColor'
+import { cn } from '../../lib/cn'
 
-import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
-import { ProjectFavicon } from "../../components/ProjectFavicon";
-import { useProjects, useThreadShells } from "../../state/entities";
-import type { WorkspaceState } from "../../state/workspaceModel";
-import { useWorkspaceState } from "../../state/workspace";
-import { groupProjectsByRepository } from "../../lib/repositoryGroups";
-import { useAdaptiveWorkspaceLayout } from "../layout/AdaptiveWorkspaceLayout";
-import { useIncomingShare } from "../sharing/IncomingShareProvider";
+import { AndroidScreenHeader } from '../../components/AndroidScreenHeader'
+import { AppText as Text } from '../../components/AppText'
+import { ProjectFavicon } from '../../components/ProjectFavicon'
+import { useProjects, useThreadShells } from '../../state/entities'
+import type { WorkspaceState } from '../../state/workspaceModel'
+import { useWorkspaceState } from '../../state/workspace'
+import { groupProjectsByRepository } from '../../lib/repositoryGroups'
+import { useAdaptiveWorkspaceLayout } from '../layout/AdaptiveWorkspaceLayout'
+import { useIncomingShare } from '../sharing/IncomingShareProvider'
 
 type NewTaskRouteParams = {
-  readonly incomingShareId?: string | string[];
-};
+  readonly incomingShareId?: string | string[]
+}
 
 function deriveProjectEmptyState(catalogState: WorkspaceState): {
-  readonly title: string;
-  readonly detail: string;
-  readonly loading: boolean;
-} {
-  if (catalogState.isLoadingConnections) {
+  readonly title: string
+  readonly detail: string
+  readonly loading: boolean
+}
+{
+  if (catalogState.isLoadingConnections)
+  {
     return {
-      title: "Loading environments",
-      detail: "Checking saved environments on this device.",
+      title: 'Loading environments',
+      detail: 'Checking saved environments on this device.',
       loading: true,
-    };
+    }
   }
 
-  if (!catalogState.hasConnections) {
+  if (!catalogState.hasConnections)
+  {
     return {
-      title: "No environments connected",
-      detail: "Add an environment before creating a task.",
+      title: 'No environments connected',
+      detail: 'Add an environment before creating a task.',
       loading: false,
-    };
+    }
   }
 
   if (
-    (catalogState.connectionState === "available" ||
-      catalogState.connectionState === "offline" ||
-      catalogState.connectionState === "error") &&
+    (catalogState.connectionState === 'available' ||
+      catalogState.connectionState === 'offline' ||
+      catalogState.connectionState === 'error') &&
     !catalogState.hasLoadedShellSnapshot
-  ) {
+  )
+  {
     return {
-      title: "Environment unavailable",
+      title: 'Environment unavailable',
       detail:
         catalogState.connectionError ??
-        "The saved environment is offline. Check the URL or start the environment, then retry.",
+        'The saved environment is offline. Check the URL or start the environment, then retry.',
       loading: false,
-    };
+    }
   }
 
   if (
     catalogState.hasConnectingEnvironment &&
     !catalogState.hasLoadedShellSnapshot &&
     catalogState.connectionError === null
-  ) {
+  )
+  {
     return {
-      title: "Connecting to environment",
-      detail: "Loading projects from the saved environment.",
+      title: 'Connecting to environment',
+      detail: 'Loading projects from the saved environment.',
       loading: true,
-    };
+    }
   }
 
   return {
-    title: "No projects found",
-    detail: "The connected environment did not report any projects.",
+    title: 'No projects found',
+    detail: 'The connected environment did not report any projects.',
     loading: false,
-  };
+  }
 }
 
-export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRouteParams | undefined>) {
-  const projects = useProjects();
-  const threads = useThreadShells();
-  const { state: catalogState } = useWorkspaceState();
-  const navigation = useNavigation();
-  const isFocused = useIsFocused();
-  const { layout } = useAdaptiveWorkspaceLayout();
-  const insets = useSafeAreaInsets();
-  const chevronColor = useThemeColor("--color-chevron");
-  const accentColor = useThemeColor("--color-icon-muted");
-  const { getShare, releaseShareReservation } = useIncomingShare();
+export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRouteParams | undefined>)
+{
+  const projects = useProjects()
+  const threads = useThreadShells()
+  const { state: catalogState } = useWorkspaceState()
+  const navigation = useNavigation()
+  const isFocused = useIsFocused()
+  const { layout } = useAdaptiveWorkspaceLayout()
+  const insets = useSafeAreaInsets()
+  const chevronColor = useThemeColor('--color-chevron')
+  const accentColor = useThemeColor('--color-icon-muted')
+  const { getShare, releaseShareReservation } = useIncomingShare()
   const routeShareId = Array.isArray(route.params?.incomingShareId)
     ? route.params.incomingShareId[0]
-    : route.params?.incomingShareId;
-  const incomingShare = routeShareId ? getShare(routeShareId) : null;
+    : route.params?.incomingShareId
+  const incomingShare = routeShareId ? getShare(routeShareId) : null
   const incomingShareSubtitle = incomingShare
     ? incomingShare.attachments.length === 0
-      ? "Choose a project for what you shared"
+      ? 'Choose a project for what you shared'
       : incomingShare.attachments.length === 1
-        ? "Choose a project for the image you shared"
+        ? 'Choose a project for the image you shared'
         : `Choose a project for the ${incomingShare.attachments.length} images you shared`
-    : null;
-  const screenTitle = incomingShare ? "Start a task" : "Choose project";
+    : null
+  const screenTitle = incomingShare ? 'Start a task' : 'Choose project'
   const repositoryGroups = useMemo(
     () => groupProjectsByRepository({ projects, threads }),
     [projects, threads],
-  );
-  const items = useMemo(() => {
+  )
+  const items = useMemo(() =>
+  {
     const nextItems: Array<{
-      readonly environmentId: EnvironmentId;
-      readonly id: ProjectId;
-      readonly key: string;
-      readonly title: string;
-      readonly workspaceRoot: string;
-    }> = [];
-    for (const group of repositoryGroups) {
-      const project = group.projects[0]?.project;
-      if (!project) {
-        continue;
+      readonly environmentId: EnvironmentId
+      readonly id: ProjectId
+      readonly key: string
+      readonly title: string
+      readonly workspaceRoot: string
+    }> = []
+    for (const group of repositoryGroups)
+    {
+      const project = group.projects[0]?.project
+      if (!project)
+      {
+        continue
       }
       nextItems.push({
         environmentId: project.environmentId,
@@ -126,79 +135,89 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
         key: group.key,
         title: project.title,
         workspaceRoot: project.workspaceRoot,
-      });
+      })
     }
-    return nextItems;
-  }, [repositoryGroups]);
-  const projectEmptyState = deriveProjectEmptyState(catalogState);
-  const resumedDestinationKeyRef = useRef<string | null>(null);
+    return nextItems
+  }, [repositoryGroups])
+  const projectEmptyState = deriveProjectEmptyState(catalogState)
+  const resumedDestinationKeyRef = useRef<string | null>(null)
   const reservedDestinationProject = incomingShare?.destination
     ? (projects.find(
         (project) =>
           project.environmentId === incomingShare.destination?.environmentId &&
           project.id === incomingShare.destination?.projectId,
       ) ?? null)
-    : null;
+    : null
 
-  async function selectProject(item: (typeof items)[number]): Promise<void> {
-    if (incomingShare?.destination && !reservedDestinationProject) {
-      try {
-        await releaseShareReservation(incomingShare.id, incomingShare.destination);
-      } catch (error) {
+  async function selectProject(item: (typeof items)[number]): Promise<void>
+  {
+    if (incomingShare?.destination && !reservedDestinationProject)
+    {
+      try
+      {
+        await releaseShareReservation(incomingShare.id, incomingShare.destination)
+      }
+      catch (error)
+      {
         Alert.alert(
-          "Could not change project",
+          'Could not change project',
           error instanceof Error
             ? error.message
-            : "The shared content reservation could not be updated.",
-        );
-        return;
+            : 'The shared content reservation could not be updated.',
+        )
+        return
       }
     }
-    navigation.navigate("NewTaskSheet", {
-      screen: "NewTaskDraft",
+    navigation.navigate('NewTaskSheet', {
+      screen: 'NewTaskDraft',
       params: {
         environmentId: item.environmentId,
         projectId: item.id,
         title: item.title,
         incomingShareId: incomingShare?.id,
       },
-    });
+    })
   }
 
-  useEffect(() => {
-    const destination = incomingShare?.destination;
-    if (!destination) {
-      resumedDestinationKeyRef.current = null;
-      return;
+  useEffect(() =>
+  {
+    const destination = incomingShare?.destination
+    if (!destination)
+    {
+      resumedDestinationKeyRef.current = null
+      return
     }
-    if (!isFocused) {
+    if (!isFocused)
+    {
       // Returning from the reserved draft is a fresh resume attempt. Keeping
       // this latch set would leave every project row disabled with no route.
-      resumedDestinationKeyRef.current = null;
-      return;
+      resumedDestinationKeyRef.current = null
+      return
     }
-    const destinationKey = `${incomingShare.id}:${destination.environmentId}:${destination.projectId}`;
-    if (resumedDestinationKeyRef.current === destinationKey) {
-      return;
+    const destinationKey = `${incomingShare.id}:${destination.environmentId}:${destination.projectId}`
+    if (resumedDestinationKeyRef.current === destinationKey)
+    {
+      return
     }
-    if (!reservedDestinationProject) {
-      return;
+    if (!reservedDestinationProject)
+    {
+      return
     }
-    resumedDestinationKeyRef.current = destinationKey;
-    navigation.navigate("NewTaskSheet", {
-      screen: "NewTaskDraft",
+    resumedDestinationKeyRef.current = destinationKey
+    navigation.navigate('NewTaskSheet', {
+      screen: 'NewTaskDraft',
       params: {
         environmentId: reservedDestinationProject.environmentId,
         projectId: reservedDestinationProject.id,
         title: reservedDestinationProject.title,
         incomingShareId: incomingShare.id,
       },
-    });
-  }, [incomingShare, isFocused, navigation, reservedDestinationProject]);
+    })
+  }, [incomingShare, isFocused, navigation, reservedDestinationProject])
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === "android" ? (
+      {Platform.OS === 'android' ? (
         <>
           {/* Android renders its own in-screen header instead of the native bar. */}
           <NativeStackScreenOptions options={{ headerShown: false }} />
@@ -210,9 +229,9 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
               catalogState.hasReadyEnvironment
                 ? [
                     {
-                      accessibilityLabel: "Add project",
-                      icon: "plus",
-                      onPress: () => navigation.navigate("NewTaskSheet", { screen: "AddProject" }),
+                      accessibilityLabel: 'Add project',
+                      icon: 'plus',
+                      onPress: () => navigation.navigate('NewTaskSheet', { screen: 'AddProject' }),
                     },
                   ]
                 : []
@@ -239,7 +258,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
             {catalogState.hasReadyEnvironment ? (
               <NativeHeaderToolbar.Button
                 icon="plus"
-                onPress={() => navigation.navigate("NewTaskSheet", { screen: "AddProject" })}
+                onPress={() => navigation.navigate('NewTaskSheet', { screen: 'AddProject' })}
                 separateBackground
               />
             ) : null}
@@ -270,7 +289,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
             {!catalogState.hasReadyEnvironment ? (
               <Pressable
                 className="mt-1 rounded-full bg-primary px-4 py-2.5 active:opacity-70"
-                onPress={() => navigation.navigate("ConnectionsNew")}
+                onPress={() => navigation.navigate('ConnectionsNew')}
               >
                 <Text className="text-sm font-sans-bold text-primary-foreground">
                   Add environment
@@ -279,7 +298,7 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
             ) : (
               <Pressable
                 className="mt-1 rounded-full bg-primary px-4 py-2.5 active:opacity-70"
-                onPress={() => navigation.navigate("NewTaskSheet", { screen: "AddProject" })}
+                onPress={() => navigation.navigate('NewTaskSheet', { screen: 'AddProject' })}
               >
                 <Text className="text-sm font-sans-bold text-primary-foreground">
                   Add new project
@@ -289,9 +308,10 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
           </View>
         ) : (
           <View collapsable={false} className="overflow-hidden rounded-[24px] bg-card">
-            {items.map((item, index) => {
-              const isFirst = index === 0;
-              const isLast = index === items.length - 1;
+            {items.map((item, index) =>
+              {
+              const isFirst = index === 0
+              const isLast = index === items.length - 1
 
               return (
                 <Pressable
@@ -299,10 +319,10 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                   disabled={reservedDestinationProject !== null}
                   onPress={() => void selectProject(item)}
                   className={cn(
-                    "bg-card px-4 py-3.5",
-                    !isFirst && "border-t border-border-subtle",
-                    isFirst && "rounded-t-[24px]",
-                    isLast && "rounded-b-[24px]",
+                    'bg-card px-4 py-3.5',
+                    !isFirst && 'border-t border-border-subtle',
+                    isFirst && 'rounded-t-[24px]',
+                    isLast && 'rounded-b-[24px]',
                   )}
                 >
                   <View className="flex-row items-center justify-between gap-3">
@@ -325,11 +345,11 @@ export function NewTaskRouteScreen({ route }: StaticScreenProps<NewTaskRoutePara
                     />
                   </View>
                 </Pressable>
-              );
+              )
             })}
           </View>
         )}
       </ScrollView>
     </View>
-  );
+  )
 }

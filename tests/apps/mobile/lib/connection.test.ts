@@ -1,74 +1,81 @@
-import { describe, expect, it, vi } from "vite-plus/test";
-import { EnvironmentId } from "@t3tools/contracts";
+import { describe, expect, it, vi } from 'vite-plus/test'
+import { EnvironmentId } from '@t3tools/contracts'
 
 import {
   isRelayManagedConnection,
   authClientMetadata,
   redactPairingCredential,
   toStableSavedRemoteConnection,
-} from "../../../../apps/mobile/src/lib/connection";
+} from '../../../../apps/mobile/src/lib/connection'
 
-vi.mock("../../../../apps/mobile/src/lib/runtime", () => ({
+vi.mock('../../../../apps/mobile/src/lib/runtime', () => ({
   runtime: {
     runPromise: vi.fn(),
   },
-}));
+}))
 
-vi.mock("react-native", () => ({
+vi.mock('react-native', () => ({
   Platform: {
-    OS: "ios",
+    OS: 'ios',
   },
-}));
+}))
 
-describe("mobile remote connection records", () => {
-  it("identifies mobile token exchanges for authorized-client presentation", () => {
+describe('mobile remote connection records', () =>
+{
+  it('identifies mobile token exchanges for authorized-client presentation', () =>
+  {
     expect(authClientMetadata()).toEqual({
-      label: "456code Mobile",
-      deviceType: "mobile",
-      os: "iOS",
-    });
-  });
+      label: '456code Mobile',
+      deviceType: 'mobile',
+      os: 'iOS',
+    })
+  })
 
-  it("removes one-time bootstrap credentials before persisting pairing URLs", () => {
-    expect(redactPairingCredential("https://desktop.example/#token=bootstrap-token")).toBe(
-      "https://desktop.example/",
-    );
-    expect(redactPairingCredential("https://desktop.example/?token=bootstrap-token")).toBe(
-      "https://desktop.example/",
-    );
-  });
+  it('removes one-time bootstrap credentials before persisting pairing URLs', () =>
+  {
+    expect(redactPairingCredential('https://desktop.example/#token=bootstrap-token')).toBe(
+      'https://desktop.example/',
+    )
+    expect(redactPairingCredential('https://desktop.example/?token=bootstrap-token')).toBe(
+      'https://desktop.example/',
+    )
+  })
 
-  it("removes hosted pairing credentials while keeping the advertised host", () => {
+  it('removes hosted pairing credentials while keeping the advertised host', () =>
+  {
     expect(
       redactPairingCredential(
-        "https://app.t3.codes/pair?host=https%3A%2F%2Fdesktop.example&token=bootstrap-token&label=Desktop",
+        'https://app.t3.codes/pair?host=https%3A%2F%2Fdesktop.example&token=bootstrap-token&label=Desktop',
       ),
-    ).toBe("https://app.t3.codes/pair?host=https%3A%2F%2Fdesktop.example&label=Desktop");
-  });
+    ).toBe('https://app.t3.codes/pair?host=https%3A%2F%2Fdesktop.example&label=Desktop')
+  })
 
-  it("recognizes explicitly managed relay connections", () => {
-    expect(isRelayManagedConnection({ relayManaged: true })).toBe(true);
-  });
+  it('recognizes explicitly managed relay connections', () =>
+  {
+    expect(isRelayManagedConnection({ relayManaged: true })).toBe(true)
+  })
 
-  it("keeps existing DPoP tunnel records read-only after upgrading", () => {
-    expect(isRelayManagedConnection({ authenticationMethod: "dpop" })).toBe(true);
-    expect(isRelayManagedConnection({ authenticationMethod: "bearer" })).toBe(false);
-  });
+  it('keeps existing DPoP tunnel records read-only after upgrading', () =>
+  {
+    expect(isRelayManagedConnection({ authenticationMethod: 'dpop' })).toBe(true)
+    expect(isRelayManagedConnection({ authenticationMethod: 'bearer' })).toBe(false)
+  })
 
-  it("drops short-lived managed environment credentials from stable records", () => {
+  it('drops short-lived managed environment credentials from stable records', () =>
+  {
     const connection = {
-      environmentId: EnvironmentId.make("environment-1"),
-      environmentLabel: "Desktop",
-      pairingUrl: "https://desktop.example/",
-      displayUrl: "https://desktop.example/",
-      httpBaseUrl: "https://desktop.example/",
-      wsBaseUrl: "wss://desktop.example/",
+      environmentId: EnvironmentId.make('environment-1'),
+      environmentLabel: 'Desktop',
+      pairingUrl: 'https://desktop.example/',
+      displayUrl: 'https://desktop.example/',
+      httpBaseUrl: 'https://desktop.example/',
+      wsBaseUrl: 'wss://desktop.example/',
       bearerToken: null,
-      authenticationMethod: "dpop",
-      dpopAccessToken: "short-lived-token",
+      authenticationMethod: 'dpop',
+      dpopAccessToken: 'short-lived-token',
       relayManaged: true,
-    } as const;
+    } as const
 
-    expect(toStableSavedRemoteConnection(connection)).not.toHaveProperty("dpopAccessToken");
-  });
-});
+    expect(toStableSavedRemoteConnection(connection)).not.toHaveProperty('dpopAccessToken')
+  })
+})

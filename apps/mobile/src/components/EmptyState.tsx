@@ -1,15 +1,17 @@
-import { Pressable, View } from "react-native";
+import { Pressable, View } from 'react-native'
 
-import { AppText as Text } from "./AppText";
+import { AppText as Text } from './AppText'
 
 export function EmptyState(props: {
-  readonly title: string;
-  readonly detail: string;
-  readonly actionLabel?: string;
-  readonly onAction?: () => void;
-  readonly variant?: "card" | "plain";
-}) {
-  if (props.variant === "plain") {
+  readonly title: string
+  readonly detail: string
+  readonly actionLabel?: string
+  readonly onAction?: () => void
+  readonly variant?: 'card' | 'plain'
+})
+{
+  if (props.variant === 'plain')
+  {
     return (
       <View className="items-center px-8 py-8">
         <Text className="text-center text-xl font-sans-bold text-foreground">{props.title}</Text>
@@ -27,7 +29,7 @@ export function EmptyState(props: {
           </Pressable>
         ) : null}
       </View>
-    );
+    )
   }
 
   return (
@@ -47,5 +49,5 @@ export function EmptyState(props: {
         </Pressable>
       ) : null}
     </View>
-  );
+  )
 }

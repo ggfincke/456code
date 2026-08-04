@@ -1,27 +1,29 @@
-import { memo } from "react";
-import { type PendingApproval } from "../../session-logic";
+import { memo } from 'react'
+import { type PendingApproval } from '../../session-logic'
 
-interface ComposerPendingApprovalPanelProps {
-  approval: PendingApproval;
-  pendingCount: number;
+interface ComposerPendingApprovalPanelProps
+{
+  approval: PendingApproval
+  pendingCount: number
 }
 
 export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprovalPanel({
   approval,
   pendingCount,
-}: ComposerPendingApprovalPanelProps) {
+}: ComposerPendingApprovalPanelProps)
+{
   const approvalSummary =
-    approval.requestKind === "command"
-      ? "Command approval requested"
-      : approval.requestKind === "file-read"
-        ? "File-read approval requested"
-        : "File-change approval requested";
+    approval.requestKind === 'command'
+      ? 'Command approval requested'
+      : approval.requestKind === 'file-read'
+        ? 'File-read approval requested'
+        : 'File-change approval requested'
   const detailLabel =
-    approval.requestKind === "command"
-      ? "Command"
-      : approval.requestKind === "file-read"
-        ? "File to read"
-        : "File change";
+    approval.requestKind === 'command'
+      ? 'Command'
+      : approval.requestKind === 'file-read'
+        ? 'File to read'
+        : 'File change'
 
   return (
     <div className="px-4 py-3.5 sm:px-5 sm:py-4">
@@ -45,5 +47,5 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
         </div>
       ) : null}
     </div>
-  );
-});
+  )
+})

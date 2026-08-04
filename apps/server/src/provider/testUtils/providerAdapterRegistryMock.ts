@@ -19,20 +19,20 @@ import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
   type ProviderInstanceId,
-} from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as PubSub from "effect/PubSub";
-import * as Record from "effect/Record";
-import * as Result from "effect/Result";
-import * as Stream from "effect/Stream";
+} from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import * as PubSub from 'effect/PubSub'
+import * as Record from 'effect/Record'
+import * as Result from 'effect/Result'
+import * as Stream from 'effect/Stream'
 
-import { ProviderUnsupportedError, type ProviderAdapterError } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
-import type { ProviderAdapterRegistryShape } from "../Services/ProviderAdapterRegistry.ts";
+import { ProviderUnsupportedError, type ProviderAdapterError } from '../Errors.ts'
+import type { ProviderAdapterShape } from '../Services/ProviderAdapter.ts'
+import type { ProviderAdapterRegistryShape } from '../Services/ProviderAdapterRegistry.ts'
 
 export type KindAdapterMap = Partial<
   Record<ProviderDriverKind, ProviderAdapterShape<ProviderAdapterError>>
->;
+>
 
 /**
  * Build a `ProviderAdapterRegistryShape` from a kind-keyed adapter map.
@@ -40,16 +40,19 @@ export type KindAdapterMap = Partial<
  * `getByProvider(kind)` path and the new `getByInstance(id)` path (where
  * `id = defaultInstanceIdForDriver(kind)`).
  */
-export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapterRegistryShape => {
-  const byInstanceId = new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>();
-  for (const [kind, adapter] of Object.entries(adapters)) {
-    if (!adapter) continue;
-    const driverKind = ProviderDriverKind.make(kind);
-    byInstanceId.set(defaultInstanceIdForDriver(driverKind), adapter);
+export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapterRegistryShape =>
+{
+  const byInstanceId = new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>()
+  for (const [kind, adapter] of Object.entries(adapters))
+  {
+    if (!adapter) continue
+    const driverKind = ProviderDriverKind.make(kind)
+    byInstanceId.set(defaultInstanceIdForDriver(driverKind), adapter)
   }
 
-  const getRoute: ProviderAdapterRegistryShape["getRoute"] = (instanceId) => {
-    const adapter = byInstanceId.get(instanceId);
+  const getRoute: ProviderAdapterRegistryShape['getRoute'] = (instanceId) =>
+  {
+    const adapter = byInstanceId.get(instanceId)
     return adapter
       ? Effect.succeed({
           info: {
@@ -68,8 +71,8 @@ export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapt
           new ProviderUnsupportedError({
             provider: ProviderDriverKind.make(instanceId),
           }),
-        );
-  };
+        )
+  }
 
   return {
     getRoute,
@@ -91,5 +94,5 @@ export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapt
     subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
       PubSub.subscribe(pubsub),
     ),
-  };
-};
+  }
+}

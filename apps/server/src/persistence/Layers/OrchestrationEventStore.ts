@@ -10,27 +10,27 @@ import {
   OrchestrationEventType,
   ProjectId,
   ThreadId,
-} from "@t3tools/contracts";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
+} from '@t3tools/contracts'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Schema from 'effect/Schema'
+import * as Stream from 'effect/Stream'
 
 import {
   toPersistenceDecodeError,
   toPersistenceSqlError,
   type OrchestrationEventStoreError,
-} from "../Errors.ts";
+} from '../Errors.ts'
 import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
-} from "../Services/OrchestrationEventStore.ts";
+} from '../Services/OrchestrationEventStore.ts'
 
-const decodeEvent = Schema.decodeUnknownEffect(OrchestrationEvent);
-const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown);
-const EventMetadataFromJsonString = Schema.fromJsonString(OrchestrationEventMetadata);
+const decodeEvent = Schema.decodeUnknownEffect(OrchestrationEvent)
+const UnknownFromJsonString = Schema.fromJsonString(Schema.Unknown)
+const EventMetadataFromJsonString = Schema.fromJsonString(OrchestrationEventMetadata)
 
 const AppendEventRequestSchema = Schema.Struct({
   eventId: EventId,
@@ -44,7 +44,7 @@ const AppendEventRequestSchema = Schema.Struct({
   commandId: Schema.NullOr(CommandId),
   payloadJson: UnknownFromJsonString,
   metadataJson: EventMetadataFromJsonString,
-});
+})
 
 const OrchestrationEventPersistedRowSchema = Schema.Struct({
   sequence: NonNegativeInt,
@@ -58,46 +58,53 @@ const OrchestrationEventPersistedRowSchema = Schema.Struct({
   correlationId: Schema.NullOr(CommandId),
   payload: UnknownFromJsonString,
   metadata: EventMetadataFromJsonString,
-});
+})
 
 const ReadFromSequenceRequestSchema = Schema.Struct({
   sequenceExclusive: NonNegativeInt,
   limit: Schema.Number,
-});
-const DEFAULT_READ_FROM_SEQUENCE_LIMIT = 1_000;
-const READ_PAGE_SIZE = 500;
+})
+const DEFAULT_READ_FROM_SEQUENCE_LIMIT = 1_000
+const READ_PAGE_SIZE = 500
 
 function inferActorKind(
-  event: Omit<OrchestrationEvent, "sequence">,
-): Schema.Schema.Type<typeof OrchestrationActorKind> {
-  if (event.commandId !== null && event.commandId.startsWith("provider:")) {
-    return "provider";
+  event: Omit<OrchestrationEvent, 'sequence'>,
+): Schema.Schema.Type<typeof OrchestrationActorKind>
+{
+  if (event.commandId !== null && event.commandId.startsWith('provider:'))
+  {
+    return 'provider'
   }
-  if (event.commandId !== null && event.commandId.startsWith("server:")) {
-    return "server";
+  if (event.commandId !== null && event.commandId.startsWith('server:'))
+  {
+    return 'server'
   }
   if (
     event.metadata.providerTurnId !== undefined ||
     event.metadata.providerItemId !== undefined ||
     event.metadata.adapterKey !== undefined
-  ) {
-    return "provider";
+  )
+  {
+    return 'provider'
   }
-  if (event.commandId === null) {
-    return "server";
+  if (event.commandId === null)
+  {
+    return 'server'
   }
-  return "client";
+  return 'client'
 }
 
-function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
+function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)
+{
   return (cause: unknown): OrchestrationEventStoreError =>
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
-      : toPersistenceSqlError(sqlOperation)(cause);
+      : toPersistenceSqlError(sqlOperation)(cause)
 }
 
-const makeEventStore = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+const makeEventStore = Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   const appendEventRow = SqlSchema.findOne({
     Request: AppendEventRequestSchema,
@@ -155,7 +162,7 @@ const makeEventStore = Effect.gen(function* () {
           payload_json AS "payload",
           metadata_json AS "metadata"
       `,
-  });
+  })
 
   const readEventRowsFromSequence = SqlSchema.findAll({
     Request: ReadFromSequenceRequestSchema,
@@ -179,9 +186,9 @@ const makeEventStore = Effect.gen(function* () {
         ORDER BY sequence ASC
         LIMIT ${request.limit}
       `,
-  });
+  })
 
-  const append: OrchestrationEventStoreShape["append"] = (event) =>
+  const append: OrchestrationEventStoreShape['append'] = (event) =>
     appendEventRow({
       eventId: event.eventId,
       aggregateKind: event.aggregateKind,
@@ -197,24 +204,26 @@ const makeEventStore = Effect.gen(function* () {
     }).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "OrchestrationEventStore.append:insert",
-          "OrchestrationEventStore.append:decodeRow",
+          'OrchestrationEventStore.append:insert',
+          'OrchestrationEventStore.append:decodeRow',
         ),
       ),
       Effect.flatMap((row) =>
         decodeEvent(row).pipe(
-          Effect.mapError(toPersistenceDecodeError("OrchestrationEventStore.append:rowToEvent")),
+          Effect.mapError(toPersistenceDecodeError('OrchestrationEventStore.append:rowToEvent')),
         ),
       ),
-    );
+    )
 
-  const readFromSequence: OrchestrationEventStoreShape["readFromSequence"] = (
+  const readFromSequence: OrchestrationEventStoreShape['readFromSequence'] = (
     sequenceExclusive,
     limit = DEFAULT_READ_FROM_SEQUENCE_LIMIT,
-  ) => {
-    const normalizedLimit = Math.max(0, Math.floor(limit));
-    if (normalizedLimit === 0) {
-      return Stream.empty;
+  ) =>
+  {
+    const normalizedLimit = Math.max(0, Math.floor(limit))
+    if (normalizedLimit === 0)
+    {
+      return Stream.empty
     }
     const readPage = (
       cursor: number,
@@ -227,44 +236,47 @@ const makeEventStore = Effect.gen(function* () {
         }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
-              "OrchestrationEventStore.readFromSequence:query",
-              "OrchestrationEventStore.readFromSequence:decodeRows",
+              'OrchestrationEventStore.readFromSequence:query',
+              'OrchestrationEventStore.readFromSequence:decodeRows',
             ),
           ),
           Effect.flatMap((rows) =>
             Effect.forEach(rows, (row) =>
               decodeEvent(row).pipe(
                 Effect.mapError(
-                  toPersistenceDecodeError("OrchestrationEventStore.readFromSequence:rowToEvent"),
+                  toPersistenceDecodeError('OrchestrationEventStore.readFromSequence:rowToEvent'),
                 ),
               ),
             ),
           ),
         ),
       ).pipe(
-        Stream.flatMap((events) => {
-          if (events.length === 0) {
-            return Stream.empty;
+        Stream.flatMap((events) =>
+        {
+          if (events.length === 0)
+          {
+            return Stream.empty
           }
-          const nextRemaining = remaining - events.length;
-          if (nextRemaining <= 0) {
-            return Stream.fromIterable(events);
+          const nextRemaining = remaining - events.length
+          if (nextRemaining <= 0)
+          {
+            return Stream.fromIterable(events)
           }
           return Stream.concat(
             Stream.fromIterable(events),
             readPage(events[events.length - 1]!.sequence, nextRemaining),
-          );
+          )
         }),
-      );
+      )
 
-    return readPage(sequenceExclusive, normalizedLimit);
-  };
+    return readPage(sequenceExclusive, normalizedLimit)
+  }
 
   return {
     append,
     readFromSequence,
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
-  } satisfies OrchestrationEventStoreShape;
-});
+  } satisfies OrchestrationEventStoreShape
+})
 
-export const OrchestrationEventStoreLive = Layer.effect(OrchestrationEventStore, makeEventStore);
+export const OrchestrationEventStoreLive = Layer.effect(OrchestrationEventStore, makeEventStore)

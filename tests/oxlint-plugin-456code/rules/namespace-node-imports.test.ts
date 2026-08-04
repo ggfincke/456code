@@ -1,12 +1,13 @@
-import { assert, describe } from "@effect/vitest";
+import { assert, describe } from '@effect/vitest'
 
-import { createOxlintRuleHarness } from "../../../oxlint-plugin-456code/test/utils.ts";
+import { createOxlintRuleHarness } from '../../../oxlint-plugin-456code/test/utils.ts'
 
-const rule = createOxlintRuleHarness("456code/namespace-node-imports");
+const rule = createOxlintRuleHarness('456code/namespace-node-imports')
 
-describe("456code/namespace-node-imports", () => {
+describe('456code/namespace-node-imports', () =>
+{
   rule.valid(
-    "allows canonical Node namespaces",
+    'allows canonical Node namespaces',
     `
       import * as NodeFS from "node:fs";
       import * as NodeFSP from "node:fs/promises";
@@ -20,44 +21,47 @@ describe("456code/namespace-node-imports", () => {
       export const readAsync = NodeFSP.readFile;
       export type Input = NodeStream.Readable;
     `,
-  );
+  )
 
   rule.valid(
-    "does not apply to non-Node packages",
+    'does not apply to non-Node packages',
     `
       import { BrowserWindow } from "electron";
     `,
-  );
+  )
 
   rule.invalid(
-    "reports named imports",
+    'reports named imports',
     `
       import { readFile } from "node:fs/promises";
     `,
-    (output) => {
-      assert.match(output, /namespace named NodeFSP/);
+    (output) =>
+    {
+      assert.match(output, /namespace named NodeFSP/)
     },
-  );
+  )
 
   rule.invalid(
-    "reports default imports",
+    'reports default imports',
     `
       import path from "node:path";
     `,
-    (output) => {
-      assert.match(output, /namespace named NodePath/);
+    (output) =>
+    {
+      assert.match(output, /namespace named NodePath/)
     },
-  );
+  )
 
   rule.invalid(
-    "reports non-canonical namespace aliases",
+    'reports non-canonical namespace aliases',
     `
       import * as Crypto from "node:crypto";
       import * as NodeOs from "node:os";
     `,
-    (output) => {
-      assert.match(output, /namespace named NodeCrypto/);
-      assert.match(output, /namespace named NodeOS/);
+    (output) =>
+    {
+      assert.match(output, /namespace named NodeCrypto/)
+      assert.match(output, /namespace named NodeOS/)
     },
-  );
-});
+  )
+})

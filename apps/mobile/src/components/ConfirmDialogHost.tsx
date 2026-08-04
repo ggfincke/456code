@@ -1,21 +1,21 @@
-import { useCallback, useEffect, useState } from "react";
-import { Modal, Pressable, View } from "react-native";
+import { useCallback, useEffect, useState } from 'react'
+import { Modal, Pressable, View } from 'react-native'
 
-import { useThemeColor } from "../lib/useThemeColor";
-import { cn } from "../lib/cn";
-import { AppText } from "./AppText";
+import { useThemeColor } from '../lib/useThemeColor'
+import { cn } from '../lib/cn'
+import { AppText } from './AppText'
 
 export type ConfirmDialogRequest = {
-  readonly title: string;
-  readonly message?: string;
-  readonly cancelText?: string;
-  readonly confirmText: string;
-  readonly destructive?: boolean;
-  readonly onConfirm: () => void;
-  readonly onCancel?: () => void;
-};
+  readonly title: string
+  readonly message?: string
+  readonly cancelText?: string
+  readonly confirmText: string
+  readonly destructive?: boolean
+  readonly onConfirm: () => void
+  readonly onCancel?: () => void
+}
 
-let presentRequest: ((request: ConfirmDialogRequest) => void) | null = null;
+let presentRequest: ((request: ConfirmDialogRequest) => void) | null = null
 
 /**
  * Imperative confirm dialog, Alert.alert-shaped. Native iOS alerts already
@@ -23,8 +23,9 @@ let presentRequest: ((request: ConfirmDialogRequest) => void) | null = null;
  * Android, where the native dialog can only theme all confirm buttons at
  * once. Requires ConfirmDialogHost to be mounted at the app root.
  */
-export function showConfirmDialog(request: ConfirmDialogRequest): void {
-  presentRequest?.(request);
+export function showConfirmDialog(request: ConfirmDialogRequest): void
+{
+  presentRequest?.(request)
 }
 
 /**
@@ -33,26 +34,31 @@ export function showConfirmDialog(request: ConfirmDialogRequest): void {
  * buttons — with what the native theme can't do: a per-dialog destructive
  * button color and a dimmer message than the title.
  */
-export function ConfirmDialogHost() {
-  const [request, setRequest] = useState<ConfirmDialogRequest | null>(null);
-  const pressedOverlay = useThemeColor("--color-subtle");
+export function ConfirmDialogHost()
+{
+  const [request, setRequest] = useState<ConfirmDialogRequest | null>(null)
+  const pressedOverlay = useThemeColor('--color-subtle')
 
-  useEffect(() => {
-    presentRequest = setRequest;
-    return () => {
-      presentRequest = null;
-    };
-  }, []);
+  useEffect(() =>
+  {
+    presentRequest = setRequest
+    return () =>
+    {
+      presentRequest = null
+    }
+  }, [])
 
-  const handleCancel = useCallback(() => {
-    request?.onCancel?.();
-    setRequest(null);
-  }, [request]);
+  const handleCancel = useCallback(() =>
+  {
+    request?.onCancel?.()
+    setRequest(null)
+  }, [request])
 
-  const handleConfirm = useCallback(() => {
-    request?.onConfirm();
-    setRequest(null);
-  }, [request]);
+  const handleConfirm = useCallback(() =>
+  {
+    request?.onConfirm()
+    setRequest(null)
+  }, [request])
 
   return (
     <Modal
@@ -81,7 +87,7 @@ export function ConfirmDialogHost() {
                   onPress={handleCancel}
                 >
                   <AppText className="text-base font-sans-medium">
-                    {request.cancelText ?? "Cancel"}
+                    {request.cancelText ?? 'Cancel'}
                   </AppText>
                 </Pressable>
               </View>
@@ -94,8 +100,8 @@ export function ConfirmDialogHost() {
                 >
                   <AppText
                     className={cn(
-                      "text-base font-sans-medium",
-                      request.destructive && "text-danger-foreground",
+                      'text-base font-sans-medium',
+                      request.destructive && 'text-danger-foreground',
                     )}
                   >
                     {request.confirmText}
@@ -107,5 +113,5 @@ export function ConfirmDialogHost() {
         </View>
       )}
     </Modal>
-  );
+  )
 }

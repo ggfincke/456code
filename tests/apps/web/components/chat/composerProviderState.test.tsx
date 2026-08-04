@@ -1,248 +1,265 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 import {
   ProviderDriverKind,
   type ProviderOptionDescriptor,
   type ProviderOptionSelection,
   type ServerProviderModel,
-} from "@t3tools/contracts";
+} from '@t3tools/contracts'
 import {
   getComposerPromptInjectionState,
   getComposerProviderState,
   renderProviderTraitsMenuContent,
   renderProviderTraitsPicker,
-} from "../../../../../apps/web/src/components/chat/composerProviderState";
+} from '../../../../../apps/web/src/components/chat/composerProviderState'
 
 // Everything in composerProviderState is now data-driven by the model's
 // optionDescriptors, so these tests use a single synthetic provider/model and
 // vary only the descriptor shape per scenario.
 
-const PROVIDER: ProviderDriverKind = ProviderDriverKind.make("codex");
-const MODEL = "test-model";
+const PROVIDER: ProviderDriverKind = ProviderDriverKind.make('codex')
+const MODEL = 'test-model'
 
 function selectDescriptor(
   id: string,
   options: ReadonlyArray<{ id: string; label: string; isDefault?: boolean }>,
   promptInjectedValues?: ReadonlyArray<string>,
-): Extract<ProviderOptionDescriptor, { type: "select" }> {
-  const defaultId = options.find((option) => option.isDefault)?.id;
+): Extract<ProviderOptionDescriptor, { type: 'select' }>
+{
+  const defaultId = options.find((option) => option.isDefault)?.id
   return {
     id,
     label: id,
-    type: "select",
+    type: 'select',
     options: [...options],
     ...(defaultId ? { currentValue: defaultId } : {}),
     ...(promptInjectedValues && promptInjectedValues.length > 0
       ? { promptInjectedValues: [...promptInjectedValues] }
       : {}),
-  };
+  }
 }
 
-function booleanDescriptor(id: string): Extract<ProviderOptionDescriptor, { type: "boolean" }> {
-  return { id, label: id, type: "boolean" };
+function booleanDescriptor(id: string): Extract<ProviderOptionDescriptor, { type: 'boolean' }>
+{
+  return { id, label: id, type: 'boolean' }
 }
 
 function modelWith(
   descriptors: ReadonlyArray<ProviderOptionDescriptor>,
-): ReadonlyArray<ServerProviderModel> {
+): ReadonlyArray<ServerProviderModel>
+{
   return [
     { slug: MODEL, name: MODEL, isCustom: false, capabilities: { optionDescriptors: descriptors } },
-  ];
+  ]
 }
 
 function selections(
   ...entries: Array<[string, string | boolean]>
-): ReadonlyArray<ProviderOptionSelection> {
-  return entries.map(([id, value]) => ({ id, value }));
+): ReadonlyArray<ProviderOptionSelection>
+{
+  return entries.map(([id, value]) => ({ id, value }))
 }
 
 const ULTRATHINK_FRAME_CLASSES = {
-  composerFrameClassName: "ultrathink-frame",
-  composerSurfaceClassName: "shadow-[0_0_0_1px_rgba(255,255,255,0.07)_inset]",
-  modelPickerIconClassName: "ultrathink-chroma",
-} as const;
+  composerFrameClassName: 'ultrathink-frame',
+  composerSurfaceClassName: 'shadow-[0_0_0_1px_rgba(255,255,255,0.07)_inset]',
+  modelPickerIconClassName: 'ultrathink-chroma',
+} as const
 
-describe("getComposerProviderState", () => {
-  it("derives a stable prompt injection state for ordinary prompt edits", () => {
-    expect(getComposerPromptInjectionState("Investigate this failure")).toBe("none");
-    expect(getComposerPromptInjectionState("Ultrathink:\nInvestigate this failure")).toBe(
-      "ultrathink",
-    );
-  });
+describe('getComposerProviderState', () =>
+{
+  it('derives a stable prompt injection state for ordinary prompt edits', () =>
+  {
+    expect(getComposerPromptInjectionState('Investigate this failure')).toBe('none')
+    expect(getComposerPromptInjectionState('Ultrathink:\nInvestigate this failure')).toBe(
+      'ultrathink',
+    )
+  })
 
-  it("returns descriptor defaults when no selections are provided", () => {
+  it('returns descriptor defaults when no selections are provided', () =>
+  {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
       models: modelWith([
-        selectDescriptor("effort", [
-          { id: "low", label: "Low" },
-          { id: "high", label: "High", isDefault: true },
+        selectDescriptor('effort', [
+          { id: 'low', label: 'Low' },
+          { id: 'high', label: 'High', isDefault: true },
         ]),
       ]),
       modelOptions: undefined,
-    });
+    })
 
     expect(state).toEqual({
       provider: PROVIDER,
-      promptEffort: "high",
-      modelOptionsForDispatch: selections(["effort", "high"]),
-    });
-  });
+      promptEffort: 'high',
+      modelOptionsForDispatch: selections(['effort', 'high']),
+    })
+  })
 
-  it("lets selections override defaults and propagates them through dispatch", () => {
+  it('lets selections override defaults and propagates them through dispatch', () =>
+  {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
       models: modelWith([
-        selectDescriptor("effort", [
-          { id: "low", label: "Low" },
-          { id: "high", label: "High", isDefault: true },
+        selectDescriptor('effort', [
+          { id: 'low', label: 'Low' },
+          { id: 'high', label: 'High', isDefault: true },
         ]),
-        booleanDescriptor("fastMode"),
+        booleanDescriptor('fastMode'),
       ]),
-      modelOptions: selections(["effort", "low"], ["fastMode", true]),
-    });
+      modelOptions: selections(['effort', 'low'], ['fastMode', true]),
+    })
 
     expect(state).toEqual({
       provider: PROVIDER,
-      promptEffort: "low",
-      modelOptionsForDispatch: selections(["effort", "low"], ["fastMode", true]),
-    });
-  });
+      promptEffort: 'low',
+      modelOptionsForDispatch: selections(['effort', 'low'], ['fastMode', true]),
+    })
+  })
 
-  it("preserves selections that match defaults so deepMerge can overwrite prior state", () => {
+  it('preserves selections that match defaults so deepMerge can overwrite prior state', () =>
+  {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
       models: modelWith([
-        selectDescriptor("effort", [{ id: "high", label: "High", isDefault: true }]),
-        booleanDescriptor("fastMode"),
+        selectDescriptor('effort', [{ id: 'high', label: 'High', isDefault: true }]),
+        booleanDescriptor('fastMode'),
       ]),
-      modelOptions: selections(["effort", "high"], ["fastMode", false]),
-    });
+      modelOptions: selections(['effort', 'high'], ['fastMode', false]),
+    })
 
     expect(state.modelOptionsForDispatch).toEqual(
-      selections(["effort", "high"], ["fastMode", false]),
-    );
-  });
+      selections(['effort', 'high'], ['fastMode', false]),
+    )
+  })
 
-  it("drops selections for descriptors the model does not declare", () => {
+  it('drops selections for descriptors the model does not declare', () =>
+  {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
-      models: modelWith([booleanDescriptor("thinking")]),
-      modelOptions: selections(["effort", "max"], ["thinking", false]),
-    });
+      models: modelWith([booleanDescriptor('thinking')]),
+      modelOptions: selections(['effort', 'max'], ['thinking', false]),
+    })
 
     expect(state).toEqual({
       provider: PROVIDER,
       promptEffort: null,
-      modelOptionsForDispatch: selections(["thinking", false]),
-    });
-  });
+      modelOptionsForDispatch: selections(['thinking', false]),
+    })
+  })
 
-  it("derives promptEffort from the first select descriptor and preserves all others for dispatch", () => {
+  it('derives promptEffort from the first select descriptor and preserves all others for dispatch', () =>
+  {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
       models: modelWith([
-        selectDescriptor("effort", [{ id: "high", label: "High", isDefault: true }]),
-        selectDescriptor("contextWindow", [
-          { id: "200k", label: "200k", isDefault: true },
-          { id: "1m", label: "1M" },
+        selectDescriptor('effort', [{ id: 'high', label: 'High', isDefault: true }]),
+        selectDescriptor('contextWindow', [
+          { id: '200k', label: '200k', isDefault: true },
+          { id: '1m', label: '1M' },
         ]),
-        selectDescriptor("agent", [
-          { id: "build", label: "Build", isDefault: true },
-          { id: "plan", label: "Plan" },
+        selectDescriptor('agent', [
+          { id: 'build', label: 'Build', isDefault: true },
+          { id: 'plan', label: 'Plan' },
         ]),
       ]),
-      modelOptions: selections(["agent", "plan"]),
-    });
+      modelOptions: selections(['agent', 'plan']),
+    })
 
-    expect(state.promptEffort).toBe("high");
+    expect(state.promptEffort).toBe('high')
     expect(state.modelOptionsForDispatch).toEqual(
-      selections(["effort", "high"], ["contextWindow", "200k"], ["agent", "plan"]),
-    );
-  });
+      selections(['effort', 'high'], ['contextWindow', '200k'], ['agent', 'plan']),
+    )
+  })
 
-  it("returns undefined dispatch options when the model declares no descriptors", () => {
+  it('returns undefined dispatch options when the model declares no descriptors', () =>
+  {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
       models: modelWith([]),
-      modelOptions: selections(["anything", "value"]),
-    });
+      modelOptions: selections(['anything', 'value']),
+    })
 
     expect(state).toEqual({
       provider: PROVIDER,
       promptEffort: null,
       modelOptionsForDispatch: undefined,
-    });
-  });
+    })
+  })
 
-  it("adds ultrathink class names when the prompt triggers a promptInjectedValues descriptor", () => {
+  it('adds ultrathink class names when the prompt triggers a promptInjectedValues descriptor', () =>
+  {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
       models: modelWith([
         selectDescriptor(
-          "effort",
+          'effort',
           [
-            { id: "medium", label: "Medium" },
-            { id: "high", label: "High", isDefault: true },
-            { id: "ultrathink", label: "Ultrathink" },
+            { id: 'medium', label: 'Medium' },
+            { id: 'high', label: 'High', isDefault: true },
+            { id: 'ultrathink', label: 'Ultrathink' },
           ],
-          ["ultrathink"],
+          ['ultrathink'],
         ),
       ]),
       promptInjectionState: getComposerPromptInjectionState(
-        "Ultrathink:\nInvestigate this failure",
+        'Ultrathink:\nInvestigate this failure',
       ),
-      modelOptions: selections(["effort", "medium"]),
-    });
+      modelOptions: selections(['effort', 'medium']),
+    })
 
     expect(state).toEqual({
       provider: PROVIDER,
-      promptEffort: "medium",
-      modelOptionsForDispatch: selections(["effort", "medium"]),
+      promptEffort: 'medium',
+      modelOptionsForDispatch: selections(['effort', 'medium']),
       ...ULTRATHINK_FRAME_CLASSES,
-    });
-  });
+    })
+  })
 
-  it("does not add ultrathink class names when the descriptor has no promptInjectedValues", () => {
+  it('does not add ultrathink class names when the descriptor has no promptInjectedValues', () =>
+  {
     const state = getComposerProviderState({
       provider: PROVIDER,
       model: MODEL,
       models: modelWith([
-        selectDescriptor("effort", [{ id: "high", label: "High", isDefault: true }]),
+        selectDescriptor('effort', [{ id: 'high', label: 'High', isDefault: true }]),
       ]),
       promptInjectionState: getComposerPromptInjectionState(
-        "Ultrathink:\nInvestigate this failure",
+        'Ultrathink:\nInvestigate this failure',
       ),
       modelOptions: undefined,
-    });
+    })
 
-    expect(state).not.toHaveProperty("composerFrameClassName");
-    expect(state).not.toHaveProperty("composerSurfaceClassName");
-    expect(state).not.toHaveProperty("modelPickerIconClassName");
-  });
-});
+    expect(state).not.toHaveProperty('composerFrameClassName')
+    expect(state).not.toHaveProperty('composerSurfaceClassName')
+    expect(state).not.toHaveProperty('modelPickerIconClassName')
+  })
+})
 
-describe("provider traits render guards", () => {
-  it("returns null when no thread target is provided", () => {
+describe('provider traits render guards', () =>
+{
+  it('returns null when no thread target is provided', () =>
+  {
     const models = modelWith([
-      selectDescriptor("effort", [{ id: "high", label: "High", isDefault: true }]),
-    ]);
+      selectDescriptor('effort', [{ id: 'high', label: 'High', isDefault: true }]),
+    ])
     const args = {
       provider: PROVIDER,
       model: MODEL,
       models,
       modelOptions: undefined,
-      prompt: "",
-      onPromptChange: () => {},
-    };
+      prompt: '',
+      onPromptChange: () =>
+      {},
+    }
 
-    expect(renderProviderTraitsPicker(args)).toBeNull();
-    expect(renderProviderTraitsMenuContent(args)).toBeNull();
-  });
-});
+    expect(renderProviderTraitsPicker(args)).toBeNull()
+    expect(renderProviderTraitsMenuContent(args)).toBeNull()
+  })
+})

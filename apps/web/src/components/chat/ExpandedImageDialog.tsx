@@ -1,50 +1,57 @@
-import { memo, useCallback, useEffect, useState } from "react";
-import { ChevronLeftIcon, ChevronRightIcon, XIcon } from "lucide-react";
-import { Button } from "../ui/button";
-import type { ExpandedImagePreview } from "./ExpandedImagePreview";
+import { memo, useCallback, useEffect, useState } from 'react'
+import { ChevronLeftIcon, ChevronRightIcon, XIcon } from 'lucide-react'
+import { Button } from '../ui/button'
+import type { ExpandedImagePreview } from './ExpandedImagePreview'
 
-interface ExpandedImageDialogProps {
-  preview: ExpandedImagePreview;
-  onClose: () => void;
+interface ExpandedImageDialogProps
+{
+  preview: ExpandedImagePreview
+  onClose: () => void
 }
 
 export const ExpandedImageDialog = memo(function ExpandedImageDialog({
   preview,
   onClose,
-}: ExpandedImageDialogProps) {
-  const [imageOffset, setImageOffset] = useState(0);
-  const index = (preview.index + imageOffset + preview.images.length) % preview.images.length;
+}: ExpandedImageDialogProps)
+{
+  const [imageOffset, setImageOffset] = useState(0)
+  const index = (preview.index + imageOffset + preview.images.length) % preview.images.length
 
-  const navigateImage = useCallback((direction: -1 | 1) => {
-    setImageOffset((current) => current + direction);
-  }, []);
+  const navigateImage = useCallback((direction: -1 | 1) =>
+  {
+    setImageOffset((current) => current + direction)
+  }, [])
 
-  useEffect(() => {
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") {
-        event.preventDefault();
-        event.stopPropagation();
-        onClose();
-        return;
+  useEffect(() =>
+  {
+    const onKeyDown = (event: globalThis.KeyboardEvent) =>
+    {
+      if (event.key === 'Escape')
+      {
+        event.preventDefault()
+        event.stopPropagation()
+        onClose()
+        return
       }
-      if (preview.images.length <= 1) return;
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        event.stopPropagation();
-        navigateImage(-1);
-        return;
+      if (preview.images.length <= 1) return
+      if (event.key === 'ArrowLeft')
+      {
+        event.preventDefault()
+        event.stopPropagation()
+        navigateImage(-1)
+        return
       }
-      if (event.key !== "ArrowRight") return;
-      event.preventDefault();
-      event.stopPropagation();
-      navigateImage(1);
-    };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
-  }, [navigateImage, onClose, preview.images.length]);
+      if (event.key !== 'ArrowRight') return
+      event.preventDefault()
+      event.stopPropagation()
+      navigateImage(1)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [navigateImage, onClose, preview.images.length])
 
-  const item = preview.images[index];
-  if (!item) return null;
+  const item = preview.images[index]
+  if (!item) return null
 
   return (
     <div
@@ -90,7 +97,7 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         />
         <p className="mt-2 max-w-[92vw] truncate text-center text-xs text-muted-foreground/80">
           {item.name}
-          {preview.images.length > 1 ? ` (${index + 1}/${preview.images.length})` : ""}
+          {preview.images.length > 1 ? ` (${index + 1}/${preview.images.length})` : ''}
         </p>
       </div>
       {preview.images.length > 1 && (
@@ -106,5 +113,5 @@ export const ExpandedImageDialog = memo(function ExpandedImageDialog({
         </Button>
       )}
     </div>
-  );
-});
+  )
+})

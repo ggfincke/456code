@@ -1,57 +1,59 @@
-import { useAtomValue } from "@effect/atom-react";
+import { useAtomValue } from '@effect/atom-react'
 import {
   RelayConnectionRegistration,
   RelayConnectionTarget,
-} from "@t3tools/client-runtime/connection";
-import type { EnvironmentId } from "@t3tools/contracts";
+} from '@t3tools/client-runtime/connection'
+import type { EnvironmentId } from '@t3tools/contracts'
 import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
-} from "@t3tools/contracts/relay";
-import * as Option from "effect/Option";
-import { useCallback, useMemo } from "react";
+} from '@t3tools/contracts/relay'
+import * as Option from 'effect/Option'
+import { useCallback, useMemo } from 'react'
 
-import { environmentCatalog } from "../../connection/catalog";
+import { environmentCatalog } from '../../connection/catalog'
 import {
   connectPairingUrl as connectPairingUrlAtom,
   updateBearerConnection,
-} from "../../connection/onboarding";
-import { useEnvironments } from "../../state/environments";
-import { relayEnvironmentDiscovery } from "../../state/relay";
-import { useAtomCommand } from "../../state/use-atom-command";
-import { projectWorkspaceEnvironment, type WorkspaceEnvironment } from "../../state/workspaceModel";
+} from '../../connection/onboarding'
+import { useEnvironments } from '../../state/environments'
+import { relayEnvironmentDiscovery } from '../../state/relay'
+import { useAtomCommand } from '../../state/use-atom-command'
+import { projectWorkspaceEnvironment, type WorkspaceEnvironment } from '../../state/workspaceModel'
 
-export interface RelayEnvironmentView {
-  readonly environment: RelayClientEnvironmentRecord;
-  readonly availability: "checking" | "online" | "offline" | "error";
-  readonly status: RelayEnvironmentStatusResponse | null;
-  readonly error: string | null;
-  readonly traceId: string | null;
+export interface RelayEnvironmentView
+{
+  readonly environment: RelayClientEnvironmentRecord
+  readonly availability: 'checking' | 'online' | 'offline' | 'error'
+  readonly status: RelayEnvironmentStatusResponse | null
+  readonly error: string | null
+  readonly traceId: string | null
 }
 
-export function useConnectionController() {
-  const { environments } = useEnvironments();
-  const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom);
+export function useConnectionController()
+{
+  const { environments } = useEnvironments()
+  const discovery = useAtomValue(relayEnvironmentDiscovery.stateValueAtom)
   const connectPairingUrlMutation = useAtomCommand(connectPairingUrlAtom, {
     reportFailure: false,
-  });
-  const updateBearer = useAtomCommand(updateBearerConnection, { reportFailure: false });
-  const registerEnvironment = useAtomCommand(environmentCatalog.register, "environment register");
-  const removeEnvironmentMutation = useAtomCommand(environmentCatalog.remove, "environment remove");
-  const retryEnvironmentMutation = useAtomCommand(environmentCatalog.retryNow, "environment retry");
+  })
+  const updateBearer = useAtomCommand(updateBearerConnection, { reportFailure: false })
+  const registerEnvironment = useAtomCommand(environmentCatalog.register, 'environment register')
+  const removeEnvironmentMutation = useAtomCommand(environmentCatalog.remove, 'environment remove')
+  const retryEnvironmentMutation = useAtomCommand(environmentCatalog.retryNow, 'environment retry')
   const refreshRelayEnvironments = useAtomCommand(
     relayEnvironmentDiscovery.refresh,
-    "relay environment refresh",
-  );
+    'relay environment refresh',
+  )
 
   const connectedEnvironments = useMemo<ReadonlyArray<WorkspaceEnvironment>>(
     () => environments.map(projectWorkspaceEnvironment),
     [environments],
-  );
+  )
   const registeredIds = useMemo(
     () => new Set(connectedEnvironments.map((environment) => environment.environmentId)),
     [connectedEnvironments],
-  );
+  )
   const relayEnvironments = useMemo<ReadonlyArray<RelayEnvironmentView>>(
     () =>
       [...discovery.environments.values()].map((entry) => ({
@@ -62,16 +64,16 @@ export function useConnectionController() {
         traceId: Option.getOrNull(entry.error)?.traceId ?? null,
       })),
     [discovery.environments],
-  );
+  )
   const availableRelayEnvironments = useMemo(
     () => relayEnvironments.filter((entry) => !registeredIds.has(entry.environment.environmentId)),
     [registeredIds, relayEnvironments],
-  );
+  )
 
   const connectPairingUrl = useCallback(
     (pairingUrl: string) => connectPairingUrlMutation(pairingUrl),
     [connectPairingUrlMutation],
-  );
+  )
   const connectRelayEnvironment = useCallback(
     (environment: RelayClientEnvironmentRecord) =>
       registerEnvironment(
@@ -83,15 +85,15 @@ export function useConnectionController() {
         }),
       ),
     [registerEnvironment],
-  );
+  )
   const removeEnvironment = useCallback(
     (environmentId: EnvironmentId) => removeEnvironmentMutation(environmentId),
     [removeEnvironmentMutation],
-  );
+  )
   const retryEnvironment = useCallback(
     (environmentId: EnvironmentId) => retryEnvironmentMutation(environmentId),
     [retryEnvironmentMutation],
-  );
+  )
   const updateEnvironment = useCallback(
     (
       environmentId: EnvironmentId,
@@ -103,7 +105,7 @@ export function useConnectionController() {
         httpBaseUrl: updates.displayUrl,
       }),
     [updateBearer],
-  );
+  )
 
   return {
     connectedEnvironments,
@@ -121,5 +123,5 @@ export function useConnectionController() {
     retryEnvironment,
     updateEnvironment,
     refreshRelayEnvironments,
-  };
+  }
 }

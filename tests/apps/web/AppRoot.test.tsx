@@ -1,24 +1,26 @@
-import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
-import { RouterProvider } from "@tanstack/react-router";
-import { describe, expect, it } from "vite-plus/test";
+import { Children, isValidElement, type ReactElement, type ReactNode } from 'react'
+import { RouterProvider } from '@tanstack/react-router'
+import { describe, expect, it } from 'vite-plus/test'
 
-import { ElectronBrowserHost } from "../../../apps/web/src/browser/ElectronBrowserHost";
-import { PreviewAutomationHosts } from "../../../apps/web/src/components/preview/PreviewAutomationHosts";
-import { AppAtomRegistryProvider } from "../../../apps/web/src/rpc/atomRegistry";
-import type { AppRouter } from "../../../apps/web/src/router";
-import { AppRoot } from "../../../apps/web/src/AppRoot";
+import { ElectronBrowserHost } from '../../../apps/web/src/browser/ElectronBrowserHost'
+import { PreviewAutomationHosts } from '../../../apps/web/src/components/preview/PreviewAutomationHosts'
+import { AppAtomRegistryProvider } from '../../../apps/web/src/rpc/atomRegistry'
+import type { AppRouter } from '../../../apps/web/src/router'
+import { AppRoot } from '../../../apps/web/src/AppRoot'
 
-describe("AppRoot", () => {
-  it("shares the application atom registry with routed UI and renderer-wide desktop hosts", () => {
-    const root = AppRoot({ router: {} as AppRouter });
+describe('AppRoot', () =>
+{
+  it('shares the application atom registry with routed UI and renderer-wide desktop hosts', () =>
+  {
+    const root = AppRoot({ router: {} as AppRouter })
 
-    expect(root.type).toBe(AppAtomRegistryProvider);
+    expect(root.type).toBe(AppAtomRegistryProvider)
     const children = Children.toArray(
       (root as ReactElement<{ readonly children: ReactNode }>).props.children,
-    );
-    expect(children).toHaveLength(3);
-    expect(isValidElement(children[0]) && children[0].type).toBe(RouterProvider);
-    expect(isValidElement(children[1]) && children[1].type).toBe(PreviewAutomationHosts);
-    expect(isValidElement(children[2]) && children[2].type).toBe(ElectronBrowserHost);
-  });
-});
+    )
+    expect(children).toHaveLength(3)
+    expect(isValidElement(children[0]) && children[0].type).toBe(RouterProvider)
+    expect(isValidElement(children[1]) && children[1].type).toBe(PreviewAutomationHosts)
+    expect(isValidElement(children[2]) && children[2].type).toBe(ElectronBrowserHost)
+  })
+})

@@ -46,16 +46,16 @@ import {
   type ProviderInstanceConfig,
   type ProviderInstanceConfigMap,
   ServerSettings,
-} from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Stream from "effect/Stream";
+} from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Stream from 'effect/Stream'
 
-import { ServerSettingsService } from "../../serverSettings.ts";
-import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from "../builtInDrivers.ts";
-import { ProviderInstanceRegistry } from "../Services/ProviderInstanceRegistry.ts";
-import { ProviderInstanceRegistryMutator } from "../Services/ProviderInstanceRegistryMutator.ts";
-import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistryLive.ts";
+import { ServerSettingsService } from '../../serverSettings.ts'
+import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from '../builtInDrivers.ts'
+import { ProviderInstanceRegistry } from '../Services/ProviderInstanceRegistry.ts'
+import { ProviderInstanceRegistryMutator } from '../Services/ProviderInstanceRegistryMutator.ts'
+import { ProviderInstanceRegistryMutableLayer } from './ProviderInstanceRegistryLive.ts'
 
 /**
  * Synthesize a `ProviderInstanceConfigMap` from a `ServerSettings` snapshot.
@@ -72,15 +72,18 @@ import { ProviderInstanceRegistryMutableLayer } from "./ProviderInstanceRegistry
  */
 export const deriveProviderInstanceConfigMap = (
   settings: ServerSettings,
-): ProviderInstanceConfigMap => {
-  const merged: Record<string, ProviderInstanceConfig> = { ...settings.providerInstances };
+): ProviderInstanceConfigMap =>
+{
+  const merged: Record<string, ProviderInstanceConfig> = { ...settings.providerInstances }
 
-  for (const driver of BUILT_IN_DRIVERS) {
-    const instanceId = defaultInstanceIdForDriver(driver.driverKind);
-    if (instanceId in merged) {
+  for (const driver of BUILT_IN_DRIVERS)
+  {
+    const instanceId = defaultInstanceIdForDriver(driver.driverKind)
+    if (instanceId in merged)
+    {
       // Explicit `providerInstances` entry for this slot — user-authored
       // config always wins over the legacy mirror.
-      continue;
+      continue
     }
 
     // Only built-in drivers have a legacy mirror; the registry's
@@ -88,20 +91,21 @@ export const deriveProviderInstanceConfigMap = (
     // `driverKind`. Access is dynamic (the driver kind is a branded string),
     // but it's constrained to `keyof settings.providers` by the union of
     // built-in driver kinds.
-    const legacyKey = driver.driverKind as keyof ServerSettings["providers"];
-    const legacyConfig = settings.providers[legacyKey];
-    if (legacyConfig === undefined) {
-      continue;
+    const legacyKey = driver.driverKind as keyof ServerSettings['providers']
+    const legacyConfig = settings.providers[legacyKey]
+    if (legacyConfig === undefined)
+    {
+      continue
     }
 
     merged[instanceId] = {
       driver: driver.driverKind,
       config: legacyConfig,
-    };
+    }
   }
 
-  return merged as ProviderInstanceConfigMap;
-};
+  return merged as ProviderInstanceConfigMap
+}
 
 /**
  * Layer that consumes `ProviderInstanceRegistryMutator` and forks a
@@ -115,23 +119,24 @@ export const deriveProviderInstanceConfigMap = (
  * tear-down, which logs and exits cleanly.
  */
 const SettingsWatcherLive = Layer.effectDiscard(
-  Effect.gen(function* () {
-    const mutator = yield* ProviderInstanceRegistryMutator;
-    const serverSettings = yield* ServerSettingsService;
+  Effect.gen(function* ()
+  {
+    const mutator = yield* ProviderInstanceRegistryMutator
+    const serverSettings = yield* ServerSettingsService
     yield* serverSettings.streamChanges.pipe(
       Stream.runForEach((next) =>
         mutator
           .reconcile(deriveProviderInstanceConfigMap(next))
           .pipe(
             Effect.catchCause((cause) =>
-              Effect.logError("ProviderInstanceRegistry reconcile failed", cause),
+              Effect.logError('ProviderInstanceRegistry reconcile failed', cause),
             ),
           ),
       ),
       Effect.forkScoped,
-    );
+    )
   }),
-);
+)
 
 /**
  * Hydrate `ProviderInstanceRegistry` from `ServerSettings` and keep it in
@@ -154,21 +159,22 @@ export const ProviderInstanceRegistryHydrationLive: Layer.Layer<
   never,
   BuiltInDriversEnv | ServerSettingsService
 > = Layer.unwrap(
-  Effect.gen(function* () {
-    const serverSettings = yield* ServerSettingsService;
+  Effect.gen(function* ()
+  {
+    const serverSettings = yield* ServerSettingsService
     const initialSettings: ServerSettings | undefined = yield* serverSettings.getSettings.pipe(
       Effect.orElseSucceed(() => undefined),
-    );
+    )
     const initialConfigMap =
       initialSettings === undefined
         ? ({} as ProviderInstanceConfigMap)
-        : deriveProviderInstanceConfigMap(initialSettings);
+        : deriveProviderInstanceConfigMap(initialSettings)
 
     const mutableLayer = ProviderInstanceRegistryMutableLayer({
       drivers: BUILT_IN_DRIVERS,
       configMap: initialConfigMap,
-    });
+    })
 
-    return SettingsWatcherLive.pipe(Layer.provideMerge(mutableLayer));
+    return SettingsWatcherLive.pipe(Layer.provideMerge(mutableLayer))
   }),
-) as Layer.Layer<ProviderInstanceRegistry, never, BuiltInDriversEnv | ServerSettingsService>;
+) as Layer.Layer<ProviderInstanceRegistry, never, BuiltInDriversEnv | ServerSettingsService>

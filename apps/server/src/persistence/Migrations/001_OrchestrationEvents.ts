@@ -1,8 +1,9 @@
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Effect from "effect/Effect";
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as Effect from 'effect/Effect'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS orchestration_events (
@@ -20,25 +21,25 @@ export default Effect.gen(function* () {
       payload_json TEXT NOT NULL,
       metadata_json TEXT NOT NULL
     )
-  `;
+  `
 
   yield* sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_orch_events_stream_version
     ON orchestration_events(aggregate_kind, stream_id, stream_version)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_orch_events_stream_sequence
     ON orchestration_events(aggregate_kind, stream_id, sequence)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_orch_events_command_id
     ON orchestration_events(command_id)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_orch_events_correlation_id
     ON orchestration_events(correlation_id)
-  `;
-});
+  `
+})

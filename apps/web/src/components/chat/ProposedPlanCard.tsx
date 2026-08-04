@@ -3,15 +3,15 @@
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from '@t3tools/client-runtime/state/runtime'
 import type {
   EnvironmentId,
   OrchestrationProposedPlanId,
   ProposalGeneration,
   ScopedThreadRef,
-} from "@t3tools/contracts";
-import { EllipsisIcon } from "lucide-react";
-import { memo, useEffect, useId, useRef, useState } from "react";
+} from '@t3tools/contracts'
+import { EllipsisIcon } from 'lucide-react'
+import { memo, useEffect, useId, useRef, useState } from 'react'
 
 import {
   buildCollapsedProposedPlanPreviewMarkdown,
@@ -20,18 +20,18 @@ import {
   normalizePlanMarkdownForExport,
   proposedPlanTitle,
   stripDisplayedPlanMarkdown,
-} from "../../proposedPlan";
-import { useCopyToClipboard } from "~/hooks/useCopyToClipboard";
-import { cn } from "~/lib/utils";
-import { useServerConfigs } from "~/state/entities";
-import { projectEnvironment } from "~/state/projects";
-import { useEnvironmentQuery } from "~/state/query";
-import { useAtomCommand } from "~/state/use-atom-command";
-import { useRightPanelStore } from "~/rightPanelStore";
+} from '../../proposedPlan'
+import { useCopyToClipboard } from '~/hooks/useCopyToClipboard'
+import { cn } from '~/lib/utils'
+import { useServerConfigs } from '~/state/entities'
+import { projectEnvironment } from '~/state/projects'
+import { useEnvironmentQuery } from '~/state/query'
+import { useAtomCommand } from '~/state/use-atom-command'
+import { useRightPanelStore } from '~/rightPanelStore'
 
-import ChatMarkdown from "../ChatMarkdown";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
+import ChatMarkdown from '../ChatMarkdown'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
 import {
   Dialog,
   DialogDescription,
@@ -40,10 +40,10 @@ import {
   DialogPanel,
   DialogPopup,
   DialogTitle,
-} from "../ui/dialog";
-import { Input } from "../ui/input";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { stackedThreadToast, toastManager } from "../ui/toast";
+} from '../ui/dialog'
+import { Input } from '../ui/input'
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../ui/menu'
+import { stackedThreadToast, toastManager } from '../ui/toast'
 
 export const ProposedPlanCard = memo(function ProposedPlanCard({
   planId,
@@ -53,20 +53,21 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
   cwd,
   workspaceRoot,
 }: {
-  planId: OrchestrationProposedPlanId;
-  planMarkdown: string;
-  environmentId: EnvironmentId;
-  threadRef?: ScopedThreadRef | undefined;
-  cwd: string | undefined;
-  workspaceRoot: string | undefined;
-}) {
-  const [expanded, setExpanded] = useState(false);
-  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false);
-  const [savePath, setSavePath] = useState("");
-  const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false);
-  const serverConfig = useServerConfigs().get(environmentId) ?? null;
-  const proposalPreviewAvailable = serverConfig?.environment.capabilities.proposalPreview === true;
-  const cartographerAvailable = serverConfig?.environment.capabilities.cartographerEmbed === true;
+  planId: OrchestrationProposedPlanId
+  planMarkdown: string
+  environmentId: EnvironmentId
+  threadRef?: ScopedThreadRef | undefined
+  cwd: string | undefined
+  workspaceRoot: string | undefined
+})
+{
+  const [expanded, setExpanded] = useState(false)
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false)
+  const [savePath, setSavePath] = useState('')
+  const [isSavingToWorkspace, setIsSavingToWorkspace] = useState(false)
+  const serverConfig = useServerConfigs().get(environmentId) ?? null
+  const proposalPreviewAvailable = serverConfig?.environment.capabilities.proposalPreview === true
+  const cartographerAvailable = serverConfig?.environment.capabilities.cartographerEmbed === true
   const planProposalQuery = useEnvironmentQuery(
     proposalPreviewAvailable && threadRef
       ? projectEnvironment.findProposalByPlan({
@@ -77,19 +78,19 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           },
         })
       : null,
-  );
+  )
   const exactPlanProposal =
     threadRef &&
     planProposalQuery.data?.proposal.sourceThreadId === threadRef.threadId &&
     planProposalQuery.data.revision.planId === planId
       ? planProposalQuery.data
-      : null;
+      : null
   const canOpenExplorer =
-    threadRef !== undefined && (proposalPreviewAvailable || cartographerAvailable);
+    threadRef !== undefined && (proposalPreviewAvailable || cartographerAvailable)
   const revisionKey =
     exactPlanProposal === null
       ? null
-      : `${exactPlanProposal.proposal.proposalId}:${exactPlanProposal.revision.revision}`;
+      : `${exactPlanProposal.proposal.proposalId}:${exactPlanProposal.revision.revision}`
   const latestGenerationQuery = useEnvironmentQuery(
     exactPlanProposal !== null && threadRef && cartographerAvailable
       ? projectEnvironment.latestProposalGeneration({
@@ -101,17 +102,18 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           },
         })
       : null,
-  );
+  )
   const startProposalGeneration = useAtomCommand(projectEnvironment.startProposalGeneration, {
     reportFailure: false,
-  });
-  const generationStartRef = useRef<string | null>(null);
+  })
+  const generationStartRef = useRef<string | null>(null)
   const [startedGeneration, setStartedGeneration] = useState<{
-    readonly key: string;
-    readonly generation: ProposalGeneration;
-  } | null>(null);
+    readonly key: string
+    readonly generation: ProposalGeneration
+  } | null>(null)
 
-  useEffect(() => {
+  useEffect(() =>
+  {
     if (
       exactPlanProposal === null ||
       !threadRef ||
@@ -121,10 +123,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       latestGenerationQuery.error !== null ||
       latestGenerationQuery.data !== null ||
       generationStartRef.current === revisionKey
-    ) {
-      return;
+    )
+    {
+      return
     }
-    generationStartRef.current = revisionKey;
+    generationStartRef.current = revisionKey
     void startProposalGeneration({
       environmentId,
       input: {
@@ -132,11 +135,12 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
         proposalId: exactPlanProposal.proposal.proposalId,
         revision: exactPlanProposal.revision.revision,
       },
-    }).then((result) => {
-      if (result._tag !== "Success") return;
-      setStartedGeneration({ key: revisionKey, generation: result.value });
-      latestGenerationQuery.refresh();
-    });
+    }).then((result) =>
+    {
+      if (result._tag !== 'Success') return
+      setStartedGeneration({ key: revisionKey, generation: result.value })
+      latestGenerationQuery.refresh()
+    })
   }, [
     cartographerAvailable,
     environmentId,
@@ -148,11 +152,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
     revisionKey,
     startProposalGeneration,
     threadRef,
-  ]);
+  ])
 
   const generationSeed =
     latestGenerationQuery.data ??
-    (startedGeneration?.key === revisionKey ? startedGeneration.generation : null);
+    (startedGeneration?.key === revisionKey ? startedGeneration.generation : null)
   const generationQuery = useEnvironmentQuery(
     generationSeed !== null && threadRef
       ? projectEnvironment.getProposalGeneration({
@@ -163,106 +167,118 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           },
         })
       : null,
-  );
-  const generation = generationQuery.data ?? generationSeed;
-  useEffect(() => {
+  )
+  const generation = generationQuery.data ?? generationSeed
+  useEffect(() =>
+  {
     if (
       generation === null ||
-      (generation.state !== "queued" &&
-        generation.state !== "preparing" &&
-        generation.state !== "analyzing")
-    ) {
-      return;
+      (generation.state !== 'queued' &&
+        generation.state !== 'preparing' &&
+        generation.state !== 'analyzing')
+    )
+    {
+      return
     }
-    const intervalId = window.setInterval(generationQuery.refresh, 1_500);
-    return () => window.clearInterval(intervalId);
-  }, [generation, generationQuery.refresh]);
+    const intervalId = window.setInterval(generationQuery.refresh, 1_500)
+    return () => window.clearInterval(intervalId)
+  }, [generation, generationQuery.refresh])
 
   const generationIsActive =
-    generation?.state === "queued" ||
-    generation?.state === "preparing" ||
-    generation?.state === "analyzing";
+    generation?.state === 'queued' ||
+    generation?.state === 'preparing' ||
+    generation?.state === 'analyzing'
   const previewIdentity =
     exactPlanProposal !== null
       ? generationIsActive
         ? `Analyzing revision ${exactPlanProposal.revision.revision} against workspace snapshot ${exactPlanProposal.revision.baseSnapshot.workingTreeOid}.`
         : `Preview of proposal revision ${exactPlanProposal.revision.revision} against workspace snapshot ${exactPlanProposal.revision.baseSnapshot.workingTreeOid}.`
       : planProposalQuery.error !== null
-        ? "Exact proposal preview is unavailable."
+        ? 'Exact proposal preview is unavailable.'
         : planProposalQuery.isPending
-          ? "Loading the exact proposal preview."
+          ? 'Loading the exact proposal preview.'
           : proposalPreviewAvailable && threadRef
-            ? "No immutable proposal revision is linked to this exact plan."
-            : null;
+            ? 'No immutable proposal revision is linked to this exact plan.'
+            : null
   const writeProjectFile = useAtomCommand(projectEnvironment.writeFile, {
     reportFailure: false,
-  });
+  })
   const { copyToClipboard, isCopied } = useCopyToClipboard({
-    target: "plan",
-    onError: (error) => {
+    target: 'plan',
+    onError: (error) =>
+    {
       toastManager.add(
         stackedThreadToast({
-          type: "error",
-          title: "Could not copy plan",
-          description: error instanceof Error ? error.message : "An error occurred while copying.",
+          type: 'error',
+          title: 'Could not copy plan',
+          description: error instanceof Error ? error.message : 'An error occurred while copying.',
         }),
-      );
+      )
     },
-  });
-  const savePathInputId = useId();
-  const title = proposedPlanTitle(planMarkdown) ?? "Proposed plan";
-  const lineCount = planMarkdown.split("\n").length;
-  const canCollapse = planMarkdown.length > 900 || lineCount > 20;
-  const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown);
+  })
+  const savePathInputId = useId()
+  const title = proposedPlanTitle(planMarkdown) ?? 'Proposed plan'
+  const lineCount = planMarkdown.split('\n').length
+  const canCollapse = planMarkdown.length > 900 || lineCount > 20
+  const displayedPlanMarkdown = stripDisplayedPlanMarkdown(planMarkdown)
   const collapsedPreview = canCollapse
     ? buildCollapsedProposedPlanPreviewMarkdown(planMarkdown, { maxLines: 10 })
-    : null;
-  const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown);
-  const saveContents = normalizePlanMarkdownForExport(planMarkdown);
+    : null
+  const downloadFilename = buildProposedPlanMarkdownFilename(planMarkdown)
+  const saveContents = normalizePlanMarkdownForExport(planMarkdown)
 
-  const handleDownload = () => {
-    downloadPlanAsTextFile(downloadFilename, saveContents);
-  };
+  const handleDownload = () =>
+  {
+    downloadPlanAsTextFile(downloadFilename, saveContents)
+  }
 
-  const handleCopyPlan = () => {
-    copyToClipboard(saveContents);
-  };
+  const handleCopyPlan = () =>
+  {
+    copyToClipboard(saveContents)
+  }
 
-  const handleOpenExplorer = () => {
-    if (!threadRef || !canOpenExplorer) return;
-    useRightPanelStore.getState().openExplorer(threadRef, planId);
-  };
+  const handleOpenExplorer = () =>
+  {
+    if (!threadRef || !canOpenExplorer) return
+    useRightPanelStore.getState().openExplorer(threadRef, planId)
+  }
 
-  const openSaveDialog = () => {
-    if (!workspaceRoot) {
+  const openSaveDialog = () =>
+  {
+    if (!workspaceRoot)
+    {
       toastManager.add(
         stackedThreadToast({
-          type: "error",
-          title: "Workspace path is unavailable",
-          description: "This thread does not have a workspace path to save into.",
+          type: 'error',
+          title: 'Workspace path is unavailable',
+          description: 'This thread does not have a workspace path to save into.',
         }),
-      );
-      return;
+      )
+      return
     }
-    setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename));
-    setIsSaveDialogOpen(true);
-  };
+    setSavePath((existing) => (existing.length > 0 ? existing : downloadFilename))
+    setIsSaveDialogOpen(true)
+  }
 
-  const handleSaveToWorkspace = () => {
-    const relativePath = savePath.trim();
-    if (!workspaceRoot) {
-      return;
+  const handleSaveToWorkspace = () =>
+  {
+    const relativePath = savePath.trim()
+    if (!workspaceRoot)
+    {
+      return
     }
-    if (!relativePath) {
+    if (!relativePath)
+    {
       toastManager.add({
-        type: "warning",
-        title: "Enter a workspace path",
-      });
-      return;
+        type: 'warning',
+        title: 'Enter a workspace path',
+      })
+      return
     }
 
-    setIsSavingToWorkspace(true);
-    void (async () => {
+    setIsSavingToWorkspace(true)
+    void (async () =>
+    {
       const result = await writeProjectFile({
         environmentId,
         input: {
@@ -270,29 +286,31 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           relativePath,
           contents: saveContents,
         },
-      });
-      setIsSavingToWorkspace(false);
-      if (result._tag === "Success") {
-        setIsSaveDialogOpen(false);
+      })
+      setIsSavingToWorkspace(false)
+      if (result._tag === 'Success')
+      {
+        setIsSaveDialogOpen(false)
         toastManager.add({
-          type: "success",
-          title: "Plan saved to workspace",
+          type: 'success',
+          title: 'Plan saved to workspace',
           description: result.value.relativePath,
-        });
-        return;
+        })
+        return
       }
-      if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
+      if (!isAtomCommandInterrupted(result))
+      {
+        const error = squashAtomCommandFailure(result)
         toastManager.add(
           stackedThreadToast({
-            type: "error",
-            title: "Could not save plan",
-            description: error instanceof Error ? error.message : "An error occurred while saving.",
+            type: 'error',
+            title: 'Could not save plan',
+            description: error instanceof Error ? error.message : 'An error occurred while saving.',
           }),
-        );
+        )
       }
-    })();
-  };
+    })()
+  }
 
   return (
     <div className="rounded-[24px] border border-border/80 bg-card/70 p-4 sm:p-5">
@@ -309,7 +327,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           </MenuTrigger>
           <MenuPopup align="end">
             <MenuItem onClick={handleCopyPlan}>
-              {isCopied ? "Copied!" : "Copy to clipboard"}
+              {isCopied ? 'Copied!' : 'Copy to clipboard'}
             </MenuItem>
             <MenuItem onClick={handleDownload}>Download as markdown</MenuItem>
             <MenuItem onClick={openSaveDialog} disabled={!workspaceRoot || isSavingToWorkspace}>
@@ -343,10 +361,10 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
             ) : null}
           </div>
         ) : null}
-        <div className={cn("relative", canCollapse && !expanded && "max-h-104 overflow-hidden")}>
+        <div className={cn('relative', canCollapse && !expanded && 'max-h-104 overflow-hidden')}>
           {canCollapse && !expanded ? (
             <ChatMarkdown
-              text={collapsedPreview ?? ""}
+              text={collapsedPreview ?? ''}
               cwd={cwd}
               threadRef={threadRef}
               isStreaming={false}
@@ -371,7 +389,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               data-scroll-anchor-ignore
               onClick={() => setExpanded((value) => !value)}
             >
-              {expanded ? "Collapse plan" : "Expand plan"}
+              {expanded ? 'Collapse plan' : 'Expand plan'}
             </Button>
           </div>
         ) : null}
@@ -379,9 +397,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
 
       <Dialog
         open={isSaveDialogOpen}
-        onOpenChange={(open) => {
-          if (!isSavingToWorkspace) {
-            setIsSaveDialogOpen(open);
+        onOpenChange={(open) =>
+        {
+          if (!isSavingToWorkspace)
+          {
+            setIsSaveDialogOpen(open)
           }
         }}
       >
@@ -389,7 +409,7 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
           <DialogHeader>
             <DialogTitle>Save plan to workspace</DialogTitle>
             <DialogDescription>
-              Enter a path relative to <code>{workspaceRoot ?? "the workspace"}</code>.
+              Enter a path relative to <code>{workspaceRoot ?? 'the workspace'}</code>.
             </DialogDescription>
           </DialogHeader>
           <DialogPanel className="space-y-3">
@@ -419,11 +439,11 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
               onClick={() => void handleSaveToWorkspace()}
               disabled={isSavingToWorkspace}
             >
-              {isSavingToWorkspace ? "Saving..." : "Save"}
+              {isSavingToWorkspace ? 'Saving...' : 'Save'}
             </Button>
           </DialogFooter>
         </DialogPopup>
       </Dialog>
     </div>
-  );
-});
+  )
+})

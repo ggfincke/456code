@@ -1,19 +1,21 @@
-import { assert, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { assert, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-import { runMigrations } from "../../../../../apps/server/src/persistence/Migrations.ts";
-import * as NodeSqliteClient from "../../../../../apps/server/src/persistence/NodeSqliteClient.ts";
+import { runMigrations } from '../../../../../apps/server/src/persistence/Migrations.ts'
+import * as NodeSqliteClient from '../../../../../apps/server/src/persistence/NodeSqliteClient.ts'
 
-const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()));
+const layer = it.layer(Layer.mergeAll(NodeSqliteClient.layerMemory()))
 
-layer("026_CanonicalizeModelSelectionOptions", (it) => {
-  it.effect("converts legacy object-shape options into array-shape on projections and events", () =>
-    Effect.gen(function* () {
-      const sql = yield* SqlClient.SqlClient;
+layer('026_CanonicalizeModelSelectionOptions', (it) =>
+{
+  it.effect('converts legacy object-shape options into array-shape on projections and events', () =>
+    Effect.gen(function* ()
+    {
+      const sql = yield* SqlClient.SqlClient
 
-      yield* runMigrations({ toMigrationInclusive: 25 });
+      yield* runMigrations({ toMigrationInclusive: 25 })
 
       yield* sql`
           INSERT INTO projection_projects (
@@ -67,7 +69,7 @@ layer("026_CanonicalizeModelSelectionOptions", (it) => {
               '2026-01-01T00:00:00.000Z',
               NULL
             )
-        `;
+        `
 
       yield* sql`
           INSERT INTO projection_threads (
@@ -145,7 +147,7 @@ layer("026_CanonicalizeModelSelectionOptions", (it) => {
               NULL, NULL, 0, 0, 0, NULL,
               'full-access', 'default'
             )
-        `;
+        `
 
       yield* sql`
           INSERT INTO orchestration_events (
@@ -275,21 +277,21 @@ layer("026_CanonicalizeModelSelectionOptions", (it) => {
               '{"threadId":"thread-legacy","activity":{"id":"a","tone":"info","kind":"k","summary":"s","payload":null,"turnId":null,"createdAt":"2026-01-01T00:00:00.000Z"}}',
               '{}'
             )
-        `;
+        `
 
-      yield* runMigrations({ toMigrationInclusive: 26 });
+      yield* runMigrations({ toMigrationInclusive: 26 })
 
       // Projection projects
       const projectRows = yield* sql<{
-        readonly projectId: string;
-        readonly defaultModelSelection: string | null;
+        readonly projectId: string
+        readonly defaultModelSelection: string | null
       }>`
           SELECT
             project_id AS "projectId",
             default_model_selection_json AS "defaultModelSelection"
           FROM projection_projects
           ORDER BY project_id
-        `;
+        `
       assert.deepStrictEqual(
         projectRows.map((row) => ({
           projectId: row.projectId,
@@ -297,43 +299,43 @@ layer("026_CanonicalizeModelSelectionOptions", (it) => {
         })),
         [
           {
-            projectId: "project-already-array",
+            projectId: 'project-already-array',
             selection: {
-              provider: "codex",
-              model: "gpt-5.4",
-              options: [{ id: "reasoningEffort", value: "high" }],
+              provider: 'codex',
+              model: 'gpt-5.4',
+              options: [{ id: 'reasoningEffort', value: 'high' }],
             },
           },
           {
-            projectId: "project-legacy",
+            projectId: 'project-legacy',
             selection: {
-              provider: "claudeAgent",
-              model: "claude-opus-4-6",
+              provider: 'claudeAgent',
+              model: 'claude-opus-4-6',
               options: [
-                { id: "effort", value: "max" },
-                { id: "fastMode", value: true },
+                { id: 'effort', value: 'max' },
+                { id: 'fastMode', value: true },
               ],
             },
           },
           {
-            projectId: "project-no-options",
-            selection: { provider: "codex", model: "gpt-5.4" },
+            projectId: 'project-no-options',
+            selection: { provider: 'codex', model: 'gpt-5.4' },
           },
-          { projectId: "project-null-selection", selection: null },
+          { projectId: 'project-null-selection', selection: null },
         ],
-      );
+      )
 
       // Projection threads
       const threadRows = yield* sql<{
-        readonly threadId: string;
-        readonly modelSelection: string | null;
+        readonly threadId: string
+        readonly modelSelection: string | null
       }>`
           SELECT
             thread_id AS "threadId",
             model_selection_json AS "modelSelection"
           FROM projection_threads
           ORDER BY thread_id
-        `;
+        `
       assert.deepStrictEqual(
         threadRows.map((row) => ({
           threadId: row.threadId,
@@ -341,111 +343,111 @@ layer("026_CanonicalizeModelSelectionOptions", (it) => {
         })),
         [
           {
-            threadId: "thread-already-array",
+            threadId: 'thread-already-array',
             selection: {
-              provider: "codex",
-              model: "gpt-5.4",
-              options: [{ id: "fastMode", value: true }],
+              provider: 'codex',
+              model: 'gpt-5.4',
+              options: [{ id: 'fastMode', value: true }],
             },
           },
           {
-            threadId: "thread-drop-garbage",
+            threadId: 'thread-drop-garbage',
             selection: {
-              provider: "claudeAgent",
-              model: "claude-opus-4-6",
+              provider: 'claudeAgent',
+              model: 'claude-opus-4-6',
               // Only the scalar string survives; nested object, whitespace
               // string, and null are dropped.
-              options: [{ id: "effort", value: "high" }],
+              options: [{ id: 'effort', value: 'high' }],
             },
           },
           {
-            threadId: "thread-empty-options",
-            selection: { provider: "codex", model: "gpt-5.4", options: [] },
+            threadId: 'thread-empty-options',
+            selection: { provider: 'codex', model: 'gpt-5.4', options: [] },
           },
           {
-            threadId: "thread-legacy",
+            threadId: 'thread-legacy',
             selection: {
-              provider: "claudeAgent",
-              model: "claude-opus-4-6",
+              provider: 'claudeAgent',
+              model: 'claude-opus-4-6',
               options: [
-                { id: "effort", value: "max" },
-                { id: "thinking", value: false },
-                { id: "contextWindow", value: "1m" },
+                { id: 'effort', value: 'max' },
+                { id: 'thinking', value: false },
+                { id: 'contextWindow', value: '1m' },
               ],
             },
           },
           {
-            threadId: "thread-no-options",
-            selection: { provider: "codex", model: "gpt-5.4" },
+            threadId: 'thread-no-options',
+            selection: { provider: 'codex', model: 'gpt-5.4' },
           },
         ],
-      );
+      )
 
       // Orchestration events
       const eventRows = yield* sql<{
-        readonly eventId: string;
-        readonly payloadJson: string;
+        readonly eventId: string
+        readonly payloadJson: string
       }>`
           SELECT event_id AS "eventId", payload_json AS "payloadJson"
           FROM orchestration_events
           ORDER BY event_id
-        `;
+        `
 
       const payloads = Object.fromEntries(
         eventRows.map((row) => [row.eventId, JSON.parse(row.payloadJson)]),
-      );
+      )
 
-      assert.deepStrictEqual(payloads["event-project-created"].defaultModelSelection, {
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
+      assert.deepStrictEqual(payloads['event-project-created'].defaultModelSelection, {
+        provider: 'claudeAgent',
+        model: 'claude-opus-4-6',
         options: [
-          { id: "effort", value: "max" },
-          { id: "fastMode", value: true },
+          { id: 'effort', value: 'max' },
+          { id: 'fastMode', value: true },
         ],
-      });
+      })
 
-      assert.deepStrictEqual(payloads["event-project-meta-updated"].defaultModelSelection, {
-        provider: "codex",
-        model: "gpt-5.4",
-        options: [{ id: "reasoningEffort", value: "low" }],
-      });
+      assert.deepStrictEqual(payloads['event-project-meta-updated'].defaultModelSelection, {
+        provider: 'codex',
+        model: 'gpt-5.4',
+        options: [{ id: 'reasoningEffort', value: 'low' }],
+      })
 
-      assert.strictEqual(payloads["event-project-null-selection"].defaultModelSelection, null);
+      assert.strictEqual(payloads['event-project-null-selection'].defaultModelSelection, null)
 
-      assert.deepStrictEqual(payloads["event-thread-created"].modelSelection, {
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
+      assert.deepStrictEqual(payloads['event-thread-created'].modelSelection, {
+        provider: 'claudeAgent',
+        model: 'claude-opus-4-6',
         options: [
-          { id: "effort", value: "max" },
-          { id: "thinking", value: false },
+          { id: 'effort', value: 'max' },
+          { id: 'thinking', value: false },
         ],
-      });
+      })
 
-      assert.deepStrictEqual(payloads["event-thread-meta-updated"].modelSelection, {
-        provider: "codex",
-        model: "gpt-5.4",
-        options: [{ id: "fastMode", value: true }],
-      });
+      assert.deepStrictEqual(payloads['event-thread-meta-updated'].modelSelection, {
+        provider: 'codex',
+        model: 'gpt-5.4',
+        options: [{ id: 'fastMode', value: true }],
+      })
 
-      assert.deepStrictEqual(payloads["event-thread-turn-start"].modelSelection, {
-        provider: "claudeAgent",
-        model: "claude-opus-4-6",
+      assert.deepStrictEqual(payloads['event-thread-turn-start'].modelSelection, {
+        provider: 'claudeAgent',
+        model: 'claude-opus-4-6',
         options: [
-          { id: "effort", value: "high" },
-          { id: "contextWindow", value: "1m" },
+          { id: 'effort', value: 'high' },
+          { id: 'contextWindow', value: '1m' },
         ],
-      });
+      })
 
       // Already-array records are left untouched.
-      assert.deepStrictEqual(payloads["event-thread-already-array"].modelSelection, {
-        provider: "codex",
-        model: "gpt-5.4",
-        options: [{ id: "reasoningEffort", value: "medium" }],
-      });
+      assert.deepStrictEqual(payloads['event-thread-already-array'].modelSelection, {
+        provider: 'codex',
+        model: 'gpt-5.4',
+        options: [{ id: 'reasoningEffort', value: 'medium' }],
+      })
 
       // Events with no modelSelection at all are untouched.
-      assert.isUndefined(payloads["event-activity-append"].modelSelection);
-      assert.isUndefined(payloads["event-activity-append"].defaultModelSelection);
+      assert.isUndefined(payloads['event-activity-append'].modelSelection)
+      assert.isUndefined(payloads['event-activity-append'].defaultModelSelection)
     }),
-  );
-});
+  )
+})

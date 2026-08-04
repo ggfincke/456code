@@ -1,11 +1,12 @@
-import { memo } from "react";
-import { Badge } from "../ui/badge";
+import { memo } from 'react'
+import { Badge } from '../ui/badge'
 
 export const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBanner({
   planTitle,
 }: {
-  planTitle: string | null;
-}) {
+  planTitle: string | null
+})
+{
   return (
     <div className="px-4 py-3.5 sm:px-5 sm:py-4">
       <div className="flex flex-wrap items-center gap-2">
@@ -24,5 +25,5 @@ export const ComposerPlanFollowUpBanner = memo(function ComposerPlanFollowUpBann
         Review the plan
       </div> */}
     </div>
-  );
-});
+  )
+})

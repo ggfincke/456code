@@ -1,41 +1,42 @@
-import type { EnvironmentProject } from "@t3tools/client-runtime/state/shell";
-import { EnvironmentId, ProjectId, ProviderInstanceId } from "@t3tools/contracts";
-import { assert, it } from "@effect/vitest";
+import type { EnvironmentProject } from '@t3tools/client-runtime/state/shell'
+import { EnvironmentId, ProjectId, ProviderInstanceId } from '@t3tools/contracts'
+import { assert, it } from '@effect/vitest'
 
 import {
   buildShowcasePendingTasks,
   SHOWCASE_PENDING_TASK_DEFINITIONS,
-} from "../../../../../apps/mobile/src/features/showcase/showcasePendingTasks";
+} from '../../../../../apps/mobile/src/features/showcase/showcasePendingTasks'
 
 const projects: ReadonlyArray<EnvironmentProject> = [
   {
-    environmentId: EnvironmentId.make("moonbase-terminal"),
-    id: ProjectId.make("456code"),
-    title: "456code",
-    workspaceRoot: "/workspace/456code",
+    environmentId: EnvironmentId.make('moonbase-terminal'),
+    id: ProjectId.make('456code'),
+    title: '456code',
+    workspaceRoot: '/workspace/456code',
     repositoryIdentity: null,
-    defaultModelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    defaultModelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
     scripts: [],
-    createdAt: "2026-07-16T08:00:00.000Z",
-    updatedAt: "2026-07-16T08:00:00.000Z",
+    createdAt: '2026-07-16T08:00:00.000Z',
+    updatedAt: '2026-07-16T08:00:00.000Z',
   },
   {
-    environmentId: EnvironmentId.make("suspense-station"),
-    id: ProjectId.make("react"),
-    title: "React",
-    workspaceRoot: "/workspace/react",
+    environmentId: EnvironmentId.make('suspense-station'),
+    id: ProjectId.make('react'),
+    title: 'React',
+    workspaceRoot: '/workspace/react',
     repositoryIdentity: null,
     defaultModelSelection: null,
     scripts: [],
-    createdAt: "2026-07-16T08:00:00.000Z",
-    updatedAt: "2026-07-16T08:00:00.000Z",
+    createdAt: '2026-07-16T08:00:00.000Z',
+    updatedAt: '2026-07-16T08:00:00.000Z',
   },
-];
+]
 
-it("builds sendable-looking pending tasks against real showcase projects", () => {
-  const tasks = buildShowcasePendingTasks(projects, Date.parse("2026-07-16T09:00:00.000Z"));
+it('builds sendable-looking pending tasks against real showcase projects', () =>
+{
+  const tasks = buildShowcasePendingTasks(projects, Date.parse('2026-07-16T09:00:00.000Z'))
 
-  assert.equal(tasks.length, SHOWCASE_PENDING_TASK_DEFINITIONS.length);
+  assert.equal(tasks.length, SHOWCASE_PENDING_TASK_DEFINITIONS.length)
   assert.deepStrictEqual(
     tasks.map((task) => ({
       environmentId: String(task.environmentId),
@@ -46,27 +47,28 @@ it("builds sendable-looking pending tasks against real showcase projects", () =>
     })),
     [
       {
-        environmentId: "moonbase-terminal",
-        projectId: "456code",
-        title: "456code",
-        branch: "feat/offline-launchpad",
-        createdAt: "2026-07-16T08:52:00.000Z",
+        environmentId: 'moonbase-terminal',
+        projectId: '456code',
+        title: '456code',
+        branch: 'feat/offline-launchpad',
+        createdAt: '2026-07-16T08:52:00.000Z',
       },
       {
-        environmentId: "suspense-station",
-        projectId: "react",
-        title: "React",
-        branch: "perf/tunnel-handoff",
-        createdAt: "2026-07-16T08:33:00.000Z",
+        environmentId: 'suspense-station',
+        projectId: 'react',
+        title: 'React',
+        branch: 'perf/tunnel-handoff',
+        createdAt: '2026-07-16T08:33:00.000Z',
       },
     ],
-  );
+  )
   assert.equal(
     tasks.every((task) => task.modelSelection !== undefined),
     true,
-  );
-});
+  )
+})
 
-it("waits until every referenced project has hydrated", () => {
-  assert.equal(buildShowcasePendingTasks(projects.slice(0, 1), Date.now()).length, 1);
-});
+it('waits until every referenced project has hydrated', () =>
+{
+  assert.equal(buildShowcasePendingTasks(projects.slice(0, 1), Date.now()).length, 1)
+})

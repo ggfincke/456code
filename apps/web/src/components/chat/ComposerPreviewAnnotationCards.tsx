@@ -1,29 +1,31 @@
-import type { PreviewAnnotationPayload } from "@t3tools/contracts";
-import { Frame, MousePointerClick, Paintbrush, PenLine, X } from "lucide-react";
-import type { ReactNode } from "react";
+import type { PreviewAnnotationPayload } from '@t3tools/contracts'
+import { Frame, MousePointerClick, Paintbrush, PenLine, X } from 'lucide-react'
+import type { ReactNode } from 'react'
 
-import type { ComposerImageAttachment } from "~/composerDraftStore";
-import { formatElementContextLabel, normalizeElementContextSelection } from "~/lib/elementContext";
-import { cn } from "~/lib/utils";
+import type { ComposerImageAttachment } from '~/composerDraftStore'
+import { formatElementContextLabel, normalizeElementContextSelection } from '~/lib/elementContext'
+import { cn } from '~/lib/utils'
 
-interface ComposerPreviewAnnotationCardsProps {
-  annotations: ReadonlyArray<PreviewAnnotationPayload>;
-  images: ReadonlyArray<ComposerImageAttachment>;
-  onRemove: (annotationId: string) => void;
-  onExpandImage: (imageId: string) => void;
-  className?: string;
+interface ComposerPreviewAnnotationCardsProps
+{
+  annotations: ReadonlyArray<PreviewAnnotationPayload>
+  images: ReadonlyArray<ComposerImageAttachment>
+  onRemove: (annotationId: string) => void
+  onExpandImage: (imageId: string) => void
+  className?: string
 }
 
-function TargetStat(props: { icon: ReactNode; count: number; label: string }) {
+function TargetStat(props: { icon: ReactNode; count: number; label: string })
+{
   return (
     <span
       className="inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground"
-      title={`${props.count} ${props.label}${props.count === 1 ? "" : "s"}`}
+      title={`${props.count} ${props.label}${props.count === 1 ? '' : 's'}`}
     >
       {props.icon}
       {props.count}
     </span>
-  );
+  )
 }
 
 export function ComposerPreviewAnnotationCards({
@@ -32,18 +34,21 @@ export function ComposerPreviewAnnotationCards({
   onRemove,
   onExpandImage,
   className,
-}: ComposerPreviewAnnotationCardsProps) {
-  if (annotations.length === 0) return null;
-  const imagesById = new Map(images.map((image) => [image.id, image]));
+}: ComposerPreviewAnnotationCardsProps)
+{
+  if (annotations.length === 0) return null
+  const imagesById = new Map(images.map((image) => [image.id, image]))
 
   return (
-    <div className={cn("flex flex-wrap gap-1.5", className)}>
-      {annotations.map((annotation) => {
-        const image = imagesById.get(annotation.id);
-        const elementLabels = annotation.elements.flatMap((target) => {
-          const context = normalizeElementContextSelection(target.element);
-          return context ? [{ id: target.id, label: formatElementContextLabel(context) }] : [];
-        });
+    <div className={cn('flex flex-wrap gap-1.5', className)}>
+      {annotations.map((annotation) =>
+      {
+        const image = imagesById.get(annotation.id)
+        const elementLabels = annotation.elements.flatMap((target) =>
+        {
+          const context = normalizeElementContextSelection(target.element)
+          return context ? [{ id: target.id, label: formatElementContextLabel(context) }] : []
+        })
         return (
           <section
             key={annotation.id}
@@ -75,8 +80,8 @@ export function ComposerPreviewAnnotationCards({
               ) : null}
               <div
                 className={cn(
-                  "flex min-w-0 items-center gap-2",
-                  annotation.comment.trim() && "mt-1",
+                  'flex min-w-0 items-center gap-2',
+                  annotation.comment.trim() && 'mt-1',
                 )}
               >
                 {elementLabels.length > 0 ? (
@@ -137,8 +142,8 @@ export function ComposerPreviewAnnotationCards({
               <X className="size-3" />
             </button>
           </section>
-        );
+        )
       })}
     </div>
-  );
+  )
 }

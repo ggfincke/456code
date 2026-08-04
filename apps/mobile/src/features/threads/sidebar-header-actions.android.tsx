@@ -1,9 +1,10 @@
-import { View } from "react-native";
+import { View } from 'react-native'
 
-import { HeaderButton } from "../../native/HeaderButton.android";
-import type { SidebarHeaderActionsProps } from "./sidebar-header-actions";
+import { HeaderButton } from '../../native/HeaderButton.android'
+import type { SidebarHeaderActionsProps } from './sidebar-header-actions'
 
-export function SidebarHeaderActions(props: SidebarHeaderActionsProps) {
+export function SidebarHeaderActions(props: SidebarHeaderActionsProps)
+{
   return (
     <View className="h-11 flex-row gap-1">
       <HeaderButton
@@ -12,5 +13,5 @@ export function SidebarHeaderActions(props: SidebarHeaderActionsProps) {
         onPress={props.onOpenSettings}
       />
     </View>
-  );
+  )
 }

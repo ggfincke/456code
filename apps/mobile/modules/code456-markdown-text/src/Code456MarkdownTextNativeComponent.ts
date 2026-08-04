@@ -1,17 +1,19 @@
-import codegenNativeComponent from "react-native/Libraries/Utilities/codegenNativeComponent";
-import type { ViewProps } from "react-native";
+import codegenNativeComponent from 'react-native/Libraries/Utilities/codegenNativeComponent'
+import type { ViewProps } from 'react-native'
 import type {
   BubblingEventHandler,
   Int32,
   WithDefault,
-} from "react-native/Libraries/Types/CodegenTypes";
+} from 'react-native/Libraries/Types/CodegenTypes'
 
-interface TargetedEvent {
-  target: Int32;
+interface TargetedEvent
+{
+  target: Int32
 }
 
-interface TextLayoutEvent extends TargetedEvent {
-  lines: string[];
+interface TextLayoutEvent extends TargetedEvent
+{
+  lines: string[]
 }
 
 /**
@@ -20,19 +22,21 @@ interface TextLayoutEvent extends TargetedEvent {
  * @property start - The start index of the selected range (0-based)
  * @property end - The end index of the selected range (0-based, exclusive)
  */
-interface SelectionChangeEvent extends TargetedEvent {
-  start: Int32;
-  end: Int32;
+interface SelectionChangeEvent extends TargetedEvent
+{
+  start: Int32
+  end: Int32
 }
 
-type EllipsizeMode = "head" | "middle" | "tail" | "clip";
+type EllipsizeMode = 'head' | 'middle' | 'tail' | 'clip'
 
-interface NativeProps extends ViewProps {
-  numberOfLines?: Int32;
-  allowFontScaling?: WithDefault<boolean, true>;
-  ellipsizeMode?: WithDefault<EllipsizeMode, "tail">;
-  selectable?: boolean;
-  onTextLayout?: BubblingEventHandler<TextLayoutEvent>;
+interface NativeProps extends ViewProps
+{
+  numberOfLines?: Int32
+  allowFontScaling?: WithDefault<boolean, true>
+  ellipsizeMode?: WithDefault<EllipsizeMode, 'tail'>
+  selectable?: boolean
+  onTextLayout?: BubblingEventHandler<TextLayoutEvent>
   /**
    * Callback fired when the text selection changes.
    *
@@ -47,9 +51,9 @@ interface NativeProps extends ViewProps {
    * </MarkdownTextPrimitive>
    * ```
    */
-  onSelectionChange?: BubblingEventHandler<SelectionChangeEvent>;
+  onSelectionChange?: BubblingEventHandler<SelectionChangeEvent>
 }
 
-export default codegenNativeComponent<NativeProps>("Code456MarkdownText", {
-  excludedPlatforms: ["android"],
-});
+export default codegenNativeComponent<NativeProps>('Code456MarkdownText', {
+  excludedPlatforms: ['android'],
+})

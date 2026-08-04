@@ -1,6 +1,6 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
-import { EnvironmentId, TerminalSessionSnapshot, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, TerminalSessionSnapshot, ThreadId } from '@t3tools/contracts'
 
 import {
   applyTerminalAttachStreamEvent,
@@ -8,39 +8,41 @@ import {
   combineTerminalSessionState,
   EMPTY_TERMINAL_BUFFER_STATE,
   selectRunningSubprocessTerminalIds,
-} from "../../../../packages/client-runtime/src/state/terminalSession.ts";
+} from '../../../../packages/client-runtime/src/state/terminalSession.ts'
 
 const TARGET = {
-  environmentId: EnvironmentId.make("env-local"),
-  threadId: ThreadId.make("thread-1"),
-  terminalId: "term-1",
-} as const;
+  environmentId: EnvironmentId.make('env-local'),
+  threadId: ThreadId.make('thread-1'),
+  terminalId: 'term-1',
+} as const
 
 const BASE_SNAPSHOT: TerminalSessionSnapshot = {
   threadId: TARGET.threadId,
   terminalId: TARGET.terminalId,
-  cwd: "/repo",
+  cwd: '/repo',
   worktreePath: null,
-  status: "running",
+  status: 'running',
   pid: 123,
-  history: "hello",
+  history: 'hello',
   exitCode: null,
   exitSignal: null,
-  label: "Terminal 1",
-  updatedAt: "2026-04-01T00:00:00.000Z",
-};
+  label: 'Terminal 1',
+  updatedAt: '2026-04-01T00:00:00.000Z',
+}
 
-describe("terminal session reducers", () => {
-  it("prefers live attach status over stale metadata after the attach stream starts", () => {
+describe('terminal session reducers', () =>
+{
+  it('prefers live attach status over stale metadata after the attach stream starts', () =>
+  {
     const summary = applyTerminalMetadataStreamEvent([], {
-      type: "snapshot",
+      type: 'snapshot',
       terminals: [
         {
           threadId: BASE_SNAPSHOT.threadId,
           terminalId: BASE_SNAPSHOT.terminalId,
           cwd: BASE_SNAPSHOT.cwd,
           worktreePath: BASE_SNAPSHOT.worktreePath,
-          status: "running",
+          status: 'running',
           pid: BASE_SNAPSHOT.pid,
           exitCode: BASE_SNAPSHOT.exitCode,
           exitSignal: BASE_SNAPSHOT.exitSignal,
@@ -49,31 +51,32 @@ describe("terminal session reducers", () => {
           label: BASE_SNAPSHOT.label,
         },
       ],
-    })[0]!;
+    })[0]!
     const attached = applyTerminalAttachStreamEvent(EMPTY_TERMINAL_BUFFER_STATE, {
-      type: "error",
+      type: 'error',
       threadId: TARGET.threadId,
       terminalId: TARGET.terminalId,
-      message: "Terminal disconnected.",
-    });
+      message: 'Terminal disconnected.',
+    })
 
     expect(combineTerminalSessionState(summary, attached)).toMatchObject({
-      status: "error",
-      error: "Terminal disconnected.",
+      status: 'error',
+      error: 'Terminal disconnected.',
       version: 1,
-    });
-  });
+    })
+  })
 
-  it("uses metadata status before an attach stream has emitted", () => {
+  it('uses metadata status before an attach stream has emitted', () =>
+  {
     const summary = applyTerminalMetadataStreamEvent([], {
-      type: "snapshot",
+      type: 'snapshot',
       terminals: [
         {
           threadId: BASE_SNAPSHOT.threadId,
           terminalId: BASE_SNAPSHOT.terminalId,
           cwd: BASE_SNAPSHOT.cwd,
           worktreePath: BASE_SNAPSHOT.worktreePath,
-          status: "running",
+          status: 'running',
           pid: BASE_SNAPSHOT.pid,
           exitCode: BASE_SNAPSHOT.exitCode,
           exitSignal: BASE_SNAPSHOT.exitSignal,
@@ -82,60 +85,61 @@ describe("terminal session reducers", () => {
           label: BASE_SNAPSHOT.label,
         },
       ],
-    })[0]!;
+    })[0]!
 
-    expect(combineTerminalSessionState(summary, EMPTY_TERMINAL_BUFFER_STATE).status).toBe(
-      "running",
-    );
-  });
+    expect(combineTerminalSessionState(summary, EMPTY_TERMINAL_BUFFER_STATE).status).toBe('running')
+  })
 
-  it("does not treat an idle running shell as a running subprocess", () => {
+  it('does not treat an idle running shell as a running subprocess', () =>
+  {
     const idleSession = {
       target: TARGET,
       state: {
         ...combineTerminalSessionState(null, EMPTY_TERMINAL_BUFFER_STATE),
-        status: "running" as const,
+        status: 'running' as const,
         hasRunningSubprocess: false,
       },
-    };
+    }
     const activeSession = {
-      target: { ...TARGET, terminalId: "term-2" },
+      target: { ...TARGET, terminalId: 'term-2' },
       state: {
         ...idleSession.state,
         hasRunningSubprocess: true,
       },
-    };
+    }
 
-    expect(selectRunningSubprocessTerminalIds([idleSession, activeSession])).toEqual(["term-2"]);
-  });
+    expect(selectRunningSubprocessTerminalIds([idleSession, activeSession])).toEqual(['term-2'])
+  })
 
-  it("reduces attach snapshots and output without an imperative session manager", () => {
+  it('reduces attach snapshots and output without an imperative session manager', () =>
+  {
     const snapshot = applyTerminalAttachStreamEvent(EMPTY_TERMINAL_BUFFER_STATE, {
-      type: "snapshot",
+      type: 'snapshot',
       snapshot: BASE_SNAPSHOT,
-    });
+    })
     const output = applyTerminalAttachStreamEvent(
       snapshot,
       {
-        type: "output",
+        type: 'output',
         threadId: TARGET.threadId,
         terminalId: TARGET.terminalId,
-        data: " world",
+        data: ' world',
       },
       8,
-    );
+    )
 
     expect(output).toMatchObject({
-      buffer: "lo world",
-      status: "running",
+      buffer: 'lo world',
+      status: 'running',
       error: null,
       version: 2,
-    });
-  });
+    })
+  })
 
-  it("reduces terminal metadata snapshots, upserts, and removals", () => {
+  it('reduces terminal metadata snapshots, upserts, and removals', () =>
+  {
     const initial = applyTerminalMetadataStreamEvent([], {
-      type: "snapshot",
+      type: 'snapshot',
       terminals: [
         {
           threadId: BASE_SNAPSHOT.threadId,
@@ -151,37 +155,38 @@ describe("terminal session reducers", () => {
           label: BASE_SNAPSHOT.label,
         },
       ],
-    });
+    })
     const updated = applyTerminalMetadataStreamEvent(initial, {
-      type: "upsert",
+      type: 'upsert',
       terminal: {
         ...initial[0]!,
         hasRunningSubprocess: true,
       },
-    });
+    })
     const removed = applyTerminalMetadataStreamEvent(updated, {
-      type: "remove",
+      type: 'remove',
       threadId: TARGET.threadId,
       terminalId: TARGET.terminalId,
-    });
+    })
 
-    expect(updated).toHaveLength(1);
-    expect(updated[0]?.hasRunningSubprocess).toBe(true);
-    expect(removed).toEqual([]);
-  });
+    expect(updated).toHaveLength(1)
+    expect(updated[0]?.hasRunningSubprocess).toBe(true)
+    expect(removed).toEqual([])
+  })
 
-  it("caps retained output by UTF-8 byte length", () => {
+  it('caps retained output by UTF-8 byte length', () =>
+  {
     const state = applyTerminalAttachStreamEvent(
       EMPTY_TERMINAL_BUFFER_STATE,
       {
-        type: "output",
+        type: 'output',
         threadId: TARGET.threadId,
         terminalId: TARGET.terminalId,
-        data: "🙂🙂",
+        data: '🙂🙂',
       },
       4,
-    );
+    )
 
-    expect(state.buffer).toBe("🙂");
-  });
-});
+    expect(state.buffer).toBe('🙂')
+  })
+})

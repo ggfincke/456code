@@ -1,4 +1,4 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+import type { ProviderDriverKind } from '@t3tools/contracts'
 
 /**
  * Model slugs that show a gold "NEW" chip in the model picker list.
@@ -6,8 +6,9 @@ import type { ProviderDriverKind } from "@t3tools/contracts";
  */
 const NEW_MODEL_KEYS = new Set<string>([
   // Example: "claudeAgent:claude-opus-4-7",
-]);
+])
 
-export function isModelPickerNewModel(provider: ProviderDriverKind, slug: string): boolean {
-  return NEW_MODEL_KEYS.has(`${provider}:${slug}`);
+export function isModelPickerNewModel(provider: ProviderDriverKind, slug: string): boolean
+{
+  return NEW_MODEL_KEYS.has(`${provider}:${slug}`)
 }

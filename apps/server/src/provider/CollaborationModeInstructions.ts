@@ -1,7 +1,7 @@
 // apps/server/src/provider/CollaborationModeInstructions.ts
 // owns provider-neutral collaboration mode instructions and prompt delivery fallbacks
 
-import type { ProviderSendTurnInput } from "@t3tools/contracts";
+import type { ProviderSendTurnInput } from '@t3tools/contracts'
 
 export const T3_CODE_BROWSER_TOOL_INSTRUCTIONS = `
 
@@ -12,7 +12,7 @@ You are running inside 456code. The \`code456\` MCP server is the product-native
 For browser work, first call \`preview_status\`. If no automation-capable preview is attached, call \`preview_open\` before concluding that the browser is unavailable. Then use \`preview_navigate\`, \`preview_snapshot\`, and the focused interaction tools. Prefer snapshot-provided locators over coordinates.
 
 Do not switch to global browser skills, Chrome, Node REPL browser automation, standalone Playwright, or agent-browser merely because the preview is initially closed or a first call fails. Use an alternative browser system only when the T3 preview tools are absent, the user explicitly requests another browser, or \`preview_open\` returns an explicit unsupported/unavailable error. A failed T3 preview tool call should be inspected and retried with corrected arguments when the error is actionable.
-`;
+`
 
 export const ORCHESTRATE_MODE_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Orchestrate
 
@@ -60,15 +60,17 @@ Accept only completed, in-scope results whose full patches and verification arti
 
 Report failed, rejected, or cancelled workers, deviations from the approved plan, unverified assumptions, deferred work, and residual risk. Do not push, publish, open a pull request, or leave temporary orchestration commits behind unless the user separately authorizes that action.
 ${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
-</collaboration_mode>`;
+</collaboration_mode>`
 
 export function applyOrchestrateModeInstructions(
   input: ProviderSendTurnInput,
-): ProviderSendTurnInput {
-  if (input.interactionMode !== "orchestrate") {
-    return input;
+): ProviderSendTurnInput
+{
+  if (input.interactionMode !== 'orchestrate')
+  {
+    return input
   }
-  const userRequest = input.input?.trim() || "The user's request is contained in the attachments.";
+  const userRequest = input.input?.trim() || "The user's request is contained in the attachments."
   return {
     ...input,
     input: `${ORCHESTRATE_MODE_INSTRUCTIONS}
@@ -76,5 +78,5 @@ export function applyOrchestrateModeInstructions(
 <user_request>
 ${userRequest}
 </user_request>`,
-  };
+  }
 }

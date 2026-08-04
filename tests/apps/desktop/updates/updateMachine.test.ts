@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   createInitialDesktopUpdateState,
@@ -11,154 +11,162 @@ import {
   reduceDesktopUpdateStateOnInstallFailure,
   reduceDesktopUpdateStateOnNoUpdate,
   reduceDesktopUpdateStateOnUpdateAvailable,
-} from "../../../../apps/desktop/src/updates/updateMachine.ts";
+} from '../../../../apps/desktop/src/updates/updateMachine.ts'
 
 const runtimeInfo = {
-  hostArch: "x64",
-  appArch: "x64",
+  hostArch: 'x64',
+  appArch: 'x64',
   runningUnderArm64Translation: false,
-} as const;
+} as const
 
-describe("updateMachine", () => {
-  it("clears transient errors when a check starts", () => {
+describe('updateMachine', () =>
+{
+  it('clears transient errors when a check starts', () =>
+  {
     const state = reduceDesktopUpdateStateOnCheckStart(
       {
-        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        ...createInitialDesktopUpdateState('1.0.0', runtimeInfo, 'latest'),
         enabled: true,
-        status: "error",
-        message: "network",
-        errorContext: "check",
+        status: 'error',
+        message: 'network',
+        errorContext: 'check',
         canRetry: true,
       },
-      "2026-03-04T00:00:00.000Z",
-    );
+      '2026-03-04T00:00:00.000Z',
+    )
 
-    expect(state.status).toBe("checking");
-    expect(state.message).toBeNull();
-    expect(state.errorContext).toBeNull();
-    expect(state.canRetry).toBe(false);
-  });
+    expect(state.status).toBe('checking')
+    expect(state.message).toBeNull()
+    expect(state.errorContext).toBeNull()
+    expect(state.canRetry).toBe(false)
+  })
 
-  it("records a check failure without exposing an action", () => {
+  it('records a check failure without exposing an action', () =>
+  {
     const state = reduceDesktopUpdateStateOnCheckFailure(
       {
-        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        ...createInitialDesktopUpdateState('1.0.0', runtimeInfo, 'latest'),
         enabled: true,
-        status: "checking",
+        status: 'checking',
       },
-      "network unavailable",
-      "2026-03-04T00:00:00.000Z",
-    );
+      'network unavailable',
+      '2026-03-04T00:00:00.000Z',
+    )
 
-    expect(state.status).toBe("error");
-    expect(state.errorContext).toBe("check");
-    expect(state.canRetry).toBe(true);
-  });
+    expect(state.status).toBe('error')
+    expect(state.errorContext).toBe('check')
+    expect(state.canRetry).toBe(true)
+  })
 
-  it("preserves available version on download failure for retry", () => {
+  it('preserves available version on download failure for retry', () =>
+  {
     const state = reduceDesktopUpdateStateOnDownloadFailure(
       {
-        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        ...createInitialDesktopUpdateState('1.0.0', runtimeInfo, 'latest'),
         enabled: true,
-        status: "downloading",
-        availableVersion: "1.1.0",
+        status: 'downloading',
+        availableVersion: '1.1.0',
         downloadPercent: 43,
       },
-      "checksum mismatch",
-    );
+      'checksum mismatch',
+    )
 
-    expect(state.status).toBe("available");
-    expect(state.availableVersion).toBe("1.1.0");
-    expect(state.errorContext).toBe("download");
-    expect(state.canRetry).toBe(true);
-  });
+    expect(state.status).toBe('available')
+    expect(state.availableVersion).toBe('1.1.0')
+    expect(state.errorContext).toBe('download')
+    expect(state.canRetry).toBe(true)
+  })
 
-  it("transitions to downloaded and then preserves install retry state", () => {
+  it('transitions to downloaded and then preserves install retry state', () =>
+  {
     const downloaded = reduceDesktopUpdateStateOnDownloadComplete(
       {
-        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        ...createInitialDesktopUpdateState('1.0.0', runtimeInfo, 'latest'),
         enabled: true,
-        status: "downloading",
-        availableVersion: "1.1.0",
+        status: 'downloading',
+        availableVersion: '1.1.0',
       },
-      "1.1.0",
-    );
+      '1.1.0',
+    )
     const failedInstall = reduceDesktopUpdateStateOnInstallFailure(
       downloaded,
-      "backend shutdown timed out",
-    );
+      'backend shutdown timed out',
+    )
 
-    expect(downloaded.status).toBe("downloaded");
-    expect(downloaded.downloadedVersion).toBe("1.1.0");
-    expect(failedInstall.status).toBe("downloaded");
-    expect(failedInstall.errorContext).toBe("install");
-    expect(failedInstall.canRetry).toBe(true);
-  });
+    expect(downloaded.status).toBe('downloaded')
+    expect(downloaded.downloadedVersion).toBe('1.1.0')
+    expect(failedInstall.status).toBe('downloaded')
+    expect(failedInstall.errorContext).toBe('install')
+    expect(failedInstall.canRetry).toBe(true)
+  })
 
-  it("clears stale download state when no update is available", () => {
+  it('clears stale download state when no update is available', () =>
+  {
     const state = reduceDesktopUpdateStateOnNoUpdate(
       {
-        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        ...createInitialDesktopUpdateState('1.0.0', runtimeInfo, 'latest'),
         enabled: true,
-        status: "error",
-        availableVersion: "1.1.0",
-        downloadedVersion: "1.1.0",
-        message: "old failure",
-        errorContext: "download",
+        status: 'error',
+        availableVersion: '1.1.0',
+        downloadedVersion: '1.1.0',
+        message: 'old failure',
+        errorContext: 'download',
         canRetry: true,
       },
-      "2026-03-04T00:00:00.000Z",
-    );
+      '2026-03-04T00:00:00.000Z',
+    )
 
-    expect(state.status).toBe("up-to-date");
-    expect(state.availableVersion).toBeNull();
-    expect(state.downloadedVersion).toBeNull();
-    expect(state.message).toBeNull();
-    expect(state.errorContext).toBeNull();
-  });
+    expect(state.status).toBe('up-to-date')
+    expect(state.availableVersion).toBeNull()
+    expect(state.downloadedVersion).toBeNull()
+    expect(state.message).toBeNull()
+    expect(state.errorContext).toBeNull()
+  })
 
-  it("tracks available, download start, and progress cleanly", () => {
+  it('tracks available, download start, and progress cleanly', () =>
+  {
     const releaseNotes = [
       {
-        version: "1.1.0",
-        items: ["feat: add update release notes"],
+        version: '1.1.0',
+        items: ['feat: add update release notes'],
       },
-    ];
+    ]
     const available = reduceDesktopUpdateStateOnUpdateAvailable(
       {
-        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "latest"),
+        ...createInitialDesktopUpdateState('1.0.0', runtimeInfo, 'latest'),
         enabled: true,
-        status: "checking",
+        status: 'checking',
       },
-      "1.1.0",
-      "2026-03-04T00:00:00.000Z",
+      '1.1.0',
+      '2026-03-04T00:00:00.000Z',
       releaseNotes,
-    );
-    const downloading = reduceDesktopUpdateStateOnDownloadStart(available);
-    const progress = reduceDesktopUpdateStateOnDownloadProgress(downloading, 55.5);
+    )
+    const downloading = reduceDesktopUpdateStateOnDownloadStart(available)
+    const progress = reduceDesktopUpdateStateOnDownloadProgress(downloading, 55.5)
 
-    expect(available.status).toBe("available");
-    expect(available.channel).toBe("latest");
-    expect(available.releaseNotes).toBe(releaseNotes);
-    expect(downloading.releaseNotes).toBe(releaseNotes);
-    expect(downloading.status).toBe("downloading");
-    expect(downloading.downloadPercent).toBe(0);
-    expect(progress.downloadPercent).toBe(55.5);
-    expect(progress.errorContext).toBeNull();
-  });
+    expect(available.status).toBe('available')
+    expect(available.channel).toBe('latest')
+    expect(available.releaseNotes).toBe(releaseNotes)
+    expect(downloading.releaseNotes).toBe(releaseNotes)
+    expect(downloading.status).toBe('downloading')
+    expect(downloading.downloadPercent).toBe(0)
+    expect(progress.downloadPercent).toBe(55.5)
+    expect(progress.errorContext).toBeNull()
+  })
 
-  it("clears release notes when checking again", () => {
+  it('clears release notes when checking again', () =>
+  {
     const state = reduceDesktopUpdateStateOnCheckStart(
       {
-        ...createInitialDesktopUpdateState("1.0.0", runtimeInfo, "nightly"),
+        ...createInitialDesktopUpdateState('1.0.0', runtimeInfo, 'nightly'),
         enabled: true,
-        status: "available",
-        availableVersion: "1.1.0-nightly.1",
-        releaseNotes: [{ version: "1.1.0-nightly.1", items: ["feat: old note"] }],
+        status: 'available',
+        availableVersion: '1.1.0-nightly.1',
+        releaseNotes: [{ version: '1.1.0-nightly.1', items: ['feat: old note'] }],
       },
-      "2026-03-04T00:00:00.000Z",
-    );
+      '2026-03-04T00:00:00.000Z',
+    )
 
-    expect(state.releaseNotes).toEqual([]);
-  });
-});
+    expect(state.releaseNotes).toEqual([])
+  })
+})

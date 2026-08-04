@@ -1,18 +1,19 @@
-import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon } from "lucide-react";
-import { memo } from "react";
+import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon } from 'lucide-react'
+import { memo } from 'react'
 
-import { Toggle } from "../ui/toggle";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Toggle } from '../ui/toggle'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 
-interface PanelLayoutControlsProps {
-  terminalAvailable: boolean;
-  terminalOpen: boolean;
-  terminalShortcutLabel: string | null;
-  rightPanelAvailable: boolean;
-  rightPanelOpen: boolean;
-  rightPanelShortcutLabel: string | null;
-  onToggleTerminal: () => void;
-  onToggleRightPanel: () => void;
+interface PanelLayoutControlsProps
+{
+  terminalAvailable: boolean
+  terminalOpen: boolean
+  terminalShortcutLabel: string | null
+  rightPanelAvailable: boolean
+  rightPanelOpen: boolean
+  rightPanelShortcutLabel: string | null
+  onToggleTerminal: () => void
+  onToggleRightPanel: () => void
 }
 
 export const PanelLayoutControls = memo(function PanelLayoutControls({
@@ -24,7 +25,8 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
   rightPanelShortcutLabel,
   onToggleTerminal,
   onToggleRightPanel,
-}: PanelLayoutControlsProps) {
+}: PanelLayoutControlsProps)
+{
   return (
     <div
       className="flex h-full shrink-0 items-center gap-1 [-webkit-app-region:no-drag]"
@@ -48,8 +50,8 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         />
         <TooltipPopup side="bottom">
           {terminalAvailable
-            ? `Toggle terminal drawer${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ""}`
-            : "Terminal drawer is unavailable"}
+            ? `Toggle terminal drawer${terminalShortcutLabel ? ` (${terminalShortcutLabel})` : ''}`
+            : 'Terminal drawer is unavailable'}
         </TooltipPopup>
       </Tooltip>
       <Tooltip>
@@ -70,22 +72,23 @@ export const PanelLayoutControls = memo(function PanelLayoutControls({
         />
         <TooltipPopup side="bottom">
           {rightPanelAvailable
-            ? `Toggle right panel${rightPanelShortcutLabel ? ` (${rightPanelShortcutLabel})` : ""}`
-            : "Right panel is unavailable"}
+            ? `Toggle right panel${rightPanelShortcutLabel ? ` (${rightPanelShortcutLabel})` : ''}`
+            : 'Right panel is unavailable'}
         </TooltipPopup>
       </Tooltip>
     </div>
-  );
-});
+  )
+})
 
 export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl({
   maximized,
   onToggle,
 }: {
-  maximized: boolean;
-  onToggle: () => void;
-}) {
-  const label = maximized ? "Restore panel size" : "Maximize panel";
+  maximized: boolean
+  onToggle: () => void
+})
+{
+  const label = maximized ? 'Restore panel size' : 'Maximize panel'
   return (
     <Tooltip>
       <TooltipTrigger
@@ -108,5 +111,5 @@ export const RightPanelMaximizeControl = memo(function RightPanelMaximizeControl
       />
       <TooltipPopup side="bottom">{label}</TooltipPopup>
     </Tooltip>
-  );
-});
+  )
+})

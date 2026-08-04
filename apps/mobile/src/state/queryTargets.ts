@@ -1,28 +1,33 @@
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 
-export interface CheckpointDiffTarget {
-  readonly environmentId: EnvironmentId | null;
-  readonly threadId: ThreadId | null;
-  readonly fromTurnCount: number | null;
-  readonly toTurnCount: number | null;
-  readonly ignoreWhitespace: boolean;
+export interface CheckpointDiffTarget
+{
+  readonly environmentId: EnvironmentId | null
+  readonly threadId: ThreadId | null
+  readonly fromTurnCount: number | null
+  readonly toTurnCount: number | null
+  readonly ignoreWhitespace: boolean
 }
 
-export function normalizeComposerPathSearchQuery(query: string | null): string {
-  return query?.trim() ?? "";
+export function normalizeComposerPathSearchQuery(query: string | null): string
+{
+  return query?.trim() ?? ''
 }
 
-export function buildCheckpointDiffTargets(target: CheckpointDiffTarget) {
+export function buildCheckpointDiffTargets(target: CheckpointDiffTarget)
+{
   if (
     target.environmentId === null ||
     target.threadId === null ||
     target.fromTurnCount === null ||
     target.toTurnCount === null
-  ) {
-    return { fullThread: null, turn: null } as const;
+  )
+  {
+    return { fullThread: null, turn: null } as const
   }
 
-  if (target.fromTurnCount === 0) {
+  if (target.fromTurnCount === 0)
+  {
     return {
       fullThread: {
         environmentId: target.environmentId,
@@ -33,7 +38,7 @@ export function buildCheckpointDiffTargets(target: CheckpointDiffTarget) {
         },
       },
       turn: null,
-    } as const;
+    } as const
   }
 
   return {
@@ -47,5 +52,5 @@ export function buildCheckpointDiffTargets(target: CheckpointDiffTarget) {
         ignoreWhitespace: target.ignoreWhitespace,
       },
     },
-  } as const;
+  } as const
 }

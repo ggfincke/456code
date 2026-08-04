@@ -9,41 +9,44 @@ import {
   PrimaryEnvironmentAuth,
   RelayDeviceIdentity,
   SshEnvironmentGateway,
-} from "@t3tools/client-runtime/platform";
+} from '@t3tools/client-runtime/platform'
 import {
   ConnectionBlockedError,
   ConnectionTransientError,
   Connectivity,
   Wakeups,
-} from "@t3tools/client-runtime/connection";
-import { managedRelayAccountChanges, managedRelaySessionAtom } from "@t3tools/client-runtime/relay";
-import { AuthStandardClientScopes } from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Queue from "effect/Queue";
-import * as Stream from "effect/Stream";
-import * as Network from "expo-network";
-import { AppState } from "react-native";
+} from '@t3tools/client-runtime/connection'
+import { managedRelayAccountChanges, managedRelaySessionAtom } from '@t3tools/client-runtime/relay'
+import { AuthStandardClientScopes } from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Queue from 'effect/Queue'
+import * as Stream from 'effect/Stream'
+import * as Network from 'expo-network'
+import { AppState } from 'react-native'
 
-import { authClientMetadata } from "../lib/authClientMetadata";
-import * as Runtime from "../lib/runtime";
-import * as MobileStorage from "../persistence/mobile-storage";
-import { appAtomRegistry } from "../state/atom-registry";
-import { clearThreadOutboxEnvironment } from "../state/thread-outbox";
-import { clearComposerDraftsEnvironment } from "../state/use-composer-drafts";
-import { mobileApplicationActiveWakeup } from "./app-state-wakeups";
-import { connectionStorageLayer } from "./storage";
+import { authClientMetadata } from '../lib/authClientMetadata'
+import * as Runtime from '../lib/runtime'
+import * as MobileStorage from '../persistence/mobile-storage'
+import { appAtomRegistry } from '../state/atom-registry'
+import { clearThreadOutboxEnvironment } from '../state/thread-outbox'
+import { clearComposerDraftsEnvironment } from '../state/use-composer-drafts'
+import { mobileApplicationActiveWakeup } from './app-state-wakeups'
+import { connectionStorageLayer } from './storage'
 
-function networkStatus(state: Network.NetworkState): "unknown" | "offline" | "online" {
-  if (state.isConnected === false) {
-    return "offline";
+function networkStatus(state: Network.NetworkState): 'unknown' | 'offline' | 'online'
+{
+  if (state.isConnected === false)
+  {
+    return 'offline'
   }
-  if (state.isConnected === true) {
-    return "online";
+  if (state.isConnected === true)
+  {
+    return 'online'
   }
-  return "unknown";
+  return 'unknown'
 }
 
 const connectivityLayer = Connectivity.layer({
@@ -52,98 +55,113 @@ const connectivityLayer = Connectivity.layer({
     catch: () => undefined,
   }).pipe(
     Effect.match({
-      onFailure: () => "unknown" as const,
+      onFailure: () => 'unknown' as const,
       onSuccess: networkStatus,
     }),
   ),
   changes: Stream.callback((queue) =>
     Effect.acquireRelease(
-      Effect.sync(() => {
-        let active = true;
-        const networkSubscription = Network.addNetworkStateListener((state) => {
-          Queue.offerUnsafe(queue, networkStatus(state));
-        });
-        const appStateSubscription = AppState.addEventListener("change", (state) => {
-          if (state !== "active") {
-            return;
+      Effect.sync(() =>
+      {
+        let active = true
+        const networkSubscription = Network.addNetworkStateListener((state) =>
+        {
+          Queue.offerUnsafe(queue, networkStatus(state))
+        })
+        const appStateSubscription = AppState.addEventListener('change', (state) =>
+        {
+          if (state !== 'active')
+          {
+            return
           }
           void Network.getNetworkStateAsync()
-            .then((current) => {
-              if (active) {
-                Queue.offerUnsafe(queue, networkStatus(current));
+            .then((current) =>
+            {
+              if (active)
+              {
+                Queue.offerUnsafe(queue, networkStatus(current))
               }
             })
-            .catch(() => undefined);
-        });
+            .catch(() => undefined)
+        })
         return {
-          close: () => {
-            active = false;
-            networkSubscription.remove();
-            appStateSubscription.remove();
+          close: () =>
+          {
+            active = false
+            networkSubscription.remove()
+            appStateSubscription.remove()
           },
-        };
+        }
       }),
       ({ close }) => Effect.sync(close),
     ).pipe(Effect.asVoid),
   ),
-});
+})
 
 const wakeupsLayer = Wakeups.layer({
   changes: Stream.merge(
-    Stream.callback<"application-active-probe" | "application-active-reconnect">((queue) =>
+    Stream.callback<'application-active-probe' | 'application-active-reconnect'>((queue) =>
       Effect.acquireRelease(
-        Effect.sync(() => {
-          let backgroundedAtMs = AppState.currentState === "background" ? Date.now() : null;
-          return AppState.addEventListener("change", (state) => {
-            if (state === "background") {
-              backgroundedAtMs = Date.now();
-              return;
+        Effect.sync(() =>
+        {
+          let backgroundedAtMs = AppState.currentState === 'background' ? Date.now() : null
+          return AppState.addEventListener('change', (state) =>
+          {
+            if (state === 'background')
+            {
+              backgroundedAtMs = Date.now()
+              return
             }
-            if (state === "active") {
-              Queue.offerUnsafe(queue, mobileApplicationActiveWakeup(backgroundedAtMs, Date.now()));
-              backgroundedAtMs = null;
+            if (state === 'active')
+            {
+              Queue.offerUnsafe(queue, mobileApplicationActiveWakeup(backgroundedAtMs, Date.now()))
+              backgroundedAtMs = null
             }
-          });
+          })
         }),
         (subscription) => Effect.sync(() => subscription.remove()),
       ).pipe(Effect.asVoid),
     ),
     managedRelayAccountChanges(appAtomRegistry).pipe(
-      Stream.map(() => "credentials-changed" as const),
+      Stream.map(() => 'credentials-changed' as const),
     ),
   ),
-});
+})
 
 const capabilitiesLayer = Layer.effectContext(
-  Effect.gen(function* () {
-    const storage = yield* MobileStorage.MobileStorage;
+  Effect.gen(function* ()
+  {
+    const storage = yield* MobileStorage.MobileStorage
     return Context.make(
       CloudSession,
       CloudSession.of({
-        clerkToken: Effect.gen(function* () {
-          const session = appAtomRegistry.get(managedRelaySessionAtom);
-          if (session === null) {
+        clerkToken: Effect.gen(function* ()
+        {
+          const session = appAtomRegistry.get(managedRelaySessionAtom)
+          if (session === null)
+          {
             return yield* new ConnectionBlockedError({
-              reason: "authentication",
-              detail: "Sign in to the cloud relay to connect this environment.",
-            });
+              reason: 'authentication',
+              detail: 'Sign in to the cloud relay to connect this environment.',
+            })
           }
           const token = yield* session.readClerkToken().pipe(
             Effect.mapError(
               (error) =>
                 new ConnectionTransientError({
-                  reason: "network",
+                  reason: 'network',
                   detail: error.message,
                 }),
             ),
-          );
-          if (token === null) {
+          )
+          if (token === null)
+          {
             return yield* new ConnectionBlockedError({
-              reason: "authentication",
-              detail: "The cloud relay session is unavailable.",
-            });
+              reason: 'authentication',
+              detail: 'The cloud relay session is unavailable.',
+            })
           }
-          return token;
+          return token
         }),
       }),
     ).pipe(
@@ -158,7 +176,7 @@ const capabilitiesLayer = Layer.effectContext(
             Effect.mapError(
               (cause) =>
                 new ConnectionTransientError({
-                  reason: "remote-unavailable",
+                  reason: 'remote-unavailable',
                   detail: `Could not load the mobile device identity: ${String(cause)}`,
                 }),
             ),
@@ -179,37 +197,35 @@ const capabilitiesLayer = Layer.effectContext(
           provision: () =>
             Effect.fail(
               new ConnectionBlockedError({
-                reason: "unsupported",
-                detail: "SSH environments are only available in the desktop app.",
+                reason: 'unsupported',
+                detail: 'SSH environments are only available in the desktop app.',
               }),
             ),
           prepare: () =>
             Effect.fail(
               new ConnectionBlockedError({
-                reason: "unsupported",
-                detail: "SSH environments are only available in the desktop app.",
+                reason: 'unsupported',
+                detail: 'SSH environments are only available in the desktop app.',
               }),
             ),
           disconnect: () => Effect.void,
         }),
       ),
-    );
+    )
   }),
-);
+)
 
 const platformConnectionSourceLayer = Layer.succeed(
   PlatformConnectionSource,
   PlatformConnectionSource.of({
     registrations: Stream.empty,
   }),
-);
+)
 
 const providedConnectionStorageLayer = connectionStorageLayer.pipe(
   Layer.provide(Runtime.runtimeContextLayer),
-);
-const providedCapabilitiesLayer = capabilitiesLayer.pipe(
-  Layer.provide(Runtime.runtimeContextLayer),
-);
+)
+const providedCapabilitiesLayer = capabilitiesLayer.pipe(Layer.provide(Runtime.runtimeContextLayer))
 
 const environmentOwnedDataCleanupLayer = Layer.succeed(
   EnvironmentOwnedDataCleanup,
@@ -220,17 +236,17 @@ const environmentOwnedDataCleanupLayer = Layer.succeed(
           Effect.promise(() => clearThreadOutboxEnvironment(environmentId)),
           Effect.promise(() => clearComposerDraftsEnvironment(environmentId)),
         ],
-        { concurrency: "unbounded", discard: true },
+        { concurrency: 'unbounded', discard: true },
       ).pipe(
         Effect.catch((cause) =>
-          Effect.logWarning("Could not clear mobile environment-owned data.", {
+          Effect.logWarning('Could not clear mobile environment-owned data.', {
             environmentId,
             cause,
           }),
         ),
       ),
   }),
-);
+)
 
 type ConnectionPlatformLayerSource =
   | typeof providedConnectionStorageLayer
@@ -239,7 +255,7 @@ type ConnectionPlatformLayerSource =
   | typeof wakeupsLayer
   | typeof providedCapabilitiesLayer
   | typeof platformConnectionSourceLayer
-  | typeof environmentOwnedDataCleanupLayer;
+  | typeof environmentOwnedDataCleanupLayer
 
 export const connectionPlatformLayer: Layer.Layer<
   Layer.Success<ConnectionPlatformLayerSource>,
@@ -253,4 +269,4 @@ export const connectionPlatformLayer: Layer.Layer<
   providedCapabilitiesLayer,
   platformConnectionSourceLayer,
   environmentOwnedDataCleanupLayer,
-);
+)

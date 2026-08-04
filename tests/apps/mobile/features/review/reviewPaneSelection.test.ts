@@ -1,35 +1,39 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
-import { resolveSelectedReviewFileId } from "../../../../../apps/mobile/src/features/review/reviewPaneSelection";
+import { resolveSelectedReviewFileId } from '../../../../../apps/mobile/src/features/review/reviewPaneSelection'
 
-describe("resolveSelectedReviewFileId", () => {
-  it("keeps a visible file selected within the active section", () => {
+describe('resolveSelectedReviewFileId', () =>
+{
+  it('keeps a visible file selected within the active section', () =>
+  {
     expect(
       resolveSelectedReviewFileId({
-        selection: { sectionId: "worktree", fileId: "second" },
-        sectionId: "worktree",
-        availableFileIds: ["first", "second"],
+        selection: { sectionId: 'worktree', fileId: 'second' },
+        sectionId: 'worktree',
+        availableFileIds: ['first', 'second'],
       }),
-    ).toBe("second");
-  });
+    ).toBe('second')
+  })
 
-  it("clears selection when the review section changes", () => {
+  it('clears selection when the review section changes', () =>
+  {
     expect(
       resolveSelectedReviewFileId({
-        selection: { sectionId: "turn-1", fileId: "first" },
-        sectionId: "turn-2",
-        availableFileIds: ["first"],
+        selection: { sectionId: 'turn-1', fileId: 'first' },
+        sectionId: 'turn-2',
+        availableFileIds: ['first'],
       }),
-    ).toBeNull();
-  });
+    ).toBeNull()
+  })
 
-  it("clears a file that no longer exists in the diff", () => {
+  it('clears a file that no longer exists in the diff', () =>
+  {
     expect(
       resolveSelectedReviewFileId({
-        selection: { sectionId: "worktree", fileId: "removed" },
-        sectionId: "worktree",
-        availableFileIds: ["first", "second"],
+        selection: { sectionId: 'worktree', fileId: 'removed' },
+        sectionId: 'worktree',
+        availableFileIds: ['first', 'second'],
       }),
-    ).toBeNull();
-  });
-});
+    ).toBeNull()
+  })
+})

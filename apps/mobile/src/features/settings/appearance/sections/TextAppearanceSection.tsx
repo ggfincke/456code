@@ -2,17 +2,15 @@ import {
   BASE_FONT_SIZE_STEP,
   MAX_BASE_FONT_SIZE,
   MIN_BASE_FONT_SIZE,
-} from "../../../../lib/appearancePreferences";
-import { SettingsSection } from "../../components/SettingsSection";
-import { useAppearancePreferences } from "../AppearancePreferencesProvider";
-import {
-  AppearancePreviewSeparator,
-  TextAppearancePreview,
-} from "../components/AppearancePreviews";
-import { FontSizeSliderRow } from "../components/FontSizeSliderRow";
+} from '../../../../lib/appearancePreferences'
+import { SettingsSection } from '../../components/SettingsSection'
+import { useAppearancePreferences } from '../AppearancePreferencesProvider'
+import { AppearancePreviewSeparator, TextAppearancePreview } from '../components/AppearancePreviews'
+import { FontSizeSliderRow } from '../components/FontSizeSliderRow'
 
-export function TextAppearanceSection() {
-  const { isReady, appearance, setBaseFontSize } = useAppearancePreferences();
+export function TextAppearanceSection()
+{
+  const { isReady, appearance, setBaseFontSize } = useAppearancePreferences()
 
   return (
     <SettingsSection card title="Text">
@@ -30,5 +28,5 @@ export function TextAppearanceSection() {
         valueLabel={`${appearance.baseFontSize} pt`}
       />
     </SettingsSection>
-  );
+  )
 }

@@ -3,26 +3,29 @@ import type {
   DesktopUpdateChannel,
   DesktopUpdateReleaseNote,
   DesktopUpdateState,
-} from "@t3tools/contracts";
+} from '@t3tools/contracts'
 
 export function nextStatusAfterDownloadFailure(
   currentState: DesktopUpdateState,
-): DesktopUpdateState["status"] {
-  return currentState.availableVersion ? "available" : "error";
+): DesktopUpdateState['status']
+{
+  return currentState.availableVersion ? 'available' : 'error'
 }
 
-export function getCanRetryAfterDownloadFailure(currentState: DesktopUpdateState): boolean {
-  return currentState.availableVersion !== null;
+export function getCanRetryAfterDownloadFailure(currentState: DesktopUpdateState): boolean
+{
+  return currentState.availableVersion !== null
 }
 
 export function createInitialDesktopUpdateState(
   currentVersion: string,
   runtimeInfo: DesktopRuntimeInfo,
   channel: DesktopUpdateChannel,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     enabled: false,
-    status: "disabled",
+    status: 'disabled',
     channel,
     currentVersion,
     hostArch: runtimeInfo.hostArch,
@@ -36,39 +39,41 @@ export function createInitialDesktopUpdateState(
     message: null,
     errorContext: null,
     canRetry: false,
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnCheckStart(
   state: DesktopUpdateState,
   checkedAt: string,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
-    status: "checking",
+    status: 'checking',
     checkedAt,
     releaseNotes: [],
     message: null,
     downloadPercent: null,
     errorContext: null,
     canRetry: false,
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnCheckFailure(
   state: DesktopUpdateState,
   message: string,
   checkedAt: string,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
-    status: "error",
+    status: 'error',
     message,
     checkedAt,
     downloadPercent: null,
-    errorContext: "check",
+    errorContext: 'check',
     canRetry: true,
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnUpdateAvailable(
@@ -76,10 +81,11 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
   version: string,
   checkedAt: string,
   releaseNotes: ReadonlyArray<DesktopUpdateReleaseNote> = [],
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
-    status: "available",
+    status: 'available',
     availableVersion: version,
     downloadedVersion: null,
     releaseNotes,
@@ -88,16 +94,17 @@ export function reduceDesktopUpdateStateOnUpdateAvailable(
     message: null,
     errorContext: null,
     canRetry: false,
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnNoUpdate(
   state: DesktopUpdateState,
   checkedAt: string,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
-    status: "up-to-date",
+    status: 'up-to-date',
     availableVersion: null,
     downloadedVersion: null,
     releaseNotes: [],
@@ -106,75 +113,80 @@ export function reduceDesktopUpdateStateOnNoUpdate(
     message: null,
     errorContext: null,
     canRetry: false,
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnDownloadStart(
   state: DesktopUpdateState,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
-    status: "downloading",
+    status: 'downloading',
     downloadPercent: 0,
     message: null,
     errorContext: null,
     canRetry: false,
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnDownloadFailure(
   state: DesktopUpdateState,
   message: string,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
     status: nextStatusAfterDownloadFailure(state),
     message,
     downloadPercent: null,
-    errorContext: "download",
+    errorContext: 'download',
     canRetry: getCanRetryAfterDownloadFailure(state),
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnDownloadProgress(
   state: DesktopUpdateState,
   percent: number,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
-    status: "downloading",
+    status: 'downloading',
     downloadPercent: percent,
     message: null,
     errorContext: null,
     canRetry: false,
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnDownloadComplete(
   state: DesktopUpdateState,
   version: string,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
-    status: "downloaded",
+    status: 'downloaded',
     availableVersion: version,
     downloadedVersion: version,
     downloadPercent: 100,
     message: null,
     errorContext: null,
     canRetry: true,
-  };
+  }
 }
 
 export function reduceDesktopUpdateStateOnInstallFailure(
   state: DesktopUpdateState,
   message: string,
-): DesktopUpdateState {
+): DesktopUpdateState
+{
   return {
     ...state,
-    status: "downloaded",
+    status: 'downloaded',
     message,
-    errorContext: "install",
+    errorContext: 'install',
     canRetry: true,
-  };
+  }
 }

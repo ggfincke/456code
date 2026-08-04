@@ -1,117 +1,120 @@
-import { AuthSessionId, ThreadId, type AuthEnvironmentScope } from "@t3tools/contracts";
-import { assert, describe, it } from "@effect/vitest";
-import * as DateTime from "effect/DateTime";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import { AuthSessionId, ThreadId, type AuthEnvironmentScope } from '@t3tools/contracts'
+import { assert, describe, it } from '@effect/vitest'
+import * as DateTime from 'effect/DateTime'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-import * as AuthPairingLinks from "../../../../apps/server/src/persistence/AuthPairingLinks.ts";
-import * as AuthSessions from "../../../../apps/server/src/persistence/AuthSessions.ts";
-import * as PersistenceErrors from "../../../../apps/server/src/persistence/Errors.ts";
-import { SqlitePersistenceMemory } from "../../../../apps/server/src/persistence/Layers/Sqlite.ts";
-import * as ProviderSessionRuntime from "../../../../apps/server/src/persistence/ProviderSessionRuntime.ts";
+import * as AuthPairingLinks from '../../../../apps/server/src/persistence/AuthPairingLinks.ts'
+import * as AuthSessions from '../../../../apps/server/src/persistence/AuthSessions.ts'
+import * as PersistenceErrors from '../../../../apps/server/src/persistence/Errors.ts'
+import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
+import * as ProviderSessionRuntime from '../../../../apps/server/src/persistence/ProviderSessionRuntime.ts'
 
-const issuedAt = DateTime.makeUnsafe("2026-06-20T00:00:00.000Z");
-const expiresAt = DateTime.makeUnsafe("2027-06-20T00:00:00.000Z");
-const now = DateTime.makeUnsafe("2026-06-21T00:00:00.000Z");
-const scopes: ReadonlyArray<AuthEnvironmentScope> = ["access:read"];
+const issuedAt = DateTime.makeUnsafe('2026-06-20T00:00:00.000Z')
+const expiresAt = DateTime.makeUnsafe('2027-06-20T00:00:00.000Z')
+const now = DateTime.makeUnsafe('2026-06-21T00:00:00.000Z')
+const scopes: ReadonlyArray<AuthEnvironmentScope> = ['access:read']
 
-const authSessionLayer = AuthSessions.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory));
+const authSessionLayer = AuthSessions.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory))
 const authPairingLinkLayer = AuthPairingLinks.layer.pipe(
   Layer.provideMerge(SqlitePersistenceMemory),
-);
+)
 const providerSessionRuntimeLayer = ProviderSessionRuntime.layer.pipe(
   Layer.provideMerge(SqlitePersistenceMemory),
-);
+)
 
-describe("persistence error correlation", () => {
-  it.effect("correlates auth session SQL and row-decode failures without sensitive fields", () =>
-    Effect.gen(function* () {
-      const sessions = yield* AuthSessions.AuthSessionRepository;
-      const sql = yield* SqlClient.SqlClient;
-      const sessionId = AuthSessionId.make("session-correlation");
-      const currentSessionId = AuthSessionId.make("current-session-correlation");
-      const subject = "session-subject-secret-sentinel";
+describe('persistence error correlation', () =>
+{
+  it.effect('correlates auth session SQL and row-decode failures without sensitive fields', () =>
+    Effect.gen(function* ()
+    {
+      const sessions = yield* AuthSessions.AuthSessionRepository
+      const sql = yield* SqlClient.SqlClient
+      const sessionId = AuthSessionId.make('session-correlation')
+      const currentSessionId = AuthSessionId.make('current-session-correlation')
+      const subject = 'session-subject-secret-sentinel'
 
       yield* sessions.create({
         sessionId,
         subject,
         scopes,
-        method: "browser-session-cookie",
+        method: 'browser-session-cookie',
         client: {
           label: null,
           ipAddress: null,
           userAgent: null,
-          deviceType: "desktop",
+          deviceType: 'desktop',
           os: null,
           browser: null,
         },
         issuedAt,
         expiresAt,
-      });
+      })
       yield* sql`
         UPDATE auth_sessions
-        SET scopes = ${"session-scopes-secret-sentinel"}
+        SET scopes = ${'session-scopes-secret-sentinel'}
         WHERE session_id = ${sessionId}
-      `;
+      `
 
-      const decodeError = yield* Effect.flip(sessions.listActive({ now }));
-      assert.instanceOf(decodeError, PersistenceErrors.PersistenceDecodeError);
-      assert.deepStrictEqual(decodeError.correlation, { sessionId });
+      const decodeError = yield* Effect.flip(sessions.listActive({ now }))
+      assert.instanceOf(decodeError, PersistenceErrors.PersistenceDecodeError)
+      assert.deepStrictEqual(decodeError.correlation, { sessionId })
       assert.equal(
         decodeError.message,
         `Decode error in AuthSessionRepository.listActive:decodeRows: ${decodeError.issue}`,
-      );
-      assert.notInclude(decodeError.issue, subject);
-      assert.notInclude(decodeError.issue, "session-scopes-secret-sentinel");
-      assert.notInclude(decodeError.message, subject);
+      )
+      assert.notInclude(decodeError.issue, subject)
+      assert.notInclude(decodeError.issue, 'session-scopes-secret-sentinel')
+      assert.notInclude(decodeError.message, subject)
 
-      yield* sql`DROP TABLE auth_sessions`;
+      yield* sql`DROP TABLE auth_sessions`
       const createError = yield* Effect.flip(
         sessions.create({
           sessionId,
           subject,
           scopes,
-          method: "browser-session-cookie",
+          method: 'browser-session-cookie',
           client: {
             label: null,
             ipAddress: null,
             userAgent: null,
-            deviceType: "desktop",
+            deviceType: 'desktop',
             os: null,
             browser: null,
           },
           issuedAt,
           expiresAt,
         }),
-      );
-      assert.instanceOf(createError, PersistenceErrors.PersistenceSqlError);
-      assert.deepStrictEqual(createError.correlation, { sessionId });
-      assert.equal(createError.message, "SQL error in AuthSessionRepository.create:query");
-      assert.notInclude(createError.message, subject);
-      assert.notInclude(createError.message, DateTime.formatIso(issuedAt));
+      )
+      assert.instanceOf(createError, PersistenceErrors.PersistenceSqlError)
+      assert.deepStrictEqual(createError.correlation, { sessionId })
+      assert.equal(createError.message, 'SQL error in AuthSessionRepository.create:query')
+      assert.notInclude(createError.message, subject)
+      assert.notInclude(createError.message, DateTime.formatIso(issuedAt))
 
       const revokeOtherError = yield* Effect.flip(
         sessions.revokeAllExcept({ currentSessionId, revokedAt: now }),
-      );
-      assert.instanceOf(revokeOtherError, PersistenceErrors.PersistenceSqlError);
-      assert.deepStrictEqual(revokeOtherError.correlation, { currentSessionId });
+      )
+      assert.instanceOf(revokeOtherError, PersistenceErrors.PersistenceSqlError)
+      assert.deepStrictEqual(revokeOtherError.correlation, { currentSessionId })
       assert.equal(
         revokeOtherError.message,
-        "SQL error in AuthSessionRepository.revokeAllExcept:query",
-      );
-      assert.notInclude(revokeOtherError.message, DateTime.formatIso(now));
+        'SQL error in AuthSessionRepository.revokeAllExcept:query',
+      )
+      assert.notInclude(revokeOtherError.message, DateTime.formatIso(now))
     }).pipe(Effect.provide(authSessionLayer)),
-  );
+  )
 
-  it.effect("correlates pairing-link create and revoke failures by id only", () =>
-    Effect.gen(function* () {
-      const pairingLinks = yield* AuthPairingLinks.AuthPairingLinkRepository;
-      const sql = yield* SqlClient.SqlClient;
-      const id = "pairing-link-correlation";
-      const credential = "pairing-credential-secret-sentinel";
-      const subject = "pairing-subject-secret-sentinel";
-      const scopesPayload = "pairing-scopes-secret-sentinel";
+  it.effect('correlates pairing-link create and revoke failures by id only', () =>
+    Effect.gen(function* ()
+    {
+      const pairingLinks = yield* AuthPairingLinks.AuthPairingLinkRepository
+      const sql = yield* SqlClient.SqlClient
+      const id = 'pairing-link-correlation'
+      const credential = 'pairing-credential-secret-sentinel'
+      const subject = 'pairing-subject-secret-sentinel'
+      const scopesPayload = 'pairing-scopes-secret-sentinel'
 
       yield* sql`
         INSERT INTO auth_pairing_links (
@@ -130,7 +133,7 @@ describe("persistence error correlation", () => {
         VALUES (
           ${id},
           ${credential},
-          ${"one-time-token"},
+          ${'one-time-token'},
           ${scopesPayload},
           ${subject},
           NULL,
@@ -140,26 +143,26 @@ describe("persistence error correlation", () => {
           NULL,
           NULL
         )
-      `;
+      `
 
-      const decodeError = yield* Effect.flip(pairingLinks.getByCredential({ credential }));
-      assert.instanceOf(decodeError, PersistenceErrors.PersistenceDecodeError);
-      assert.deepStrictEqual(decodeError.correlation, { pairingLinkId: id });
+      const decodeError = yield* Effect.flip(pairingLinks.getByCredential({ credential }))
+      assert.instanceOf(decodeError, PersistenceErrors.PersistenceDecodeError)
+      assert.deepStrictEqual(decodeError.correlation, { pairingLinkId: id })
       assert.equal(
         decodeError.message,
         `Decode error in AuthPairingLinkRepository.getByCredential:decodeRow: ${decodeError.issue}`,
-      );
-      assert.notInclude(decodeError.issue, credential);
-      assert.notInclude(decodeError.issue, subject);
-      assert.notInclude(decodeError.issue, scopesPayload);
-      assert.notInclude(decodeError.message, DateTime.formatIso(issuedAt));
+      )
+      assert.notInclude(decodeError.issue, credential)
+      assert.notInclude(decodeError.issue, subject)
+      assert.notInclude(decodeError.issue, scopesPayload)
+      assert.notInclude(decodeError.message, DateTime.formatIso(issuedAt))
 
-      yield* sql`DROP TABLE auth_pairing_links`;
+      yield* sql`DROP TABLE auth_pairing_links`
       const createError = yield* Effect.flip(
         pairingLinks.create({
           id,
           credential,
-          method: "one-time-token",
+          method: 'one-time-token',
           scopes,
           subject,
           label: null,
@@ -167,28 +170,29 @@ describe("persistence error correlation", () => {
           createdAt: issuedAt,
           expiresAt,
         }),
-      );
-      assert.instanceOf(createError, PersistenceErrors.PersistenceSqlError);
-      assert.deepStrictEqual(createError.correlation, { pairingLinkId: id });
-      assert.notInclude(createError.message, credential);
-      assert.notInclude(createError.message, subject);
-      assert.notInclude(createError.message, DateTime.formatIso(issuedAt));
+      )
+      assert.instanceOf(createError, PersistenceErrors.PersistenceSqlError)
+      assert.deepStrictEqual(createError.correlation, { pairingLinkId: id })
+      assert.notInclude(createError.message, credential)
+      assert.notInclude(createError.message, subject)
+      assert.notInclude(createError.message, DateTime.formatIso(issuedAt))
 
-      const revokeError = yield* Effect.flip(pairingLinks.revoke({ id, revokedAt: now }));
-      assert.instanceOf(revokeError, PersistenceErrors.PersistenceSqlError);
-      assert.deepStrictEqual(revokeError.correlation, { pairingLinkId: id });
-      assert.notInclude(revokeError.message, credential);
-      assert.notInclude(revokeError.message, DateTime.formatIso(now));
+      const revokeError = yield* Effect.flip(pairingLinks.revoke({ id, revokedAt: now }))
+      assert.instanceOf(revokeError, PersistenceErrors.PersistenceSqlError)
+      assert.deepStrictEqual(revokeError.correlation, { pairingLinkId: id })
+      assert.notInclude(revokeError.message, credential)
+      assert.notInclude(revokeError.message, DateTime.formatIso(now))
     }).pipe(Effect.provide(authPairingLinkLayer)),
-  );
+  )
 
-  it.effect("skips undecodable provider runtime rows and correlates SQL failures by thread", () =>
-    Effect.gen(function* () {
-      const runtimes = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository;
-      const sql = yield* SqlClient.SqlClient;
-      const threadId = ThreadId.make("thread-correlation");
-      const runtimePayload = "runtime-payload-secret-sentinel";
-      const lastSeenAt = "2026-06-20T00:00:00.000Z";
+  it.effect('skips undecodable provider runtime rows and correlates SQL failures by thread', () =>
+    Effect.gen(function* ()
+    {
+      const runtimes = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository
+      const sql = yield* SqlClient.SqlClient
+      const threadId = ThreadId.make('thread-correlation')
+      const runtimePayload = 'runtime-payload-secret-sentinel'
+      const lastSeenAt = '2026-06-20T00:00:00.000Z'
 
       yield* sql`
         INSERT INTO provider_session_runtime (
@@ -204,58 +208,55 @@ describe("persistence error correlation", () => {
         )
         VALUES (
           ${threadId},
-          ${"codex"},
+          ${'codex'},
           NULL,
-          ${"codex"},
-          ${"invalid-runtime-mode"},
-          ${"running"},
+          ${'codex'},
+          ${'invalid-runtime-mode'},
+          ${'running'},
           ${lastSeenAt},
           NULL,
           ${`{"secret":"${runtimePayload}"}`}
         )
-      `;
+      `
 
-      const validThreadId = ThreadId.make("thread-valid");
+      const validThreadId = ThreadId.make('thread-valid')
       yield* runtimes.upsert({
         threadId: validThreadId,
-        providerName: "codex",
+        providerName: 'codex',
         providerInstanceId: null,
-        adapterKey: "codex",
-        runtimeMode: "full-access",
-        status: "running",
+        adapterKey: 'codex',
+        runtimeMode: 'full-access',
+        status: 'running',
         lastSeenAt,
         resumeCursor: null,
         runtimePayload: null,
-      });
+      })
 
-      const listed = yield* runtimes.list();
+      const listed = yield* runtimes.list()
       assert.deepStrictEqual(
         listed.map((runtime) => runtime.threadId),
         [validThreadId],
-      );
+      )
 
-      yield* sql`DROP TABLE provider_session_runtime`;
+      yield* sql`DROP TABLE provider_session_runtime`
       const sqlFailure = yield* Effect.flip(
         runtimes.upsert({
           threadId,
-          providerName: "codex",
+          providerName: 'codex',
           providerInstanceId: null,
-          adapterKey: "codex",
-          runtimeMode: "full-access",
-          status: "running",
+          adapterKey: 'codex',
+          runtimeMode: 'full-access',
+          status: 'running',
           lastSeenAt,
           resumeCursor: null,
           runtimePayload: { secret: runtimePayload },
         }),
-      );
-      assert.instanceOf(sqlFailure, PersistenceErrors.PersistenceSqlError);
-      assert.deepStrictEqual(sqlFailure.correlation, { threadId });
-      assert.equal(
-        sqlFailure.message,
-        "SQL error in ProviderSessionRuntimeRepository.upsert:query",
-      );
-      assert.notInclude(sqlFailure.message, runtimePayload);
-      assert.notInclude(sqlFailure.message, lastSeenAt);
+      )
+      assert.instanceOf(sqlFailure, PersistenceErrors.PersistenceSqlError)
+      assert.deepStrictEqual(sqlFailure.correlation, { threadId })
+      assert.equal(sqlFailure.message, 'SQL error in ProviderSessionRuntimeRepository.upsert:query')
+      assert.notInclude(sqlFailure.message, runtimePayload)
+      assert.notInclude(sqlFailure.message, lastSeenAt)
     }).pipe(Effect.provide(providerSessionRuntimeLayer)),
-  );
-});
+  )
+})

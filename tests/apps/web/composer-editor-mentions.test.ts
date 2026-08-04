@@ -1,219 +1,241 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   selectionTouchesMentionBoundary,
   splitPromptIntoComposerSegments,
-} from "../../../apps/web/src/composer-editor-mentions";
-import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from "../../../apps/web/src/lib/terminalContext";
+} from '../../../apps/web/src/composer-editor-mentions'
+import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from '../../../apps/web/src/lib/terminalContext'
 
-describe("splitPromptIntoComposerSegments", () => {
-  it("splits mention tokens followed by whitespace into mention segments", () => {
-    expect(splitPromptIntoComposerSegments("Inspect @AGENTS.md please")).toEqual([
-      { type: "text", text: "Inspect " },
-      { type: "mention", path: "AGENTS.md", source: "@AGENTS.md" },
-      { type: "text", text: " please" },
-    ]);
-  });
+describe('splitPromptIntoComposerSegments', () =>
+{
+  it('splits mention tokens followed by whitespace into mention segments', () =>
+  {
+    expect(splitPromptIntoComposerSegments('Inspect @AGENTS.md please')).toEqual([
+      { type: 'text', text: 'Inspect ' },
+      { type: 'mention', path: 'AGENTS.md', source: '@AGENTS.md' },
+      { type: 'text', text: ' please' },
+    ])
+  })
 
-  it("does not convert an incomplete trailing mention token", () => {
-    expect(splitPromptIntoComposerSegments("Inspect @AGENTS.md")).toEqual([
-      { type: "text", text: "Inspect @AGENTS.md" },
-    ]);
-  });
+  it('does not convert an incomplete trailing mention token', () =>
+  {
+    expect(splitPromptIntoComposerSegments('Inspect @AGENTS.md')).toEqual([
+      { type: 'text', text: 'Inspect @AGENTS.md' },
+    ])
+  })
 
-  it("keeps newlines around mention tokens", () => {
-    expect(splitPromptIntoComposerSegments("one\n@AGENTS.md \ntwo")).toEqual([
-      { type: "text", text: "one\n" },
-      { type: "mention", path: "AGENTS.md", source: "@AGENTS.md" },
-      { type: "text", text: " \ntwo" },
-    ]);
-  });
+  it('keeps newlines around mention tokens', () =>
+  {
+    expect(splitPromptIntoComposerSegments('one\n@AGENTS.md \ntwo')).toEqual([
+      { type: 'text', text: 'one\n' },
+      { type: 'mention', path: 'AGENTS.md', source: '@AGENTS.md' },
+      { type: 'text', text: ' \ntwo' },
+    ])
+  })
 
-  it("splits quoted mention tokens containing whitespace", () => {
+  it('splits quoted mention tokens containing whitespace', () =>
+  {
     expect(splitPromptIntoComposerSegments('Inspect @"My File.md" please')).toEqual([
-      { type: "text", text: "Inspect " },
-      { type: "mention", path: "My File.md", source: '@"My File.md"' },
-      { type: "text", text: " please" },
-    ]);
-  });
+      { type: 'text', text: 'Inspect ' },
+      { type: 'mention', path: 'My File.md', source: '@"My File.md"' },
+      { type: 'text', text: ' please' },
+    ])
+  })
 
-  it("unescapes quoted mention token content", () => {
+  it('unescapes quoted mention token content', () =>
+  {
     expect(splitPromptIntoComposerSegments('Inspect @"docs/My \\"File\\".md" please')).toEqual([
-      { type: "text", text: "Inspect " },
+      { type: 'text', text: 'Inspect ' },
       {
-        type: "mention",
+        type: 'mention',
         path: 'docs/My "File".md',
         source: '@"docs/My \\"File\\".md"',
       },
-      { type: "text", text: " please" },
-    ]);
-  });
+      { type: 'text', text: ' please' },
+    ])
+  })
 
-  it("splits generated markdown file links into mention segments", () => {
+  it('splits generated markdown file links into mention segments', () =>
+  {
     expect(
       splitPromptIntoComposerSegments(
-        "Inspect [package.json](path/to/package.json) before continuing",
+        'Inspect [package.json](path/to/package.json) before continuing',
       ),
     ).toEqual([
-      { type: "text", text: "Inspect " },
+      { type: 'text', text: 'Inspect ' },
       {
-        type: "mention",
-        path: "path/to/package.json",
-        source: "[package.json](path/to/package.json)",
+        type: 'mention',
+        path: 'path/to/package.json',
+        source: '[package.json](path/to/package.json)',
       },
-      { type: "text", text: " before continuing" },
-    ]);
-  });
+      { type: 'text', text: ' before continuing' },
+    ])
+  })
 
-  it("does not turn normal web links into file mention segments", () => {
+  it('does not turn normal web links into file mention segments', () =>
+  {
     expect(
-      splitPromptIntoComposerSegments("Read [the docs](https://example.com/docs) first"),
-    ).toEqual([{ type: "text", text: "Read [the docs](https://example.com/docs) first" }]);
-  });
+      splitPromptIntoComposerSegments('Read [the docs](https://example.com/docs) first'),
+    ).toEqual([{ type: 'text', text: 'Read [the docs](https://example.com/docs) first' }])
+  })
 
-  it("turns canonical scoped folder links into file mention segments", () => {
-    expect(splitPromptIntoComposerSegments("Inspect [sub](@scope/pkg/sub) next")).toEqual([
-      { type: "text", text: "Inspect " },
+  it('turns canonical scoped folder links into file mention segments', () =>
+  {
+    expect(splitPromptIntoComposerSegments('Inspect [sub](@scope/pkg/sub) next')).toEqual([
+      { type: 'text', text: 'Inspect ' },
       {
-        type: "mention",
-        path: "@scope/pkg/sub",
-        source: "[sub](@scope/pkg/sub)",
+        type: 'mention',
+        path: '@scope/pkg/sub',
+        source: '[sub](@scope/pkg/sub)',
       },
-      { type: "text", text: " next" },
-    ]);
-  });
+      { type: 'text', text: ' next' },
+    ])
+  })
 
-  it("decodes reserved path characters from generated links", () => {
+  it('decodes reserved path characters from generated links', () =>
+  {
     expect(
       splitPromptIntoComposerSegments(
-        "Inspect [config#draft?.json](config%23draft%3F.json) before continuing",
+        'Inspect [config#draft?.json](config%23draft%3F.json) before continuing',
       ),
     ).toEqual([
-      { type: "text", text: "Inspect " },
+      { type: 'text', text: 'Inspect ' },
       {
-        type: "mention",
-        path: "config#draft?.json",
-        source: "[config#draft?.json](config%23draft%3F.json)",
+        type: 'mention',
+        path: 'config#draft?.json',
+        source: '[config#draft?.json](config%23draft%3F.json)',
       },
-      { type: "text", text: " before continuing" },
-    ]);
-  });
+      { type: 'text', text: ' before continuing' },
+    ])
+  })
 
-  it("splits skill tokens followed by whitespace into skill segments", () => {
-    expect(splitPromptIntoComposerSegments("Use $review-follow-up please")).toEqual([
-      { type: "text", text: "Use " },
-      { type: "skill", name: "review-follow-up" },
-      { type: "text", text: " please" },
-    ]);
-  });
+  it('splits skill tokens followed by whitespace into skill segments', () =>
+  {
+    expect(splitPromptIntoComposerSegments('Use $review-follow-up please')).toEqual([
+      { type: 'text', text: 'Use ' },
+      { type: 'skill', name: 'review-follow-up' },
+      { type: 'text', text: ' please' },
+    ])
+  })
 
-  it("does not convert an incomplete trailing skill token", () => {
-    expect(splitPromptIntoComposerSegments("Use $review-follow-up")).toEqual([
-      { type: "text", text: "Use $review-follow-up" },
-    ]);
-  });
+  it('does not convert an incomplete trailing skill token', () =>
+  {
+    expect(splitPromptIntoComposerSegments('Use $review-follow-up')).toEqual([
+      { type: 'text', text: 'Use $review-follow-up' },
+    ])
+  })
 
-  it("keeps inline terminal context placeholders at their prompt positions", () => {
+  it('keeps inline terminal context placeholders at their prompt positions', () =>
+  {
     expect(
       splitPromptIntoComposerSegments(
         `Inspect ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md please`,
       ),
     ).toEqual([
-      { type: "text", text: "Inspect " },
-      { type: "terminal-context", context: null },
-      { type: "mention", path: "AGENTS.md", source: "@AGENTS.md" },
-      { type: "text", text: " please" },
-    ]);
-  });
+      { type: 'text', text: 'Inspect ' },
+      { type: 'terminal-context', context: null },
+      { type: 'mention', path: 'AGENTS.md', source: '@AGENTS.md' },
+      { type: 'text', text: ' please' },
+    ])
+  })
 
-  it("preserves consecutive terminal context placeholders without dropping positions", () => {
+  it('preserves consecutive terminal context placeholders without dropping positions', () =>
+  {
     expect(
       splitPromptIntoComposerSegments(
         `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}tail`,
       ),
     ).toEqual([
-      { type: "terminal-context", context: null },
-      { type: "terminal-context", context: null },
-      { type: "text", text: "tail" },
-    ]);
-  });
+      { type: 'terminal-context', context: null },
+      { type: 'terminal-context', context: null },
+      { type: 'text', text: 'tail' },
+    ])
+  })
 
-  it("keeps skill parsing alongside mentions and terminal placeholders", () => {
+  it('keeps skill parsing alongside mentions and terminal placeholders', () =>
+  {
     expect(
       splitPromptIntoComposerSegments(
         `Inspect ${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}$review-follow-up after @AGENTS.md `,
       ),
     ).toEqual([
-      { type: "text", text: "Inspect " },
-      { type: "terminal-context", context: null },
-      { type: "skill", name: "review-follow-up" },
-      { type: "text", text: " after " },
-      { type: "mention", path: "AGENTS.md", source: "@AGENTS.md" },
-      { type: "text", text: " " },
-    ]);
-  });
-});
+      { type: 'text', text: 'Inspect ' },
+      { type: 'terminal-context', context: null },
+      { type: 'skill', name: 'review-follow-up' },
+      { type: 'text', text: ' after ' },
+      { type: 'mention', path: 'AGENTS.md', source: '@AGENTS.md' },
+      { type: 'text', text: ' ' },
+    ])
+  })
+})
 
-describe("selectionTouchesMentionBoundary", () => {
-  it("returns true when selection includes the whitespace after a mention", () => {
+describe('selectionTouchesMentionBoundary', () =>
+{
+  it('returns true when selection includes the whitespace after a mention', () =>
+  {
     expect(
       selectionTouchesMentionBoundary(
-        "hi @package.json there",
-        "hi @package.json".length,
-        "hi @package.json there".length,
+        'hi @package.json there',
+        'hi @package.json'.length,
+        'hi @package.json there'.length,
       ),
-    ).toBe(true);
-  });
+    ).toBe(true)
+  })
 
-  it("returns true when selection includes the whitespace before a mention", () => {
+  it('returns true when selection includes the whitespace before a mention', () =>
+  {
     expect(
       selectionTouchesMentionBoundary(
-        "hi there @package.json later",
-        "hi there".length,
-        "hi there ".length,
+        'hi there @package.json later',
+        'hi there'.length,
+        'hi there '.length,
       ),
-    ).toBe(true);
-  });
+    ).toBe(true)
+  })
 
-  it("returns false when selection starts after the mention boundary whitespace", () => {
+  it('returns false when selection starts after the mention boundary whitespace', () =>
+  {
     expect(
       selectionTouchesMentionBoundary(
-        "hi @package.json there",
-        "hi @package.json ".length,
-        "hi @package.json there".length,
+        'hi @package.json there',
+        'hi @package.json '.length,
+        'hi @package.json there'.length,
       ),
-    ).toBe(false);
-  });
+    ).toBe(false)
+  })
 
-  it("returns true when selection includes whitespace after a mention following a terminal placeholder", () => {
-    const prompt = `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md there`;
+  it('returns true when selection includes whitespace after a mention following a terminal placeholder', () =>
+  {
+    const prompt = `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md there`
     expect(
       selectionTouchesMentionBoundary(
         prompt,
         `${INLINE_TERMINAL_CONTEXT_PLACEHOLDER}@AGENTS.md`.length,
         prompt.length,
       ),
-    ).toBe(true);
-  });
+    ).toBe(true)
+  })
 
-  it("returns true when selection includes whitespace after a quoted mention", () => {
+  it('returns true when selection includes whitespace after a quoted mention', () =>
+  {
     expect(
       selectionTouchesMentionBoundary(
         'hi @"My File.md" there',
         'hi @"My File.md"'.length,
         'hi @"My File.md" there'.length,
       ),
-    ).toBe(true);
-  });
+    ).toBe(true)
+  })
 
-  it("returns true when selection includes whitespace after a markdown file link", () => {
-    const prompt = "hi [package.json](path/to/package.json) there";
+  it('returns true when selection includes whitespace after a markdown file link', () =>
+  {
+    const prompt = 'hi [package.json](path/to/package.json) there'
     expect(
       selectionTouchesMentionBoundary(
         prompt,
-        "hi [package.json](path/to/package.json)".length,
+        'hi [package.json](path/to/package.json)'.length,
         prompt.length,
       ),
-    ).toBe(true);
-  });
-});
+    ).toBe(true)
+  })
+})

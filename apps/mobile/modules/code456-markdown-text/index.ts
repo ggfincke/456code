@@ -1,10 +1,10 @@
-export { markdownFileIconSource } from "./src/markdownFileIcons";
+export { markdownFileIconSource } from './src/markdownFileIcons'
 export {
   resolveMarkdownFileIcon,
   resolveMarkdownLinkPresentation,
   type MarkdownFileIcon,
   type MarkdownLinkPresentation,
-} from "./src/markdownLinks";
+} from './src/markdownLinks'
 export {
   nativeMarkdownChunkSpacing,
   nativeMarkdownDocumentChunks,
@@ -13,15 +13,15 @@ export {
   nativeMarkdownTextRuns,
   type NativeMarkdownDocumentChunk,
   type NativeMarkdownTextRun,
-} from "./src/nativeMarkdownText";
-export { MarkdownTextPrimitive } from "./src/MarkdownTextPrimitive";
+} from './src/nativeMarkdownText'
+export { MarkdownTextPrimitive } from './src/MarkdownTextPrimitive'
 export {
   SelectableMarkdownText,
   type MarkdownCodeHighlighter,
   type MarkdownHighlightedToken,
-} from "./src/SelectableMarkdownText";
+} from './src/SelectableMarkdownText'
 export type {
   NativeMarkdownTextStyle,
   SelectableMarkdownSkill,
   SelectableMarkdownTextProps,
-} from "./src/SelectableMarkdownText.types";
+} from './src/SelectableMarkdownText.types'

@@ -1,11 +1,12 @@
 // apps/server/src/persistence/Migrations/039_ProposalImplementationAttempts.ts
 // records exact proposal revisions consumed by implementation turns
 
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS proposal_implementation_attempts (
@@ -25,20 +26,20 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       completed_at TEXT
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_proposal_attempts_implementation_thread
     ON proposal_implementation_attempts(implementation_thread_id, created_at DESC)
-  `;
+  `
 
   yield* sql`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_proposal_attempts_implementation_turn
     ON proposal_implementation_attempts(implementation_thread_id, implementation_turn_id)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_proposal_attempts_plan
     ON proposal_implementation_attempts(source_thread_id, plan_id, created_at DESC)
-  `;
-});
+  `
+})

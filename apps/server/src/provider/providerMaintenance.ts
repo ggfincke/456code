@@ -2,21 +2,21 @@ import {
   ProviderDriverKind,
   type ServerProvider,
   type ServerProviderVersionAdvisory,
-} from "@t3tools/contracts";
-import { compareSemverVersions } from "@t3tools/shared/semver";
-import { resolveCommandPath } from "@t3tools/shared/shell";
-import * as Config from "effect/Config";
-import * as Context from "effect/Context";
-import * as DateTime from "effect/DateTime";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import { HttpClient, HttpClientRequest } from "effect/unstable/http";
+} from '@t3tools/contracts'
+import { compareSemverVersions } from '@t3tools/shared/semver'
+import { resolveCommandPath } from '@t3tools/shared/shell'
+import * as Config from 'effect/Config'
+import * as Context from 'effect/Context'
+import * as DateTime from 'effect/DateTime'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
+import { HttpClient, HttpClientRequest } from 'effect/unstable/http'
 
-const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000;
-const LATEST_VERSION_TIMEOUT_MS = 4_000;
-const PROVIDER_UPDATE_ACTION_TOAST_MESSAGE = "Install the update now or review provider settings.";
+const LATEST_VERSION_CACHE_TTL_MS = 60 * 60 * 1_000
+const LATEST_VERSION_TIMEOUT_MS = 4_000
+const PROVIDER_UPDATE_ACTION_TOAST_MESSAGE = 'Install the update now or review provider settings.'
 
 const compactEnv = (input: Record<string, Option.Option<string>>): NodeJS.ProcessEnv =>
   Object.fromEntries(
@@ -26,182 +26,199 @@ const compactEnv = (input: Record<string, Option.Option<string>>): NodeJS.Proces
         onSome: (resolved) => [[key, resolved]],
       }),
     ),
-  );
+  )
 
 const CommandLookupEnvConfig = Config.all({
-  PATH: Config.string("PATH").pipe(Config.option),
-  Path: Config.string("Path").pipe(Config.option),
-  path: Config.string("path").pipe(Config.option),
-  PATHEXT: Config.string("PATHEXT").pipe(Config.option),
-}).pipe(Config.map(compactEnv));
+  PATH: Config.string('PATH').pipe(Config.option),
+  Path: Config.string('Path').pipe(Config.option),
+  path: Config.string('path').pipe(Config.option),
+  PATHEXT: Config.string('PATHEXT').pipe(Config.option),
+}).pipe(Config.map(compactEnv))
 
-const readCommandLookupEnv = CommandLookupEnvConfig.pipe(Effect.orElseSucceed(() => ({})));
+const readCommandLookupEnv = CommandLookupEnvConfig.pipe(Effect.orElseSucceed(() => ({})))
 
-export interface ProviderMaintenanceCapabilities {
-  readonly provider: ProviderDriverKind;
-  readonly packageName: string | null;
-  readonly update: ProviderMaintenanceCommandAction | null;
+export interface ProviderMaintenanceCapabilities
+{
+  readonly provider: ProviderDriverKind
+  readonly packageName: string | null
+  readonly update: ProviderMaintenanceCommandAction | null
 }
 
-export interface ProviderMaintenanceCommandAction {
-  readonly command: string;
-  readonly executable: string;
-  readonly args: ReadonlyArray<string>;
-  readonly lockKey: string;
+export interface ProviderMaintenanceCommandAction
+{
+  readonly command: string
+  readonly executable: string
+  readonly args: ReadonlyArray<string>
+  readonly lockKey: string
 }
 
-export interface ProviderMaintenanceCapabilityResolutionOptions {
-  readonly binaryPath?: string | null;
-  readonly env?: NodeJS.ProcessEnv;
-  readonly resolvedCommandPath?: string | null;
-  readonly realCommandPath?: string | null;
+export interface ProviderMaintenanceCapabilityResolutionOptions
+{
+  readonly binaryPath?: string | null
+  readonly env?: NodeJS.ProcessEnv
+  readonly resolvedCommandPath?: string | null
+  readonly realCommandPath?: string | null
 }
 
-export interface ProviderMaintenanceCapabilitiesResolver {
+export interface ProviderMaintenanceCapabilitiesResolver
+{
   readonly resolve: (
     options?: ProviderMaintenanceCapabilityResolutionOptions,
-  ) => ProviderMaintenanceCapabilities;
+  ) => ProviderMaintenanceCapabilities
 }
 
-export interface PackageManagedProviderMaintenanceDefinition {
-  readonly provider: ProviderDriverKind;
-  readonly npmPackageName: string;
-  readonly homebrewFormula: string | null;
+export interface PackageManagedProviderMaintenanceDefinition
+{
+  readonly provider: ProviderDriverKind
+  readonly npmPackageName: string
+  readonly homebrewFormula: string | null
   readonly nativeUpdate: {
-    readonly executable: string;
-    readonly args: ReadonlyArray<string>;
-    readonly lockKey: string;
-    readonly isCommandPath: (commandPath: string) => boolean;
-  } | null;
+    readonly executable: string
+    readonly args: ReadonlyArray<string>
+    readonly lockKey: string
+    readonly isCommandPath: (commandPath: string) => boolean
+  } | null
 }
 
-export interface ProviderVersionCacheEntry {
-  readonly expiresAt: number;
-  readonly version: string | null;
+export interface ProviderVersionCacheEntry
+{
+  readonly expiresAt: number
+  readonly version: string | null
 }
 
 export const ProviderVersionCache = Context.Reference<Map<string, ProviderVersionCacheEntry>>(
-  "@t3tools/server/providerMaintenance/ProviderVersionCache",
+  '@t3tools/server/providerMaintenance/ProviderVersionCache',
   {
     defaultValue: () => new Map(),
   },
-);
+)
 const NpmLatestVersionResponse = Schema.Struct({
   version: Schema.optional(Schema.String),
-});
+})
 
-function nonEmptyString(value: unknown): string | null {
-  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
+function nonEmptyString(value: unknown): string | null
+{
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
 
 export function makeProviderMaintenanceCapabilities(input: {
-  readonly provider: ProviderDriverKind;
-  readonly packageName: string | null;
-  readonly updateExecutable: string | null;
-  readonly updateArgs: ReadonlyArray<string>;
-  readonly updateLockKey: string | null;
-}): ProviderMaintenanceCapabilities {
+  readonly provider: ProviderDriverKind
+  readonly packageName: string | null
+  readonly updateExecutable: string | null
+  readonly updateArgs: ReadonlyArray<string>
+  readonly updateLockKey: string | null
+}): ProviderMaintenanceCapabilities
+{
   const update =
     input.updateExecutable === null || input.updateLockKey === null
       ? null
       : {
-          command: [input.updateExecutable, ...input.updateArgs].join(" "),
+          command: [input.updateExecutable, ...input.updateArgs].join(' '),
           executable: input.updateExecutable,
           args: input.updateArgs,
           lockKey: input.updateLockKey,
-        };
+        }
   return {
     provider: input.provider,
     packageName: input.packageName,
     update,
-  };
+  }
 }
 
 export function makeManualOnlyProviderMaintenanceCapabilities(input: {
-  readonly provider: ProviderDriverKind;
-  readonly packageName: string | null;
-}): ProviderMaintenanceCapabilities {
+  readonly provider: ProviderDriverKind
+  readonly packageName: string | null
+}): ProviderMaintenanceCapabilities
+{
   return makeProviderMaintenanceCapabilities({
     provider: input.provider,
     packageName: input.packageName,
     updateExecutable: null,
     updateArgs: [],
     updateLockKey: null,
-  });
+  })
 }
 
 function makeNpmGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
-): ProviderMaintenanceCapabilities {
+): ProviderMaintenanceCapabilities
+{
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
-    updateExecutable: "npm",
-    updateArgs: ["install", "-g", `${definition.npmPackageName}@latest`],
-    updateLockKey: "npm-global",
-  });
+    updateExecutable: 'npm',
+    updateArgs: ['install', '-g', `${definition.npmPackageName}@latest`],
+    updateLockKey: 'npm-global',
+  })
 }
 
 function makeBunGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
-): ProviderMaintenanceCapabilities {
+): ProviderMaintenanceCapabilities
+{
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
-    updateExecutable: "bun",
-    updateArgs: ["i", "-g", `${definition.npmPackageName}@latest`],
-    updateLockKey: "bun-global",
-  });
+    updateExecutable: 'bun',
+    updateArgs: ['i', '-g', `${definition.npmPackageName}@latest`],
+    updateLockKey: 'bun-global',
+  })
 }
 
 function makePnpmGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
-): ProviderMaintenanceCapabilities {
+): ProviderMaintenanceCapabilities
+{
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
-    updateExecutable: "pnpm",
-    updateArgs: ["add", "-g", `${definition.npmPackageName}@latest`],
-    updateLockKey: "pnpm-global",
-  });
+    updateExecutable: 'pnpm',
+    updateArgs: ['add', '-g', `${definition.npmPackageName}@latest`],
+    updateLockKey: 'pnpm-global',
+  })
 }
 
 function makeVitePlusGlobalProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
-): ProviderMaintenanceCapabilities {
+): ProviderMaintenanceCapabilities
+{
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
-    updateExecutable: "vp",
-    updateArgs: ["i", "-g", definition.npmPackageName],
-    updateLockKey: "vite-plus-global",
-  });
+    updateExecutable: 'vp',
+    updateArgs: ['i', '-g', definition.npmPackageName],
+    updateLockKey: 'vite-plus-global',
+  })
 }
 
 function makeHomebrewProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
-): ProviderMaintenanceCapabilities {
-  if (!definition.homebrewFormula) {
+): ProviderMaintenanceCapabilities
+{
+  if (!definition.homebrewFormula)
+  {
     return makeManualOnlyProviderMaintenanceCapabilities({
       provider: definition.provider,
       packageName: definition.npmPackageName,
-    });
+    })
   }
 
   return makeProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
-    updateExecutable: "brew",
-    updateArgs: ["upgrade", definition.homebrewFormula],
-    updateLockKey: "homebrew",
-  });
+    updateExecutable: 'brew',
+    updateArgs: ['upgrade', definition.homebrewFormula],
+    updateLockKey: 'homebrew',
+  })
 }
 
 function makeNativeProviderMaintenanceCapabilities(
   definition: PackageManagedProviderMaintenanceDefinition,
-): ProviderMaintenanceCapabilities | null {
-  if (!definition.nativeUpdate) {
-    return null;
+): ProviderMaintenanceCapabilities | null
+{
+  if (!definition.nativeUpdate)
+  {
+    return null
   }
 
   return makeProviderMaintenanceCapabilities({
@@ -210,204 +227,232 @@ function makeNativeProviderMaintenanceCapabilities(
     updateExecutable: definition.nativeUpdate.executable,
     updateArgs: definition.nativeUpdate.args,
     updateLockKey: definition.nativeUpdate.lockKey,
-  });
+  })
 }
 
-export function hasPathSeparator(value: string): boolean {
-  return value.includes("/") || value.includes("\\");
+export function hasPathSeparator(value: string): boolean
+{
+  return value.includes('/') || value.includes('\\')
 }
 
-export function normalizeCommandPath(commandPath: string): string {
-  return commandPath.replaceAll("\\", "/").toLowerCase();
+export function normalizeCommandPath(commandPath: string): string
+{
+  return commandPath.replaceAll('\\', '/').toLowerCase()
 }
 
-function isBunGlobalCommandPath(commandPath: string): boolean {
-  return normalizeCommandPath(commandPath).includes("/.bun/bin/");
+function isBunGlobalCommandPath(commandPath: string): boolean
+{
+  return normalizeCommandPath(commandPath).includes('/.bun/bin/')
 }
 
-function isVitePlusGlobalCommandPath(commandPath: string): boolean {
-  return normalizeCommandPath(commandPath).includes("/.vite-plus/bin/");
+function isVitePlusGlobalCommandPath(commandPath: string): boolean
+{
+  return normalizeCommandPath(commandPath).includes('/.vite-plus/bin/')
 }
 
-function isPnpmGlobalCommandPath(commandPath: string): boolean {
-  const normalized = normalizeCommandPath(commandPath);
+function isPnpmGlobalCommandPath(commandPath: string): boolean
+{
+  const normalized = normalizeCommandPath(commandPath)
   return (
-    normalized.includes("/.local/share/pnpm/") ||
-    normalized.includes("/library/pnpm/") ||
-    normalized.includes("/local/share/pnpm/") ||
-    normalized.includes("/appdata/local/pnpm/") ||
-    normalized.includes("/pnpm/global/")
-  );
+    normalized.includes('/.local/share/pnpm/') ||
+    normalized.includes('/library/pnpm/') ||
+    normalized.includes('/local/share/pnpm/') ||
+    normalized.includes('/appdata/local/pnpm/') ||
+    normalized.includes('/pnpm/global/')
+  )
 }
 
-function isNpmGlobalCommandPath(commandPath: string): boolean {
-  const normalized = normalizeCommandPath(commandPath);
+function isNpmGlobalCommandPath(commandPath: string): boolean
+{
+  const normalized = normalizeCommandPath(commandPath)
   return (
-    normalized.includes("/node_modules/.bin/") ||
-    normalized.includes("/lib/node_modules/") ||
-    normalized.includes("/npm/node_modules/")
-  );
+    normalized.includes('/node_modules/.bin/') ||
+    normalized.includes('/lib/node_modules/') ||
+    normalized.includes('/npm/node_modules/')
+  )
 }
 
-function isHomebrewCommandPath(commandPath: string): boolean {
-  const normalized = normalizeCommandPath(commandPath);
+function isHomebrewCommandPath(commandPath: string): boolean
+{
+  const normalized = normalizeCommandPath(commandPath)
   return (
-    normalized.includes("/opt/homebrew/cellar/") ||
-    normalized.includes("/usr/local/cellar/") ||
-    normalized.includes("/homebrew/cellar/") ||
-    normalized.includes("/opt/homebrew/caskroom/") ||
-    normalized.includes("/usr/local/caskroom/") ||
-    normalized.includes("/homebrew/caskroom/") ||
-    normalized.startsWith("/opt/homebrew/bin/") ||
-    normalized.startsWith("/usr/local/bin/")
-  );
+    normalized.includes('/opt/homebrew/cellar/') ||
+    normalized.includes('/usr/local/cellar/') ||
+    normalized.includes('/homebrew/cellar/') ||
+    normalized.includes('/opt/homebrew/caskroom/') ||
+    normalized.includes('/usr/local/caskroom/') ||
+    normalized.includes('/homebrew/caskroom/') ||
+    normalized.startsWith('/opt/homebrew/bin/') ||
+    normalized.startsWith('/usr/local/bin/')
+  )
 }
 
 export function resolvePackageManagedProviderMaintenance(
   definition: PackageManagedProviderMaintenanceDefinition,
   options?: ProviderMaintenanceCapabilityResolutionOptions,
-): ProviderMaintenanceCapabilities {
-  const binaryPath = nonEmptyString(options?.binaryPath);
-  if (!binaryPath) {
-    return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+): ProviderMaintenanceCapabilities
+{
+  const binaryPath = nonEmptyString(options?.binaryPath)
+  if (!binaryPath)
+  {
+    return makeNpmGlobalProviderMaintenanceCapabilities(definition)
   }
 
   const resolvedCommandPath =
-    options?.resolvedCommandPath ?? (hasPathSeparator(binaryPath) ? binaryPath : null);
+    options?.resolvedCommandPath ?? (hasPathSeparator(binaryPath) ? binaryPath : null)
 
-  if (resolvedCommandPath) {
+  if (resolvedCommandPath)
+  {
     const commandPaths = [
       resolvedCommandPath,
       ...(options?.realCommandPath ? [options.realCommandPath] : []),
-    ];
+    ]
 
-    const nativeUpdate = definition.nativeUpdate;
+    const nativeUpdate = definition.nativeUpdate
     if (
       nativeUpdate &&
       commandPaths.some((commandPath) => nativeUpdate.isCommandPath(commandPath))
-    ) {
+    )
+    {
       return (
         makeNativeProviderMaintenanceCapabilities(definition) ??
         makeNpmGlobalProviderMaintenanceCapabilities(definition)
-      );
+      )
     }
-    if (commandPaths.some(isVitePlusGlobalCommandPath)) {
-      return makeVitePlusGlobalProviderMaintenanceCapabilities(definition);
+    if (commandPaths.some(isVitePlusGlobalCommandPath))
+    {
+      return makeVitePlusGlobalProviderMaintenanceCapabilities(definition)
     }
-    if (commandPaths.some(isBunGlobalCommandPath)) {
-      return makeBunGlobalProviderMaintenanceCapabilities(definition);
+    if (commandPaths.some(isBunGlobalCommandPath))
+    {
+      return makeBunGlobalProviderMaintenanceCapabilities(definition)
     }
-    if (commandPaths.some(isPnpmGlobalCommandPath)) {
-      return makePnpmGlobalProviderMaintenanceCapabilities(definition);
+    if (commandPaths.some(isPnpmGlobalCommandPath))
+    {
+      return makePnpmGlobalProviderMaintenanceCapabilities(definition)
     }
-    if (commandPaths.some(isNpmGlobalCommandPath)) {
-      return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+    if (commandPaths.some(isNpmGlobalCommandPath))
+    {
+      return makeNpmGlobalProviderMaintenanceCapabilities(definition)
     }
-    if (commandPaths.some(isHomebrewCommandPath)) {
-      return makeHomebrewProviderMaintenanceCapabilities(definition);
+    if (commandPaths.some(isHomebrewCommandPath))
+    {
+      return makeHomebrewProviderMaintenanceCapabilities(definition)
     }
   }
 
-  if (!hasPathSeparator(binaryPath)) {
-    return makeNpmGlobalProviderMaintenanceCapabilities(definition);
+  if (!hasPathSeparator(binaryPath))
+  {
+    return makeNpmGlobalProviderMaintenanceCapabilities(definition)
   }
 
   return makeManualOnlyProviderMaintenanceCapabilities({
     provider: definition.provider,
     packageName: definition.npmPackageName,
-  });
+  })
 }
 
 export function makePackageManagedProviderMaintenanceResolver(
   definition: PackageManagedProviderMaintenanceDefinition,
-): ProviderMaintenanceCapabilitiesResolver {
+): ProviderMaintenanceCapabilitiesResolver
+{
   return {
     resolve: (options) => resolvePackageManagedProviderMaintenance(definition, options),
-  };
+  }
 }
 
 export function makeStaticProviderMaintenanceResolver(
   capabilities: ProviderMaintenanceCapabilities,
-): ProviderMaintenanceCapabilitiesResolver {
+): ProviderMaintenanceCapabilitiesResolver
+{
   return {
     resolve: () => capabilities,
-  };
+  }
 }
 
 function makeManualProviderMaintenanceCapabilities(
   provider: ProviderDriverKind,
-): ProviderMaintenanceCapabilities {
+): ProviderMaintenanceCapabilities
+{
   return makeManualOnlyProviderMaintenanceCapabilities({
     provider,
     packageName: null,
-  });
+  })
 }
 
 export const resolveProviderMaintenanceCapabilitiesEffect = Effect.fn(
-  "resolveProviderMaintenanceCapabilitiesEffect",
+  'resolveProviderMaintenanceCapabilitiesEffect',
 )(function* (
   resolver: ProviderMaintenanceCapabilitiesResolver,
-  options?: Omit<ProviderMaintenanceCapabilityResolutionOptions, "realCommandPath">,
-) {
-  const binaryPath = nonEmptyString(options?.binaryPath);
-  if (!binaryPath) {
-    return resolver.resolve(options);
+  options?: Omit<ProviderMaintenanceCapabilityResolutionOptions, 'realCommandPath'>,
+)
+{
+  const binaryPath = nonEmptyString(options?.binaryPath)
+  if (!binaryPath)
+  {
+    return resolver.resolve(options)
   }
 
-  const env = options?.env ?? (yield* readCommandLookupEnv);
+  const env = options?.env ?? (yield* readCommandLookupEnv)
   const resolvedCommandPath =
     (yield* resolveCommandPath(binaryPath, { env }).pipe(
-      Effect.catchTag("CommandResolutionError", () => Effect.succeed(null)),
-    )) ?? (hasPathSeparator(binaryPath) ? binaryPath : null);
-  if (!resolvedCommandPath) {
-    return resolver.resolve(options);
+      Effect.catchTag('CommandResolutionError', () => Effect.succeed(null)),
+    )) ?? (hasPathSeparator(binaryPath) ? binaryPath : null)
+  if (!resolvedCommandPath)
+  {
+    return resolver.resolve(options)
   }
 
-  const fileSystem = yield* FileSystem.FileSystem;
+  const fileSystem = yield* FileSystem.FileSystem
   const realCommandPath = yield* fileSystem
     .realPath(resolvedCommandPath)
-    .pipe(Effect.orElseSucceed(() => resolvedCommandPath));
+    .pipe(Effect.orElseSucceed(() => resolvedCommandPath))
   return resolver.resolve({
     ...options,
     env,
     resolvedCommandPath,
     realCommandPath,
-  });
-});
+  })
+})
 
 function deriveVersionAdvisory(input: {
-  readonly currentVersion: string | null;
-  readonly latestVersion: string | null;
-}): Pick<ServerProviderVersionAdvisory, "status" | "message"> {
-  if (!input.currentVersion) {
-    return { status: "unknown", message: null };
+  readonly currentVersion: string | null
+  readonly latestVersion: string | null
+}): Pick<ServerProviderVersionAdvisory, 'status' | 'message'>
+{
+  if (!input.currentVersion)
+  {
+    return { status: 'unknown', message: null }
   }
-  if (!input.latestVersion) {
-    return { status: "unknown", message: null };
+  if (!input.latestVersion)
+  {
+    return { status: 'unknown', message: null }
   }
-  if (compareSemverVersions(input.currentVersion, input.latestVersion) < 0) {
+  if (compareSemverVersions(input.currentVersion, input.latestVersion) < 0)
+  {
     return {
-      status: "behind_latest",
+      status: 'behind_latest',
       message: PROVIDER_UPDATE_ACTION_TOAST_MESSAGE,
-    };
+    }
   }
-  return { status: "current", message: null };
+  return { status: 'current', message: null }
 }
 
 export function createProviderVersionAdvisory(input: {
-  readonly driver: ProviderDriverKind;
-  readonly currentVersion: string | null;
-  readonly latestVersion?: string | null;
-  readonly checkedAt?: string | null;
-  readonly maintenanceCapabilities?: ProviderMaintenanceCapabilities;
-}): ServerProviderVersionAdvisory {
+  readonly driver: ProviderDriverKind
+  readonly currentVersion: string | null
+  readonly latestVersion?: string | null
+  readonly checkedAt?: string | null
+  readonly maintenanceCapabilities?: ProviderMaintenanceCapabilities
+}): ServerProviderVersionAdvisory
+{
   const capabilities =
-    input.maintenanceCapabilities ?? makeManualProviderMaintenanceCapabilities(input.driver);
-  const latestVersion = input.latestVersion ?? null;
+    input.maintenanceCapabilities ?? makeManualProviderMaintenanceCapabilities(input.driver)
+  const latestVersion = input.latestVersion ?? null
   const advisory = deriveVersionAdvisory({
     currentVersion: input.currentVersion,
     latestVersion,
-  });
+  })
 
   return {
     status: advisory.status,
@@ -417,72 +462,80 @@ export function createProviderVersionAdvisory(input: {
     canUpdate: capabilities.update !== null,
     checkedAt: input.checkedAt ?? null,
     message: advisory.message,
-  };
+  }
 }
 
-const fetchNpmLatestVersion = Effect.fn("fetchNpmLatestVersion")(function* (packageName: string) {
-  const client = yield* HttpClient.HttpClient;
+const fetchNpmLatestVersion = Effect.fn('fetchNpmLatestVersion')(function* (packageName: string)
+{
+  const client = yield* HttpClient.HttpClient
   const request = HttpClientRequest.get(
     `https://registry.npmjs.org/${encodeURIComponent(packageName)}/latest`,
-  ).pipe(HttpClientRequest.setHeader("accept", "application/json"));
+  ).pipe(HttpClientRequest.setHeader('accept', 'application/json'))
   const response = yield* client.execute(request).pipe(
     Effect.timeoutOption(LATEST_VERSION_TIMEOUT_MS),
     Effect.orElseSucceed(() => Option.none()),
-  );
-  if (Option.isNone(response)) {
-    return null;
+  )
+  if (Option.isNone(response))
+  {
+    return null
   }
-  const httpResponse = response.value;
-  if (httpResponse.status < 200 || httpResponse.status >= 300) {
-    return null;
+  const httpResponse = response.value
+  if (httpResponse.status < 200 || httpResponse.status >= 300)
+  {
+    return null
   }
   const payload = yield* httpResponse.json.pipe(
     Effect.flatMap(Schema.decodeUnknownEffect(NpmLatestVersionResponse)),
     Effect.orElseSucceed(() => null),
-  );
-  return payload ? nonEmptyString(payload.version) : null;
-});
+  )
+  return payload ? nonEmptyString(payload.version) : null
+})
 
-export const resolveLatestProviderVersion = Effect.fn("resolveLatestProviderVersion")(function* (
+export const resolveLatestProviderVersion = Effect.fn('resolveLatestProviderVersion')(function* (
   maintenanceCapabilities: ProviderMaintenanceCapabilities,
-) {
-  const packageName = maintenanceCapabilities.packageName;
-  if (!packageName) {
-    return null;
+)
+{
+  const packageName = maintenanceCapabilities.packageName
+  if (!packageName)
+  {
+    return null
   }
 
-  const latestVersionCache = yield* ProviderVersionCache;
-  const cached = latestVersionCache.get(packageName);
-  const now = DateTime.toEpochMillis(yield* DateTime.now);
-  if (cached && cached.expiresAt > now) {
-    return cached.version;
+  const latestVersionCache = yield* ProviderVersionCache
+  const cached = latestVersionCache.get(packageName)
+  const now = DateTime.toEpochMillis(yield* DateTime.now)
+  if (cached && cached.expiresAt > now)
+  {
+    return cached.version
   }
 
-  const version = yield* fetchNpmLatestVersion(packageName);
+  const version = yield* fetchNpmLatestVersion(packageName)
   latestVersionCache.set(packageName, {
     expiresAt: now + LATEST_VERSION_CACHE_TTL_MS,
     version,
-  });
-  return version;
-});
+  })
+  return version
+})
 
 export const enrichProviderSnapshotWithVersionAdvisory = Effect.fn(
-  "enrichProviderSnapshotWithVersionAdvisory",
+  'enrichProviderSnapshotWithVersionAdvisory',
 )(function* (
   snapshot: ServerProvider,
   maintenanceCapabilities?: ProviderMaintenanceCapabilities,
   options?: {
-    readonly enableProviderUpdateChecks: boolean | undefined;
+    readonly enableProviderUpdateChecks: boolean | undefined
   },
-) {
+)
+{
   const capabilities =
-    maintenanceCapabilities ?? makeManualProviderMaintenanceCapabilities(snapshot.driver);
+    maintenanceCapabilities ?? makeManualProviderMaintenanceCapabilities(snapshot.driver)
   const shouldResolveLatestVersion =
     options?.enableProviderUpdateChecks !== false &&
     snapshot.enabled &&
     snapshot.installed &&
-    Boolean(snapshot.version);
-  if (!shouldResolveLatestVersion) {
+    Boolean(snapshot.version)
+  if (!shouldResolveLatestVersion)
+  {
     return {
       ...snapshot,
       versionAdvisory: createProviderVersionAdvisory({
@@ -491,10 +544,10 @@ export const enrichProviderSnapshotWithVersionAdvisory = Effect.fn(
         checkedAt: snapshot.checkedAt,
         maintenanceCapabilities: capabilities,
       }),
-    };
+    }
   }
 
-  const latestVersion = yield* resolveLatestProviderVersion(capabilities);
+  const latestVersion = yield* resolveLatestProviderVersion(capabilities)
   return {
     ...snapshot,
     versionAdvisory: createProviderVersionAdvisory({
@@ -504,5 +557,5 @@ export const enrichProviderSnapshotWithVersionAdvisory = Effect.fn(
       checkedAt: DateTime.formatIso(yield* DateTime.now),
       maintenanceCapabilities: capabilities,
     }),
-  };
-});
+  }
+})

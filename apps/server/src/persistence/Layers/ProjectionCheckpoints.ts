@@ -1,13 +1,13 @@
-import { OrchestrationCheckpointFile } from "@t3tools/contracts";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlSchema from "effect/unstable/sql/SqlSchema";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as Struct from "effect/Struct";
+import { OrchestrationCheckpointFile } from '@t3tools/contracts'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
+import * as Struct from 'effect/Struct'
 
-import { toPersistenceDecodeError, toPersistenceSqlError } from "../Errors.ts";
+import { toPersistenceDecodeError, toPersistenceSqlError } from '../Errors.ts'
 import {
   DeleteByThreadIdInput,
   GetByThreadAndTurnCountInput,
@@ -15,23 +15,25 @@ import {
   ProjectionCheckpoint,
   ProjectionCheckpointRepository,
   type ProjectionCheckpointRepositoryShape,
-} from "../Services/ProjectionCheckpoints.ts";
+} from '../Services/ProjectionCheckpoints.ts'
 
 const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
   Struct.assign({
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
   }),
-);
+)
 
-function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string) {
+function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)
+{
   return (cause: unknown) =>
     Schema.isSchemaError(cause)
       ? toPersistenceDecodeError(decodeOperation)(cause)
-      : toPersistenceSqlError(sqlOperation)(cause);
+      : toPersistenceSqlError(sqlOperation)(cause)
 }
 
-const makeProjectionCheckpointRepository = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+const makeProjectionCheckpointRepository = Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   const clearCheckpointConflict = SqlSchema.void({
     Request: GetByThreadAndTurnCountInput,
@@ -46,7 +48,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count = ${checkpointTurnCount}
       `,
-  });
+  })
 
   const upsertProjectionCheckpointRow = SqlSchema.void({
     Request: ProjectionCheckpointDbRowSchema,
@@ -71,7 +73,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
           ${row.turnId},
           NULL,
           ${row.assistantMessageId},
-          ${row.status === "error" ? "error" : "completed"},
+          ${row.status === 'error' ? 'error' : 'completed'},
           ${row.completedAt},
           ${row.completedAt},
           ${row.completedAt},
@@ -90,7 +92,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
           checkpoint_status = excluded.checkpoint_status,
           checkpoint_files_json = excluded.checkpoint_files_json
       `,
-  });
+  })
 
   const listProjectionCheckpointRows = SqlSchema.findAll({
     Request: ListByThreadIdInput,
@@ -111,7 +113,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
           AND checkpoint_turn_count IS NOT NULL
         ORDER BY checkpoint_turn_count ASC
       `,
-  });
+  })
 
   const getProjectionCheckpointRow = SqlSchema.findOneOption({
     Request: GetByThreadAndTurnCountInput,
@@ -131,7 +133,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count = ${checkpointTurnCount}
       `,
-  });
+  })
 
   const deleteProjectionCheckpointRows = SqlSchema.void({
     Request: DeleteByThreadIdInput,
@@ -146,7 +148,7 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count IS NOT NULL
       `,
-  });
+  })
 
   const upsertCheckpointRow = (row: Schema.Schema.Type<typeof ProjectionCheckpointDbRowSchema>) =>
     sql.withTransaction(
@@ -154,37 +156,37 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
         threadId: row.threadId,
         checkpointTurnCount: row.checkpointTurnCount,
       }).pipe(Effect.flatMap(() => upsertProjectionCheckpointRow(row))),
-    );
+    )
 
-  const upsert: ProjectionCheckpointRepositoryShape["upsert"] = (row) =>
+  const upsert: ProjectionCheckpointRepositoryShape['upsert'] = (row) =>
     upsertCheckpointRow(row).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "ProjectionCheckpointRepository.upsert:query",
-          "ProjectionCheckpointRepository.upsert:encodeRequest",
+          'ProjectionCheckpointRepository.upsert:query',
+          'ProjectionCheckpointRepository.upsert:encodeRequest',
         ),
       ),
-    );
+    )
 
-  const listByThreadId: ProjectionCheckpointRepositoryShape["listByThreadId"] = (input) =>
+  const listByThreadId: ProjectionCheckpointRepositoryShape['listByThreadId'] = (input) =>
     listProjectionCheckpointRows(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "ProjectionCheckpointRepository.listByThreadId:query",
-          "ProjectionCheckpointRepository.listByThreadId:decodeRows",
+          'ProjectionCheckpointRepository.listByThreadId:query',
+          'ProjectionCheckpointRepository.listByThreadId:decodeRows',
         ),
       ),
       Effect.map((rows) => rows as ReadonlyArray<Schema.Schema.Type<typeof ProjectionCheckpoint>>),
-    );
+    )
 
-  const getByThreadAndTurnCount: ProjectionCheckpointRepositoryShape["getByThreadAndTurnCount"] = (
+  const getByThreadAndTurnCount: ProjectionCheckpointRepositoryShape['getByThreadAndTurnCount'] = (
     input,
   ) =>
     getProjectionCheckpointRow(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "ProjectionCheckpointRepository.getByThreadAndTurnCount:query",
-          "ProjectionCheckpointRepository.getByThreadAndTurnCount:decodeRow",
+          'ProjectionCheckpointRepository.getByThreadAndTurnCount:query',
+          'ProjectionCheckpointRepository.getByThreadAndTurnCount:decodeRow',
         ),
       ),
       Effect.flatMap((rowOption) =>
@@ -194,24 +196,24 @@ const makeProjectionCheckpointRepository = Effect.gen(function* () {
             Effect.succeed(Option.some(row as Schema.Schema.Type<typeof ProjectionCheckpoint>)),
         }),
       ),
-    );
+    )
 
-  const deleteByThreadId: ProjectionCheckpointRepositoryShape["deleteByThreadId"] = (input) =>
+  const deleteByThreadId: ProjectionCheckpointRepositoryShape['deleteByThreadId'] = (input) =>
     deleteProjectionCheckpointRows(input).pipe(
       Effect.mapError(
-        toPersistenceSqlError("ProjectionCheckpointRepository.deleteByThreadId:query"),
+        toPersistenceSqlError('ProjectionCheckpointRepository.deleteByThreadId:query'),
       ),
-    );
+    )
 
   return {
     upsert,
     listByThreadId,
     getByThreadAndTurnCount,
     deleteByThreadId,
-  } satisfies ProjectionCheckpointRepositoryShape;
-});
+  } satisfies ProjectionCheckpointRepositoryShape
+})
 
 export const ProjectionCheckpointRepositoryLive = Layer.effect(
   ProjectionCheckpointRepository,
   makeProjectionCheckpointRepository,
-);
+)

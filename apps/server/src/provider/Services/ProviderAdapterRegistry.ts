@@ -25,41 +25,44 @@ import type {
   ProviderContinuationIdentity,
   ProviderDriverKind,
   ProviderInstanceId,
-} from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
-import type * as PubSub from "effect/PubSub";
-import type * as Scope from "effect/Scope";
-import type * as Stream from "effect/Stream";
+} from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
+import type * as PubSub from 'effect/PubSub'
+import type * as Scope from 'effect/Scope'
+import type * as Stream from 'effect/Stream'
 
-import type { ProviderAdapterError, ProviderUnsupportedError } from "../Errors.ts";
-import type { ProviderAdapterShape } from "./ProviderAdapter.ts";
-export interface ProviderInstanceRoutingInfo {
-  readonly instanceId: ProviderInstanceId;
-  readonly driverKind: ProviderDriverKind;
-  readonly displayName: string | undefined;
-  readonly accentColor?: string | undefined;
-  readonly enabled: boolean;
-  readonly continuationIdentity: ProviderContinuationIdentity;
-  readonly continuationUnavailableReason?: string;
+import type { ProviderAdapterError, ProviderUnsupportedError } from '../Errors.ts'
+import type { ProviderAdapterShape } from './ProviderAdapter.ts'
+export interface ProviderInstanceRoutingInfo
+{
+  readonly instanceId: ProviderInstanceId
+  readonly driverKind: ProviderDriverKind
+  readonly displayName: string | undefined
+  readonly accentColor?: string | undefined
+  readonly enabled: boolean
+  readonly continuationIdentity: ProviderContinuationIdentity
+  readonly continuationUnavailableReason?: string
 }
 
-export interface ProviderInstanceRoute {
-  readonly info: ProviderInstanceRoutingInfo;
-  readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
+export interface ProviderInstanceRoute
+{
+  readonly info: ProviderInstanceRoutingInfo
+  readonly adapter: ProviderAdapterShape<ProviderAdapterError>
 }
 
 /**
  * ProviderAdapterRegistryShape - Service API for adapter lookup.
  */
-export interface ProviderAdapterRegistryShape {
+export interface ProviderAdapterRegistryShape
+{
   /**
    * Resolve routing metadata and its adapter from one immutable registry
    * snapshot so settings reloads cannot mix two instance generations.
    */
   readonly getRoute: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderInstanceRoute, ProviderUnsupportedError>;
+  ) => Effect.Effect<ProviderInstanceRoute, ProviderUnsupportedError>
 
   /**
    * Resolve the adapter for a specific instance id. Returns
@@ -70,17 +73,17 @@ export interface ProviderAdapterRegistryShape {
    */
   readonly getByInstance: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderAdapterShape<ProviderAdapterError>, ProviderUnsupportedError>;
+  ) => Effect.Effect<ProviderAdapterShape<ProviderAdapterError>, ProviderUnsupportedError>
 
   readonly getInstanceInfo: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ProviderInstanceRoutingInfo, ProviderUnsupportedError>;
+  ) => Effect.Effect<ProviderInstanceRoutingInfo, ProviderUnsupportedError>
 
   /**
    * List all live instance ids. Excludes unavailable/shadow instances —
    * callers of this method want something they can pass to `getByInstance`.
    */
-  readonly listInstances: () => Effect.Effect<ReadonlyArray<ProviderInstanceId>>;
+  readonly listInstances: () => Effect.Effect<ReadonlyArray<ProviderInstanceId>>
 
   /**
    * Legacy: list provider kinds whose default instance is currently
@@ -89,7 +92,7 @@ export interface ProviderAdapterRegistryShape {
    * @deprecated Prefer `listInstances`. Retained for migration-era call
    * sites that iterate providers to build UI/metrics.
    */
-  readonly listProviders: () => Effect.Effect<ReadonlyArray<ProviderDriverKind>>;
+  readonly listProviders: () => Effect.Effect<ReadonlyArray<ProviderDriverKind>>
 
   /**
    * Change notification stream mirroring `ProviderInstanceRegistry.streamChanges`.
@@ -99,14 +102,14 @@ export interface ProviderAdapterRegistryShape {
    * runtime event bus — re-pull `listInstances` on each tick and fork new
    * subscriptions for instances they haven't seen yet.
    */
-  readonly streamChanges: Stream.Stream<void>;
+  readonly streamChanges: Stream.Stream<void>
 
   /**
    * Acquire a change subscription synchronously in the caller's current fiber.
    * Consumers that must avoid missing a publish between initial reconciliation
    * and watcher startup should use this, then fork `Stream.fromSubscription`.
    */
-  readonly subscribeChanges: Effect.Effect<PubSub.Subscription<void>, never, Scope.Scope>;
+  readonly subscribeChanges: Effect.Effect<PubSub.Subscription<void>, never, Scope.Scope>
 }
 
 /**
@@ -115,4 +118,5 @@ export interface ProviderAdapterRegistryShape {
 export class ProviderAdapterRegistry extends Context.Service<
   ProviderAdapterRegistry,
   ProviderAdapterRegistryShape
->()("456code/provider/Services/ProviderAdapterRegistry") {}
+>()('456code/provider/Services/ProviderAdapterRegistry')
+{}

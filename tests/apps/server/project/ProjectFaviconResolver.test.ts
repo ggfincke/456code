@@ -1,14 +1,14 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { it, describe, expect } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import { it, describe, expect } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as Path from 'effect/Path'
+import * as PlatformError from 'effect/PlatformError'
 
-import * as WorkspacePaths from "../../../../apps/server/src/workspace/WorkspacePaths.ts";
-import * as ProjectFaviconResolver from "../../../../apps/server/src/project/ProjectFaviconResolver.ts";
-import * as ProjectFileLoader from "../../../../apps/server/src/project/ProjectFileLoader.ts";
+import * as WorkspacePaths from '../../../../apps/server/src/workspace/WorkspacePaths.ts'
+import * as ProjectFaviconResolver from '../../../../apps/server/src/project/ProjectFaviconResolver.ts'
+import * as ProjectFileLoader from '../../../../apps/server/src/project/ProjectFileLoader.ts'
 
 const TestLayer = Layer.empty.pipe(
   Layer.provideMerge(
@@ -18,195 +18,209 @@ const TestLayer = Layer.empty.pipe(
     ),
   ),
   Layer.provideMerge(NodeServices.layer),
-);
+)
 
-const makeTempDir = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
+const makeTempDir = Effect.gen(function* ()
+{
+  const fileSystem = yield* FileSystem.FileSystem
   return yield* fileSystem.makeTempDirectoryScoped({
-    prefix: "t3code-project-favicon-",
-  });
-});
+    prefix: 't3code-project-favicon-',
+  })
+})
 
-const writeTextFile = Effect.fn("writeTextFile")(function* (
+const writeTextFile = Effect.fn('writeTextFile')(function* (
   cwd: string,
   relativePath: string,
   contents: string,
-) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
-  const absolutePath = path.join(cwd, relativePath);
+)
+{
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
+  const absolutePath = path.join(cwd, relativePath)
   yield* fileSystem
     .makeDirectory(path.dirname(absolutePath), { recursive: true })
-    .pipe(Effect.orDie);
-  yield* fileSystem.writeFileString(absolutePath, contents).pipe(Effect.orDie);
-});
+    .pipe(Effect.orDie)
+  yield* fileSystem.writeFileString(absolutePath, contents).pipe(Effect.orDie)
+})
 
 const makeResolverWithFileSystem = (fileSystem: FileSystem.FileSystem) =>
   ProjectFaviconResolver.make.pipe(
     Effect.provide([WorkspacePaths.layer, ProjectFileLoader.layer]),
     Effect.provideService(FileSystem.FileSystem, fileSystem),
-  );
+  )
 
-it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
-  describe("resolvePath", () => {
-    it.effect("prefers well-known favicon files", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        yield* writeTextFile(cwd, "favicon.svg", "<svg>favicon</svg>");
+it.layer(TestLayer)('ProjectFaviconResolverLive', (it) =>
+{
+  describe('resolvePath', () =>
+  {
+    it.effect('prefers well-known favicon files', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        yield* writeTextFile(cwd, 'favicon.svg', '<svg>favicon</svg>')
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).not.toBeNull();
-        expect(resolved).toContain("favicon.svg");
+        expect(resolved).not.toBeNull()
+        expect(resolved).toContain('favicon.svg')
       }),
-    );
+    )
 
-    it.effect("prefers a 456code.json iconPath over well-known files", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        yield* writeTextFile(cwd, "456code.json", '{ "iconPath": "brand/mark.svg" }');
-        yield* writeTextFile(cwd, "brand/mark.svg", "<svg>mark</svg>");
-        yield* writeTextFile(cwd, "favicon.svg", "<svg>favicon</svg>");
+    it.effect('prefers a 456code.json iconPath over well-known files', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        yield* writeTextFile(cwd, '456code.json', '{ "iconPath": "brand/mark.svg" }')
+        yield* writeTextFile(cwd, 'brand/mark.svg', '<svg>mark</svg>')
+        yield* writeTextFile(cwd, 'favicon.svg', '<svg>favicon</svg>')
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).not.toBeNull();
-        expect(resolved).toContain("brand/mark.svg");
+        expect(resolved).not.toBeNull()
+        expect(resolved).toContain('brand/mark.svg')
       }),
-    );
+    )
 
-    it.effect("falls back to well-known files when the 456code.json iconPath does not exist", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        yield* writeTextFile(cwd, "456code.json", '{ "iconPath": "brand/missing.svg" }');
-        yield* writeTextFile(cwd, "favicon.svg", "<svg>favicon</svg>");
+    it.effect('falls back to well-known files when the 456code.json iconPath does not exist', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        yield* writeTextFile(cwd, '456code.json', '{ "iconPath": "brand/missing.svg" }')
+        yield* writeTextFile(cwd, 'favicon.svg', '<svg>favicon</svg>')
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).not.toBeNull();
-        expect(resolved).toContain("favicon.svg");
+        expect(resolved).not.toBeNull()
+        expect(resolved).toContain('favicon.svg')
       }),
-    );
+    )
 
-    it.effect("ignores invalid 456code.json files", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        yield* writeTextFile(cwd, "456code.json", "{ not json");
-        yield* writeTextFile(cwd, "favicon.svg", "<svg>favicon</svg>");
+    it.effect('ignores invalid 456code.json files', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        yield* writeTextFile(cwd, '456code.json', '{ not json')
+        yield* writeTextFile(cwd, 'favicon.svg', '<svg>favicon</svg>')
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).not.toBeNull();
-        expect(resolved).toContain("favicon.svg");
+        expect(resolved).not.toBeNull()
+        expect(resolved).toContain('favicon.svg')
       }),
-    );
+    )
 
-    it.effect("does not resolve a 456code.json iconPath outside the workspace root", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const parent = yield* makeTempDir;
-        const cwd = `${parent}/app`;
-        yield* writeTextFile(parent, "secret.svg", "<svg>secret</svg>");
-        yield* writeTextFile(cwd, "456code.json", '{ "iconPath": "../secret.svg" }');
+    it.effect('does not resolve a 456code.json iconPath outside the workspace root', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const parent = yield* makeTempDir
+        const cwd = `${parent}/app`
+        yield* writeTextFile(parent, 'secret.svg', '<svg>secret</svg>')
+        yield* writeTextFile(cwd, '456code.json', '{ "iconPath": "../secret.svg" }')
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).toBeNull();
+        expect(resolved).toBeNull()
       }),
-    );
+    )
 
-    it.effect("resolves icon hrefs from project source files", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        yield* writeTextFile(cwd, "index.html", '<link rel="icon" href="/brand/logo.svg">');
-        yield* writeTextFile(cwd, "public/brand/logo.svg", "<svg>brand</svg>");
+    it.effect('resolves icon hrefs from project source files', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        yield* writeTextFile(cwd, 'index.html', '<link rel="icon" href="/brand/logo.svg">')
+        yield* writeTextFile(cwd, 'public/brand/logo.svg', '<svg>brand</svg>')
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).not.toBeNull();
-        expect(resolved).toContain("public/brand/logo.svg");
+        expect(resolved).not.toBeNull()
+        expect(resolved).toContain('public/brand/logo.svg')
       }),
-    );
+    )
 
-    it.effect("returns null when no icon is present", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
+    it.effect('returns null when no icon is present', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).toBeNull();
+        expect(resolved).toBeNull()
       }),
-    );
+    )
 
-    it.effect("preserves workspace normalization context", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        const missingCwd = `${cwd}/missing`;
+    it.effect('preserves workspace normalization context', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        const missingCwd = `${cwd}/missing`
 
-        const error = yield* resolver.resolvePath(missingCwd).pipe(Effect.flip);
+        const error = yield* resolver.resolvePath(missingCwd).pipe(Effect.flip)
 
         expect(error).toMatchObject({
-          _tag: "ProjectFaviconResolutionError",
-          operation: "normalize-workspace",
+          _tag: 'ProjectFaviconResolutionError',
+          operation: 'normalize-workspace',
           workspaceRoot: missingCwd,
-        });
-        expect(error.cause).toBeInstanceOf(WorkspacePaths.WorkspaceRootNotExistsError);
+        })
+        expect(error.cause).toBeInstanceOf(WorkspacePaths.WorkspaceRootNotExistsError)
       }),
-    );
+    )
 
-    it.effect("preserves non-missing candidate stat failures", () =>
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const cwd = yield* makeTempDir;
-        const faviconPath = path.join(cwd, "favicon.svg");
+    it.effect('preserves non-missing candidate stat failures', () =>
+      Effect.gen(function* ()
+      {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const cwd = yield* makeTempDir
+        const faviconPath = path.join(cwd, 'favicon.svg')
         const cause = PlatformError.systemError({
-          _tag: "PermissionDenied",
-          module: "FileSystem",
-          method: "stat",
+          _tag: 'PermissionDenied',
+          module: 'FileSystem',
+          method: 'stat',
           pathOrDescriptor: faviconPath,
-        });
+        })
         const resolver = yield* makeResolverWithFileSystem(
           FileSystem.FileSystem.of({
             ...fileSystem,
             stat: (filePath) =>
               filePath === faviconPath ? Effect.fail(cause) : fileSystem.stat(filePath),
           }),
-        );
+        )
 
-        const error = yield* resolver.resolvePath(cwd).pipe(Effect.flip);
+        const error = yield* resolver.resolvePath(cwd).pipe(Effect.flip)
 
         expect(error).toMatchObject({
-          _tag: "ProjectFaviconResolutionError",
-          operation: "stat-candidate",
+          _tag: 'ProjectFaviconResolutionError',
+          operation: 'stat-candidate',
           workspaceRoot: cwd,
-          relativePath: "favicon.svg",
+          relativePath: 'favicon.svg',
           absolutePath: faviconPath,
-        });
-        expect(error.cause).toBe(cause);
+        })
+        expect(error.cause).toBe(cause)
       }),
-    );
+    )
 
-    it.effect("preserves icon source read failures", () =>
-      Effect.gen(function* () {
-        const fileSystem = yield* FileSystem.FileSystem;
-        const path = yield* Path.Path;
-        const cwd = yield* makeTempDir;
-        const sourcePath = path.join(cwd, "index.html");
-        yield* writeTextFile(cwd, "index.html", '<link rel="icon" href="/favicon.svg">');
+    it.effect('preserves icon source read failures', () =>
+      Effect.gen(function* ()
+      {
+        const fileSystem = yield* FileSystem.FileSystem
+        const path = yield* Path.Path
+        const cwd = yield* makeTempDir
+        const sourcePath = path.join(cwd, 'index.html')
+        yield* writeTextFile(cwd, 'index.html', '<link rel="icon" href="/favicon.svg">')
         const cause = PlatformError.systemError({
-          _tag: "PermissionDenied",
-          module: "FileSystem",
-          method: "readFileString",
+          _tag: 'PermissionDenied',
+          module: 'FileSystem',
+          method: 'readFileString',
           pathOrDescriptor: sourcePath,
-        });
+        })
         const resolver = yield* makeResolverWithFileSystem(
           FileSystem.FileSystem.of({
             ...fileSystem,
@@ -215,46 +229,48 @@ it.layer(TestLayer)("ProjectFaviconResolverLive", (it) => {
                 ? Effect.fail(cause)
                 : fileSystem.readFileString(filePath, options),
           }),
-        );
+        )
 
-        const error = yield* resolver.resolvePath(cwd).pipe(Effect.flip);
+        const error = yield* resolver.resolvePath(cwd).pipe(Effect.flip)
 
         expect(error).toMatchObject({
-          _tag: "ProjectFaviconResolutionError",
-          operation: "read-source",
+          _tag: 'ProjectFaviconResolutionError',
+          operation: 'read-source',
           workspaceRoot: cwd,
-          relativePath: "index.html",
+          relativePath: 'index.html',
           absolutePath: sourcePath,
-        });
-        expect(error.cause).toBe(cause);
+        })
+        expect(error.cause).toBe(cause)
       }),
-    );
+    )
 
-    it.effect("skips icon metadata paths outside the workspace", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        yield* writeTextFile(cwd, "index.html", '<link rel="icon" href="../../secret.svg">');
+    it.effect('skips icon metadata paths outside the workspace', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        yield* writeTextFile(cwd, 'index.html', '<link rel="icon" href="../../secret.svg">')
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).toBeNull();
+        expect(resolved).toBeNull()
       }),
-    );
+    )
 
-    it.effect("continues to later sources after an outside-root icon href", () =>
-      Effect.gen(function* () {
-        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver;
-        const cwd = yield* makeTempDir;
-        yield* writeTextFile(cwd, "index.html", '<link rel="icon" href="../../secret.svg">');
-        yield* writeTextFile(cwd, "public/index.html", '<link rel="icon" href="/brand/logo.svg">');
-        yield* writeTextFile(cwd, "public/brand/logo.svg", "<svg>brand</svg>");
+    it.effect('continues to later sources after an outside-root icon href', () =>
+      Effect.gen(function* ()
+      {
+        const resolver = yield* ProjectFaviconResolver.ProjectFaviconResolver
+        const cwd = yield* makeTempDir
+        yield* writeTextFile(cwd, 'index.html', '<link rel="icon" href="../../secret.svg">')
+        yield* writeTextFile(cwd, 'public/index.html', '<link rel="icon" href="/brand/logo.svg">')
+        yield* writeTextFile(cwd, 'public/brand/logo.svg', '<svg>brand</svg>')
 
-        const resolved = yield* resolver.resolvePath(cwd);
+        const resolved = yield* resolver.resolvePath(cwd)
 
-        expect(resolved).not.toBeNull();
-        expect(resolved).toContain("public/brand/logo.svg");
+        expect(resolved).not.toBeNull()
+        expect(resolved).toContain('public/brand/logo.svg')
       }),
-    );
-  });
-});
+    )
+  })
+})

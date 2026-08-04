@@ -1,19 +1,19 @@
 // apps/mobile/src/features/settings/SettingsRouteScreen.tsx
 // renders mobile settings and coordinates cloud preference updates
 
-import { useAuth, useUser } from "@clerk/expo";
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import Constants from "expo-constants";
-import * as Notifications from "expo-notifications";
-import * as Updates from "expo-updates";
-import { useNavigation } from "@react-navigation/native";
-import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { SymbolView } from "../../components/AppSymbol";
-import * as Effect from "effect/Effect";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { Alert, Linking, Platform, ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAuth, useUser } from '@clerk/expo'
+import { useAtomSet, useAtomValue } from '@effect/atom-react'
+import Constants from 'expo-constants'
+import * as Notifications from 'expo-notifications'
+import * as Updates from 'expo-updates'
+import { useNavigation } from '@react-navigation/native'
+import { NativeStackScreenOptions } from '../../native/StackHeader'
+import { SymbolView } from '../../components/AppSymbol'
+import * as Effect from 'effect/Effect'
+import { AsyncResult } from 'effect/unstable/reactivity'
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Alert, Linking, Platform, ScrollView, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import {
   isAtomCommandInterrupted,
@@ -21,56 +21,58 @@ import {
   settleAsyncResult,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { AndroidScreenHeader } from "../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../components/AppText";
-import { supportsAgentAwarenessPush } from "../agent-awareness/capabilities";
+} from '@t3tools/client-runtime/state/runtime'
+import { AndroidScreenHeader } from '../../components/AndroidScreenHeader'
+import { AppText as Text } from '../../components/AppText'
+import { supportsAgentAwarenessPush } from '../agent-awareness/capabilities'
 import {
   runLiveActivityPreferenceIntent,
   setLiveActivityUpdatesEnabled,
-} from "../agent-awareness/liveActivityPreferences";
-import { requestAgentNotificationPermission } from "../agent-awareness/notificationPermissions";
+} from '../agent-awareness/liveActivityPreferences'
+import { requestAgentNotificationPermission } from '../agent-awareness/notificationPermissions'
 import {
   getAgentAwarenessRegistrationStatus,
   refreshAgentAwarenessRegistration,
   subscribeAgentAwarenessRegistrationStatus,
-} from "../agent-awareness/remoteRegistration";
-import { refreshManagedRelayEnvironments } from "../cloud/managedRelayState";
-import { useClerkSettingsSheetDetent } from "../cloud/ClerkSettingsSheetDetent";
-import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from "../cloud/publicConfig";
-import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
-import { WorkspaceSidebarToolbar } from "../layout/workspace-sidebar-toolbar";
-import { runtime } from "../../lib/runtime";
-import { useThemeColor } from "../../lib/useThemeColor";
-import { mobilePreferencesAtom, updateMobilePreferencesAtom } from "../../state/preferences";
-import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
-import { SettingsRow } from "./components/SettingsRow";
-import { SettingsSection } from "./components/SettingsSection";
-import { SettingsSwitchRow } from "./components/SettingsSwitchRow";
+} from '../agent-awareness/remoteRegistration'
+import { refreshManagedRelayEnvironments } from '../cloud/managedRelayState'
+import { useClerkSettingsSheetDetent } from '../cloud/ClerkSettingsSheetDetent'
+import { hasCloudPublicConfig, resolveRelayClerkTokenOptions } from '../cloud/publicConfig'
+import { withNativeGlassHeaderItem } from '../layout/native-glass-header-items'
+import { WorkspaceSidebarToolbar } from '../layout/workspace-sidebar-toolbar'
+import { runtime } from '../../lib/runtime'
+import { useThemeColor } from '../../lib/useThemeColor'
+import { mobilePreferencesAtom, updateMobilePreferencesAtom } from '../../state/preferences'
+import { useSavedRemoteConnections } from '../../state/use-remote-environment-registry'
+import { SettingsRow } from './components/SettingsRow'
+import { SettingsSection } from './components/SettingsSection'
+import { SettingsSwitchRow } from './components/SettingsSwitchRow'
 
-type NotificationStatus = "checking" | "enabled" | "disabled" | "unsupported";
-type LiveActivityStatus = "checking" | "enabled" | "disabled" | "signed-out" | "linking";
+type NotificationStatus = 'checking' | 'enabled' | 'disabled' | 'unsupported'
+type LiveActivityStatus = 'checking' | 'enabled' | 'disabled' | 'signed-out' | 'linking'
 
 // Reflects whether the relay actually accepted this device's registration.
 // The notification and Live Activity switches are gated on this so they can
 // never read as enabled when the device cannot receive anything (e.g. the
 // registration request timed out).
-function useDeviceRegistered(): boolean {
+function useDeviceRegistered(): boolean
+{
   const status = useSyncExternalStore(
     subscribeAgentAwarenessRegistrationStatus,
     getAgentAwarenessRegistrationStatus,
-    () => "unknown" as const,
-  );
-  return status === "registered";
+    () => 'unknown' as const,
+  )
+  return status === 'registered'
 }
 
-export function SettingsRouteScreen() {
-  const navigation = useNavigation();
+export function SettingsRouteScreen()
+{
+  const navigation = useNavigation()
 
   return (
     <>
       <WorkspaceSidebarToolbar />
-      {Platform.OS === "android" ? (
+      {Platform.OS === 'android' ? (
         <>
           {/* Android renders its own in-screen header instead of the native bar. */}
           <NativeStackScreenOptions options={{ headerShown: false }} />
@@ -80,15 +82,15 @@ export function SettingsRouteScreen() {
         <NativeStackScreenOptions
           options={{
             unstable_headerRightItems:
-              Platform.OS === "ios"
+              Platform.OS === 'ios'
                 ? () => [
                     withNativeGlassHeaderItem({
-                      accessibilityLabel: "Close settings",
-                      icon: { name: "xmark", type: "sfSymbol" } as const,
-                      identifier: "settings-close",
-                      label: "",
+                      accessibilityLabel: 'Close settings',
+                      icon: { name: 'xmark', type: 'sfSymbol' } as const,
+                      identifier: 'settings-close',
+                      label: '',
                       onPress: () => navigation.goBack(),
-                      type: "button",
+                      type: 'button',
                     }),
                   ]
                 : undefined,
@@ -97,13 +99,14 @@ export function SettingsRouteScreen() {
       )}
       {hasCloudPublicConfig() ? <ConfiguredSettingsRouteScreen /> : <LocalSettingsRouteScreen />}
     </>
-  );
+  )
 }
 
-function LocalSettingsRouteScreen() {
-  const insets = useSafeAreaInsets();
-  const { savedConnectionsById } = useSavedRemoteConnections();
-  const environmentCount = Object.keys(savedConnectionsById).length;
+function LocalSettingsRouteScreen()
+{
+  const insets = useSafeAreaInsets()
+  const { savedConnectionsById } = useSavedRemoteConnections()
+  const environmentCount = Object.keys(savedConnectionsById).length
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -138,185 +141,215 @@ function LocalSettingsRouteScreen() {
         <AppSettingsSection />
       </ScrollView>
     </View>
-  );
+  )
 }
 
-function ConfiguredSettingsRouteScreen() {
-  const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
-  const agentAwarenessPushAvailable = supportsAgentAwarenessPush();
-  const insets = useSafeAreaInsets();
-  const navigation = useNavigation();
-  const { expand: expandClerkSheet } = useClerkSettingsSheetDetent();
-  const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const { user } = useUser();
-  const { savedConnectionsById } = useSavedRemoteConnections();
-  const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>("checking");
-  const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>("checking");
-  const liveActivityIntentRevisionRef = useRef(0);
-  const pendingLiveActivityIntentRef = useRef<number | null>(null);
-  const deviceRegistered = useDeviceRegistered();
+function ConfiguredSettingsRouteScreen()
+{
+  const preferencesResult = useAtomValue(mobilePreferencesAtom)
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom)
+  const agentAwarenessPushAvailable = supportsAgentAwarenessPush()
+  const insets = useSafeAreaInsets()
+  const navigation = useNavigation()
+  const { expand: expandClerkSheet } = useClerkSettingsSheetDetent()
+  const { getToken, isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false })
+  const { user } = useUser()
+  const { savedConnectionsById } = useSavedRemoteConnections()
+  const [notificationStatus, setNotificationStatus] = useState<NotificationStatus>('checking')
+  const [liveActivityStatus, setLiveActivityStatus] = useState<LiveActivityStatus>('checking')
+  const liveActivityIntentRevisionRef = useRef(0)
+  const pendingLiveActivityIntentRef = useRef<number | null>(null)
+  const deviceRegistered = useDeviceRegistered()
 
-  const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById]);
-  const environmentCount = connections.length;
-  const accountLabel = useMemo(() => {
-    if (!isLoaded) return "Checking";
-    if (!isSignedIn) return "Request access";
-    return user?.primaryEmailAddress?.emailAddress ?? "Signed in";
-  }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress]);
+  const connections = useMemo(() => Object.values(savedConnectionsById), [savedConnectionsById])
+  const environmentCount = connections.length
+  const accountLabel = useMemo(() =>
+  {
+    if (!isLoaded) return 'Checking'
+    if (!isSignedIn) return 'Request access'
+    return user?.primaryEmailAddress?.emailAddress ?? 'Signed in'
+  }, [isLoaded, isSignedIn, user?.primaryEmailAddress?.emailAddress])
 
-  const refreshNotifications = useCallback(async () => {
-    if (process.env.EXPO_OS !== "ios") {
-      setNotificationStatus("unsupported");
-      return;
+  const refreshNotifications = useCallback(async () =>
+  {
+    if (process.env.EXPO_OS !== 'ios')
+    {
+      setNotificationStatus('unsupported')
+      return
     }
-    const result = await settlePromise(() => Notifications.getPermissionsAsync());
-    if (result._tag === "Failure") {
-      reportAtomCommandResult(result, { label: "notification permission refresh" });
-      setNotificationStatus("disabled");
-      return;
+    const result = await settlePromise(() => Notifications.getPermissionsAsync())
+    if (result._tag === 'Failure')
+    {
+      reportAtomCommandResult(result, { label: 'notification permission refresh' })
+      setNotificationStatus('disabled')
+      return
     }
-    setNotificationStatus(result.value.granted ? "enabled" : "disabled");
-  }, []);
+    setNotificationStatus(result.value.granted ? 'enabled' : 'disabled')
+  }, [])
 
-  useEffect(() => {
-    void refreshNotifications();
-  }, [refreshNotifications]);
+  useEffect(() =>
+  {
+    void refreshNotifications()
+  }, [refreshNotifications])
 
-  useEffect(() => {
-    if (pendingLiveActivityIntentRef.current !== null) {
-      return;
+  useEffect(() =>
+  {
+    if (pendingLiveActivityIntentRef.current !== null)
+    {
+      return
     }
-    if (!isLoaded) {
-      setLiveActivityStatus("checking");
-      return;
+    if (!isLoaded)
+    {
+      setLiveActivityStatus('checking')
+      return
     }
-    if (!isSignedIn) {
-      setLiveActivityStatus("signed-out");
-      return;
+    if (!isSignedIn)
+    {
+      setLiveActivityStatus('signed-out')
+      return
     }
-    if (!AsyncResult.isSuccess(preferencesResult)) {
-      if (AsyncResult.isFailure(preferencesResult)) {
-        reportAtomCommandResult(preferencesResult, { label: "live activity preference load" });
-        setLiveActivityStatus("enabled");
-      } else {
-        setLiveActivityStatus("checking");
+    if (!AsyncResult.isSuccess(preferencesResult))
+    {
+      if (AsyncResult.isFailure(preferencesResult))
+      {
+        reportAtomCommandResult(preferencesResult, { label: 'live activity preference load' })
+        setLiveActivityStatus('enabled')
       }
-      return;
+      else
+      {
+        setLiveActivityStatus('checking')
+      }
+      return
     }
     setLiveActivityStatus(
-      preferencesResult.value.liveActivitiesEnabled === false ? "disabled" : "enabled",
-    );
-  }, [isLoaded, isSignedIn, preferencesResult]);
+      preferencesResult.value.liveActivitiesEnabled === false ? 'disabled' : 'enabled',
+    )
+  }, [isLoaded, isSignedIn, preferencesResult])
 
   const finishLiveActivityIntent = useCallback(
-    (intentRevision: number, status: LiveActivityStatus): boolean => {
-      if (liveActivityIntentRevisionRef.current !== intentRevision) {
-        return false;
+    (intentRevision: number, status: LiveActivityStatus): boolean =>
+    {
+      if (liveActivityIntentRevisionRef.current !== intentRevision)
+      {
+        return false
       }
-      pendingLiveActivityIntentRef.current = null;
-      setLiveActivityStatus(status);
-      return true;
+      pendingLiveActivityIntentRef.current = null
+      setLiveActivityStatus(status)
+      return true
     },
     [],
-  );
+  )
 
-  const requestNotifications = useCallback(async () => {
+  const requestNotifications = useCallback(async () =>
+  {
     const result = await settleAsyncResult(() =>
       runtime.runPromiseExit(
         requestAgentNotificationPermission.pipe(
           Effect.tap((permission) =>
-            permission.type === "granted" ? refreshAgentAwarenessRegistration() : Effect.void,
+            permission.type === 'granted' ? refreshAgentAwarenessRegistration() : Effect.void,
           ),
         ),
       ),
-    );
-    if (result._tag === "Failure") {
-      if (!isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
+    )
+    if (result._tag === 'Failure')
+    {
+      if (!isAtomCommandInterrupted(result))
+      {
+        const error = squashAtomCommandFailure(result)
         Alert.alert(
-          "Notifications unavailable",
-          error instanceof Error ? error.message : "Could not request notification permission.",
-        );
+          'Notifications unavailable',
+          error instanceof Error ? error.message : 'Could not request notification permission.',
+        )
       }
-      return;
+      return
     }
-    if (result.value.type === "granted") {
-      setNotificationStatus("enabled");
+    if (result.value.type === 'granted')
+    {
+      setNotificationStatus('enabled')
       // Permission alone is not enough: the switch stays off until the relay
       // registration succeeds, so tell the user the truth about which happened.
-      if (getAgentAwarenessRegistrationStatus() === "registered") {
+      if (getAgentAwarenessRegistrationStatus() === 'registered')
+      {
         Alert.alert(
-          "Notifications enabled",
-          "Live Activity notifications are enabled for this device.",
-        );
-      } else {
+          'Notifications enabled',
+          'Live Activity notifications are enabled for this device.',
+        )
+      }
+      else
+      {
         Alert.alert(
           "Couldn't finish enabling notifications",
-          "Notification access was granted, but this device could not be registered with the cloud relay. Notifications will start once registration succeeds.",
-        );
+          'Notification access was granted, but this device could not be registered with the cloud relay. Notifications will start once registration succeeds.',
+        )
       }
-      return;
+      return
     }
-    if (result.value.type === "unsupported") {
-      setNotificationStatus("unsupported");
+    if (result.value.type === 'unsupported')
+    {
+      setNotificationStatus('unsupported')
       Alert.alert(
-        "Notifications unavailable",
-        "Live Activity notifications are only available on iOS.",
-      );
-      return;
+        'Notifications unavailable',
+        'Live Activity notifications are only available on iOS.',
+      )
+      return
     }
-    setNotificationStatus("disabled");
-    if (result.value.canAskAgain) {
-      Alert.alert("Notifications disabled", "Notifications were not enabled.");
-      return;
+    setNotificationStatus('disabled')
+    if (result.value.canAskAgain)
+    {
+      Alert.alert('Notifications disabled', 'Notifications were not enabled.')
+      return
     }
     Alert.alert(
-      "Notifications disabled",
-      "Notifications were denied for this app. Open Settings to enable them.",
+      'Notifications disabled',
+      'Notifications were denied for this app. Open Settings to enable them.',
       [
-        { text: "Cancel", style: "cancel" },
-        { text: "Open Settings", onPress: () => void Linking.openSettings() },
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Open Settings', onPress: () => void Linking.openSettings() },
       ],
-    );
-  }, []);
+    )
+  }, [])
 
-  const promptSignIn = useCallback(() => {
+  const promptSignIn = useCallback(() =>
+  {
     Alert.alert(
-      "Request cloud relay access",
-      "Live Activity updates require approved cloud access so the relay can deliver updates to this device.",
+      'Request cloud relay access',
+      'Live Activity updates require approved cloud access so the relay can deliver updates to this device.',
       [
-        { text: "Cancel", style: "cancel" },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: "Continue",
-          onPress: () => navigation.navigate("SettingsSheet", { screen: "SettingsWaitlist" }),
+          text: 'Continue',
+          onPress: () => navigation.navigate('SettingsSheet', { screen: 'SettingsWaitlist' }),
         },
       ],
-    );
-  }, [navigation]);
+    )
+  }, [navigation])
 
   const linkEnvironments = useCallback(
-    async (intentRevision: number) => {
-      if (!isSignedIn) {
-        finishLiveActivityIntent(intentRevision, "signed-out");
-        promptSignIn();
-        return;
+    async (intentRevision: number) =>
+    {
+      if (!isSignedIn)
+      {
+        finishLiveActivityIntent(intentRevision, 'signed-out')
+        promptSignIn()
+        return
       }
 
-      const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()));
-      if (tokenResult._tag === "Failure") {
-        finishLiveActivityIntent(intentRevision, "disabled");
-        const error = squashAtomCommandFailure(tokenResult);
+      const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()))
+      if (tokenResult._tag === 'Failure')
+      {
+        finishLiveActivityIntent(intentRevision, 'disabled')
+        const error = squashAtomCommandFailure(tokenResult)
         Alert.alert(
-          "Live Activities unavailable",
-          error instanceof Error ? error.message : "Could not enable Live Activity updates.",
-        );
-        return;
+          'Live Activities unavailable',
+          error instanceof Error ? error.message : 'Could not enable Live Activity updates.',
+        )
+        return
       }
-      if (!tokenResult.value) {
-        promptSignIn();
-        finishLiveActivityIntent(intentRevision, "signed-out");
-        return;
+      if (!tokenResult.value)
+      {
+        promptSignIn()
+        finishLiveActivityIntent(intentRevision, 'signed-out')
+        return
       }
 
       const updateResult = await settleAsyncResult(() =>
@@ -328,39 +361,45 @@ function ConfiguredSettingsRouteScreen() {
             connections,
           }),
         ),
-      );
-      if (updateResult._tag === "Failure") {
-        finishLiveActivityIntent(intentRevision, "disabled");
-        if (!isAtomCommandInterrupted(updateResult)) {
-          const error = squashAtomCommandFailure(updateResult);
+      )
+      if (updateResult._tag === 'Failure')
+      {
+        finishLiveActivityIntent(intentRevision, 'disabled')
+        if (!isAtomCommandInterrupted(updateResult))
+        {
+          const error = squashAtomCommandFailure(updateResult)
           Alert.alert(
-            "Live Activities unavailable",
-            error instanceof Error ? error.message : "Could not enable Live Activity updates.",
-          );
+            'Live Activities unavailable',
+            error instanceof Error ? error.message : 'Could not enable Live Activity updates.',
+          )
         }
-        return;
+        return
       }
 
-      savePreferences({ liveActivitiesEnabled: true });
-      refreshManagedRelayEnvironments();
-      if (!finishLiveActivityIntent(intentRevision, "enabled")) {
-        return;
+      savePreferences({ liveActivitiesEnabled: true })
+      refreshManagedRelayEnvironments()
+      if (!finishLiveActivityIntent(intentRevision, 'enabled'))
+      {
+        return
       }
       // The environment link can succeed while this device's own registration
       // (the push-to-start token the relay needs) has not — don't claim Live
       // Activities are live until the device is actually registered.
-      if (getAgentAwarenessRegistrationStatus() === "registered") {
+      if (getAgentAwarenessRegistrationStatus() === 'registered')
+      {
         Alert.alert(
-          "Live Activities enabled",
+          'Live Activities enabled',
           environmentCount > 0
-            ? `${environmentCount} environment${environmentCount === 1 ? "" : "s"} linked for Live Activity updates.`
-            : "Live Activity updates are enabled. Add an environment to start receiving updates.",
-        );
-      } else {
+            ? `${environmentCount} environment${environmentCount === 1 ? '' : 's'} linked for Live Activity updates.`
+            : 'Live Activity updates are enabled. Add an environment to start receiving updates.',
+        )
+      }
+      else
+      {
         Alert.alert(
           "Couldn't finish enabling Live Activities",
           "This device could not be registered with the cloud relay, so Live Activities won't appear yet. They'll start once registration succeeds.",
-        );
+        )
       }
     },
     [
@@ -372,48 +411,53 @@ function ConfiguredSettingsRouteScreen() {
       promptSignIn,
       savePreferences,
     ],
-  );
+  )
 
   const handleDeviceNotificationsChange = useCallback(
-    (enabled: boolean) => {
-      if (enabled) {
-        void requestNotifications();
-        return;
+    (enabled: boolean) =>
+    {
+      if (enabled)
+      {
+        void requestNotifications()
+        return
       }
 
       Alert.alert(
-        "Disable notifications",
-        "Notification permission is controlled by iOS. Open Settings to disable notifications for 456code.",
+        'Disable notifications',
+        'Notification permission is controlled by iOS. Open Settings to disable notifications for 456code.',
         [
-          { text: "Cancel", style: "cancel" },
-          { text: "Open Settings", onPress: () => void Linking.openSettings() },
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Open Settings', onPress: () => void Linking.openSettings() },
         ],
-      );
+      )
     },
     [requestNotifications],
-  );
+  )
 
   const handleLiveActivitiesChange = useCallback(
-    (enabled: boolean) => {
-      if (!enabled) {
-        const intentRevision = liveActivityIntentRevisionRef.current + 1;
-        liveActivityIntentRevisionRef.current = intentRevision;
-        pendingLiveActivityIntentRef.current = intentRevision;
-        setLiveActivityStatus("disabled");
-        void runLiveActivityPreferenceIntent(async () => {
-          let token: string | null = null;
-          if (isSignedIn) {
-            const tokenResult = await settlePromise(() =>
-              getToken(resolveRelayClerkTokenOptions()),
-            );
-            if (tokenResult._tag === "Failure") {
-              finishLiveActivityIntent(intentRevision, "enabled");
+    (enabled: boolean) =>
+    {
+      if (!enabled)
+      {
+        const intentRevision = liveActivityIntentRevisionRef.current + 1
+        liveActivityIntentRevisionRef.current = intentRevision
+        pendingLiveActivityIntentRef.current = intentRevision
+        setLiveActivityStatus('disabled')
+        void runLiveActivityPreferenceIntent(async () =>
+        {
+          let token: string | null = null
+          if (isSignedIn)
+          {
+            const tokenResult = await settlePromise(() => getToken(resolveRelayClerkTokenOptions()))
+            if (tokenResult._tag === 'Failure')
+            {
+              finishLiveActivityIntent(intentRevision, 'enabled')
               reportAtomCommandResult(tokenResult, {
-                label: "live activity disable token lookup",
-              });
-              return;
+                label: 'live activity disable token lookup',
+              })
+              return
             }
-            token = tokenResult.value;
+            token = tokenResult.value
           }
 
           const updateResult = await settleAsyncResult(() =>
@@ -425,31 +469,33 @@ function ConfiguredSettingsRouteScreen() {
                 connections,
               }),
             ),
-          );
-          if (updateResult._tag === "Failure") {
-            finishLiveActivityIntent(intentRevision, "enabled");
+          )
+          if (updateResult._tag === 'Failure')
+          {
+            finishLiveActivityIntent(intentRevision, 'enabled')
             reportAtomCommandResult(updateResult, {
-              label: "live activity disable",
-            });
-            return;
+              label: 'live activity disable',
+            })
+            return
           }
-          savePreferences({ liveActivitiesEnabled: false });
-          refreshManagedRelayEnvironments();
-          finishLiveActivityIntent(intentRevision, "disabled");
-        });
-        return;
+          savePreferences({ liveActivitiesEnabled: false })
+          refreshManagedRelayEnvironments()
+          finishLiveActivityIntent(intentRevision, 'disabled')
+        })
+        return
       }
 
-      if (!isSignedIn) {
-        promptSignIn();
-        return;
+      if (!isSignedIn)
+      {
+        promptSignIn()
+        return
       }
 
-      const intentRevision = liveActivityIntentRevisionRef.current + 1;
-      liveActivityIntentRevisionRef.current = intentRevision;
-      pendingLiveActivityIntentRef.current = intentRevision;
-      setLiveActivityStatus("linking");
-      void runLiveActivityPreferenceIntent(() => linkEnvironments(intentRevision));
+      const intentRevision = liveActivityIntentRevisionRef.current + 1
+      liveActivityIntentRevisionRef.current = intentRevision
+      pendingLiveActivityIntentRef.current = intentRevision
+      setLiveActivityStatus('linking')
+      void runLiveActivityPreferenceIntent(() => linkEnvironments(intentRevision))
     },
     [
       connections,
@@ -460,17 +506,19 @@ function ConfiguredSettingsRouteScreen() {
       promptSignIn,
       savePreferences,
     ],
-  );
+  )
 
-  const openAccount = useCallback(() => {
-    if (!isLoaded) return;
-    if (!isSignedIn) {
-      navigation.navigate("SettingsSheet", { screen: "SettingsWaitlist" });
-      return;
+  const openAccount = useCallback(() =>
+  {
+    if (!isLoaded) return
+    if (!isSignedIn)
+    {
+      navigation.navigate('SettingsSheet', { screen: 'SettingsWaitlist' })
+      return
     }
-    expandClerkSheet();
-    navigation.navigate("SettingsSheet", { screen: "SettingsAuth" });
-  }, [expandClerkSheet, isLoaded, isSignedIn, navigation]);
+    expandClerkSheet()
+    navigation.navigate('SettingsSheet', { screen: 'SettingsAuth' })
+  }, [expandClerkSheet, isLoaded, isSignedIn, navigation])
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -509,14 +557,14 @@ function ConfiguredSettingsRouteScreen() {
             label="Device Notifications"
             disabled={
               !agentAwarenessPushAvailable ||
-              notificationStatus === "checking" ||
-              notificationStatus === "unsupported"
+              notificationStatus === 'checking' ||
+              notificationStatus === 'unsupported'
             }
             // Only reads as on when this device is actually registered with the
             // relay; otherwise notifications cannot be delivered regardless of
             // the local iOS permission.
             value={
-              agentAwarenessPushAvailable && notificationStatus === "enabled" && deviceRegistered
+              agentAwarenessPushAvailable && notificationStatus === 'enabled' && deviceRegistered
             }
             onValueChange={handleDeviceNotificationsChange}
           />
@@ -524,8 +572,8 @@ function ConfiguredSettingsRouteScreen() {
             disabled={
               !agentAwarenessPushAvailable ||
               !isLoaded ||
-              liveActivityStatus === "checking" ||
-              liveActivityStatus === "linking"
+              liveActivityStatus === 'checking' ||
+              liveActivityStatus === 'linking'
             }
             icon="bolt.circle"
             label="Live Activity Updates"
@@ -533,7 +581,7 @@ function ConfiguredSettingsRouteScreen() {
             // registration the relay needs to push updates has succeeded.
             value={
               agentAwarenessPushAvailable &&
-              (liveActivityStatus === "enabled" || liveActivityStatus === "linking") &&
+              (liveActivityStatus === 'enabled' || liveActivityStatus === 'linking') &&
               deviceRegistered
             }
             onValueChange={handleLiveActivitiesChange}
@@ -553,15 +601,16 @@ function ConfiguredSettingsRouteScreen() {
         <AppSettingsSection />
       </ScrollView>
     </View>
-  );
+  )
 }
 
-function GeneralSettingsSection() {
-  const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+function GeneralSettingsSection()
+{
+  const preferencesResult = useAtomValue(mobilePreferencesAtom)
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom)
   const projectGroupingEnabled = AsyncResult.isSuccess(preferencesResult)
     ? preferencesResult.value.projectGroupingEnabled !== false
-    : true;
+    : true
 
   return (
     <SettingsSection title="General">
@@ -572,19 +621,20 @@ function GeneralSettingsSection() {
         onValueChange={(value) => savePreferences({ projectGroupingEnabled: value })}
       />
     </SettingsSection>
-  );
+  )
 }
 
 /**
  * Device-local beta toggles. Mobile has no client-settings sync, so this is
  * the counterpart of web's Settings → Beta backed by mobile preferences.
  */
-function BetaSettingsSection() {
-  const preferencesResult = useAtomValue(mobilePreferencesAtom);
-  const savePreferences = useAtomSet(updateMobilePreferencesAtom);
+function BetaSettingsSection()
+{
+  const preferencesResult = useAtomValue(mobilePreferencesAtom)
+  const savePreferences = useAtomSet(updateMobilePreferencesAtom)
   const threadListV2Enabled = AsyncResult.isSuccess(preferencesResult)
     ? preferencesResult.value.threadListV2Enabled === true
-    : false;
+    : false
 
   return (
     <View className="gap-3">
@@ -601,28 +651,29 @@ function BetaSettingsSection() {
         collapse to compact rows. Switch back any time.
       </Text>
     </View>
-  );
+  )
 }
 
-function AppSettingsSection() {
-  const icon = useThemeColor("--color-icon");
+function AppSettingsSection()
+{
+  const icon = useThemeColor('--color-icon')
 
-  const version = Constants.expoConfig?.version ?? "0.0.0";
+  const version = Constants.expoConfig?.version ?? '0.0.0'
   // Fall back to "production" to match resolveAppVariant in app.config.ts, so a
   // missing variant never mislabels a production build as development.
-  const variant = (Constants.expoConfig?.extra?.appVariant as string | undefined) ?? "production";
-  const variantLabel = variant === "production" ? "" : capitalize(variant);
-  const versionLabel = variantLabel ? `${version} · ${variantLabel}` : version;
+  const variant = (Constants.expoConfig?.extra?.appVariant as string | undefined) ?? 'production'
+  const variantLabel = variant === 'production' ? '' : capitalize(variant)
+  const versionLabel = variantLabel ? `${version} · ${variantLabel}` : version
   // Which JS is actually running: the bundle shipped in the binary, or an OTA
   // update downloaded on top of it. Surfacing this makes "am I even on the
   // right build?" answerable at a glance.
   const bundleLabel = Updates.isEnabled
     ? Updates.isEmbeddedLaunch
-      ? "Embedded"
+      ? 'Embedded'
       : Updates.updateId
         ? `OTA ${Updates.updateId.slice(0, 7)}`
         : null
-    : null;
+    : null
 
   return (
     <SettingsSection title="App">
@@ -644,17 +695,19 @@ function AppSettingsSection() {
         </View>
       </View>
     </SettingsSection>
-  );
+  )
 }
 
-function capitalize(value: string): string {
-  return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value;
+function capitalize(value: string): string
+{
+  return value.length > 0 ? value.charAt(0).toUpperCase() + value.slice(1) : value
 }
 
-function ArchivedThreadsSettingsSection() {
+function ArchivedThreadsSettingsSection()
+{
   return (
     <SettingsSection title="Threads">
       <SettingsRow icon="archivebox" label="Archived Threads" target="SettingsArchive" />
     </SettingsSection>
-  );
+  )
 }

@@ -1,6 +1,6 @@
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeOS from "node:os";
-import * as NodePath from "node:path";
+import * as NodeOS from 'node:os'
+import * as NodePath from 'node:path'
 
 /**
  * Expand a leading `~` (or `~/…`, `~\…`) in a user-supplied path to the
@@ -14,11 +14,13 @@ import * as NodePath from "node:path";
  * start with `~` or is empty. Does not handle `~user` (other-user)
  * expansion.
  */
-export function expandHomePath(value: string): string {
-  if (!value) return value;
-  if (value === "~") return NodeOS.homedir();
-  if (value.startsWith("~/") || value.startsWith("~\\")) {
-    return NodePath.join(NodeOS.homedir(), value.slice(2));
+export function expandHomePath(value: string): string
+{
+  if (!value) return value
+  if (value === '~') return NodeOS.homedir()
+  if (value.startsWith('~/') || value.startsWith('~\\'))
+  {
+    return NodePath.join(NodeOS.homedir(), value.slice(2))
   }
-  return value;
+  return value
 }

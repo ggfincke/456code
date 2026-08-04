@@ -1,19 +1,21 @@
-import type { ApprovalRequestId, ProviderApprovalDecision } from "@t3tools/contracts";
-import { Pressable, View } from "react-native";
+import type { ApprovalRequestId, ProviderApprovalDecision } from '@t3tools/contracts'
+import { Pressable, View } from 'react-native'
 
-import { AppText as Text } from "../../components/AppText";
-import type { PendingApproval } from "../../lib/threadActivity";
+import { AppText as Text } from '../../components/AppText'
+import type { PendingApproval } from '../../lib/threadActivity'
 
-export interface PendingApprovalCardProps {
-  readonly approval: PendingApproval;
-  readonly respondingApprovalId: ApprovalRequestId | null;
+export interface PendingApprovalCardProps
+{
+  readonly approval: PendingApproval
+  readonly respondingApprovalId: ApprovalRequestId | null
   readonly onRespond: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
-  ) => Promise<unknown>;
+  ) => Promise<unknown>
 }
 
-export function PendingApprovalCard(props: PendingApprovalCardProps) {
+export function PendingApprovalCard(props: PendingApprovalCardProps)
+{
   return (
     <View className="gap-2.5 rounded-[20px] border border-neutral-200 bg-neutral-100/80 p-4 dark:border-white/6 dark:bg-neutral-900/80">
       <Text className="font-sans-bold text-2xs uppercase tracking-[1.1px] text-sky-700 dark:text-sky-300">
@@ -31,14 +33,14 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
         <Pressable
           className="items-center justify-center rounded-[14px] bg-blue-500 px-3.5 py-3"
           disabled={props.respondingApprovalId === props.approval.requestId}
-          onPress={() => void props.onRespond(props.approval.requestId, "accept")}
+          onPress={() => void props.onRespond(props.approval.requestId, 'accept')}
         >
           <Text className="font-sans-extrabold text-sm text-white">Allow once</Text>
         </Pressable>
         <Pressable
           className="items-center justify-center rounded-[14px] bg-neutral-200 px-3.5 py-3 dark:bg-neutral-800"
           disabled={props.respondingApprovalId === props.approval.requestId}
-          onPress={() => void props.onRespond(props.approval.requestId, "acceptForSession")}
+          onPress={() => void props.onRespond(props.approval.requestId, 'acceptForSession')}
         >
           <Text className="font-sans-bold text-sm text-neutral-950 dark:text-neutral-50">
             Allow session
@@ -47,11 +49,11 @@ export function PendingApprovalCard(props: PendingApprovalCardProps) {
         <Pressable
           className="items-center justify-center rounded-[14px] bg-rose-100 px-3.5 py-3 dark:bg-rose-500/18"
           disabled={props.respondingApprovalId === props.approval.requestId}
-          onPress={() => void props.onRespond(props.approval.requestId, "decline")}
+          onPress={() => void props.onRespond(props.approval.requestId, 'decline')}
         >
           <Text className="font-sans-bold text-sm text-rose-700 dark:text-rose-300">Decline</Text>
         </Pressable>
       </View>
     </View>
-  );
+  )
 }

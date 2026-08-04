@@ -1,90 +1,95 @@
-import type { EnvironmentId, SidebarThreadSortOrder } from "@t3tools/contracts";
-import type { MenuAction } from "@react-native-menu/menu";
-import { useAtomValue } from "@effect/atom-react";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { NativeHeaderToolbar, NativeStackScreenOptions } from "../../native/StackHeader";
-import { useCallback, useMemo, useRef } from "react";
-import { Platform, Pressable, Text as RNText, TextInput, View } from "react-native";
-import type { SearchBarCommands } from "react-native-screens";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { EnvironmentId, SidebarThreadSortOrder } from '@t3tools/contracts'
+import type { MenuAction } from '@react-native-menu/menu'
+import { useAtomValue } from '@effect/atom-react'
+import { AsyncResult } from 'effect/unstable/reactivity'
+import { NativeHeaderToolbar, NativeStackScreenOptions } from '../../native/StackHeader'
+import { useCallback, useMemo, useRef } from 'react'
+import { Platform, Pressable, Text as RNText, TextInput, View } from 'react-native'
+import type { SearchBarCommands } from 'react-native-screens'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { ControlPillMenu } from "../../components/ControlPill";
-import { SymbolView } from "../../components/AppSymbol";
-import { useThemeColor } from "../../lib/useThemeColor";
-import { mobilePreferencesAtom } from "../../state/preferences";
-import { useHardwareKeyboardCommand } from "../keyboard/hardwareKeyboardCommands";
-import { withNativeGlassHeaderItem } from "../layout/native-glass-header-items";
-import { createNativeMailSearchToolbarItem } from "../layout/native-mail-search-toolbar";
-import type { HomeProjectSortOrder } from "./homeThreadList";
+import { ControlPillMenu } from '../../components/ControlPill'
+import { SymbolView } from '../../components/AppSymbol'
+import { useThemeColor } from '../../lib/useThemeColor'
+import { mobilePreferencesAtom } from '../../state/preferences'
+import { useHardwareKeyboardCommand } from '../keyboard/hardwareKeyboardCommands'
+import { withNativeGlassHeaderItem } from '../layout/native-glass-header-items'
+import { createNativeMailSearchToolbarItem } from '../layout/native-mail-search-toolbar'
+import type { HomeProjectSortOrder } from './homeThreadList'
 import {
   buildHomeListFilterMenu,
   type HomeListFilterMenuEnvironment,
   type HomeListFilterMenuProject,
-} from "./home-list-filter-menu";
+} from './home-list-filter-menu'
 import {
   hasCustomHomeListOptions,
   PROJECT_SORT_OPTIONS,
   THREAD_SORT_OPTIONS,
-} from "./home-list-options";
+} from './home-list-options'
 
-export type HomeHeaderEnvironment = HomeListFilterMenuEnvironment;
+export type HomeHeaderEnvironment = HomeListFilterMenuEnvironment
 
 export function HomeHeader(props: {
-  readonly environments: ReadonlyArray<HomeHeaderEnvironment>;
-  readonly projects: ReadonlyArray<HomeListFilterMenuProject>;
-  readonly searchQuery: string;
-  readonly selectedEnvironmentId: EnvironmentId | null;
-  readonly selectedProjectKey: string | null;
-  readonly projectSortOrder: HomeProjectSortOrder;
-  readonly threadSortOrder: SidebarThreadSortOrder;
-  readonly onSearchQueryChange: (query: string) => void;
-  readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void;
-  readonly onProjectChange: (projectKey: string | null) => void;
-  readonly onProjectSortOrderChange: (sortOrder: HomeProjectSortOrder) => void;
-  readonly onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void;
-  readonly onOpenSettings: () => void;
-  readonly onStartNewTask: () => void;
-}) {
-  if (Platform.OS === "android") {
-    return <AndroidHomeHeader {...props} />;
+  readonly environments: ReadonlyArray<HomeHeaderEnvironment>
+  readonly projects: ReadonlyArray<HomeListFilterMenuProject>
+  readonly searchQuery: string
+  readonly selectedEnvironmentId: EnvironmentId | null
+  readonly selectedProjectKey: string | null
+  readonly projectSortOrder: HomeProjectSortOrder
+  readonly threadSortOrder: SidebarThreadSortOrder
+  readonly onSearchQueryChange: (query: string) => void
+  readonly onEnvironmentChange: (environmentId: EnvironmentId | null) => void
+  readonly onProjectChange: (projectKey: string | null) => void
+  readonly onProjectSortOrderChange: (sortOrder: HomeProjectSortOrder) => void
+  readonly onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void
+  readonly onOpenSettings: () => void
+  readonly onStartNewTask: () => void
+})
+{
+  if (Platform.OS === 'android')
+  {
+    return <AndroidHomeHeader {...props} />
   }
 
-  return <IosHomeHeader {...props} />;
+  return <IosHomeHeader {...props} />
 }
 
-type HomeHeaderProps = Parameters<typeof HomeHeader>[0];
+type HomeHeaderProps = Parameters<typeof HomeHeader>[0]
 
-function checkedMenuState(checked: boolean) {
-  return checked ? ("on" as const) : undefined;
+function checkedMenuState(checked: boolean)
+{
+  return checked ? ('on' as const) : undefined
 }
 
 /** Thread List v2 lays the list out in fixed creation order, so the
     sort/group filter controls would be silently ignored — hide them and
     key the "customized" icon state off the environment filter alone. */
-function useThreadListV2FilterGate() {
-  const preferencesResult = useAtomValue(mobilePreferencesAtom);
+function useThreadListV2FilterGate()
+{
+  const preferencesResult = useAtomValue(mobilePreferencesAtom)
   return (
     AsyncResult.isSuccess(preferencesResult) && preferencesResult.value.threadListV2Enabled === true
-  );
+  )
 }
 
-function AndroidHomeHeader(props: HomeHeaderProps) {
-  const insets = useSafeAreaInsets();
-  const iconColor = useThemeColor("--color-icon");
-  const mutedColor = useThemeColor("--color-foreground-muted");
-  const threadListV2Enabled = useThreadListV2FilterGate();
+function AndroidHomeHeader(props: HomeHeaderProps)
+{
+  const insets = useSafeAreaInsets()
+  const iconColor = useThemeColor('--color-icon')
+  const mutedColor = useThemeColor('--color-foreground-muted')
+  const threadListV2Enabled = useThreadListV2FilterGate()
   const hasCustomListOptions = threadListV2Enabled
     ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
-    : hasCustomHomeListOptions(props);
+    : hasCustomHomeListOptions(props)
   const menuActions = useMemo<MenuAction[]>(
     () => [
       {
-        id: "environment",
-        title: "Environment",
+        id: 'environment',
+        title: 'Environment',
         subactions: [
           {
-            id: "environment:all",
-            title: "All environments",
+            id: 'environment:all',
+            title: 'All environments',
             state: checkedMenuState(props.selectedEnvironmentId === null),
           },
           ...props.environments.map((environment) => ({
@@ -98,12 +103,12 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
         ? []
         : ([
             {
-              id: "project",
-              title: "Project",
+              id: 'project',
+              title: 'Project',
               subactions: [
                 {
-                  id: "project:all",
-                  title: "All projects",
+                  id: 'project:all',
+                  title: 'All projects',
                   state: checkedMenuState(props.selectedProjectKey === null),
                 },
                 ...props.projects.map((project) => ({
@@ -118,8 +123,8 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
         ? []
         : ([
             {
-              id: "project-sort",
-              title: "Sort projects",
+              id: 'project-sort',
+              title: 'Sort projects',
               subactions: PROJECT_SORT_OPTIONS.map((option) => ({
                 id: `project-sort:${option.value}`,
                 title: option.label,
@@ -127,8 +132,8 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
               })),
             },
             {
-              id: "thread-sort",
-              title: "Sort threads",
+              id: 'thread-sort',
+              title: 'Sort threads',
               subactions: THREAD_SORT_OPTIONS.map((option) => ({
                 id: `thread-sort:${option.value}`,
                 title: option.label,
@@ -146,55 +151,64 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
       props.threadSortOrder,
       threadListV2Enabled,
     ],
-  );
+  )
   const handleMenuAction = useCallback(
-    (event: { nativeEvent: { event: string } }) => {
-      const id = event.nativeEvent.event;
-      if (id === "environment:all") {
-        props.onEnvironmentChange(null);
-        return;
+    (event: { nativeEvent: { event: string } }) =>
+    {
+      const id = event.nativeEvent.event
+      if (id === 'environment:all')
+      {
+        props.onEnvironmentChange(null)
+        return
       }
 
-      if (id.startsWith("environment:")) {
-        const environmentId = id.slice("environment:".length);
+      if (id.startsWith('environment:'))
+      {
+        const environmentId = id.slice('environment:'.length)
         const environment = props.environments.find(
           (candidate) => candidate.environmentId === environmentId,
-        );
-        if (environment) {
-          props.onEnvironmentChange(environment.environmentId);
+        )
+        if (environment)
+        {
+          props.onEnvironmentChange(environment.environmentId)
         }
-        return;
+        return
       }
 
-      if (id === "project:all") {
-        props.onProjectChange(null);
-        return;
+      if (id === 'project:all')
+      {
+        props.onProjectChange(null)
+        return
       }
 
-      if (id.startsWith("project:")) {
-        const projectKey = id.slice("project:".length);
-        if (props.projects.some((project) => project.key === projectKey)) {
-          props.onProjectChange(projectKey);
+      if (id.startsWith('project:'))
+      {
+        const projectKey = id.slice('project:'.length)
+        if (props.projects.some((project) => project.key === projectKey))
+        {
+          props.onProjectChange(projectKey)
         }
-        return;
+        return
       }
 
       const projectSort = PROJECT_SORT_OPTIONS.find(
         (option) => id === `project-sort:${option.value}`,
-      );
-      if (projectSort) {
-        props.onProjectSortOrderChange(projectSort.value);
-        return;
+      )
+      if (projectSort)
+      {
+        props.onProjectSortOrderChange(projectSort.value)
+        return
       }
 
-      const threadSort = THREAD_SORT_OPTIONS.find((option) => id === `thread-sort:${option.value}`);
-      if (threadSort) {
-        props.onThreadSortOrderChange(threadSort.value);
-        return;
+      const threadSort = THREAD_SORT_OPTIONS.find((option) => id === `thread-sort:${option.value}`)
+      if (threadSort)
+      {
+        props.onThreadSortOrderChange(threadSort.value)
+        return
       }
     },
     [props],
-  );
+  )
 
   return (
     <>
@@ -232,8 +246,8 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
                 <SymbolView
                   name={
                     hasCustomListOptions
-                      ? "line.3.horizontal.decrease.circle.fill"
-                      : "line.3.horizontal.decrease.circle"
+                      ? 'line.3.horizontal.decrease.circle.fill'
+                      : 'line.3.horizontal.decrease.circle'
                   }
                   size={16}
                   tintColor={iconColor}
@@ -269,7 +283,7 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
               <Pressable
                 accessibilityLabel="Clear search"
                 hitSlop={10}
-                onPress={() => props.onSearchQueryChange("")}
+                onPress={() => props.onSearchQueryChange('')}
               >
                 <SymbolView
                   name="xmark.circle.fill"
@@ -283,25 +297,27 @@ function AndroidHomeHeader(props: HomeHeaderProps) {
         </View>
       </View>
     </>
-  );
+  )
 }
 
-function IosHomeHeader(props: HomeHeaderProps) {
-  const searchBarRef = useRef<SearchBarCommands>(null);
-  const iconColor = useThemeColor("--color-icon");
-  const threadListV2Enabled = useThreadListV2FilterGate();
+function IosHomeHeader(props: HomeHeaderProps)
+{
+  const searchBarRef = useRef<SearchBarCommands>(null)
+  const iconColor = useThemeColor('--color-icon')
+  const threadListV2Enabled = useThreadListV2FilterGate()
   const hasCustomListOptions = threadListV2Enabled
     ? props.selectedEnvironmentId !== null || props.selectedProjectKey !== null
-    : hasCustomHomeListOptions(props);
-  const focusSearch = useCallback(() => {
-    searchBarRef.current?.focus();
-    return searchBarRef.current !== null;
-  }, []);
-  useHardwareKeyboardCommand("focusSearch", focusSearch);
+    : hasCustomHomeListOptions(props)
+  const focusSearch = useCallback(() =>
+  {
+    searchBarRef.current?.focus()
+    return searchBarRef.current !== null
+  }, [])
+  useHardwareKeyboardCommand('focusSearch', focusSearch)
   const filterMenu = buildHomeListFilterMenu({
     ...props,
     listOrganization: !threadListV2Enabled,
-  });
+  })
 
   return (
     <>
@@ -312,55 +328,57 @@ function IosHomeHeader(props: HomeHeaderProps) {
           // (GLASS_HEADER_OPTIONS). Only dynamic values are set here.
           headerTintColor: iconColor,
           unstable_headerRightItems:
-            Platform.OS === "ios"
+            Platform.OS === 'ios'
               ? () => [
                   withNativeGlassHeaderItem({
-                    accessibilityLabel: "Open settings",
-                    icon: { name: "ellipsis", type: "sfSymbol" } as const,
-                    identifier: "home-settings",
-                    label: "",
+                    accessibilityLabel: 'Open settings',
+                    icon: { name: 'ellipsis', type: 'sfSymbol' } as const,
+                    identifier: 'home-settings',
+                    label: '',
                     onPress: props.onOpenSettings,
-                    type: "button",
+                    type: 'button',
                   }),
                 ]
               : undefined,
           unstable_headerToolbarItems:
-            Platform.OS === "ios"
+            Platform.OS === 'ios'
               ? () => [
                   createNativeMailSearchToolbarItem({
-                    composeButtonId: "home-new-task",
-                    composeSystemImageName: "square.and.pencil",
+                    composeButtonId: 'home-new-task',
+                    composeSystemImageName: 'square.and.pencil',
                     filterMenu,
-                    filterButtonId: "home-filter",
+                    filterButtonId: 'home-filter',
                     filterSystemImageName: hasCustomListOptions
-                      ? "line.3.horizontal.decrease.circle.fill"
-                      : "line.3.horizontal.decrease",
+                      ? 'line.3.horizontal.decrease.circle.fill'
+                      : 'line.3.horizontal.decrease',
                     onComposePress: props.onStartNewTask,
                     onSearchTextChange: props.onSearchQueryChange,
-                    placeholder: "Search",
-                    searchTextChangeId: "home-search-text",
+                    placeholder: 'Search',
+                    searchTextChangeId: 'home-search-text',
                   }),
                 ]
               : undefined,
           headerSearchBarOptions:
-            Platform.OS === "ios"
+            Platform.OS === 'ios'
               ? undefined
               : {
                   ref: searchBarRef,
                   allowToolbarIntegration: true,
                   hideNavigationBar: false,
-                  placeholder: "Search",
-                  onCancelButtonPress: () => {
-                    props.onSearchQueryChange("");
+                  placeholder: 'Search',
+                  onCancelButtonPress: () =>
+                    {
+                    props.onSearchQueryChange('')
                   },
-                  onChangeText: (event) => {
-                    props.onSearchQueryChange(event.nativeEvent.text);
+                  onChangeText: (event) =>
+                    {
+                    props.onSearchQueryChange(event.nativeEvent.text)
                   },
                 },
         }}
       />
 
-      {Platform.OS === "ios" ? null : (
+      {Platform.OS === 'ios' ? null : (
         <NativeHeaderToolbar placement="right">
           <NativeHeaderToolbar.Button
             accessibilityLabel="Open settings"
@@ -371,14 +389,14 @@ function IosHomeHeader(props: HomeHeaderProps) {
         </NativeHeaderToolbar>
       )}
 
-      {Platform.OS === "ios" ? null : (
+      {Platform.OS === 'ios' ? null : (
         <NativeHeaderToolbar placement="bottom">
           <NativeHeaderToolbar.Menu
             accessibilityLabel="Filter and sort threads"
             icon={
               hasCustomListOptions
-                ? "line.3.horizontal.decrease.circle.fill"
-                : "line.3.horizontal.decrease.circle"
+                ? 'line.3.horizontal.decrease.circle.fill'
+                : 'line.3.horizontal.decrease.circle'
             }
             title="Thread list options"
             separateBackground
@@ -463,5 +481,5 @@ function IosHomeHeader(props: HomeHeaderProps) {
         </NativeHeaderToolbar>
       )}
     </>
-  );
+  )
 }

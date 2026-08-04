@@ -1,24 +1,26 @@
-import { assert, describe } from "@effect/vitest";
+import { assert, describe } from '@effect/vitest'
 
-import { createOxlintRuleHarness } from "../../../oxlint-plugin-456code/test/utils.ts";
+import { createOxlintRuleHarness } from '../../../oxlint-plugin-456code/test/utils.ts'
 
-const rule = createOxlintRuleHarness("456code/no-manual-effect-runtime-in-tests", {
-  filename: "fixture.test.ts",
-});
+const rule = createOxlintRuleHarness('456code/no-manual-effect-runtime-in-tests', {
+  filename: 'fixture.test.ts',
+})
 
-describe("456code/no-manual-effect-runtime-in-tests", () => {
+describe('456code/no-manual-effect-runtime-in-tests', () =>
+{
   rule.valid(
-    "allows @effect/vitest effect tests",
+    'allows @effect/vitest effect tests',
     `
       import { it } from "@effect/vitest";
       import * as Effect from "effect/Effect";
 
       it.effect("runs an Effect", () => Effect.succeed("ok"));
     `,
-  );
+  )
 
   // Representative Effect.run* surfaces; full method list is owned by the lint rule itself.
-  for (const method of ["runPromise", "runSync", "runFork"] as const) {
+  for (const method of ['runPromise', 'runSync', 'runFork'] as const)
+  {
     rule.invalid(
       `reports Effect.${method}`,
       `
@@ -28,14 +30,15 @@ describe("456code/no-manual-effect-runtime-in-tests", () => {
           Effect.${method}(Effect.succeed("ok"));
         });
       `,
-      (output) => {
-        assert.match(output, /Use @effect\/vitest with it\.effect/);
+      (output) =>
+      {
+        assert.match(output, /Use @effect\/vitest with it\.effect/)
       },
-    );
+    )
   }
 
   rule.invalid(
-    "reports ManagedRuntime.make",
+    'reports ManagedRuntime.make',
     `
       import * as Layer from "effect/Layer";
       import * as ManagedRuntime from "effect/ManagedRuntime";
@@ -44,16 +47,16 @@ describe("456code/no-manual-effect-runtime-in-tests", () => {
         ManagedRuntime.make(Layer.empty);
       });
     `,
-  );
-});
+  )
+})
 
-const productionRule = createOxlintRuleHarness("456code/no-manual-effect-runtime-in-tests");
+const productionRule = createOxlintRuleHarness('456code/no-manual-effect-runtime-in-tests')
 
 productionRule.valid(
-  "allows production runtime boundaries",
+  'allows production runtime boundaries',
   `
     import * as Effect from "effect/Effect";
 
     export const main = () => Effect.runPromise(Effect.void);
   `,
-);
+)

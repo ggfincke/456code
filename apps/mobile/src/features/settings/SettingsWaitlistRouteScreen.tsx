@@ -1,38 +1,44 @@
-import { useAuth } from "@clerk/expo";
-import { StackActions, useFocusEffect, useNavigation } from "@react-navigation/native";
-import { useCallback } from "react";
-import { ScrollView } from "react-native";
+import { useAuth } from '@clerk/expo'
+import { StackActions, useFocusEffect, useNavigation } from '@react-navigation/native'
+import { useCallback } from 'react'
+import { ScrollView } from 'react-native'
 
-import { CloudWaitlistEnrollment } from "../cloud/CloudWaitlistEnrollment";
-import { useClerkSettingsSheetDetent } from "../cloud/ClerkSettingsSheetDetent";
-import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { CloudWaitlistEnrollment } from '../cloud/CloudWaitlistEnrollment'
+import { useClerkSettingsSheetDetent } from '../cloud/ClerkSettingsSheetDetent'
+import { hasCloudPublicConfig } from '../cloud/publicConfig'
 
-export function SettingsWaitlistRouteScreen() {
-  const navigation = useNavigation();
+export function SettingsWaitlistRouteScreen()
+{
+  const navigation = useNavigation()
 
   useFocusEffect(
-    useCallback(() => {
-      if (!hasCloudPublicConfig()) {
-        navigation.dispatch(StackActions.replace("Settings"));
+    useCallback(() =>
+    {
+      if (!hasCloudPublicConfig())
+      {
+        navigation.dispatch(StackActions.replace('Settings'))
       }
     }, [navigation]),
-  );
+  )
 
-  return hasCloudPublicConfig() ? <ConfiguredSettingsWaitlistRouteScreen /> : null;
+  return hasCloudPublicConfig() ? <ConfiguredSettingsWaitlistRouteScreen /> : null
 }
 
-function ConfiguredSettingsWaitlistRouteScreen() {
-  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
-  const { expand } = useClerkSettingsSheetDetent();
-  const navigation = useNavigation();
+function ConfiguredSettingsWaitlistRouteScreen()
+{
+  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false })
+  const { expand } = useClerkSettingsSheetDetent()
+  const navigation = useNavigation()
 
   useFocusEffect(
-    useCallback(() => {
-      if (isLoaded && isSignedIn) {
-        navigation.dispatch(StackActions.replace("Settings"));
+    useCallback(() =>
+    {
+      if (isLoaded && isSignedIn)
+      {
+        navigation.dispatch(StackActions.replace('Settings'))
       }
     }, [isLoaded, isSignedIn, navigation]),
-  );
+  )
 
   return (
     <>
@@ -49,12 +55,13 @@ function ConfiguredSettingsWaitlistRouteScreen() {
         showsVerticalScrollIndicator={false}
       >
         <CloudWaitlistEnrollment
-          onSignIn={() => {
-            expand();
-            navigation.navigate("SettingsSheet", { screen: "SettingsAuth" });
+          onSignIn={() =>
+          {
+            expand()
+            navigation.navigate('SettingsSheet', { screen: 'SettingsAuth' })
           }}
         />
       </ScrollView>
     </>
-  );
+  )
 }

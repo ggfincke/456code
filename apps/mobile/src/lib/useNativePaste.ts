@@ -1,5 +1,5 @@
-import type { PasteEventPayload } from "expo-paste-input";
-import { useCallback } from "react";
+import type { PasteEventPayload } from 'expo-paste-input'
+import { useCallback } from 'react'
 
 /**
  * Returns a stable `onPaste` handler for `TextInputWrapper` from
@@ -9,13 +9,16 @@ import { useCallback } from "react";
  *
  * Used by both the thread composer and the new-task draft screen.
  */
-export function useNativePaste(onImages: (uris: ReadonlyArray<string>) => void) {
+export function useNativePaste(onImages: (uris: ReadonlyArray<string>) => void)
+{
   return useCallback(
-    (payload: PasteEventPayload) => {
-      if (payload.type === "images" && payload.uris && payload.uris.length > 0) {
-        onImages(payload.uris);
+    (payload: PasteEventPayload) =>
+    {
+      if (payload.type === 'images' && payload.uris && payload.uris.length > 0)
+      {
+        onImages(payload.uris)
       }
     },
     [onImages],
-  );
+  )
 }

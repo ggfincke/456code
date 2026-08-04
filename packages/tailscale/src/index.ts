@@ -1,1 +1,1 @@
-export * from "./tailscale.ts";
+export * from './tailscale.ts'

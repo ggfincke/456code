@@ -1,8 +1,8 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import { CloudIcon, MonitorIcon } from "lucide-react";
-import { memo, useMemo } from "react";
+import type { EnvironmentId } from '@t3tools/contracts'
+import { CloudIcon, MonitorIcon } from 'lucide-react'
+import { memo, useMemo } from 'react'
 
-import type { EnvironmentOption } from "./BranchToolbar.logic";
+import type { EnvironmentOption } from './BranchToolbar.logic'
 import {
   Select,
   SelectGroup,
@@ -11,15 +11,16 @@ import {
   SelectPopup,
   SelectTrigger,
   SelectValue,
-} from "./ui/select";
+} from './ui/select'
 
-interface BranchToolbarEnvironmentSelectorProps {
-  envLocked: boolean;
-  environmentId: EnvironmentId;
-  availableEnvironments: readonly EnvironmentOption[];
+interface BranchToolbarEnvironmentSelectorProps
+{
+  envLocked: boolean
+  environmentId: EnvironmentId
+  availableEnvironments: readonly EnvironmentOption[]
   // Absent when there is only one environment to show: the indicator still
   // renders (as a static label) so remote projects are always identifiable.
-  onEnvironmentChange?: (environmentId: EnvironmentId) => void;
+  onEnvironmentChange?: (environmentId: EnvironmentId) => void
 }
 
 export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvironmentSelector({
@@ -27,10 +28,12 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
   environmentId,
   availableEnvironments,
   onEnvironmentChange,
-}: BranchToolbarEnvironmentSelectorProps) {
-  const activeEnvironment = useMemo(() => {
-    return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null;
-  }, [availableEnvironments, environmentId]);
+}: BranchToolbarEnvironmentSelectorProps)
+{
+  const activeEnvironment = useMemo(() =>
+  {
+    return availableEnvironments.find((env) => env.environmentId === environmentId) ?? null
+  }, [availableEnvironments, environmentId])
 
   const environmentItems = useMemo(
     () =>
@@ -39,9 +42,10 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         label: env.label,
       })),
     [availableEnvironments],
-  );
+  )
 
-  if (envLocked || onEnvironmentChange === undefined) {
+  if (envLocked || onEnvironmentChange === undefined)
+  {
     return (
       <span className="inline-flex items-center gap-1 border border-transparent px-[calc(--spacing(3)-1px)] text-sm font-medium text-muted-foreground/70 sm:text-xs">
         {activeEnvironment?.isPrimary ? (
@@ -49,9 +53,9 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         ) : (
           <CloudIcon className="size-3" />
         )}
-        {activeEnvironment?.label ?? "Run on"}
+        {activeEnvironment?.label ?? 'Run on'}
       </span>
-    );
+    )
   }
 
   return (
@@ -87,5 +91,5 @@ export const BranchToolbarEnvironmentSelector = memo(function BranchToolbarEnvir
         </SelectGroup>
       </SelectPopup>
     </Select>
-  );
-});
+  )
+})

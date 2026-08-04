@@ -70,79 +70,79 @@ import {
   IconWorld,
   IconX,
   type Icon,
-} from "@tabler/icons-react-native";
-import { Platform } from "react-native";
-import { SymbolView as ExpoSymbolView, type SFSymbol, type SymbolViewProps } from "expo-symbols";
+} from '@tabler/icons-react-native'
+import { Platform } from 'react-native'
+import { SymbolView as ExpoSymbolView, type SFSymbol, type SymbolViewProps } from 'expo-symbols'
 
 const ANDROID_ICON_BY_SF_SYMBOL: Partial<Record<SFSymbol, Icon>> = {
-  "arrow.branch": IconGitBranch,
-  "arrow.clockwise": IconRefresh,
-  "arrow.down.circle": IconArrowDownCircle,
-  "arrow.right.circle": IconArrowRightCircle,
-  "arrow.triangle.branch": IconGitBranch,
-  "arrow.triangle.pull": IconGitPullRequest,
-  "arrow.turn.left.up": IconArrowBackUp,
-  "arrow.up": IconArrowUp,
-  "arrow.up.circle": IconArrowUpCircle,
-  "arrow.up.left.and.arrow.down.right": IconArrowsMaximize,
-  "arrow.up.right": IconArrowUpRight,
-  "arrow.up.right.circle": IconArrowUpRightCircle,
-  "arrow.uturn.backward": IconArrowBackUp,
+  'arrow.branch': IconGitBranch,
+  'arrow.clockwise': IconRefresh,
+  'arrow.down.circle': IconArrowDownCircle,
+  'arrow.right.circle': IconArrowRightCircle,
+  'arrow.triangle.branch': IconGitBranch,
+  'arrow.triangle.pull': IconGitPullRequest,
+  'arrow.turn.left.up': IconArrowBackUp,
+  'arrow.up': IconArrowUp,
+  'arrow.up.circle': IconArrowUpCircle,
+  'arrow.up.left.and.arrow.down.right': IconArrowsMaximize,
+  'arrow.up.right': IconArrowUpRight,
+  'arrow.up.right.circle': IconArrowUpRightCircle,
+  'arrow.uturn.backward': IconArrowBackUp,
   archivebox: IconArchive,
-  "archivebox.fill": IconArchive,
-  "bell.badge": IconBellRinging,
-  "bolt.circle": IconBolt,
-  "bolt.horizontal.circle": IconBolt,
+  'archivebox.fill': IconArchive,
+  'bell.badge': IconBellRinging,
+  'bolt.circle': IconBolt,
+  'bolt.horizontal.circle': IconBolt,
   camera: IconCamera,
   checkmark: IconCheck,
-  "checkmark.circle": IconCircleCheck,
-  "chevron.down": IconChevronDown,
-  "chevron.left": IconChevronLeft,
-  "chevron.left.forwardslash.chevron.right": IconCode,
-  "chevron.right": IconChevronRight,
-  "chevron.up": IconChevronUp,
+  'checkmark.circle': IconCircleCheck,
+  'chevron.down': IconChevronDown,
+  'chevron.left': IconChevronLeft,
+  'chevron.left.forwardslash.chevron.right': IconCode,
+  'chevron.right': IconChevronRight,
+  'chevron.up': IconChevronUp,
   desktopcomputer: IconDeviceDesktop,
-  "doc.on.doc": IconCopy,
-  "doc.text": IconFileText,
+  'doc.on.doc': IconCopy,
+  'doc.text': IconFileText,
   ellipsis: IconDots,
-  "ellipsis.circle": IconDotsCircleHorizontal,
-  "exclamationmark.triangle": IconAlertTriangle,
+  'ellipsis.circle': IconDotsCircleHorizontal,
+  'exclamationmark.triangle': IconAlertTriangle,
   eye: IconEye,
   folder: IconFolder,
-  "folder.badge.plus": IconFolderPlus,
-  "folder.fill": IconFolder,
+  'folder.badge.plus': IconFolderPlus,
+  'folder.fill': IconFolder,
   gearshape: IconSettings,
-  "info.circle": IconInfoCircle,
+  'info.circle': IconInfoCircle,
   link: IconLink,
-  "line.3.horizontal.decrease.circle": IconFilter,
-  "line.3.horizontal.decrease.circle.fill": IconFilter,
+  'line.3.horizontal.decrease.circle': IconFilter,
+  'line.3.horizontal.decrease.circle.fill': IconFilter,
   magnifyingglass: IconSearch,
   paintbrush: IconPalette,
-  "person.crop.circle": IconUserCircle,
+  'person.crop.circle': IconUserCircle,
   play: IconPlayerPlay,
   plus: IconPlus,
-  "qrcode.viewfinder": IconQrcode,
-  "point.3.connected.trianglepath.dotted": IconNetwork,
-  "point.topleft.down.curvedto.point.bottomright.up": IconGitMerge,
+  'qrcode.viewfinder': IconQrcode,
+  'point.3.connected.trianglepath.dotted': IconNetwork,
+  'point.topleft.down.curvedto.point.bottomright.up': IconGitMerge,
   safari: IconExternalLink,
-  "server.rack": IconServer,
-  "sidebar.left": IconLayoutSidebar,
-  "sidebar.right": IconLayoutSidebarRight,
-  "slider.horizontal.3": IconAdjustmentsHorizontal,
-  "square.and.pencil": IconEdit,
-  "square.split.2x1": IconLayoutColumns,
-  "stop.fill": IconPlayerStopFilled,
+  'server.rack': IconServer,
+  'sidebar.left': IconLayoutSidebar,
+  'sidebar.right': IconLayoutSidebarRight,
+  'slider.horizontal.3': IconAdjustmentsHorizontal,
+  'square.and.pencil': IconEdit,
+  'square.split.2x1': IconLayoutColumns,
+  'stop.fill': IconPlayerStopFilled,
   terminal: IconTerminal2,
-  "text.bubble": IconMessage,
-  "text.word.spacing": IconLetterSpacing,
-  "textformat.size": IconTypography,
-  "textformat.size.larger": IconTextIncrease,
-  "textformat.size.smaller": IconTextDecrease,
+  'text.bubble': IconMessage,
+  'text.word.spacing': IconLetterSpacing,
+  'textformat.size': IconTypography,
+  'textformat.size.larger': IconTextIncrease,
+  'textformat.size.smaller': IconTextDecrease,
   trash: IconTrash,
-  "wifi.slash": IconWifiOff,
+  'wifi.slash': IconWifiOff,
   xmark: IconX,
-  "xmark.circle.fill": IconCircleXFilled,
-};
+  'xmark.circle.fill': IconCircleXFilled,
+}
 
 // Callers can pass `{ ios, android }` names where `android` is a Material
 // icon name (the raw expo-symbols contract). Resolve those here too so the
@@ -169,24 +169,27 @@ const ANDROID_ICON_BY_MATERIAL_NAME: Record<string, Icon> = {
   remove: IconMinus,
   terminal: IconTerminal2,
   visibility: IconEye,
-};
+}
 
-export type { SFSymbol } from "expo-symbols";
-export type AppSymbolName = SymbolViewProps["name"];
+export type { SFSymbol } from 'expo-symbols'
+export type AppSymbolName = SymbolViewProps['name']
 
-export function SymbolView(props: SymbolViewProps) {
-  if (Platform.OS !== "android") {
-    return <ExpoSymbolView {...props} />;
+export function SymbolView(props: SymbolViewProps)
+{
+  if (Platform.OS !== 'android')
+  {
+    return <ExpoSymbolView {...props} />
   }
 
-  const materialName = typeof props.name === "string" ? undefined : props.name.android;
-  const sfSymbol = typeof props.name === "string" ? props.name : props.name.ios;
+  const materialName = typeof props.name === 'string' ? undefined : props.name.android
+  const sfSymbol = typeof props.name === 'string' ? props.name : props.name.ios
   const AndroidIcon =
     (materialName ? ANDROID_ICON_BY_MATERIAL_NAME[materialName] : undefined) ??
-    (sfSymbol ? ANDROID_ICON_BY_SF_SYMBOL[sfSymbol] : undefined);
+    (sfSymbol ? ANDROID_ICON_BY_SF_SYMBOL[sfSymbol] : undefined)
 
-  if (!AndroidIcon) {
-    return props.fallback ?? null;
+  if (!AndroidIcon)
+  {
+    return props.fallback ?? null
   }
 
   return (
@@ -198,5 +201,5 @@ export function SymbolView(props: SymbolViewProps) {
       style={props.style}
       testID={props.testID}
     />
-  );
+  )
 }

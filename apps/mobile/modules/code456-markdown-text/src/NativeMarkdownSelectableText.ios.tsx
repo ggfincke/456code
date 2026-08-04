@@ -1,16 +1,17 @@
-import { Image, Linking, type TextStyle, useColorScheme } from "react-native";
+import { Image, Linking, type TextStyle, useColorScheme } from 'react-native'
 
-import { MarkdownTextPrimitive } from "./MarkdownTextPrimitive";
-import { markdownFileIconSource } from "./markdownFileIcons";
-import type { NativeMarkdownTextRun } from "./nativeMarkdownText";
-import type { NativeMarkdownTextStyle } from "./SelectableMarkdownText.types";
+import { MarkdownTextPrimitive } from './MarkdownTextPrimitive'
+import { markdownFileIconSource } from './markdownFileIcons'
+import type { NativeMarkdownTextRun } from './nativeMarkdownText'
+import type { NativeMarkdownTextStyle } from './SelectableMarkdownText.types'
 
-const EXTERNAL_LINK_PREFIX = "◉ ";
-const INLINE_ATTACHMENT_PREFIX = "\uFFFC\u00A0";
-const SKILL_ICON_PLACEHOLDER = "\uFFFC";
-const PARAGRAPH_STYLE_ENCODING_OFFSET = 1000;
+const EXTERNAL_LINK_PREFIX = '◉ '
+const INLINE_ATTACHMENT_PREFIX = '\uFFFC\u00A0'
+const SKILL_ICON_PLACEHOLDER = '\uFFFC'
+const PARAGRAPH_STYLE_ENCODING_OFFSET = 1000
 
-function runKeySignature(run: NativeMarkdownTextRun): string {
+function runKeySignature(run: NativeMarkdownTextRun): string
+{
   return [
     run.text,
     run.bold,
@@ -29,36 +30,39 @@ function runKeySignature(run: NativeMarkdownTextRun): string {
     run.firstLineHeadIndent,
     run.headIndent,
     run.paragraphSpacing,
-  ].join(":");
+  ].join(':')
 }
 
-const DEFAULT_BODY_FONT_SIZE = 15;
-const DEFAULT_HEADING_FONT_SIZES = [22, 19, 17, 16, 15, 15] as const;
+const DEFAULT_BODY_FONT_SIZE = 15
+const DEFAULT_HEADING_FONT_SIZES = [22, 19, 17, 16, 15, 15] as const
 
-function resolveHeadingFontSize(textStyle: NativeMarkdownTextStyle, headingLevel: number): number {
-  const index = Math.max(0, Math.min(5, headingLevel - 1));
-  const configured = textStyle.headingFontSizes?.[index];
-  if (typeof configured === "number" && Number.isFinite(configured)) {
-    return configured;
+function resolveHeadingFontSize(textStyle: NativeMarkdownTextStyle, headingLevel: number): number
+{
+  const index = Math.max(0, Math.min(5, headingLevel - 1))
+  const configured = textStyle.headingFontSizes?.[index]
+  if (typeof configured === 'number' && Number.isFinite(configured))
+  {
+    return configured
   }
 
-  const scale = textStyle.fontSize / DEFAULT_BODY_FONT_SIZE;
-  return Math.max(12, Math.round(DEFAULT_HEADING_FONT_SIZES[index] * scale));
+  const scale = textStyle.fontSize / DEFAULT_BODY_FONT_SIZE
+  return Math.max(12, Math.round(DEFAULT_HEADING_FONT_SIZES[index] * scale))
 }
 
-function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle): TextStyle {
-  const isFile = run.fileIcon != null;
-  const isSkill = run.skillName != null;
-  const headingLevel = Math.max(1, Math.min(6, run.headingLevel ?? 1));
-  const headingFontSize = resolveHeadingFontSize(textStyle, headingLevel);
-  const isHeading = run.role === "heading";
-  const isCodeBlock = run.role === "code-block" || run.role === "code-language";
-  const hasParagraphStyle = run.headIndent !== undefined;
+function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle): TextStyle
+{
+  const isFile = run.fileIcon != null
+  const isSkill = run.skillName != null
+  const headingLevel = Math.max(1, Math.min(6, run.headingLevel ?? 1))
+  const headingFontSize = resolveHeadingFontSize(textStyle, headingLevel)
+  const isHeading = run.role === 'heading'
+  const isCodeBlock = run.role === 'code-block' || run.role === 'code-language'
+  const hasParagraphStyle = run.headIndent !== undefined
   const textDecorationLine = run.strikethrough
-    ? "line-through"
+    ? 'line-through'
     : run.href && !isFile
-      ? "underline"
-      : "none";
+      ? 'underline'
+      : 'none'
 
   return {
     color: isFile
@@ -69,13 +73,13 @@ function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle
           ? textStyle.linkColor
           : isHeading
             ? textStyle.strongColor
-            : run.role === "quote-marker"
+            : run.role === 'quote-marker'
               ? textStyle.quoteMarkerColor
-              : run.role === "divider"
+              : run.role === 'divider'
                 ? textStyle.dividerColor
-                : run.role === "code-language"
+                : run.role === 'code-language'
                   ? textStyle.mutedColor
-                  : run.role === "list-marker"
+                  : run.role === 'list-marker'
                     ? textStyle.mutedColor
                     : isCodeBlock
                       ? textStyle.codeColor
@@ -88,41 +92,41 @@ function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle
       isFile || isSkill
         ? textStyle.boldFontFamily
         : run.code || isCodeBlock
-          ? "ui-monospace"
+          ? 'ui-monospace'
           : isHeading
             ? textStyle.headingFontFamily
             : run.bold
               ? textStyle.boldFontFamily
               : textStyle.fontFamily,
     fontSize:
-      run.role === "spacer"
+      run.role === 'spacer'
         ? (run.spacing ?? 10)
-        : run.role === "list-break"
+        : run.role === 'list-break'
           ? textStyle.fontSize
           : isHeading
             ? headingFontSize
-            : run.role === "code-language"
+            : run.role === 'code-language'
               ? Math.max(10, Math.round(textStyle.fontSize * 0.73))
               : run.code || isCodeBlock
                 ? Math.max(12, textStyle.fontSize - 2)
                 : textStyle.fontSize,
     lineHeight:
-      run.role === "spacer"
+      run.role === 'spacer'
         ? (run.spacing ?? 10)
-        : run.role === "list-break"
+        : run.role === 'list-break'
           ? textStyle.lineHeight + (run.spacing ?? 0)
           : isHeading
             ? Math.max(headingFontSize + 6, textStyle.lineHeight + 2)
             : isCodeBlock
               ? Math.max(16, textStyle.lineHeight - 2)
               : textStyle.lineHeight,
-    fontStyle: run.italic ? "italic" : "normal",
-    fontWeight: isHeading || run.bold || isFile || isSkill ? "700" : "400",
+    fontStyle: run.italic ? 'italic' : 'normal',
+    fontWeight: isHeading || run.bold || isFile || isSkill ? '700' : '400',
     textDecorationLine,
     backgroundColor: isCodeBlock ? textStyle.codeBlockBackgroundColor : undefined,
     ...(hasParagraphStyle
       ? {
-          shadowColor: "transparent",
+          shadowColor: 'transparent',
           shadowOffset: {
             width: run.firstLineHeadIndent ?? 0,
             height: run.headIndent,
@@ -130,41 +134,48 @@ function runStyle(run: NativeMarkdownTextRun, textStyle: NativeMarkdownTextStyle
           shadowRadius: PARAGRAPH_STYLE_ENCODING_OFFSET + (run.paragraphSpacing ?? 0),
         }
       : {}),
-  };
+  }
 }
 
 export function NativeMarkdownSelectableText(props: {
-  readonly runs: ReadonlyArray<NativeMarkdownTextRun>;
-  readonly textStyle: NativeMarkdownTextStyle;
-  readonly onLinkPress?: (href: string) => void;
-}) {
-  const colorScheme = useColorScheme();
-  const occurrences = new Map<string, number>();
-  const prefixedExternalLinks = new Set<string>();
-  const keyedRuns = props.runs.map((run) => {
-    const signature = runKeySignature(run);
-    const occurrence = occurrences.get(signature) ?? 0;
-    occurrences.set(signature, occurrence + 1);
+  readonly runs: ReadonlyArray<NativeMarkdownTextRun>
+  readonly textStyle: NativeMarkdownTextStyle
+  readonly onLinkPress?: (href: string) => void
+})
+{
+  const colorScheme = useColorScheme()
+  const occurrences = new Map<string, number>()
+  const prefixedExternalLinks = new Set<string>()
+  const keyedRuns = props.runs.map((run) =>
+  {
+    const signature = runKeySignature(run)
+    const occurrence = occurrences.get(signature) ?? 0
+    occurrences.set(signature, occurrence + 1)
 
-    let text = run.text;
-    if (run.fileIcon) {
-      text = `${INLINE_ATTACHMENT_PREFIX}${text}`;
-    } else if (run.skillName && run.skillLabel) {
-      text = `${SKILL_ICON_PLACEHOLDER}\u00A0${run.skillLabel}`;
-    } else if (run.externalHost && run.href && !prefixedExternalLinks.has(run.href)) {
-      prefixedExternalLinks.add(run.href);
-      text = `${EXTERNAL_LINK_PREFIX}${text}`;
+    let text = run.text
+    if (run.fileIcon)
+    {
+      text = `${INLINE_ATTACHMENT_PREFIX}${text}`
+    }
+    else if (run.skillName && run.skillLabel)
+    {
+      text = `${SKILL_ICON_PLACEHOLDER}\u00A0${run.skillLabel}`
+    }
+    else if (run.externalHost && run.href && !prefixedExternalLinks.has(run.href))
+    {
+      prefixedExternalLinks.add(run.href)
+      text = `${EXTERNAL_LINK_PREFIX}${text}`
     }
 
-    return { key: `${signature}:${occurrence}`, run, text };
-  });
+    return { key: `${signature}:${occurrence}`, run, text }
+  })
   // Code456MarkdownText only rebuilds its attributed string during native layout. A
   // color-only child update can otherwise leave the previous appearance cached.
   const appearanceKey = [
-    colorScheme ?? "unspecified",
+    colorScheme ?? 'unspecified',
     props.textStyle.fontSize,
     props.textStyle.lineHeight,
-    props.textStyle.headingFontSizes?.join(","),
+    props.textStyle.headingFontSizes?.join(','),
     props.textStyle.color,
     props.textStyle.strongColor,
     props.textStyle.mutedColor,
@@ -177,7 +188,7 @@ export function NativeMarkdownSelectableText(props: {
     props.textStyle.skillTextColor,
     props.textStyle.quoteMarkerColor,
     props.textStyle.dividerColor,
-  ].join(":");
+  ].join(':')
 
   return (
     <MarkdownTextPrimitive
@@ -193,8 +204,9 @@ export function NativeMarkdownSelectableText(props: {
         lineHeight: props.textStyle.lineHeight,
       }}
     >
-      {keyedRuns.map(({ key, run, text }) => {
-        const href = run.href;
+      {keyedRuns.map(({ key, run, text }) =>
+      {
+        const href = run.href
         return (
           <MarkdownTextPrimitive
             key={key}
@@ -202,17 +214,21 @@ export function NativeMarkdownSelectableText(props: {
               run.fileIcon
                 ? `code456-file:${Image.resolveAssetSource(markdownFileIconSource(run.fileIcon)).uri}`
                 : run.skillName
-                  ? "code456-skill:sf:cube"
+                  ? 'code456-skill:sf:cube'
                   : undefined
             }
             style={runStyle(run, props.textStyle)}
             onPress={
               href
-                ? () => {
-                    if (props.onLinkPress) {
-                      props.onLinkPress(href);
-                    } else {
-                      void Linking.openURL(href);
+                ? () =>
+                  {
+                    if (props.onLinkPress)
+                      {
+                      props.onLinkPress(href)
+                    }
+                    else
+                      {
+                      void Linking.openURL(href)
                     }
                   }
                 : undefined
@@ -220,8 +236,8 @@ export function NativeMarkdownSelectableText(props: {
           >
             {text}
           </MarkdownTextPrimitive>
-        );
+        )
       })}
     </MarkdownTextPrimitive>
-  );
+  )
 }

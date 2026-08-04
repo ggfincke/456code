@@ -1,12 +1,12 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, it } from "@effect/vitest";
-import * as ConfigProvider from "effect/ConfigProvider";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Sink from "effect/Sink";
-import * as Stream from "effect/Stream";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import { assert, it } from '@effect/vitest'
+import * as ConfigProvider from 'effect/ConfigProvider'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Sink from 'effect/Sink'
+import * as Stream from 'effect/Stream'
+import { ChildProcessSpawner } from 'effect/unstable/process'
 
 import {
   BuildCommandFailedError,
@@ -29,11 +29,12 @@ import {
   resolvePackageManagerUserAgent,
   stageLinuxIconSize,
   STAGE_INSTALL_ARGS,
-} from "../../scripts/build-desktop-artifact.ts";
-import { BRAND_ASSET_PATHS } from "../../scripts/lib/brand-assets.ts";
-import { HostProcessArchitecture, HostProcessPlatform } from "@t3tools/shared/hostProcess";
+} from '../../scripts/build-desktop-artifact.ts'
+import { BRAND_ASSET_PATHS } from '../../scripts/lib/brand-assets.ts'
+import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 
-function mockProcess(exitCode: number) {
+function mockProcess(exitCode: number)
+{
   return ChildProcessSpawner.makeHandle({
     pid: ChildProcessSpawner.ProcessId(1),
     exitCode: Effect.succeed(ChildProcessSpawner.ExitCode(exitCode)),
@@ -46,396 +47,418 @@ function mockProcess(exitCode: number) {
     all: Stream.empty,
     getInputFd: () => Sink.drain,
     getOutputFd: () => Stream.empty,
-  });
+  })
 }
 
 function iconResizeSpawnerLayer(
   commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }>,
   exitCodes: ReadonlyArray<number>,
-) {
-  let commandIndex = 0;
+)
+{
+  let commandIndex = 0
   return Layer.succeed(
     ChildProcessSpawner.ChildProcessSpawner,
-    ChildProcessSpawner.make((command) => {
+    ChildProcessSpawner.make((command) =>
+    {
       const childProcess = command as unknown as {
-        readonly command: string;
-        readonly args: ReadonlyArray<string>;
-      };
+        readonly command: string
+        readonly args: ReadonlyArray<string>
+      }
       commands.push({
         command: childProcess.command,
         args: childProcess.args,
-      });
-      return Effect.succeed(mockProcess(exitCodes[commandIndex++] ?? 0));
+      })
+      return Effect.succeed(mockProcess(exitCodes[commandIndex++] ?? 0))
     }),
-  );
+  )
 }
 
-it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
-  it("resolves the dedicated nightly updater channel from nightly versions", () => {
-    assert.equal(resolveDesktopUpdateChannel("0.0.17-nightly.20260413.42"), "nightly");
-    assert.equal(resolveDesktopUpdateChannel("0.0.17"), "latest");
-  });
+it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
+{
+  it('resolves the dedicated nightly updater channel from nightly versions', () =>
+  {
+    assert.equal(resolveDesktopUpdateChannel('0.0.17-nightly.20260413.42'), 'nightly')
+    assert.equal(resolveDesktopUpdateChannel('0.0.17'), 'latest')
+  })
 
-  it("switches desktop packaging product names to nightly for nightly builds", () => {
-    assert.equal(resolveDesktopProductName("0.0.17"), "456code (Alpha)");
-    assert.equal(resolveDesktopProductName("0.0.17-nightly.20260413.42"), "456code (Nightly)");
-  });
+  it('switches desktop packaging product names to nightly for nightly builds', () =>
+  {
+    assert.equal(resolveDesktopProductName('0.0.17'), '456code (Alpha)')
+    assert.equal(resolveDesktopProductName('0.0.17-nightly.20260413.42'), '456code (Nightly)')
+  })
 
-  it("switches desktop packaging icons to the nightly artwork for nightly versions", () => {
-    assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17", false), {
+  it('switches desktop packaging icons to the nightly artwork for nightly versions', () =>
+  {
+    assert.deepStrictEqual(resolveDesktopBuildIconAssets('0.0.17', false), {
       macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
       windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
-    });
+    })
 
-    assert.deepStrictEqual(resolveDesktopBuildIconAssets("0.0.17-nightly.20260413.42", false), {
+    assert.deepStrictEqual(resolveDesktopBuildIconAssets('0.0.17-nightly.20260413.42', false), {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
       windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
-    });
-  });
+    })
+  })
 
-  it("switches the bundled splash and favicon branding for nightly versions", () => {
-    assert.equal(resolveDesktopWebAssetBrand("0.0.17", false), "production");
-    assert.equal(resolveDesktopWebAssetBrand("0.0.17-nightly.20260413.42", false), "nightly");
-  });
+  it('switches the bundled splash and favicon branding for nightly versions', () =>
+  {
+    assert.equal(resolveDesktopWebAssetBrand('0.0.17', false), 'production')
+    assert.equal(resolveDesktopWebAssetBrand('0.0.17-nightly.20260413.42', false), 'nightly')
+  })
 
-  it.effect("resolves GitHub desktop publish config from Effect config", () =>
-    Effect.gen(function* () {
-      const latestConfig = yield* resolveGitHubPublishConfig("latest").pipe(
+  it.effect('resolves GitHub desktop publish config from Effect config', () =>
+    Effect.gen(function* ()
+    {
+      const latestConfig = yield* resolveGitHubPublishConfig('latest').pipe(
         Effect.provide(
           ConfigProvider.layer(
             ConfigProvider.fromEnv({
               env: {
-                T3CODE_DESKTOP_UPDATE_REPOSITORY: "pingdotgg/t3code",
+                T3CODE_DESKTOP_UPDATE_REPOSITORY: 'pingdotgg/t3code',
               },
             }),
           ),
         ),
-      );
-      const nightlyConfig = yield* resolveGitHubPublishConfig("nightly").pipe(
+      )
+      const nightlyConfig = yield* resolveGitHubPublishConfig('nightly').pipe(
         Effect.provide(
           ConfigProvider.layer(
             ConfigProvider.fromEnv({
               env: {
-                GITHUB_REPOSITORY: "pingdotgg/t3code",
+                GITHUB_REPOSITORY: 'pingdotgg/t3code',
               },
             }),
           ),
         ),
-      );
+      )
 
       assert.deepStrictEqual(latestConfig, {
-        provider: "github",
-        owner: "pingdotgg",
-        repo: "t3code",
-        releaseType: "release",
-      });
+        provider: 'github',
+        owner: 'pingdotgg',
+        repo: 't3code',
+        releaseType: 'release',
+      })
       assert.deepStrictEqual(nightlyConfig, {
-        provider: "github",
-        owner: "pingdotgg",
-        repo: "t3code",
-        releaseType: "prerelease",
-        channel: "nightly",
-      });
+        provider: 'github',
+        owner: 'pingdotgg',
+        repo: 't3code',
+        releaseType: 'prerelease',
+        channel: 'nightly',
+      })
     }),
-  );
+  )
 
-  it("omits bundled workspace packages from staged desktop dependencies", () => {
+  it('omits bundled workspace packages from staged desktop dependencies', () =>
+  {
     assert.deepStrictEqual(
       resolveDesktopRuntimeDependencies(
         {
-          "@effect/platform-node": "catalog:",
-          "@t3tools/contracts": "workspace:*",
-          "@t3tools/shared": "workspace:*",
-          "@t3tools/ssh": "workspace:*",
-          "@t3tools/tailscale": "workspace:*",
-          effect: "catalog:",
-          electron: "41.5.0",
+          '@effect/platform-node': 'catalog:',
+          '@t3tools/contracts': 'workspace:*',
+          '@t3tools/shared': 'workspace:*',
+          '@t3tools/ssh': 'workspace:*',
+          '@t3tools/tailscale': 'workspace:*',
+          effect: 'catalog:',
+          electron: '41.5.0',
         },
         {
-          "@effect/platform-node": "4.0.0-beta.59",
-          effect: "4.0.0-beta.59",
+          '@effect/platform-node': '4.0.0-beta.59',
+          effect: '4.0.0-beta.59',
         },
       ),
       {
-        "@effect/platform-node": "4.0.0-beta.59",
-        effect: "4.0.0-beta.59",
+        '@effect/platform-node': '4.0.0-beta.59',
+        effect: '4.0.0-beta.59',
       },
-    );
-  });
+    )
+  })
 
-  it("carries only staged dependency patch metadata into staged desktop installs", () => {
+  it('carries only staged dependency patch metadata into staged desktop installs', () =>
+  {
     assert.deepStrictEqual(
       createStagePatchedDependencies(
         {
-          "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
-          "@ff-labs/fff-node@0.9.4": "patches/@ff-labs__fff-node@0.9.4.patch",
-          "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
-          "alchemy@2.0.0-beta.49": "patches/alchemy@2.0.0-beta.49.patch",
-          "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+          '@expo/metro-config@56.0.13': 'patches/@expo%2Fmetro-config@56.0.13.patch',
+          '@ff-labs/fff-node@0.9.4': 'patches/@ff-labs__fff-node@0.9.4.patch',
+          '@pierre/diffs@1.1.20': 'patches/@pierre%2Fdiffs@1.1.20.patch',
+          'alchemy@2.0.0-beta.49': 'patches/alchemy@2.0.0-beta.49.patch',
+          'effect@4.0.0-beta.73': 'patches/effect@4.0.0-beta.73.patch',
         },
         {
-          "@ff-labs/fff-node": "0.9.4",
-          "@pierre/diffs": "1.1.20",
-          effect: "4.0.0-beta.73",
+          '@ff-labs/fff-node': '0.9.4',
+          '@pierre/diffs': '1.1.20',
+          effect: '4.0.0-beta.73',
         },
       ),
       {
-        "@ff-labs/fff-node@0.9.4": "patches/@ff-labs__fff-node@0.9.4.patch",
-        "@pierre/diffs@1.1.20": "patches/@pierre%2Fdiffs@1.1.20.patch",
-        "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+        '@ff-labs/fff-node@0.9.4': 'patches/@ff-labs__fff-node@0.9.4.patch',
+        '@pierre/diffs@1.1.20': 'patches/@pierre%2Fdiffs@1.1.20.patch',
+        'effect@4.0.0-beta.73': 'patches/effect@4.0.0-beta.73.patch',
       },
-    );
+    )
 
     assert.deepStrictEqual(
       createStagePatchedDependencies(
         {
-          "@expo/metro-config@56.0.13": "patches/@expo%2Fmetro-config@56.0.13.patch",
+          '@expo/metro-config@56.0.13': 'patches/@expo%2Fmetro-config@56.0.13.patch',
         },
-        { effect: "4.0.0-beta.73" },
+        { effect: '4.0.0-beta.73' },
       ),
       {},
-    );
-  });
+    )
+  })
 
-  it("installs optional native dependencies for the target desktop architecture", () => {
-    assert.deepStrictEqual(STAGE_INSTALL_ARGS, ["install", "--prod"]);
-    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "mac", arch: "x64" }), {
+  it('installs optional native dependencies for the target desktop architecture', () =>
+  {
+    assert.deepStrictEqual(STAGE_INSTALL_ARGS, ['install', '--prod'])
+    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'mac', arch: 'x64' }), {
       supportedArchitectures: {
-        os: ["darwin"],
-        cpu: ["x64"],
+        os: ['darwin'],
+        cpu: ['x64'],
       },
-    });
-    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "linux", arch: "x64" }), {
+    })
+    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'linux', arch: 'x64' }), {
       supportedArchitectures: {
-        os: ["linux"],
-        cpu: ["x64"],
-        libc: ["glibc"],
+        os: ['linux'],
+        cpu: ['x64'],
+        libc: ['glibc'],
       },
-    });
+    })
     // Windows artifacts also bundle the same-architecture WSL (Linux, glibc) backend, so the
     // staged install must fetch its native optional deps (e.g. ffi-rs) too.
-    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "x64" }), {
+    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'win', arch: 'x64' }), {
       supportedArchitectures: {
-        os: ["win32", "linux"],
-        cpu: ["x64"],
-        libc: ["glibc"],
+        os: ['win32', 'linux'],
+        cpu: ['x64'],
+        libc: ['glibc'],
       },
-    });
-    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "win", arch: "arm64" }), {
+    })
+    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'win', arch: 'arm64' }), {
       supportedArchitectures: {
-        os: ["win32", "linux"],
-        cpu: ["arm64"],
-        libc: ["glibc"],
+        os: ['win32', 'linux'],
+        cpu: ['arm64'],
+        libc: ['glibc'],
       },
-    });
-    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: "mac", arch: "universal" }), {
+    })
+    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'mac', arch: 'universal' }), {
       supportedArchitectures: {
-        os: ["darwin"],
-        cpu: ["arm64", "x64"],
+        os: ['darwin'],
+        cpu: ['arm64', 'x64'],
       },
-    });
-  });
+    })
+  })
 
-  it("stages pnpm 11 allowBuilds and patchedDependencies in the workspace yaml", () => {
+  it('stages pnpm 11 allowBuilds and patchedDependencies in the workspace yaml', () =>
+  {
     assert.deepStrictEqual(
       createStageWorkspaceConfig({
-        platform: "linux",
-        arch: "x64",
+        platform: 'linux',
+        arch: 'x64',
         allowBuilds: {
           electron: true,
-          "node-pty": true,
-          "browser-tabs-lock": false,
+          'node-pty': true,
+          'browser-tabs-lock': false,
         },
         patchedDependencies: {
-          "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+          'effect@4.0.0-beta.73': 'patches/effect@4.0.0-beta.73.patch',
         },
         overrides: {
-          effect: "4.0.0-beta.73",
+          effect: '4.0.0-beta.73',
         },
       }),
       {
         supportedArchitectures: {
-          os: ["linux"],
-          cpu: ["x64"],
-          libc: ["glibc"],
+          os: ['linux'],
+          cpu: ['x64'],
+          libc: ['glibc'],
         },
         allowBuilds: {
           electron: true,
-          "node-pty": true,
-          "browser-tabs-lock": false,
+          'node-pty': true,
+          'browser-tabs-lock': false,
         },
         patchedDependencies: {
-          "effect@4.0.0-beta.73": "patches/effect@4.0.0-beta.73.patch",
+          'effect@4.0.0-beta.73': 'patches/effect@4.0.0-beta.73.patch',
         },
         overrides: {
-          effect: "4.0.0-beta.73",
+          effect: '4.0.0-beta.73',
         },
       },
-    );
+    )
 
     // Empty maps must not be written — pnpm would still require reviewed
     // packages if allowBuilds is present but incomplete, and omitting empty
     // patchedDependencies keeps the stage yaml minimal.
     assert.deepStrictEqual(
       createStageWorkspaceConfig({
-        platform: "mac",
-        arch: "arm64",
+        platform: 'mac',
+        arch: 'arm64',
         allowBuilds: {},
         patchedDependencies: {},
         overrides: {},
       }),
       {
         supportedArchitectures: {
-          os: ["darwin"],
-          cpu: ["arm64"],
+          os: ['darwin'],
+          cpu: ['arm64'],
         },
       },
-    );
-  });
+    )
+  })
 
-  it("unpacks the fff shared library for filesystem and FFI access", () => {
-    assert.deepStrictEqual(DESKTOP_ASAR_UNPACK, ["node_modules/@ff-labs/fff-bin-*/**/*"]);
-  });
+  it('unpacks the fff shared library for filesystem and FFI access', () =>
+  {
+    assert.deepStrictEqual(DESKTOP_ASAR_UNPACK, ['node_modules/@ff-labs/fff-bin-*/**/*'])
+  })
 
-  it.effect("preserves both Linux icon resize failures with structural context", () => {
-    const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> = [];
+  it.effect('preserves both Linux icon resize failures with structural context', () =>
+  {
+    const commands: Array<{ readonly command: string; readonly args: ReadonlyArray<string> }> = []
 
-    return Effect.gen(function* () {
-      const error = yield* stageLinuxIconSize("source.png", "target.png", 512, false).pipe(
+    return Effect.gen(function* ()
+    {
+      const error = yield* stageLinuxIconSize('source.png', 'target.png', 512, false).pipe(
         Effect.provide(iconResizeSpawnerLayer(commands, [1, 2])),
         Effect.flip,
-      );
+      )
 
-      assert.instanceOf(error, LinuxIconResizeError);
-      assert.equal(error.operation, "resize");
-      assert.equal(error.iconSize, 512);
-      assert.equal(error.primaryTool, "magick");
-      assert.equal(error.fallbackTool, "convert");
-      assert.include(error.message, "512x512");
-      assert.include(error.message, "`magick`");
-      assert.include(error.message, "`convert`");
-      assert.notInclude(error.message, "non-zero exit code");
+      assert.instanceOf(error, LinuxIconResizeError)
+      assert.equal(error.operation, 'resize')
+      assert.equal(error.iconSize, 512)
+      assert.equal(error.primaryTool, 'magick')
+      assert.equal(error.fallbackTool, 'convert')
+      assert.include(error.message, '512x512')
+      assert.include(error.message, '`magick`')
+      assert.include(error.message, '`convert`')
+      assert.notInclude(error.message, 'non-zero exit code')
 
-      assert.instanceOf(error.cause, AggregateError);
-      const aggregateCause = error.cause as AggregateError;
-      assert.lengthOf(aggregateCause.errors, 2);
-      assert.strictEqual(aggregateCause.cause, aggregateCause.errors[0]);
-      assert.instanceOf(aggregateCause.errors[0], BuildCommandFailedError);
-      assert.instanceOf(aggregateCause.errors[1], BuildCommandFailedError);
-      const primaryError = aggregateCause.errors[0] as BuildCommandFailedError;
-      const fallbackError = aggregateCause.errors[1] as BuildCommandFailedError;
-      assert.equal(primaryError.command, "magick linux icon 512x512");
-      assert.equal(primaryError.exitCode, 1);
-      assert.include(primaryError.message, "magick linux icon");
-      assert.equal(fallbackError.command, "convert linux icon 512x512");
-      assert.equal(fallbackError.exitCode, 2);
-      assert.include(fallbackError.message, "convert linux icon");
+      assert.instanceOf(error.cause, AggregateError)
+      const aggregateCause = error.cause as AggregateError
+      assert.lengthOf(aggregateCause.errors, 2)
+      assert.strictEqual(aggregateCause.cause, aggregateCause.errors[0])
+      assert.instanceOf(aggregateCause.errors[0], BuildCommandFailedError)
+      assert.instanceOf(aggregateCause.errors[1], BuildCommandFailedError)
+      const primaryError = aggregateCause.errors[0] as BuildCommandFailedError
+      const fallbackError = aggregateCause.errors[1] as BuildCommandFailedError
+      assert.equal(primaryError.command, 'magick linux icon 512x512')
+      assert.equal(primaryError.exitCode, 1)
+      assert.include(primaryError.message, 'magick linux icon')
+      assert.equal(fallbackError.command, 'convert linux icon 512x512')
+      assert.equal(fallbackError.exitCode, 2)
+      assert.include(fallbackError.message, 'convert linux icon')
       assert.deepStrictEqual(
         commands.map(({ command }) => command),
-        ["magick", "convert"],
-      );
-    });
-  });
+        ['magick', 'convert'],
+      )
+    })
+  })
 
-  it.effect("adds both renderer protocols to signed macOS builds", () =>
-    Effect.gen(function* () {
-      const config = yield* createBuildConfig("mac", "dmg", "1.2.3", true, false, undefined);
+  it.effect('adds both renderer protocols to signed macOS builds', () =>
+    Effect.gen(function* ()
+    {
+      const config = yield* createBuildConfig('mac', 'dmg', '1.2.3', true, false, undefined)
 
-      const mac = config.mac as Record<string, unknown>;
-      assert.equal(config.appId, "com.ggfincke.456code");
+      const mac = config.mac as Record<string, unknown>
+      assert.equal(config.appId, 'com.ggfincke.456code')
       assert.deepStrictEqual(mac.protocols, [
-        { name: "456code", schemes: ["code456", "code456-dev"] },
-      ]);
+        { name: '456code', schemes: ['code456', 'code456-dev'] },
+      ])
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
-  );
+  )
 
-  it.effect("keeps executable resource editing enabled for unsigned Windows builds", () =>
-    Effect.gen(function* () {
-      const config = yield* createBuildConfig("win", "nsis", "1.2.3", false, false, undefined);
+  it.effect('keeps executable resource editing enabled for unsigned Windows builds', () =>
+    Effect.gen(function* ()
+    {
+      const config = yield* createBuildConfig('win', 'nsis', '1.2.3', false, false, undefined)
 
-      const win = config.win as Record<string, unknown>;
-      assert.equal(win.icon, "icon.ico");
-      assert.equal(win.signAndEditExecutable, true);
-      assert.notProperty(win, "azureSignOptions");
+      const win = config.win as Record<string, unknown>
+      assert.equal(win.icon, 'icon.ico')
+      assert.equal(win.signAndEditExecutable, true)
+      assert.notProperty(win, 'azureSignOptions')
     }).pipe(Effect.provide(ConfigProvider.layer(ConfigProvider.fromEnv({ env: {} })))),
-  );
+  )
 
-  it("promotes target fff binaries to direct staged dependencies", () => {
-    assert.deepStrictEqual(resolveFffNativeDependencies("mac", "arm64", "0.9.4"), {
-      "@ff-labs/fff-bin-darwin-arm64": "0.9.4",
-    });
-    assert.deepStrictEqual(resolveFffNativeDependencies("mac", "universal", "0.9.4"), {
-      "@ff-labs/fff-bin-darwin-arm64": "0.9.4",
-      "@ff-labs/fff-bin-darwin-x64": "0.9.4",
-    });
-    assert.deepStrictEqual(resolveFffNativeDependencies("win", "x64", "0.9.4"), {
-      "@ff-labs/fff-bin-win32-x64": "0.9.4",
-    });
-    assert.deepStrictEqual(resolveFffNativeDependencies("linux", "x64", "0.9.4"), {
-      "@ff-labs/fff-bin-linux-x64-gnu": "0.9.4",
-      "@ff-labs/fff-bin-linux-x64-musl": "0.9.4",
-    });
-    assert.deepStrictEqual(resolveFffNativeDependencies("linux", "arm64", "0.9.4"), {
-      "@ff-labs/fff-bin-linux-arm64-gnu": "0.9.4",
-      "@ff-labs/fff-bin-linux-arm64-musl": "0.9.4",
-    });
-  });
+  it('promotes target fff binaries to direct staged dependencies', () =>
+  {
+    assert.deepStrictEqual(resolveFffNativeDependencies('mac', 'arm64', '0.9.4'), {
+      '@ff-labs/fff-bin-darwin-arm64': '0.9.4',
+    })
+    assert.deepStrictEqual(resolveFffNativeDependencies('mac', 'universal', '0.9.4'), {
+      '@ff-labs/fff-bin-darwin-arm64': '0.9.4',
+      '@ff-labs/fff-bin-darwin-x64': '0.9.4',
+    })
+    assert.deepStrictEqual(resolveFffNativeDependencies('win', 'x64', '0.9.4'), {
+      '@ff-labs/fff-bin-win32-x64': '0.9.4',
+    })
+    assert.deepStrictEqual(resolveFffNativeDependencies('linux', 'x64', '0.9.4'), {
+      '@ff-labs/fff-bin-linux-x64-gnu': '0.9.4',
+      '@ff-labs/fff-bin-linux-x64-musl': '0.9.4',
+    })
+    assert.deepStrictEqual(resolveFffNativeDependencies('linux', 'arm64', '0.9.4'), {
+      '@ff-labs/fff-bin-linux-arm64-gnu': '0.9.4',
+      '@ff-labs/fff-bin-linux-arm64-musl': '0.9.4',
+    })
+  })
 
-  it("falls back to the default mock update port when the configured port is blank", () => {
-    assert.equal(resolveMockUpdateServerUrl(undefined), "http://localhost:3000");
-    assert.equal(resolveMockUpdateServerUrl(4123), "http://localhost:4123");
-  });
+  it('falls back to the default mock update port when the configured port is blank', () =>
+  {
+    assert.equal(resolveMockUpdateServerUrl(undefined), 'http://localhost:3000')
+    assert.equal(resolveMockUpdateServerUrl(4123), 'http://localhost:4123')
+  })
 
-  it("derives the electron-builder package manager user agent from packageManager", () => {
-    assert.equal(resolvePackageManagerUserAgent("pnpm@11.10.0"), "pnpm/11.10.0");
-    assert.equal(resolvePackageManagerUserAgent(" yarn@4.9.2 "), "yarn/4.9.2");
-    assert.equal(resolvePackageManagerUserAgent("pnpm"), "pnpm");
-  });
+  it('derives the electron-builder package manager user agent from packageManager', () =>
+  {
+    assert.equal(resolvePackageManagerUserAgent('pnpm@11.10.0'), 'pnpm/11.10.0')
+    assert.equal(resolvePackageManagerUserAgent(' yarn@4.9.2 '), 'yarn/4.9.2')
+    assert.equal(resolvePackageManagerUserAgent('pnpm'), 'pnpm')
+  })
 
-  it.effect("normalizes mock update server ports from env-style strings", () =>
-    Effect.gen(function* () {
-      assert.equal(yield* resolveMockUpdateServerPort(undefined), undefined);
-      assert.equal(yield* resolveMockUpdateServerPort(""), undefined);
-      assert.equal(yield* resolveMockUpdateServerPort("   "), undefined);
-      assert.equal(yield* resolveMockUpdateServerPort("4123"), 4123);
+  it.effect('normalizes mock update server ports from env-style strings', () =>
+    Effect.gen(function* ()
+    {
+      assert.equal(yield* resolveMockUpdateServerPort(undefined), undefined)
+      assert.equal(yield* resolveMockUpdateServerPort(''), undefined)
+      assert.equal(yield* resolveMockUpdateServerPort('   '), undefined)
+      assert.equal(yield* resolveMockUpdateServerPort('4123'), 4123)
     }),
-  );
+  )
 
-  it.effect("rejects non-numeric or out-of-range mock update ports", () =>
-    Effect.gen(function* () {
-      const invalidPorts = ["abc", "12.5", "0", "65536"];
-      for (const port of invalidPorts) {
-        const exit = yield* Effect.exit(resolveMockUpdateServerPort(port));
-        assert.equal(exit._tag, "Failure");
+  it.effect('rejects non-numeric or out-of-range mock update ports', () =>
+    Effect.gen(function* ()
+    {
+      const invalidPorts = ['abc', '12.5', '0', '65536']
+      for (const port of invalidPorts)
+      {
+        const exit = yield* Effect.exit(resolveMockUpdateServerPort(port))
+        assert.equal(exit._tag, 'Failure')
       }
     }),
-  );
+  )
 
-  it("classifies invalid configured ports with the decoder's number grammar", () => {
-    const cause = new Error("invalid configured port");
+  it("classifies invalid configured ports with the decoder's number grammar", () =>
+  {
+    const cause = new Error('invalid configured port')
 
     assert.equal(
-      InvalidMockUpdateServerPortError.fromConfigValue("0x10", cause).reason,
-      "not-numeric",
-    );
+      InvalidMockUpdateServerPortError.fromConfigValue('0x10', cause).reason,
+      'not-numeric',
+    )
     assert.equal(
-      InvalidMockUpdateServerPortError.fromConfigValue("12.5", cause).reason,
-      "not-integer",
-    );
+      InvalidMockUpdateServerPortError.fromConfigValue('12.5', cause).reason,
+      'not-integer',
+    )
     assert.equal(
-      InvalidMockUpdateServerPortError.fromConfigValue("65536", cause).reason,
-      "out-of-range",
-    );
-    assert.strictEqual(
-      InvalidMockUpdateServerPortError.fromConfigValue("0x10", cause).cause,
-      cause,
-    );
-  });
+      InvalidMockUpdateServerPortError.fromConfigValue('65536', cause).reason,
+      'out-of-range',
+    )
+    assert.strictEqual(InvalidMockUpdateServerPortError.fromConfigValue('0x10', cause).cause, cause)
+  })
 
-  it.effect("resolves default platform and architecture from host references", () =>
-    Effect.gen(function* () {
+  it.effect('resolves default platform and architecture from host references', () =>
+    Effect.gen(function* ()
+    {
       const resolved = yield* resolveBuildOptions({
         platform: Option.none(),
         target: Option.none(),
@@ -452,34 +475,35 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
-            Layer.succeed(HostProcessPlatform, "win32"),
-            Layer.succeed(HostProcessArchitecture, "x64"),
+            Layer.succeed(HostProcessPlatform, 'win32'),
+            Layer.succeed(HostProcessArchitecture, 'x64'),
             ConfigProvider.layer(
               ConfigProvider.fromEnv({
                 env: {
-                  PROCESSOR_ARCHITECTURE: "AMD64",
-                  PROCESSOR_ARCHITEW6432: "ARM64",
+                  PROCESSOR_ARCHITECTURE: 'AMD64',
+                  PROCESSOR_ARCHITEW6432: 'ARM64',
                 },
               }),
             ),
           ),
         ),
-      );
+      )
 
-      assert.equal(resolved.platform, "win");
-      assert.equal(resolved.target, "nsis");
-      assert.equal(resolved.arch, "arm64");
+      assert.equal(resolved.platform, 'win')
+      assert.equal(resolved.target, 'nsis')
+      assert.equal(resolved.arch, 'arm64')
     }),
-  );
+  )
 
-  it.effect("preserves explicit false boolean flags over true env defaults", () =>
-    Effect.gen(function* () {
+  it.effect('preserves explicit false boolean flags over true env defaults', () =>
+    Effect.gen(function* ()
+    {
       const resolved = yield* resolveBuildOptions({
-        platform: Option.some("mac"),
+        platform: Option.some('mac'),
         target: Option.none(),
-        arch: Option.some("arm64"),
+        arch: Option.some('arm64'),
         buildVersion: Option.none(),
-        outputDir: Option.some("release-test"),
+        outputDir: Option.some('release-test'),
         skipBuild: Option.some(false),
         keepStage: Option.some(false),
         signed: Option.some(false),
@@ -492,22 +516,22 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           ConfigProvider.layer(
             ConfigProvider.fromEnv({
               env: {
-                T3CODE_DESKTOP_SKIP_BUILD: "true",
-                T3CODE_DESKTOP_KEEP_STAGE: "true",
-                T3CODE_DESKTOP_SIGNED: "true",
-                T3CODE_DESKTOP_VERBOSE: "true",
-                T3CODE_DESKTOP_MOCK_UPDATES: "true",
+                T3CODE_DESKTOP_SKIP_BUILD: 'true',
+                T3CODE_DESKTOP_KEEP_STAGE: 'true',
+                T3CODE_DESKTOP_SIGNED: 'true',
+                T3CODE_DESKTOP_VERBOSE: 'true',
+                T3CODE_DESKTOP_MOCK_UPDATES: 'true',
               },
             }),
           ),
         ),
-      );
+      )
 
-      assert.equal(resolved.skipBuild, false);
-      assert.equal(resolved.keepStage, false);
-      assert.equal(resolved.signed, false);
-      assert.equal(resolved.verbose, false);
-      assert.equal(resolved.mockUpdates, false);
+      assert.equal(resolved.skipBuild, false)
+      assert.equal(resolved.keepStage, false)
+      assert.equal(resolved.signed, false)
+      assert.equal(resolved.verbose, false)
+      assert.equal(resolved.mockUpdates, false)
     }),
-  );
-});
+  )
+})

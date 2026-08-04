@@ -1,6 +1,6 @@
-import { Schema } from "effect";
+import { Schema } from 'effect'
 
-import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from "./baseSchemas.ts";
+import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from './baseSchemas.ts'
 import {
   PREVIEW_VIEWPORT_MAX_AREA,
   PreviewRenderedViewportSize,
@@ -8,48 +8,48 @@ import {
   PreviewViewportPresetId,
   PreviewViewportSetting,
   PreviewViewportSize,
-} from "./preview.ts";
-import { ProviderInstanceId } from "./providerInstance.ts";
+} from './preview.ts'
+import { ProviderInstanceId } from './providerInstance.ts'
 
 const BoundedUrl = Schema.String.check(Schema.isTrimmed())
   .check(
     Schema.isNonEmpty({
       description:
-        "Absolute http(s) URL or a schemeless host such as t3.chat or localhost:5173. Schemeless public hosts use https; loopback hosts use http.",
+        'Absolute http(s) URL or a schemeless host such as t3.chat or localhost:5173. Schemeless public hosts use https; loopback hosts use http.',
     }),
   )
-  .check(Schema.isMaxLength(2048));
+  .check(Schema.isMaxLength(2048))
 const OptionalTimeoutMs = Schema.optional(
   Schema.Int.check(Schema.isGreaterThan(0))
     .check(Schema.isLessThanOrEqualTo(60_000))
-    .annotate({ description: "Maximum wait in milliseconds. Defaults to 15000; maximum 60000." }),
-).annotate({ description: "Maximum wait in milliseconds. Defaults to 15000; maximum 60000." });
+    .annotate({ description: 'Maximum wait in milliseconds. Defaults to 15000; maximum 60000.' }),
+).annotate({ description: 'Maximum wait in milliseconds. Defaults to 15000; maximum 60000.' })
 
 /** Operations understood by desktop hosts predating viewport resizing. */
 export const PREVIEW_AUTOMATION_V1_OPERATIONS = [
-  "status",
-  "open",
-  "navigate",
-  "snapshot",
-  "click",
-  "type",
-  "press",
-  "scroll",
-  "evaluate",
-  "waitFor",
-  "recordingStart",
-  "recordingStop",
-] as const;
+  'status',
+  'open',
+  'navigate',
+  'snapshot',
+  'click',
+  'type',
+  'press',
+  'scroll',
+  'evaluate',
+  'waitFor',
+  'recordingStart',
+  'recordingStop',
+] as const
 
 /** Advertised by current desktop hosts for mixed-version routing. */
 export const PREVIEW_AUTOMATION_OPERATIONS = [
   ...PREVIEW_AUTOMATION_V1_OPERATIONS,
-  "resize",
-  "setColorScheme",
-] as const;
+  'resize',
+  'setColorScheme',
+] as const
 
-export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_OPERATIONS);
-export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type;
+export const PreviewAutomationOperation = Schema.Literals(PREVIEW_AUTOMATION_OPERATIONS)
+export type PreviewAutomationOperation = typeof PreviewAutomationOperation.Type
 
 const PreviewAutomationTabTargetFields = {
   tabId: Schema.optional(
@@ -61,10 +61,10 @@ const PreviewAutomationTabTargetFields = {
     description:
       "Exact collaborative browser tab to target. Omit to use this agent session's current tab.",
   }),
-};
+}
 
-export const PreviewAutomationTabTargetInput = Schema.Struct(PreviewAutomationTabTargetFields);
-export type PreviewAutomationTabTargetInput = typeof PreviewAutomationTabTargetInput.Type;
+export const PreviewAutomationTabTargetInput = Schema.Struct(PreviewAutomationTabTargetFields)
+export type PreviewAutomationTabTargetInput = typeof PreviewAutomationTabTargetInput.Type
 
 export const PreviewAutomationStatus = Schema.Struct({
   available: Schema.Boolean,
@@ -77,18 +77,18 @@ export const PreviewAutomationStatus = Schema.Struct({
   viewportSetting: Schema.optional(PreviewViewportSetting),
   /** Measured guest-page viewport in CSS pixels when a webview is ready. */
   viewport: Schema.optional(PreviewRenderedViewportSize),
-});
-export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type;
+})
+export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type
 
 export const PreviewAutomationOpenInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   url: Schema.optional(BoundedUrl).annotate({
     description:
-      "Optional initial page URL, for example https://t3.chat or localhost:5173. Omit to open a blank tab.",
+      'Optional initial page URL, for example https://t3.chat or localhost:5173. Omit to open a blank tab.',
   }),
   show: Schema.optional(
     Schema.Boolean.annotate({
-      description: "Whether to reveal the preview panel to the human. Defaults to true.",
+      description: 'Whether to reveal the preview panel to the human. Defaults to true.',
     }),
   ),
   reuseExistingTab: Schema.optional(
@@ -102,50 +102,50 @@ export const PreviewAutomationOpenInput = Schema.Struct({
     Schema.makeFilter(
       (input) =>
         !(input.tabId !== undefined && input.reuseExistingTab === false) ||
-        "tabId cannot be combined with reuseExistingTab=false.",
+        'tabId cannot be combined with reuseExistingTab=false.',
     ),
   )
   .annotate({
     description:
-      "Opens the collaborative browser for the current thread. Use preview_navigate afterward when readiness waiting matters.",
-  });
-export type PreviewAutomationOpenInput = typeof PreviewAutomationOpenInput.Type;
+      'Opens the collaborative browser for the current thread. Use preview_navigate afterward when readiness waiting matters.',
+  })
+export type PreviewAutomationOpenInput = typeof PreviewAutomationOpenInput.Type
 
 export const BrowserNavigationTarget = Schema.Union([
   Schema.Struct({
-    kind: Schema.Literal("url").annotate({
-      description: "Selects direct URL navigation.",
+    kind: Schema.Literal('url').annotate({
+      description: 'Selects direct URL navigation.',
     }),
     url: BoundedUrl.annotate({
-      description: "Direct website URL.",
+      description: 'Direct website URL.',
     }),
   }),
   Schema.Struct({
-    kind: Schema.Literal("environment-port").annotate({
-      description: "Selects a dev-server port relative to the current execution environment.",
+    kind: Schema.Literal('environment-port').annotate({
+      description: 'Selects a dev-server port relative to the current execution environment.',
     }),
     port: Schema.Int.check(Schema.isGreaterThan(0))
       .check(Schema.isLessThan(65_536))
-      .annotate({ description: "Dev-server TCP port inside the current environment." }),
+      .annotate({ description: 'Dev-server TCP port inside the current environment.' }),
     protocol: Schema.optional(
-      Schema.Literals(["http", "https"]).annotate({
-        description: "Dev-server protocol. Defaults to http.",
+      Schema.Literals(['http', 'https']).annotate({
+        description: 'Dev-server protocol. Defaults to http.',
       }),
     ),
     path: Schema.optional(
       Schema.String.annotate({
-        description: "Optional path, query, and fragment, for example /settings?tab=account.",
+        description: 'Optional path, query, and fragment, for example /settings?tab=account.',
       }),
     ),
   }),
-]);
-export type BrowserNavigationTarget = typeof BrowserNavigationTarget.Type;
+])
+export type BrowserNavigationTarget = typeof BrowserNavigationTarget.Type
 
 export const PreviewAutomationNavigateInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   url: Schema.optional(BoundedUrl).annotate({
     description:
-      "Website URL, for example https://t3.chat. Use this for public pages and directly reachable URLs.",
+      'Website URL, for example https://t3.chat. Use this for public pages and directly reachable URLs.',
   }),
   target: Schema.optional(
     BrowserNavigationTarget.annotate({
@@ -157,7 +157,7 @@ export const PreviewAutomationNavigateInput = Schema.Struct({
       "Environment-relative target. Prefer {kind:'environment-port',port:5173} for a dev server in the current environment.",
   }),
   readiness: Schema.optional(
-    Schema.Literals(["load", "domContentLoaded", "none"]).annotate({
+    Schema.Literals(['load', 'domContentLoaded', 'none']).annotate({
       description:
         "Readiness milestone before returning. 'load' waits for loading to stop (default), 'domContentLoaded' waits for an interactive document, and 'none' returns immediately.",
     }),
@@ -171,122 +171,129 @@ export const PreviewAutomationNavigateInput = Schema.Struct({
     Schema.makeFilter(
       (input) =>
         Number(input.url !== undefined) + Number(input.target !== undefined) === 1 ||
-        "Provide exactly one of url or target.",
+        'Provide exactly one of url or target.',
     ),
   )
   .annotate({
     description:
-      "Navigates the active browser tab. Provide exactly one of url or target; for most public pages use url.",
-  });
-export type PreviewAutomationNavigateInput = typeof PreviewAutomationNavigateInput.Type;
+      'Navigates the active browser tab. Provide exactly one of url or target; for most public pages use url.',
+  })
+export type PreviewAutomationNavigateInput = typeof PreviewAutomationNavigateInput.Type
 
 export const PreviewAutomationResizeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  mode: Schema.Literals(["fill", "freeform", "preset"]).annotate({
+  mode: Schema.Literals(['fill', 'freeform', 'preset']).annotate({
     description:
-      "Viewport mode: fill follows the preview panel, freeform uses exact independently resizable dimensions, and preset uses a named device size.",
+      'Viewport mode: fill follows the preview panel, freeform uses exact independently resizable dimensions, and preset uses a named device size.',
   }),
   preset: Schema.optional(
     PreviewViewportPresetId.annotate({
       description: "Named viewport from Chrome DevTools' standard device catalog.",
     }),
   ).annotate({
-    description: "Named device size. Required only when mode is preset.",
+    description: 'Named device size. Required only when mode is preset.',
   }),
   width: Schema.optional(
     PreviewViewportSize.fields.width.annotate({
-      description: "Freeform viewport width in CSS pixels. Required only in freeform mode.",
+      description: 'Freeform viewport width in CSS pixels. Required only in freeform mode.',
     }),
   ).annotate({
-    description: "Freeform viewport width in CSS pixels. Required only in freeform mode.",
+    description: 'Freeform viewport width in CSS pixels. Required only in freeform mode.',
   }),
   height: Schema.optional(
     PreviewViewportSize.fields.height.annotate({
-      description: "Freeform viewport height in CSS pixels. Required only in freeform mode.",
+      description: 'Freeform viewport height in CSS pixels. Required only in freeform mode.',
     }),
   ).annotate({
-    description: "Freeform viewport height in CSS pixels. Required only in freeform mode.",
+    description: 'Freeform viewport height in CSS pixels. Required only in freeform mode.',
   }),
   orientation: Schema.optional(
-    Schema.Literals(["portrait", "landscape"]).annotate({
+    Schema.Literals(['portrait', 'landscape']).annotate({
       description:
         "Orientation for a fixed device preset. Defaults to the preset's native orientation.",
     }),
   ).annotate({
     description:
-      "Orientation for a named device preset. It is not accepted in fill or freeform mode.",
+      'Orientation for a named device preset. It is not accepted in fill or freeform mode.',
   }),
   timeoutMs: OptionalTimeoutMs,
 })
   .check(
-    Schema.makeFilter((input) => {
-      const hasPreset = input.preset !== undefined;
-      const hasWidth = input.width !== undefined;
-      const hasHeight = input.height !== undefined;
-      if (hasWidth !== hasHeight) return "Custom dimensions require both width and height.";
-      if (input.mode === "fill") {
+    Schema.makeFilter((input) =>
+    {
+      const hasPreset = input.preset !== undefined
+      const hasWidth = input.width !== undefined
+      const hasHeight = input.height !== undefined
+      if (hasWidth !== hasHeight) return 'Custom dimensions require both width and height.'
+      if (input.mode === 'fill')
+      {
         return !hasPreset && !hasWidth && input.orientation === undefined
           ? true
-          : "Fill mode does not accept a preset, dimensions, or orientation.";
+          : 'Fill mode does not accept a preset, dimensions, or orientation.'
       }
-      if (input.mode === "freeform") {
-        if (!hasWidth || !hasHeight || hasPreset || input.orientation !== undefined) {
-          return "Freeform mode requires width and height and does not accept a preset or orientation.";
+      if (input.mode === 'freeform')
+      {
+        if (!hasWidth || !hasHeight || hasPreset || input.orientation !== undefined)
+        {
+          return 'Freeform mode requires width and height and does not accept a preset or orientation.'
         }
-      } else if (!hasPreset || hasWidth || hasHeight) {
-        return "Preset mode requires a preset and does not accept custom dimensions.";
       }
-      if (hasWidth && hasHeight && input.width! * input.height! > PREVIEW_VIEWPORT_MAX_AREA) {
-        return `Custom viewport area must not exceed ${PREVIEW_VIEWPORT_MAX_AREA} pixels.`;
+      else if (!hasPreset || hasWidth || hasHeight)
+      {
+        return 'Preset mode requires a preset and does not accept custom dimensions.'
       }
-      return true;
+      if (hasWidth && hasHeight && input.width! * input.height! > PREVIEW_VIEWPORT_MAX_AREA)
+      {
+        return `Custom viewport area must not exceed ${PREVIEW_VIEWPORT_MAX_AREA} pixels.`
+      }
+      return true
     }),
   )
   .annotate({
     description:
-      "Sets the active browser tab to fill-panel, independently resizable freeform, or named device-preset sizing.",
-  });
-export type PreviewAutomationResizeInput = typeof PreviewAutomationResizeInput.Type;
+      'Sets the active browser tab to fill-panel, independently resizable freeform, or named device-preset sizing.',
+  })
+export type PreviewAutomationResizeInput = typeof PreviewAutomationResizeInput.Type
 
 export const PreviewAutomationResizeResult = Schema.Struct({
   tabId: PreviewTabId,
   setting: PreviewViewportSetting,
   viewport: PreviewRenderedViewportSize,
-});
-export type PreviewAutomationResizeResult = typeof PreviewAutomationResizeResult.Type;
+})
+export type PreviewAutomationResizeResult = typeof PreviewAutomationResizeResult.Type
 
 /** Mirrors DesktopPreviewColorScheme; declared here to keep this module free of ipc.ts imports. */
-export const PreviewAutomationColorScheme = Schema.Literals(["system", "light", "dark"]);
-export type PreviewAutomationColorScheme = typeof PreviewAutomationColorScheme.Type;
+export const PreviewAutomationColorScheme = Schema.Literals(['system', 'light', 'dark'])
+export type PreviewAutomationColorScheme = typeof PreviewAutomationColorScheme.Type
 
 export const PreviewAutomationSetColorSchemeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   colorScheme: PreviewAutomationColorScheme.annotate({
     description:
-      "Emulated prefers-color-scheme for the page: light, dark, or system to follow the OS appearance.",
+      'Emulated prefers-color-scheme for the page: light, dark, or system to follow the OS appearance.',
   }),
 }).annotate({
   description:
-    "Emulates prefers-color-scheme in the active browser tab without changing the OS or app theme.",
-});
-export type PreviewAutomationSetColorSchemeInput = typeof PreviewAutomationSetColorSchemeInput.Type;
+    'Emulates prefers-color-scheme in the active browser tab without changing the OS or app theme.',
+})
+export type PreviewAutomationSetColorSchemeInput = typeof PreviewAutomationSetColorSchemeInput.Type
 
 export const PreviewAutomationSetColorSchemeResult = Schema.Struct({
   tabId: PreviewTabId,
   colorScheme: PreviewAutomationColorScheme,
-});
+})
 export type PreviewAutomationSetColorSchemeResult =
-  typeof PreviewAutomationSetColorSchemeResult.Type;
+  typeof PreviewAutomationSetColorSchemeResult.Type
 
 const Locator = TrimmedNonEmptyString.annotate({
   description:
     "Playwright selector, preferably role/text based, for example role=button[name='Send'] or text=Continue. Use snapshot first to inspect the page.",
-});
+})
 
 const LegacySelector = TrimmedNonEmptyString.annotate({
   description:
     "Legacy CSS selector such as button[type='submit']. Prefer locator for resilient role/text targeting.",
-});
+})
 
 export const PreviewAutomationClickInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
@@ -300,38 +307,39 @@ export const PreviewAutomationClickInput = Schema.Struct({
   }),
   x: Schema.optional(
     Schema.Finite.annotate({
-      description: "Viewport-relative X coordinate in CSS pixels. Must be paired with y.",
+      description: 'Viewport-relative X coordinate in CSS pixels. Must be paired with y.',
     }),
   ),
   y: Schema.optional(
     Schema.Finite.annotate({
-      description: "Viewport-relative Y coordinate in CSS pixels. Must be paired with x.",
+      description: 'Viewport-relative Y coordinate in CSS pixels. Must be paired with x.',
     }),
   ),
   timeoutMs: OptionalTimeoutMs,
 })
   .check(
-    Schema.makeFilter((input) => {
+    Schema.makeFilter((input) =>
+    {
       const selectorModes =
-        Number(input.selector !== undefined) + Number(input.locator !== undefined);
-      const hasX = input.x !== undefined;
-      const hasY = input.y !== undefined;
-      if (hasX !== hasY) return "Coordinates require both x and y.";
-      const coordinateModes = hasX && hasY ? 1 : 0;
-      return selectorModes + coordinateModes === 1 || "Provide exactly one click target.";
+        Number(input.selector !== undefined) + Number(input.locator !== undefined)
+      const hasX = input.x !== undefined
+      const hasY = input.y !== undefined
+      if (hasX !== hasY) return 'Coordinates require both x and y.'
+      const coordinateModes = hasX && hasY ? 1 : 0
+      return selectorModes + coordinateModes === 1 || 'Provide exactly one click target.'
     }),
   )
   .annotate({
     description:
-      "Clicks one target. Provide exactly one of locator, selector, or the x/y coordinate pair.",
-  });
-export type PreviewAutomationClickInput = typeof PreviewAutomationClickInput.Type;
+      'Clicks one target. Provide exactly one of locator, selector, or the x/y coordinate pair.',
+  })
+export type PreviewAutomationClickInput = typeof PreviewAutomationClickInput.Type
 
 export const PreviewAutomationTypeInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
-  text: Schema.String.annotate({ description: "Literal text to insert." }),
+  text: Schema.String.annotate({ description: 'Literal text to insert.' }),
   selector: Schema.optional(LegacySelector).annotate({
-    description: "Legacy CSS selector for the input. Prefer locator.",
+    description: 'Legacy CSS selector for the input. Prefer locator.',
   }),
   locator: Schema.optional(Locator).annotate({
     description:
@@ -339,7 +347,7 @@ export const PreviewAutomationTypeInput = Schema.Struct({
   }),
   clear: Schema.optional(
     Schema.Boolean.annotate({
-      description: "Clear the existing input value before inserting text. Defaults to false.",
+      description: 'Clear the existing input value before inserting text. Defaults to false.',
     }),
   ),
   timeoutMs: OptionalTimeoutMs,
@@ -348,14 +356,14 @@ export const PreviewAutomationTypeInput = Schema.Struct({
     Schema.makeFilter(
       (input) =>
         !(input.selector !== undefined && input.locator !== undefined) ||
-        "Provide at most one of selector or locator.",
+        'Provide at most one of selector or locator.',
     ),
   )
   .annotate({
     description:
-      "Types into locator/selector, or into the currently focused element when neither target is provided.",
-  });
-export type PreviewAutomationTypeInput = typeof PreviewAutomationTypeInput.Type;
+      'Types into locator/selector, or into the currently focused element when neither target is provided.',
+  })
+export type PreviewAutomationTypeInput = typeof PreviewAutomationTypeInput.Type
 
 export const PreviewAutomationPressInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
@@ -363,55 +371,55 @@ export const PreviewAutomationPressInput = Schema.Struct({
     .check(
       Schema.isNonEmpty({
         description:
-          "Keyboard key name such as Enter, Escape, Tab, ArrowDown, Backspace, or a single character.",
+          'Keyboard key name such as Enter, Escape, Tab, ArrowDown, Backspace, or a single character.',
       }),
     )
     .annotateKey({
       description:
-        "Keyboard key name such as Enter, Escape, Tab, ArrowDown, Backspace, or a single character.",
+        'Keyboard key name such as Enter, Escape, Tab, ArrowDown, Backspace, or a single character.',
     }),
   modifiers: Schema.optional(
-    Schema.Array(Schema.Literals(["Alt", "Control", "Meta", "Shift"])).annotate({
-      description: "Modifier keys held while pressing key.",
+    Schema.Array(Schema.Literals(['Alt', 'Control', 'Meta', 'Shift'])).annotate({
+      description: 'Modifier keys held while pressing key.',
     }),
   ),
-}).annotate({ description: "Presses one keyboard key in the active browser tab." });
-export type PreviewAutomationPressInput = typeof PreviewAutomationPressInput.Type;
+}).annotate({ description: 'Presses one keyboard key in the active browser tab.' })
+export type PreviewAutomationPressInput = typeof PreviewAutomationPressInput.Type
 
 export const PreviewAutomationScrollInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   deltaX: Schema.optional(
     Schema.Finite.annotate({
-      description: "Horizontal scroll delta in CSS pixels. Positive scrolls right. Defaults to 0.",
+      description: 'Horizontal scroll delta in CSS pixels. Positive scrolls right. Defaults to 0.',
     }),
   ),
   deltaY: Schema.optional(
     Schema.Finite.annotate({
-      description: "Vertical scroll delta in CSS pixels. Positive scrolls down. Defaults to 0.",
+      description: 'Vertical scroll delta in CSS pixels. Positive scrolls down. Defaults to 0.',
     }),
   ),
   selector: Schema.optional(LegacySelector).annotate({
-    description: "Legacy CSS selector for a scrollable container. Omit to scroll the viewport.",
+    description: 'Legacy CSS selector for a scrollable container. Omit to scroll the viewport.',
   }),
   locator: Schema.optional(Locator).annotate({
-    description: "Playwright selector for a scrollable container. Omit to scroll the viewport.",
+    description: 'Playwright selector for a scrollable container. Omit to scroll the viewport.',
   }),
 })
   .check(
-    Schema.makeFilter((input) => {
-      if (input.selector !== undefined && input.locator !== undefined) {
-        return "Provide at most one of selector or locator.";
+    Schema.makeFilter((input) =>
+    {
+      if (input.selector !== undefined && input.locator !== undefined)
+      {
+        return 'Provide at most one of selector or locator.'
       }
-      return (
-        input.deltaX !== undefined || input.deltaY !== undefined || "Provide deltaX or deltaY."
-      );
+      return input.deltaX !== undefined || input.deltaY !== undefined || 'Provide deltaX or deltaY.'
     }),
   )
   .annotate({
     description:
-      "Scrolls the viewport, or a locator/selector container. Provide deltaX, deltaY, or both.",
-  });
-export type PreviewAutomationScrollInput = typeof PreviewAutomationScrollInput.Type;
+      'Scrolls the viewport, or a locator/selector container. Provide deltaX, deltaY, or both.',
+  })
+export type PreviewAutomationScrollInput = typeof PreviewAutomationScrollInput.Type
 
 export const PreviewAutomationEvaluateInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
@@ -428,24 +436,24 @@ export const PreviewAutomationEvaluateInput = Schema.Struct({
         "JavaScript expression evaluated in the page's main frame, for example document.title or (() => ({href: location.href}))().",
     }),
   awaitPromise: Schema.optional(
-    Schema.Boolean.annotate({ description: "Await a returned Promise. Defaults to true." }),
+    Schema.Boolean.annotate({ description: 'Await a returned Promise. Defaults to true.' }),
   ),
   returnByValue: Schema.optional(
     Schema.Boolean.annotate({
       description:
-        "Serialize and return the value instead of a remote object reference. Defaults to true.",
+        'Serialize and return the value instead of a remote object reference. Defaults to true.',
     }),
   ),
 }).annotate({
   description:
-    "Evaluates JavaScript in the page. Prefer snapshot and semantic actions; use evaluate for inspection or unsupported interactions.",
-});
-export type PreviewAutomationEvaluateInput = typeof PreviewAutomationEvaluateInput.Type;
+    'Evaluates JavaScript in the page. Prefer snapshot and semantic actions; use evaluate for inspection or unsupported interactions.',
+})
+export type PreviewAutomationEvaluateInput = typeof PreviewAutomationEvaluateInput.Type
 
 export const PreviewAutomationWaitForInput = Schema.Struct({
   ...PreviewAutomationTabTargetFields,
   selector: Schema.optional(LegacySelector).annotate({
-    description: "Legacy CSS selector that must match an element. Prefer locator.",
+    description: 'Legacy CSS selector that must match an element. Prefer locator.',
   }),
   locator: Schema.optional(Locator).annotate({
     description:
@@ -453,37 +461,39 @@ export const PreviewAutomationWaitForInput = Schema.Struct({
   }),
   text: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "Case-sensitive substring that must appear in visible document text.",
+      description: 'Case-sensitive substring that must appear in visible document text.',
     }),
   ).annotate({
-    description: "Case-sensitive substring that must appear in visible document text.",
+    description: 'Case-sensitive substring that must appear in visible document text.',
   }),
   urlIncludes: Schema.optional(
     TrimmedNonEmptyString.annotate({
-      description: "Substring that must appear in the current absolute URL.",
+      description: 'Substring that must appear in the current absolute URL.',
     }),
-  ).annotate({ description: "Substring that must appear in the current absolute URL." }),
+  ).annotate({ description: 'Substring that must appear in the current absolute URL.' }),
   timeoutMs: OptionalTimeoutMs,
 })
   .check(
-    Schema.makeFilter((input) => {
-      if (input.selector !== undefined && input.locator !== undefined) {
-        return "Provide at most one of selector or locator.";
+    Schema.makeFilter((input) =>
+    {
+      if (input.selector !== undefined && input.locator !== undefined)
+      {
+        return 'Provide at most one of selector or locator.'
       }
       return (
         input.selector !== undefined ||
         input.locator !== undefined ||
         input.text !== undefined ||
         input.urlIncludes !== undefined ||
-        "Provide at least one wait condition."
-      );
+        'Provide at least one wait condition.'
+      )
     }),
   )
   .annotate({
     description:
-      "Waits until all provided conditions match. Use after click/type when the page changes asynchronously.",
-  });
-export type PreviewAutomationWaitForInput = typeof PreviewAutomationWaitForInput.Type;
+      'Waits until all provided conditions match. Use after click/type when the page changes asynchronously.',
+  })
+export type PreviewAutomationWaitForInput = typeof PreviewAutomationWaitForInput.Type
 
 export const PreviewAutomationElement = Schema.Struct({
   tag: Schema.String,
@@ -494,16 +504,16 @@ export const PreviewAutomationElement = Schema.Struct({
   y: Schema.Number,
   width: Schema.Number,
   height: Schema.Number,
-});
-export type PreviewAutomationElement = typeof PreviewAutomationElement.Type;
+})
+export type PreviewAutomationElement = typeof PreviewAutomationElement.Type
 
 export const PreviewAutomationConsoleEntry = Schema.Struct({
   level: Schema.String,
   text: Schema.String,
   timestamp: Schema.String,
   source: Schema.optional(Schema.String),
-});
-export type PreviewAutomationConsoleEntry = typeof PreviewAutomationConsoleEntry.Type;
+})
+export type PreviewAutomationConsoleEntry = typeof PreviewAutomationConsoleEntry.Type
 
 export const PreviewAutomationNetworkEntry = Schema.Struct({
   url: Schema.String,
@@ -512,18 +522,18 @@ export const PreviewAutomationNetworkEntry = Schema.Struct({
   failed: Schema.Boolean,
   errorText: Schema.optional(Schema.String),
   timestamp: Schema.String,
-});
-export type PreviewAutomationNetworkEntry = typeof PreviewAutomationNetworkEntry.Type;
+})
+export type PreviewAutomationNetworkEntry = typeof PreviewAutomationNetworkEntry.Type
 
 export const PreviewAutomationActionEvent = Schema.Struct({
   id: Schema.String,
   action: Schema.String,
-  status: Schema.Literals(["running", "succeeded", "failed", "interrupted"]),
+  status: Schema.Literals(['running', 'succeeded', 'failed', 'interrupted']),
   startedAt: Schema.String,
   completedAt: Schema.optional(Schema.String),
   error: Schema.optional(Schema.String),
-});
-export type PreviewAutomationActionEvent = typeof PreviewAutomationActionEvent.Type;
+})
+export type PreviewAutomationActionEvent = typeof PreviewAutomationActionEvent.Type
 
 export const PreviewAutomationSnapshot = Schema.Struct({
   url: Schema.String,
@@ -536,20 +546,20 @@ export const PreviewAutomationSnapshot = Schema.Struct({
   networkEntries: Schema.Array(PreviewAutomationNetworkEntry),
   actionTimeline: Schema.Array(PreviewAutomationActionEvent),
   screenshot: Schema.Struct({
-    mimeType: Schema.Literal("image/png"),
+    mimeType: Schema.Literal('image/png'),
     data: Schema.String,
     width: Schema.Int,
     height: Schema.Int,
   }),
-});
-export type PreviewAutomationSnapshot = typeof PreviewAutomationSnapshot.Type;
+})
+export type PreviewAutomationSnapshot = typeof PreviewAutomationSnapshot.Type
 
 export const PreviewAutomationRecordingStatus = Schema.Struct({
   tabId: PreviewTabId,
   recording: Schema.Boolean,
   startedAt: Schema.NullOr(Schema.String),
-});
-export type PreviewAutomationRecordingStatus = typeof PreviewAutomationRecordingStatus.Type;
+})
+export type PreviewAutomationRecordingStatus = typeof PreviewAutomationRecordingStatus.Type
 
 export const PreviewAutomationRecordingArtifact = Schema.Struct({
   id: Schema.String,
@@ -558,19 +568,19 @@ export const PreviewAutomationRecordingArtifact = Schema.Struct({
   mimeType: Schema.String,
   sizeBytes: Schema.Int,
   createdAt: Schema.String,
-});
-export type PreviewAutomationRecordingArtifact = typeof PreviewAutomationRecordingArtifact.Type;
+})
+export type PreviewAutomationRecordingArtifact = typeof PreviewAutomationRecordingArtifact.Type
 
-export const PreviewAutomationClientId = TrimmedNonEmptyString.check(Schema.isMaxLength(128));
-export type PreviewAutomationClientId = typeof PreviewAutomationClientId.Type;
-export const PreviewAutomationConnectionId = TrimmedNonEmptyString.check(Schema.isMaxLength(64));
-export type PreviewAutomationConnectionId = typeof PreviewAutomationConnectionId.Type;
+export const PreviewAutomationClientId = TrimmedNonEmptyString.check(Schema.isMaxLength(128))
+export type PreviewAutomationClientId = typeof PreviewAutomationClientId.Type
+export const PreviewAutomationConnectionId = TrimmedNonEmptyString.check(Schema.isMaxLength(64))
+export type PreviewAutomationConnectionId = typeof PreviewAutomationConnectionId.Type
 
 export const PreviewAutomationHostIdentity = Schema.Struct({
   clientId: PreviewAutomationClientId,
   environmentId: EnvironmentId,
-});
-export type PreviewAutomationHostIdentity = typeof PreviewAutomationHostIdentity.Type;
+})
+export type PreviewAutomationHostIdentity = typeof PreviewAutomationHostIdentity.Type
 
 export const PreviewAutomationHost = Schema.Struct({
   ...PreviewAutomationHostIdentity.fields,
@@ -579,15 +589,15 @@ export const PreviewAutomationHost = Schema.Struct({
    * a newer server safely coexist with an older desktop during rollout.
    */
   supportedOperations: Schema.optional(Schema.Array(PreviewAutomationOperation)),
-});
-export type PreviewAutomationHost = typeof PreviewAutomationHost.Type;
+})
+export type PreviewAutomationHost = typeof PreviewAutomationHost.Type
 
 export const PreviewAutomationHostFocus = Schema.Struct({
   ...PreviewAutomationHostIdentity.fields,
   connectionId: PreviewAutomationConnectionId,
   focused: Schema.Boolean,
-});
-export type PreviewAutomationHostFocus = typeof PreviewAutomationHostFocus.Type;
+})
+export type PreviewAutomationHostFocus = typeof PreviewAutomationHostFocus.Type
 
 export const PreviewAutomationRequest = Schema.Struct({
   requestId: TrimmedNonEmptyString,
@@ -597,21 +607,21 @@ export const PreviewAutomationRequest = Schema.Struct({
   operation: PreviewAutomationOperation,
   input: Schema.Unknown,
   timeoutMs: Schema.Int.check(Schema.isGreaterThan(0)),
-});
-export type PreviewAutomationRequest = typeof PreviewAutomationRequest.Type;
+})
+export type PreviewAutomationRequest = typeof PreviewAutomationRequest.Type
 
 export const PreviewAutomationStreamEvent = Schema.Union([
   Schema.Struct({
-    type: Schema.Literal("connected"),
+    type: Schema.Literal('connected'),
     connectionId: PreviewAutomationConnectionId,
   }),
   Schema.Struct({
-    type: Schema.Literal("request"),
+    type: Schema.Literal('request'),
     connectionId: PreviewAutomationConnectionId,
     request: PreviewAutomationRequest,
   }),
-]);
-export type PreviewAutomationStreamEvent = typeof PreviewAutomationStreamEvent.Type;
+])
+export type PreviewAutomationStreamEvent = typeof PreviewAutomationStreamEvent.Type
 
 export const PreviewAutomationResponse = Schema.Struct({
   clientId: PreviewAutomationClientId,
@@ -626,21 +636,23 @@ export const PreviewAutomationResponse = Schema.Struct({
       detail: Schema.optional(Schema.Unknown),
     }),
   ),
-});
-export type PreviewAutomationResponse = typeof PreviewAutomationResponse.Type;
+})
+export type PreviewAutomationResponse = typeof PreviewAutomationResponse.Type
 
 export class PreviewAutomationUnavailableError extends Schema.TaggedErrorClass<PreviewAutomationUnavailableError>()(
-  "PreviewAutomationUnavailableError",
+  'PreviewAutomationUnavailableError',
   {
-    capability: Schema.Literals(["preview", "proposal"]),
+    capability: Schema.Literals(['preview', 'proposal']),
     environmentId: EnvironmentId,
     threadId: ThreadId,
     providerSessionId: TrimmedNonEmptyString,
     providerInstanceId: ProviderInstanceId,
   },
-) {
-  override get message(): string {
-    return `MCP credential does not grant the ${this.capability} capability.`;
+)
+{
+  override get message(): string
+  {
+    return `MCP credential does not grant the ${this.capability} capability.`
   }
 }
 
@@ -650,7 +662,7 @@ const PreviewAutomationScopeErrorFields = {
   threadId: ThreadId,
   providerSessionId: TrimmedNonEmptyString,
   providerInstanceId: ProviderInstanceId,
-};
+}
 
 const PreviewAutomationRequestErrorFields = {
   ...PreviewAutomationScopeErrorFields,
@@ -659,28 +671,28 @@ const PreviewAutomationRequestErrorFields = {
   requestId: TrimmedNonEmptyString,
   tabId: Schema.optional(PreviewTabId),
   timeoutMs: Schema.Int.check(Schema.isGreaterThan(0)),
-};
+}
 
 const PreviewAutomationRemoteDiagnosticFields = {
   remoteTag: TrimmedNonEmptyString,
   remoteMessageLength: Schema.Int.check(Schema.isGreaterThanOrEqualTo(0)),
   remoteDetailKind: Schema.optional(
-    Schema.Literals(["null", "array", "object", "string", "number", "boolean"]),
+    Schema.Literals(['null', 'array', 'object', 'string', 'number', 'boolean']),
   ),
   cause: Schema.Defect(),
-};
+}
 
 const PreviewAutomationOptionalRemoteDiagnosticFields = {
   remoteTag: Schema.optional(TrimmedNonEmptyString),
   remoteMessageLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   remoteDetailKind: Schema.optional(
-    Schema.Literals(["null", "array", "object", "string", "number", "boolean"]),
+    Schema.Literals(['null', 'array', 'object', 'string', 'number', 'boolean']),
   ),
   cause: Schema.optional(Schema.Defect()),
-};
+}
 
 export class PreviewAutomationNoAvailableHostError extends Schema.TaggedErrorClass<PreviewAutomationNoAvailableHostError>()(
-  "PreviewAutomationNoAvailableHostError",
+  'PreviewAutomationNoAvailableHostError',
   {
     ...PreviewAutomationScopeErrorFields,
     clientId: Schema.optional(TrimmedNonEmptyString),
@@ -690,167 +702,196 @@ export class PreviewAutomationNoAvailableHostError extends Schema.TaggedErrorCla
     timeoutMs: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
     ...PreviewAutomationOptionalRemoteDiagnosticFields,
   },
-) {
-  override get message(): string {
-    const summary = `No preview automation host is available for ${this.operation} in environment ${this.environmentId}.`;
-    return summary;
+)
+{
+  override get message(): string
+  {
+    const summary = `No preview automation host is available for ${this.operation} in environment ${this.environmentId}.`
+    return summary
   }
 }
 
 export class PreviewAutomationUnsupportedClientError extends Schema.TaggedErrorClass<PreviewAutomationUnsupportedClientError>()(
-  "PreviewAutomationUnsupportedClientError",
+  'PreviewAutomationUnsupportedClientError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
   },
-) {
-  override get message(): string {
-    return `Preview automation client ${this.clientId} does not support ${this.operation}.`;
+)
+{
+  override get message(): string
+  {
+    return `Preview automation client ${this.clientId} does not support ${this.operation}.`
   }
 }
 
 export class PreviewAutomationTabNotFoundError extends Schema.TaggedErrorClass<PreviewAutomationTabNotFoundError>()(
-  "PreviewAutomationTabNotFoundError",
+  'PreviewAutomationTabNotFoundError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
   },
-) {
-  override get message(): string {
+)
+{
+  override get message(): string
+  {
     const summary = this.tabId
       ? `Preview tab ${this.tabId} was not found for ${this.operation}.`
-      : `No active preview tab was found for ${this.operation}.`;
-    return summary;
+      : `No active preview tab was found for ${this.operation}.`
+    return summary
   }
 }
 
 export class PreviewAutomationTimeoutError extends Schema.TaggedErrorClass<PreviewAutomationTimeoutError>()(
-  "PreviewAutomationTimeoutError",
+  'PreviewAutomationTimeoutError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationOptionalRemoteDiagnosticFields,
   },
-) {
-  override get message(): string {
-    const summary = `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms.`;
-    return summary;
+)
+{
+  override get message(): string
+  {
+    const summary = `Preview automation ${this.operation} timed out after ${this.timeoutMs}ms.`
+    return summary
   }
 }
 
 export class PreviewAutomationControlInterruptedError extends Schema.TaggedErrorClass<PreviewAutomationControlInterruptedError>()(
-  "PreviewAutomationControlInterruptedError",
+  'PreviewAutomationControlInterruptedError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
   },
-) {
-  override get message(): string {
-    return `Preview automation ${this.operation} was interrupted on client ${this.clientId}.`;
+)
+{
+  override get message(): string
+  {
+    return `Preview automation ${this.operation} was interrupted on client ${this.clientId}.`
   }
 }
 
 export class PreviewAutomationExecutionError extends Schema.TaggedErrorClass<PreviewAutomationExecutionError>()(
-  "PreviewAutomationExecutionError",
+  'PreviewAutomationExecutionError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
   },
-) {
-  override get message(): string {
-    return `Preview automation ${this.operation} failed on client ${this.clientId}.`;
+)
+{
+  override get message(): string
+  {
+    return `Preview automation ${this.operation} failed on client ${this.clientId}.`
   }
 }
 
 export class PreviewAutomationInvalidSelectorError extends Schema.TaggedErrorClass<PreviewAutomationInvalidSelectorError>()(
-  "PreviewAutomationInvalidSelectorError",
+  'PreviewAutomationInvalidSelectorError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
-    selectorKind: Schema.optional(Schema.Literals(["locator", "selector"])),
+    selectorKind: Schema.optional(Schema.Literals(['locator', 'selector'])),
     selectorLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   },
-) {
-  override get message(): string {
-    if (this.selectorKind !== undefined && this.selectorLength !== undefined) {
-      return `Preview automation ${this.operation} received an invalid ${this.selectorKind} (${this.selectorLength} characters).`;
+)
+{
+  override get message(): string
+  {
+    if (this.selectorKind !== undefined && this.selectorLength !== undefined)
+    {
+      return `Preview automation ${this.operation} received an invalid ${this.selectorKind} (${this.selectorLength} characters).`
     }
-    return `Preview automation ${this.operation} received an invalid selector.`;
+    return `Preview automation ${this.operation} received an invalid selector.`
   }
 }
 
 export class PreviewAutomationTargetNotEditableError extends Schema.TaggedErrorClass<PreviewAutomationTargetNotEditableError>()(
-  "PreviewAutomationTargetNotEditableError",
+  'PreviewAutomationTargetNotEditableError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
-    selectorKind: Schema.optional(Schema.Literals(["focused-element", "locator", "selector"])),
+    selectorKind: Schema.optional(Schema.Literals(['focused-element', 'locator', 'selector'])),
     selectorLength: Schema.optional(Schema.Int.check(Schema.isGreaterThanOrEqualTo(0))),
   },
-) {
-  override get message(): string {
-    if (this.selectorKind === "focused-element") {
-      return `Preview automation ${this.operation} requires an editable focused element.`;
+)
+{
+  override get message(): string
+  {
+    if (this.selectorKind === 'focused-element')
+    {
+      return `Preview automation ${this.operation} requires an editable focused element.`
     }
-    if (this.selectorKind !== undefined && this.selectorLength !== undefined) {
-      return `Preview automation ${this.operation} requires an editable ${this.selectorKind} (${this.selectorLength} characters).`;
+    if (this.selectorKind !== undefined && this.selectorLength !== undefined)
+    {
+      return `Preview automation ${this.operation} requires an editable ${this.selectorKind} (${this.selectorLength} characters).`
     }
-    return `Preview automation ${this.operation} requires an editable target.`;
+    return `Preview automation ${this.operation} requires an editable target.`
   }
 }
 
 export class PreviewAutomationResultTooLargeError extends Schema.TaggedErrorClass<PreviewAutomationResultTooLargeError>()(
-  "PreviewAutomationResultTooLargeError",
+  'PreviewAutomationResultTooLargeError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
     maximumBytes: Schema.optional(Schema.Int.check(Schema.isGreaterThan(0))),
   },
-) {
-  override get message(): string {
+)
+{
+  override get message(): string
+  {
     const summary =
       this.maximumBytes === undefined
         ? `Preview automation ${this.operation} produced a result that is too large.`
-        : `Preview automation ${this.operation} produced a result larger than ${this.maximumBytes} bytes.`;
-    return summary;
+        : `Preview automation ${this.operation} produced a result larger than ${this.maximumBytes} bytes.`
+    return summary
   }
 }
 
 export class PreviewAutomationClientDisconnectedError extends Schema.TaggedErrorClass<PreviewAutomationClientDisconnectedError>()(
-  "PreviewAutomationClientDisconnectedError",
+  'PreviewAutomationClientDisconnectedError',
   PreviewAutomationRequestErrorFields,
-) {
-  override get message(): string {
-    return `Preview automation client ${this.clientId} disconnected during ${this.operation}.`;
+)
+{
+  override get message(): string
+  {
+    return `Preview automation client ${this.clientId} disconnected during ${this.operation}.`
   }
 }
 
 export class PreviewAutomationRequestQueueClosedError extends Schema.TaggedErrorClass<PreviewAutomationRequestQueueClosedError>()(
-  "PreviewAutomationRequestQueueClosedError",
+  'PreviewAutomationRequestQueueClosedError',
   PreviewAutomationRequestErrorFields,
-) {
-  override get message(): string {
-    return `Preview automation client ${this.clientId} stopped accepting ${this.operation} requests.`;
+)
+{
+  override get message(): string
+  {
+    return `Preview automation client ${this.clientId} stopped accepting ${this.operation} requests.`
   }
 }
 
 export class PreviewAutomationRemoteUnavailableError extends Schema.TaggedErrorClass<PreviewAutomationRemoteUnavailableError>()(
-  "PreviewAutomationRemoteUnavailableError",
+  'PreviewAutomationRemoteUnavailableError',
   {
     ...PreviewAutomationRequestErrorFields,
     ...PreviewAutomationRemoteDiagnosticFields,
   },
-) {
-  override get message(): string {
-    return `Preview automation ${this.operation} is unavailable on client ${this.clientId}.`;
+)
+{
+  override get message(): string
+  {
+    return `Preview automation ${this.operation} is unavailable on client ${this.clientId}.`
   }
 }
 
 export class PreviewAutomationMalformedResponseError extends Schema.TaggedErrorClass<PreviewAutomationMalformedResponseError>()(
-  "PreviewAutomationMalformedResponseError",
+  'PreviewAutomationMalformedResponseError',
   PreviewAutomationRequestErrorFields,
-) {
-  override get message(): string {
-    return `Preview automation client ${this.clientId} returned a malformed response for ${this.operation}.`;
+)
+{
+  override get message(): string
+  {
+    return `Preview automation client ${this.clientId} returned a malformed response for ${this.operation}.`
   }
 }
 
@@ -869,13 +910,13 @@ export const PreviewAutomationError = Schema.Union([
   PreviewAutomationRequestQueueClosedError,
   PreviewAutomationRemoteUnavailableError,
   PreviewAutomationMalformedResponseError,
-]);
-export type PreviewAutomationError = typeof PreviewAutomationError.Type;
+])
+export type PreviewAutomationError = typeof PreviewAutomationError.Type
 
 export const PreviewUrlResolution = Schema.Struct({
   requestedUrl: Schema.String,
   resolvedUrl: Schema.String,
-  resolutionKind: Schema.Literals(["direct", "direct-private-network"]),
+  resolutionKind: Schema.Literals(['direct', 'direct-private-network']),
   environmentId: EnvironmentId,
-});
-export type PreviewUrlResolution = typeof PreviewUrlResolution.Type;
+})
+export type PreviewUrlResolution = typeof PreviewUrlResolution.Type

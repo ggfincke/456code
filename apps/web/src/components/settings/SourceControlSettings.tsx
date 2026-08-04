@@ -1,9 +1,9 @@
 // apps/web/src/components/settings/SourceControlSettings.tsx
 // configures source control behavior and polling
-import { ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon } from "lucide-react";
-import * as Duration from "effect/Duration";
-import * as Option from "effect/Option";
-import { useState, type ReactNode } from "react";
+import { ChevronDownIcon, GitPullRequestIcon, RefreshCwIcon } from 'lucide-react'
+import * as Duration from 'effect/Duration'
+import * as Option from 'effect/Option'
+import { useState, type ReactNode } from 'react'
 import type {
   SourceControlProviderKind,
   SourceControlDiscoveryResult,
@@ -11,17 +11,17 @@ import type {
   SourceControlProviderDiscoveryItem,
   VcsDriverKind,
   VcsDiscoveryItem,
-} from "@t3tools/contracts";
-import { DEFAULT_UNIFIED_SETTINGS } from "@t3tools/contracts/settings";
+} from '@t3tools/contracts'
+import { DEFAULT_UNIFIED_SETTINGS } from '@t3tools/contracts/settings'
 
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
-import { cn } from "../../lib/utils";
-import { usePrimaryEnvironment } from "../../state/environments";
-import { useEnvironmentQuery } from "../../state/query";
-import { sourceControlEnvironment } from "../../state/sourceControl";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Collapsible, CollapsibleContent } from "../ui/collapsible";
+import { usePrimarySettings, useUpdatePrimarySettings } from '../../hooks/useSettings'
+import { cn } from '../../lib/utils'
+import { usePrimaryEnvironment } from '../../state/environments'
+import { useEnvironmentQuery } from '../../state/query'
+import { sourceControlEnvironment } from '../../state/sourceControl'
+import { Badge } from '../ui/badge'
+import { Button } from '../ui/button'
+import { Collapsible, CollapsibleContent } from '../ui/collapsible'
 import {
   Empty,
   EmptyContent,
@@ -29,17 +29,17 @@ import {
   EmptyHeader,
   EmptyMedia,
   EmptyTitle,
-} from "../ui/empty";
-import { Skeleton } from "../ui/skeleton";
+} from '../ui/empty'
+import { Skeleton } from '../ui/skeleton'
 import {
   NumberField,
   NumberFieldDecrement,
   NumberFieldGroup,
   NumberFieldIncrement,
   NumberFieldInput,
-} from "../ui/number-field";
-import { Switch } from "../ui/switch";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+} from '../ui/number-field'
+import { Switch } from '../ui/switch'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 import {
   AzureDevOpsIcon,
   BitbucketIcon,
@@ -48,70 +48,80 @@ import {
   GitLabIcon,
   JujutsuIcon,
   type Icon,
-} from "../Icons";
-import { RedactedSensitiveText } from "./RedactedSensitiveText";
-import { SourceControlWritingSettingsSection } from "./SourceControlWritingSettings";
-import { SettingResetButton, SettingsPageContainer, SettingsSection } from "./settingsLayout";
+} from '../Icons'
+import { RedactedSensitiveText } from './RedactedSensitiveText'
+import { SourceControlWritingSettingsSection } from './SourceControlWritingSettings'
+import { SettingResetButton, SettingsPageContainer, SettingsSection } from './settingsLayout'
 
 const EMPTY_DISCOVERY_RESULT: SourceControlDiscoveryResult = {
   versionControlSystems: [],
   sourceControlProviders: [],
-};
+}
 
 const SOURCE_CONTROL_PROVIDER_ICONS: Partial<Record<SourceControlProviderKind, Icon>> = {
   github: GitHubIcon,
   gitlab: GitLabIcon,
-  "azure-devops": AzureDevOpsIcon,
+  'azure-devops': AzureDevOpsIcon,
   bitbucket: BitbucketIcon,
-};
+}
 
 const VCS_ICONS: Partial<Record<VcsDriverKind, Icon>> = {
   git: GitIcon,
   jj: JujutsuIcon,
-};
-
-const SOURCE_CONTROL_SKELETON_ROWS = ["primary", "secondary"] as const;
-const GIT_FETCH_INTERVAL_STEP_SECONDS = 5;
-
-function durationToSeconds(duration: Duration.Duration): number {
-  return Math.round(Duration.toMillis(duration) / 1_000);
 }
 
-function normalizeFetchIntervalSeconds(value: number | null): number {
-  if (value === null || !Number.isFinite(value)) {
-    return 0;
+const SOURCE_CONTROL_SKELETON_ROWS = ['primary', 'secondary'] as const
+const GIT_FETCH_INTERVAL_STEP_SECONDS = 5
+
+function durationToSeconds(duration: Duration.Duration): number
+{
+  return Math.round(Duration.toMillis(duration) / 1_000)
+}
+
+function normalizeFetchIntervalSeconds(value: number | null): number
+{
+  if (value === null || !Number.isFinite(value))
+  {
+    return 0
   }
-  return Math.max(0, Math.round(value));
+  return Math.max(0, Math.round(value))
 }
 
-function optionLabel(value: Option.Option<string>): string | null {
-  return Option.getOrNull(value);
+function optionLabel(value: Option.Option<string>): string | null
+{
+  return Option.getOrNull(value)
 }
 
 function isProviderDiscoveryItem(
   item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem,
-): item is SourceControlProviderDiscoveryItem {
-  return "auth" in item;
+): item is SourceControlProviderDiscoveryItem
+{
+  return 'auth' in item
 }
 
-function isVcsNotReady(item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem): boolean {
-  return !isProviderDiscoveryItem(item) && !item.implemented;
+function isVcsNotReady(item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem): boolean
+{
+  return !isProviderDiscoveryItem(item) && !item.implemented
 }
 
 function authPresentation(auth: SourceControlProviderAuth): {
-  readonly label: string;
-  readonly badge: "warning" | null;
-} {
-  if (auth.status === "authenticated") {
-    return { label: "Authenticated", badge: null };
+  readonly label: string
+  readonly badge: 'warning' | null
+}
+{
+  if (auth.status === 'authenticated')
+  {
+    return { label: 'Authenticated', badge: null }
   }
-  if (auth.status === "unauthenticated") {
-    return { label: "Not authenticated", badge: "warning" };
+  if (auth.status === 'unauthenticated')
+  {
+    return { label: 'Not authenticated', badge: 'warning' }
   }
-  return { label: "Status unknown", badge: null };
+  return { label: 'Status unknown', badge: null }
 }
 
-function RedactedAccount(props: { readonly account: string | null }) {
+function RedactedAccount(props: { readonly account: string | null })
+{
   return (
     <RedactedSensitiveText
       value={props.account}
@@ -119,28 +129,31 @@ function RedactedAccount(props: { readonly account: string | null }) {
       revealTooltip="Click to reveal account"
       hideTooltip="Click to hide account"
     />
-  );
+  )
 }
 
-function itemStatusDot(item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem): string {
-  if (isVcsNotReady(item)) return "bg-muted-foreground/35";
-  if (item.status !== "available") return "bg-warning";
-  if (isProviderDiscoveryItem(item) && item.auth.status !== "authenticated") return "bg-warning";
-  return "bg-success";
+function itemStatusDot(item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem): string
+{
+  if (isVcsNotReady(item)) return 'bg-muted-foreground/35'
+  if (item.status !== 'available') return 'bg-warning'
+  if (isProviderDiscoveryItem(item) && item.auth.status !== 'authenticated') return 'bg-warning'
+  return 'bg-success'
 }
 
 function SourceControlItemMark({
   item,
 }: {
-  readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem;
-}) {
-  const dotClassName = itemStatusDot(item);
+  readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem
+})
+{
+  const dotClassName = itemStatusDot(item)
   const Icon = isProviderDiscoveryItem(item)
     ? SOURCE_CONTROL_PROVIDER_ICONS[item.kind]
-    : VCS_ICONS[item.kind];
+    : VCS_ICONS[item.kind]
 
-  if (!Icon) {
-    return <span className={cn("size-2 shrink-0 rounded-full", dotClassName)} aria-hidden />;
+  if (!Icon)
+  {
+    return <span className={cn('size-2 shrink-0 rounded-full', dotClassName)} aria-hidden />
   }
 
   return (
@@ -148,13 +161,13 @@ function SourceControlItemMark({
       <Icon className="size-4.5 text-foreground/80" aria-hidden />
       <span
         className={cn(
-          "pointer-events-none absolute -left-0.5 -top-0.5 size-2 rounded-full ring-2 ring-background",
+          'pointer-events-none absolute -left-0.5 -top-0.5 size-2 rounded-full ring-2 ring-background',
           dotClassName,
         )}
         aria-hidden
       />
     </span>
-  );
+  )
 }
 
 function itemSummary({
@@ -162,20 +175,25 @@ function itemSummary({
   auth,
   authAccount,
 }: {
-  readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem;
-  readonly auth: SourceControlProviderAuth | null;
-  readonly authAccount: string | null;
-}) {
-  if (isVcsNotReady(item)) {
-    return <span>Support for {item.label} is coming soon.</span>;
+  readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem
+  readonly auth: SourceControlProviderAuth | null
+  readonly authAccount: string | null
+})
+{
+  if (isVcsNotReady(item))
+  {
+    return <span>Support for {item.label} is coming soon.</span>
   }
 
-  if (item.status !== "available") {
-    return <span>Not available on this server: {item.installHint}</span>;
+  if (item.status !== 'available')
+  {
+    return <span>Not available on this server: {item.installHint}</span>
   }
 
-  if (auth) {
-    if (auth.status === "authenticated") {
+  if (auth)
+  {
+    if (auth.status === 'authenticated')
+    {
       return (
         <>
           <span>Authenticated</span>
@@ -186,54 +204,57 @@ function itemSummary({
             </>
           ) : null}
         </>
-      );
+      )
     }
 
-    if (!item.executable) {
-      return <span>Available. {item.installHint}</span>;
+    if (!item.executable)
+    {
+      return <span>Available. {item.installHint}</span>
     }
 
-    if (auth.status === "unauthenticated") {
+    if (auth.status === 'unauthenticated')
+    {
       return (
         <span>
           {item.label} is not authenticated on this server. Sign in or configure credentials using
-          the <code className="rounded bg-muted px-1 py-px text-[11px]">{item.executable}</code>{" "}
+          the <code className="rounded bg-muted px-1 py-px text-[11px]">{item.executable}</code>{' '}
           tool on the server host to enable change request features.
         </span>
-      );
+      )
     }
     return (
       <span>
         Could not verify {item.label}. {item.installHint}
       </span>
-    );
+    )
   }
 
-  return <span>Available</span>;
+  return <span>Available</span>
 }
 
 function DiscoveryItemRow({
   item,
   children,
 }: {
-  readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem;
-  readonly children?: ReactNode;
-}) {
-  const version = optionLabel(item.version);
+  readonly item: VcsDiscoveryItem | SourceControlProviderDiscoveryItem
+  readonly children?: ReactNode
+})
+{
+  const version = optionLabel(item.version)
   const enabled = isProviderDiscoveryItem(item)
-    ? item.status === "available" && item.auth.status === "authenticated"
-    : item.status === "available" && item.implemented;
-  const auth = isProviderDiscoveryItem(item) ? item.auth : null;
-  const authStatus = auth ? authPresentation(auth) : null;
-  const authAccount = auth ? optionLabel(auth.account) : null;
-  const [isExpanded, setIsExpanded] = useState(false);
-  const hasDetails = children !== undefined;
+    ? item.status === 'available' && item.auth.status === 'authenticated'
+    : item.status === 'available' && item.implemented
+  const auth = isProviderDiscoveryItem(item) ? item.auth : null
+  const authStatus = auth ? authPresentation(auth) : null
+  const authAccount = auth ? optionLabel(auth.account) : null
+  const [isExpanded, setIsExpanded] = useState(false)
+  const hasDetails = children !== undefined
 
   return (
     <div
       className={cn(
-        "rounded-xl transition-colors hover:bg-muted/20",
-        isVcsNotReady(item) && "opacity-80",
+        'rounded-xl transition-colors hover:bg-muted/20',
+        isVcsNotReady(item) && 'opacity-80',
       )}
     >
       <div className="px-3 py-3 sm:px-4">
@@ -271,7 +292,7 @@ function DiscoveryItemRow({
                 aria-label={`Toggle ${item.label} details`}
               >
                 <ChevronDownIcon
-                  className={cn("size-3.5 transition-transform", isExpanded && "rotate-180")}
+                  className={cn('size-3.5 transition-transform', isExpanded && 'rotate-180')}
                 />
               </Button>
             ) : null}
@@ -290,20 +311,21 @@ function DiscoveryItemRow({
         </Collapsible>
       ) : null}
     </div>
-  );
+  )
 }
 
-function GitFetchIntervalSettings() {
+function GitFetchIntervalSettings()
+{
   const automaticGitFetchInterval = usePrimarySettings(
     (settings) => settings.automaticGitFetchInterval,
-  );
-  const updateSettings = useUpdatePrimarySettings();
-  const automaticGitFetchIntervalSeconds = durationToSeconds(automaticGitFetchInterval);
+  )
+  const updateSettings = useUpdatePrimarySettings()
+  const automaticGitFetchIntervalSeconds = durationToSeconds(automaticGitFetchInterval)
   const defaultAutomaticGitFetchIntervalSeconds = durationToSeconds(
     DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval,
-  );
+  )
   const canResetFetchInterval =
-    automaticGitFetchIntervalSeconds !== defaultAutomaticGitFetchIntervalSeconds;
+    automaticGitFetchIntervalSeconds !== defaultAutomaticGitFetchIntervalSeconds
 
   return (
     <div className="grid gap-3">
@@ -313,8 +335,8 @@ function GitFetchIntervalSettings() {
             <span className="text-xs font-medium text-foreground">Fetch interval</span>
             <span
               className={cn(
-                "inline-flex size-5 shrink-0 items-center justify-center transition-opacity",
-                canResetFetchInterval ? "opacity-100" : "pointer-events-none opacity-0",
+                'inline-flex size-5 shrink-0 items-center justify-center transition-opacity',
+                canResetFetchInterval ? 'opacity-100' : 'pointer-events-none opacity-0',
               )}
               aria-hidden={!canResetFetchInterval}
             >
@@ -358,16 +380,17 @@ function GitFetchIntervalSettings() {
         </div>
       </div>
     </div>
-  );
+  )
 }
 
 function SourceControlSectionSkeleton({
   title,
   headerAction,
 }: {
-  readonly title: string;
-  readonly headerAction?: ReactNode;
-}) {
+  readonly title: string
+  readonly headerAction?: ReactNode
+})
+{
   return (
     <SettingsSection title={title} headerAction={headerAction}>
       {SOURCE_CONTROL_SKELETON_ROWS.map((row) => (
@@ -395,7 +418,7 @@ function SourceControlSectionSkeleton({
         </div>
       ))}
     </SettingsSection>
-  );
+  )
 }
 
 function EmptySourceControlDiscovery({
@@ -403,11 +426,12 @@ function EmptySourceControlDiscovery({
   isPending,
   onScan,
 }: {
-  readonly error: string | null;
-  readonly isPending: boolean;
-  readonly onScan: () => void;
-}) {
-  const hasError = error !== null;
+  readonly error: string | null
+  readonly isPending: boolean
+  readonly onScan: () => void
+})
+{
+  const hasError = error !== null
 
   return (
     <SettingsSection title="Server environment">
@@ -417,12 +441,12 @@ function EmptySourceControlDiscovery({
         </EmptyMedia>
         <EmptyHeader>
           <EmptyTitle>
-            {hasError ? "Could not scan the server environment" : "Nothing detected yet"}
+            {hasError ? 'Could not scan the server environment' : 'Nothing detected yet'}
           </EmptyTitle>
           <EmptyDescription>
             {hasError
               ? error
-              : "Install Git on the server, add optional hosting integrations or credentials your workspace needs, then rescan."}
+              : 'Install Git on the server, add optional hosting integrations or credentials your workspace needs, then rescan.'}
           </EmptyDescription>
         </EmptyHeader>
         <EmptyContent>
@@ -433,17 +457,18 @@ function EmptySourceControlDiscovery({
             onClick={onScan}
             disabled={isPending}
           >
-            <RefreshCwIcon className={cn("size-3.5", isPending && "animate-spin")} />
+            <RefreshCwIcon className={cn('size-3.5', isPending && 'animate-spin')} />
             Scan
           </Button>
         </EmptyContent>
       </Empty>
     </SettingsSection>
-  );
+  )
 }
 
-export function SourceControlSettingsPanel() {
-  const environmentId = usePrimaryEnvironment()?.environmentId ?? null;
+export function SourceControlSettingsPanel()
+{
+  const environmentId = usePrimaryEnvironment()?.environmentId ?? null
   const discovery = useEnvironmentQuery(
     environmentId === null
       ? null
@@ -451,14 +476,15 @@ export function SourceControlSettingsPanel() {
           environmentId,
           input: {},
         }),
-  );
-  const result = discovery.data ?? EMPTY_DISCOVERY_RESULT;
+  )
+  const result = discovery.data ?? EMPTY_DISCOVERY_RESULT
   const hasDiscoveryItems =
-    result.versionControlSystems.length > 0 || result.sourceControlProviders.length > 0;
-  const isInitialScanPending = discovery.isPending && discovery.data === null;
-  const handleScan = () => {
-    discovery.refresh();
-  };
+    result.versionControlSystems.length > 0 || result.sourceControlProviders.length > 0
+  const isInitialScanPending = discovery.isPending && discovery.data === null
+  const handleScan = () =>
+  {
+    discovery.refresh()
+  }
   const scanButton = (
     <Tooltip>
       <TooltipTrigger
@@ -471,13 +497,13 @@ export function SourceControlSettingsPanel() {
             disabled={discovery.isPending}
             aria-label="Rescan server environment"
           >
-            <RefreshCwIcon className={cn("size-3", discovery.isPending && "animate-spin")} />
+            <RefreshCwIcon className={cn('size-3', discovery.isPending && 'animate-spin')} />
           </Button>
         }
       />
       <TooltipPopup side="top">Rescan Git and hosting integrations</TooltipPopup>
     </Tooltip>
-  );
+  )
 
   return (
     <SettingsPageContainer>
@@ -492,7 +518,7 @@ export function SourceControlSettingsPanel() {
             <SettingsSection title="Version Control" headerAction={scanButton}>
               {result.versionControlSystems.map((item) => (
                 <DiscoveryItemRow key={`vcs:${item.kind}`} item={item}>
-                  {item.kind === "git" ? <GitFetchIntervalSettings /> : undefined}
+                  {item.kind === 'git' ? <GitFetchIntervalSettings /> : undefined}
                 </DiscoveryItemRow>
               ))}
             </SettingsSection>
@@ -519,5 +545,5 @@ export function SourceControlSettingsPanel() {
 
       {environmentId !== null ? <SourceControlWritingSettingsSection /> : null}
     </SettingsPageContainer>
-  );
+  )
 }

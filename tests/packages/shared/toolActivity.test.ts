@@ -1,56 +1,59 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
-import { deriveToolActivityPresentation } from "../../../packages/shared/src/toolActivity.ts";
+import { deriveToolActivityPresentation } from '../../../packages/shared/src/toolActivity.ts'
 
-describe("toolActivity", () => {
-  it("normalizes command tools to a stable ran-command label", () => {
+describe('toolActivity', () =>
+{
+  it('normalizes command tools to a stable ran-command label', () =>
+  {
     expect(
       deriveToolActivityPresentation({
-        itemType: "command_execution",
-        title: "Terminal",
-        detail: "Terminal",
+        itemType: 'command_execution',
+        title: 'Terminal',
+        detail: 'Terminal',
         data: {
-          command: "bun run lint",
+          command: 'bun run lint',
         },
-        fallbackSummary: "Terminal",
+        fallbackSummary: 'Terminal',
       }),
     ).toEqual({
-      summary: "Ran command",
-      detail: "bun run lint",
-    });
-  });
+      summary: 'Ran command',
+      detail: 'bun run lint',
+    })
+  })
 
   it.each([
     {
-      label: "structured file path",
+      label: 'structured file path',
       data: {
-        kind: "read",
-        locations: [{ path: "/tmp/app.ts" }],
+        kind: 'read',
+        locations: [{ path: '/tmp/app.ts' }],
       },
       expected: {
-        summary: "Read file",
-        detail: "/tmp/app.ts",
+        summary: 'Read file',
+        detail: '/tmp/app.ts',
       },
     },
     {
-      label: "no path",
+      label: 'no path',
       data: {
-        kind: "read",
+        kind: 'read',
         rawInput: {},
       },
       expected: {
-        summary: "Read file",
+        summary: 'Read file',
       },
     },
-  ])("normalizes read-file tools when $label is available", ({ data, expected }) => {
+  ])('normalizes read-file tools when $label is available', ({ data, expected }) =>
+  {
     expect(
       deriveToolActivityPresentation({
-        itemType: "dynamic_tool_call",
-        title: "Read File",
-        detail: "Read File",
+        itemType: 'dynamic_tool_call',
+        title: 'Read File',
+        detail: 'Read File',
         data,
-        fallbackSummary: "Read File",
+        fallbackSummary: 'Read File',
       }),
-    ).toEqual(expected);
-  });
-});
+    ).toEqual(expected)
+  })
+})

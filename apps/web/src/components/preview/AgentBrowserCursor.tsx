@@ -1,26 +1,27 @@
-"use client";
+'use client'
 
-import type { DesktopPreviewPointerEvent } from "@t3tools/contracts";
-import { MousePointer2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import type { DesktopPreviewPointerEvent } from '@t3tools/contracts'
+import { MousePointer2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
 
-import { useBrowserPointerStore } from "~/browser/browserPointerStore";
-import { useBrowserSurfaceStore } from "~/browser/browserSurfaceStore";
+import { useBrowserPointerStore } from '~/browser/browserPointerStore'
+import { useBrowserSurfaceStore } from '~/browser/browserSurfaceStore'
 
-import { agentBrowserCursorOpacity, type BrowserController } from "./agentBrowserCursorLogic";
+import { agentBrowserCursorOpacity, type BrowserController } from './agentBrowserCursorLogic'
 
-const CURSOR_ACTIVE_MS = 700;
+const CURSOR_ACTIVE_MS = 700
 
 export function AgentBrowserCursor(props: {
-  readonly tabId: string;
-  readonly zoomFactor: number;
-  readonly controller: BrowserController;
-}) {
-  const { tabId, zoomFactor, controller } = props;
-  const event = useBrowserPointerStore((state) => state.byTabId[tabId] ?? null);
-  const content = useBrowserSurfaceStore((state) => state.byTabId[tabId]?.content ?? null);
+  readonly tabId: string
+  readonly zoomFactor: number
+  readonly controller: BrowserController
+})
+{
+  const { tabId, zoomFactor, controller } = props
+  const event = useBrowserPointerStore((state) => state.byTabId[tabId] ?? null)
+  const content = useBrowserSurfaceStore((state) => state.byTabId[tabId]?.content ?? null)
 
-  if (!event) return null;
+  if (!event) return null
 
   return (
     <AgentBrowserCursorEvent
@@ -30,28 +31,30 @@ export function AgentBrowserCursor(props: {
       zoomFactor={zoomFactor}
       controller={controller}
     />
-  );
+  )
 }
 
 function AgentBrowserCursorEvent(props: {
-  readonly event: DesktopPreviewPointerEvent;
+  readonly event: DesktopPreviewPointerEvent
   readonly content: {
-    readonly x: number;
-    readonly y: number;
-    readonly scale: number;
-    readonly scrollLeft: number;
-    readonly scrollTop: number;
-  } | null;
-  readonly zoomFactor: number;
-  readonly controller: BrowserController;
-}) {
-  const { event, content, zoomFactor, controller } = props;
-  const [active, setActive] = useState(true);
+    readonly x: number
+    readonly y: number
+    readonly scale: number
+    readonly scrollLeft: number
+    readonly scrollTop: number
+  } | null
+  readonly zoomFactor: number
+  readonly controller: BrowserController
+})
+{
+  const { event, content, zoomFactor, controller } = props
+  const [active, setActive] = useState(true)
 
-  useEffect(() => {
-    const timeout = window.setTimeout(() => setActive(false), CURSOR_ACTIVE_MS);
-    return () => window.clearTimeout(timeout);
-  }, []);
+  useEffect(() =>
+  {
+    const timeout = window.setTimeout(() => setActive(false), CURSOR_ACTIVE_MS)
+    return () => window.clearTimeout(timeout)
+  }, [])
 
   return (
     <div
@@ -63,7 +66,7 @@ function AgentBrowserCursorEvent(props: {
       aria-hidden="true"
       data-agent-browser-cursor
     >
-      {event.phase === "click" ? (
+      {event.phase === 'click' ? (
         <span
           key={event.sequence}
           className="absolute left-0.5 top-0.5 size-4 animate-status-ping rounded-full bg-primary/25 motion-reduce:animate-none"
@@ -74,5 +77,5 @@ function AgentBrowserCursorEvent(props: {
         strokeWidth={2}
       />
     </div>
-  );
+  )
 }

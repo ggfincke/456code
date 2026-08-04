@@ -1,8 +1,9 @@
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Effect from "effect/Effect";
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as Effect from 'effect/Effect'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     DELETE FROM projection_pending_approvals
@@ -13,7 +14,7 @@ export default Effect.gen(function* () {
         AND json_extract(activity.payload_json, '$.requestId')
           = projection_pending_approvals.request_id
     )
-  `;
+  `
 
   yield* sql`
     UPDATE projection_threads
@@ -23,5 +24,5 @@ export default Effect.gen(function* () {
       WHERE projection_pending_approvals.thread_id = projection_threads.thread_id
         AND projection_pending_approvals.status = 'pending'
     ), 0)
-  `;
-});
+  `
+})

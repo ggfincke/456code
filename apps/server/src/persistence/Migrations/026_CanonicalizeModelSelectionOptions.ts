@@ -1,5 +1,5 @@
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 /**
  * Canonicalize `modelSelection.options` / `defaultModelSelection.options` from
@@ -25,8 +25,9 @@ import * as SqlClient from "effect/unstable/sql/SqlClient";
  *   - `orchestration_events.payload_json.$.defaultModelSelection.options`
  *     (project.created | project.meta-updated)
  */
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     UPDATE projection_threads
@@ -52,7 +53,7 @@ export default Effect.gen(function* () {
     )
     WHERE model_selection_json IS NOT NULL
       AND json_type(model_selection_json, '$.options') = 'object'
-  `;
+  `
 
   yield* sql`
     UPDATE projection_projects
@@ -78,7 +79,7 @@ export default Effect.gen(function* () {
     )
     WHERE default_model_selection_json IS NOT NULL
       AND json_type(default_model_selection_json, '$.options') = 'object'
-  `;
+  `
 
   yield* sql`
     UPDATE orchestration_events
@@ -108,7 +109,7 @@ export default Effect.gen(function* () {
       'thread.turn-start-requested'
     )
       AND json_type(payload_json, '$.modelSelection.options') = 'object'
-  `;
+  `
 
   yield* sql`
     UPDATE orchestration_events
@@ -134,5 +135,5 @@ export default Effect.gen(function* () {
     )
     WHERE event_type IN ('project.created', 'project.meta-updated')
       AND json_type(payload_json, '$.defaultModelSelection.options') = 'object'
-  `;
-});
+  `
+})

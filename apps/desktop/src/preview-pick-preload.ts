@@ -1,1 +1,1 @@
-import "./preview/PickPreload.ts";
+import './preview/PickPreload.ts'

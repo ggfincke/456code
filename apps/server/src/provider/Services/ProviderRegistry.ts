@@ -11,21 +11,22 @@ import type {
   ProviderDriverKind,
   ServerProvider,
   ServerProviderUpdateState,
-} from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
-import type * as Stream from "effect/Stream";
-import type { ProviderMaintenanceCapabilities } from "../providerMaintenance.ts";
+} from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
+import type * as Stream from 'effect/Stream'
+import type { ProviderMaintenanceCapabilities } from '../providerMaintenance.ts'
 
-export type ProviderMaintenanceActionKind = "update";
+export type ProviderMaintenanceActionKind = 'update'
 
-export interface ProviderRegistryShape {
+export interface ProviderRegistryShape
+{
   /**
    * Read the latest provider snapshots for every configured instance.
    * Multiple snapshots may share the same `provider` kind (multiple
    * instances of the same driver) and disambiguate via `instanceId`.
    */
-  readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>;
+  readonly getProviders: Effect.Effect<ReadonlyArray<ServerProvider>>
 
   /**
    * Refresh all providers, or the default instance of the specified
@@ -36,7 +37,7 @@ export interface ProviderRegistryShape {
    *
    * @deprecated prefer `refreshInstance` for new call sites.
    */
-  readonly refresh: (provider?: ProviderDriverKind) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+  readonly refresh: (provider?: ProviderDriverKind) => Effect.Effect<ReadonlyArray<ServerProvider>>
 
   /**
    * Refresh the specific configured instance. Returns the updated snapshot
@@ -46,7 +47,7 @@ export interface ProviderRegistryShape {
    */
   readonly refreshInstance: (
     instanceId: ProviderInstanceId,
-  ) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+  ) => Effect.Effect<ReadonlyArray<ServerProvider>>
 
   /**
    * Resolve the maintenance capabilities owned by one live provider instance.
@@ -55,7 +56,7 @@ export interface ProviderRegistryShape {
   readonly getProviderMaintenanceCapabilitiesForInstance: (
     instanceId: ProviderInstanceId,
     provider: ProviderDriverKind,
-  ) => Effect.Effect<ProviderMaintenanceCapabilities>;
+  ) => Effect.Effect<ProviderMaintenanceCapabilities>
 
   /**
    * Apply volatile maintenance-action state to one configured instance.
@@ -64,18 +65,19 @@ export interface ProviderRegistryShape {
    * extend this action map without adding driver-scoped APIs.
    */
   readonly setProviderMaintenanceActionState: (input: {
-    readonly instanceId: ProviderInstanceId;
-    readonly action: ProviderMaintenanceActionKind;
-    readonly state: ServerProviderUpdateState | null;
-  }) => Effect.Effect<ReadonlyArray<ServerProvider>>;
+    readonly instanceId: ProviderInstanceId
+    readonly action: ProviderMaintenanceActionKind
+    readonly state: ServerProviderUpdateState | null
+  }) => Effect.Effect<ReadonlyArray<ServerProvider>>
 
   /**
    * Stream of provider snapshot updates — one emission per aggregated
    * change. The array contains the full current state.
    */
-  readonly streamChanges: Stream.Stream<ReadonlyArray<ServerProvider>>;
+  readonly streamChanges: Stream.Stream<ReadonlyArray<ServerProvider>>
 }
 
 export class ProviderRegistry extends Context.Service<ProviderRegistry, ProviderRegistryShape>()(
-  "456code/provider/Services/ProviderRegistry",
-) {}
+  '456code/provider/Services/ProviderRegistry',
+)
+{}

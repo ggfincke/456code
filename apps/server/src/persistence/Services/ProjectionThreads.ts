@@ -19,13 +19,13 @@ import {
   RuntimeMode,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as Context from "effect/Context";
-import type * as Effect from "effect/Effect";
+} from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
+import * as Context from 'effect/Context'
+import type * as Effect from 'effect/Effect'
 
-import type { ProjectionRepositoryError } from "../Errors.ts";
+import type { ProjectionRepositoryError } from '../Errors.ts'
 
 export const ProjectionThread = Schema.Struct({
   threadId: ThreadId,
@@ -42,7 +42,7 @@ export const ProjectionThread = Schema.Struct({
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime),
-  settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])),
+  settledOverride: Schema.NullOr(Schema.Literals(['settled', 'active'])),
   settledAt: Schema.NullOr(IsoDateTime),
   snoozedUntil: Schema.NullOr(IsoDateTime),
   snoozedAt: Schema.NullOr(IsoDateTime),
@@ -51,41 +51,42 @@ export const ProjectionThread = Schema.Struct({
   pendingUserInputCount: NonNegativeInt,
   hasActionableProposedPlan: NonNegativeInt,
   deletedAt: Schema.NullOr(IsoDateTime),
-});
-export type ProjectionThread = typeof ProjectionThread.Type;
+})
+export type ProjectionThread = typeof ProjectionThread.Type
 
 export const GetProjectionThreadInput = Schema.Struct({
   threadId: ThreadId,
-});
-export type GetProjectionThreadInput = typeof GetProjectionThreadInput.Type;
+})
+export type GetProjectionThreadInput = typeof GetProjectionThreadInput.Type
 
 export const DeleteProjectionThreadInput = Schema.Struct({
   threadId: ThreadId,
-});
-export type DeleteProjectionThreadInput = typeof DeleteProjectionThreadInput.Type;
+})
+export type DeleteProjectionThreadInput = typeof DeleteProjectionThreadInput.Type
 
 export const ListProjectionThreadsByProjectInput = Schema.Struct({
   projectId: ProjectId,
-});
-export type ListProjectionThreadsByProjectInput = typeof ListProjectionThreadsByProjectInput.Type;
+})
+export type ListProjectionThreadsByProjectInput = typeof ListProjectionThreadsByProjectInput.Type
 
 /**
  * ProjectionThreadRepositoryShape - Service API for projected thread records.
  */
-export interface ProjectionThreadRepositoryShape {
+export interface ProjectionThreadRepositoryShape
+{
   /**
    * Insert or replace a projected thread row.
    *
    * Upserts by `threadId`.
    */
-  readonly upsert: (thread: ProjectionThread) => Effect.Effect<void, ProjectionRepositoryError>;
+  readonly upsert: (thread: ProjectionThread) => Effect.Effect<void, ProjectionRepositoryError>
 
   /**
    * Read a projected thread row by id.
    */
   readonly getById: (
     input: GetProjectionThreadInput,
-  ) => Effect.Effect<Option.Option<ProjectionThread>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<ProjectionThread>, ProjectionRepositoryError>
 
   /**
    * List projected threads for a project.
@@ -94,14 +95,14 @@ export interface ProjectionThreadRepositoryShape {
    */
   readonly listByProjectId: (
     input: ListProjectionThreadsByProjectInput,
-  ) => Effect.Effect<ReadonlyArray<ProjectionThread>, ProjectionRepositoryError>;
+  ) => Effect.Effect<ReadonlyArray<ProjectionThread>, ProjectionRepositoryError>
 
   /**
    * Soft-delete a projected thread row by id.
    */
   readonly deleteById: (
     input: DeleteProjectionThreadInput,
-  ) => Effect.Effect<void, ProjectionRepositoryError>;
+  ) => Effect.Effect<void, ProjectionRepositoryError>
 }
 
 /**
@@ -110,4 +111,5 @@ export interface ProjectionThreadRepositoryShape {
 export class ProjectionThreadRepository extends Context.Service<
   ProjectionThreadRepository,
   ProjectionThreadRepositoryShape
->()("456code/persistence/Services/ProjectionThreads/ProjectionThreadRepository") {}
+>()('456code/persistence/Services/ProjectionThreads/ProjectionThreadRepository')
+{}

@@ -1,116 +1,125 @@
-import { type ServerLifecycleWelcomePayload } from "@t3tools/contracts";
-import { scopedProjectKey, scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime";
+import { type ServerLifecycleWelcomePayload } from '@t3tools/contracts'
+import { scopedProjectKey, scopeProjectRef } from '@t3tools/client-runtime/environment'
+import { squashAtomCommandFailure } from '@t3tools/client-runtime/state/runtime'
 import {
   Outlet,
   createRootRoute,
   type ErrorComponentProps,
   useLocation,
   useNavigate,
-} from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+} from '@tanstack/react-router'
+import { useEffect, useEffectEvent, useRef, useState } from 'react'
 
-import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from "../branding";
-import { resolveServerBackedAppDisplayName } from "../branding.logic";
-import { AppSidebarLayout } from "../components/AppSidebarLayout";
-import { CommandPalette } from "../components/CommandPalette";
-import { SshPasswordPromptDialog } from "../components/desktop/SshPasswordPromptDialog";
-import { ProviderUpdateLaunchNotification } from "../components/ProviderUpdateLaunchNotification";
-import { SlowRpcRequestToastCoordinator } from "../components/SlowRpcRequestToastCoordinator";
-import { Button } from "../components/ui/button";
+import { APP_BASE_NAME, APP_DISPLAY_NAME, APP_STAGE_LABEL } from '../branding'
+import { resolveServerBackedAppDisplayName } from '../branding.logic'
+import { AppSidebarLayout } from '../components/AppSidebarLayout'
+import { CommandPalette } from '../components/CommandPalette'
+import { SshPasswordPromptDialog } from '../components/desktop/SshPasswordPromptDialog'
+import { ProviderUpdateLaunchNotification } from '../components/ProviderUpdateLaunchNotification'
+import { SlowRpcRequestToastCoordinator } from '../components/SlowRpcRequestToastCoordinator'
+import { Button } from '../components/ui/button'
 import {
   AnchoredToastProvider,
   stackedThreadToast,
   ToastProvider,
   toastManager,
-} from "../components/ui/toast";
-import { resolveAndPersistPreferredEditor } from "../editorPreferences";
-import { useClientSettings } from "../hooks/useSettings";
+} from '../components/ui/toast'
+import { resolveAndPersistPreferredEditor } from '../editorPreferences'
+import { useClientSettings } from '../hooks/useSettings'
 import {
   deriveLogicalProjectKeyFromSettings,
   derivePhysicalProjectKeyFromPath,
   selectProjectGroupingSettings,
-} from "../logicalProject";
-import { useUiStateStore } from "../uiStateStore";
-import { syncBrowserChromeTheme } from "../hooks/useTheme";
-import { configureClientTracing } from "../observability/clientTracing";
-import { resolveInitialServerAuthGateState } from "../environments/primary";
-import { hasHostedPairingRequest, isHostedStaticApp } from "../hostedPairing";
-import { shellEnvironment } from "../state/shell";
-import { useAtomValue } from "@effect/atom-react";
-import { useAtomCommand } from "../state/use-atom-command";
-import { useEnvironments, usePrimaryEnvironment } from "../state/environments";
+} from '../logicalProject'
+import { useUiStateStore } from '../uiStateStore'
+import { syncBrowserChromeTheme } from '../hooks/useTheme'
+import { configureClientTracing } from '../observability/clientTracing'
+import { resolveInitialServerAuthGateState } from '../environments/primary'
+import { hasHostedPairingRequest, isHostedStaticApp } from '../hostedPairing'
+import { shellEnvironment } from '../state/shell'
+import { useAtomValue } from '@effect/atom-react'
+import { useAtomCommand } from '../state/use-atom-command'
+import { useEnvironments, usePrimaryEnvironment } from '../state/environments'
 import {
   primaryServerConfigAtom,
   primaryServerConfigEventAtom,
   primaryServerWelcomeAtom,
-} from "../state/server";
-import { readProject, setActiveEnvironmentId, useActiveEnvironmentId } from "../state/entities";
+} from '../state/server'
+import { readProject, setActiveEnvironmentId, useActiveEnvironmentId } from '../state/entities'
 import {
   createKeybindingsUpdateToastController,
   type KeybindingsUpdateToastController,
-} from "../components/KeybindingsUpdateToast.logic";
+} from '../components/KeybindingsUpdateToast.logic'
 
 export const Route = createRootRoute({
-  beforeLoad: async ({ location }) => {
-    if (location.pathname === "/pair" && hasHostedPairingRequest(new URL(window.location.href))) {
+  beforeLoad: async ({ location }) =>
+  {
+    if (location.pathname === '/pair' && hasHostedPairingRequest(new URL(window.location.href)))
+    {
       return {
         authGateState: {
-          status: "hosted-pairing",
+          status: 'hosted-pairing',
         } as const,
-      };
+      }
     }
 
-    if (isHostedStaticApp(new URL(window.location.href))) {
+    if (isHostedStaticApp(new URL(window.location.href)))
+    {
       return {
         authGateState: {
-          status: "hosted-static",
+          status: 'hosted-static',
         } as const,
-      };
+      }
     }
 
-    const authGateState = await resolveInitialServerAuthGateState();
+    const authGateState = await resolveInitialServerAuthGateState()
     return {
       authGateState,
-    };
+    }
   },
   component: RootRouteView,
   errorComponent: RootRouteErrorView,
   head: () => ({
-    meta: [{ name: "title", content: APP_DISPLAY_NAME }],
+    meta: [{ name: 'title', content: APP_DISPLAY_NAME }],
   }),
-});
+})
 
-function RootRouteView() {
-  const pathname = useLocation({ select: (location) => location.pathname });
-  const { authGateState } = Route.useRouteContext();
-  const primaryEnvironmentAuthenticated = authGateState.status === "authenticated";
+function RootRouteView()
+{
+  const pathname = useLocation({ select: (location) => location.pathname })
+  const { authGateState } = Route.useRouteContext()
+  const primaryEnvironmentAuthenticated = authGateState.status === 'authenticated'
 
-  useEffect(() => {
-    const frame = window.requestAnimationFrame(() => {
-      syncBrowserChromeTheme();
-    });
-    return () => {
-      window.cancelAnimationFrame(frame);
-    };
-  }, [pathname]);
+  useEffect(() =>
+  {
+    const frame = window.requestAnimationFrame(() =>
+    {
+      syncBrowserChromeTheme()
+    })
+    return () =>
+    {
+      window.cancelAnimationFrame(frame)
+    }
+  }, [pathname])
 
-  if (pathname === "/pair") {
+  if (pathname === '/pair')
+  {
     return (
       <>
         <DocumentTitleSync />
         <Outlet />
       </>
-    );
+    )
   }
 
-  if (authGateState.status !== "authenticated" && authGateState.status !== "hosted-static") {
+  if (authGateState.status !== 'authenticated' && authGateState.status !== 'hosted-static')
+  {
     return (
       <>
         <DocumentTitleSync />
         <Outlet />
       </>
-    );
+    )
   }
 
   const appShell = (
@@ -119,7 +128,7 @@ function RootRouteView() {
         <Outlet />
       </AppSidebarLayout>
     </CommandPalette>
-  );
+  )
 
   return (
     <ToastProvider>
@@ -135,67 +144,77 @@ function RootRouteView() {
         {appShell}
       </AnchoredToastProvider>
     </ToastProvider>
-  );
+  )
 }
 
-function GlassAppearanceSync() {
-  const glassOpacity = useClientSettings((settings) => settings.glassOpacity);
+function GlassAppearanceSync()
+{
+  const glassOpacity = useClientSettings((settings) => settings.glassOpacity)
 
-  useEffect(() => {
-    document.documentElement.style.setProperty("--glass-opacity", `${glassOpacity}%`);
-  }, [glassOpacity]);
+  useEffect(() =>
+  {
+    document.documentElement.style.setProperty('--glass-opacity', `${glassOpacity}%`)
+  }, [glassOpacity])
 
-  return null;
+  return null
 }
 
-function DocumentTitleSync() {
+function DocumentTitleSync()
+{
   const primaryServerVersion =
-    useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
+    useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null
   const title = resolveServerBackedAppDisplayName({
     baseName: APP_BASE_NAME,
     fallbackDisplayName: APP_DISPLAY_NAME,
     fallbackStageLabel: APP_STAGE_LABEL,
     primaryServerVersion,
-  });
+  })
 
-  useEffect(() => {
-    document.title = title;
-  }, [title]);
+  useEffect(() =>
+  {
+    document.title = title
+  }, [title])
 
-  return null;
+  return null
 }
 
-function HostedStaticEnvironmentBootstrap() {
-  const { environments } = useEnvironments();
-  const activeEnvironmentId = useActiveEnvironmentId();
+function HostedStaticEnvironmentBootstrap()
+{
+  const { environments } = useEnvironments()
+  const activeEnvironmentId = useActiveEnvironmentId()
 
-  useEffect(() => {
+  useEffect(() =>
+  {
     if (
       environments.some(
-        (environment) => environment.entry.target._tag === "PrimaryConnectionTarget",
+        (environment) => environment.entry.target._tag === 'PrimaryConnectionTarget',
       )
-    ) {
-      return;
+    )
+    {
+      return
     }
 
-    if (activeEnvironmentId) {
-      return;
+    if (activeEnvironmentId)
+    {
+      return
     }
 
-    const firstSavedEnvironment = environments[0];
-    if (!firstSavedEnvironment) {
-      return;
+    const firstSavedEnvironment = environments[0]
+    if (!firstSavedEnvironment)
+    {
+      return
     }
 
-    setActiveEnvironmentId(firstSavedEnvironment.environmentId);
-  }, [activeEnvironmentId, environments]);
+    setActiveEnvironmentId(firstSavedEnvironment.environmentId)
+  }, [activeEnvironmentId, environments])
 
-  return null;
+  return null
 }
 
-function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
-  const message = errorMessage(error);
-  const details = errorDetails(error);
+function RootRouteErrorView({ error, reset }: ErrorComponentProps)
+{
+  const message = errorMessage(error)
+  const details = errorDetails(error)
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
@@ -233,74 +252,89 @@ function RootRouteErrorView({ error, reset }: ErrorComponentProps) {
         </details>
       </section>
     </div>
-  );
+  )
 }
 
-function errorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
+function errorMessage(error: unknown): string
+{
+  if (error instanceof Error && error.message.trim().length > 0)
+  {
+    return error.message
   }
 
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error;
+  if (typeof error === 'string' && error.trim().length > 0)
+  {
+    return error
   }
 
-  return "An unexpected router error occurred.";
+  return 'An unexpected router error occurred.'
 }
 
-function errorDetails(error: unknown): string {
-  if (error instanceof Error) {
-    return error.stack ?? error.message;
+function errorDetails(error: unknown): string
+{
+  if (error instanceof Error)
+  {
+    return error.stack ?? error.message
   }
 
-  if (typeof error === "string") {
-    return error;
+  if (typeof error === 'string')
+  {
+    return error
   }
 
-  try {
-    return JSON.stringify(error, null, 2);
-  } catch {
-    return "No additional error details are available.";
+  try
+  {
+    return JSON.stringify(error, null, 2)
+  }
+  catch
+  {
+    return 'No additional error details are available.'
   }
 }
 
-function AuthenticatedTracingBootstrap() {
-  useEffect(() => {
-    void configureClientTracing();
-  }, []);
+function AuthenticatedTracingBootstrap()
+{
+  useEffect(() =>
+  {
+    void configureClientTracing()
+  }, [])
 
-  return null;
+  return null
 }
 
-function EventRouter() {
-  const navigate = useNavigate();
-  const pathname = useLocation({ select: (loc) => loc.pathname });
-  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings);
-  const primaryEnvironment = usePrimaryEnvironment();
+function EventRouter()
+{
+  const navigate = useNavigate()
+  const pathname = useLocation({ select: (loc) => loc.pathname })
+  const projectGroupingSettings = useClientSettings(selectProjectGroupingSettings)
+  const primaryEnvironment = usePrimaryEnvironment()
   const openInEditor = useAtomCommand(shellEnvironment.openInEditor, {
     reportFailure: false,
-  });
-  const serverConfig = useAtomValue(primaryServerConfigAtom);
-  const serverConfigEvent = useAtomValue(primaryServerConfigEventAtom);
-  const serverWelcome = useAtomValue(primaryServerWelcomeAtom);
-  const readPathname = useEffectEvent(() => pathname);
-  const handledBootstrapThreadIdRef = useRef<string | null>(null);
-  const handledConfigEventRef = useRef(serverConfigEvent);
+  })
+  const serverConfig = useAtomValue(primaryServerConfigAtom)
+  const serverConfigEvent = useAtomValue(primaryServerConfigEventAtom)
+  const serverWelcome = useAtomValue(primaryServerWelcomeAtom)
+  const readPathname = useEffectEvent(() => pathname)
+  const handledBootstrapThreadIdRef = useRef<string | null>(null)
+  const handledConfigEventRef = useRef(serverConfigEvent)
   const [keybindingsToastController] = useState<KeybindingsUpdateToastController>(() =>
     createKeybindingsUpdateToastController({}),
-  );
+  )
 
-  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) => {
-    if (!payload) return;
+  const handleWelcome = useEffectEvent((payload: ServerLifecycleWelcomePayload | null) =>
+  {
+    if (!payload) return
 
-    setActiveEnvironmentId(payload.environment.environmentId);
-    void (async () => {
-      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId) {
-        return;
+    setActiveEnvironmentId(payload.environment.environmentId)
+    void (async () =>
+    {
+      if (!payload.bootstrapProjectId || !payload.bootstrapThreadId)
+      {
+        return
       }
       const bootstrapProject = readProject(
         scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
-      );
+      )
       const bootstrapProjectKey =
         (bootstrapProject
           ? deriveLogicalProjectKeyFromSettings(bootstrapProject, projectGroupingSettings)
@@ -310,105 +344,120 @@ function EventRouter() {
           : null) ??
         scopedProjectKey(
           scopeProjectRef(payload.environment.environmentId, payload.bootstrapProjectId),
-        );
-      useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true);
+        )
+      useUiStateStore.getState().setProjectExpanded(bootstrapProjectKey, true)
 
-      if (readPathname() !== "/") {
-        return;
+      if (readPathname() !== '/')
+      {
+        return
       }
-      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId) {
-        return;
+      if (handledBootstrapThreadIdRef.current === payload.bootstrapThreadId)
+      {
+        return
       }
       await navigate({
-        to: "/$environmentId/$threadId",
+        to: '/$environmentId/$threadId',
         params: {
           environmentId: payload.environment.environmentId,
           threadId: payload.bootstrapThreadId,
         },
         replace: true,
-      });
-      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId;
-    })().catch(() => undefined);
-  });
+      })
+      handledBootstrapThreadIdRef.current = payload.bootstrapThreadId
+    })().catch(() => undefined)
+  })
 
-  const handleServerConfigUpdated = useEffectEvent(() => {
-    const decision = keybindingsToastController.handle(serverConfigEvent);
-    if (!decision) {
-      return;
+  const handleServerConfigUpdated = useEffectEvent(() =>
+  {
+    const decision = keybindingsToastController.handle(serverConfigEvent)
+    if (!decision)
+    {
+      return
     }
 
-    if (decision._tag === "Success") {
+    if (decision._tag === 'Success')
+    {
       toastManager.add({
-        type: "success",
-        title: "Keybindings updated",
-        description: "Keybindings configuration reloaded successfully.",
-      });
-      return;
+        type: 'success',
+        title: 'Keybindings updated',
+        description: 'Keybindings configuration reloaded successfully.',
+      })
+      return
     }
 
     toastManager.add(
       stackedThreadToast({
-        type: "warning",
-        title: "Invalid keybindings configuration",
+        type: 'warning',
+        title: 'Invalid keybindings configuration',
         description: decision.message,
-        actionVariant: "outline",
+        actionVariant: 'outline',
         actionProps: {
-          children: "Open keybindings.json",
-          onClick: () => {
-            if (!serverConfig || !primaryEnvironment) {
-              return;
+          children: 'Open keybindings.json',
+          onClick: () =>
+          {
+            if (!serverConfig || !primaryEnvironment)
+            {
+              return
             }
 
-            const editor = resolveAndPersistPreferredEditor(serverConfig.availableEditors);
-            if (!editor) {
-              return;
+            const editor = resolveAndPersistPreferredEditor(serverConfig.availableEditors)
+            if (!editor)
+            {
+              return
             }
-            void (async () => {
+            void (async () =>
+            {
               const result = await openInEditor({
                 environmentId: primaryEnvironment.environmentId,
                 input: {
                   cwd: serverConfig.keybindingsConfigPath,
                   editor,
                 },
-              });
-              if (result._tag === "Success") {
-                return;
+              })
+              if (result._tag === 'Success')
+              {
+                return
               }
-              const error = squashAtomCommandFailure(result);
+              const error = squashAtomCommandFailure(result)
               toastManager.add(
                 stackedThreadToast({
-                  type: "error",
-                  title: "Unable to open keybindings file",
+                  type: 'error',
+                  title: 'Unable to open keybindings file',
                   description:
-                    error instanceof Error ? error.message : "Unknown error opening file.",
+                    error instanceof Error ? error.message : 'Unknown error opening file.',
                 }),
-              );
-            })();
+              )
+            })()
           },
         },
       }),
-    );
-  });
+    )
+  })
 
-  useEffect(() => {
-    if (!serverConfig) {
-      return;
+  useEffect(() =>
+  {
+    if (!serverConfig)
+    {
+      return
     }
 
-    setActiveEnvironmentId(serverConfig.environment.environmentId);
-  }, [serverConfig]);
+    setActiveEnvironmentId(serverConfig.environment.environmentId)
+  }, [serverConfig])
 
-  useEffect(() => {
-    handleWelcome(serverWelcome);
-  }, [serverWelcome]);
+  useEffect(() =>
+  {
+    handleWelcome(serverWelcome)
+  }, [serverWelcome])
 
-  useEffect(() => {
-    if (serverConfigEvent === null || handledConfigEventRef.current === serverConfigEvent) {
-      return;
+  useEffect(() =>
+  {
+    if (serverConfigEvent === null || handledConfigEventRef.current === serverConfigEvent)
+    {
+      return
     }
-    handledConfigEventRef.current = serverConfigEvent;
-    handleServerConfigUpdated();
-  }, [serverConfigEvent]);
+    handledConfigEventRef.current = serverConfigEvent
+    handleServerConfigUpdated()
+  }, [serverConfigEvent])
 
-  return null;
+  return null
 }

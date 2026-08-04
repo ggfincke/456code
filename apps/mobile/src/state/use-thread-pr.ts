@@ -1,14 +1,10 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 
-import { useEnvironmentQuery } from "./query";
-import { presentThreadPr, type ThreadPrPresentation } from "./thread-pr-presentation";
-import { vcsEnvironment } from "./vcs";
+import { useEnvironmentQuery } from './query'
+import { presentThreadPr, type ThreadPrPresentation } from './thread-pr-presentation'
+import { vcsEnvironment } from './vcs'
 
-export {
-  presentThreadPr,
-  type ThreadPr,
-  type ThreadPrPresentation,
-} from "./thread-pr-presentation";
+export { presentThreadPr, type ThreadPr, type ThreadPrPresentation } from './thread-pr-presentation'
 
 /**
  * Live PR status for a thread's branch. Subscriptions are deduplicated per
@@ -19,8 +15,9 @@ export {
 export function useThreadPr(
   thread: EnvironmentThreadShell,
   projectCwd: string | null,
-): ThreadPrPresentation | null {
-  const cwd = thread.worktreePath ?? projectCwd;
+): ThreadPrPresentation | null
+{
+  const cwd = thread.worktreePath ?? projectCwd
   const gitStatus = useEnvironmentQuery(
     thread.branch !== null && cwd !== null
       ? vcsEnvironment.status({
@@ -28,14 +25,16 @@ export function useThreadPr(
           input: { cwd },
         })
       : null,
-  );
+  )
 
-  const status = gitStatus.data;
-  if (status === null || thread.branch === null || status.refName !== thread.branch) {
-    return null;
+  const status = gitStatus.data
+  if (status === null || thread.branch === null || status.refName !== thread.branch)
+  {
+    return null
   }
-  if (!status.pr) {
-    return null;
+  if (!status.pr)
+  {
+    return null
   }
-  return presentThreadPr(status.pr, status.sourceControlProvider);
+  return presentThreadPr(status.pr, status.sourceControlProvider)
 }

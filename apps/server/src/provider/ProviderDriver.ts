@@ -28,31 +28,32 @@ import type {
   ProviderDriverKind,
   ProviderInstanceEnvironment,
   ProviderInstanceId,
-} from "@t3tools/contracts";
-import type * as Effect from "effect/Effect";
-import type * as Schema from "effect/Schema";
-import type * as Scope from "effect/Scope";
+} from '@t3tools/contracts'
+import type * as Effect from 'effect/Effect'
+import type * as Schema from 'effect/Schema'
+import type * as Scope from 'effect/Scope'
 
-import type * as TextGeneration from "../textGeneration/TextGeneration.ts";
-import type { ProviderAdapterError, ProviderDriverError } from "./Errors.ts";
-import type { ProviderAdapterShape } from "./Services/ProviderAdapter.ts";
-import type { ServerProviderShape } from "./Services/ServerProvider.ts";
+import type * as TextGeneration from '../textGeneration/TextGeneration.ts'
+import type { ProviderAdapterError, ProviderDriverError } from './Errors.ts'
+import type { ProviderAdapterShape } from './Services/ProviderAdapter.ts'
+import type { ServerProviderShape } from './Services/ServerProvider.ts'
 
 /**
  * Static metadata advertised by a driver. Used for default presentation
  * and (later) settings UI. Doesn't need to be Effect-typed because nothing
  * about it is dynamic — drivers are registered at startup.
  */
-export interface ProviderDriverMetadata {
+export interface ProviderDriverMetadata
+{
   /** Human-readable name for the driver itself (e.g. "Codex"). */
-  readonly displayName: string;
+  readonly displayName: string
   /**
    * Whether the driver may be instantiated more than once concurrently.
    * Defaults to `true`. Set to `false` for drivers that wrap a global
    * resource (e.g. a single desktop app socket) — the registry then
    * rejects multi-instance configurations with a clear error.
    */
-  readonly supportsMultipleInstances?: boolean;
+  readonly supportsMultipleInstances?: boolean
 }
 
 /**
@@ -64,18 +65,19 @@ export interface ProviderDriverMetadata {
  * instance of the same driver does not reach into the first instance's
  * state.
  */
-export interface ProviderInstance {
-  readonly instanceId: ProviderInstanceId;
-  readonly driverKind: ProviderDriverKind;
-  readonly continuationIdentity: ProviderContinuationIdentity;
-  readonly resolveContinuationIdentity: Effect.Effect<ProviderContinuationIdentity>;
-  readonly continuationUnavailableReason?: string;
-  readonly displayName: string | undefined;
-  readonly accentColor?: string | undefined;
-  readonly enabled: boolean;
-  readonly snapshot: ServerProviderShape;
-  readonly adapter: ProviderAdapterShape<ProviderAdapterError>;
-  readonly textGeneration: TextGeneration.TextGeneration["Service"];
+export interface ProviderInstance
+{
+  readonly instanceId: ProviderInstanceId
+  readonly driverKind: ProviderDriverKind
+  readonly continuationIdentity: ProviderContinuationIdentity
+  readonly resolveContinuationIdentity: Effect.Effect<ProviderContinuationIdentity>
+  readonly continuationUnavailableReason?: string
+  readonly displayName: string | undefined
+  readonly accentColor?: string | undefined
+  readonly enabled: boolean
+  readonly snapshot: ServerProviderShape
+  readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+  readonly textGeneration: TextGeneration.TextGeneration['Service']
 }
 
 /**
@@ -84,13 +86,14 @@ export interface ProviderInstance {
  * `config` is the typed payload — already decoded by the registry through
  * `driver.configSchema`. Drivers never decode their own raw envelope.
  */
-export interface ProviderDriverCreateInput<Config> {
-  readonly instanceId: ProviderInstanceId;
-  readonly displayName: string | undefined;
-  readonly accentColor?: string | undefined;
-  readonly environment: ProviderInstanceEnvironment;
-  readonly enabled: boolean;
-  readonly config: Config;
+export interface ProviderDriverCreateInput<Config>
+{
+  readonly instanceId: ProviderInstanceId
+  readonly displayName: string | undefined
+  readonly accentColor?: string | undefined
+  readonly environment: ProviderInstanceEnvironment
+  readonly enabled: boolean
+  readonly config: Config
 }
 
 /**
@@ -106,9 +109,10 @@ export interface ProviderDriverCreateInput<Config> {
  * scope closes. Two calls to `create` with different `instanceId` /
  * `config` MUST yield instances with no shared mutable state.
  */
-export interface ProviderDriver<Config, R = never> {
-  readonly driverKind: ProviderDriverKind;
-  readonly metadata: ProviderDriverMetadata;
+export interface ProviderDriver<Config, R = never>
+{
+  readonly driverKind: ProviderDriverKind
+  readonly metadata: ProviderDriverMetadata
   /**
    * Decoder for the opaque `ProviderInstanceConfig.config` envelope. The
    * registry runs this exactly once per (re)load of an instance; a decode
@@ -126,7 +130,7 @@ export interface ProviderDriver<Config, R = never> {
    * widen `DecodingServices` to `unknown` and poison the R channel of every
    * caller of `decodeUnknownEffect`.
    */
-  readonly configSchema: Schema.Codec<Config, unknown>;
+  readonly configSchema: Schema.Codec<Config, unknown>
   /**
    * Default config payload used when the legacy
    * `ServerSettings.providers.<kind>` entry is empty or when the driver
@@ -134,7 +138,7 @@ export interface ProviderDriver<Config, R = never> {
    * default keeps the migration path simple — no special-casing needed
    * to construct a "blank" instance.
    */
-  readonly defaultConfig: () => Config;
+  readonly defaultConfig: () => Config
   /**
    * Materialize one instance. The returned effect runs in a scope owned
    * by the registry; closing that scope releases every resource the
@@ -143,7 +147,7 @@ export interface ProviderDriver<Config, R = never> {
    */
   readonly create: (
     input: ProviderDriverCreateInput<Config>,
-  ) => Effect.Effect<ProviderInstance, ProviderDriverError, R | Scope.Scope>;
+  ) => Effect.Effect<ProviderInstance, ProviderDriverError, R | Scope.Scope>
 }
 
 /**
@@ -156,4 +160,4 @@ export interface ProviderDriver<Config, R = never> {
 // needs the original `Config` type. Using `unknown` instead would force
 // `create` callers into casts since `unknown` is not assignable to a
 // concrete `Config` from inside the driver body.
-export type AnyProviderDriver<R = never> = ProviderDriver<any, R>;
+export type AnyProviderDriver<R = never> = ProviderDriver<any, R>

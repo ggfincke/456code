@@ -1,12 +1,12 @@
-import { TextInputWrapper } from "expo-paste-input";
-import { useImperativeHandle, useRef } from "react";
-import { TextInput, type TextInput as RNTextInput } from "react-native";
+import { TextInputWrapper } from 'expo-paste-input'
+import { useImperativeHandle, useRef } from 'react'
+import { TextInput, type TextInput as RNTextInput } from 'react-native'
 
-import { useThemeColor } from "../lib/useThemeColor";
-import { useFontFamily } from "../lib/useFontFamily";
-import { useScaledTextRole } from "../features/settings/appearance/useScaledTextRole";
-import { useNativePaste } from "../lib/useNativePaste";
-import type { ComposerEditorProps } from "./ComposerEditor.types";
+import { useThemeColor } from '../lib/useThemeColor'
+import { useFontFamily } from '../lib/useFontFamily'
+import { useScaledTextRole } from '../features/settings/appearance/useScaledTextRole'
+import { useNativePaste } from '../lib/useNativePaste'
+import type { ComposerEditorProps } from './ComposerEditor.types'
 
 export function ComposerEditor({
   ref,
@@ -18,13 +18,14 @@ export function ComposerEditor({
   contentInsetVertical = 0,
   singleLineCentered: _singleLineCentered,
   ...props
-}: ComposerEditorProps) {
-  const inputRef = useRef<RNTextInput>(null);
-  const bodyText = useScaledTextRole("body");
-  const foregroundColor = useThemeColor("--color-foreground");
-  const placeholderColor = useThemeColor("--color-placeholder");
-  const fontFamily = useFontFamily("regular");
-  const handlePaste = useNativePaste((uris) => onPasteImages?.(uris));
+}: ComposerEditorProps)
+{
+  const inputRef = useRef<RNTextInput>(null)
+  const bodyText = useScaledTextRole('body')
+  const foregroundColor = useThemeColor('--color-foreground')
+  const placeholderColor = useThemeColor('--color-placeholder')
+  const fontFamily = useFontFamily('regular')
+  const handlePaste = useNativePaste((uris) => onPasteImages?.(uris))
 
   useImperativeHandle(
     ref,
@@ -35,7 +36,7 @@ export function ComposerEditor({
         inputRef.current?.setSelection(nextSelection.start, nextSelection.end),
     }),
     [],
-  );
+  )
 
   return (
     <TextInputWrapper onPaste={handlePaste} style={[{ minHeight: 0 }, style]}>
@@ -59,11 +60,11 @@ export function ComposerEditor({
         ]}
       />
     </TextInputWrapper>
-  );
+  )
 }
 
 export type {
   ComposerEditorHandle,
   ComposerEditorProps,
   ComposerEditorSelection,
-} from "./ComposerEditor.types";
+} from './ComposerEditor.types'

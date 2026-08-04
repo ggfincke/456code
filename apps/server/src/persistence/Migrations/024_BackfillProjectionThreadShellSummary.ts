@@ -1,8 +1,9 @@
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Effect from "effect/Effect";
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as Effect from 'effect/Effect'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     INSERT OR IGNORE INTO projection_pending_approvals (
@@ -37,7 +38,7 @@ export default Effect.gen(function* () {
         AND json_extract(payload_json, '$.requestId') IS NOT NULL
     ) AS requested
     WHERE requested.row_number = 1
-  `;
+  `
 
   yield* sql`
     WITH latest_resolutions AS (
@@ -87,7 +88,7 @@ export default Effect.gen(function* () {
       FROM latest_resolutions
       WHERE latest_resolutions.request_id = projection_pending_approvals.request_id
     )
-  `;
+  `
 
   yield* sql`
     WITH latest_response_events AS (
@@ -137,7 +138,7 @@ export default Effect.gen(function* () {
       FROM latest_response_events
       WHERE latest_response_events.request_id = projection_pending_approvals.request_id
     )
-  `;
+  `
 
   yield* sql`
     WITH latest_stale_failures AS (
@@ -181,7 +182,7 @@ export default Effect.gen(function* () {
         FROM latest_stale_failures
         WHERE latest_stale_failures.request_id = projection_pending_approvals.request_id
       )
-  `;
+  `
 
   yield* sql`
     UPDATE projection_threads
@@ -273,5 +274,5 @@ export default Effect.gen(function* () {
           ELSE 0
         END
       ), 0)
-  `;
-});
+  `
+})

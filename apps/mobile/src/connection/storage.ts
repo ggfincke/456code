@@ -6,49 +6,51 @@ import {
   removeConnectionFromCatalog,
   removeCatalogValue,
   replaceCatalogValue,
-} from "@t3tools/client-runtime/platform";
-import { TokenStore } from "@t3tools/client-runtime/authorization";
+} from '@t3tools/client-runtime/platform'
+import { TokenStore } from '@t3tools/client-runtime/authorization'
 import {
   ConnectionTransientError,
   CredentialStore,
   ProfileStore,
-} from "@t3tools/client-runtime/connection";
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as CatalogStore from "./catalog-store";
+} from '@t3tools/client-runtime/connection'
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as CatalogStore from './catalog-store'
 
 function targetPersistenceError(
-  operation: "list-targets" | "register-connection" | "remove-connection",
+  operation: 'list-targets' | 'register-connection' | 'remove-connection',
   error: ConnectionTransientError,
-) {
+)
+{
   return new ConnectionPersistenceError({
     operation,
     message: error.message,
-  });
+  })
 }
 
 export const connectionStorageLayer = Layer.effectContext(
-  Effect.gen(function* () {
-    const catalog = yield* CatalogStore.make();
+  Effect.gen(function* ()
+  {
+    const catalog = yield* CatalogStore.make()
 
     const targetStore = ConnectionTargetStore.of({
       list: catalog.read.pipe(
         Effect.map((document) => document.targets),
-        Effect.mapError((error) => targetPersistenceError("list-targets", error)),
+        Effect.mapError((error) => targetPersistenceError('list-targets', error)),
       ),
-    });
+    })
     const registrationStore = ConnectionRegistrationStore.of({
       register: (registration) =>
         catalog
           .update((document) => registerConnectionInCatalog(document, registration))
-          .pipe(Effect.mapError((error) => targetPersistenceError("register-connection", error))),
+          .pipe(Effect.mapError((error) => targetPersistenceError('register-connection', error))),
       remove: (target) =>
         catalog
           .update((document) => removeConnectionFromCatalog(document, target))
-          .pipe(Effect.mapError((error) => targetPersistenceError("remove-connection", error))),
-    });
+          .pipe(Effect.mapError((error) => targetPersistenceError('remove-connection', error))),
+    })
     const profileStore = ProfileStore.make({
       get: (connectionId) =>
         catalog.read.pipe(
@@ -72,7 +74,7 @@ export const connectionStorageLayer = Layer.effectContext(
             connectionId,
           ),
         })),
-    });
+    })
     const credentialStore = CredentialStore.make({
       get: (connectionId) =>
         catalog.read.pipe(
@@ -99,7 +101,7 @@ export const connectionStorageLayer = Layer.effectContext(
             connectionId,
           ),
         })),
-    });
+    })
     const remoteTokenStore = TokenStore.make({
       get: (environmentId) =>
         catalog.read.pipe(
@@ -127,12 +129,12 @@ export const connectionStorageLayer = Layer.effectContext(
             environmentId,
           ),
         })),
-    });
+    })
     return Context.make(ConnectionTargetStore, targetStore).pipe(
       Context.add(ConnectionRegistrationStore, registrationStore),
       Context.add(ProfileStore.ConnectionProfileStore, profileStore),
       Context.add(CredentialStore.ConnectionCredentialStore, credentialStore),
       Context.add(TokenStore.RemoteDpopAccessTokenStore, remoteTokenStore),
-    );
+    )
   }),
-);
+)

@@ -1,12 +1,13 @@
 // apps/web/src/components/chat/ThreadSyncStatusPill.tsx
 // renders thread detail synchronization status
 
-import { LoaderCircleIcon } from "lucide-react";
+import { LoaderCircleIcon } from 'lucide-react'
 
-import { threadSyncLabel, type ThreadSyncPhase } from "../../threadSync";
+import { threadSyncLabel, type ThreadSyncPhase } from '../../threadSync'
 
-export function ThreadSyncStatusPill({ phase }: { readonly phase: ThreadSyncPhase }) {
-  const label = threadSyncLabel(phase);
+export function ThreadSyncStatusPill({ phase }: { readonly phase: ThreadSyncPhase })
+{
+  const label = threadSyncLabel(phase)
 
   return (
     <div
@@ -17,5 +18,5 @@ export function ThreadSyncStatusPill({ phase }: { readonly phase: ThreadSyncPhas
       <LoaderCircleIcon aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
       <span className="truncate">{label}</span>
     </div>
-  );
+  )
 }
