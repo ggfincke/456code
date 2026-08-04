@@ -12,7 +12,6 @@ import {
   type ProviderApprovalDecision,
   ProviderInstanceId,
   type ServerProvider,
-  type ResolvedKeybindingsConfig,
   type ScopedThreadRef,
   type ThreadId,
   type TurnId,
@@ -47,7 +46,6 @@ import { Debouncer } from '@tanstack/react-pacer'
 import { useAtomValue } from '@effect/atom-react'
 import {
   lazy,
-  memo,
   Suspense,
   useCallback,
   useEffect,
@@ -125,24 +123,15 @@ import {
   selectActiveRightPanel,
   selectActiveRightPanelSurface,
   selectThreadRightPanelState,
-  type RightPanelSurface,
   useRightPanelStore,
 } from '../rightPanelStore'
-import {
-  isPreviewSupportedInRuntime,
-  setActivePreviewTab,
-  useThreadPreviewState,
-} from '../previewStateStore'
-import { addBrowserSurface } from './preview/addBrowserSurface'
-import { closePreviewSession } from './preview/closePreviewSession'
-import { subscribePreviewAction } from './preview/previewActionBus'
+import { isPreviewSupportedInRuntime, useThreadPreviewState } from '../previewStateStore'
 import { getConfiguredPreviewUrls } from './preview/previewEmptyStateLogic'
 import { RightPanelTabs } from './RightPanelTabs'
 import { DiffWorkerPoolProvider } from './DiffWorkerPoolProvider'
 import { BranchToolbar } from './BranchToolbar'
 import { resolveShortcutCommand, shortcutLabelForCommand } from '../keybindings'
 import PlanSidebar from './PlanSidebar'
-import ThreadTerminalDrawer from './ThreadTerminalDrawer'
 import {
   AlarmClockIcon,
   ArrowRightLeftIcon,
@@ -167,14 +156,17 @@ import {
 import { newDraftId, newMessageId, newThreadId } from '~/lib/utils'
 import { getProviderModelCapabilities, resolveSelectableProvider } from '../providerModels'
 import { deriveProviderInstanceEntries, NO_PROVIDER_MODEL_SELECTION } from '../providerInstances'
+import {
+  deriveProviderSwitchTimelineEvents,
+  describeProviderSwitchConfirmation,
+  formatProviderSwitchTargetLabel,
+  resolvePendingHandoffPresentation,
+  type ProviderSwitchInstanceResolver,
+} from '../providerSwitchPresentation'
 import { useClientSettings, useEnvironmentSettings } from '../hooks/useSettings'
 import { useNowMinute } from '../hooks/useNowMinute'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
-import {
-  type AppModelOption,
-  getAppModelOptionsForInstance,
-  resolveAppModelSelectionForInstance,
-} from '../modelSelection'
+import { type AppModelOption, getAppModelOptionsForInstance } from '../modelSelection'
 import { getTerminalFocusOwner } from '../lib/terminalFocus'
 import { resolveNewDraftStartFromOrigin } from '../lib/chatThreadActions'
 import {
@@ -231,18 +223,24 @@ import { ExpandedImageDialog } from './chat/ExpandedImageDialog'
 import { PullRequestThreadDialog } from './PullRequestThreadDialog'
 import { MessagesTimeline } from './chat/MessagesTimeline'
 import { ChatHeader } from './chat/ChatHeader'
+import {
+  PersistentThreadTerminalDrawer,
+  PersistentThreadTerminalPanel,
+} from './chat/PersistentThreadTerminals'
 import { PanelLayoutControls, RightPanelMaximizeControl } from './chat/PanelLayoutControls'
 import { type ExpandedImagePreview } from './chat/ExpandedImagePreview'
 import { NoActiveThreadState } from './NoActiveThreadState'
 import { resolveEffectiveEnvMode, resolveLocalCheckoutBranchMismatch } from './BranchToolbar.logic'
 import {
   getProviderStatusBannerKey,
+  isProviderAuthFailureMessage,
   ProviderStatusBanner,
   shouldShowProviderStatusBanner,
 } from './chat/ProviderStatusBanner'
 import { ThreadErrorBanner } from './chat/ThreadErrorBanner'
 import { resolveThreadPr } from './ThreadStatusIndicators'
 import { ComposerBannerStack, type ComposerBannerStackItem } from './chat/ComposerBannerStack'
+import { ProviderSwitchStatusPill } from './chat/ProviderSwitchStatusPill'
 import { ThreadSyncStatusPill } from './chat/ThreadSyncStatusPill'
 import {
   DRAFT_HERO_TRANSITION_ANIMATION_ID,
@@ -258,7 +256,7 @@ import {
   buildExpiredTerminalContextToastCopy,
   buildLocalDraftThread,
   buildLoadingThreadFromShell,
-  buildThreadTurnInterruptInput,
+  chatActionErrorMessage,
   collectUserMessageBlobPreviewUrls,
   createLocalDispatchSnapshot,
   deriveComposerSendState,
@@ -269,11 +267,10 @@ import {
   isImportContinuationSendBlocked,
   isBranchMismatchDismissedForSession,
   shouldShowBranchMismatchBanner,
-  getStartedThreadModelChangeBlockReason,
-  getStartedThreadProviderSwitchBlockReason,
   LAST_INVOKED_SCRIPT_BY_PROJECT_KEY,
   LastInvokedScriptByProjectSchema,
   type LocalDispatchSnapshot,
+  type LocalThreadErrorEntry,
   PullRequestDialogState,
   cloneComposerImageForRetry,
   deriveLockedProvider,
@@ -320,6 +317,8 @@ import {
 } from '../versionSkew'
 import { useAssetUrls } from '../assets/assetUrls'
 import { importSourceDisplayName } from '../importSourcePresentation'
+import { useChatDispatchController, useDraftErrorPromotion } from './chat/useChatDispatchController'
+import { useChatRightPanelController } from './chat/useChatRightPanelController'
 
 const IMAGE_ONLY_BOOTSTRAP_PROMPT =
   '[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]'
@@ -525,8 +524,6 @@ interface TerminalLaunchContext
   worktreePath: string | null
 }
 
-type PersistentTerminalLaunchContext = Pick<TerminalLaunchContext, 'cwd' | 'worktreePath'>
-
 function useLocalDispatchState(input: {
   activeThread: Thread | undefined
   activeLatestTurn: Thread['latestTurn'] | null
@@ -597,628 +594,6 @@ function useLocalDispatchState(input: {
   }
 }
 
-/** Same terminal ids (order ignored) — avoids reconcile when only server session ordering differs. */
-function terminalIdListsEqual(left: readonly string[], right: readonly string[]): boolean
-{
-  if (left.length !== right.length)
-  {
-    return false
-  }
-  if (left.length === 0)
-  {
-    return true
-  }
-  const sortedLeft = left.toSorted((a, b) => a.localeCompare(b))
-  const sortedRight = right.toSorted((a, b) => a.localeCompare(b))
-  for (let index = 0; index < sortedLeft.length; index += 1)
-  {
-    if (sortedLeft[index] !== sortedRight[index])
-    {
-      return false
-    }
-  }
-  return true
-}
-
-/**
- * Server knows about fewer sessions than the client, but every server id still exists locally.
- * Typical right after `terminal.open`: known-session list lags; reconciling would drop the new id
- * and later re-add it as a separate group (no split layout).
- */
-function serverTerminalIdsStrictSubsetOfClient(
-  serverIds: readonly string[],
-  clientIds: readonly string[],
-): boolean
-{
-  if (serverIds.length >= clientIds.length || clientIds.length === 0)
-  {
-    return false
-  }
-  const clientSet = new Set(clientIds)
-  for (const id of serverIds)
-  {
-    if (!clientSet.has(id))
-    {
-      return false
-    }
-  }
-  return true
-}
-
-interface PersistentThreadTerminalDrawerProps
-{
-  threadRef: { environmentId: EnvironmentId; threadId: ThreadId }
-  threadId: ThreadId
-  visible: boolean
-  launchContext: PersistentTerminalLaunchContext | null
-  focusRequestId: number
-  splitShortcutLabel: string | undefined
-  splitVerticalShortcutLabel: string | undefined
-  newShortcutLabel: string | undefined
-  closeShortcutLabel: string | undefined
-  keybindings: ResolvedKeybindingsConfig
-  onAddTerminalContext: (selection: TerminalContextSelection) => void
-}
-
-const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerminalDrawer({
-  threadRef,
-  threadId,
-  visible,
-  launchContext,
-  focusRequestId,
-  splitShortcutLabel,
-  splitVerticalShortcutLabel,
-  newShortcutLabel,
-  closeShortcutLabel,
-  keybindings,
-  onAddTerminalContext,
-}: PersistentThreadTerminalDrawerProps)
-{
-  const openTerminal = useAtomCommand(terminalEnvironment.open, 'terminal open')
-  const writeTerminal = useAtomCommand(terminalEnvironment.write, 'terminal write')
-  const closeTerminalMutation = useAtomCommand(terminalEnvironment.close, 'terminal close')
-  const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef))
-  const serverThread = useThread(threadRef, { waitForShell: draftThread !== null })
-  const projectRef = serverThread
-    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
-    : draftThread
-      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-      : null
-  const project = useProject(projectRef)
-  const terminalUiState = useTerminalUiStateStore((state) =>
-    selectThreadTerminalUiState(state.terminalUiStateByThreadKey, threadRef),
-  )
-  const knownTerminalSessions = useKnownTerminalSessions({
-    environmentId: threadRef.environmentId,
-    threadId,
-  })
-  const panelSurfaces = useRightPanelStore(
-    (state) => selectThreadRightPanelState(state.byThreadKey, threadRef).surfaces,
-  )
-  const panelTerminalIds = useMemo(
-    () =>
-      new Set(
-        panelSurfaces.flatMap((surface) =>
-          surface.kind === 'terminal' ? surface.terminalIds : [],
-        ),
-      ),
-    [panelSurfaces],
-  )
-  const drawerTerminalSessions = useMemo(
-    () =>
-      knownTerminalSessions.filter((session) => !panelTerminalIds.has(session.target.terminalId)),
-    [knownTerminalSessions, panelTerminalIds],
-  )
-  const terminalLabelsById = useMemo(() =>
-  {
-    const next = new Map<string, string>()
-    for (const session of drawerTerminalSessions)
-    {
-      next.set(
-        session.target.terminalId,
-        resolveTerminalSessionLabel(session.target.terminalId, session.state.summary),
-      )
-    }
-    return next
-  }, [drawerTerminalSessions])
-  const terminalLaunchLocationsById = useMemo(() =>
-  {
-    const next = new Map<
-      string,
-      {
-        readonly cwd: string
-        readonly worktreePath: string | null
-        readonly runtimeEnv: Record<string, string>
-      }
-    >()
-    if (!project)
-    {
-      return next
-    }
-
-    for (const session of drawerTerminalSessions)
-    {
-      const summary = session.state.summary
-      if (!summary)
-      {
-        continue
-      }
-      const worktreePathForLaunch =
-        launchContext !== null ? launchContext.worktreePath : summary.worktreePath
-      next.set(session.target.terminalId, {
-        cwd: launchContext?.cwd ?? summary.cwd,
-        worktreePath: worktreePathForLaunch,
-        runtimeEnv: projectScriptRuntimeEnv({
-          project: { cwd: project.workspaceRoot },
-          worktreePath: worktreePathForLaunch,
-        }),
-      })
-    }
-
-    return next
-  }, [drawerTerminalSessions, launchContext, project])
-  const serverOrderedTerminalIds = useMemo(
-    () => drawerTerminalSessions.map((session) => session.target.terminalId),
-    [drawerTerminalSessions],
-  )
-  const storeSetTerminalHeight = useTerminalUiStateStore((state) => state.setTerminalHeight)
-  const storeSplitTerminal = useTerminalUiStateStore((state) => state.splitTerminal)
-  const storeSplitTerminalVertical = useTerminalUiStateStore((state) => state.splitTerminalVertical)
-  const storeNewTerminal = useTerminalUiStateStore((state) => state.newTerminal)
-  const storeSetActiveTerminal = useTerminalUiStateStore((state) => state.setActiveTerminal)
-  const storeCloseTerminal = useTerminalUiStateStore((state) => state.closeTerminal)
-  const reconcileTerminalIds = useTerminalUiStateStore((state) => state.reconcileTerminalIds)
-
-  useEffect(() =>
-  {
-    if (terminalIdListsEqual(serverOrderedTerminalIds, terminalUiState.terminalIds))
-    {
-      return
-    }
-    if (
-      serverTerminalIdsStrictSubsetOfClient(serverOrderedTerminalIds, terminalUiState.terminalIds)
-    )
-    {
-      return
-    }
-    reconcileTerminalIds(threadRef, serverOrderedTerminalIds)
-  }, [reconcileTerminalIds, serverOrderedTerminalIds, terminalUiState.terminalIds, threadRef])
-  const [localFocusRequestId, setLocalFocusRequestId] = useState(0)
-  const worktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null
-  const effectiveWorktreePath = useMemo(() =>
-  {
-    if (launchContext !== null)
-    {
-      return launchContext.worktreePath
-    }
-    return worktreePath
-  }, [launchContext, worktreePath])
-  const cwd = useMemo(
-    () =>
-      launchContext?.cwd ??
-      (project
-        ? projectScriptCwd({
-            project: { cwd: project.workspaceRoot },
-            worktreePath: effectiveWorktreePath,
-          })
-        : null),
-    [effectiveWorktreePath, launchContext?.cwd, project],
-  )
-  const runtimeEnv = useMemo(
-    () =>
-      project
-        ? projectScriptRuntimeEnv({
-            project: { cwd: project.workspaceRoot },
-            worktreePath: effectiveWorktreePath,
-          })
-        : {},
-    [effectiveWorktreePath, project],
-  )
-
-  const bumpFocusRequestId = useCallback(() =>
-  {
-    if (!visible)
-    {
-      return
-    }
-    setLocalFocusRequestId((value) => value + 1)
-  }, [visible])
-
-  const setTerminalHeight = useCallback(
-    (height: number) =>
-    {
-      storeSetTerminalHeight(threadRef, height)
-    },
-    [storeSetTerminalHeight, threadRef],
-  )
-
-  const splitTerminal = useCallback(() =>
-  {
-    if (!cwd)
-    {
-      return
-    }
-    const terminalId = nextTerminalId(serverOrderedTerminalIds)
-    storeSplitTerminal(threadRef, terminalId)
-    bumpFocusRequestId()
-    void openTerminal({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId,
-        terminalId,
-        cwd,
-        ...(effectiveWorktreePath != null ? { worktreePath: effectiveWorktreePath } : {}),
-        env: runtimeEnv,
-      },
-    })
-  }, [
-    bumpFocusRequestId,
-    cwd,
-    effectiveWorktreePath,
-    runtimeEnv,
-    serverOrderedTerminalIds,
-    storeSplitTerminal,
-    threadId,
-    threadRef,
-    openTerminal,
-  ])
-  const splitTerminalVertical = useCallback(() =>
-  {
-    if (!cwd)
-    {
-      return
-    }
-    const terminalId = nextTerminalId(serverOrderedTerminalIds)
-    storeSplitTerminalVertical(threadRef, terminalId)
-    bumpFocusRequestId()
-    void openTerminal({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId,
-        terminalId,
-        cwd,
-        ...(effectiveWorktreePath != null ? { worktreePath: effectiveWorktreePath } : {}),
-        env: runtimeEnv,
-      },
-    })
-  }, [
-    bumpFocusRequestId,
-    cwd,
-    effectiveWorktreePath,
-    openTerminal,
-    runtimeEnv,
-    serverOrderedTerminalIds,
-    storeSplitTerminalVertical,
-    threadId,
-    threadRef,
-  ])
-
-  const createNewTerminal = useCallback(() =>
-  {
-    if (!cwd)
-    {
-      return
-    }
-    const terminalId = nextTerminalId(serverOrderedTerminalIds)
-    storeNewTerminal(threadRef, terminalId)
-    bumpFocusRequestId()
-    void openTerminal({
-      environmentId: threadRef.environmentId,
-      input: {
-        threadId,
-        terminalId,
-        cwd,
-        ...(effectiveWorktreePath != null ? { worktreePath: effectiveWorktreePath } : {}),
-        env: runtimeEnv,
-      },
-    })
-  }, [
-    bumpFocusRequestId,
-    cwd,
-    effectiveWorktreePath,
-    runtimeEnv,
-    serverOrderedTerminalIds,
-    storeNewTerminal,
-    threadId,
-    threadRef,
-    openTerminal,
-  ])
-
-  const activateTerminal = useCallback(
-    (terminalId: string) =>
-    {
-      storeSetActiveTerminal(threadRef, terminalId)
-      bumpFocusRequestId()
-    },
-    [bumpFocusRequestId, storeSetActiveTerminal, threadRef],
-  )
-
-  const closeTerminal = useCallback(
-    (terminalId: string) =>
-    {
-      const fallbackExitWrite = () =>
-        writeTerminal({
-          environmentId: threadRef.environmentId,
-          input: { threadId, terminalId, data: 'exit\n' },
-        })
-
-      void (async () =>
-      {
-        const closeResult = await closeTerminalMutation({
-          environmentId: threadRef.environmentId,
-          input: {
-            threadId,
-            terminalId,
-            deleteHistory: true,
-          },
-        })
-        if (closeResult._tag === 'Failure' && !isAtomCommandInterrupted(closeResult))
-        {
-          await fallbackExitWrite()
-        }
-      })()
-
-      storeCloseTerminal(threadRef, terminalId)
-      bumpFocusRequestId()
-    },
-    [
-      bumpFocusRequestId,
-      storeCloseTerminal,
-      threadId,
-      threadRef,
-      closeTerminalMutation,
-      writeTerminal,
-    ],
-  )
-
-  const handleAddTerminalContext = useCallback(
-    (selection: TerminalContextSelection) =>
-    {
-      if (!visible)
-      {
-        return
-      }
-      onAddTerminalContext(selection)
-    },
-    [onAddTerminalContext, visible],
-  )
-
-  if (!project || !terminalUiState.terminalOpen || !cwd)
-  {
-    return null
-  }
-
-  return (
-    <div className={visible ? undefined : 'hidden'}>
-      <ThreadTerminalDrawer
-        threadRef={threadRef}
-        threadId={threadId}
-        cwd={cwd}
-        worktreePath={effectiveWorktreePath}
-        runtimeEnv={runtimeEnv}
-        visible={visible}
-        height={terminalUiState.terminalHeight}
-        // Known-session order is MRU and changes on focus; persisted store order keeps sidebar labels stable.
-        terminalIds={terminalUiState.terminalIds}
-        activeTerminalId={terminalUiState.activeTerminalId}
-        terminalGroups={terminalUiState.terminalGroups}
-        activeTerminalGroupId={terminalUiState.activeTerminalGroupId}
-        focusRequestId={focusRequestId + localFocusRequestId + (visible ? 1 : 0)}
-        onSplitTerminal={splitTerminal}
-        onSplitTerminalVertical={splitTerminalVertical}
-        onNewTerminal={createNewTerminal}
-        splitShortcutLabel={visible ? splitShortcutLabel : undefined}
-        splitVerticalShortcutLabel={visible ? splitVerticalShortcutLabel : undefined}
-        newShortcutLabel={visible ? newShortcutLabel : undefined}
-        closeShortcutLabel={visible ? closeShortcutLabel : undefined}
-        keybindings={keybindings}
-        onActiveTerminalChange={activateTerminal}
-        onCloseTerminal={closeTerminal}
-        onHeightChange={setTerminalHeight}
-        onAddTerminalContext={handleAddTerminalContext}
-        terminalLabelsById={terminalLabelsById}
-        terminalLaunchLocationsById={terminalLaunchLocationsById}
-      />
-    </div>
-  )
-})
-
-interface PersistentThreadTerminalPanelProps
-{
-  threadRef: ScopedThreadRef
-  surface: Extract<RightPanelSurface, { kind: 'terminal' }>
-  launchContext: PersistentTerminalLaunchContext | null
-  focusRequestId: number
-  keybindings: ResolvedKeybindingsConfig
-  onAddTerminalContext: (selection: TerminalContextSelection) => void
-  onSplitTerminal: () => void
-  onSplitTerminalVertical: () => void
-  onNewTerminal: () => void
-  onActiveTerminalChange: (terminalId: string) => void
-  onCloseTerminal: (terminalId: string) => void
-  splitShortcutLabel?: string | undefined
-  splitVerticalShortcutLabel?: string | undefined
-  newShortcutLabel?: string | undefined
-  closeShortcutLabel?: string | undefined
-}
-
-const PersistentThreadTerminalPanel = memo(function PersistentThreadTerminalPanel({
-  threadRef,
-  surface,
-  launchContext,
-  focusRequestId,
-  keybindings,
-  onAddTerminalContext,
-  onSplitTerminal,
-  onSplitTerminalVertical,
-  onNewTerminal,
-  onActiveTerminalChange,
-  onCloseTerminal,
-  splitShortcutLabel,
-  splitVerticalShortcutLabel,
-  newShortcutLabel,
-  closeShortcutLabel,
-}: PersistentThreadTerminalPanelProps)
-{
-  const draftThread = useComposerDraftStore((store) => store.getDraftThreadByRef(threadRef))
-  const serverThread = useThread(threadRef, { waitForShell: draftThread !== null })
-  const projectRef = serverThread
-    ? scopeProjectRef(serverThread.environmentId, serverThread.projectId)
-    : draftThread
-      ? scopeProjectRef(draftThread.environmentId, draftThread.projectId)
-      : null
-  const project = useProject(projectRef)
-  const knownTerminalSessions = useKnownTerminalSessions({
-    environmentId: threadRef.environmentId,
-    threadId: threadRef.threadId,
-  })
-  const threadWorktreePath = serverThread?.worktreePath ?? draftThread?.worktreePath ?? null
-  const activeSummary =
-    knownTerminalSessions.find((session) => session.target.terminalId === surface.activeTerminalId)
-      ?.state.summary ?? null
-  const worktreePath =
-    launchContext?.worktreePath ?? activeSummary?.worktreePath ?? threadWorktreePath
-  const cwd = useMemo(
-    () =>
-      launchContext?.cwd ??
-      activeSummary?.cwd ??
-      (project
-        ? projectScriptCwd({
-            project: { cwd: project.workspaceRoot },
-            worktreePath,
-          })
-        : null),
-    [activeSummary?.cwd, launchContext?.cwd, project, worktreePath],
-  )
-  const runtimeEnv = useMemo(
-    () =>
-      project
-        ? projectScriptRuntimeEnv({
-            project: { cwd: project.workspaceRoot },
-            worktreePath,
-          })
-        : {},
-    [project, worktreePath],
-  )
-  const terminalLabelsById = useMemo(() =>
-  {
-    const labels = new Map<string, string>()
-    for (const terminalId of surface.terminalIds)
-    {
-      const summary =
-        knownTerminalSessions.find((session) => session.target.terminalId === terminalId)?.state
-          .summary ?? null
-      labels.set(terminalId, resolveTerminalSessionLabel(terminalId, summary))
-    }
-    return labels
-  }, [knownTerminalSessions, surface.terminalIds])
-  const terminalLaunchLocationsById = useMemo(() =>
-  {
-    const locations = new Map<
-      string,
-      {
-        readonly cwd: string
-        readonly worktreePath: string | null
-        readonly runtimeEnv: Record<string, string>
-      }
-    >()
-    for (const terminalId of surface.terminalIds)
-    {
-      const summary =
-        knownTerminalSessions.find((session) => session.target.terminalId === terminalId)?.state
-          .summary ?? null
-      const terminalWorktreePath =
-        launchContext?.worktreePath ?? summary?.worktreePath ?? threadWorktreePath
-      const terminalCwd =
-        launchContext?.cwd ??
-        summary?.cwd ??
-        (project
-          ? projectScriptCwd({
-              project: { cwd: project.workspaceRoot },
-              worktreePath: terminalWorktreePath,
-            })
-          : null)
-      if (!terminalCwd || !project) continue
-      locations.set(terminalId, {
-        cwd: terminalCwd,
-        worktreePath: terminalWorktreePath,
-        runtimeEnv: projectScriptRuntimeEnv({
-          project: { cwd: project.workspaceRoot },
-          worktreePath: terminalWorktreePath,
-        }),
-      })
-    }
-    return locations
-  }, [
-    knownTerminalSessions,
-    launchContext?.cwd,
-    launchContext?.worktreePath,
-    project,
-    surface.terminalIds,
-    threadWorktreePath,
-  ])
-
-  if (!project || !cwd) return null
-
-  return (
-    <ThreadTerminalDrawer
-      mode="panel"
-      threadRef={threadRef}
-      threadId={threadRef.threadId}
-      cwd={cwd}
-      worktreePath={worktreePath}
-      runtimeEnv={runtimeEnv}
-      height={0}
-      terminalIds={surface.terminalIds}
-      activeTerminalId={surface.activeTerminalId}
-      terminalGroups={[
-        {
-          id: surface.id,
-          terminalIds: surface.terminalIds,
-          ...(surface.splitDirection === 'vertical' ? { splitDirection: 'vertical' as const } : {}),
-        },
-      ]}
-      activeTerminalGroupId={surface.id}
-      focusRequestId={focusRequestId}
-      onSplitTerminal={onSplitTerminal}
-      onSplitTerminalVertical={onSplitTerminalVertical}
-      onNewTerminal={onNewTerminal}
-      splitShortcutLabel={splitShortcutLabel}
-      splitVerticalShortcutLabel={splitVerticalShortcutLabel}
-      newShortcutLabel={newShortcutLabel}
-      closeShortcutLabel={closeShortcutLabel}
-      onActiveTerminalChange={onActiveTerminalChange}
-      onCloseTerminal={onCloseTerminal}
-      onHeightChange={() => undefined}
-      onAddTerminalContext={onAddTerminalContext}
-      terminalLabelsById={terminalLabelsById}
-      terminalLaunchLocationsById={terminalLaunchLocationsById}
-      keybindings={keybindings}
-    />
-  )
-})
-
-// Errors surface through two maps (draft-keyed and thread-keyed) whose entries
-// can race around promotion, so each write carries its time to let the latest
-// one win when they collide.
-type LocalThreadErrorEntry = {
-  readonly message: string | null
-  readonly at: number
-}
-
-type ProviderSwitchConfirmation = {
-  readonly environmentId: EnvironmentId
-  readonly threadId: ThreadId
-  readonly targetModelSelection: ModelSelection
-  readonly targetDisplayName: string
-  readonly expectedCurrentInstanceId: ProviderInstanceId
-}
-
-function chatActionErrorMessage(error: unknown): string
-{
-  return error instanceof Error ? error.message : 'An error occurred.'
-}
-
 function ChatViewContent(props: ChatViewProps)
 {
   const {
@@ -1232,6 +607,9 @@ function ChatViewContent(props: ChatViewProps)
   const draftId = routeKind === 'draft' ? props.draftId : null
   const threadSyncPhase = routeKind === 'server' ? (props.threadSyncPhase ?? null) : null
   const threadDetailLoading = threadSyncPhase === 'loading'
+  // a null sync phase is the live detail; 'loading' and 'syncing' both mean the
+  // snapshot can still be missing history
+  const threadDetailSynchronized = routeKind === 'server' && threadSyncPhase === null
   const handleNewThread = useNewThreadHandler()
   const routeThreadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
@@ -1306,7 +684,7 @@ function ChatViewContent(props: ChatViewProps)
     (store) => store.threadLastVisitedAtById[routeThreadKey],
   )
   const settings = useEnvironmentSettings(environmentId)
-  // New-thread defaults live in the primary environment's settings.json (the
+  // new-thread defaults live in the primary environment's settings.json (the
   // settings UI never writes to remote environments), so read them from the
   // primary server rather than the thread's environment.
   const primaryServerSettings = useAtomValue(primaryServerSettingsAtom)
@@ -1317,7 +695,7 @@ function ChatViewContent(props: ChatViewProps)
   const autoOpenPlanSidebar = settings.autoOpenPlanSidebar
   const navigate = useNavigate()
   const { resolvedTheme } = useTheme()
-  // Granular store selectors — avoid subscribing to prompt changes.
+  // granular store selectors — avoid subscribing to prompt changes.
   const composerRuntimeMode = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.runtimeMode ?? null,
   )
@@ -1327,6 +705,14 @@ function ChatViewContent(props: ChatViewProps)
   const composerActiveProvider = useComposerDraftStore(
     (store) => store.getComposerDraft(composerDraftTarget)?.activeProvider ?? null,
   )
+  // the complete draft selection (model and options, not just the instance) so
+  // projection reconciliation can spot a stale selection on the same instance
+  const composerModelSelection = useComposerDraftStore((store) =>
+  {
+    const draft = store.getComposerDraft(composerDraftTarget)
+    const activeProvider = draft?.activeProvider ?? null
+    return activeProvider ? (draft?.modelSelectionByProvider[activeProvider] ?? null) : null
+  })
   const setComposerDraftPrompt = useComposerDraftStore((store) => store.setPrompt)
   const addComposerDraftImages = useComposerDraftStore((store) => store.addImages)
   const setComposerDraftTerminalContexts = useComposerDraftStore(
@@ -1381,10 +767,10 @@ function ChatViewContent(props: ChatViewProps)
   const [pendingUserInputQuestionIndexByRequestId, setPendingUserInputQuestionIndexByRequestId] =
     useState<Record<string, number>>({})
   const shouldUsePlanSidebarSheet = useMediaQuery(RIGHT_PANEL_INLINE_LAYOUT_MEDIA_QUERY)
-  // Tracks whether the user explicitly dismissed the sidebar for the active turn.
+  // tracks whether the user explicitly dismissed the sidebar for the active turn.
   const planSidebarDismissedForTurnRef = useRef<string | null>(null)
-  // When set, the thread-change reset effect will open the sidebar instead of closing it.
-  // Used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
+  // when set, the thread-change reset effect will open the sidebar instead of closing it.
+  // used by "Implement in a new thread" to carry the sidebar-open intent across navigation.
   const planSidebarOpenOnNextThreadRef = useRef(false)
   const [terminalFocusRequestId, setTerminalFocusRequestId] = useState(0)
   const [pullRequestDialogState, setPullRequestDialogState] =
@@ -1397,10 +783,6 @@ function ChatViewContent(props: ChatViewProps)
   const [pendingServerThreadEnvMode, setPendingServerThreadEnvMode] =
     useState<DraftThreadEnvMode | null>(null)
   const [pendingServerThreadBranch, setPendingServerThreadBranch] = useState<string | null>()
-  const [providerSwitchConfirmation, setProviderSwitchConfirmation] =
-    useState<ProviderSwitchConfirmation | null>(null)
-  const [switchingProviderThreadKey, setSwitchingProviderThreadKey] = useState<string | null>(null)
-  const isSwitchingProvider = switchingProviderThreadKey === routeThreadKey
   const [
     pendingServerThreadStartFromOriginByThreadId,
     setPendingServerThreadStartFromOriginByThreadId,
@@ -1487,48 +869,14 @@ function ChatViewContent(props: ChatViewProps)
     ? null
     : ((draftId ? localDraftErrorsByDraftId[draftId]?.message : null) ?? null)
   const localServerError = localServerErrorsByThreadKey[routeThreadKey]?.message ?? null
-  // Draft errors are keyed by draftId while server errors are keyed by thread
-  // key, so a pending draft entry must migrate when the server thread loads or
-  // a failed send would silently disappear on promotion. When both keys hold
-  // an entry, the most recent write wins.
-  useEffect(() =>
-  {
-    if (!activeServerThread || !draftId)
-    {
-      return
-    }
-    const pendingDraftEntry = localDraftErrorsByDraftId[draftId]
-    if (pendingDraftEntry === undefined)
-    {
-      return
-    }
-    setLocalDraftErrorsByDraftId((existing) =>
-    {
-      if (existing[draftId] === undefined)
-      {
-        return existing
-      }
-      const next = { ...existing }
-      delete next[draftId]
-      return next
-    })
-    setLocalServerErrorsByThreadKey((existing) =>
-    {
-      const currentEntry = existing[routeThreadKey]
-      if (
-        currentEntry !== undefined &&
-        (currentEntry.at > pendingDraftEntry.at ||
-          currentEntry.message === pendingDraftEntry.message)
-      )
-      {
-        return existing
-      }
-      return {
-        ...existing,
-        [routeThreadKey]: pendingDraftEntry,
-      }
-    })
-  }, [activeServerThread, draftId, localDraftErrorsByDraftId, routeThreadKey])
+  useDraftErrorPromotion({
+    activeServerThread,
+    draftId,
+    localDraftErrorsByDraftId,
+    routeThreadKey,
+    setLocalDraftErrorsByDraftId,
+    setLocalServerErrorsByThreadKey,
+  })
   const localDraftThread = useMemo(
     () =>
       draftThread
@@ -1540,7 +888,7 @@ function ChatViewContent(props: ChatViewProps)
         : undefined,
     [draftThread, fallbackDraftProject?.defaultModelSelection, threadId],
   )
-  // Promotion is data-driven: the draft route keeps rendering while the
+  // promotion is data-driven: the draft route keeps rendering while the
   // server thread (same pre-allocated ref) starts, so live state must not
   // depend on which route is mounted.
   const isServerThread = activeServerThread !== null
@@ -1755,7 +1103,7 @@ function ChatViewContent(props: ChatViewProps)
     useRightPanelStore.getState().reconcileFileSurfaces(activeThreadRef, activeProject !== null)
   }, [activeEnvironmentBootstrapComplete, activeProject, activeThreadRef])
 
-  // Compute the list of environments this logical project spans, used to
+  // compute the list of environments this logical project spans, used to
   // drive the environment picker in BranchToolbar.
   const allProjects = useProjects()
   const primaryEnvironmentId = primaryEnvironment?.environmentId ?? null
@@ -1827,7 +1175,7 @@ function ChatViewContent(props: ChatViewProps)
         isPrimary,
       })
     }
-    // Sort: primary first, then alphabetical
+    // sort: primary first, then alphabetical
     envs.sort((a, b) =>
     {
       if (a.isPrimary !== b.isPrimary) return a.isPrimary ? -1 : 1
@@ -1976,7 +1324,7 @@ function ChatViewContent(props: ChatViewProps)
     activeThread?.modelSelection.instanceId ??
     activeProject?.defaultModelSelection?.instanceId ??
     null
-  // Once a thread selects an environment, never substitute the primary
+  // once a thread selects an environment, never substitute the primary
   // environment's config while the selected environment is still loading.
   const serverConfig =
     liveServerConfig ??
@@ -2065,7 +1413,7 @@ function ChatViewContent(props: ChatViewProps)
             {serverUpdateGuidance(versionMismatchSelfUpdate, versionMismatchServerLabel)}
           </>
         ),
-        // The desktop-managed guidance is already the description; the action
+        // the desktop-managed guidance is already the description; the action
         // slot would only repeat it.
         actions:
           versionMismatchSelfUpdate === 'desktop-managed' ? undefined : (
@@ -2098,6 +1446,19 @@ function ChatViewContent(props: ChatViewProps)
     versionMismatchServerLabel,
   ])
   const providerStatuses = serverConfig?.providers ?? EMPTY_PROVIDERS
+  const providerInstanceEntries = useMemo(
+    () => deriveProviderInstanceEntries(providerStatuses),
+    [providerStatuses],
+  )
+  // provider identity for the switch pill and the switch timeline dividers
+  const resolveProviderSwitchInstance = useCallback<ProviderSwitchInstanceResolver>(
+    (instanceId) =>
+    {
+      const entry = providerInstanceEntries.find((candidate) => candidate.instanceId === instanceId)
+      return entry ? { driverKind: entry.driverKind, displayName: entry.displayName } : null
+    },
+    [providerInstanceEntries],
+  )
   const importContinuationGate = useMemo(
     () =>
       resolveImportContinuationGate({
@@ -2528,14 +1889,12 @@ function ChatViewContent(props: ChatViewProps)
   const timelineMessages = useMemo(() =>
   {
     const messages = displayServerMessages
+    // copy only messages with changed attachment handoffs to preserve stable references
     const serverMessagesWithPreviewHandoff =
       Object.keys(attachmentPreviewHandoffByMessageId).length === 0
         ? messages
-        : // Spread only fires for the few messages that actually changed;
-          // unchanged ones early-return their original reference.
-          // In-place mutation would break React's immutable state contract.
-          messages.map((message) =>
-            {
+        : messages.map((message) =>
+          {
             if (
               message.role !== 'user' ||
               !message.attachments ||
@@ -2588,8 +1947,13 @@ function ChatViewContent(props: ChatViewProps)
   }, [attachmentPreviewHandoffByMessageId, displayServerMessages, optimisticUserMessages])
   const timelineEntries = useMemo(
     () =>
-      deriveTimelineEntries(timelineMessages, activeThread?.proposedPlans ?? [], workLogEntries),
-    [activeThread?.proposedPlans, timelineMessages, workLogEntries],
+      deriveTimelineEntries(
+        timelineMessages,
+        activeThread?.proposedPlans ?? [],
+        workLogEntries,
+        providerSwitchTimelineEvents,
+      ),
+    [activeThread?.proposedPlans, providerSwitchTimelineEvents, timelineMessages, workLogEntries],
   )
   const [dockedDraftHeroThreadKey, setDockedDraftHeroThreadKey] = useState<string | null>(null)
   const draftHeroDockRequested =
@@ -2671,7 +2035,7 @@ function ChatViewContent(props: ChatViewProps)
   )
   const keybindings = useAtomValue(primaryServerKeybindingsAtom)
   const availableEditors = useAtomValue(primaryServerAvailableEditorsAtom)
-  // Prefer an instance-id match so a custom Codex instance (e.g.
+  // prefer an instance-id match so a custom Codex instance (e.g.
   // `codex_personal`) surfaces its own status/message in the banner rather
   // than the default Codex's. Falls back to first-match-by-kind when no
   // saved instance id is available or the instance no longer exists.
@@ -2695,7 +2059,15 @@ function ChatViewContent(props: ChatViewProps)
     const defaultInstanceId = defaultInstanceIdForDriver(selectedProvider)
     return providerStatuses.find((status) => status.instanceId === defaultInstanceId) ?? null
   }, [activeProviderInstanceId, providerStatuses, selectedProvider])
-  const providerStatusBannerKey = getProviderStatusBannerKey(activeProviderStatus)
+  // an auth failure that lands mid-thread arrives as a session error while the
+  // provider probe still reads healthy, so promote it to the re-auth banner
+  // instead of leaving it as one more generic thread error.
+  const providerReAuthRequired =
+    activeProviderStatus !== null && isProviderAuthFailureMessage(threadError)
+  const providerStatusBannerKey = getProviderStatusBannerKey(
+    activeProviderStatus,
+    providerReAuthRequired,
+  )
   const [dismissedProviderStatusBannerKey, setDismissedProviderStatusBannerKey] = useState<
     string | null
   >(null)
@@ -2709,16 +2081,20 @@ function ChatViewContent(props: ChatViewProps)
   const visibleProviderStatus = shouldShowProviderStatusBanner(
     activeProviderStatus,
     dismissedProviderStatusBannerKey,
+    providerReAuthRequired,
   )
     ? activeProviderStatus
     : null
+  // the promoted banner carries the raw error, so the generic one would only
+  // repeat it; dismissing the promotion hands the error back.
+  const promotedProviderAuthError = providerReAuthRequired && visibleProviderStatus !== null
   const hasTimelineTopBanner = Boolean(threadError) || visibleProviderStatus !== null
   const activeProjectCwd = activeProject?.workspaceRoot ?? null
   const activeThreadWorktreePath = activeThread?.worktreePath ?? null
   const activeWorkspaceRoot = activeThreadWorktreePath ?? activeProjectCwd ?? undefined
   const activeTerminalLaunchContext =
     terminalUiLaunchContext?.threadId === activeThreadId ? terminalUiLaunchContext : null
-  // Default true while loading to avoid toolbar flicker.
+  // default true while loading to avoid toolbar flicker.
   const isGitRepo = gitStatusQuery.data?.isRepo ?? true
   const showComposerContextStrip = isGitRepo && activeProject !== null
   const initialDiffPanelGitScope =
@@ -2750,29 +2126,13 @@ function ChatViewContent(props: ChatViewProps)
     () => shortcutLabelForCommand(keybindings, 'terminal.close', terminalShortcutLabelOptions),
     [keybindings, terminalShortcutLabelOptions],
   )
-  const onToggleDiff = useCallback(() =>
-  {
-    if (!isServerThread)
-    {
-      return
-    }
-    if (!diffOpen)
-    {
-      onDiffPanelOpen?.()
-    }
-    if (activeThreadRef)
-    {
-      useRightPanelStore.getState().toggle(activeThreadRef, 'diff')
-    }
-  }, [activeThreadRef, diffOpen, isServerThread, onDiffPanelOpen])
-
   const envLocked = Boolean(
     activeThread &&
     (activeThread.messages.length > 0 ||
       (activeThread.session !== null && activeThread.session.status !== 'stopped')),
   )
 
-  // Handle environment change for draft threads.  When the user picks a
+  // handle environment change for draft threads.  When the user picks a
   // different environment we update the draft context to point at the physical
   // project in that environment while keeping the same logical project.
   const onEnvironmentChange = useCallback(
@@ -3378,413 +2738,72 @@ function ChatViewContent(props: ChatViewProps)
     planSidebarDismissedForTurnRef.current =
       activePlan?.turnId ?? sidebarProposedPlan?.turnId ?? '__dismissed__'
   }, [activePlan?.turnId, sidebarProposedPlan?.turnId])
-  const togglePlanSidebar = useCallback(() =>
+  const resetPlanSidebarDismissal = useCallback(() =>
   {
-    if (!activeThreadRef) return
-    if (planSidebarOpen)
-    {
-      dismissPlanSidebarForCurrentTurn()
-    }
-    else
-    {
-      planSidebarDismissedForTurnRef.current = null
-    }
-    useRightPanelStore.getState().toggle(activeThreadRef, 'plan')
-  }, [activeThreadRef, dismissPlanSidebarForCurrentTurn, planSidebarOpen])
-  const closePlanSidebar = useCallback(() =>
+    planSidebarDismissedForTurnRef.current = null
+  }, [])
+  const requestTerminalFocus = useCallback(() =>
   {
-    if (!activeThreadRef) return
-    setMaximizedRightPanelThreadKey(null)
-    useRightPanelStore.getState().close(activeThreadRef)
-    dismissPlanSidebarForCurrentTurn()
-  }, [activeThreadRef, dismissPlanSidebarForCurrentTurn])
-  const createBrowserSurface = useCallback(() =>
-  {
-    if (!activeThreadRef) return
-    void addBrowserSurface({ threadRef: activeThreadRef, openPreview })
-  }, [activeThreadRef, openPreview])
-  const addDiffSurface = useCallback(() =>
-  {
-    if (!activeThreadRef || !isServerThread || !isGitRepo) return
-    if (planSidebarOpen)
-    {
-      dismissPlanSidebarForCurrentTurn()
-    }
-    useRightPanelStore.getState().open(activeThreadRef, 'diff')
-    onDiffPanelOpen?.()
-  }, [
+    setTerminalFocusRequestId((value) => value + 1)
+  }, [])
+  const explorerAvailable =
+    activeProject !== null && isServerThread && (proposalPreviewAvailable || cartographerAvailable)
+  const {
+    activatePanelTerminal,
+    activateRightPanelSurface,
+    addDiffSurface,
+    addExplorerSurface,
+    addFilesSurface,
+    addTerminalSurface,
+    addWorkersSurface,
+    closeAllRightPanelSurfaces,
+    closeOtherRightPanelSurfaces,
+    closePanelTerminal,
+    closePlanSidebar,
+    closePreviewPanel,
+    closeRightPanelSurface,
+    closeRightPanelSurfacesToRight,
+    copyRightPanelFilePath,
+    createBrowserSurface,
+    onToggleDiff,
+    openFileSurface,
+    selectExplorerFile,
+    splitPanelTerminal,
+    splitPanelTerminalVertical,
+    togglePlanSidebar,
+    toggleRightPanel,
+    toggleRightPanelMaximized,
+  } = useChatRightPanelController({
+    activeKnownTerminalIds,
+    activePreviewTabId: activePreviewState.activeTabId,
+    activePreviewSessions: activePreviewState.sessions,
+    activeProjectWorkspaceRoot: activeProject?.workspaceRoot ?? null,
+    activeRightPanelSurface,
     activeThreadRef,
+    activeThreadWorktreePath,
+    canMaximizeRightPanel,
+    closePreview,
+    closeTerminal: closeTerminalMutation,
+    diffOpen,
     dismissPlanSidebarForCurrentTurn,
+    explorerAvailable,
+    gitCwd,
     isGitRepo,
     isServerThread,
     onDiffPanelOpen,
-    planSidebarOpen,
-  ])
-  const addFilesSurface = useCallback(() =>
-  {
-    if (!activeThreadRef || !activeProject) return
-    useRightPanelStore.getState().open(activeThreadRef, 'files')
-  }, [activeProject, activeThreadRef])
-  // workers reads local broker state, so it is available for every thread
-  const addWorkersSurface = useCallback(() =>
-  {
-    if (!activeThreadRef) return
-    useRightPanelStore.getState().open(activeThreadRef, 'workers')
-  }, [activeThreadRef])
-  const explorerAvailable =
-    activeProject !== null && isServerThread && (proposalPreviewAvailable || cartographerAvailable)
-  const addExplorerSurface = useCallback(() =>
-  {
-    if (!activeThreadRef || !explorerAvailable) return
-    useRightPanelStore.getState().open(activeThreadRef, 'explorer')
-  }, [activeThreadRef, explorerAvailable])
-  const openFileSurface = useCallback(
-    (relativePath: string, line?: number) =>
-    {
-      if (!activeThreadRef || !activeProject) return
-      useRightPanelStore.getState().openFile(activeThreadRef, relativePath, line)
-    },
-    [activeProject, activeThreadRef],
-  )
-  const selectExplorerFile = useCallback(
-    (relativePath: string | null) =>
-    {
-      if (relativePath === null) return
-      openFileSurface(relativePath)
-    },
-    [openFileSurface],
-  )
-  const togglePreviewPanel = useCallback(() =>
-  {
-    if (!activeThreadRef || !isPreviewSupportedInRuntime()) return
-    if (previewPanelOpen)
-    {
-      useRightPanelStore.getState().close(activeThreadRef)
-      return
-    }
-    const activeTabId = activePreviewState.activeTabId
-    if (activeTabId)
-    {
-      useRightPanelStore.getState().openBrowser(activeThreadRef, activeTabId)
-    }
-    else
-    {
-      createBrowserSurface()
-    }
-  }, [activePreviewState.activeTabId, activeThreadRef, createBrowserSurface, previewPanelOpen])
-  const closePreviewPanel = useCallback(() =>
-  {
-    if (activeThreadRef)
-    {
-      setMaximizedRightPanelThreadKey(null)
-      useRightPanelStore.getState().close(activeThreadRef)
-    }
-  }, [activeThreadRef])
-  const addTerminalSurface = useCallback(() =>
-  {
-    if (!activeThreadRef || !activeThreadId || !activeProject) return
-    const cwd = gitCwd ?? activeProject.workspaceRoot
-    const terminalId = nextTerminalId([...activeKnownTerminalIds, ...panelTerminalIds])
-    useRightPanelStore.getState().openTerminal(activeThreadRef, terminalId)
-    setTerminalFocusRequestId((value) => value + 1)
-    void openTerminal({
-      environmentId: activeThreadRef.environmentId,
-      input: {
-        threadId: activeThreadId,
-        terminalId,
-        cwd,
-        ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
-        env: projectScriptRuntimeEnv({
-          project: { cwd: activeProject.workspaceRoot },
-          worktreePath: activeThreadWorktreePath,
-        }),
-      },
-    })
-  }, [
-    activeKnownTerminalIds,
-    activeProject,
-    activeThreadId,
-    activeThreadRef,
-    activeThreadWorktreePath,
-    gitCwd,
+    openPreview,
     openTerminal,
     panelTerminalIds,
-  ])
-  const splitPanelTerminal = useCallback(
-    (direction: 'horizontal' | 'vertical' = 'horizontal') =>
-    {
-      if (
-        !activeThreadRef ||
-        !activeThreadId ||
-        !activeProject ||
-        activeRightPanelSurface?.kind !== 'terminal' ||
-        activeRightPanelSurface.terminalIds.length >= MAX_TERMINALS_PER_GROUP
-      )
-      {
-        return
-      }
-      const terminalId = nextTerminalId([...activeKnownTerminalIds, ...panelTerminalIds])
-      const cwd = gitCwd ?? activeProject.workspaceRoot
-      useRightPanelStore
-        .getState()
-        .splitTerminal(activeThreadRef, activeRightPanelSurface.id, terminalId, direction)
-      setTerminalFocusRequestId((value) => value + 1)
-      void openTerminal({
-        environmentId: activeThreadRef.environmentId,
-        input: {
-          threadId: activeThreadId,
-          terminalId,
-          cwd,
-          ...(activeThreadWorktreePath != null ? { worktreePath: activeThreadWorktreePath } : {}),
-          env: projectScriptRuntimeEnv({
-            project: { cwd: activeProject.workspaceRoot },
-            worktreePath: activeThreadWorktreePath,
-          }),
-        },
-      })
-    },
-    [
-      activeKnownTerminalIds,
-      activeProject,
-      activeRightPanelSurface,
-      activeThreadId,
-      activeThreadRef,
-      activeThreadWorktreePath,
-      gitCwd,
-      openTerminal,
-      panelTerminalIds,
-    ],
-  )
-  const splitPanelTerminalVertical = useCallback(() =>
-  {
-    splitPanelTerminal('vertical')
-  }, [splitPanelTerminal])
-  const activatePanelTerminal = useCallback(
-    (terminalId: string) =>
-    {
-      if (!activeThreadRef || activeRightPanelSurface?.kind !== 'terminal') return
-      useRightPanelStore
-        .getState()
-        .activateTerminal(activeThreadRef, activeRightPanelSurface.id, terminalId)
-      setTerminalFocusRequestId((value) => value + 1)
-    },
-    [activeRightPanelSurface, activeThreadRef],
-  )
-  const closePanelTerminal = useCallback(
-    (terminalId: string) =>
-    {
-      if (!activeThreadRef || activeRightPanelSurface?.kind !== 'terminal') return
-      void closeTerminalMutation({
-        environmentId: activeThreadRef.environmentId,
-        input: { threadId: activeThreadRef.threadId, terminalId, deleteHistory: true },
-      })
-      storeCloseTerminal(activeThreadRef, terminalId)
-      useRightPanelStore
-        .getState()
-        .closeTerminal(activeThreadRef, activeRightPanelSurface.id, terminalId)
-      setTerminalFocusRequestId((value) => value + 1)
-    },
-    [activeRightPanelSurface, activeThreadRef, closeTerminalMutation, storeCloseTerminal],
-  )
-  const activateRightPanelSurface = useCallback(
-    (surface: RightPanelSurface) =>
-    {
-      if (!activeThreadRef) return
-      if (surface.kind === 'plan')
-      {
-        planSidebarDismissedForTurnRef.current = null
-      }
-      else if (planSidebarOpen)
-      {
-        dismissPlanSidebarForCurrentTurn()
-      }
-      useRightPanelStore.getState().activateSurface(activeThreadRef, surface.id)
-      if (surface.kind === 'preview' && surface.resourceId)
-      {
-        setActivePreviewTab(activeThreadRef, surface.resourceId)
-      }
-      if (surface.kind === 'terminal')
-      {
-        setTerminalFocusRequestId((value) => value + 1)
-      }
-      if (surface.kind === 'diff' && !diffOpen)
-      {
-        onDiffPanelOpen?.()
-      }
-    },
-    [activeThreadRef, diffOpen, dismissPlanSidebarForCurrentTurn, onDiffPanelOpen, planSidebarOpen],
-  )
-  const toggleRightPanel = useCallback(() =>
-  {
-    if (!activeThreadRef) return
-    if (rightPanelOpen)
-    {
-      if (planSidebarOpen)
-      {
-        closePlanSidebar()
-      }
-      else
-      {
-        closePreviewPanel()
-      }
-      return
-    }
-    useRightPanelStore.getState().toggleVisibility(activeThreadRef)
-  }, [activeThreadRef, closePlanSidebar, closePreviewPanel, planSidebarOpen, rightPanelOpen])
-  const toggleRightPanelMaximized = useCallback(() =>
-  {
-    if (!canMaximizeRightPanel) return
-    setMaximizedRightPanelThreadKey((threadKey) =>
-      threadKey === routeThreadKey ? null : routeThreadKey,
-    )
-  }, [canMaximizeRightPanel, routeThreadKey])
-  const cleanupRightPanelSurfaces = useCallback(
-    (surfaces: readonly RightPanelSurface[]) =>
-    {
-      if (!activeThreadRef) return
-      if (surfaces.some((surface) => surface.kind === 'plan'))
-      {
-        dismissPlanSidebarForCurrentTurn()
-      }
-
-      for (const surface of surfaces)
-      {
-        if (surface.kind === 'preview' && surface.resourceId)
-        {
-          void closePreviewSession({
-            closePreview,
-            snapshot: activePreviewState.sessions[surface.resourceId] ?? null,
-            tabId: surface.resourceId,
-            threadRef: activeThreadRef,
-          })
-        }
-        if (surface.kind === 'terminal')
-        {
-          for (const terminalId of surface.terminalIds)
-          {
-            storeCloseTerminal(activeThreadRef, terminalId)
-            void closeTerminalMutation({
-              environmentId: activeThreadRef.environmentId,
-              input: { threadId: activeThreadRef.threadId, terminalId, deleteHistory: true },
-            })
-          }
-        }
-      }
-    },
-    [
-      activeThreadRef,
-      activePreviewState.sessions,
-      closePreview,
-      closeTerminalMutation,
-      dismissPlanSidebarForCurrentTurn,
-      storeCloseTerminal,
-    ],
-  )
-  const syncActivePreviewSurface = useCallback(() =>
-  {
-    if (!activeThreadRef) return
-    const nextActiveSurface = selectActiveRightPanelSurface(
-      useRightPanelStore.getState().byThreadKey,
-      activeThreadRef,
-    )
-    if (nextActiveSurface?.kind === 'preview' && nextActiveSurface.resourceId)
-    {
-      setActivePreviewTab(activeThreadRef, nextActiveSurface.resourceId)
-    }
-  }, [activeThreadRef])
-  const closeRightPanelSurface = useCallback(
-    (surface: RightPanelSurface) =>
-    {
-      if (!activeThreadRef) return
-      cleanupRightPanelSurfaces([surface])
-      useRightPanelStore.getState().closeSurface(activeThreadRef, surface.id)
-      syncActivePreviewSurface()
-    },
-    [activeThreadRef, cleanupRightPanelSurfaces, syncActivePreviewSurface],
-  )
-  const closeOtherRightPanelSurfaces = useCallback(
-    (surface: RightPanelSurface) =>
-    {
-      if (!activeThreadRef) return
-      const surfaces = rightPanelState.surfaces.filter((entry) => entry.id !== surface.id)
-      cleanupRightPanelSurfaces(surfaces)
-      useRightPanelStore.getState().closeOtherSurfaces(activeThreadRef, surface.id)
-      syncActivePreviewSurface()
-    },
-    [
-      activeThreadRef,
-      cleanupRightPanelSurfaces,
-      rightPanelState.surfaces,
-      syncActivePreviewSurface,
-    ],
-  )
-  const closeRightPanelSurfacesToRight = useCallback(
-    (surface: RightPanelSurface) =>
-    {
-      if (!activeThreadRef) return
-      const surfaceIndex = rightPanelState.surfaces.findIndex((entry) => entry.id === surface.id)
-      if (surfaceIndex < 0) return
-      const surfaces = rightPanelState.surfaces.slice(surfaceIndex + 1)
-      cleanupRightPanelSurfaces(surfaces)
-      useRightPanelStore.getState().closeSurfacesToRight(activeThreadRef, surface.id)
-      syncActivePreviewSurface()
-    },
-    [
-      activeThreadRef,
-      cleanupRightPanelSurfaces,
-      rightPanelState.surfaces,
-      syncActivePreviewSurface,
-    ],
-  )
-  const closeAllRightPanelSurfaces = useCallback(() =>
-  {
-    if (!activeThreadRef) return
-    cleanupRightPanelSurfaces(rightPanelState.surfaces)
-    useRightPanelStore.getState().closeAllSurfaces(activeThreadRef)
-  }, [activeThreadRef, cleanupRightPanelSurfaces, rightPanelState.surfaces])
-  const copyRightPanelFilePath = useCallback((relativePath: string) =>
-  {
-    if (typeof window === 'undefined' || !navigator.clipboard?.writeText)
-    {
-      toastManager.add(
-        stackedThreadToast({
-          type: 'error',
-          title: 'Failed to copy path',
-          description: 'Clipboard API unavailable.',
-        }),
-      )
-      return
-    }
-
-    void navigator.clipboard.writeText(relativePath).then(
-      () =>
-      {
-        toastManager.add({
-          type: 'success',
-          title: 'Path copied',
-          description: relativePath,
-        })
-      },
-      (error) =>
-      {
-        toastManager.add(
-          stackedThreadToast({
-            type: 'error',
-            title: 'Failed to copy path',
-            description: error instanceof Error ? error.message : 'An error occurred.',
-          }),
-        )
-      },
-    )
-  }, [])
-  useEffect(
-    () =>
-      subscribePreviewAction((action) =>
-      {
-        if (action === 'toggle-panel') togglePreviewPanel()
-      }),
-    [togglePreviewPanel],
-  )
+    planSidebarOpen,
+    previewPanelOpen,
+    requestTerminalFocus,
+    resetPlanSidebarDismissal,
+    rightPanelOpen,
+    rightPanelState,
+    routeThreadKey,
+    setMaximizedRightPanelThreadKey,
+    storeCloseTerminal,
+  })
   const persistThreadSettingsForNextTurn = useCallback(
     async (input: {
       threadId: ThreadId
@@ -3869,7 +2888,7 @@ function ChatViewContent(props: ChatViewProps)
     ],
   )
 
-  // Debounce *showing* the scroll-to-bottom pill so it doesn't flash during
+  // debounce *showing* the scroll-to-bottom pill so it doesn't flash during
   // thread switches. LegendList fires scroll events with isAtEnd=false while
   // initialScrollAtEnd is settling; hiding is always immediate.
   const showScrollDebouncer = useRef(
@@ -3964,7 +2983,7 @@ function ChatViewContent(props: ChatViewProps)
     [composerOverlayHeight],
   )
 
-  // Live-follow stays active after send/thread-open until an actual list scroll
+  // live-follow stays active after send/thread-open until an actual list scroll
   // gesture opts out.
   const scrollToEnd = useCallback((animated = false) =>
   {
@@ -4261,8 +3280,8 @@ function ChatViewContent(props: ChatViewProps)
     // activeThreadRef resets transitively with the active thread.
   }, [activeThread?.id])
 
-  // Auto-open the plan sidebar when plan/todo steps arrive for the current turn.
-  // Don't auto-open for plans carried over from a previous turn (the user can open manually).
+  // auto-open the plan sidebar when plan/todo steps arrive for the current turn.
+  // don't auto-open for plans carried over from a previous turn (the user can open manually).
   useEffect(() =>
   {
     if (!autoOpenPlanSidebar) return
@@ -4399,7 +3418,7 @@ function ChatViewContent(props: ChatViewProps)
         : null,
     [activeThreadBranch, activeWorktreePath, envMode, gitStatusQuery.data?.refName, isServerThread],
   )
-  // Settled state of the open thread, resolved exactly like the sidebar
+  // settled state of the open thread, resolved exactly like the sidebar
   // partition (same shell, same capability gate, same PR auto-settle input)
   // so the banner and the sidebar row never disagree.
   const activeThreadShell = useThreadShell(isServerThread ? activeThreadRef : null)
@@ -4440,7 +3459,7 @@ function ChatViewContent(props: ChatViewProps)
   const unsettleThreadMutation = useAtomCommand(threadEnvironment.unsettle, {
     reportFailure: false,
   })
-  // Keyed by thread, not a boolean: the pending state must follow the thread
+  // keyed by thread, not a boolean: the pending state must follow the thread
   // it belongs to across navigation, and a request resolving for thread A
   // must never clear (or re-enable) thread B's button.
   const [unsettlingThreadKey, setUnsettlingThreadKey] = useState<string | null>(null)
@@ -4508,10 +3527,10 @@ function ChatViewContent(props: ChatViewProps)
   }, [activeThreadRef, unsnoozeThreadMutation])
   const [isRestoringThreadBranch, setIsRestoringThreadBranch] = useState(false)
   const [branchRestoreConfirmOpen, setBranchRestoreConfirmOpen] = useState(false)
-  // Once revealed for a given mismatch, the banner stays mounted until the
+  // once revealed for a given mismatch, the banner stays mounted until the
   // mismatch changes or resolves, so clearing the draft doesn't flicker it.
   const [revealedBranchMismatchKey, setRevealedBranchMismatchKey] = useState<string | null>(null)
-  // Dismissal lives in a module-level set (survives remounts); this tick just
+  // dismissal lives in a module-level set (survives remounts); this tick just
   // forces a re-render so the banner leaves immediately.
   const [, setBranchMismatchDismissTick] = useState(0)
   const composerHasDraftContent = useComposerDraftStore((store) =>
@@ -4546,7 +3565,7 @@ function ChatViewContent(props: ChatViewProps)
       {
         return activeBranchMismatchKey
       }
-      // Hysteresis is scoped to an uninterrupted mismatch: reset when the
+      // hysteresis is scoped to an uninterrupted mismatch: reset when the
       // mismatch resolves or changes so a recurrence re-gates on intent.
       return revealed !== null && revealed !== activeBranchMismatchKey ? null : revealed
     })
@@ -4624,7 +3643,7 @@ function ChatViewContent(props: ChatViewProps)
     switchGitRef,
     updateThreadMetadata,
   ])
-  // The stack renders items[0] front-most and tucks the rest behind hover, so
+  // the stack renders items[0] front-most and tucks the rest behind hover, so
   // ordering is priority: a blocking import decision stays focusable at the
   // front, followed by system banners, branch mismatch, and parked state.
   const parkedThreadBannerItem = useMemo<ComposerBannerStackItem | null>(() =>
@@ -4670,6 +3689,46 @@ function ChatViewContent(props: ChatViewProps)
     isUnsnoozing,
     isUnsettling,
   ])
+  // a started thread stays bound to the instance that owns its session. When
+  // that instance is disabled or removed the composer silently falls back to
+  // another instance and the send fails inside the provider layer, so name the
+  // binding and point at the switch flow before the user hits that.
+  const unavailableBoundProviderBannerItem = useMemo<ComposerBannerStackItem | null>(() =>
+  {
+    // an empty snapshot list means the server config has not arrived yet, not
+    // that every instance vanished.
+    if (!activeThread || !threadHasStarted(activeThread) || providerStatuses.length === 0)
+    {
+      return null
+    }
+    const boundInstanceId =
+      activeThread.session?.providerInstanceId ?? activeThread.modelSelection.instanceId
+    const snapshot =
+      providerStatuses.find((status) => status.instanceId === boundInstanceId) ?? null
+    const entry = snapshot ? (deriveProviderInstanceEntries([snapshot])[0] ?? null) : null
+    if (entry && entry.enabled && entry.isAvailable)
+    {
+      return null
+    }
+    const instanceName = entry?.displayName ?? boundInstanceId
+    const reason = entry
+      ? entry.enabled
+        ? (snapshot?.unavailableReason ?? `${instanceName} is no longer available on this server.`)
+        : `${instanceName} is disabled in provider settings.`
+      : `${instanceName} is no longer configured on this server.`
+    return {
+      id: `bound-provider-unavailable:${activeThread.id}:${boundInstanceId}`,
+      variant: 'error',
+      icon: <TriangleAlertIcon />,
+      title: `This thread is bound to ${instanceName}`,
+      description: `${reason} Sending will fail until this thread switches to another provider.`,
+      actions: (
+        <Button size="xs" variant="outline" onClick={() => composerRef.current?.openModelPicker()}>
+          Switch provider
+        </Button>
+      ),
+    }
+  }, [activeThread, composerRef, providerStatuses])
   const importConsentBannerItem = useMemo<ComposerBannerStackItem | null>(() =>
   {
     if (
@@ -4748,13 +3807,21 @@ function ChatViewContent(props: ChatViewProps)
   const composerBannerItems = useMemo<ComposerBannerStackItem[]>(() =>
   {
     const importConsentItems = importConsentBannerItem === null ? [] : [importConsentBannerItem]
+    const boundProviderItems =
+      unavailableBoundProviderBannerItem === null ? [] : [unavailableBoundProviderBannerItem]
     const parkedThreadItems = parkedThreadBannerItem === null ? [] : [parkedThreadBannerItem]
     if (!localCheckoutBranchMismatch || !showBranchMismatchBanner || !activeBranchMismatchKey)
     {
-      return [...importConsentItems, ...systemComposerBannerItems, ...parkedThreadItems]
+      return [
+        ...importConsentItems,
+        ...boundProviderItems,
+        ...systemComposerBannerItems,
+        ...parkedThreadItems,
+      ]
     }
     return [
       ...importConsentItems,
+      ...boundProviderItems,
       ...systemComposerBannerItems,
       {
         id: `branch-mismatch:${activeBranchMismatchKey}`,
@@ -4807,6 +3874,7 @@ function ChatViewContent(props: ChatViewProps)
     parkedThreadBannerItem,
     showBranchMismatchBanner,
     systemComposerBannerItems,
+    unavailableBoundProviderBannerItem,
   ])
 
   useEffect(() =>
@@ -5281,7 +4349,7 @@ function ChatViewContent(props: ChatViewProps)
         ? activeThreadBranch
         : null
 
-    // In worktree mode, require an explicit base branch so we don't silently
+    // in worktree mode, require an explicit base branch so we don't silently
     // fall back to local execution when branch selection is missing.
     const shouldCreateWorktree =
       isFirstMessage && sendEnvMode === 'worktree' && !activeThread.worktreePath
@@ -5356,7 +4424,7 @@ function ChatViewContent(props: ChatViewProps)
       sizeBytes: image.sizeBytes,
       previewUrl: image.previewUrl,
     }))
-    // Sending always returns to the live edge. The new row becomes the
+    // sending always returns to the live edge. The new row becomes the
     // anchored end-space target so it lands near the top while the response
     // streams into the reserved space below it.
     isAtEndRef.current = true
@@ -5436,7 +4504,7 @@ function ChatViewContent(props: ChatViewProps)
     )
 
     let failure: AtomCommandResult<unknown, unknown> | null = null
-    // Auto-title from first message
+    // auto-title from first message
     if (isFirstMessage && isServerThread)
     {
       const titleResult = await updateThreadMetadata({
@@ -5614,10 +4682,7 @@ function ChatViewContent(props: ChatViewProps)
 
   // the full catalog, same as the composer picker -> the user picks models;
   // mapping a model to a launchable harness is the orchestrator's job
-  const orchestrateInstanceEntries = useMemo(
-    () => deriveProviderInstanceEntries(providerStatuses),
-    [providerStatuses],
-  )
+  const orchestrateInstanceEntries = providerInstanceEntries
 
   const orchestrateModelOptions = useMemo(() =>
   {
@@ -5683,27 +4748,19 @@ function ChatViewContent(props: ChatViewProps)
     ],
   )
 
-  const onInterrupt = async () =>
-  {
-    if (!activeThread) return
-    const result = await interruptThreadTurn({
-      environmentId,
-      input: buildThreadTurnInterruptInput(activeThread),
-    })
-    if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
-    {
-      const error = squashAtomCommandFailure(result)
-      setThreadError(
-        activeThread.id,
-        error instanceof Error ? error.message : 'Failed to interrupt the current turn.',
-      )
-    }
-  }
-
   const onRespondToApproval = useCallback(
     async (requestId: ApprovalRequestId, decision: ProviderApprovalDecision) =>
     {
       if (!activeThreadId) return
+      const approval = pendingApprovals.find((candidate) => candidate.requestId === requestId)
+      if (
+        respondingRequestIds.includes(requestId) ||
+        approval?.status === 'responding' ||
+        approval?.status === 'unknown'
+      )
+      {
+        return
+      }
 
       setRespondingRequestIds((existing) =>
         existing.includes(requestId) ? existing : [...existing, requestId],
@@ -5727,7 +4784,14 @@ function ChatViewContent(props: ChatViewProps)
       setRespondingRequestIds((existing) => existing.filter((id) => id !== requestId))
       return result
     },
-    [activeThreadId, environmentId, respondToThreadApproval, setThreadError],
+    [
+      activeThreadId,
+      environmentId,
+      pendingApprovals,
+      respondToThreadApproval,
+      respondingRequestIds,
+      setThreadError,
+    ],
   )
 
   const onRespondToUserInput = useCallback(
@@ -5944,7 +5008,7 @@ function ChatViewContent(props: ChatViewProps)
       beginLocalDispatch({ preparingWorktree: false })
       setThreadError(threadIdForSend, null)
 
-      // Position this sent row once LegendList has measured the anchored tail.
+      // position this sent row once LegendList has measured the anchored tail.
       isAtEndRef.current = true
       timelineScrollModeRef.current = 'anchoring-new-turn'
       liveFollowUserScrollGenerationRef.current = anchorUserScrollGenerationRef.current
@@ -5985,7 +5049,7 @@ function ChatViewContent(props: ChatViewProps)
 
       if (failure === null)
       {
-        // Keep the mode toggle and plan-follow-up banner in sync immediately
+        // keep the mode toggle and plan-follow-up banner in sync immediately
         // while the same-thread implementation turn is starting.
         setComposerDraftInteractionMode(
           scopeThreadRef(activeThread.environmentId, threadIdForSend),
@@ -6023,7 +5087,7 @@ function ChatViewContent(props: ChatViewProps)
 
       if (failure === null)
       {
-        // Optimistically open the plan sidebar when implementing (not refining).
+        // optimistically open the plan sidebar when implementing (not refining).
         // "default" mode here means the agent is executing the plan, which produces
         // step-tracking activities that the sidebar will display.
         if (nextInteractionMode === 'default' && autoOpenPlanSidebar)
@@ -6185,7 +5249,7 @@ function ChatViewContent(props: ChatViewProps)
 
     if (failure === null)
     {
-      // Signal that the plan sidebar should open on the new thread when enabled.
+      // signal that the plan sidebar should open on the new thread when enabled.
       planSidebarOpenOnNextThreadRef.current = autoOpenPlanSidebar
       const navigateResult = await settlePromise(() =>
         navigate({
@@ -6259,284 +5323,50 @@ function ChatViewContent(props: ChatViewProps)
     composerRef,
   ])
 
-  const providerSwitchBlockReason = getStartedThreadProviderSwitchBlockReason({
+  const {
+    activeProviderSwitch,
+    activeProviderSwitchTarget,
+    activeProviderSwitchTargetLabel,
+    composerProviderSwitch,
+    confirmProviderSwitch,
+    getModelDisabledReason,
     isSwitchingProvider,
-    isTurnRunning: phase === 'running' || isSendBusy,
-    hasPendingApproval: pendingApprovals.length > 0,
-    hasPendingUserInput: pendingUserInputs.length > 0,
-  })
-  const currentProviderInstanceId = activeThread
-    ? activeThread.pendingHandoff
-      ? activeThread.modelSelection.instanceId
-      : (activeThread.session?.providerInstanceId ?? activeThread.modelSelection.instanceId)
-    : null
-  const getModelDisabledReason = useCallback(
-    (instanceId: ProviderInstanceId, model: string): string | null =>
-    {
-      if (!activeThread)
-      {
-        return null
-      }
-      if (
-        verifiedImportProviderInstanceId !== null &&
-        instanceId !== verifiedImportProviderInstanceId
-      )
-      {
-        return 'This imported session is locked to its verified provider instance until its first native turn.'
-      }
-      if (threadHasStarted(activeThread) && instanceId !== activeThread.modelSelection.instanceId)
-      {
-        return providerSwitchBlockReason
-      }
-      const reason = getStartedThreadModelChangeBlockReason({
-        providers: providerStatuses,
-        hasStartedSession: activeThread.session !== null,
-        currentModelSelection: activeThread.modelSelection,
-        currentProviderInstanceId,
-        nextModelSelection: { instanceId, model },
-      })
-      return reason ? `${reason.description} Start a new thread to use this model.` : null
-    },
-    [
-      activeThread,
-      currentProviderInstanceId,
-      providerStatuses,
-      providerSwitchBlockReason,
-      verifiedImportProviderInstanceId,
-    ],
-  )
-
-  const applyComposerModelSelection = useCallback(
-    (threadRef: ScopedThreadRef, nextModelSelection: ModelSelection) =>
-    {
-      setComposerDraftModelSelection(threadRef, nextModelSelection)
-      setStickyComposerModelSelection(nextModelSelection)
-    },
-    [setComposerDraftModelSelection, setStickyComposerModelSelection],
-  )
-
-  const onProviderModelSelect = useCallback(
-    (instanceId: ProviderInstanceId, model: string) =>
-    {
-      if (!activeThread) return
-      if (
-        verifiedImportProviderInstanceId !== null &&
-        instanceId !== verifiedImportProviderInstanceId
-      )
-      {
-        scheduleComposerFocus()
-        return
-      }
-      // Look up the configured instance so model normalization and custom
-      // model lookup stay scoped to that exact instance. Unknown instance ids
-      // are rejected by returning early; the server remains authoritative too.
-      const entry = providerStatuses.find((snapshot) => snapshot.instanceId === instanceId)
-      if (!entry)
-      {
-        scheduleComposerFocus()
-        return
-      }
-      const resolvedDriverKind = entry.driver
-      if (
-        lockedProvider !== null &&
-        resolvedDriverKind !== null &&
-        resolvedDriverKind !== lockedProvider
-      )
-      {
-        scheduleComposerFocus()
-        return
-      }
-      if (lockedProvider !== null && activeThread.session?.providerInstanceId)
-      {
-        const currentEntry = providerStatuses.find(
-          (snapshot) => snapshot.instanceId === activeThread.session?.providerInstanceId,
-        )
-        if (
-          currentEntry?.continuation?.groupKey &&
-          entry?.continuation?.groupKey &&
-          currentEntry.continuation.groupKey !== entry.continuation.groupKey
-        )
-        {
-          scheduleComposerFocus()
-          return
-        }
-      }
-      const resolvedModel = resolveAppModelSelectionForInstance(
-        instanceId,
-        settings,
-        providerStatuses,
-        model,
-      )
-      if (!resolvedModel)
-      {
-        scheduleComposerFocus()
-        return
-      }
-      const nextModelSelection: ModelSelection = {
-        instanceId,
-        model: resolvedModel,
-      }
-      if (threadHasStarted(activeThread) && instanceId !== activeThread.modelSelection.instanceId)
-      {
-        if (providerSwitchBlockReason)
-        {
-          toastManager.add({
-            type: 'warning',
-            title: 'Provider switch unavailable',
-            description: providerSwitchBlockReason,
-          })
-          scheduleComposerFocus()
-          return
-        }
-        setProviderSwitchConfirmation({
-          environmentId: activeThread.environmentId,
-          threadId: activeThread.id,
-          targetModelSelection: nextModelSelection,
-          targetDisplayName:
-            deriveProviderInstanceEntries([entry])[0]?.displayName ??
-            entry.displayName ??
-            instanceId,
-          expectedCurrentInstanceId:
-            currentProviderInstanceId ?? activeThread.modelSelection.instanceId,
-        })
-        return
-      }
-      const modelChangeBlockReason = getStartedThreadModelChangeBlockReason({
-        providers: providerStatuses,
-        hasStartedSession: activeThread.session !== null,
-        currentModelSelection: activeThread.modelSelection,
-        currentProviderInstanceId,
-        nextModelSelection,
-      })
-      if (modelChangeBlockReason)
-      {
-        toastManager.add({
-          type: 'warning',
-          title: modelChangeBlockReason.title,
-          description: modelChangeBlockReason.description,
-        })
-        scheduleComposerFocus()
-        return
-      }
-      applyComposerModelSelection(
-        scopeThreadRef(activeThread.environmentId, activeThread.id),
-        nextModelSelection,
-      )
-      scheduleComposerFocus()
-    },
-    [
-      activeThread,
-      applyComposerModelSelection,
-      currentProviderInstanceId,
-      lockedProvider,
-      providerSwitchBlockReason,
-      verifiedImportProviderInstanceId,
-      scheduleComposerFocus,
-      providerStatuses,
-      settings,
-    ],
-  )
-  const confirmProviderSwitch = useCallback(async () =>
-  {
-    const confirmation = providerSwitchConfirmation
-    if (!confirmation || isSwitchingProvider)
-    {
-      return
-    }
-    const targetThreadRef = scopeThreadRef(confirmation.environmentId, confirmation.threadId)
-    const targetThreadKey = scopedThreadKey(targetThreadRef)
-    const targetProvider = providerStatuses.find(
-      (provider) => provider.instanceId === confirmation.targetModelSelection.instanceId,
-    )
-    if (!targetProvider)
-    {
-      setProviderSwitchConfirmation(null)
-      toastManager.add({
-        type: 'error',
-        title: 'Could not switch provider',
-        description: 'The selected provider instance is no longer available.',
-      })
-      return
-    }
-
-    setSwitchingProviderThreadKey(targetThreadKey)
-    const result = await switchThreadProvider({
-      environmentId: confirmation.environmentId,
-      input: {
-        threadId: confirmation.threadId,
-        targetModelSelection: confirmation.targetModelSelection,
-        expectedCurrentInstanceId: confirmation.expectedCurrentInstanceId,
-      },
-    })
-    // acceptance only queues the switch; the composer follows the thread's
-    // projected modelSelection once thread.provider-switched arrives, and a
-    // failed compaction leaves the thread (and composer) on the old provider
-    if (result._tag !== 'Success' && !isAtomCommandInterrupted(result))
-    {
-      const error = squashAtomCommandFailure(result)
-      toastManager.add(
-        stackedThreadToast({
-          type: 'error',
-          title: 'Could not switch provider',
-          description: chatActionErrorMessage(error),
-        }),
-      )
-    }
-    setProviderSwitchConfirmation((current) => (current === confirmation ? null : current))
-    setSwitchingProviderThreadKey((current) => (current === targetThreadKey ? null : current))
-    scheduleComposerFocus()
-  }, [
-    isSwitchingProvider,
-    providerStatuses,
+    onInterrupt,
+    onProviderModelSelect,
+    onProviderSwitchConfirmationOpenChange,
     providerSwitchConfirmation,
-    scheduleComposerFocus,
-    switchThreadProvider,
-  ])
-
-  // follow server-side provider rebinds (thread.provider-switched): when the
-  // projected instance changes for the visible thread, move the composer's
-  // draft selection with it so the next send targets the new provider
-  const lastSyncedThreadInstanceRef = useRef<{
-    threadKey: string
-    instanceId: ProviderInstanceId
-  } | null>(null)
-  const activeThreadProjectedSelection =
-    routeKind === 'server' ? (activeThread?.modelSelection ?? null) : null
-  useEffect(() =>
-  {
-    if (activeThreadProjectedSelection === null)
-    {
-      lastSyncedThreadInstanceRef.current = null
-      return
-    }
-    const previous = lastSyncedThreadInstanceRef.current
-    lastSyncedThreadInstanceRef.current = {
-      threadKey: routeThreadKey,
-      instanceId: activeThreadProjectedSelection.instanceId,
-    }
-    if (previous === null || previous.threadKey !== routeThreadKey)
-    {
-      return
-    }
-    if (previous.instanceId === activeThreadProjectedSelection.instanceId)
-    {
-      return
-    }
-    const provider = providerStatuses.find(
-      (snapshot) => snapshot.instanceId === activeThreadProjectedSelection.instanceId,
-    )
-    if (!provider)
-    {
-      return
-    }
-    applyComposerModelSelection(routeThreadRef, activeThreadProjectedSelection)
-  }, [
-    activeThreadProjectedSelection,
-    applyComposerModelSelection,
+  } = useChatDispatchController({
+    activeLatestTurnRunning: activeLatestTurn?.state === 'running',
+    activeThread: activeThread ?? null,
+    composerModelSelection,
+    environmentId,
+    interruptThreadTurn,
+    isSendBusy,
+    lockedProvider,
+    pendingApprovalCount: pendingApprovals.length,
+    pendingUserInputCount: pendingUserInputs.length,
+    phase,
     providerStatuses,
+    providerSwitchTimelineEvents,
+    resolveProviderSwitchInstance,
+    routeKind,
     routeThreadKey,
     routeThreadRef,
-  ])
+    scheduleComposerFocus,
+    setComposerDraftModelSelection,
+    setStickyComposerModelSelection,
+    setThreadError,
+    settings,
+    switchThreadProvider,
+    threadDetailSynchronized,
+    verifiedImportProviderInstanceId,
+  })
+  // the dialog outlives its confirmation while it animates closed, so the copy
+  // keeps a neutral target rather than flashing an empty name
+  const providerSwitchConfirmationCopy = describeProviderSwitchConfirmation({
+    targetLabel: providerSwitchConfirmation?.targetLabel ?? 'the selected provider',
+  })
+
   const onEnvModeChange = useCallback(
     (mode: DraftThreadEnvMode) =>
     {
@@ -6604,7 +5434,7 @@ function ChatViewContent(props: ChatViewProps)
     },
     [activeThreadRef, isServerThread, onDiffPanelOpen],
   )
-  // Both the Map and the revert handler are read from refs at call-time so
+  // both the Map and the revert handler are read from refs at call-time so
   // the callback reference is fully stable and never busts context identity.
   const revertTurnCountRef = useRef(revertTurnCountByUserMessageId)
   revertTurnCountRef.current = revertTurnCountByUserMessageId
@@ -6620,7 +5450,7 @@ function ChatViewContent(props: ChatViewProps)
     void onRevertToTurnCountRef.current(targetTurnCount)
   }, [])
 
-  // Empty state: no active thread
+  // empty state: no active thread
   if (!activeThread)
   {
     return <NoActiveThreadState />
@@ -6801,7 +5631,7 @@ function ChatViewContent(props: ChatViewProps)
         </header>
 
         <ThreadErrorBanner
-          error={threadError}
+          error={promotedProviderAuthError ? null : threadError}
           onDismiss={() => setThreadError(activeThread.id, null)}
         />
         {/* Main content area with optional plan sidebar */}
@@ -6812,6 +5642,8 @@ function ChatViewContent(props: ChatViewProps)
             <div className="pointer-events-none absolute inset-x-0 top-0 z-20">
               <ProviderStatusBanner
                 status={visibleProviderStatus}
+                reAuthRequired={providerReAuthRequired}
+                reAuthDetail={providerReAuthRequired ? threadError : null}
                 onDismiss={() => setDismissedProviderStatusBannerKey(providerStatusBannerKey)}
               />
             </div>
@@ -6922,18 +5754,30 @@ function ChatViewContent(props: ChatViewProps)
                   {threadSyncPhase && !activeEnvironmentUnavailable ? (
                     <ThreadSyncStatusPill phase={threadSyncPhase} />
                   ) : null}
-                  {activeThread?.pendingHandoff ? (
+                  {activeProviderSwitch && activeProviderSwitchTargetLabel ? (
+                    <ProviderSwitchStatusPill
+                      phase={activeProviderSwitch.phase}
+                      targetLabel={activeProviderSwitchTargetLabel}
+                      targetDriverKind={activeProviderSwitchTarget?.driverKind ?? null}
+                      targetDisplayName={
+                        activeProviderSwitchTarget?.displayName ??
+                        activeProviderSwitch.targetInstanceId
+                      }
+                    />
+                  ) : null}
+                  {pendingHandoffPresentation ? (
                     <div
+                      aria-label={pendingHandoffPresentation.label}
+                      data-provider-handoff-delivery={pendingHandoffPresentation.delivery}
                       className="pointer-events-none mx-auto mb-2 flex w-fit max-w-full items-center gap-2 rounded-full border border-border/60 bg-card/95 px-3 py-1.5 text-foreground text-xs font-medium shadow-sm"
                       role="status"
+                      title={pendingHandoffPresentation.label}
                     >
                       <ArrowRightLeftIcon
                         aria-hidden
                         className="size-3.5 shrink-0 text-muted-foreground"
                       />
-                      <span className="truncate">
-                        Handoff summary pending — it will be included with your next message
-                      </span>
+                      <span className="truncate">{pendingHandoffPresentation.label}</span>
                     </div>
                   ) : null}
                   <div
@@ -6969,7 +5813,14 @@ function ChatViewContent(props: ChatViewProps)
                             phase={phase}
                             isConnecting={isConnecting}
                             isSendBusy={isSendBusy}
-                            sendDisabledReason={threadDetailLoading ? 'Messages loading' : null}
+                            sendDisabledReason={
+                              composerProviderSwitch
+                                ? composerProviderSwitch.notice
+                                : threadDetailLoading
+                                  ? 'Messages loading'
+                                  : null
+                            }
+                            providerSwitch={composerProviderSwitch}
                             isPreparingWorktree={isPreparingWorktree}
                             importContinuationSendBlocked={importContinuationSendBlocked}
                             environmentUnavailable={activeEnvironmentUnavailableState}
@@ -6981,7 +5832,7 @@ function ChatViewContent(props: ChatViewProps)
                             activePendingIsResponding={activePendingIsResponding}
                             activePendingDraftAnswers={activePendingDraftAnswers}
                             activePendingQuestionIndex={activePendingQuestionIndex}
-                            respondingRequestIds={respondingRequestIds}
+                            respondingRequestIds={approvalResponseDisabledRequestIds}
                             showPlanFollowUpPrompt={showPlanFollowUpPrompt}
                             activeProposedPlan={activeProposedPlan}
                             activePlan={activePlan as { turnId?: TurnId } | null}
@@ -7084,23 +5935,13 @@ function ChatViewContent(props: ChatViewProps)
                 providerSwitchConfirmation?.environmentId === activeThread.environmentId &&
                 providerSwitchConfirmation.threadId === activeThread.id
               }
-              onOpenChange={(open) =>
-              {
-                if (!open && !isSwitchingProvider)
-                {
-                  setProviderSwitchConfirmation(null)
-                }
-              }}
+              onOpenChange={onProviderSwitchConfirmationOpenChange}
             >
               <AlertDialogPopup>
                 <AlertDialogHeader>
-                  <AlertDialogTitle>
-                    Switch to {providerSwitchConfirmation?.targetDisplayName ?? 'this provider'}?
-                  </AlertDialogTitle>
+                  <AlertDialogTitle>{providerSwitchConfirmationCopy.title}</AlertDialogTitle>
                   <AlertDialogDescription>
-                    The current model will summarize this thread and hand it off to{' '}
-                    {providerSwitchConfirmation?.targetDisplayName ?? 'the selected provider'}. Tool
-                    state and pending approvals do not carry over.
+                    {providerSwitchConfirmationCopy.description}
                   </AlertDialogDescription>
                 </AlertDialogHeader>
                 <AlertDialogFooter>

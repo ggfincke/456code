@@ -31,6 +31,11 @@ import {
   type ProviderInstanceEntry,
 } from '../../providerInstances'
 import { providerModelKey, sortProviderModelItems } from '../../modelOrdering'
+import {
+  describeProviderSwitchPickerIntent,
+  PROVIDER_SWITCH_PICKER_HEADING,
+  PROVIDER_SWITCH_PICKER_HINT,
+} from '../../providerSwitchPresentation'
 
 type ModelPickerItem = {
   slug: string
@@ -46,7 +51,11 @@ type ModelPickerItem = {
 
 const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>()
 
-// Split a `${instanceId}:${slug}` combobox key back into its pieces. Slugs
+// the search field has no visible label and its placeholder disappears as soon
+// as the user types, so it carries an explicit accessible name.
+export const MODEL_SEARCH_INPUT_LABEL = 'Search models'
+
+// split a `${instanceId}:${slug}` combobox key back into its pieces. Slugs
 // can contain colons (e.g. some vendor model ids), so we only split on the
 // first colon — anything after that is the slug.
 function splitInstanceModelKey(key: string): { instanceId: ProviderInstanceId; slug: string }
@@ -63,31 +72,25 @@ function splitInstanceModelKey(key: string): { instanceId: ProviderInstanceId; s
 }
 
 export const ModelPickerContent = memo(function ModelPickerContent(props: {
-  /** The instance currently selected in the composer (combobox "value"). */
+  // the instance currently selected in the composer (combobox "value").
   activeInstanceId: ProviderInstanceId
   model: string
-  /**
-   * When set, the picker is locked to the given driver kind — typically
-   * because the user is editing a previously-sent message and can't change
-   * which driver served the turn. Multiple instances of the same kind
-   * remain selectable (e.g. locked to `codex` still lets the user switch
-   * between the default Codex and a custom Codex Personal).
-   */
+  // when set, the picker is locked to the given driver kind — typically
+  // because the user is editing a previously-sent message and can't change
+  // which driver served the turn. Multiple instances of the same kind
+  // remain selectable (e.g. locked to `codex` still lets the user switch
+  // between the default Codex and a custom Codex Personal).
   lockedProvider: ProviderDriverKind | null
   lockedContinuationGroupKey?: string | null
-  /**
-   * All configured provider instances in display order. Used to render
-   * the sidebar (one button per instance) and to resolve display names
-   * for the locked-mode header.
-   */
+  // all configured provider instances in display order. Used to render
+  // the sidebar (one button per instance) and to resolve display names
+  // for the locked-mode header.
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>
   keybindings?: ResolvedKeybindingsConfig
-  /**
-   * Model options per instance. Keyed by `ProviderInstanceId` so the
-   * default Codex instance and any custom Codex instances each have their
-   * own list (custom instances typically start with the same built-in
-   * model set but are free to diverge via customModels).
-   */
+  // model options per instance. Keyed by `ProviderInstanceId` so the
+  // default Codex instance and any custom Codex instances each have their
+  // own list (custom instances typically start with the same built-in
+  // model set but are free to diverge via customModels).
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>
   switchableThreadProviderInstanceId?: ProviderInstanceId | null
   terminalOpen: boolean
@@ -116,7 +119,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     {
       if (props.lockedProvider !== null)
       {
-        // When locked, prime the sidebar to the currently-active instance
+        // when locked, prime the sidebar to the currently-active instance
         // so jumping into the picker keeps the focused instance visible.
         return props.activeInstanceId
       }
@@ -164,7 +167,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     }
   }, [focusSearchInput])
 
-  // Create a Set for efficient lookup. Favorites are keyed by
+  // create a Set for efficient lookup. Favorites are keyed by
   // `${instanceId}:${slug}`; the storage schema widened from ProviderDriverKind
   // to ProviderInstanceId so pre-migration favorites keyed by driver slugs
   // (e.g. `"codex:gpt-5"`) still resolve — the default instance id equals
@@ -174,11 +177,9 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return new Set(favorites.map((fav) => providerModelKey(fav.provider, fav.model)))
   }, [favorites])
 
-  /**
-   * Lookup table keyed by `instanceId`. Used for display name + driver
-   * kind enrichment and for `ready`/enabled filtering before flattening
-   * models into the search list.
-   */
+  // lookup table keyed by `instanceId`. Used for display name + driver
+  // kind enrichment and for `ready`/enabled filtering before flattening
+  // models into the search list.
   const entryByInstanceId = useMemo(
     () => new Map(instanceEntries.map((entry) => [entry.instanceId, entry])),
     [instanceEntries],
@@ -207,7 +208,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     return ready
   }, [instanceEntries])
 
-  // Flatten models into a searchable array. One pass over the
+  // flatten models into a searchable array. One pass over the
   // instance-keyed map; each model carries its instance id + driver kind
   // so the list row can render the right icon and display name without
   // another lookup.
@@ -219,7 +220,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
       const entry = entryByInstanceId.get(instanceId)
       if (!entry)
       {
-        // Instance disappeared between renders (configuration change). Skip
+        // instance disappeared between renders (configuration change). Skip
         // its models — stale options shouldn't appear in the picker.
         continue
       }
@@ -302,12 +303,12 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     [instanceEntries],
   )
 
-  // Filter models based on search query and selected instance
+  // filter models based on search query and selected instance
   const filteredModels = useMemo(() =>
   {
     let result = flatModels
 
-    // Apply tokenized fuzzy search across the combined provider/model search fields.
+    // apply tokenized fuzzy search across the combined provider/model search fields.
     if (searchQuery.trim())
     {
       const rankedMatches = result
@@ -344,7 +345,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
           } => rankedModel.score !== null,
         )
 
-      // When searching, we only respect locked provider (by driver kind),
+      // when searching, we only respect locked provider (by driver kind),
       // ignoring sidebar selection so account-scoped searches can find a
       // model before the user chooses a specific instance rail item.
       if (props.lockedProvider !== null)
@@ -676,6 +677,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               <div className="-translate-y-px border-b border-border/70 pb-2.5 transition-colors focus-within:border-ring">
                 <ComboboxInput
                   ref={searchInputRef}
+                  aria-label={MODEL_SEARCH_INPUT_LABEL}
                   className="[&_input]:h-6.5 [&_input]:font-sans [&_input]:leading-6.5"
                   inputClassName="rounded-none bg-transparent text-sm"
                   placeholder="Search models..."
@@ -716,9 +718,14 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                 />
               </div>
               {props.switchableThreadProviderInstanceId ? (
-                <p className="pt-2 text-[11px] font-medium text-muted-foreground">
-                  Switch provider for this thread
-                </p>
+                <div className="pt-2">
+                  <p className="text-[11px] font-medium text-muted-foreground">
+                    {PROVIDER_SWITCH_PICKER_HEADING}
+                  </p>
+                  <p className="text-[11px] leading-snug text-muted-foreground/70">
+                    {PROVIDER_SWITCH_PICKER_HINT}
+                  </p>
+                </div>
               ) : null}
             </div>
 
@@ -743,6 +750,10 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     }
                     const disabledReason =
                       getModelDisabledReason?.(model.instanceId, model.slug) ?? null
+                    const switchIntent = describeProviderSwitchPickerIntent({
+                      rowInstanceId: model.instanceId,
+                      threadInstanceId: props.switchableThreadProviderInstanceId ?? null,
+                    })
                     return (
                       <ModelListRow
                         key={modelKey}
@@ -760,6 +771,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                         showNewBadge={isModelPickerNewModel(model.driverKind, model.slug)}
                         jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                         disabledReason={disabledReason}
+                        switchIntent={switchIntent}
                         onToggleFavorite={() => toggleFavorite(model.instanceId, model.slug)}
                       />
                     )

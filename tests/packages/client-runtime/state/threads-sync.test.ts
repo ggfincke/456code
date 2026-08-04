@@ -69,6 +69,7 @@ const BASE_THREAD: OrchestrationThread = {
   branch: 'main',
   worktreePath: null,
   latestTurn: null,
+  providerSwitch: null,
   createdAt: '2026-04-01T00:00:00.000Z',
   updatedAt: '2026-04-01T00:00:00.000Z',
   archivedAt: null,
@@ -337,11 +338,10 @@ describe('EnvironmentThreads', () =>
   it.effect('resumes a warm cache via afterSequence without an HTTP fetch', () =>
     Effect.gen(function* ()
     {
-      const harness = yield* makeHarness({ cached: BASE_THREAD })
+      const harness = yield* makeHarness({ cached: BASE_THREAD, completionMarker: true })
 
-      // The warm cache reaches live from the cached data, and a live event
-      // applies on top of it.
       yield* Queue.offer(harness.inputs, titleUpdated('Live title', CACHED_SNAPSHOT_SEQUENCE + 1))
+      yield* Queue.offer(harness.inputs, synchronized())
       yield* awaitThreadState(
         harness.observed,
         (value) =>
@@ -350,10 +350,47 @@ describe('EnvironmentThreads', () =>
           value.data.value.title === 'Live title',
       )
 
-      // The subscription resumed from the cached sequence and never fetched the
+      // the subscription resumed from the cached sequence and never fetched the
       // full snapshot over HTTP.
       expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(CACHED_SNAPSHOT_SEQUENCE)
       expect(yield* Ref.get(harness.loaderCalls)).toBe(0)
+    }),
+  )
+
+  // a marker-less server cannot say where catch-up ends, so a resumed cursor
+  // would let replayed history arrive looking exactly like live activity —
+  // outcomes that already happened would be announced as if they just landed.
+  it.effect('refuses to resume a marker-less session from a cached cursor', () =>
+    Effect.gen(function* ()
+    {
+      const harness = yield* makeHarness({ cached: BASE_THREAD })
+      yield* awaitThreadState(
+        harness.observed,
+        (value) => value.status === 'synchronizing' && Option.isSome(value.data),
+      )
+
+      // the catch-up event alone must not be mistaken for a fresh boundary
+      yield* Queue.offer(
+        harness.inputs,
+        titleUpdated('Replayed title', CACHED_SNAPSHOT_SEQUENCE + 1),
+      )
+      const catchingUp = yield* awaitThreadState(
+        harness.observed,
+        (value) => Option.isSome(value.data) && value.data.value.title === 'Replayed title',
+      )
+
+      expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBeUndefined()
+      expect(yield* Ref.get(harness.lastRequestCompletionMarker)).toBeUndefined()
+      expect(catchingUp.status).toBe('synchronizing')
+
+      // the full snapshot is the boundary this session was waiting for
+      yield* Queue.offer(harness.inputs, snapshot({ ...BASE_THREAD, title: 'Fresh title' }))
+      const live = yield* awaitThreadState(
+        harness.observed,
+        (value) => value.status === 'live' && Option.isSome(value.data),
+      )
+
+      expect(Option.getOrThrow(live.data).title).toBe('Fresh title')
     }),
   )
 
@@ -387,6 +424,7 @@ describe('EnvironmentThreads', () =>
         Effect.gen(function* ()
         {
           const harness = yield* makeHarness({ cached: ACTIVE_THREAD })
+          yield* Queue.offer(harness.inputs, snapshot(ACTIVE_THREAD))
           yield* awaitThreadState(
             harness.observed,
             (value) =>
@@ -414,8 +452,8 @@ describe('EnvironmentThreads', () =>
       const harness = yield* makeHarness({
         httpSnapshot: Option.some({ snapshotSequence: 1, thread: httpThread }),
       })
-      // No socket snapshot is pushed; only a live event arrives over the socket.
-      // It can only be applied if the HTTP snapshot already seeded the thread.
+      // no socket snapshot is pushed; only a live event arrives over the socket.
+      // it can only be applied if the HTTP snapshot already seeded the thread.
       yield* Queue.offer(harness.inputs, titleUpdated('Live title', 2))
 
       const state = yield* awaitThreadState(
@@ -427,7 +465,7 @@ describe('EnvironmentThreads', () =>
       )
 
       expect(Option.getOrThrow(state.data).title).toBe('Live title')
-      // Cold cache: the full snapshot was loaded over HTTP and the socket
+      // cold cache: the full snapshot was loaded over HTTP and the socket
       // resumed from that snapshot's sequence.
       expect(yield* Ref.get(harness.loaderCalls)).toBeGreaterThanOrEqual(1)
       expect(yield* Ref.get(harness.lastSubscribeAfterSequence)).toBe(1)

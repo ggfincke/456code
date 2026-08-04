@@ -1,6 +1,13 @@
+// apps/web/src/components/chat/ModelListRow.tsx
+// render model list row
+
 import { type ProviderDriverKind, type ProviderInstanceId } from '@t3tools/contracts'
 import { memo } from 'react'
 import { StarIcon } from 'lucide-react'
+import {
+  providerSwitchPickerIntentCopy,
+  type ProviderSwitchPickerIntent,
+} from '../../providerSwitchPresentation'
 import {
   getDisplayModelName,
   getTriggerDisplayModelLabel,
@@ -16,15 +23,13 @@ import { cn } from '~/lib/utils'
 export const ModelListRow = memo(function ModelListRow(props: {
   index: number
   model: ModelEsque
-  /** Instance the model belongs to — the routing key used in combobox values. */
+  // instance the model belongs to — the routing key used in combobox values.
   instanceId: ProviderInstanceId
-  /** Driver kind of the instance — used for the provider icon glyph. */
+  // driver kind of the instance — used for the provider icon glyph.
   driverKind: ProviderDriverKind
-  /**
-   * Display name to show in the secondary line (provider footer). Usually
-   * the instance's configured `displayName` so custom instances like
-   * "Codex Personal" render with their user-authored label.
-   */
+  // display name to show in the secondary line (provider footer). Usually
+  // the instance's configured `displayName` so custom instances like
+  // "Codex Personal" render with their user-authored label.
   providerDisplayName: string
   providerAccentColor?: string | undefined
   isFavorite: boolean
@@ -35,6 +40,10 @@ export const ModelListRow = memo(function ModelListRow(props: {
   showNewBadge?: boolean
   jumpLabel?: string | null
   disabledReason?: string | null
+  // when the thread can switch providers, says whether picking this row applies
+  // instantly or opens a confirm-and-wait handoff. Passed as the intent rather
+  // than resolved copy so the memoized row keeps a stable prop identity.
+  switchIntent?: ProviderSwitchPickerIntent | null
   onToggleFavorite: () => void
 })
 {
@@ -42,6 +51,7 @@ export const ModelListRow = memo(function ModelListRow(props: {
   const providerLabel = props.model.subProvider
     ? `${props.providerDisplayName} · ${props.model.subProvider}`
     : props.providerDisplayName
+  const switchCopy = props.switchIntent ? providerSwitchPickerIntentCopy(props.switchIntent) : null
 
   const row = (
     <ComboboxItem
@@ -78,10 +88,24 @@ export const ModelListRow = memo(function ModelListRow(props: {
         </div>
         {props.showProvider && (
           <div className="mt-1 flex items-center gap-1.5">
-            {ProviderIcon ? <ProviderIcon className="size-3 shrink-0" /> : null}
+            {/* decorative: the instance name follows it in the same line */}
+            {ProviderIcon ? <ProviderIcon aria-hidden className="size-3 shrink-0" /> : null}
             <span className="truncate text-xs font-normal leading-snug text-muted-foreground/70">
               {providerLabel}
             </span>
+            {switchCopy ? (
+              <span
+                className={cn(
+                  'shrink-0 rounded border px-1 py-px text-[10px] font-medium leading-none',
+                  props.switchIntent === 'instant'
+                    ? 'border-border/60 text-muted-foreground/80'
+                    : 'border-amber-500/35 bg-amber-500/10 text-amber-800 dark:border-amber-400/30 dark:text-amber-200',
+                )}
+              >
+                {switchCopy.badge}
+                <span className="sr-only"> — {switchCopy.description}</span>
+              </span>
+            ) : null}
           </div>
         )}
       </div>

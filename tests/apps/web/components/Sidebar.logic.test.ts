@@ -417,7 +417,7 @@ describe('orderItemsByPreferredIds', () =>
 
   it('honors projectOrder physical keys via getProjectOrderKey', async () =>
   {
-    // Regression guard for #1904 / the regression introduced by #2055:
+    // regression guard for #1904 / the regression introduced by #2055:
     // `projectOrder` is populated with physical keys (envId + cwd-derived)
     // by the store and by drag-end handlers. Readers must identify projects
     // with the same key format, or manual sort silently snaps back.
@@ -690,7 +690,7 @@ describe('sortSettledThreadsForSidebarV2', () =>
       settled({
         id: 'settled-first',
         settledAt: '2026-03-09T10:00:00.000Z',
-        // Created/active later than the other thread: settle time must win.
+        // created/active later than the other thread: settle time must win.
         latestUserMessageAt: '2026-03-09T09:59:00.000Z',
       }),
       settled({
@@ -716,7 +716,7 @@ describe('sortSettledThreadsForSidebarV2', () =>
 
   it('counts a turn completion as activity for auto-settled threads', () =>
   {
-    // The message came in before the other thread's, but its turn finished
+    // the message came in before the other thread's, but its turn finished
     // after: completion time is the real "work ended" moment.
     const sorted = sortSettledThreadsForSidebarV2([
       settled({ id: 'message-only', latestUserMessageAt: '2026-03-09T10:04:00.000Z' }),
@@ -808,6 +808,7 @@ describe('resolveThreadStatusPill', () =>
     hasPendingUserInput: false,
     interactionMode: 'plan' as const,
     latestTurn: null,
+    providerSwitch: null,
     lastVisitedAt: undefined,
     session: {
       threadId: ThreadId.make('thread-1'),
@@ -1059,6 +1060,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread
     deletedAt: null,
     updatedAt: '2026-03-09T10:00:00.000Z',
     latestTurn: null,
+    providerSwitch: null,
     branch: null,
     worktreePath: null,
     checkpoints: [],

@@ -39,6 +39,7 @@ import {
   resolveSendEnvMode,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
+  shouldReconcileComposerDraftModelSelection,
   shouldWriteThreadErrorToCurrentServerThread,
 } from '../../../../apps/web/src/components/ChatView.logic'
 
@@ -46,6 +47,139 @@ const environmentId = EnvironmentId.make('environment-local')
 const projectId = ProjectId.make('project-1')
 const threadId = ThreadId.make('thread-1')
 const now = '2026-03-29T00:00:00.000Z'
+
+describe('shouldReconcileComposerDraftModelSelection', () =>
+{
+  const threadKey = 'environment-local:thread-1'
+  const projectedSelection = {
+    instanceId: ProviderInstanceId.make('codex_work'),
+    model: 'gpt-5.4',
+  }
+
+  it('lets a started thread projection replace a stale draft on first observation', () =>
+  {
+    expect(
+      shouldReconcileComposerDraftModelSelection({
+        composerSelection: {
+          instanceId: ProviderInstanceId.make('codex_personal'),
+          model: 'gpt-5.4',
+        },
+        hasStarted: true,
+        previousProjection: null,
+        projectedSelection,
+        threadKey,
+      }),
+    ).toBe(true)
+    expect(
+      shouldReconcileComposerDraftModelSelection({
+        composerSelection: {
+          instanceId: ProviderInstanceId.make('codex_personal'),
+          model: 'gpt-5.4',
+        },
+        hasStarted: false,
+        previousProjection: null,
+        projectedSelection,
+        threadKey,
+      }),
+    ).toBe(false)
+  })
+
+  it('reconciles a stale model or option set on the same instance', () =>
+  {
+    expect(
+      shouldReconcileComposerDraftModelSelection({
+        composerSelection: { instanceId: projectedSelection.instanceId, model: 'gpt-5.3' },
+        hasStarted: true,
+        previousProjection: null,
+        projectedSelection,
+        threadKey,
+      }),
+    ).toBe(true)
+    expect(
+      shouldReconcileComposerDraftModelSelection({
+        composerSelection: {
+          ...projectedSelection,
+          options: [{ id: 'effort', value: 'high' }],
+        },
+        hasStarted: true,
+        previousProjection: null,
+        projectedSelection: { ...projectedSelection, options: [{ id: 'effort', value: 'max' }] },
+        threadKey,
+      }),
+    ).toBe(true)
+  })
+
+  // the projection is the complete selection, so options it drops are a real
+  // change the composer has to adopt — not a no-op the draft can keep
+  it('detects a projection that removes the options the draft still holds', () =>
+  {
+    expect(
+      shouldReconcileComposerDraftModelSelection({
+        composerSelection: { ...projectedSelection, options: [{ id: 'effort', value: 'high' }] },
+        hasStarted: true,
+        previousProjection: null,
+        projectedSelection,
+        threadKey,
+      }),
+    ).toBe(true)
+    expect(
+      shouldReconcileComposerDraftModelSelection({
+        composerSelection: projectedSelection,
+        hasStarted: true,
+        previousProjection: {
+          threadKey,
+          selection: { ...projectedSelection, options: [{ id: 'effort', value: 'high' }] },
+        },
+        projectedSelection,
+        threadKey,
+      }),
+    ).toBe(true)
+  })
+
+  it('observes a live transition that only changes the model on the same instance', () =>
+  {
+    expect(
+      shouldReconcileComposerDraftModelSelection({
+        composerSelection: projectedSelection,
+        hasStarted: true,
+        previousProjection: {
+          threadKey,
+          selection: { ...projectedSelection, model: 'gpt-5.3' },
+        },
+        projectedSelection,
+        threadKey,
+      }),
+    ).toBe(true)
+  })
+
+  it('leaves an already-matching draft alone, including option order', () =>
+  {
+    // option selections are order-independent on the wire
+    const projectedWithOptions = {
+      ...projectedSelection,
+      options: [
+        { id: 'fastMode', value: true },
+        { id: 'effort', value: 'max' },
+      ],
+    }
+
+    expect(
+      shouldReconcileComposerDraftModelSelection({
+        composerSelection: {
+          ...projectedSelection,
+          options: [
+            { id: 'effort', value: 'max' },
+            { id: 'fastMode', value: true },
+          ],
+        },
+        hasStarted: true,
+        previousProjection: { threadKey, selection: projectedWithOptions },
+        projectedSelection: projectedWithOptions,
+        threadKey,
+      }),
+    ).toBe(false)
+  })
+})
 
 function makeThread(overrides: Partial<Thread> = {}): Thread
 {
@@ -73,6 +207,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread
     settledAt: null,
     deletedAt: null,
     latestTurn: null,
+    providerSwitch: null,
     branch: null,
     worktreePath: null,
     ...overrides,
@@ -117,6 +252,7 @@ describe('buildLoadingThreadFromShell', () =>
       branch: 'main',
       worktreePath: null,
       latestTurn: null,
+      providerSwitch: null,
       createdAt: now,
       updatedAt: now,
       archivedAt: null,
@@ -937,6 +1073,19 @@ describe('getStartedThreadProviderSwitchBlockReason', () =>
         hasPendingUserInput: true,
       }),
     ).toBe('Answer the pending question before switching providers.')
+  })
+
+  // clear flags are the only path that unblocks the picker; owning suite must pin null
+  it('returns null when nothing blocks a provider switch', () =>
+  {
+    expect(
+      getStartedThreadProviderSwitchBlockReason({
+        isSwitchingProvider: false,
+        isTurnRunning: false,
+        hasPendingApproval: false,
+        hasPendingUserInput: false,
+      }),
+    ).toBeNull()
   })
 })
 
