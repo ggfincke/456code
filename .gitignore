@@ -1,3 +1,6 @@
+# .gitignore
+# exclude generated, local, and private development artifacts
+
 node_modules
 .bun
 .turbo
@@ -25,6 +28,7 @@ __screenshots__/
 squashfs-root/
 .vercel
 .gstack/
+dev-docs/
 dist-electron/
 .electron-runtime/
 .showcase/
