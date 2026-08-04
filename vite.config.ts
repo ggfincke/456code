@@ -1,3 +1,6 @@
+// vite.config.ts
+// coordinate repository-wide Vite+ tests, lint, staged checks, & sidecar formatting
+
 import 'vite-plus/test/config'
 import { defineConfig } from 'vite-plus'
 import * as NodeURL from 'node:url'
@@ -21,8 +24,10 @@ export default defineConfig({
     testTimeout: 60_000,
   },
   staged: {
-    // Formatter only for now — no lint or typecheck on commit.
+    // partition staged formatting and comment checks by supported language
     '*': 'node scripts/format-repository.ts --staged',
+    '*.{cjs,js,jsx,mjs,ts,tsx}': 'node scripts/check-js-comments.ts',
+    '*.{bash,kt,kts,py,sh,swift,zsh}': 'python3 scripts/check_comment_style.py --check --headers',
   },
   fmt: {
     ignorePatterns: [
@@ -70,9 +75,13 @@ export default defineConfig({
       'pnpm-lock.yaml',
       '*.tsbuildinfo',
       '**/routeTree.gen.ts',
+      '**/*.generated.ts',
+      '**/*.generated.tsx',
+      '**/_generated/**',
       'apps/mobile/android/**',
       'apps/mobile/ios/**',
       'apps/mobile/uniwind-types.d.ts',
+      'packages/shared/src/qrCode.ts',
     ],
     plugins: ['eslint', 'oxc', 'react', 'unicorn', 'typescript'],
     jsPlugins: ['./oxlint-plugin-456code/index.ts'],
@@ -123,9 +132,15 @@ export default defineConfig({
       '456code/no-inline-schema-compile': 'warn',
       '456code/no-manual-effect-runtime-in-tests': 'error',
       '456code/namespace-node-imports': 'error',
+      '456code/block-doc-comments': 'error',
+      '456code/comment-tags': 'error',
+      '456code/file-header': 'error',
+      '456code/no-inline-prose': 'error',
+      '456code/no-unicode-arrow': 'error',
+      '456code/plain-comment-case': 'error',
     },
     options: {
-      // Revisit once Oxlint's tsgolint path can integrate with @effect/tsgo diagnostics.
+      // revisit once Oxlint's tsgolint path can integrate with @effect/tsgo diagnostics
       typeAware: false,
       typeCheck: false,
     },
