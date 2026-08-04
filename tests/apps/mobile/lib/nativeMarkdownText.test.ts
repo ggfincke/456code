@@ -101,56 +101,48 @@ describe('nativeMarkdownTextRuns', () =>
     ])
   })
 
-  it('normalizes common inline HTML and entities', () =>
-  {
-    const node: MarkdownNode = {
-      type: 'paragraph',
+  it.each([
+    {
+      name: 'common inline HTML and entities',
       children: [
-        { type: 'text', content: 'Less than: &lt; ' },
-        { type: 'html_inline', content: '<kbd>' },
-        { type: 'text', content: '⌘' },
-        { type: 'html_inline', content: '</kbd>' },
-        { type: 'html_inline', content: '<br />' },
-        { type: 'html_inline', content: '<mark>highlighted</mark>' },
+        { type: 'text' as const, content: 'Less than: &lt; ' },
+        { type: 'html_inline' as const, content: '<kbd>' },
+        { type: 'text' as const, content: '⌘' },
+        { type: 'html_inline' as const, content: '</kbd>' },
+        { type: 'html_inline' as const, content: '<br />' },
+        { type: 'html_inline' as const, content: '<mark>highlighted</mark>' },
       ],
-    }
-
-    expect(nativeMarkdownTextRuns(node)).toEqual([{ text: 'Less than: < ⌘\nhighlighted' }])
-  })
-
-  it('normalizes double-encoded entities and inline tags emitted as text', () =>
-  {
-    const node: MarkdownNode = {
-      type: 'paragraph',
+      expected: 'Less than: < ⌘\nhighlighted',
+    },
+    {
+      name: 'double-encoded entities and inline tags emitted as text',
       children: [
         {
-          type: 'text',
+          type: 'text' as const,
           content:
             'Keyboard: <kbd>⌘</kbd> + <kbd>K</kbd>; Less than: &amp;lt;; Greater than: &amp;gt;',
         },
       ],
-    }
-
-    expect(nativeMarkdownTextRuns(node)).toEqual([
-      { text: 'Keyboard: ⌘ + K; Less than: <; Greater than: >' },
-    ])
-  })
-
-  it('leaves out-of-range numeric entities as literal text', () =>
-  {
-    const node: MarkdownNode = {
-      type: 'paragraph',
+      expected: 'Keyboard: ⌘ + K; Less than: <; Greater than: >',
+    },
+    {
+      name: 'out-of-range numeric entities left as literal text',
       children: [
         {
-          type: 'text',
+          type: 'text' as const,
           content: 'Invalid: &#1114112; &#xD800;; valid: &#x1F642;',
         },
       ],
-    }
-
-    expect(nativeMarkdownTextRuns(node)).toEqual([
-      { text: 'Invalid: &#1114112; &#xD800;; valid: 🙂' },
-    ])
+      expected: 'Invalid: &#1114112; &#xD800;; valid: 🙂',
+    },
+  ])('normalizes $name', ({ children, expected }) =>
+  {
+    expect(
+      nativeMarkdownTextRuns({
+        type: 'paragraph',
+        children,
+      }),
+    ).toEqual([{ text: expected }])
   })
 
   it('reads inline content from nested text nodes', () =>

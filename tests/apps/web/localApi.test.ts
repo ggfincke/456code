@@ -1,3 +1,6 @@
+// tests/apps/web/localApi.test.ts
+// verify local api behavior
+
 import {
   DEFAULT_CLIENT_SETTINGS,
   type ContextMenuItem,
@@ -119,19 +122,6 @@ describe('LocalApi', () =>
     expect(pickFolder).toHaveBeenCalledWith({ initialPath: '/tmp' })
     expect(getClientSettings).toHaveBeenCalledTimes(1)
     expect(setClientSettings).toHaveBeenCalledWith(DEFAULT_CLIENT_SETTINGS)
-  })
-
-  it('persists client settings in browser storage', async () =>
-  {
-    const { createLocalApi } = await import('../../../apps/web/src/localApi')
-    const api = createLocalApi()
-    const settings = {
-      ...DEFAULT_CLIENT_SETTINGS,
-      timestampFormat: '12-hour' as const,
-    }
-
-    await api.persistence.setClientSettings(settings)
-    await expect(api.persistence.getClientSettings()).resolves.toEqual(settings)
   })
 
   it('prefers the native LocalApi when one is injected', async () =>

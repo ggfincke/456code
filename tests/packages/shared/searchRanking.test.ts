@@ -1,3 +1,6 @@
+// tests/packages/shared/searchRanking.test.ts
+// verify normalize search query behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -10,13 +13,9 @@ import {
 
 describe('normalizeSearchQuery', () =>
 {
-  it('trims and lowercases queries', () =>
+  it('trims, lowercases, and optionally strips leading trigger characters', () =>
   {
     expect(normalizeSearchQuery('  UI  ')).toBe('ui')
-  })
-
-  it('can strip leading trigger characters', () =>
-  {
     expect(normalizeSearchQuery('  $ui', { trimLeadingPattern: /^\$+/ })).toBe('ui')
   })
 })

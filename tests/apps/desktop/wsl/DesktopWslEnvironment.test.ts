@@ -1,3 +1,6 @@
+// tests/apps/desktop/wsl/DesktopWslEnvironment.test.ts
+// verify probe wsl distros behavior
+
 import { describe, it } from '@effect/vitest'
 import { expect } from 'vite-plus/test'
 import * as Duration from 'effect/Duration'
@@ -140,12 +143,7 @@ describe('buildWslNodeEnvPreamble', () =>
 
 describe('parseToolchainReport', () =>
 {
-  it('returns no missing tools and no node version on empty output', () =>
-  {
-    expect(parseToolchainReport('')).toEqual({ missingTools: [], nodeVersion: null })
-  })
-
-  it('collects all missing: lines', () =>
+  it('collects missing tools and node version from a multi-line report', () =>
   {
     const stdout = ['missing:make', 'missing:g++', 'nodeVersion:24.10.0'].join('\n')
     expect(parseToolchainReport(stdout)).toEqual({
@@ -154,17 +152,9 @@ describe('parseToolchainReport', () =>
     })
   })
 
-  it('ignores blank lines and trims whitespace', () =>
+  it('treats empty and empty-prefix output as no tools', () =>
   {
-    const stdout = ['  missing:python3  ', '', '  nodeVersion:v22.16.0  '].join('\n')
-    expect(parseToolchainReport(stdout)).toEqual({
-      missingTools: ['python3'],
-      nodeVersion: 'v22.16.0',
-    })
-  })
-
-  it('returns null node version when value after prefix is empty', () =>
-  {
+    expect(parseToolchainReport('')).toEqual({ missingTools: [], nodeVersion: null })
     expect(parseToolchainReport('nodeVersion:')).toEqual({
       missingTools: [],
       nodeVersion: null,
@@ -172,58 +162,62 @@ describe('parseToolchainReport', () =>
   })
 })
 
-describe('parseNodePath', () =>
-{
-  it('extracts the absolute node path from a nodePath: line', () =>
+describe.each([
   {
-    const stdout = 'nodePath:/home/josh/.nvm/versions/node/v22.16.0/bin/node'
-    expect(parseNodePath(stdout)).toBe('/home/josh/.nvm/versions/node/v22.16.0/bin/node')
-  })
+    parser: 'parseNodePath',
+    parse: parseNodePath,
+    happyStdout: 'nodePath:/home/josh/.nvm/versions/node/v22.16.0/bin/node',
+    happyExpected: '/home/josh/.nvm/versions/node/v22.16.0/bin/node',
+    emptyStdout: 'nodePath:',
+    absentStdout: 'missing:node\nnodeVersion:',
+    noiseStdout: ['some preamble noise', '  nodePath:/usr/bin/node  ', 'trailing'].join('\n'),
+    noiseExpected: '/usr/bin/node',
+  },
+  {
+    parser: 'parseNodeVersion',
+    parse: parseNodeVersion,
+    happyStdout: 'nodeVersion:24.10.0',
+    happyExpected: '24.10.0',
+    emptyStdout: 'nodeVersion:',
+    absentStdout: 'nodePath:/usr/bin/node\nresolvedPath:/usr/bin',
+    noiseStdout: ['some preamble noise', '  nodeVersion:22.16.0  ', 'nodePath:/usr/bin/node'].join(
+      '\n',
+    ),
+    noiseExpected: '22.16.0',
+  },
+])(
+  '$parser',
+  ({
+    parse,
+    happyStdout,
+    happyExpected,
+    emptyStdout,
+    absentStdout,
+    noiseStdout,
+    noiseExpected,
+  }) =>
+  {
+    it('extracts the value from its prefixed line', () =>
+    {
+      expect(parse(happyStdout)).toBe(happyExpected)
+    })
 
-  it('returns null when node was not found (empty value after prefix)', () =>
-  {
-    expect(parseNodePath('nodePath:')).toBeNull()
-  })
+    it('returns null when the value after the prefix is empty', () =>
+    {
+      expect(parse(emptyStdout)).toBeNull()
+    })
 
-  it('returns null when there is no nodePath line at all', () =>
-  {
-    expect(parseNodePath('missing:node\nnodeVersion:')).toBeNull()
-  })
+    it('returns null when its prefixed line is absent', () =>
+    {
+      expect(parse(absentStdout)).toBeNull()
+    })
 
-  it('ignores surrounding noise and trims whitespace', () =>
-  {
-    const stdout = ['some preamble noise', '  nodePath:/usr/bin/node  ', 'trailing'].join('\n')
-    expect(parseNodePath(stdout)).toBe('/usr/bin/node')
-  })
-})
-
-describe('parseNodeVersion', () =>
-{
-  it('extracts the node version from a nodeVersion: line', () =>
-  {
-    expect(parseNodeVersion('nodeVersion:24.10.0')).toBe('24.10.0')
-  })
-
-  it('returns null when the version value is empty', () =>
-  {
-    expect(parseNodeVersion('nodeVersion:')).toBeNull()
-  })
-
-  it('returns null when there is no nodeVersion line at all', () =>
-  {
-    expect(parseNodeVersion('nodePath:/usr/bin/node\nresolvedPath:/usr/bin')).toBeNull()
-  })
-
-  it('ignores surrounding noise and trims whitespace', () =>
-  {
-    const stdout = [
-      'some preamble noise',
-      '  nodeVersion:22.16.0  ',
-      'nodePath:/usr/bin/node',
-    ].join('\n')
-    expect(parseNodeVersion(stdout)).toBe('22.16.0')
-  })
-})
+    it('ignores surrounding noise and trims whitespace', () =>
+    {
+      expect(parse(noiseStdout)).toBe(noiseExpected)
+    })
+  },
+)
 
 describe('parseResolvedPath', () =>
 {

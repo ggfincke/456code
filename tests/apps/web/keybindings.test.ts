@@ -1,3 +1,6 @@
+// tests/apps/web/keybindings.test.ts
+// verify is terminal toggle shortcut behavior
+
 import { assert, describe, it } from 'vite-plus/test'
 
 import {
@@ -157,30 +160,25 @@ const DEFAULT_BINDINGS = compile([
 
 describe('isTerminalToggleShortcut', () =>
 {
-  it('matches Cmd+J on macOS', () =>
+  it.each([
+    {
+      label: 'Cmd+J on macOS',
+      evt: { metaKey: true },
+      options: { platform: 'MacIntel' as const },
+    },
+    {
+      label: 'Ctrl+J on non-macOS',
+      evt: { ctrlKey: true },
+      options: { platform: 'Win32' as const },
+    },
+    {
+      label: 'Ctrl+J on non-macOS while terminalFocus is true',
+      evt: { ctrlKey: true },
+      options: { platform: 'Win32' as const, context: { terminalFocus: true } },
+    },
+  ])('matches $label', ({ evt, options }) =>
   {
-    assert.isTrue(
-      isTerminalToggleShortcut(event({ metaKey: true }), DEFAULT_BINDINGS, {
-        platform: 'MacIntel',
-      }),
-    )
-  })
-
-  it('matches Ctrl+J on non-macOS', () =>
-  {
-    assert.isTrue(
-      isTerminalToggleShortcut(event({ ctrlKey: true }), DEFAULT_BINDINGS, { platform: 'Win32' }),
-    )
-  })
-
-  it('matches Ctrl+J on non-macOS while terminalFocus is true', () =>
-  {
-    assert.isTrue(
-      isTerminalToggleShortcut(event({ ctrlKey: true }), DEFAULT_BINDINGS, {
-        platform: 'Win32',
-        context: { terminalFocus: true },
-      }),
-    )
+    assert.isTrue(isTerminalToggleShortcut(event(evt), DEFAULT_BINDINGS, options))
   })
 })
 
@@ -330,42 +328,20 @@ describe('shortcutLabelForCommand', () =>
     )
   })
 
-  it('returns effective labels for non-terminal commands', () =>
+  it.each([
+    { command: 'sidebar.toggle' as const, platform: 'MacIntel' as const, label: '⌘B' },
+    { command: 'chat.new' as const, platform: 'MacIntel' as const, label: '⇧⌘O' },
+    { command: 'diff.toggle' as const, platform: 'Linux' as const, label: 'Ctrl+D' },
+    { command: 'thread.jump.3' as const, platform: 'MacIntel' as const, label: '⌘3' },
+    { command: 'thread.previous' as const, platform: 'Linux' as const, label: 'Ctrl+Shift+[' },
+    {
+      command: 'modelPicker.jump.3' as const,
+      platform: { platform: 'MacIntel' as const, context: { modelPickerOpen: true } },
+      label: '⌘3',
+    },
+  ])('returns $label for $command', ({ command, platform, label }) =>
   {
-    assert.strictEqual(
-      shortcutLabelForCommand(DEFAULT_BINDINGS, 'sidebar.toggle', 'MacIntel'),
-      '⌘B',
-    )
-    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, 'chat.new', 'MacIntel'), '⇧⌘O')
-    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, 'diff.toggle', 'Linux'), 'Ctrl+D')
-    assert.strictEqual(
-      shortcutLabelForCommand(DEFAULT_BINDINGS, 'rightPanel.toggle', 'MacIntel'),
-      '⌥⌘B',
-    )
-    assert.strictEqual(
-      shortcutLabelForCommand(DEFAULT_BINDINGS, 'commandPalette.toggle', 'MacIntel'),
-      '⌘K',
-    )
-    assert.strictEqual(
-      shortcutLabelForCommand(DEFAULT_BINDINGS, 'modelPicker.toggle', 'Linux'),
-      'Ctrl+Shift+M',
-    )
-    assert.strictEqual(
-      shortcutLabelForCommand(DEFAULT_BINDINGS, 'editor.openFavorite', 'Linux'),
-      'Ctrl+O',
-    )
-    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, 'thread.jump.3', 'MacIntel'), '⌘3')
-    assert.strictEqual(
-      shortcutLabelForCommand(DEFAULT_BINDINGS, 'thread.previous', 'Linux'),
-      'Ctrl+Shift+[',
-    )
-    assert.strictEqual(
-      shortcutLabelForCommand(DEFAULT_BINDINGS, 'modelPicker.jump.3', {
-        platform: 'MacIntel',
-        context: { modelPickerOpen: true },
-      }),
-      '⌘3',
-    )
+    assert.strictEqual(shortcutLabelForCommand(DEFAULT_BINDINGS, command, platform), label)
   })
 
   it('returns null for commands shadowed by a later conflicting shortcut', () =>
@@ -413,17 +389,37 @@ describe('shortcutLabelForCommand', () =>
   })
 })
 
-describe('thread navigation helpers', () =>
+describe('jump navigation helpers', () =>
 {
-  it('maps jump commands to visible thread indices', () =>
-  {
-    assert.strictEqual(threadJumpCommandForIndex(0), 'thread.jump.1')
-    assert.strictEqual(threadJumpCommandForIndex(2), 'thread.jump.3')
-    assert.isNull(threadJumpCommandForIndex(9))
-    assert.strictEqual(threadJumpIndexFromCommand('thread.jump.1'), 0)
-    assert.strictEqual(threadJumpIndexFromCommand('thread.jump.3'), 2)
-    assert.isNull(threadJumpIndexFromCommand('thread.next'))
-  })
+  it.each([
+    {
+      label: 'thread',
+      commandForIndex: threadJumpCommandForIndex,
+      indexFromCommand: threadJumpIndexFromCommand,
+      commandAt0: 'thread.jump.1',
+      commandAt2: 'thread.jump.3',
+      unrelated: 'thread.next',
+    },
+    {
+      label: 'model picker',
+      commandForIndex: modelPickerJumpCommandForIndex,
+      indexFromCommand: modelPickerJumpIndexFromCommand,
+      commandAt0: 'modelPicker.jump.1',
+      commandAt2: 'modelPicker.jump.3',
+      unrelated: 'thread.jump.1',
+    },
+  ])(
+    'maps $label jump commands to visible indices',
+    ({ commandForIndex, indexFromCommand, commandAt0, commandAt2, unrelated }) =>
+    {
+      assert.strictEqual(commandForIndex(0), commandAt0)
+      assert.strictEqual(commandForIndex(2), commandAt2)
+      assert.isNull(commandForIndex(9))
+      assert.strictEqual(indexFromCommand(commandAt0), 0)
+      assert.strictEqual(indexFromCommand(commandAt2), 2)
+      assert.isNull(indexFromCommand(unrelated))
+    },
+  )
 
   it('maps traversal commands to directions', () =>
   {
@@ -451,21 +447,8 @@ describe('thread navigation helpers', () =>
       }),
     )
   })
-})
 
-describe('model picker navigation helpers', () =>
-{
-  it('maps jump commands to visible model indices', () =>
-  {
-    assert.strictEqual(modelPickerJumpCommandForIndex(0), 'modelPicker.jump.1')
-    assert.strictEqual(modelPickerJumpCommandForIndex(2), 'modelPicker.jump.3')
-    assert.isNull(modelPickerJumpCommandForIndex(9))
-    assert.strictEqual(modelPickerJumpIndexFromCommand('modelPicker.jump.1'), 0)
-    assert.strictEqual(modelPickerJumpIndexFromCommand('modelPicker.jump.3'), 2)
-    assert.isNull(modelPickerJumpIndexFromCommand('thread.jump.1'))
-  })
-
-  it('shows jump hints only while the model picker context is active', () =>
+  it('shows model picker jump hints only while the picker context is active', () =>
   {
     assert.isFalse(
       shouldShowModelPickerJumpHints(event({ metaKey: true }), DEFAULT_BINDINGS, {

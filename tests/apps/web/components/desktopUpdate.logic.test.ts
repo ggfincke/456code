@@ -1,3 +1,6 @@
+// tests/apps/web/components/desktopUpdate.logic.test.ts
+// verify desktop update button state behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { DesktopUpdateActionResult, DesktopUpdateState } from '@t3tools/contracts'
 
@@ -274,67 +277,50 @@ describe('desktop update UI helpers', () =>
 
 describe('canCheckForUpdate', () =>
 {
-  it('returns false for null state', () =>
-  {
-    expect(canCheckForUpdate(null)).toBe(false)
-  })
-
-  it('returns false when updates are disabled', () =>
-  {
-    expect(canCheckForUpdate({ ...baseState, enabled: false, status: 'disabled' })).toBe(false)
-  })
-
-  it('returns false while checking', () =>
-  {
-    expect(canCheckForUpdate({ ...baseState, status: 'checking' })).toBe(false)
-  })
-
-  it('returns false while downloading', () =>
-  {
-    expect(canCheckForUpdate({ ...baseState, status: 'downloading', downloadPercent: 50 })).toBe(
-      false,
-    )
-  })
-
-  it('returns false once an update has been downloaded', () =>
-  {
-    expect(
-      canCheckForUpdate({
+  it.each([
+    { label: 'null state', state: null },
+    {
+      label: 'updates disabled',
+      state: { ...baseState, enabled: false, status: 'disabled' as const },
+    },
+    { label: 'checking', state: { ...baseState, status: 'checking' as const } },
+    {
+      label: 'downloading',
+      state: { ...baseState, status: 'downloading' as const, downloadPercent: 50 },
+    },
+    {
+      label: 'downloaded',
+      state: {
         ...baseState,
-        status: 'downloaded',
+        status: 'downloaded' as const,
         availableVersion: '1.1.0',
         downloadedVersion: '1.1.0',
-      }),
-    ).toBe(false)
+      },
+    },
+  ])('returns false for $label', ({ state }) =>
+  {
+    expect(canCheckForUpdate(state)).toBe(false)
   })
 
-  it('returns true when idle', () =>
-  {
-    expect(canCheckForUpdate({ ...baseState, status: 'idle' })).toBe(true)
-  })
-
-  it('returns true when up-to-date', () =>
-  {
-    expect(canCheckForUpdate({ ...baseState, status: 'up-to-date' })).toBe(true)
-  })
-
-  it('returns true when an update is available', () =>
-  {
-    expect(
-      canCheckForUpdate({ ...baseState, status: 'available', availableVersion: '1.1.0' }),
-    ).toBe(true)
-  })
-
-  it('returns true on error so the user can retry', () =>
-  {
-    expect(
-      canCheckForUpdate({
+  it.each([
+    { label: 'idle', state: { ...baseState, status: 'idle' as const } },
+    { label: 'up-to-date', state: { ...baseState, status: 'up-to-date' as const } },
+    {
+      label: 'available',
+      state: { ...baseState, status: 'available' as const, availableVersion: '1.1.0' },
+    },
+    {
+      label: 'error (retry)',
+      state: {
         ...baseState,
-        status: 'error',
-        errorContext: 'check',
+        status: 'error' as const,
+        errorContext: 'check' as const,
         message: 'network',
-      }),
-    ).toBe(true)
+      },
+    },
+  ])('returns true for $label', ({ state }) =>
+  {
+    expect(canCheckForUpdate(state)).toBe(true)
   })
 })
 

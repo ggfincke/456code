@@ -1,3 +1,6 @@
+// tests/apps/desktop/electron/ElectronWindow.test.ts
+// verify electron window behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Cause from 'effect/Cause'
@@ -162,94 +165,92 @@ describe('ElectronWindow', () =>
     }).pipe(Effect.provide(TestLayer)),
   )
 
-  it.effect('preserves reveal failures with the target window', () =>
-    Effect.gen(function* ()
+  it.effect.each([
     {
-      const cause = new Error('window restore failed')
-      const window = {
-        id: 41,
-        isDestroyed: vi.fn(() => false),
-        isMinimized: vi.fn(() => true),
-        restore: vi.fn(() =>
-        {
-          throw cause
-        }),
-      } as unknown as Electron.BrowserWindow
-
-      const electronWindow = yield* ElectronWindow.ElectronWindow
-      const exit = yield* Effect.exit(electronWindow.reveal(window))
-
-      assert.equal(exit._tag, 'Failure')
-      if (exit._tag === 'Failure')
+      label: 'reveal',
+      operation: 'reveal-window' as const,
+      windowId: 41,
+      channel: null,
+      causeMessage: 'window restore failed',
+      prepare: (cause: Error) =>
       {
-        const error = Cause.squash(exit.cause)
-        assert.instanceOf(error, ElectronWindow.ElectronWindowOperationError)
-        assert.equal(error.operation, 'reveal-window')
-        assert.equal(error.windowId, 41)
-        assert.isNull(error.channel)
-        assert.strictEqual(error.cause, cause)
-      }
-    }).pipe(Effect.provide(TestLayer)),
-  )
-
-  it.effect('preserves message delivery failures with window and channel context', () =>
-    Effect.gen(function* ()
-    {
-      const cause = new Error('renderer send failed')
-      const window = {
-        id: 42,
-        isDestroyed: vi.fn(() => false),
-        webContents: {
-          send: vi.fn(() =>
+        const window = {
+          id: 41,
+          isDestroyed: vi.fn(() => false),
+          isMinimized: vi.fn(() => true),
+          restore: vi.fn(() =>
           {
             throw cause
           }),
-        },
-      } as unknown as Electron.BrowserWindow
-      getAllWindowsMock.mockReturnValueOnce([window])
-
-      const electronWindow = yield* ElectronWindow.ElectronWindow
-      const exit = yield* Effect.exit(electronWindow.sendAll('desktop:update', { ready: true }))
-
-      assert.equal(exit._tag, 'Failure')
-      if (exit._tag === 'Failure')
-      {
-        const error = Cause.squash(exit.cause)
-        assert.instanceOf(error, ElectronWindow.ElectronWindowOperationError)
-        assert.equal(error.operation, 'send-window-message')
-        assert.equal(error.windowId, 42)
-        assert.equal(error.channel, 'desktop:update')
-        assert.strictEqual(error.cause, cause)
-      }
-    }).pipe(Effect.provide(TestLayer)),
-  )
-
-  it.effect('preserves destroy failures with the target window', () =>
-    Effect.gen(function* ()
+        } as unknown as Electron.BrowserWindow
+        return (electronWindow: ElectronWindow.ElectronWindow['Service']) =>
+          electronWindow.reveal(window)
+      },
+    },
     {
-      const cause = new Error('window destroy failed')
-      const window = {
-        id: 43,
-        destroy: vi.fn(() =>
-        {
-          throw cause
-        }),
-      } as unknown as Electron.BrowserWindow
-      getAllWindowsMock.mockReturnValueOnce([window])
-
-      const electronWindow = yield* ElectronWindow.ElectronWindow
-      const exit = yield* Effect.exit(electronWindow.destroyAll)
-
-      assert.equal(exit._tag, 'Failure')
-      if (exit._tag === 'Failure')
+      label: 'message delivery',
+      operation: 'send-window-message' as const,
+      windowId: 42,
+      channel: 'desktop:update',
+      causeMessage: 'renderer send failed',
+      prepare: (cause: Error) =>
       {
-        const error = Cause.squash(exit.cause)
-        assert.instanceOf(error, ElectronWindow.ElectronWindowOperationError)
-        assert.equal(error.operation, 'destroy-window')
-        assert.equal(error.windowId, 43)
-        assert.isNull(error.channel)
-        assert.strictEqual(error.cause, cause)
-      }
-    }).pipe(Effect.provide(TestLayer)),
+        const window = {
+          id: 42,
+          isDestroyed: vi.fn(() => false),
+          webContents: {
+            send: vi.fn(() =>
+            {
+              throw cause
+            }),
+          },
+        } as unknown as Electron.BrowserWindow
+        getAllWindowsMock.mockReturnValueOnce([window])
+        return (electronWindow: ElectronWindow.ElectronWindow['Service']) =>
+          electronWindow.sendAll('desktop:update', { ready: true })
+      },
+    },
+    {
+      label: 'destroy',
+      operation: 'destroy-window' as const,
+      windowId: 43,
+      channel: null,
+      causeMessage: 'window destroy failed',
+      prepare: (cause: Error) =>
+      {
+        const window = {
+          id: 43,
+          destroy: vi.fn(() =>
+          {
+            throw cause
+          }),
+        } as unknown as Electron.BrowserWindow
+        getAllWindowsMock.mockReturnValueOnce([window])
+        return (electronWindow: ElectronWindow.ElectronWindow['Service']) =>
+          electronWindow.destroyAll
+      },
+    },
+  ])(
+    'preserves $label failures with window context',
+    ({ operation, windowId, channel, causeMessage, prepare }) =>
+      Effect.gen(function* ()
+      {
+        const cause = new Error(causeMessage)
+        const invoke = prepare(cause)
+
+        const electronWindow = yield* ElectronWindow.ElectronWindow
+        const exit = yield* Effect.exit(invoke(electronWindow))
+
+        assert.equal(exit._tag, 'Failure')
+        if (exit._tag === 'Failure')
+        {
+          const error = Cause.squash(exit.cause)
+          assert.instanceOf(error, ElectronWindow.ElectronWindowOperationError)
+          assert.equal(error.operation, operation)
+          assert.equal(error.windowId, windowId)
+          assert.equal(error.channel, channel)
+          assert.strictEqual(error.cause, cause)
+        }
+      }).pipe(Effect.provide(TestLayer)),
   )
 })

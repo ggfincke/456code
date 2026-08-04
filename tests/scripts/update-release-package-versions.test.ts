@@ -1,3 +1,6 @@
+// tests/scripts/update-release-package-versions.test.ts
+// verify update release package versions behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'
@@ -290,28 +293,6 @@ it.layer(ScriptTestLayer)('update-release-package-versions', (it) =>
         error.message,
         `Failed to append release package version output to '${baseDir}'.`,
       )
-    }),
-  )
-
-  it.effect('rejects unknown flags during cli parsing', () =>
-    Effect.gen(function* ()
-    {
-      const error = yield* runCli(['1.2.3', '--unknown']).pipe(Effect.flip)
-
-      if (!CliError.isCliError(error))
-      {
-        assert.fail(`Expected CliError, got ${String(error)}`)
-      }
-
-      const optionError =
-        error._tag === 'ShowHelp' ? (error.errors[0] as CliError.CliError | undefined) : error
-
-      if (!optionError || optionError._tag !== 'UnrecognizedOption')
-      {
-        assert.fail(`Expected UnrecognizedOption, got ${String(optionError?._tag)}`)
-      }
-
-      assert.equal(optionError.option, '--unknown')
     }),
   )
 

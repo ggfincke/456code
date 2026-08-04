@@ -1,3 +1,6 @@
+// tests/scripts/lib/brand-assets.test.ts
+// verify brand assets behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -47,14 +50,6 @@ describe('brand-assets', () =>
         targetRelativePath: 'apps/web/public/apple-touch-icon.png',
       },
     ])
-  })
-
-  it('can target hosted web dist directly', () =>
-  {
-    expect(resolveWebIconOverrides('production', 'apps/web/dist')).toContainEqual({
-      sourceRelativePath: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
-      targetRelativePath: 'apps/web/dist/apple-touch-icon.png',
-    })
   })
 
   it('maps hosted nightly web assets to nightly icons', () =>

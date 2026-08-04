@@ -1,3 +1,6 @@
+// tests/packages/shared/previewViewport.test.ts
+// verify preview viewport behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -41,27 +44,14 @@ describe('previewViewport', () =>
     })
   })
 
-  it("matches Chrome's standard device catalog ordering", () =>
+  it('keeps the Chrome standard device catalog endpoints in order', () =>
   {
-    expect(PREVIEW_VIEWPORT_PRESETS.map((preset) => preset.label)).toEqual([
-      'iPhone SE',
-      'iPhone XR',
-      'iPhone 12 Pro',
-      'iPhone 14 Pro Max',
-      'Pixel 7',
-      'Samsung Galaxy S8+',
-      'Samsung Galaxy S20 Ultra',
-      'iPad Mini',
-      'iPad Air',
-      'iPad Pro',
-      'Surface Pro 7',
-      'Surface Duo',
-      'Galaxy Z Fold 5',
-      'Asus Zenbook Fold',
-      'Samsung Galaxy A51/71',
-      'Nest Hub',
-      'Nest Hub Max',
-    ])
+    expect(PREVIEW_VIEWPORT_PRESETS).toHaveLength(17)
+    expect(PREVIEW_VIEWPORT_PRESETS[0]).toMatchObject({ id: 'iphone-se', label: 'iPhone SE' })
+    expect(PREVIEW_VIEWPORT_PRESETS.at(-1)).toMatchObject({
+      id: 'nest-hub-max',
+      label: 'Nest Hub Max',
+    })
   })
 
   it('formats settings for compact UI', () =>

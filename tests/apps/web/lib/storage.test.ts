@@ -1,3 +1,6 @@
+// tests/apps/web/lib/storage.test.ts
+// verify create debounced storage behavior
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import { createDebouncedStorage } from '../../../../apps/web/src/lib/storage'
@@ -93,7 +96,7 @@ describe('createDebouncedStorage', () =>
     storage.flush()
     expect(base.setItem).toHaveBeenCalledWith('key', 'v1')
 
-    // Timer should be cancelled; no duplicate write.
+    // timer should be cancelled; no duplicate write.
     vi.advanceTimersByTime(300)
     expect(base.setItem).toHaveBeenCalledTimes(1)
   })
@@ -105,17 +108,10 @@ describe('createDebouncedStorage', () =>
 
     storage.flush()
     expect(base.setItem).not.toHaveBeenCalled()
-  })
-
-  it('flush after removeItem is a no-op', () =>
-  {
-    const base = createMockStorage()
-    const storage = createDebouncedStorage(base)
 
     storage.setItem('key', 'v1')
     storage.removeItem('key')
     storage.flush()
-
     expect(base.setItem).not.toHaveBeenCalled()
   })
 

@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/cloud/linkEnvironment.test.ts
+// verify mobile cloud link environment client behavior
+
 import { beforeEach, vi } from 'vite-plus/test'
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -637,9 +640,26 @@ describe('mobile cloud link environment client', () =>
     }),
   )
 
-  it.effect(
-    'rejects relay link credentials for a different environment before persisting relay config',
-    () =>
+  it.effect.each([
+    {
+      name: 'a different environment',
+      response: () => validLinkResponse('env-other'),
+      message: 'Relay returned credentials for a different environment.',
+    },
+    {
+      name: 'a different managed endpoint provider',
+      response: () => ({
+        ...validLinkResponse(),
+        endpoint: {
+          ...validLinkResponse().endpoint,
+          providerKind: 'manual',
+        },
+      }),
+      message: 'Relay returned credentials for a different endpoint provider.',
+    },
+  ])(
+    'rejects relay link credentials for $name before persisting relay config',
+    ({ response, message }) =>
       Effect.gen(function* ()
       {
         const fetchMock = vi.fn((url: string | URL) =>
@@ -652,7 +672,7 @@ describe('mobile cloud link environment client', () =>
           {
             return Promise.resolve(Response.json(validLinkProof()))
           }
-          return Promise.resolve(Response.json(validLinkResponse('env-other')))
+          return Promise.resolve(Response.json(response()))
         })
         vi.stubGlobal('fetch', fetchMock)
 
@@ -664,7 +684,7 @@ describe('mobile cloud link environment client', () =>
         ).pipe(Effect.flip)
         expect(error).toMatchObject({
           _tag: 'CloudEnvironmentLinkError',
-          message: 'Relay returned credentials for a different environment.',
+          message,
         })
         expect(fetchMock).toHaveBeenCalledTimes(3)
       }),
@@ -743,45 +763,6 @@ describe('mobile cloud link environment client', () =>
         message:
           'https://relay.example.test/v1/client/environment-links failed: Relay rejected the environment link proof (origin_not_allowed).',
         traceId: 'trace-test',
-      })
-      expect(fetchMock).toHaveBeenCalledTimes(3)
-    }),
-  )
-
-  it.effect('rejects relay link credentials for a different managed endpoint provider', () =>
-    Effect.gen(function* ()
-    {
-      const fetchMock = vi.fn((url: string | URL) =>
-      {
-        if (String(url).endsWith('/v1/client/environment-link-challenges'))
-        {
-          return Promise.resolve(Response.json(validLinkChallengeResponse()))
-        }
-        if (String(url).endsWith('/api/connect/link-proof'))
-        {
-          return Promise.resolve(Response.json(validLinkProof()))
-        }
-        return Promise.resolve(
-          Response.json({
-            ...validLinkResponse(),
-            endpoint: {
-              ...validLinkResponse().endpoint,
-              providerKind: 'manual',
-            },
-          }),
-        )
-      })
-      vi.stubGlobal('fetch', fetchMock)
-
-      const error = yield* withCloudServices(
-        linkEnvironmentToCloud({
-          clerkToken: 'clerk-token',
-          connection: savedConnection,
-        }),
-      ).pipe(Effect.flip)
-      expect(error).toMatchObject({
-        _tag: 'CloudEnvironmentLinkError',
-        message: 'Relay returned credentials for a different endpoint provider.',
       })
       expect(fetchMock).toHaveBeenCalledTimes(3)
     }),
@@ -1066,7 +1047,36 @@ describe('mobile cloud link environment client', () =>
     }),
   )
 
-  it.effect('rejects relay connect responses for a different environment', () =>
+  it.effect.each([
+    {
+      name: 'environment',
+      connectBody: {
+        environmentId: 'env-other',
+        endpoint: {
+          httpBaseUrl: 'https://desktop.example.test/',
+          wsBaseUrl: 'wss://desktop.example.test/ws',
+          providerKind: 'cloudflare_tunnel',
+        },
+        credential: 'one-time-cloud-credential',
+        expiresAt: '2026-05-25T00:05:00.000Z',
+      },
+      message: 'Relay returned credentials for a different environment.',
+    },
+    {
+      name: 'endpoint',
+      connectBody: {
+        environmentId: 'env-1',
+        endpoint: {
+          httpBaseUrl: 'https://other-desktop.example.test/',
+          wsBaseUrl: 'wss://other-desktop.example.test/ws',
+          providerKind: 'cloudflare_tunnel',
+        },
+        credential: 'one-time-cloud-credential',
+        expiresAt: '2026-05-25T00:05:00.000Z',
+      },
+      message: 'Relay returned credentials for a different endpoint.',
+    },
+  ])('rejects relay connect responses for a different $name', ({ connectBody, message }) =>
     Effect.gen(function* ()
     {
       vi.stubGlobal(
@@ -1075,16 +1085,7 @@ describe('mobile cloud link environment client', () =>
           Promise.resolve(
             String(url).endsWith('/v1/client/dpop-token')
               ? Response.json(validDpopAccessTokenResponse('environment:connect'))
-              : Response.json({
-                  environmentId: 'env-other',
-                  endpoint: {
-                    httpBaseUrl: 'https://desktop.example.test/',
-                    wsBaseUrl: 'wss://desktop.example.test/ws',
-                    providerKind: 'cloudflare_tunnel',
-                  },
-                  credential: 'one-time-cloud-credential',
-                  expiresAt: '2026-05-25T00:05:00.000Z',
-                }),
+              : Response.json(connectBody),
           ),
         ),
       )
@@ -1106,7 +1107,7 @@ describe('mobile cloud link environment client', () =>
       ).pipe(Effect.flip)
       expect(error).toMatchObject({
         _tag: 'CloudEnvironmentLinkError',
-        message: 'Relay returned credentials for a different environment.',
+        message,
       })
     }),
   )
@@ -1153,51 +1154,6 @@ describe('mobile cloud link environment client', () =>
         message:
           'https://relay.example.test/v1/environments/env-1/connect failed: Relay rejected the DPoP proof.',
         traceId: 'trace-connect',
-      })
-    }),
-  )
-
-  it.effect('rejects relay connect responses for a different endpoint', () =>
-    Effect.gen(function* ()
-    {
-      vi.stubGlobal(
-        'fetch',
-        vi.fn((url: string | URL) =>
-          Promise.resolve(
-            String(url).endsWith('/v1/client/dpop-token')
-              ? Response.json(validDpopAccessTokenResponse('environment:connect'))
-              : Response.json({
-                  environmentId: 'env-1',
-                  endpoint: {
-                    httpBaseUrl: 'https://other-desktop.example.test/',
-                    wsBaseUrl: 'wss://other-desktop.example.test/ws',
-                    providerKind: 'cloudflare_tunnel',
-                  },
-                  credential: 'one-time-cloud-credential',
-                  expiresAt: '2026-05-25T00:05:00.000Z',
-                }),
-          ),
-        ),
-      )
-
-      const error = yield* withCloudServices(
-        connectCloudEnvironment({
-          clerkToken: 'clerk-token',
-          environment: {
-            environmentId: EnvironmentId.make('env-1'),
-            label: 'Desktop',
-            endpoint: {
-              httpBaseUrl: 'https://desktop.example.test/',
-              wsBaseUrl: 'wss://desktop.example.test/ws',
-              providerKind: 'cloudflare_tunnel',
-            },
-            linkedAt: '2026-05-25T00:00:00.000Z',
-          },
-        }),
-      ).pipe(Effect.flip)
-      expect(error).toMatchObject({
-        _tag: 'CloudEnvironmentLinkError',
-        message: 'Relay returned credentials for a different endpoint.',
       })
     }),
   )

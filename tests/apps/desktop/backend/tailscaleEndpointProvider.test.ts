@@ -1,3 +1,6 @@
+// tests/apps/desktop/backend/tailscaleEndpointProvider.test.ts
+// verify tailscale endpoint provider behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -5,7 +8,6 @@ import { HttpClient } from 'effect/unstable/http'
 import { ChildProcessSpawner } from 'effect/unstable/process'
 
 import {
-  isTailscaleIpv4Address,
   parseTailscaleMagicDnsName,
   resolveTailscaleAdvertisedEndpoints,
 } from '../../../../apps/desktop/src/backend/tailscaleEndpointProvider.ts'
@@ -23,22 +25,10 @@ const unusedTailscaleExternalServicesLayer = Layer.mergeAll(
 
 describe('tailscale endpoint provider', () =>
 {
-  it('detects Tailnet IPv4 addresses', () =>
-  {
-    assert.equal(isTailscaleIpv4Address('100.64.0.1'), true)
-    assert.equal(isTailscaleIpv4Address('100.127.255.254'), true)
-    assert.equal(isTailscaleIpv4Address('100.128.0.1'), false)
-    assert.equal(isTailscaleIpv4Address('192.168.1.44'), false)
-  })
-
-  it.effect('parses MagicDNS names from tailscale status', () =>
+  // package owns CGNAT/MagicDNS happy paths; desktop pins malformed decode only
+  it.effect('fails MagicDNS parse on malformed status JSON', () =>
     Effect.gen(function* ()
     {
-      const dnsName = yield* parseTailscaleMagicDnsName(
-        `{"Self":{"DNSName":"desktop.tail.ts.net."}}`,
-      )
-      assert.equal(dnsName, 'desktop.tail.ts.net')
-      assert.equal(yield* parseTailscaleMagicDnsName('{}'), null)
       const malformed = yield* Effect.result(parseTailscaleMagicDnsName('not-json'))
       assert.isTrue(malformed._tag === 'Failure')
     }),

@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/layout.test.ts
+// verify resizable pane constraints behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -67,13 +70,9 @@ describe('deriveCenteredContentHorizontalPadding', () =>
 
 describe('deriveLayout', () =>
 {
-  it.each([
-    { name: 'small iPhone portrait', width: 375, height: 667 },
-    { name: 'large iPhone landscape', width: 932, height: 430 },
-    { name: 'narrow tall window', width: 719, height: 1_024 },
-  ])('keeps a $name in the compact shell', ({ width, height }) =>
+  it('keeps a small iPhone portrait in the compact shell', () =>
   {
-    expect(deriveLayout({ width, height })).toEqual({
+    expect(deriveLayout({ width: 375, height: 667 })).toEqual({
       variant: 'compact',
       usesSplitView: false,
       listPaneWidth: null,

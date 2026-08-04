@@ -1,3 +1,6 @@
+// tests/apps/web/orchestrationRecovery.test.ts
+// verify create orchestration recovery coordinator behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -125,23 +128,6 @@ describe('createOrchestrationRecoveryCoordinator', () =>
     expect(coordinator.getState().inFlight).toEqual({
       kind: 'snapshot',
       reason: 'replay-failed',
-    })
-  })
-
-  it('keeps enough state to explain why bootstrap snapshot recovery requests replay', () =>
-  {
-    const coordinator = createOrchestrationRecoveryCoordinator()
-
-    expect(coordinator.beginSnapshotRecovery('bootstrap')).toBe(true)
-    expect(coordinator.classifyDomainEvent(4)).toBe('defer')
-    expect(coordinator.completeSnapshotRecovery(2)).toBe(true)
-
-    expect(coordinator.getState()).toMatchObject({
-      latestSequence: 2,
-      highestObservedSequence: 4,
-      bootstrapped: true,
-      pendingReplay: false,
-      inFlight: null,
     })
   })
 

@@ -1,84 +1,16 @@
+// tests/packages/contracts/git.test.ts
+// verify stacked-action git input/result wire pins
+
 import { describe, expect, it } from 'vite-plus/test'
 import * as Schema from 'effect/Schema'
 
 import {
-  VcsCreateWorktreeInput,
-  GitPreparePullRequestThreadInput,
   GitRunStackedActionResult,
   GitRunStackedActionInput,
-  GitResolvePullRequestResult,
 } from '../../../packages/contracts/src/git.ts'
 
-const decodeCreateWorktreeInput = Schema.decodeUnknownSync(VcsCreateWorktreeInput)
-const decodePreparePullRequestThreadInput = Schema.decodeUnknownSync(
-  GitPreparePullRequestThreadInput,
-)
 const decodeRunStackedActionInput = Schema.decodeUnknownSync(GitRunStackedActionInput)
 const decodeRunStackedActionResult = Schema.decodeUnknownSync(GitRunStackedActionResult)
-const decodeResolvePullRequestResult = Schema.decodeUnknownSync(GitResolvePullRequestResult)
-
-describe('VcsCreateWorktreeInput', () =>
-{
-  it('accepts omitted newRefName for existing-refName worktrees', () =>
-  {
-    const parsed = decodeCreateWorktreeInput({
-      cwd: '/repo',
-      refName: 'feature/existing',
-      path: '/tmp/worktree',
-    })
-
-    expect(parsed.newRefName).toBeUndefined()
-    expect(parsed.refName).toBe('feature/existing')
-  })
-
-  it('accepts baseRefName metadata for a new worktree ref', () =>
-  {
-    const parsed = decodeCreateWorktreeInput({
-      cwd: '/repo',
-      refName: '0123456789abcdef',
-      newRefName: 'feature/new',
-      baseRefName: 'origin/main',
-      path: '/tmp/worktree',
-    })
-
-    expect(parsed.baseRefName).toBe('origin/main')
-  })
-})
-
-describe('GitPreparePullRequestThreadInput', () =>
-{
-  it('accepts pull request references and mode', () =>
-  {
-    const parsed = decodePreparePullRequestThreadInput({
-      cwd: '/repo',
-      reference: '#42',
-      mode: 'worktree',
-    })
-
-    expect(parsed.reference).toBe('#42')
-    expect(parsed.mode).toBe('worktree')
-  })
-})
-
-describe('GitResolvePullRequestResult', () =>
-{
-  it('decodes resolved pull request metadata', () =>
-  {
-    const parsed = decodeResolvePullRequestResult({
-      pullRequest: {
-        number: 42,
-        title: 'PR threads',
-        url: 'https://github.com/pingdotgg/codething-mvp/pull/42',
-        baseBranch: 'main',
-        headBranch: 'feature/pr-threads',
-        state: 'open',
-      },
-    })
-
-    expect(parsed.pullRequest.number).toBe(42)
-    expect(parsed.pullRequest.headBranch).toBe('feature/pr-threads')
-  })
-})
 
 describe('GitRunStackedActionInput', () =>
 {

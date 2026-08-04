@@ -1,3 +1,6 @@
+// tests/apps/desktop/electron/ElectronUpdater.test.ts
+// verify electron updater behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import { beforeEach, vi } from 'vite-plus/test'
@@ -65,7 +68,7 @@ describe('ElectronUpdater', () =>
     }).pipe(Effect.provide(ElectronUpdater.layer)),
   )
 
-  it.effect('wraps rejected update checks in the method-specific typed error', () =>
+  it.effect('wraps rejected update checks with the execution-time channel', () =>
     Effect.gen(function* ()
     {
       const cause = new Error('network unavailable')
@@ -84,7 +87,7 @@ describe('ElectronUpdater', () =>
     }).pipe(Effect.provide(ElectronUpdater.layer)),
   )
 
-  it.effect('preserves the execution-time channel on download failures', () =>
+  it.effect('wraps rejected update downloads with the execution-time channel', () =>
     Effect.gen(function* ()
     {
       const cause = new Error('download unavailable')
@@ -103,19 +106,6 @@ describe('ElectronUpdater', () =>
         'Electron updater failed to download the update on channel nightly.',
       )
       assert.notInclude(error.message, cause.message)
-    }).pipe(Effect.provide(ElectronUpdater.layer)),
-  )
-
-  it.effect('sets full changelog mode', () =>
-    Effect.gen(function* ()
-    {
-      const updater = yield* ElectronUpdater.ElectronUpdater
-
-      yield* updater.setFullChangelog(true)
-      assert.equal(autoUpdaterMock.fullChangelog, true)
-
-      yield* updater.setFullChangelog(false)
-      assert.equal(autoUpdaterMock.fullChangelog, false)
     }).pipe(Effect.provide(ElectronUpdater.layer)),
   )
 

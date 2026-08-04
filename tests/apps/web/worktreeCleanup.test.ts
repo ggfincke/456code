@@ -42,6 +42,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread
     settledAt: null,
     deletedAt: null,
     latestTurn: null,
+    providerSwitch: null,
     branch: null,
     worktreePath: null,
     ...overrides,

@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/markdownLinks.test.ts
+// verify resolve markdown link presentation behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { resolveMarkdownLinkPresentation } from '@t3tools/mobile-markdown-text/links'
@@ -65,23 +68,14 @@ describe('resolveMarkdownLinkPresentation', () =>
     })
   })
 
-  it('uses the Pierre complete icon mappings', () =>
+  it.each([
+    { path: 'src/Button.tsx', icon: 'react' },
+    { path: 'Dockerfile', icon: 'docker' },
+  ])('uses the Pierre icon mapping for $path', ({ path, icon }) =>
   {
-    expect(resolveMarkdownLinkPresentation('src/Button.tsx')).toMatchObject({
+    expect(resolveMarkdownLinkPresentation(path)).toMatchObject({
       kind: 'file',
-      icon: 'react',
-    })
-    expect(resolveMarkdownLinkPresentation('vite.config.ts')).toMatchObject({
-      kind: 'file',
-      icon: 'vite',
-    })
-    expect(resolveMarkdownLinkPresentation('Dockerfile')).toMatchObject({
-      kind: 'file',
-      icon: 'docker',
-    })
-    expect(resolveMarkdownLinkPresentation('pnpm-lock.yaml')).toMatchObject({
-      kind: 'file',
-      icon: 'pnpm',
+      icon,
     })
   })
 

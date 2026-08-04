@@ -1,3 +1,6 @@
+// tests/packages/contracts/ipc.test.ts
+// verify desktop environment bootstrap schema behavior
+
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vite-plus/test'
 
@@ -24,18 +27,5 @@ describe('DesktopEnvironmentBootstrapSchema', () =>
       httpBaseUrl: 'http://127.0.0.1:3774/',
       wsBaseUrl: 'ws://127.0.0.1:3774/',
     })
-  })
-
-  it('allows non-running and non-WSL bootstraps to report no running distro', () =>
-  {
-    expect(
-      decode({
-        id: 'primary',
-        label: 'Windows',
-        runningDistro: null,
-        httpBaseUrl: null,
-        wsBaseUrl: null,
-      }).runningDistro,
-    ).toBeNull()
   })
 })

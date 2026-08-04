@@ -19,46 +19,50 @@ const decodeProviderInstanceConfigMap = Schema.decodeUnknownSync(ProviderInstanc
 
 describe('provider slug validation (shared by driver + instance ids)', () =>
 {
-  const cases = [
+  const schemas = [
     { schemaName: 'ProviderInstanceId', decode: decodeProviderInstanceId },
     { schemaName: 'ProviderDriverKind', decode: decodeProviderDriverKind },
   ] as const
 
-  for (const { schemaName, decode } of cases)
-  {
-    describe(schemaName, () =>
-    {
-      it.each([
+  it.each(
+    schemas.flatMap(({ schemaName, decode }) =>
+      [
         { label: 'accepts codex_work', value: 'codex_work', expectValid: true },
         { label: 'rejects empty string', value: '', expectValid: false },
         { label: 'rejects leading digit', value: '1codex', expectValid: false },
         { label: 'rejects whitespace inside', value: 'codex personal', expectValid: false },
-      ])('$label', ({ value, expectValid }) =>
-      {
-        if (expectValid)
-        {
-          expect(decode(value)).toBe(value)
-        }
-        else
-        {
-          expect(() => decode(value)).toThrow()
-        }
-      })
+      ].map((row) => ({ schemaName, decode, ...row })),
+    ),
+  )('$schemaName $label', ({ decode, value, expectValid }) =>
+  {
+    if (expectValid)
+    {
+      expect(decode(value)).toBe(value)
+    }
+    else
+    {
+      expect(() => decode(value)).toThrow()
+    }
+  })
 
-      it('trims surrounding whitespace before validating', () =>
-      {
-        expect(decode('  codex_work  ')).toBe('codex_work')
-      })
+  it('trims surrounding whitespace before validating', () =>
+  {
+    for (const { decode } of schemas)
+    {
+      expect(decode('  codex_work  ')).toBe('codex_work')
+    }
+  })
 
-      it('rejects ids longer than 64 characters', () =>
-      {
-        const tooLong = 'a'.repeat(65)
-        expect(() => decode(tooLong)).toThrow()
-        const justRight = 'a'.repeat(64)
-        expect(decode(justRight)).toBe(justRight)
-      })
-    })
-  }
+  it('rejects ids longer than 64 characters', () =>
+  {
+    const tooLong = 'a'.repeat(65)
+    const justRight = 'a'.repeat(64)
+    for (const { decode } of schemas)
+    {
+      expect(() => decode(tooLong)).toThrow()
+      expect(decode(justRight)).toBe(justRight)
+    }
+  })
 })
 
 describe('ProviderInstanceRef', () =>

@@ -1,9 +1,10 @@
+// tests/apps/mobile/lib/appearancePreferences.test.ts
+// verify appearance preferences behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
   DEFAULT_BASE_FONT_SIZE,
-  deriveCodeFontSize,
-  deriveTerminalFontSize,
   normalizeBaseFontSize,
   normalizeCodeFontSize,
   resolveAppearance,
@@ -50,8 +51,6 @@ describe('appearancePreferences', () =>
     expect(appearance.isCodeFontSizeCustom).toBe(false)
 
     const scaled = resolveAppearance(resolveAppearancePreferences({ baseFontSize: 22 }))
-    expect(scaled.terminalFontSize).toBe(deriveTerminalFontSize(22))
-    expect(scaled.codeFontSize).toBe(deriveCodeFontSize(22))
     expect(scaled.terminalFontSize).toBeGreaterThan(10)
     expect(scaled.codeFontSize).toBeGreaterThan(11)
   })

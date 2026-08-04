@@ -1,6 +1,7 @@
 // tests/apps/web/session-logic.test.ts
 // verifies orchestration activities, work logs, and timeline derivation
 import {
+  ApprovalRequestId,
   EventId,
   MessageId,
   ThreadId,
@@ -529,7 +530,7 @@ describe('deriveActivePlanState', () =>
       }),
     ]
 
-    // Current turn is turn-2, which has no plan activity — should fall back to turn-1's plan
+    // current turn is turn-2, which has no plan activity — should fall back to turn-1's plan
     const result = deriveActivePlanState(activities, TurnId.make('turn-2'))
     expect(result).toEqual({
       createdAt: '2026-02-23T00:00:01.000Z',

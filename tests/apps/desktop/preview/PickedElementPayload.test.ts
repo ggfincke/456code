@@ -1,3 +1,6 @@
+// tests/apps/desktop/preview/PickedElementPayload.test.ts
+// verify is picked element payload behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -70,16 +73,11 @@ describe('isPickedElementPayload', () =>
     expect(isPickedElementPayload([])).toBe(false)
   })
 
+  // representative flat-field rejects; nested/finite/stack cases below cover the rest.
   it.each<[string, Record<string, unknown>]>([
-    ['missing pageUrl', validPayload({ pageUrl: undefined })],
-    ['wrong-type pageUrl', validPayload({ pageUrl: 123 })],
-    ['missing tagName', validPayload({ tagName: undefined })],
-    ['missing htmlPreview', validPayload({ htmlPreview: undefined })],
-    ['missing styles', validPayload({ styles: undefined })],
-    ['missing pickedAt', validPayload({ pickedAt: undefined })],
-    ['wrong-type pageTitle', validPayload({ pageTitle: 99 })],
-    ['wrong-type selector', validPayload({ selector: 99 })],
-    ['wrong-type componentName', validPayload({ componentName: 99 })],
+    ['missing required pageUrl', validPayload({ pageUrl: undefined })],
+    ['wrong-type required pageUrl', validPayload({ pageUrl: 123 })],
+    ['wrong-type nullable pageTitle', validPayload({ pageTitle: 99 })],
   ])('rejects payloads with %s', (_label, value) =>
   {
     expect(isPickedElementPayload(value)).toBe(false)

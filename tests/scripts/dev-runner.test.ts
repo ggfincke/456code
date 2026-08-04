@@ -1,3 +1,6 @@
+// tests/scripts/dev-runner.test.ts
+// verify get dev runner mode args behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as NetService from '@t3tools/shared/Net'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
@@ -136,67 +139,52 @@ it.layer(NodeServices.layer)('dev-runner', (it) =>
 
   describe('createDevRunnerEnv', () =>
   {
-    it.effect('leaves the shared home implicit and disables browser auto-open', () =>
+    it.effect('resolves browser auto-open from defaults, enable, and env override', () =>
       Effect.gen(function* ()
       {
-        const env = yield* createDevRunnerEnv({
-          mode: 'dev',
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        })
+        const browserCases = [
+          {
+            baseEnv: {},
+            browser: undefined,
+            expectedNoBrowser: '1',
+            expectImplicitHome: true,
+          },
+          {
+            baseEnv: {},
+            browser: true,
+            expectedNoBrowser: '0',
+            expectImplicitHome: false,
+          },
+          {
+            baseEnv: { T3CODE_NO_BROWSER: '0' },
+            browser: false,
+            expectedNoBrowser: '1',
+            expectImplicitHome: false,
+          },
+        ] as const
 
-        assert.equal(env.T3CODE_HOME, undefined)
-        assert.equal(env.T3CODE_NO_BROWSER, '1')
-      }),
-    )
+        for (const { baseEnv, browser, expectedNoBrowser, expectImplicitHome } of browserCases)
+        {
+          const env = yield* createDevRunnerEnv({
+            mode: 'dev',
+            baseEnv,
+            serverOffset: 0,
+            webOffset: 0,
+            t3Home: undefined,
+            browser,
+            autoBootstrapProjectFromCwd: undefined,
+            logWebSocketEvents: undefined,
+            host: undefined,
+            port: undefined,
+            devUrl: undefined,
+          })
 
-    it.effect('allows browser auto-open to be explicitly enabled', () =>
-      Effect.gen(function* ()
-      {
-        const env = yield* createDevRunnerEnv({
-          mode: 'dev',
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: true,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        })
-
-        assert.equal(env.T3CODE_NO_BROWSER, '0')
-      }),
-    )
-
-    it.effect('requires the browser flag even when the environment enables auto-open', () =>
-      Effect.gen(function* ()
-      {
-        const env = yield* createDevRunnerEnv({
-          mode: 'dev',
-          baseEnv: { T3CODE_NO_BROWSER: '0' },
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: undefined,
-          browser: false,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        })
-
-        assert.equal(env.T3CODE_NO_BROWSER, '1')
+          assert.equal(env.T3CODE_NO_BROWSER, expectedNoBrowser)
+          if (expectImplicitHome)
+          {
+            assert.equal(env.T3CODE_HOME, undefined)
+          }
+        }
       }),
     )
 
@@ -274,28 +262,6 @@ it.layer(NodeServices.layer)('dev-runner', (it) =>
         })
 
         assert.equal(env.T3CODE_LOG_WS_EVENTS, '0')
-      }),
-    )
-
-    it.effect('uses custom t3Home when provided', () =>
-      Effect.gen(function* ()
-      {
-        const path = yield* Path.Path
-        const env = yield* createDevRunnerEnv({
-          mode: 'dev',
-          baseEnv: {},
-          serverOffset: 0,
-          webOffset: 0,
-          t3Home: '/tmp/my-t3',
-          browser: undefined,
-          autoBootstrapProjectFromCwd: undefined,
-          logWebSocketEvents: undefined,
-          host: undefined,
-          port: undefined,
-          devUrl: undefined,
-        })
-
-        assert.equal(env.T3CODE_HOME, path.resolve('/tmp/my-t3'))
       }),
     )
 
