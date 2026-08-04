@@ -79,6 +79,7 @@ function makeThread(activities: ReadonlyArray<OrchestrationThreadActivity>): Orc
     branch: null,
     worktreePath: null,
     latestTurn: null,
+    providerSwitch: null,
     createdAt: '2026-07-27T00:00:00.000Z',
     updatedAt: '2026-07-27T00:00:00.000Z',
     archivedAt: null,
@@ -274,6 +275,7 @@ describe('context-window snapshot dedup', () =>
     const latestA = makeContextWindowActivity('ctx-2', 2_000, 'turn-a')
     const latestB = makeContextWindowActivity('ctx-3', 3_000, 'turn-b')
     const tool = fixtures[0]!
+    const nonContext = fixtures[2]!
 
     const projected = projectThreadDetailSnapshot({
       snapshotSequence: 7,
@@ -287,6 +289,14 @@ describe('context-window snapshot dedup', () =>
     ])
     // retained rows keep their payloads; tool projection only rewrites `data`
     expect(projected.thread.activities[2]?.payload).toEqual(latestB.payload)
+
+    // no-op when the snapshot has no context-window rows
+    expect(
+      projectThreadDetailSnapshot({
+        snapshotSequence: 7,
+        thread: makeThread([nonContext]),
+      }).thread.activities,
+    ).toEqual([nonContext])
   })
 
   it('still resolves a meter value after the client reverts the newest turn', () =>
@@ -345,15 +355,6 @@ describe('context-window snapshot dedup', () =>
     expect(deriveLatestContextWindowSnapshot(projected.thread.activities)).toEqual(
       deriveLatestContextWindowSnapshot([valid, malformed]),
     )
-  })
-
-  it('leaves snapshots without context-window activities untouched', () =>
-  {
-    const projected = projectThreadDetailSnapshot({
-      snapshotSequence: 7,
-      thread: makeThread([fixtures[2]!]),
-    })
-    expect(projected.thread.activities).toEqual([fixtures[2]])
   })
 
   it('does not filter live activity-appended events', () =>

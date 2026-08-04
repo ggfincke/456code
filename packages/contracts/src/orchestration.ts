@@ -424,6 +424,48 @@ export const OrchestrationPendingHandoff = Schema.Struct({
 })
 export type OrchestrationPendingHandoff = typeof OrchestrationPendingHandoff.Type
 
+export const OrchestrationProviderSwitch = Schema.Struct({
+  phase: Schema.Literals(['pending', 'compacting', 'finalizing']),
+  targetInstanceId: ProviderInstanceId,
+  targetModel: Schema.NullOr(TrimmedNonEmptyString),
+  requestedAt: IsoDateTime,
+  requestId: Schema.optional(EventId),
+  requestSequence: Schema.optional(NonNegativeInt),
+  sourceModelSelection: Schema.optional(ModelSelection),
+})
+export type OrchestrationProviderSwitch = typeof OrchestrationProviderSwitch.Type
+
+// approval outcome lifecycle: user intent (responding) is distinct from provider
+// acceptance; only provider evidence or explicit stale classification closes an
+// approval. legacy pending|resolved rows remain the compatibility surface.
+export const ApprovalOutcomeStatus = Schema.Literals([
+  'pending',
+  'responding',
+  'accepted',
+  'stale-terminal',
+  'unknown',
+])
+export type ApprovalOutcomeStatus = typeof ApprovalOutcomeStatus.Type
+
+export const ApprovalAcceptanceEvidence = Schema.Struct({
+  providerEventId: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
+  providerRequestId: Schema.optional(Schema.String),
+})
+export type ApprovalAcceptanceEvidence = typeof ApprovalAcceptanceEvidence.Type
+
+export const ApprovalOutcome = Schema.Struct({
+  requestId: ApprovalRequestId,
+  status: ApprovalOutcomeStatus,
+  requestedDecision: Schema.optional(ProviderApprovalDecision),
+  decision: Schema.optional(Schema.NullOr(ProviderApprovalDecision)),
+  detail: Schema.optional(Schema.String),
+  actionId: Schema.optional(Schema.String),
+  acceptanceEvidence: Schema.optional(ApprovalAcceptanceEvidence),
+  updatedAt: IsoDateTime,
+})
+export type ApprovalOutcome = typeof ApprovalOutcome.Type
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -437,6 +479,9 @@ export const OrchestrationThread = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   pendingHandoff: Schema.optional(Schema.NullOr(OrchestrationPendingHandoff)),
+  providerSwitch: Schema.NullOr(OrchestrationProviderSwitch).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -494,6 +539,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  providerSwitch: Schema.NullOr(OrchestrationProviderSwitch).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -918,10 +966,34 @@ const ThreadSessionSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+const ThreadProviderSwitchProgressCommand = Schema.Struct({
+  type: Schema.Literal('thread.provider.switch.progress'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  expectedRequestedAt: Schema.optional(IsoDateTime),
+  phase: Schema.Literals(['compacting', 'finalizing']),
+})
+
+const ThreadProviderSwitchFailCommand = Schema.Struct({
+  type: Schema.Literal('thread.provider.switch.fail'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  expectedRequestedAt: Schema.optional(IsoDateTime),
+  sourceModelSelection: Schema.optional(ModelSelection),
+  targetModelSelection: Schema.optional(ModelSelection),
+  reasonCode: TrimmedNonEmptyString,
+  detail: Schema.String,
+})
+
 export const ThreadProviderSwitchCompleteCommand = Schema.Struct({
   type: Schema.Literal('thread.provider.switch.complete'),
   commandId: CommandId,
   threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  expectedRequestedAt: Schema.optional(IsoDateTime),
+  sourceModelSelection: Schema.optional(ModelSelection),
   modelSelection: ModelSelection,
   fromInstanceId: Schema.NullOr(ProviderInstanceId),
   handoffText: Schema.String,
@@ -1012,6 +1084,8 @@ const ThreadRevertCompleteCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
+  ThreadProviderSwitchProgressCommand,
+  ThreadProviderSwitchFailCommand,
   ThreadProviderSwitchCompleteCommand,
   ThreadHandoffClearCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1046,6 +1120,8 @@ export const OrchestrationEventType = Schema.Literals([
   'thread.runtime-mode-set',
   'thread.interaction-mode-set',
   'thread.provider-switch-requested',
+  'thread.provider-switch-progressed',
+  'thread.provider-switch-failed',
   'thread.provider-switched',
   'thread.handoff-cleared',
   'thread.message-sent',
@@ -1181,10 +1257,33 @@ export const ThreadProviderSwitchRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   targetModelSelection: ModelSelection,
   expectedCurrentInstanceId: Schema.NullOr(ProviderInstanceId),
+  sourceModelSelection: Schema.optional(ModelSelection),
 })
 export type ThreadProviderSwitchRequestedPayload = typeof ThreadProviderSwitchRequestedPayload.Type
 
+export const ThreadProviderSwitchProgressedPayload = Schema.Struct({
+  threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  phase: Schema.Literals(['compacting', 'finalizing']),
+})
+export type ThreadProviderSwitchProgressedPayload =
+  typeof ThreadProviderSwitchProgressedPayload.Type
+
+export const ThreadProviderSwitchFailedPayload = Schema.Struct({
+  threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  sourceModelSelection: Schema.optional(ModelSelection),
+  targetModelSelection: Schema.optional(ModelSelection),
+  activityVersion: Schema.optional(Schema.Literal(1)),
+  reasonCode: TrimmedNonEmptyString,
+  detail: Schema.String,
+})
+export type ThreadProviderSwitchFailedPayload = typeof ThreadProviderSwitchFailedPayload.Type
+
 export const ThreadProviderSwitchedPayload = Schema.Struct({
+  requestId: Schema.optional(EventId),
+  sourceModelSelection: Schema.optional(ModelSelection),
+  activityVersion: Schema.optional(Schema.Literal(1)),
   modelSelection: ModelSelection,
   fromInstanceId: Schema.NullOr(ProviderInstanceId),
   fromModel: Schema.optional(TrimmedNonEmptyString),
@@ -1385,6 +1484,16 @@ export const OrchestrationEvent = Schema.Union([
     ...EventBaseFields,
     type: Schema.Literal('thread.provider-switch-requested'),
     payload: ThreadProviderSwitchRequestedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.provider-switch-progressed'),
+    payload: ThreadProviderSwitchProgressedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.provider-switch-failed'),
+    payload: ThreadProviderSwitchFailedPayload,
   }),
   Schema.Struct({
     ...EventBaseFields,

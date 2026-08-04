@@ -1,21 +1,20 @@
 // apps/server/src/persistence/Migrations.ts
 // assembles ordered database migrations
 
-/**
- * MigrationsLive - Migration runner with inline loader
- *
- * Uses Migrator.make with fromRecord to define migrations inline.
- * All migrations are statically imported - no dynamic file system loading.
- *
- * Migrations run automatically when the MigrationLayer is provided,
- * ensuring the database schema is always up-to-date before the application starts.
- */
+// MigrationsLive - Migration runner with inline loader
+//
+// uses Migrator.make with fromRecord to define migrations inline.
+// all migrations are statically imported - no dynamic file system loading.
+//
+// migrations run automatically when the MigrationLayer is provided,
+// ensuring the database schema is always up-to-date before the application starts.
 
 import * as Migrator from 'effect/unstable/sql/Migrator'
 import * as Layer from 'effect/Layer'
 import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-// Import all migrations statically
+// import all migrations statically
 import Migration0001 from './Migrations/001_OrchestrationEvents.ts'
 import Migration0002 from './Migrations/002_OrchestrationCommandReceipts.ts'
 import Migration0003 from './Migrations/003_CheckpointDiffBlobs.ts'
@@ -57,17 +56,16 @@ import Migration0038 from './Migrations/038_ProposalGenerations.ts'
 import Migration0039 from './Migrations/039_ProposalImplementationAttempts.ts'
 import Migration0040 from './Migrations/040_ProjectionThreadsPendingHandoff.ts'
 import Migration0041 from './Migrations/041_RepairProjectionPendingUserInputCounts.ts'
+import Migration0042 from './Migrations/042_ProjectionThreadsProviderSwitch.ts'
 
-/**
- * Migration loader with all migrations defined inline.
- *
- * Key format: "{id}_{name}" where:
- * - id: numeric migration ID (determines execution order)
- * - name: descriptive name for the migration
- *
- * Uses Migrator.fromRecord which parses the key format and
- * returns migrations sorted by ID.
- */
+// migration loader with all migrations defined inline.
+//
+// key format: "{id}_{name}" where:
+// - id: numeric migration ID (determines execution order)
+// - name: descriptive name for the migration
+//
+// uses Migrator.fromRecord which parses the key format and
+// returns migrations sorted by ID.
 export const migrationEntries = [
   [1, 'OrchestrationEvents', Migration0001],
   [2, 'OrchestrationCommandReceipts', Migration0002],
@@ -110,6 +108,7 @@ export const migrationEntries = [
   [39, 'ProposalImplementationAttempts', Migration0039],
   [40, 'ProjectionThreadsPendingHandoff', Migration0040],
   [41, 'RepairProjectionPendingUserInputCounts', Migration0041],
+  [42, 'ProjectionThreadsProviderSwitch', Migration0042],
 ] as const
 
 export const makeMigrationLoader = (throughId?: number) =>
@@ -121,10 +120,8 @@ export const makeMigrationLoader = (throughId?: number) =>
     ),
   )
 
-/**
- * Migrator run function - no schema dumping needed
- * Uses the base Migrator.make without platform dependencies
- */
+// migrator run function - no schema dumping needed
+// uses the base Migrator.make without platform dependencies
 const run = Migrator.make({})
 
 export interface RunMigrationsOptions
@@ -132,21 +129,77 @@ export interface RunMigrationsOptions
   readonly toMigrationInclusive?: number | undefined
 }
 
-/**
- * Run all pending migrations.
- *
- * Creates the migrations tracking table (effect_sql_migrations) if it doesn't exist,
- * then runs any migrations with ID greater than the latest recorded migration.
- *
- * Returns array of [id, name] tuples for migrations that were run.
- *
- * @returns Effect containing array of executed migrations
- */
+// ! the upstream migrator selects work by high-water mark: it skips every id
+// <= the newest recorded migration. An id introduced *below* that mark - a
+// number backfilled while a database had already recorded a later one - is
+// therefore skipped permanently, and silently. Fresh databases never show it
+// (they start at 0 and apply the whole sorted set), so tests stay green while
+// long-lived installs drift. Two ids reached a live database that way before
+// this guard existed. Gaps are filled here, ascending, before the forward
+// pass so a backfilled migration still lands exactly once.
+const backfillSkippedMigrations = Effect.fn('backfillSkippedMigrations')(function* (
+  toMigrationInclusive?: number,
+)
+{
+  const sql = yield* SqlClient.SqlClient
+  const trackingTable = yield* sql<{ readonly name: string }>`
+    SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'effect_sql_migrations'
+  `
+  // a fresh database has no ledger yet, so the forward pass owns everything
+  if (trackingTable.length === 0) return []
+
+  const appliedRows = yield* sql<{ readonly migration_id: number }>`
+    SELECT migration_id FROM effect_sql_migrations
+  `
+  if (appliedRows.length === 0) return []
+
+  const applied = new Set(appliedRows.map((row) => row.migration_id))
+  const highWaterMark = Math.max(...applied)
+  const gaps = migrationEntries
+    .filter(
+      ([id]) =>
+        id < highWaterMark &&
+        !applied.has(id) &&
+        (toMigrationInclusive === undefined || id <= toMigrationInclusive),
+    )
+    .toSorted(([leftId], [rightId]) => leftId - rightId)
+  if (gaps.length === 0) return []
+
+  for (const [id, name, migration] of gaps)
+  {
+    yield* sql.withTransaction(
+      Effect.gen(function* ()
+      {
+        yield* migration
+        yield* sql`INSERT INTO effect_sql_migrations (migration_id, name) VALUES (${id}, ${name})`
+      }),
+    )
+  }
+
+  yield* Effect.logWarning('Applied migrations skipped by the high-water mark').pipe(
+    Effect.annotateLogs({
+      migrations: gaps.map(([id, name]) => `${id}_${name}`),
+      highWaterMark,
+    }),
+  )
+  return gaps.map(([id, name]) => [id, name] as const)
+})
+
+// run all pending migrations.
+//
+// creates the migrations tracking table (effect_sql_migrations) if it doesn't exist,
+// fills any ids the high-water mark would skip, then runs everything newer.
+//
+// returns array of [id, name] tuples for migrations that were run.
+//
+// @returns Effect containing array of executed migrations
 export const runMigrations = Effect.fn('runMigrations')(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {})
 {
-  const executedMigrations = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })
+  const backfilled = yield* backfillSkippedMigrations(toMigrationInclusive)
+  const forward = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })
+  const executedMigrations = [...backfilled, ...forward]
   const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`)
   yield* migrations.length === 0
     ? Effect.logDebug('Database schema is current')
@@ -154,21 +207,19 @@ export const runMigrations = Effect.fn('runMigrations')(function* ({
   return executedMigrations
 })
 
-/**
- * Layer that runs migrations when the layer is built.
- *
- * Use this to ensure migrations run before your application starts.
- * Migrations are run automatically - no separate script is needed.
- *
- * @example
- * ```typescript
- * import { MigrationsLive } from "@acme/db/Migrations"
- * import * as SqliteClient from "@acme/db/SqliteClient"
- *
- * // Migrations run automatically when SqliteClient is provided
- * const AppLayer = MigrationsLive.pipe(
- *   Layer.provideMerge(SqliteClient.layer({ filename: "database.sqlite" }))
- * )
- * ```
- */
+// layer that runs migrations when the layer is built.
+//
+// use this to ensure migrations run before your application starts.
+// migrations are run automatically - no separate script is needed.
+//
+// @example
+// ```typescript
+// import { MigrationsLive } from "@acme/db/Migrations"
+// import * as SqliteClient from "@acme/db/SqliteClient"
+//
+// // Migrations run automatically when SqliteClient is provided
+// const AppLayer = MigrationsLive.pipe(
+//   Layer.provideMerge(SqliteClient.layer({ filename: "database.sqlite" }))
+// )
+// ```
 export const MigrationsLive = Layer.effectDiscard(runMigrations())

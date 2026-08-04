@@ -17,12 +17,17 @@ import {
   ProjectionThreadRepository,
   type ProjectionThreadRepositoryShape,
 } from '../Services/ProjectionThreads.ts'
-import { ModelSelection, OrchestrationPendingHandoff } from '@t3tools/contracts'
+import {
+  ModelSelection,
+  OrchestrationPendingHandoff,
+  OrchestrationProviderSwitch,
+} from '@t3tools/contracts'
 
 const ProjectionThreadDbRow = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
     pendingHandoff: Schema.NullOr(Schema.fromJsonString(OrchestrationPendingHandoff)),
+    providerSwitch: Schema.NullOr(Schema.fromJsonString(OrchestrationProviderSwitch)),
   }),
 )
 type ProjectionThreadDbRow = typeof ProjectionThreadDbRow.Type
@@ -41,6 +46,7 @@ const makeProjectionThreadRepository = Effect.gen(function* ()
           title,
           model_selection_json,
           pending_handoff_json,
+          provider_switch_json,
           runtime_mode,
           interaction_mode,
           branch,
@@ -66,6 +72,7 @@ const makeProjectionThreadRepository = Effect.gen(function* ()
           ${row.title},
           ${JSON.stringify(row.modelSelection)},
           ${row.pendingHandoff === null ? null : JSON.stringify(row.pendingHandoff)},
+          ${row.providerSwitch === null ? null : JSON.stringify(row.providerSwitch)},
           ${row.runtimeMode},
           ${row.interactionMode},
           ${row.branch},
@@ -91,6 +98,7 @@ const makeProjectionThreadRepository = Effect.gen(function* ()
           title = excluded.title,
           model_selection_json = excluded.model_selection_json,
           pending_handoff_json = excluded.pending_handoff_json,
+          provider_switch_json = excluded.provider_switch_json,
           runtime_mode = excluded.runtime_mode,
           interaction_mode = excluded.interaction_mode,
           branch = excluded.branch,
@@ -123,6 +131,7 @@ const makeProjectionThreadRepository = Effect.gen(function* ()
           title,
           model_selection_json AS "modelSelection",
           pending_handoff_json AS "pendingHandoff",
+          provider_switch_json AS "providerSwitch",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -157,6 +166,7 @@ const makeProjectionThreadRepository = Effect.gen(function* ()
           title,
           model_selection_json AS "modelSelection",
           pending_handoff_json AS "pendingHandoff",
+          provider_switch_json AS "providerSwitch",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,

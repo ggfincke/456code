@@ -17,9 +17,13 @@ const DEFAULT_COMPACTION_MODEL_BY_DRIVER: Readonly<Record<string, string | null>
 
 export const PROVIDER_SWITCH_COMPACTION_PROMPT = [
   'Produce a complete handoff summary for a successor agent.',
-  "Include the conversation's intent, decisions, completed work including files changed,",
-  'unresolved work, and constraints.',
-  'Explicitly distinguish completed tool effects from proposed actions.',
+  'Intent and decisions: state the user goal, constraints, and decisions.',
+  'Workspace: state the current working directory and repo state, including branch and an uncommitted-change summary.',
+  'Open requests: include pending approvals or user-input requests and their exact content.',
+  'Execution: include in-flight or recently failed tool calls and their outcomes.',
+  'Plan and mode: state whether the proposed plan is accepted or pending, plus the current interaction and runtime modes.',
+  'Completed effects: list completed work and files changed; explicitly instruct the successor not to redo completed work.',
+  'Next work: state unresolved work and distinguish proposed actions from completed tool effects.',
   'Return only the handoff summary.',
 ].join(' ')
 

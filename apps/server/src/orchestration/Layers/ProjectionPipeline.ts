@@ -4,11 +4,16 @@
 import {
   ApprovalRequestId,
   type ChatAttachment,
+  type ApprovalOutcomeStatus,
+  type ProviderApprovalDecision,
+  type ModelSelection,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
   ThreadOrigin,
 } from '@t3tools/contracts'
+import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
+import { isAdjacentProviderSwitchActivity } from '@t3tools/shared/providerSwitchActivity'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -107,14 +112,30 @@ interface ProjectorDefinition
   readonly name: ProjectorName
   readonly apply: (
     event: OrchestrationEvent,
-    attachmentSideEffects: AttachmentSideEffects,
+    attachmentCleanupIntents: AttachmentCleanupIntents,
   ) => Effect.Effect<void, ProjectionRepositoryError>
 }
 
-interface AttachmentSideEffects
+interface AttachmentCleanupIntents
+{
+  readonly deletedThreads: Map<string, string>
+  readonly removedRelativePaths: Set<string>
+}
+
+interface DirectAttachmentSideEffects
 {
   readonly deletedThreadIds: Set<string>
   readonly prunedThreadRelativePaths: Map<string, Set<string>>
+}
+
+interface LegacyProviderSwitchReplayState
+{
+  readonly currentModelSelection: ModelSelection | null
+  readonly pendingSwitch: {
+    readonly requestId: string
+    readonly sourceModelSelection: ModelSelection | null
+    readonly targetModelSelection: ModelSelection
+  } | null
 }
 
 const materializeAttachmentsForProjection = Effect.fn('materializeAttachmentsForProjection')(
@@ -543,6 +564,106 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository
     const projectionTurnRepository = yield* ProjectionTurnRepository
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository
+    const attachmentLifecycleRepository = yield* AttachmentLifecycleRepository
+
+    const recoverLegacyProviderSwitchSelections = Effect.fn(
+      'recoverLegacyProviderSwitchSelections',
+    )(function* (
+      terminalEvent: Extract<OrchestrationEvent, { type: 'thread.provider-switch-failed' }>,
+    )
+    {
+      const threadId = terminalEvent.payload.threadId
+      const replayState = yield* eventStore.readFromSequence(0).pipe(
+        Stream.takeWhile((event) => event.sequence < terminalEvent.sequence),
+        Stream.runFold(
+          (): LegacyProviderSwitchReplayState => ({
+            currentModelSelection: null,
+            pendingSwitch: null,
+          }),
+          (state, event): LegacyProviderSwitchReplayState =>
+          {
+            if (event.aggregateKind !== 'thread' || event.aggregateId !== threadId)
+            {
+              return state
+            }
+            switch (event.type)
+            {
+              case 'thread.created':
+                return {
+                  currentModelSelection: event.payload.modelSelection,
+                  pendingSwitch: null,
+                }
+              case 'thread.meta-updated':
+                return event.payload.modelSelection === undefined
+                  ? state
+                  : { ...state, currentModelSelection: event.payload.modelSelection }
+              case 'thread.provider-switch-requested':
+                return {
+                  ...state,
+                  pendingSwitch: {
+                    requestId: event.eventId,
+                    sourceModelSelection:
+                      event.payload.sourceModelSelection ?? state.currentModelSelection,
+                    targetModelSelection: event.payload.targetModelSelection,
+                  },
+                }
+              case 'thread.provider-switch-failed':
+                return event.payload.requestId !== undefined &&
+                  state.pendingSwitch?.requestId !== event.payload.requestId
+                  ? state
+                  : { ...state, pendingSwitch: null }
+              case 'thread.provider-switched':
+                return event.payload.requestId !== undefined &&
+                  state.pendingSwitch?.requestId !== event.payload.requestId
+                  ? state
+                  : {
+                      currentModelSelection: event.payload.modelSelection,
+                      pendingSwitch: null,
+                    }
+              default:
+                return state
+            }
+          },
+        ),
+      )
+      if (
+        terminalEvent.payload.requestId !== undefined &&
+        replayState.pendingSwitch?.requestId !== terminalEvent.payload.requestId
+      )
+      {
+        return null
+      }
+      return replayState.pendingSwitch
+    })
+
+    const updateApprovalOutcome = (input: {
+      readonly requestId: ApprovalRequestId
+      readonly status: ApprovalOutcomeStatus
+      readonly requestedDecision: ProviderApprovalDecision | null
+      readonly decision: ProviderApprovalDecision | null
+      readonly detail: string | null
+      readonly actionId: string | null
+      readonly acceptanceEvidence: string | null
+      readonly updatedAt: string
+    }) =>
+      sql`
+        UPDATE projection_pending_approvals
+        SET
+          outcome_status = ${input.status},
+          outcome_requested_decision = ${input.requestedDecision},
+          outcome_decision = ${input.decision},
+          outcome_detail = ${input.detail},
+          outcome_action_id = ${input.actionId},
+          outcome_acceptance_evidence = ${input.acceptanceEvidence},
+          outcome_updated_at = ${input.updatedAt}
+        WHERE request_id = ${input.requestId}
+          AND (
+            outcome_status NOT IN ('accepted', 'stale-terminal')
+            OR outcome_status = ${input.status}
+          )
+      `.pipe(
+        Effect.mapError(toPersistenceSqlError('ProjectionPipeline.updateApprovalOutcome:query')),
+      )
 
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -675,6 +796,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             title: event.payload.title,
             modelSelection: event.payload.modelSelection,
             pendingHandoff: null,
+            providerSwitch: null,
             runtimeMode: event.payload.runtimeMode,
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
@@ -861,6 +983,81 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           return
         }
 
+        case 'thread.provider-switch-requested':
+        {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          })
+          if (Option.isNone(existingRow))
+          {
+            return
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            providerSwitch: {
+              phase: 'pending',
+              targetInstanceId: event.payload.targetModelSelection.instanceId,
+              targetModel: event.payload.targetModelSelection.model,
+              requestedAt: event.occurredAt,
+              requestId: event.eventId,
+              requestSequence: event.sequence,
+              sourceModelSelection:
+                event.payload.sourceModelSelection ?? existingRow.value.modelSelection,
+            },
+            updatedAt: event.occurredAt,
+          })
+          return
+        }
+
+        case 'thread.provider-switch-progressed':
+        {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          })
+          if (
+            Option.isNone(existingRow) ||
+            existingRow.value.providerSwitch === null ||
+            (event.payload.requestId !== undefined &&
+              existingRow.value.providerSwitch.requestId !== event.payload.requestId)
+          )
+          {
+            return
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            providerSwitch: {
+              ...existingRow.value.providerSwitch,
+              phase: event.payload.phase,
+            },
+            updatedAt: event.occurredAt,
+          })
+          return
+        }
+
+        case 'thread.provider-switch-failed':
+        {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          })
+          if (Option.isNone(existingRow))
+          {
+            return
+          }
+          if (
+            event.payload.requestId !== undefined &&
+            existingRow.value.providerSwitch?.requestId !== event.payload.requestId
+          )
+          {
+            return
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            providerSwitch: null,
+            updatedAt: event.occurredAt,
+          })
+          return
+        }
+
         case 'thread.provider-switched':
         {
           const existingRow = yield* projectionThreadRepository.getById({
@@ -870,9 +1067,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           {
             return
           }
+          if (
+            event.payload.requestId !== undefined &&
+            existingRow.value.providerSwitch?.requestId !== event.payload.requestId
+          )
+          {
+            return
+          }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             modelSelection: event.payload.modelSelection,
+            providerSwitch: null,
             pendingHandoff:
               event.payload.handoffText.trim().length > 0
                 ? {
@@ -1244,8 +1449,121 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.provider-switch-failed':
+        {
+          const sourceModelSelection = event.payload.sourceModelSelection
+          const targetModelSelection = event.payload.targetModelSelection
+          const thread =
+            sourceModelSelection === undefined || targetModelSelection === undefined
+              ? yield* projectionThreadRepository.getById({ threadId: event.payload.threadId })
+              : Option.none()
+          const legacyThread = Option.getOrUndefined(thread)
+          const target = legacyThread?.providerSwitch ?? null
+          const liveTargetModelSelection =
+            target === null
+              ? undefined
+              : { instanceId: target.targetInstanceId, model: target.targetModel }
+          const recovered =
+            target === null &&
+            (sourceModelSelection === undefined || targetModelSelection === undefined)
+              ? yield* recoverLegacyProviderSwitchSelections(event)
+              : null
+          const source =
+            sourceModelSelection ??
+            (target === null
+              ? (recovered?.sourceModelSelection ?? legacyThread?.modelSelection)
+              : legacyThread?.modelSelection)
+          const resolvedTargetModelSelection =
+            targetModelSelection ?? liveTargetModelSelection ?? recovered?.targetModelSelection
+          const activity: ProjectionThreadActivity = {
+            activityId: event.eventId,
+            threadId: event.payload.threadId,
+            turnId: null,
+            tone: 'error',
+            kind: 'provider.switch.failed',
+            summary: 'Provider switch failed',
+            payload: {
+              reasonCode: event.payload.reasonCode,
+              detail: event.payload.detail,
+              ...(source === undefined
+                ? {}
+                : {
+                    fromInstanceId: source.instanceId,
+                    fromModel: source.model,
+                  }),
+              ...(resolvedTargetModelSelection === undefined
+                ? {}
+                : {
+                    toInstanceId: resolvedTargetModelSelection.instanceId,
+                    toModel: resolvedTargetModelSelection.model,
+                    retryTargetModelSelection: resolvedTargetModelSelection,
+                  }),
+            },
+            sequence: event.sequence,
+            createdAt: event.occurredAt,
+          }
+          if (event.payload.activityVersion === undefined)
+          {
+            const existingRows = yield* projectionThreadActivityRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            })
+            if (existingRows.some((row) => isAdjacentProviderSwitchActivity(row, activity)))
+            {
+              return
+            }
+          }
+          yield* projectionThreadActivityRepository.upsert(activity)
+          return
+        }
+
+        case 'thread.provider-switched':
+        {
+          const threadId = ThreadId.make(event.aggregateId)
+          const sourceModelSelection = event.payload.sourceModelSelection ?? {
+            instanceId: event.payload.fromInstanceId,
+            ...(event.payload.fromModel === undefined ? {} : { model: event.payload.fromModel }),
+          }
+          const activity: ProjectionThreadActivity = {
+            activityId: event.eventId,
+            threadId,
+            turnId: null,
+            tone: 'info',
+            kind: 'provider.switch.completed',
+            summary: `Switched from ${
+              sourceModelSelection.model ?? sourceModelSelection.instanceId ?? 'prior provider'
+            } to ${event.payload.modelSelection.model || event.payload.modelSelection.instanceId}`,
+            payload: {
+              fromInstanceId: sourceModelSelection.instanceId,
+              ...(sourceModelSelection.model === undefined
+                ? {}
+                : { fromModel: sourceModelSelection.model }),
+              toInstanceId: event.payload.modelSelection.instanceId,
+              toModel: event.payload.modelSelection.model,
+              targetModelSelection: event.payload.modelSelection,
+            },
+            sequence: event.sequence,
+            createdAt: event.occurredAt,
+          }
+          if (event.payload.activityVersion === undefined)
+          {
+            const existingRows = yield* projectionThreadActivityRepository.listByThreadId({
+              threadId,
+            })
+            if (existingRows.some((row) => isAdjacentProviderSwitchActivity(row, activity)))
+            {
+              return
+            }
+          }
+          yield* projectionThreadActivityRepository.upsert(activity)
+          return
+        }
+
         case 'thread.activity-appended':
-          yield* projectionThreadActivityRepository.upsert({
+        {
+          const isProviderSwitchActivity =
+            event.payload.activity.kind === 'provider.switch.failed' ||
+            event.payload.activity.kind === 'provider.switch.completed'
+          const activity: ProjectionThreadActivity = {
             activityId: event.payload.activity.id,
             threadId: event.payload.threadId,
             turnId: event.payload.activity.turnId,
@@ -1255,10 +1573,36 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             payload: event.payload.activity.payload,
             ...(event.payload.activity.sequence !== undefined
               ? { sequence: event.payload.activity.sequence }
-              : {}),
+              : isProviderSwitchActivity
+                ? { sequence: event.sequence }
+                : {}),
             createdAt: event.payload.activity.createdAt,
-          })
+          }
+          if (isProviderSwitchActivity)
+          {
+            const existingRows = yield* projectionThreadActivityRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            })
+            const replacedActivityId = existingRows.findLast(
+              (row) =>
+                event.causationEventId === row.activityId ||
+                isAdjacentProviderSwitchActivity(row, activity),
+            )?.activityId
+            if (replacedActivityId !== undefined)
+            {
+              yield* projectionThreadActivityRepository.deleteByThreadId({
+                threadId: event.payload.threadId,
+              })
+              yield* Effect.forEach(
+                existingRows.filter((row) => row.activityId !== replacedActivityId),
+                projectionThreadActivityRepository.upsert,
+                { concurrency: 1, discard: true },
+              )
+            }
+          }
+          yield* projectionThreadActivityRepository.upsert(activity)
           return
+        }
 
         case 'thread.reverted':
         {

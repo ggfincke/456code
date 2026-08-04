@@ -38,11 +38,26 @@ import { projectEvent } from './projector.ts'
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-// Session adoption takes seconds; a user message still unadopted after this
+// session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
 // QUEUED_TURN_START_GRACE_MS in client-runtime threadSettled.ts.
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000
 const isThreadImportContinuationActivityPayload = Schema.is(ThreadImportContinuationActivityPayload)
+
+function providerSwitchRequestMatches(
+  providerSwitch: OrchestrationThread['providerSwitch'],
+  requestId: EventId | undefined,
+  expectedRequestedAt: string | undefined,
+): boolean
+{
+  if (providerSwitch === null)
+  {
+    return false
+  }
+  return requestId !== undefined
+    ? providerSwitch.requestId === requestId
+    : expectedRequestedAt !== undefined && providerSwitch.requestedAt === expectedRequestedAt
+}
 
 type LatestImportContinuationActivity =
   | { readonly state: 'missing' | 'invalid' }
@@ -853,13 +868,19 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
-      if (
-        command.expectedCurrentInstanceId !== undefined &&
-        command.expectedCurrentInstanceId !== thread.modelSelection.instanceId
-      )
+      if (thread.providerSwitch !== null)
       {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-in-progress',
+          detail: `Thread '${command.threadId}' already has a provider switch in progress.`,
+        })
+      }
+      if (command.expectedCurrentInstanceId !== thread.modelSelection.instanceId)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'switch-instance-mismatch',
           detail: `Thread '${command.threadId}' is bound to provider instance '${thread.modelSelection.instanceId}', not expected instance '${command.expectedCurrentInstanceId}'.`,
         })
       }
@@ -922,6 +943,14 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
+      if (targetThread.providerSwitch !== null)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'turn-start-during-switch',
+          detail: `Thread '${command.threadId}' cannot start a turn while a provider switch is in progress.`,
+        })
+      }
       const requiresImportContinuationConsent =
         targetThread.origin !== null && targetThread.latestTurn === null
       if (
@@ -1317,13 +1346,157 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       return [unsettledEvent, sessionSetEvent]
     }
 
-    case 'thread.provider.switch.complete':
+    case 'thread.provider.switch.progress':
     {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       })
+      if (
+        !providerSwitchRequestMatches(
+          thread.providerSwitch,
+          command.requestId,
+          command.expectedRequestedAt,
+        )
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'stale-provider-switch-request',
+          detail: `Provider switch request '${command.requestId}' no longer owns thread '${command.threadId}'.`,
+        })
+      }
+      const occurredAt = yield* nowIso
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.provider-switch-progressed',
+        payload: {
+          threadId: command.threadId,
+          requestId: command.requestId,
+          phase: command.phase,
+        },
+      }
+    }
+
+    case 'thread.provider.switch.fail':
+    {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      if (
+        !providerSwitchRequestMatches(
+          thread.providerSwitch,
+          command.requestId,
+          command.expectedRequestedAt,
+        )
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'stale-provider-switch-request',
+          detail: `Provider switch request '${command.requestId}' no longer owns thread '${command.threadId}'.`,
+        })
+      }
+      const sourceModelSelection =
+        thread.providerSwitch?.sourceModelSelection ??
+        command.sourceModelSelection ??
+        thread.modelSelection
+      const targetModelSelection =
+        thread.providerSwitch === null || thread.providerSwitch.targetModel === null
+          ? command.targetModelSelection
+          : {
+              instanceId: thread.providerSwitch.targetInstanceId,
+              model: thread.providerSwitch.targetModel,
+            }
+      const occurredAt = yield* nowIso
+      const failureEvent: Omit<OrchestrationEvent, 'sequence'> = {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.provider-switch-failed',
+        payload: {
+          threadId: command.threadId,
+          requestId: command.requestId,
+          sourceModelSelection,
+          ...(targetModelSelection === undefined ? {} : { targetModelSelection }),
+          activityVersion: 1,
+          reasonCode: command.reasonCode,
+          detail: command.detail,
+        },
+      }
+      const session = thread.session
+      if (
+        session?.status !== 'running' ||
+        session.activeTurnId !== null ||
+        session.providerInstanceId !== thread.modelSelection.instanceId
+      )
+      {
+        return failureEvent
+      }
+      const sessionRepairEvent: Omit<OrchestrationEvent, 'sequence'> = {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.session-set',
+        payload: {
+          threadId: command.threadId,
+          session: {
+            ...session,
+            status: 'ready',
+            updatedAt: occurredAt,
+          },
+        },
+      }
+      return [failureEvent, sessionRepairEvent]
+    }
+
+    case 'thread.provider.switch.complete':
+    {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      if (
+        !providerSwitchRequestMatches(
+          thread.providerSwitch,
+          command.requestId,
+          command.expectedRequestedAt,
+        )
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'stale-provider-switch-request',
+          detail: `Provider switch request '${command.requestId}' no longer owns thread '${command.threadId}'.`,
+        })
+      }
+      if (
+        thread.providerSwitch !== null &&
+        (thread.providerSwitch.targetInstanceId !== command.modelSelection.instanceId ||
+          thread.providerSwitch.targetModel !== command.modelSelection.model)
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'stale-provider-switch-target',
+          detail: `Provider switch request '${command.requestId}' does not own target '${command.modelSelection.instanceId}'.`,
+        })
+      }
       const occurredAt = yield* nowIso
       return {
         ...(yield* withEventBase({
@@ -1334,6 +1507,12 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         })),
         type: 'thread.provider-switched',
         payload: {
+          requestId: command.requestId,
+          sourceModelSelection:
+            thread.providerSwitch?.sourceModelSelection ??
+            command.sourceModelSelection ??
+            thread.modelSelection,
+          activityVersion: 1,
           modelSelection: command.modelSelection,
           fromInstanceId: command.fromInstanceId,
           ...(command.fromModel !== undefined ? { fromModel: command.fromModel } : {}),

@@ -27,73 +27,40 @@ const projectionRepositoriesLayer = it.layer(
 
 projectionRepositoriesLayer('Projection repositories', (it) =>
 {
-  it.effect('stores SQL NULL for missing project model options', () =>
+  it.effect('stores JSON for project and thread model selections', () =>
     Effect.gen(function* ()
     {
       const projects = yield* ProjectionProjectRepository
+      const threads = yield* ProjectionThreadRepository
       const sql = yield* SqlClient.SqlClient
+
+      const projectSelection = {
+        instanceId: ProviderInstanceId.make('codex'),
+        model: 'gpt-5.4',
+      }
+      const threadSelection = {
+        instanceId: ProviderInstanceId.make('claudeAgent'),
+        model: 'claude-opus-4-6',
+      }
 
       yield* projects.upsert({
         projectId: ProjectId.make('project-null-options'),
         title: 'Null options project',
         workspaceRoot: '/tmp/project-null-options',
-        defaultModelSelection: {
-          instanceId: ProviderInstanceId.make('codex'),
-          model: 'gpt-5.4',
-        },
+        defaultModelSelection: projectSelection,
         scripts: [],
         createdAt: '2026-03-24T00:00:00.000Z',
         updatedAt: '2026-03-24T00:00:00.000Z',
         deletedAt: null,
       })
 
-      const rows = yield* sql<{
-        readonly defaultModelSelection: string | null
-      }>`
-        SELECT default_model_selection_json AS "defaultModelSelection"
-        FROM projection_projects
-        WHERE project_id = 'project-null-options'
-      `
-      const row = rows[0]
-      if (!row)
-      {
-        return yield* Effect.die('Expected projection_projects row to exist.')
-      }
-
-      assert.strictEqual(
-        row.defaultModelSelection,
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        JSON.stringify({
-          instanceId: ProviderInstanceId.make('codex'),
-          model: 'gpt-5.4',
-        }),
-      )
-
-      const persisted = yield* projects.getById({
-        projectId: ProjectId.make('project-null-options'),
-      })
-      assert.deepStrictEqual(Option.getOrNull(persisted)?.defaultModelSelection, {
-        instanceId: ProviderInstanceId.make('codex'),
-        model: 'gpt-5.4',
-      })
-    }),
-  )
-
-  it.effect('stores JSON for thread model options', () =>
-    Effect.gen(function* ()
-    {
-      const threads = yield* ProjectionThreadRepository
-      const sql = yield* SqlClient.SqlClient
-
       yield* threads.upsert({
         threadId: ThreadId.make('thread-null-options'),
         projectId: ProjectId.make('project-null-options'),
         title: 'Null options thread',
-        modelSelection: {
-          instanceId: ProviderInstanceId.make('claudeAgent'),
-          model: 'claude-opus-4-6',
-        },
+        modelSelection: threadSelection,
         pendingHandoff: null,
+        providerSwitch: null,
         runtimeMode: 'full-access',
         interactionMode: 'default',
         branch: null,
@@ -114,35 +81,56 @@ projectionRepositoriesLayer('Projection repositories', (it) =>
         deletedAt: null,
       })
 
-      const rows = yield* sql<{
+      const projectRows = yield* sql<{
+        readonly defaultModelSelection: string | null
+      }>`
+        SELECT default_model_selection_json AS "defaultModelSelection"
+        FROM projection_projects
+        WHERE project_id = 'project-null-options'
+      `
+      const projectRow = projectRows[0]
+      if (!projectRow)
+      {
+        return yield* Effect.die('Expected projection_projects row to exist.')
+      }
+
+      assert.strictEqual(
+        projectRow.defaultModelSelection,
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        JSON.stringify(projectSelection),
+      )
+
+      const persistedProject = yield* projects.getById({
+        projectId: ProjectId.make('project-null-options'),
+      })
+      assert.deepStrictEqual(
+        Option.getOrNull(persistedProject)?.defaultModelSelection,
+        projectSelection,
+      )
+
+      const threadRows = yield* sql<{
         readonly modelSelection: string | null
       }>`
         SELECT model_selection_json AS "modelSelection"
         FROM projection_threads
         WHERE thread_id = 'thread-null-options'
       `
-      const row = rows[0]
-      if (!row)
+      const threadRow = threadRows[0]
+      if (!threadRow)
       {
         return yield* Effect.die('Expected projection_threads row to exist.')
       }
 
       assert.strictEqual(
-        row.modelSelection,
+        threadRow.modelSelection,
         // @effect-diagnostics-next-line preferSchemaOverJson:off
-        JSON.stringify({
-          instanceId: ProviderInstanceId.make('claudeAgent'),
-          model: 'claude-opus-4-6',
-        }),
+        JSON.stringify(threadSelection),
       )
 
-      const persisted = yield* threads.getById({
+      const persistedThread = yield* threads.getById({
         threadId: ThreadId.make('thread-null-options'),
       })
-      assert.deepStrictEqual(Option.getOrNull(persisted)?.modelSelection, {
-        instanceId: ProviderInstanceId.make('claudeAgent'),
-        model: 'claude-opus-4-6',
-      })
+      assert.deepStrictEqual(Option.getOrNull(persistedThread)?.modelSelection, threadSelection)
     }),
   )
 
@@ -160,6 +148,7 @@ projectionRepositoriesLayer('Projection repositories', (it) =>
           model: 'gpt-5.4',
         },
         pendingHandoff: null,
+        providerSwitch: null,
         runtimeMode: 'full-access',
         interactionMode: 'default',
         branch: null,
@@ -193,7 +182,7 @@ projectionRepositoriesLayer('Projection repositories', (it) =>
       assert.strictEqual(row.snoozedUntil, '2026-03-26T09:00:00.000Z')
       assert.strictEqual(row.snoozedAt, '2026-03-25T00:00:00.000Z')
 
-      // Un-settle to the keep-active pin and wake the snooze; confirm the
+      // un-settle to the keep-active pin and wake the snooze; confirm the
       // flips persist.
       yield* threads.upsert({
         ...row,
