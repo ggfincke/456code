@@ -21,7 +21,7 @@ import {
 } from '@t3tools/contracts'
 import { createModelSelection } from '@t3tools/shared/model'
 
-// The composer draft's `modelSelectionByProvider` and
+// the composer draft's `modelSelectionByProvider` and
 // `stickyModelSelectionByProvider` maps are keyed by `ProviderInstanceId`
 // in production; these aliases keep the legacy-key migration tests concise.
 const CODEX_INSTANCE = ProviderInstanceId.make('codex')
@@ -631,7 +631,7 @@ describe('composerDraftStore element contexts', () =>
     const store = useComposerDraftStore.getState()
     store.addElementContext(threadRef, baseSelection)
     store.setElementContexts(threadRef, [])
-    // Fully empty draft should be removed via shouldRemoveDraft.
+    // fully empty draft should be removed via shouldRemoveDraft.
     expect(draftFor(threadId, TEST_ENVIRONMENT_ID)).toBeUndefined()
 
     store.addElementContext(threadRef, baseSelection)
@@ -659,7 +659,7 @@ describe('composerDraftStore element contexts', () =>
       selector: baseSelection.selector,
       componentName: baseSelection.componentName,
     })
-    // Persistence does NOT include htmlPreview / styles oversize-clamping —
+    // persistence does NOT include htmlPreview / styles oversize-clamping —
     // that happens at normalization time, before the value reaches the store.
     expect(typeof entry?.htmlPreview).toBe('string')
   })
@@ -874,7 +874,7 @@ describe('composerDraftStore project draft thread mapping', () =>
       expect(useComposerDraftStore.getState().getDraftThread(draftId)).toBeNull()
       expect(revokeSpy).toHaveBeenCalledWith('blob:clear')
 
-      // Same revoke path via clear-by-id API.
+      // same revoke path via clear-by-id API.
       store.setProjectDraftThreadId(projectRef, draftId, { threadId })
       store.addImage(
         draftId,
@@ -1333,27 +1333,7 @@ describe('composerDraftStore modelSelection', () =>
         modelSelection(CLAUDE_AGENT_DRIVER, 'claude-opus-4-6', {
           thinking: true,
         }),
-    },
-    {
-      label: 'codex off/default overrides',
-      setup: (store: ReturnType<typeof useComposerDraftStore.getState>) =>
-      {
-        store.setModelSelection(
-          threadRef,
-          modelSelection(CODEX_DRIVER, 'gpt-5.4', { fastMode: true }),
-        )
-        store.setProviderModelOptions(
-          threadRef,
-          CODEX_DRIVER,
-          toSelections({ reasoningEffort: 'high', fastMode: false }),
-        )
-      },
-      expectedInstance: CODEX_INSTANCE,
-      expected: () =>
-        modelSelection(CODEX_DRIVER, 'gpt-5.4', {
-          reasoningEffort: 'high',
-          fastMode: false,
-        }),
+      expectEmptySticky: true,
     },
     {
       label: 'Cursor reset overrides',
@@ -1380,20 +1360,23 @@ describe('composerDraftStore modelSelection', () =>
           fastMode: false,
           thinking: true,
         }),
+      expectEmptySticky: false,
     },
-  ])('keeps explicit $label on the selection', ({ label, setup, expectedInstance, expected }) =>
-  {
-    const store = useComposerDraftStore.getState()
-    setup(store)
-    expect(
-      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[expectedInstance],
-    ).toEqual(expected())
-    if (label === 'claude default-state overrides')
+  ])(
+    'keeps explicit $label on the selection',
+    ({ setup, expectedInstance, expected, expectEmptySticky }) =>
     {
-      expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toEqual({})
-    }
-  })
-
+      const store = useComposerDraftStore.getState()
+      setup(store)
+      expect(
+        draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[expectedInstance],
+      ).toEqual(expected())
+      if (expectEmptySticky)
+      {
+        expect(useComposerDraftStore.getState().stickyModelSelectionByProvider).toEqual({})
+      }
+    },
+  )
   it('preserves the selected Cursor model when only traits change', () =>
   {
     const store = useComposerDraftStore.getState()
@@ -1457,7 +1440,7 @@ describe('composerDraftStore modelSelection', () =>
   {
     const store = useComposerDraftStore.getState()
 
-    // Set options for both providers
+    // set options for both providers
     store.setModelOptions(
       threadRef,
       providerModelOptions({
@@ -1466,7 +1449,7 @@ describe('composerDraftStore modelSelection', () =>
       }),
     )
 
-    // Now set options for only codex — claudeAgent should be untouched
+    // now set options for only codex — claudeAgent should be untouched
     store.setModelOptions(threadRef, providerModelOptions({ codex: { reasoningEffort: 'xhigh' } }))
 
     const draft = draftFor(threadId, TEST_ENVIRONMENT_ID)
@@ -1582,6 +1565,42 @@ describe('composerDraftStore setModelSelection', () =>
     expect(
       draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE],
     ).toEqual(modelSelection(CODEX_DRIVER, 'gpt-5.3-codex'))
+  })
+
+  // the projection reconciler passes a complete snapshot: options the thread no
+  // longer projects have to disappear, or the next turn is sent with them.
+  it('drops options the projection no longer carries under replaceOptions', () =>
+  {
+    const store = useComposerDraftStore.getState()
+
+    store.setModelSelection(
+      threadRef,
+      modelSelection(CODEX_DRIVER, 'gpt-5.3-codex', { reasoningEffort: 'high' }),
+    )
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, 'gpt-5.4'), {
+      replaceOptions: true,
+    })
+
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE],
+    ).toEqual(modelSelection(CODEX_DRIVER, 'gpt-5.4'))
+  })
+
+  // a picker row changes the model only, so the options the user already chose
+  // must survive it
+  it('preserves existing options for a direct picker change', () =>
+  {
+    const store = useComposerDraftStore.getState()
+
+    store.setModelSelection(
+      threadRef,
+      modelSelection(CODEX_DRIVER, 'gpt-5.3-codex', { reasoningEffort: 'high' }),
+    )
+    store.setModelSelection(threadRef, modelSelection(CODEX_DRIVER, 'gpt-5.4'))
+
+    expect(
+      draftFor(threadId, TEST_ENVIRONMENT_ID)?.modelSelectionByProvider[CODEX_INSTANCE],
+    ).toEqual(modelSelection(CODEX_DRIVER, 'gpt-5.4', { reasoningEffort: 'high' }))
   })
 })
 
