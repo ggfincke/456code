@@ -1,3 +1,6 @@
+// apps/mobile/src/native/ComposerEditor.ios.tsx
+// bridge the iOS native composer editor into React Native
+
 import { collectComposerInlineTokens } from '@t3tools/shared/composerInlineTokens'
 import { requireNativeView } from 'expo'
 import {
@@ -25,9 +28,12 @@ import {
   type ComposerNativeEventSnapshot,
 } from './composerEditorRevision'
 import type { ComposerEditorProps, ComposerEditorSelection } from './ComposerEditor.types'
+import { resolveComposerEditorCapabilities } from './composerEditorCapabilities'
 
 const NATIVE_MODULE_NAME = 'Code456ComposerEditor'
 const EMPTY_SKILLS: NonNullable<ComposerEditorProps['skills']> = []
+
+export const composerEditorCapabilities = resolveComposerEditorCapabilities('ios')
 
 type NativeEditorEvent = NativeSyntheticEvent<{
   readonly value: string
@@ -291,6 +297,7 @@ export function ComposerEditor({
 }
 
 export type {
+  ComposerEditorCapabilities,
   ComposerEditorHandle,
   ComposerEditorProps,
   ComposerEditorSelection,

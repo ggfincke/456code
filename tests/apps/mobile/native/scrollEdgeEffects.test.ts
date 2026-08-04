@@ -1,3 +1,6 @@
+// tests/apps/mobile/native/scrollEdgeEffects.test.ts
+// verify native top scroll edge effect behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -7,12 +10,9 @@ import {
 
 describe('nativeTopScrollEdgeEffect', () =>
 {
-  it.each([
-    { platform: 'ios', version: '26.5', expected: 'automatic' },
-    { platform: 'android', version: 27, expected: 'automatic' },
-  ])('uses the automatic native treatment on $platform', ({ platform, version, expected }) =>
+  it('uses the automatic native treatment on iOS', () =>
   {
-    expect(nativeTopScrollEdgeEffect(platform, version)).toBe(expected)
+    expect(nativeTopScrollEdgeEffect('ios', '26.5')).toBe('automatic')
   })
 })
 

@@ -74,6 +74,7 @@ import * as VcsProvisioningService from './vcs/VcsProvisioningService.ts'
 import * as VcsStatusBroadcaster from './vcs/VcsStatusBroadcaster.ts'
 import * as GitWorkflowService from './git/GitWorkflowService.ts'
 import * as ReviewService from './review/ReviewService.ts'
+import * as SourceControlDiscovery from './sourceControl/SourceControlDiscovery.ts'
 import * as SourceControlProviderRegistry from './sourceControl/SourceControlProviderRegistry.ts'
 import * as SourceControlRepositoryService from './sourceControl/SourceControlRepositoryService.ts'
 import * as ProjectSetupScriptRunner from './project/ProjectSetupScriptRunner.ts'
@@ -341,6 +342,14 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerSecretStore.layer),
 )
 
+export const makeSourceControlDiscoveryLayer = <ROut, E, RIn>(
+  runtimeCoreDependencies: Layer.Layer<ROut, E, RIn>,
+) => SourceControlDiscovery.layer.pipe(Layer.provideMerge(runtimeCoreDependencies))
+
+export const SourceControlDiscoveryLayerLive = makeSourceControlDiscoveryLayer(
+  RuntimeCoreDependenciesLive,
+)
+
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
   // Misc.
   Layer.provideMerge(ProcessDiagnostics.layer),
@@ -489,6 +498,7 @@ export const makeServerLayer = Layer.unwrap(
       // present (inert fallback otherwise); providing it here keeps provider
       // services out of makeRoutesLayer requirements so test graphs stay small
       Layer.provide(ImportContinuationLive),
+      Layer.provide(SourceControlDiscoveryLayerLive),
       Layer.provideMerge(RuntimeServicesLive),
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ObservabilityLive),
