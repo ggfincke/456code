@@ -1,155 +1,187 @@
 // apps/server/src/orchestration/Layers/ThreadDeletionReactor.ts
-// cleans up runtime resources after durable thread deletion
+// executes durable ordered cleanup after thread deletion
 
-import type { OrchestrationEvent } from '@t3tools/contracts'
-import { makeDrainableWorker } from '@t3tools/shared/DrainableWorker'
-import * as Cause from 'effect/Cause'
+import { OrchestrationEvent } from '@t3tools/contracts'
+import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
-import * as Stream from 'effect/Stream'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
 
 import { CartographerEmbedBroker } from '../../cartographer/CartographerEmbedBroker.ts'
+import { ReactorDeliveryError } from '../../persistence/Errors.ts'
+import { OrchestrationReactorDelivery } from '../../persistence/Services/OrchestrationReactorDelivery.ts'
 import { ProposalGenerationService } from '../../proposal/ProposalGenerationService.ts'
 import { ProviderService } from '../../provider/Services/ProviderService.ts'
 import * as TerminalManager from '../../terminal/Manager.ts'
-import { OrchestrationEngineService } from '../Services/OrchestrationEngine.ts'
+import {
+  DurableReactorRunner,
+  type DurableReactorDefinition,
+} from '../Services/DurableReactorRunner.ts'
+import { DurableReactorInfrastructureLive } from './OrchestrationReactor.ts'
+import { ProjectionSnapshotQuery } from '../Services/ProjectionSnapshotQuery.ts'
 import {
   ThreadDeletionReactor,
   type ThreadDeletionReactorShape,
 } from '../Services/ThreadDeletionReactor.ts'
 
-type ThreadDeletedEvent = Extract<OrchestrationEvent, { type: 'thread.deleted' }>
+const REACTOR_ID = 'thread-deletion' as const
+const OPERATION_VERSION = 1
+const EventPayload = Schema.fromJsonString(OrchestrationEvent)
+const encodeEventPayload = Schema.encodeEffect(EventPayload)
+const decodeEventPayload = Schema.decodeUnknownEffect(EventPayload)
+const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-export const logCleanupCauseUnlessInterrupted = <R, E>({
-  effect,
-  message,
-  threadId,
-}: {
-  readonly effect: Effect.Effect<void, E, R>
-  readonly message: string
-  readonly threadId: ThreadDeletedEvent['payload']['threadId']
-}): Effect.Effect<void, E, R> =>
-  effect.pipe(
-    Effect.catchCause((cause) =>
-    {
-      if (Cause.hasInterruptsOnly(cause))
-      {
-        return Effect.failCause(cause)
-      }
-      return Effect.logDebug(message, {
-        threadId,
-        cause: Cause.pretty(cause),
-      })
-    }),
-  )
+class ThreadDeletionPayloadError extends Schema.TaggedErrorClass<ThreadDeletionPayloadError>()(
+  'ThreadDeletionPayloadError',
+  { detail: Schema.String },
+)
+{}
+const isThreadDeletionPayloadError = Schema.is(ThreadDeletionPayloadError)
 
-export function runThreadDeletionCleanup<CancelError, EmbedError, ProviderError, TerminalError>({
-  cancelProposalGeneration,
-  closeCartographerEmbed,
-  stopProviderSession,
-  closeThreadTerminals,
-}: {
-  readonly cancelProposalGeneration: Effect.Effect<void, CancelError>
-  readonly closeCartographerEmbed: Effect.Effect<void, EmbedError>
-  readonly stopProviderSession: Effect.Effect<void, ProviderError>
-  readonly closeThreadTerminals: Effect.Effect<void, TerminalError>
-}): Effect.Effect<void, CancelError | EmbedError | ProviderError | TerminalError>
+function isPayloadError(cause: unknown): boolean
 {
-  return Effect.gen(function* ()
-  {
-    // install bounded-resource tombstones before slower external cleanup
-    yield* cancelProposalGeneration
-    yield* closeCartographerEmbed
-    yield* stopProviderSession
-    yield* closeThreadTerminals
-  })
+  return Schema.isSchemaError(cause) || isThreadDeletionPayloadError(cause)
 }
 
 const make = Effect.gen(function* ()
 {
-  const orchestrationEngine = yield* OrchestrationEngineService
+  const delivery = yield* OrchestrationReactorDelivery
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
+  const durableRunner = yield* DurableReactorRunner
   const providerService = yield* ProviderService
   const terminalManager = yield* TerminalManager.TerminalManager
   const proposalGenerationService = yield* ProposalGenerationService
   const cartographerEmbedBroker = yield* CartographerEmbedBroker
 
-  const stopProviderSession = (threadId: ThreadDeletedEvent['payload']['threadId']) =>
-    logCleanupCauseUnlessInterrupted({
-      effect: providerService.stopSession({ threadId }),
-      message: 'thread deletion cleanup skipped provider session stop',
-      threadId,
-    })
-
-  const closeThreadTerminals = (threadId: ThreadDeletedEvent['payload']['threadId']) =>
-    logCleanupCauseUnlessInterrupted({
-      effect: terminalManager.close({ threadId, deleteHistory: true }),
-      message: 'thread deletion cleanup skipped terminal close',
-      threadId,
-    })
-
-  const cancelProposalGeneration = (threadId: ThreadDeletedEvent['payload']['threadId']) =>
-    logCleanupCauseUnlessInterrupted({
-      effect: proposalGenerationService.cancelThread(threadId),
-      message: 'thread deletion cleanup skipped proposal generation cancellation',
-      threadId,
-    })
-
-  const closeCartographerEmbed = (threadId: ThreadDeletedEvent['payload']['threadId']) =>
-    logCleanupCauseUnlessInterrupted({
-      effect: cartographerEmbedBroker.closeThread(threadId),
-      message: 'thread deletion cleanup skipped cartographer embed close',
-      threadId,
-    })
-
-  const processThreadDeleted = Effect.fn('processThreadDeleted')(function* (
-    event: ThreadDeletedEvent,
-  )
-  {
-    const { threadId } = event.payload
-    yield* runThreadDeletionCleanup({
-      cancelProposalGeneration: cancelProposalGeneration(threadId),
-      closeCartographerEmbed: closeCartographerEmbed(threadId),
-      stopProviderSession: stopProviderSession(threadId),
-      closeThreadTerminals: closeThreadTerminals(threadId),
-    })
-  })
-
-  const processThreadDeletedSafely = (event: ThreadDeletedEvent) =>
-    processThreadDeleted(event).pipe(
-      Effect.catchCause((cause) =>
+  const definition: DurableReactorDefinition = {
+    reactorId: REACTOR_ID,
+    operationVersion: OPERATION_VERSION,
+    plan: (event) =>
+    {
+      if (event.type !== 'thread.deleted')
       {
-        if (Cause.hasInterruptsOnly(cause))
-        {
-          return Effect.failCause(cause)
-        }
-        return Effect.logWarning('thread deletion reactor failed to process event', {
-          eventType: event.type,
-          threadId: event.payload.threadId,
-          cause: Cause.pretty(cause),
+        return Effect.succeed([])
+      }
+      return encodeEventPayload(event).pipe(
+        Effect.map((payloadJson) => [
+          {
+            outputIndex: 0,
+            effectKind: 'proposal-generation.cancel',
+            targetKind: 'thread',
+            targetId: event.payload.threadId,
+            payloadJson,
+          },
+          {
+            outputIndex: 1,
+            effectKind: 'cartographer-embed.close',
+            targetKind: 'thread',
+            targetId: event.payload.threadId,
+            payloadJson,
+          },
+          {
+            outputIndex: 2,
+            effectKind: 'provider-session.stop',
+            targetKind: 'thread',
+            targetId: event.payload.threadId,
+            payloadJson,
+          },
+          {
+            outputIndex: 3,
+            effectKind: 'terminal.close-and-delete-history',
+            targetKind: 'thread',
+            targetId: event.payload.threadId,
+            payloadJson,
+          },
+        ]),
+      )
+    },
+    execute: Effect.fn('ThreadDeletionReactor.execute')(function* (action)
+    {
+      const event = yield* decodeEventPayload(action.payloadJson)
+      if (event.type !== 'thread.deleted' || event.payload.threadId !== action.targetId)
+      {
+        return yield* new ThreadDeletionPayloadError({
+          detail: `Action ${action.actionId} does not contain its thread.deleted target.`,
         })
-      }),
-    )
+      }
 
-  const worker = yield* makeDrainableWorker(processThreadDeletedSafely)
-
-  const start: ThreadDeletionReactorShape['start'] = Effect.fn('start')(function* ()
-  {
-    yield* Effect.forkScoped(
-      Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
+      switch (action.effectKind)
       {
-        if (event.type !== 'thread.deleted')
-        {
-          return Effect.void
-        }
-        return worker.enqueue(event)
-      }),
-    )
-  })
+        case 'proposal-generation.cancel':
+          yield* proposalGenerationService.cancelThread(event.payload.threadId)
+          break
+        case 'cartographer-embed.close':
+          yield* cartographerEmbedBroker.closeThread(event.payload.threadId)
+          break
+        case 'provider-session.stop':
+          yield* providerService
+            .stopSession({ threadId: event.payload.threadId })
+            .pipe(
+              Effect.catch((cause) =>
+                cause._tag === 'ProviderSessionNotFoundError' ? Effect.void : Effect.fail(cause),
+              ),
+            )
+          break
+        case 'terminal.close-and-delete-history':
+          yield* terminalManager.close({ threadId: event.payload.threadId, deleteHistory: true })
+          break
+        default:
+          return yield* new ThreadDeletionPayloadError({
+            detail: `Unsupported thread deletion effect kind '${action.effectKind}'.`,
+          })
+      }
+      return { status: 'succeeded' as const }
+    }),
+    classify: (cause) => (isPayloadError(cause) ? 'poison' : 'retryable'),
+    onLeaseExpiry: 'retryable',
+  }
+
+  const start: ThreadDeletionReactorShape['start'] = Effect.fn('ThreadDeletionReactor.start')(
+    function* ()
+    {
+      const startedAt = yield* nowIso
+      // an install that predates this reactor's durable progress row would
+      // otherwise start at 0 and replay history as unhandled, re-running
+      // deletion cleanup for threads deleted long ago
+      const existingProgress = yield* delivery.getProgress(REACTOR_ID)
+      const initialSequence = Option.isSome(existingProgress)
+        ? 0
+        : (yield* projectionSnapshotQuery.getSnapshotSequence().pipe(
+            Effect.mapError(
+              (cause) =>
+                new ReactorDeliveryError({
+                  operation: 'ThreadDeletionReactor.start:initialSequence',
+                  cause,
+                }),
+            ),
+          )).snapshotSequence
+      const progress = yield* delivery.ensureProgress({
+        reactorId: REACTOR_ID,
+        operationVersion: OPERATION_VERSION,
+        initialSequence,
+        mode: 'durable',
+        now: startedAt,
+      })
+      if (progress.mode === 'shadow')
+      {
+        yield* delivery.setMode({
+          reactorId: REACTOR_ID,
+          mode: 'durable',
+          ownerId: `${REACTOR_ID}:cutover`,
+          now: startedAt,
+        })
+      }
+      yield* durableRunner.start(definition)
+    },
+  )
 
   return {
     start,
-    drain: worker.drain,
+    drain: durableRunner.drain(REACTOR_ID),
   } satisfies ThreadDeletionReactorShape
 })
 
-export const ThreadDeletionReactorLive = Layer.effect(ThreadDeletionReactor, make)
+export const ThreadDeletionReactorLive = Layer.effect(ThreadDeletionReactor, make).pipe(
+  Layer.provideMerge(DurableReactorInfrastructureLive),
+)
