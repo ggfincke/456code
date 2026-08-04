@@ -42,55 +42,28 @@ import * as CheckpointDiffQuery from './checkpointing/CheckpointDiffQuery.ts'
 import * as ServerConfig from './config.ts'
 import * as Keybindings from './keybindings.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
-import {
-  projectActivityEvent,
-  projectThreadDetailSnapshot,
-} from './orchestration/ActivityPayloadProjection.ts'
-import { normalizeDispatchCommand } from './orchestration/Normalizer.ts'
 import * as OrchestrationEngine from './orchestration/Services/OrchestrationEngine.ts'
 import * as ProjectionSnapshotQuery from './orchestration/Services/ProjectionSnapshotQuery.ts'
+import { OrchestrationProjectionPipeline } from './orchestration/Services/ProjectionPipeline.ts'
+import { ImportReplacementIntentRepository } from './persistence/Services/ImportReplacementIntents.ts'
+import { AttachmentLifecycleRepository } from './persistence/Services/AttachmentLifecycle.ts'
+import {
+  OrchestrationCommandInvariantError,
+  OrchestrationCommandPreviouslyRejectedError,
+} from './orchestration/Errors.ts'
 import * as ImportContinuation from './import/continuationContract.ts'
 import * as WorkspaceMdxDocument from './mdx/WorkspaceMdxDocument.ts'
 import * as CartographerEmbedBroker from './cartographer/CartographerEmbedBroker.ts'
 import * as ProposalGenerationService from './proposal/ProposalGenerationService.ts'
 import * as ProposalImplementationAttemptService from './proposal/ProposalImplementationAttemptService.ts'
 import * as ProposalService from './proposal/ProposalService.ts'
-
-// prefer a continuation implementation provided by the server layer graph
-// (see server.ts providing ImportContinuationLive onto the ws route layer);
-// harness graphs without one fall back to an inert bind so imports still work
-const ImportContinuationFromContext = Layer.effect(
-  ImportContinuation.ImportContinuationDeps,
-  Effect.serviceOption(ImportContinuation.ImportContinuationDeps).pipe(
-    Effect.map(
-      Option.getOrElse(() =>
-        ImportContinuation.ImportContinuationDeps.of({
-          bind: (request) =>
-            Effect.succeed({
-              state: 'history-only',
-              providerInstanceId: request.providerInstanceId,
-              continuationIdentity: null,
-              reason: 'continuation module not wired',
-            }),
-        }),
-      ),
-    ),
-  ),
-)
-import * as ImportDiscovery from './import/discovery.ts'
-import * as ImportSessions from './import/importService.ts'
-import {
-  AcpImportError,
-  loadAcpImportSessionsBatch,
-  scanAcpImportCatalog,
-} from './import/acpImport.ts'
-import { partitionAcpImportBytePolicy } from './import/resourceLimits.ts'
-import { resolveAcpImportSourceCatalog, resolveSourceCatalog } from './import/sourceCatalog.ts'
-import {
-  observeRpcEffect as instrumentRpcEffect,
-  observeRpcStream as instrumentRpcStream,
-  observeRpcStreamEffect as instrumentRpcStreamEffect,
-} from './observability/RpcInstrumentation.ts'
+import { dispatchWithAttachmentLifecycle } from './orchestration/dispatchWithAttachmentLifecycle.ts'
+import { makeProposalRpcHandlers } from './ws/handlers/proposalHandlers.ts'
+import { makePreviewRpcHandlers } from './ws/handlers/previewHandlers.ts'
+import { makeOrchestrationRpcHandlers } from './ws/handlers/orchestrationHandlers.ts'
+import { makeVcsRpcHandlers } from './ws/handlers/vcsHandlers.ts'
+import { makeWorkspaceRpcHandlers } from './ws/handlers/workspaceHandlers.ts'
+import { makeRpcAuthorization, toAuthAccessStreamEvent } from './ws/rpcAuthorization.ts'
 import * as ProviderRegistry from './provider/Services/ProviderRegistry.ts'
 import * as ProviderMaintenanceRunner from './provider/providerMaintenanceRunner.ts'
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
@@ -205,6 +178,10 @@ const makeWsRpcLayer = (
       const currentSessionId = currentSession.sessionId
       const crypto = yield* Crypto.Crypto
       const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery
+      const projectionPipeline = yield* OrchestrationProjectionPipeline
+      const importReplacementIntents = yield* ImportReplacementIntentRepository
+      const attachmentLifecycle = yield* AttachmentLifecycleRepository
+      const childProcessSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
       const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService
       const checkpointDiffQuery = yield* CheckpointDiffQuery.CheckpointDiffQuery
       const keybindings = yield* Keybindings.Keybindings
@@ -838,13 +815,15 @@ const makeWsRpcLayer = (
                   ),
                 )
 
-        return startup
-          .enqueueCommand(dispatchEffect)
-          .pipe(
-            Effect.mapError((cause) =>
-              toDispatchCommandError(cause, 'Failed to dispatch orchestration command'),
-            ),
-          )
+        return dispatchWithAttachmentLifecycle(
+          normalizedCommand,
+          startup.enqueueCommand(dispatchEffect),
+        ).pipe(
+          Effect.provideService(AttachmentLifecycleRepository, attachmentLifecycle),
+          Effect.mapError((cause) =>
+            toDispatchCommandError(cause, 'Failed to dispatch orchestration command'),
+          ),
+        )
       }
 
       const prevalidateImportContinuationProvider = (

@@ -24,6 +24,8 @@ import * as Stream from 'effect/Stream'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 import { toPersistenceSqlError, type ProjectionRepositoryError } from '../../persistence/Errors.ts'
+import { AttachmentLifecycleRepositoryLive } from '../../persistence/Layers/AttachmentLifecycle.ts'
+import { AttachmentLifecycleRepository } from '../../persistence/Services/AttachmentLifecycle.ts'
 import { OrchestrationEventStore } from '../../persistence/Services/OrchestrationEventStore.ts'
 import { ProjectionPendingApprovalRepository } from '../../persistence/Services/ProjectionPendingApprovals.ts'
 import { ProjectionProjectRepository } from '../../persistence/Services/ProjectionProjects.ts'
@@ -419,7 +421,7 @@ function collectThreadAttachmentRelativePaths(
 }
 
 const runAttachmentSideEffects = Effect.fn('runAttachmentSideEffects')(function* (
-  sideEffects: AttachmentSideEffects,
+  sideEffects: DirectAttachmentSideEffects,
 )
 {
   const serverConfig = yield* Effect.service(ServerConfig)
@@ -548,6 +550,38 @@ const runAttachmentSideEffects = Effect.fn('runAttachmentSideEffects')(function*
       pruneThreadAttachments(threadId, keptThreadRelativePaths),
     { concurrency: 1 },
   )
+})
+
+const listThreadAttachmentRelativePaths = Effect.fn('listThreadAttachmentRelativePaths')(function* (
+  threadId: string,
+)
+{
+  const serverConfig = yield* Effect.service(ServerConfig)
+  const fileSystem = yield* Effect.service(FileSystem.FileSystem)
+  const threadSegment = toSafeThreadAttachmentSegment(threadId)
+  if (!threadSegment)
+  {
+    return yield* Effect.die(new Error(`Unsafe thread id '${threadId}' for attachment lookup`))
+  }
+  if (!(yield* fileSystem.exists(serverConfig.attachmentsDir)))
+  {
+    return []
+  }
+  const entries = yield* fileSystem.readDirectory(serverConfig.attachmentsDir, {
+    recursive: false,
+  })
+  return entries
+    .flatMap((entry) =>
+    {
+      const relativePath = entry.replace(/^[/\\]+/, '').replace(/\\/g, '/')
+      if (relativePath.length === 0 || relativePath.includes('/')) return []
+      const attachmentId = parseAttachmentIdFromRelativePath(relativePath)
+      if (!attachmentId) return []
+      return parseThreadSegmentFromAttachmentId(attachmentId) === threadSegment
+        ? [relativePath]
+        : []
+    })
+    .toSorted()
 })
 
 const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjectionPipeline')(
@@ -785,7 +819,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
     const applyThreadsProjection: ProjectorDefinition['apply'] = Effect.fn(
       'applyThreadsProjection',
-    )(function* (event, attachmentSideEffects)
+    )(function* (event, attachmentCleanupIntents)
     {
       switch (event.type)
       {
@@ -1113,7 +1147,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
         case 'thread.deleted':
         {
-          attachmentSideEffects.deletedThreadIds.add(event.payload.threadId)
+          const threadSegment = toSafeThreadAttachmentSegment(event.payload.threadId)
+          if (threadSegment !== null)
+          {
+            attachmentCleanupIntents.deletedThreads.set(event.payload.threadId, threadSegment)
+          }
+          else
+          {
+            yield* Effect.logWarning('skipping attachment cleanup intent for unsafe thread id', {
+              threadId: event.payload.threadId,
+            })
+          }
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           })
@@ -1301,7 +1345,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
     const applyThreadMessagesProjection: ProjectorDefinition['apply'] = Effect.fn(
       'applyThreadMessagesProjection',
-    )(function* (event, attachmentSideEffects)
+    )(function* (event, attachmentCleanupIntents)
     {
       switch (event.type)
       {
@@ -1332,6 +1376,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                   attachments: event.payload.attachments,
                 })
               : previousMessage?.attachments
+          if (previousMessage !== undefined && event.payload.attachments !== undefined)
+          {
+            const previousRelativePaths = collectThreadAttachmentRelativePaths(
+              event.payload.threadId,
+              [previousMessage],
+            )
+            const nextRelativePaths = collectThreadAttachmentRelativePaths(event.payload.threadId, [
+              { ...previousMessage, attachments: nextAttachments ?? [] },
+            ])
+            for (const relativePath of previousRelativePaths)
+            {
+              if (!nextRelativePaths.has(relativePath))
+              {
+                attachmentCleanupIntents.removedRelativePaths.add(relativePath)
+              }
+            }
+          }
           yield* projectionThreadMessageRepository.upsert({
             messageId: event.payload.messageId,
             threadId: event.payload.threadId,
@@ -1375,10 +1436,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           yield* Effect.forEach(keptRows, projectionThreadMessageRepository.upsert, {
             concurrency: 1,
           }).pipe(Effect.asVoid)
-          attachmentSideEffects.prunedThreadRelativePaths.set(
+          const existingRelativePaths = collectThreadAttachmentRelativePaths(
             event.payload.threadId,
-            collectThreadAttachmentRelativePaths(event.payload.threadId, keptRows),
+            existingRows,
           )
+          const keptRelativePaths = collectThreadAttachmentRelativePaths(
+            event.payload.threadId,
+            keptRows,
+          )
+          for (const relativePath of existingRelativePaths)
+          {
+            if (!keptRelativePaths.has(relativePath))
+            {
+              attachmentCleanupIntents.removedRelativePaths.add(relativePath)
+            }
+          }
           return
         }
 
@@ -2194,32 +2266,48 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       event: OrchestrationEvent,
     )
     {
-      const attachmentSideEffects: AttachmentSideEffects = {
-        deletedThreadIds: new Set<string>(),
-        prunedThreadRelativePaths: new Map<string, Set<string>>(),
+      const attachmentCleanupIntents: AttachmentCleanupIntents = {
+        deletedThreads: new Map<string, string>(),
+        removedRelativePaths: new Set<string>(),
       }
 
       yield* sql.withTransaction(
-        projector.apply(event, attachmentSideEffects).pipe(
-          Effect.flatMap(() =>
-            projectionStateRepository.upsert({
-              projector: projector.name,
-              lastAppliedSequence: event.sequence,
-              updatedAt: event.occurredAt,
-            }),
-          ),
-        ),
-      )
-
-      yield* runAttachmentSideEffects(attachmentSideEffects).pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning('failed to apply projected attachment side-effects', {
+        Effect.gen(function* ()
+        {
+          yield* projector.apply(event, attachmentCleanupIntents)
+          yield* Effect.forEach(
+            attachmentCleanupIntents.removedRelativePaths,
+            (relativePath) =>
+              attachmentLifecycleRepository.enqueuePathCleanup({
+                cleanupKey: `projection:${projector.name}:${event.sequence}:path:${relativePath}`,
+                stagingKey: null,
+                relativePath,
+                stagingRelativePath: null,
+                reason: `projection removed attachment reference during ${event.type}`,
+                sourceSequence: event.sequence,
+                now: event.occurredAt,
+              }),
+            { concurrency: 1 },
+          )
+          yield* Effect.forEach(
+            attachmentCleanupIntents.deletedThreads,
+            ([threadId, threadSegment]) =>
+              attachmentLifecycleRepository.enqueueThreadCleanup({
+                cleanupKey: `projection:${projector.name}:${event.sequence}:thread:${threadSegment}`,
+                threadId: ThreadId.make(threadId),
+                threadSegment,
+                reason: 'projection deleted thread attachments',
+                sourceSequence: event.sequence,
+                now: event.occurredAt,
+              }),
+            { concurrency: 1 },
+          )
+          yield* projectionStateRepository.upsert({
             projector: projector.name,
-            sequence: event.sequence,
-            eventType: event.type,
-            cause,
-          }),
-        ),
+            lastAppliedSequence: event.sequence,
+            updatedAt: event.occurredAt,
+          })
+        }),
       )
     })
 
@@ -2271,9 +2359,52 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       ),
     )
 
+    const provideAttachmentOwnerServices = <A, E>(
+      effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | ServerConfig>,
+    ) =>
+      effect.pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(ServerConfig, serverConfig),
+      )
+
+    const verifyThreadAttachmentSet: NonNullable<
+      OrchestrationProjectionPipelineShape['verifyThreadAttachmentSet']
+    > = (input) =>
+      provideAttachmentOwnerServices(listThreadAttachmentRelativePaths(input.threadId)).pipe(
+        Effect.map((actualRelativePaths) =>
+        {
+          const expectedRelativePaths = [...input.expectedRelativePaths].toSorted()
+          return {
+            complete:
+              actualRelativePaths.length === expectedRelativePaths.length &&
+              actualRelativePaths.every((value, index) => value === expectedRelativePaths[index]),
+            actualRelativePaths,
+          }
+        }),
+      )
+
+    const cleanupDeletedThreadAttachments: NonNullable<
+      OrchestrationProjectionPipelineShape['cleanupDeletedThreadAttachments']
+    > = (threadId) =>
+      provideAttachmentOwnerServices(
+        runAttachmentSideEffects({
+          deletedThreadIds: new Set([threadId]),
+          prunedThreadRelativePaths: new Map(),
+        }).pipe(
+          Effect.andThen(listThreadAttachmentRelativePaths(threadId)),
+          Effect.map((remainingRelativePaths) => ({
+            complete: remainingRelativePaths.length === 0,
+            remainingRelativePaths,
+          })),
+        ),
+      )
+
     return {
       bootstrap,
       projectEvent,
+      verifyThreadAttachmentSet,
+      cleanupDeletedThreadAttachments,
     } satisfies OrchestrationProjectionPipelineShape
   },
 )
@@ -2291,4 +2422,5 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
+  Layer.provideMerge(AttachmentLifecycleRepositoryLive),
 )

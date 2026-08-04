@@ -60,6 +60,8 @@ import Migration0042 from './Migrations/042_ProjectionThreadsProviderSwitch.ts'
 import Migration0043 from './Migrations/043_ProposalRetainedRefAttempts.ts'
 import Migration0044 from './Migrations/044_ImportReplacementIntents.ts'
 import Migration0045 from './Migrations/045_OrchestrationReactorDelivery.ts'
+import Migration0046 from './Migrations/046_AttachmentLifecycle.ts'
+import Migration0050 from './Migrations/050_AttachmentLifecycleGenerations.ts'
 
 // migration loader with all migrations defined inline.
 //
@@ -115,6 +117,8 @@ export const migrationEntries = [
   [43, 'ProposalRetainedRefAttempts', Migration0043],
   [44, 'ImportReplacementIntents', Migration0044],
   [45, 'OrchestrationReactorDelivery', Migration0045],
+  [46, 'AttachmentLifecycle', Migration0046],
+  [50, 'AttachmentLifecycleGenerations', Migration0050],
 ] as const
 
 export const makeMigrationLoader = (throughId?: number) =>
