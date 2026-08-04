@@ -2,17 +2,13 @@
 // projects provider runtime events into orchestration state
 
 import {
-  ApprovalRequestId,
   type AssistantDeliveryMode,
   CommandId,
   MessageId,
-  type OrchestrationEvent,
   type OrchestrationMessage,
   type OrchestrationProposedPlanId,
   CheckpointRef,
-  isToolLifecycleItemType,
   ThreadId,
-  type ThreadTokenUsageSnapshot,
   TurnId,
   type OrchestrationCheckpointSummary,
   type OrchestrationProposedPlan,
@@ -43,11 +39,14 @@ import {
 import { ServerSettingsService } from '../../serverSettings.ts'
 import { proposedPlanIdForTurn } from '../proposedPlanIdentity.ts'
 import { isHiddenTurnRuntimeEvent } from '../../provider/HiddenTurnRegistry.ts'
+import { runtimeEventToActivities, toTurnId } from './ProviderRuntimeEventMapping.ts'
+
+export { runtimeEventToActivities }
 
 const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`
 const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`
 
-// Fallback when the in-memory description cache no longer has the task name
+// fallback when the in-memory description cache no longer has the task name
 // (server restart, session-exit sweep, TTL/capacity eviction): earlier
 // task.started/task.progress activities for the task are persisted with it.
 function findTaskTitleInActivities(
@@ -105,31 +104,6 @@ const TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY = 10_000
 const TASK_DESCRIPTION_BY_TASK_TTL = Duration.minutes(120)
 const MAX_BUFFERED_ASSISTANT_CHARS = 24_000
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== '0'
-
-type TurnStartRequestedDomainEvent = Extract<
-  OrchestrationEvent,
-  { type: 'thread.turn-start-requested' }
->
-
-type RuntimeIngestionInput =
-  | {
-      source: 'runtime'
-      event: ProviderRuntimeEvent
-    }
-  | {
-      source: 'domain'
-      event: TurnStartRequestedDomainEvent
-    }
-
-function toTurnId(value: TurnId | string | undefined): TurnId | undefined
-{
-  return value === undefined ? undefined : TurnId.make(String(value))
-}
-
-function toApprovalRequestId(value: string | undefined): ApprovalRequestId | undefined
-{
-  return value === undefined ? undefined : ApprovalRequestId.make(value)
-}
 
 function sameId(left: string | null | undefined, right: string | null | undefined): boolean
 {
@@ -233,11 +207,6 @@ function maxCheckpointTurnCount(
   return maxTurnCount
 }
 
-function truncateDetail(value: string, limit = 180): string
-{
-  return value.length > limit ? `${value.slice(0, limit - 3)}...` : value
-}
-
 function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined
 {
   const trimmed = planMarkdown?.trim()
@@ -278,17 +247,6 @@ function assistantSegmentMessageId(baseKey: string, segmentIndex: number): Messa
     segmentIndex === 0 ? `assistant:${baseKey}` : `assistant:${baseKey}:segment:${segmentIndex}`,
   )
 }
-function buildContextWindowActivityPayload(
-  event: ProviderRuntimeEvent,
-): ThreadTokenUsageSnapshot | undefined
-{
-  if (event.type !== 'thread.token-usage.updated' || event.payload.usage.usedTokens <= 0)
-  {
-    return undefined
-  }
-  return event.payload.usage
-}
-
 function normalizeRuntimeTurnState(
   value: string | undefined,
 ): 'completed' | 'failed' | 'interrupted' | 'cancelled'
@@ -334,431 +292,6 @@ function sessionStatusAllowsActiveTurn(
   return status === 'starting' || status === 'running'
 }
 
-function requestKindFromCanonicalRequestType(
-  requestType: string | undefined,
-): 'command' | 'file-read' | 'file-change' | undefined
-{
-  switch (requestType)
-  {
-    case 'command_execution_approval':
-    case 'exec_command_approval':
-      return 'command'
-    case 'file_read_approval':
-      return 'file-read'
-    case 'file_change_approval':
-    case 'apply_patch_approval':
-      return 'file-change'
-    default:
-      return undefined
-  }
-}
-
-export function runtimeEventToActivities(
-  event: ProviderRuntimeEvent,
-  taskTitle?: string,
-): ReadonlyArray<OrchestrationThreadActivity>
-{
-  const maybeSequence = (() =>
-  {
-    const eventWithSequence = event as ProviderRuntimeEvent & { sessionSequence?: number }
-    return eventWithSequence.sessionSequence !== undefined
-      ? { sequence: eventWithSequence.sessionSequence }
-      : {}
-  })()
-  switch (event.type)
-  {
-    case 'request.opened':
-    {
-      if (event.payload.requestType === 'tool_user_input')
-      {
-        return []
-      }
-      const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType)
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'approval',
-          kind: 'approval.requested',
-          summary:
-            requestKind === 'command'
-              ? 'Command approval requested'
-              : requestKind === 'file-read'
-                ? 'File-read approval requested'
-                : requestKind === 'file-change'
-                  ? 'File-change approval requested'
-                  : 'Approval requested',
-          payload: {
-            requestId: toApprovalRequestId(event.requestId),
-            ...(requestKind ? { requestKind } : {}),
-            requestType: event.payload.requestType,
-            ...(event.payload.detail ? { detail: event.payload.detail } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'request.resolved':
-    {
-      if (event.payload.requestType === 'tool_user_input')
-      {
-        return []
-      }
-      const requestKind = requestKindFromCanonicalRequestType(event.payload.requestType)
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'approval',
-          kind: 'approval.resolved',
-          summary: 'Approval resolved',
-          payload: {
-            requestId: toApprovalRequestId(event.requestId),
-            ...(requestKind ? { requestKind } : {}),
-            requestType: event.payload.requestType,
-            ...(event.payload.decision ? { decision: event.payload.decision } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'runtime.error':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'error',
-          kind: 'runtime.error',
-          summary: 'Runtime error',
-          payload: {
-            message: truncateDetail(event.payload.message),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'tool.denied':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'error',
-          kind: 'tool.denied',
-          summary: `Tool denied: ${event.payload.toolName}`,
-          payload: {
-            toolName: event.payload.toolName,
-            ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
-            ...(event.payload.reason ? { detail: truncateDetail(event.payload.reason) } : {}),
-            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'runtime.warning':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'info',
-          kind: 'runtime.warning',
-          // Use the adapter-supplied message as the row label so the work log
-          // shows what the warning was about, not a generic "Runtime warning".
-          summary: truncateDetail(event.payload.message, 120),
-          payload: {
-            message: truncateDetail(event.payload.message),
-            ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'turn.plan.updated':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'info',
-          kind: 'turn.plan.updated',
-          summary: 'Plan updated',
-          payload: {
-            plan: event.payload.plan,
-            ...(event.payload.explanation !== undefined
-              ? { explanation: event.payload.explanation }
-              : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'user-input.requested':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'info',
-          kind: 'user-input.requested',
-          summary: 'User input requested',
-          payload: {
-            ...(event.requestId ? { requestId: event.requestId } : {}),
-            questions: event.payload.questions,
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'user-input.resolved':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'info',
-          kind: 'user-input.resolved',
-          summary: 'User input submitted',
-          payload: {
-            ...(event.requestId ? { requestId: event.requestId } : {}),
-            answers: event.payload.answers,
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'task.started':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'info',
-          kind: 'task.started',
-          summary:
-            event.payload.taskType === 'plan'
-              ? 'Plan task started'
-              : event.payload.taskType
-                ? `${event.payload.taskType} task started`
-                : 'Task started',
-          payload: {
-            taskId: event.payload.taskId,
-            ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
-            ...(event.payload.description
-              ? { detail: truncateDetail(event.payload.description) }
-              : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'task.progress':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'info',
-          kind: 'task.progress',
-          summary:
-            event.payload.description.trim().length > 0
-              ? truncateDetail(event.payload.description, 120)
-              : 'Reasoning update',
-          payload: {
-            taskId: event.payload.taskId,
-            ...(event.payload.description.trim().length > 0
-              ? { title: truncateDetail(event.payload.description, 120) }
-              : {}),
-            detail: truncateDetail(event.payload.summary ?? event.payload.description),
-            ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
-            ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
-            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'task.completed':
-    {
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: event.payload.status === 'failed' ? 'error' : 'info',
-          kind: 'task.completed',
-          summary:
-            event.payload.status === 'failed'
-              ? 'Task failed'
-              : event.payload.status === 'stopped'
-                ? 'Task stopped'
-                : 'Task completed',
-          payload: {
-            taskId: event.payload.taskId,
-            status: event.payload.status,
-            ...(taskTitle ? { title: truncateDetail(taskTitle, 120) } : {}),
-            // summary + detail mirror task.progress: clients label the row from
-            // summary and keep detail for the preview/expanded body.
-            ...(event.payload.summary
-              ? {
-                  summary: truncateDetail(event.payload.summary),
-                  detail: truncateDetail(event.payload.summary),
-                }
-              : {}),
-            ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'thread.state.changed':
-    {
-      if (event.payload.state !== 'compacted')
-      {
-        return []
-      }
-
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'info',
-          kind: 'context-compaction',
-          summary: 'Context compacted',
-          payload: {
-            state: event.payload.state,
-            ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'thread.token-usage.updated':
-    {
-      const payload = buildContextWindowActivityPayload(event)
-      if (!payload)
-      {
-        return []
-      }
-
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'info',
-          kind: 'context-window.updated',
-          summary: 'Context window updated',
-          payload,
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'item.updated':
-    {
-      if (!isToolLifecycleItemType(event.payload.itemType))
-      {
-        return []
-      }
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'tool',
-          kind: 'tool.updated',
-          summary: event.payload.title ?? 'Tool updated',
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.status ? { status: event.payload.status } : {}),
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'item.completed':
-    {
-      if (!isToolLifecycleItemType(event.payload.itemType))
-      {
-        return []
-      }
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'tool',
-          kind: 'tool.completed',
-          summary: event.payload.title ?? 'Tool',
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    case 'item.started':
-    {
-      if (!isToolLifecycleItemType(event.payload.itemType))
-      {
-        return []
-      }
-      return [
-        {
-          id: event.eventId,
-          createdAt: event.createdAt,
-          tone: 'tool',
-          kind: 'tool.started',
-          summary: `${event.payload.title ?? 'Tool'} started`,
-          payload: {
-            itemType: event.payload.itemType,
-            ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-          },
-          turnId: toTurnId(event.turnId) ?? null,
-          ...maybeSequence,
-        },
-      ]
-    }
-
-    default:
-      break
-  }
-
-  return []
-}
-
 const make = Effect.gen(function* ()
 {
   const crypto = yield* Crypto.Crypto
@@ -799,7 +332,7 @@ const make = Effect.gen(function* ()
     lookup: () => Effect.succeed({ text: '', createdAt: '' }),
   })
 
-  // Task names arrive on task.started/task.progress but not on task.completed,
+  // task names arrive on task.started/task.progress but not on task.completed,
   // so remember them per task to title the completion activity.
   const taskDescriptionByTaskKey = yield* Cache.make<string, string>({
     capacity: TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY,
@@ -810,7 +343,7 @@ const make = Effect.gen(function* ()
   const rememberTaskDescription = (threadId: ThreadId, taskId: string, description: string) =>
     Cache.set(taskDescriptionByTaskKey, providerTaskKey(threadId, taskId), description)
 
-  // Entries are left in place after completion so replayed or duplicate
+  // entries are left in place after completion so replayed or duplicate
   // terminal events stay titled; TTL, capacity, and the session-exit sweep
   // bound the cache.
   const lookupTaskDescription = (threadId: ThreadId, taskId: string) =>
@@ -978,7 +511,7 @@ const make = Effect.gen(function* ()
             return ''
           }
 
-          // Safety valve: flush full buffered text as an assistant delta to cap memory.
+          // safety valve: flush full buffered text as an assistant delta to cap memory.
           yield* Cache.invalidate(bufferedAssistantTextByMessageId, messageId)
           return nextText
         }),
@@ -1404,7 +937,10 @@ const make = Effect.gen(function* ()
     {
       const thread = yield* resolveThreadShell(event.threadId)
       if (!thread) return
-      const isHiddenTurnEvent = isHiddenTurnRuntimeEvent(event)
+      const isHiddenTurnEvent =
+        isHiddenTurnRuntimeEvent(event) ||
+        (thread.providerSwitch !== null &&
+          event.providerInstanceId === thread.modelSelection.instanceId)
 
       let loadedThreadDetail: OrchestrationThread | null | undefined
       const getLoadedThreadDetail = () =>
@@ -1431,7 +967,7 @@ const make = Effect.gen(function* ()
         activeTurnId !== null && eventTurnId !== undefined && !sameId(activeTurnId, eventTurnId)
       const missingTurnForActiveTurn = activeTurnId !== null && eventTurnId === undefined
 
-      // A turn.started that conflicts with the active turn is legitimate when
+      // a turn.started that conflicts with the active turn is legitimate when
       // the server itself has a turn start pending for this thread AND the
       // provider session already tracks the event's turn as its active turn:
       // steering a running turn makes some providers (e.g. opencode) open a
@@ -1464,12 +1000,12 @@ const make = Effect.gen(function* ()
             {
               return false
             }
-            // Only the active turn may close the lifecycle state.
+            // only the active turn may close the lifecycle state.
             if (activeTurnId !== null && eventTurnId !== undefined)
             {
               return sameId(activeTurnId, eventTurnId)
             }
-            // If no active turn is tracked, accept completion scoped to this thread.
+            // if no active turn is tracked, accept completion scoped to this thread.
             return true
           default:
             return true
@@ -1490,7 +1026,7 @@ const make = Effect.gen(function* ()
         event.type === 'turn.aborted'
       )
       {
-        const status = (() =>
+        const runtimeStatus = (() =>
         {
           switch (event.type)
           {
@@ -1509,11 +1045,18 @@ const make = Effect.gen(function* ()
               return 'ready'
             case 'session.started':
             case 'thread.started':
-              // Provider thread/session start notifications can arrive during an
+              // provider thread/session start notifications can arrive during an
               // active or pending turn; preserve that lifecycle state.
               return activeTurnId !== null ? 'running' : hasPendingTurnStart ? 'starting' : 'ready'
           }
         })()
+        const status =
+          isHiddenTurnEvent &&
+          runtimeStatus === 'ready' &&
+          event.type !== 'turn.completed' &&
+          event.type !== 'turn.aborted'
+            ? (thread.session?.status ?? 'running')
+            : runtimeStatus
         const nextActiveTurnId =
           event.type === 'turn.started'
             ? (eventTurnId ?? null)
@@ -1528,14 +1071,16 @@ const make = Effect.gen(function* ()
                 ? null
                 : activeTurnId
         const lastError =
-          event.type === 'session.state.changed' && event.payload.state === 'error'
+          event.type === 'session.exited' && event.payload?.exitKind === 'error'
             ? (event.payload.reason ?? thread.session?.lastError ?? 'Provider session error')
-            : event.type === 'turn.completed' &&
-                normalizeRuntimeTurnState(event.payload.state) === 'failed'
-              ? (event.payload.errorMessage ?? thread.session?.lastError ?? 'Turn failed')
-              : status === 'ready'
-                ? null
-                : (thread.session?.lastError ?? null)
+            : event.type === 'session.state.changed' && event.payload.state === 'error'
+              ? (event.payload.reason ?? thread.session?.lastError ?? 'Provider session error')
+              : event.type === 'turn.completed' &&
+                  normalizeRuntimeTurnState(event.payload.state) === 'failed'
+                ? (event.payload.errorMessage ?? thread.session?.lastError ?? 'Turn failed')
+                : status === 'ready'
+                  ? null
+                  : (thread.session?.lastError ?? null)
 
         if (shouldApplyThreadLifecycle)
         {
@@ -1897,13 +1442,13 @@ const make = Effect.gen(function* ()
           checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined
         if (turnId && checkpointContext && workspaceCwd && isGitRepository(workspaceCwd))
         {
-          // Skip if a checkpoint already exists for this turn. A real
+          // skip if a checkpoint already exists for this turn. A real
           // (non-placeholder) capture from CheckpointReactor should not
           // be clobbered, and dispatching a duplicate placeholder for the
           // same turnId would produce an unstable checkpointTurnCount.
           if (hasCheckpointForTurn(checkpointContext.checkpoints, turnId))
           {
-            // Already tracked; no-op.
+            // already tracked; no-op.
           }
           else
           {
@@ -1962,13 +1507,8 @@ const make = Effect.gen(function* ()
       ).pipe(Effect.asVoid)
     })
 
-  const processDomainEvent = (_event: TurnStartRequestedDomainEvent) => Effect.void
-
-  const processInput = (input: RuntimeIngestionInput) =>
-    input.source === 'runtime' ? processRuntimeEvent(input.event) : processDomainEvent(input.event)
-
-  const processInputSafely = (input: RuntimeIngestionInput) =>
-    processInput(input).pipe(
+  const processRuntimeEventSafely = (event: ProviderRuntimeEvent) =>
+    processRuntimeEvent(event).pipe(
       Effect.catchCause((cause) =>
       {
         if (Cause.hasInterruptsOnly(cause))
@@ -1976,33 +1516,21 @@ const make = Effect.gen(function* ()
           return Effect.failCause(cause)
         }
         return Effect.logWarning('provider runtime ingestion failed to process event', {
-          source: input.source,
-          eventId: input.event.eventId,
-          eventType: input.event.type,
+          source: 'runtime',
+          eventId: event.eventId,
+          eventType: event.type,
           cause: Cause.pretty(cause),
         })
       }),
     )
 
-  const worker = yield* makeDrainableWorker(processInputSafely)
+  const worker = yield* makeDrainableWorker(processRuntimeEventSafely)
 
   const start: ProviderRuntimeIngestionShape['start'] = () =>
     Effect.gen(function* ()
     {
       yield* Effect.forkScoped(
-        Stream.runForEach(providerService.streamEvents, (event) =>
-          worker.enqueue({ source: 'runtime', event }),
-        ),
-      )
-      yield* Effect.forkScoped(
-        Stream.runForEach(orchestrationEngine.streamDomainEvents, (event) =>
-        {
-          if (event.type !== 'thread.turn-start-requested')
-          {
-            return Effect.void
-          }
-          return worker.enqueue({ source: 'domain', event })
-        }),
+        Stream.runForEach(providerService.streamEvents, (event) => worker.enqueue(event)),
       )
     })
 
