@@ -30,6 +30,7 @@ function makeThread(
 ): OrchestrationThreadShell
 {
   return {
+    providerSwitch: null,
     modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
     runtimeMode: 'full-access',
     interactionMode: 'default',

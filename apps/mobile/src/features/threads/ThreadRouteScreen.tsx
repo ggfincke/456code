@@ -159,7 +159,7 @@ export function ThreadRouteScreen(props: ThreadRouteScreenProps)
     return <OpeningThreadLoadingScreen />
   }
 
-  // Render the full thread chrome (header, feed, composer) as soon as the
+  // render the full thread chrome (header, feed, composer) as soon as the
   // thread SHELL is known — no blocking on message detail. The feed shows a
   // loading placeholder while messages fetch, and the composer's connection
   // pill reports connecting/reconnecting/syncing status.
@@ -277,9 +277,9 @@ function ThreadRouteContent(
       {
         if (props.renderInspector === undefined)
         {
-          // Inspectors are contextual to this chat destination. Clear the
+          // inspectors are contextual to this chat destination. Clear the
           // hidden chat copy after a native push so returning from Files,
-          // Review, or Terminal cannot reserve an empty trailing pane.
+          // review, or Terminal cannot reserve an empty trailing pane.
           setInspectorSelection(null)
         }
       }
@@ -302,7 +302,7 @@ function ThreadRouteContent(
     [composer.interactionMode, composer.modelSelection, composer.runtimeMode, selectedThread],
   )
 
-  /* ─── Native header theming ──────────────────────────────────────── */
+  // ─── Native header theming ────────────────────────────────────────
   const usesNativeHeaderGlass = NATIVE_LIQUID_GLASS_SUPPORTED
   const headerSubtitle = [
     selectedThreadProject?.title ?? null,
@@ -310,7 +310,7 @@ function ThreadRouteContent(
   ]
     .filter(Boolean)
     .join(' · ')
-  /* ─── Git status for native header trigger ───────────────────────── */
+  // ─── Git status for native header trigger ─────────────────────────
   const gitStatus = useEnvironmentQuery(
     selectedThread !== null && selectedThreadCwd !== null
       ? vcsEnvironment.status({
@@ -341,7 +341,7 @@ function ThreadRouteContent(
     onReconnectEnvironment(environmentId)
   }, [environmentId, onReconnectEnvironment])
 
-  /* ─── Git action progress (for overlay banner) ──────────────────── */
+  // ─── Git action progress (for overlay banner) ────────────────────
   const gitActionProgressTarget = useMemo(
     () => ({
       environmentId: selectedThread?.environmentId ?? null,
@@ -437,7 +437,7 @@ function ThreadRouteContent(
     },
     [fileInspector.supported, navigation, selectedThread],
   )
-  // The workspace inspector column spans the full window height. On iOS the
+  // the workspace inspector column spans the full window height. On iOS the
   // panes bring their own nested native headers (which underlap the status
   // bar); elsewhere the pane content pads itself below the top inset.
   const safeAreaInsets = useSafeAreaInsets()
@@ -489,7 +489,7 @@ function ThreadRouteContent(
     [FilesInspector, GitInspector, RouteInspector, inspectorMode, props.renderInspector],
   )
   const activeInspectorRenderer = inspectorMode === null ? undefined : renderInspectorStack
-  // Hand the inspector to the workspace so it renders beside the navigator,
+  // hand the inspector to the workspace so it renders beside the navigator,
   // outside this screen's native header — the terminal/git/files toolbar
   // stays anchored to the chat pane instead of floating above the inspector.
   useRegisterWorkspaceInspector(activeInspectorRenderer)
@@ -500,8 +500,12 @@ function ThreadRouteContent(
   }, [navigation])
   const handleStopThread = useCallback(() =>
   {
+    // a provider switch has no interruptible turn: the running session belongs
+    // to the outgoing provider's compaction, so stopping it would abort the
+    // handoff rather than the user's work.
     if (
       !selectedThread ||
+      selectedThread.providerSwitch !== null ||
       (selectedThread.session?.status !== 'running' &&
         selectedThread.session?.status !== 'starting')
     )
@@ -668,7 +672,7 @@ function ThreadRouteContent(
   const splitLeftHeaderItems = useMemo<NativeHeaderItems>(
     () => [
       {
-        // Match Mail's split-view detail toolbar: the first detail action sits
+        // match Mail's split-view detail toolbar: the first detail action sits
         // inside the content pane, not flush against the sidebar divider.
         spacing: 18,
         type: 'spacing' as const,
@@ -760,7 +764,7 @@ function ThreadRouteContent(
     selectedThreadProject?.workspaceRoot,
   ])
 
-  // Deep links / cold starts land with Thread as the ONLY route, where the
+  // deep links / cold starts land with Thread as the ONLY route, where the
   // native back button does not render. Provide an explicit Home escape for
   // that case; when history exists the native back button is used instead.
   const canGoBack = navigation.canGoBack()
@@ -821,10 +825,13 @@ function ThreadRouteContent(
           threadSyncStatus={selectedThreadDetailState.status}
           activeThreadBusy={composer.activeThreadBusy}
           sendBlockedReason={composer.sendBlockedReason}
+          providerSwitchActive={composer.providerSwitchActive}
+          providerSwitchNotice={composer.providerSwitchNotice}
           environmentId={selectedThread.environmentId}
           projectWorkspaceRoot={selectedThreadProject?.workspaceRoot ?? null}
           threadCwd={selectedThreadCwd}
           selectedThreadQueueCount={composer.selectedThreadQueueCount}
+          selectedThreadQueueFailureReason={composer.selectedThreadQueueFailureReason}
           layoutVariant={layout.variant}
           usesAutomaticContentInsets={usesNativeHeaderGlass}
           onOpenConnectionEditor={handleOpenConnectionEditor}
@@ -835,10 +842,13 @@ function ThreadRouteContent(
           serverConfig={serverConfig}
           onStopThread={handleStopThread}
           onSendMessage={composer.onSendMessage}
+          onDiscardQueuedMessage={composer.onDiscardFailedQueuedMessage}
           onReconnectEnvironment={handleReconnectEnvironment}
           onUpdateThreadModelSelection={composer.onUpdateModelSelection}
           onUpdateThreadRuntimeMode={composer.onUpdateRuntimeMode}
           onUpdateThreadInteractionMode={composer.onUpdateInteractionMode}
+          onRetryProviderSwitch={composer.onRetryProviderSwitch}
+          onDismissProviderSwitchNotice={composer.onDismissProviderSwitchNotice}
           onRespondToApproval={requests.onRespondToApproval}
           onSelectUserInputOption={requests.onSelectUserInputOption}
           onChangeUserInputCustomAnswer={requests.onChangeUserInputCustomAnswer}
@@ -853,7 +863,7 @@ function ThreadRouteContent(
       {activeInspectorRenderer ? <InspectorPaneRoleActivation /> : null}
       <NativeStackScreenOptions
         options={{
-          // Android draws its own in-flow header (AndroidScreenHeader below);
+          // android draws its own in-flow header (AndroidScreenHeader below);
           // the native stack header stays iOS-only.
           headerShown: Platform.OS !== 'android',
           headerTitle: selectedThread.title,
@@ -865,9 +875,9 @@ function ThreadRouteContent(
             : undefined,
           title: selectedThread.title,
           headerBackVisible: !layout.usesSplitView,
-          // Compact uses the NATIVE back button when a previous route exists;
+          // compact uses the NATIVE back button when a previous route exists;
           // deep links / cold starts get an explicit Home button instead.
-          // Split view always uses its custom left items.
+          // split view always uses its custom left items.
           unstable_headerLeftItems:
             Platform.OS === 'ios'
               ? layout.usesSplitView
@@ -876,7 +886,7 @@ function ThreadRouteContent(
                   ? undefined
                   : () => compactHomeHeaderItems
               : undefined,
-          // Search lives in the persistent sidebar, so the split header keeps
+          // search lives in the persistent sidebar, so the split header keeps
           // the git controls on the RIGHT (no center items — center space is
           // reserved for future breadcrumbs/status).
           unstable_headerRightItems:

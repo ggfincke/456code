@@ -8,6 +8,7 @@ import { Atom, type AtomRegistry } from 'effect/unstable/reactivity'
 import {
   flattenQueuedThreadMessages,
   groupQueuedThreadMessages,
+  threadOutboxRetryDelayMs,
   type QueuedThreadMessage,
 } from './thread-outbox-model'
 import type { ThreadOutboxStorage } from './thread-outbox-storage'
@@ -43,6 +44,10 @@ export interface ThreadOutboxManagerOptions
   readonly warn?: (message: string, error: unknown) => void
 }
 
+export type ThreadOutboxEnvironmentCleanupResult =
+  | { readonly complete: true; readonly remainingMessageCount: 0 }
+  | { readonly complete: false; readonly remainingMessageCount: number }
+
 export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
 {
   const queuedMessagesByThreadKeyAtom = Atom.make<
@@ -55,6 +60,8 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
       console.warn(message, error)
     })
   let loadPromise: Promise<void> | null = null
+  let loadAttempt = 0
+  let loadRetryTimer: ReturnType<typeof setTimeout> | null = null
   let mutationQueue: Promise<void> = Promise.resolve()
 
   const serialize = <A>(mutation: () => Promise<A>): Promise<A> =>
@@ -85,20 +92,40 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
     {
       const persistedMessages = await options.storage.load()
       setMessages([...persistedMessages, ...currentMessages()])
-    }).catch((cause) =>
-    {
-      loadPromise = null
-      warn(
-        '[thread-outbox] failed to load persisted messages',
-        new ThreadOutboxManagerError({
-          operation: 'load',
-          environmentId: null,
-          threadId: null,
-          messageId: null,
-          cause,
-        }),
-      )
-    })
+    }).then(
+      () =>
+      {
+        loadAttempt = 0
+        if (loadRetryTimer !== null)
+        {
+          clearTimeout(loadRetryTimer)
+          loadRetryTimer = null
+        }
+      },
+      (cause) =>
+      {
+        loadPromise = null
+        loadAttempt += 1
+        warn(
+          '[thread-outbox] failed to load persisted messages',
+          new ThreadOutboxManagerError({
+            operation: 'load',
+            environmentId: null,
+            threadId: null,
+            messageId: null,
+            cause,
+          }),
+        )
+        if (loadRetryTimer === null)
+        {
+          loadRetryTimer = setTimeout(() =>
+          {
+            loadRetryTimer = null
+            void load()
+          }, threadOutboxRetryDelayMs(loadAttempt))
+        }
+      },
+    )
     return loadPromise
   }
 
@@ -134,7 +161,7 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
   const confirmQueued = (message: QueuedThreadMessage): Promise<boolean> =>
     serialize(async () => currentMessages().some((candidate) => candidate === message))
 
-  // Rewrites an already-queued message. A no-op when the message has been
+  // rewrites an already-queued message. A no-op when the message has been
   // removed in the meantime (e.g. deleted or delivered), so a trailing editor
   // flush can never resurrect it. Returns whether the message was updated.
   const update = (message: QueuedThreadMessage): Promise<boolean> =>
@@ -190,10 +217,17 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
       )
     })
 
-  const clearEnvironment = (environmentId: EnvironmentId): Promise<void> =>
+  const clearEnvironment = (
+    environmentId: EnvironmentId,
+  ): Promise<ThreadOutboxEnvironmentCleanupResult> =>
     serialize(async () =>
     {
-      const persisted = await options.storage.load().catch((cause) =>
+      let persisted: ReadonlyArray<QueuedThreadMessage>
+      try
+      {
+        persisted = await options.storage.load()
+      }
+      catch (cause)
       {
         warn(
           '[thread-outbox] failed to load messages while clearing environment',
@@ -205,12 +239,20 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
             cause,
           }),
         )
-        return []
-      })
+        return {
+          complete: false as const,
+          remainingMessageCount: currentMessages().filter(
+            (message) => message.environmentId === environmentId,
+          ).length,
+        }
+      }
       const allMessages = flattenQueuedThreadMessages(
         groupQueuedThreadMessages([...persisted, ...currentMessages()]),
       )
-      const removedMessageIds = new Set<MessageId>()
+      const removedMessageKeys = new Set<string>()
+
+      const messageKey = (message: QueuedThreadMessage): string =>
+        `${message.environmentId}\0${message.messageId}`
 
       await Promise.all(
         allMessages
@@ -220,7 +262,7 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
             try
             {
               await options.storage.remove(message)
-              removedMessageIds.add(message.messageId)
+              removedMessageKeys.add(messageKey(message))
             }
             catch (cause)
             {
@@ -238,7 +280,16 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
           }),
       )
 
-      setMessages(allMessages.filter((message) => !removedMessageIds.has(message.messageId)))
+      const remainingMessages = allMessages.filter(
+        (message) => !removedMessageKeys.has(messageKey(message)),
+      )
+      setMessages(remainingMessages)
+      const remainingMessageCount = remainingMessages.filter(
+        (message) => message.environmentId === environmentId,
+      ).length
+      return remainingMessageCount === 0
+        ? ({ complete: true, remainingMessageCount: 0 } as const)
+        : ({ complete: false, remainingMessageCount } as const)
     })
 
   return {

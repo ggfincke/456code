@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vite-plus/test'
 
 import {
   buildThreadListV2Items,
+  resolveThreadListV2Presentation,
   resolveThreadListV2Status,
   sortThreadsForListV2,
 } from '../../../../../apps/mobile/src/features/threads/threadListV2'
@@ -17,6 +18,7 @@ function makeThread(
 ): EnvironmentThreadShell
 {
   return {
+    providerSwitch: null,
     environmentId,
     projectId: ProjectId.make('project-1'),
     modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
@@ -70,6 +72,38 @@ describe('resolveThreadListV2Status', () =>
       'ready',
     )
   })
+
+  it('lets a retained outbox failure override status, subtitle, and accessibility', () =>
+  {
+    const thread = makeThread({
+      id: ThreadId.make('queued-failure'),
+      title: 'Deploy release',
+      hasPendingApprovals: true,
+      session: {
+        threadId: ThreadId.make('queued-failure'),
+        status: 'running',
+        providerName: 'Codex',
+        providerInstanceId: ProviderInstanceId.make('codex'),
+        runtimeMode: 'full-access',
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: NOW,
+      },
+    })
+
+    expect(
+      resolveThreadListV2Presentation(
+        thread,
+        'The queued message timed out.',
+        'Deploy release, pull request 42 open',
+      ),
+    ).toEqual({
+      status: 'failed',
+      failureReason: 'The queued message timed out.',
+      accessibilityLabel:
+        'Deploy release, pull request 42 open, failed: The queued message timed out.',
+    })
+  })
 })
 
 describe('sortThreadsForListV2', () =>
@@ -101,7 +135,7 @@ describe('buildThreadListV2Items', () =>
         makeThread({
           id: ThreadId.make('woken'),
           title: 'Woken',
-          // Wake time already passed: back in the active list.
+          // wake time already passed: back in the active list.
           snoozedUntil: '2026-06-01T18:00:00.000Z',
           snoozedAt: '2026-06-01T12:00:00.000Z',
         }),
@@ -111,7 +145,7 @@ describe('buildThreadListV2Items', () =>
       now: NOW,
     })
 
-    // Same createdAt → static sort tiebreaks by id; the point is the woken
+    // same createdAt -> static sort tiebreaks by id; the point is the woken
     // thread is BACK in the card block and the snoozed one is gone.
     expect(layout.items.map((item) => item.thread.id)).toEqual(['active', 'woken'])
     expect(layout.snoozedCount).toBe(1)
@@ -124,7 +158,7 @@ describe('buildThreadListV2Items', () =>
         makeThread({
           id: ThreadId.make('just-woke'),
           title: 'Just woke',
-          // Woke 30s ago: hidden under the minute-floored clock, visible
+          // woke 30s ago: hidden under the minute-floored clock, visible
           // under the precise one.
           snoozedUntil: '2026-06-02T00:00:30.000Z',
           snoozedAt: '2026-06-01T12:00:00.000Z',
@@ -138,7 +172,7 @@ describe('buildThreadListV2Items', () =>
       ],
       environmentId: null,
       searchQuery: '',
-      // Minute-floored partition clock vs precise snooze clock.
+      // minute-floored partition clock vs precise snooze clock.
       now: '2026-06-02T00:01:00.000Z',
       snoozeNow: '2026-06-02T00:01:07.500Z',
     })
@@ -209,7 +243,8 @@ describe('buildThreadListV2Items', () =>
           id: ThreadId.make('older-created'),
           title: 'Older',
           createdAt: '2026-06-01T08:00:00.000Z',
-          updatedAt: NOW, // recent activity must NOT promote it
+          // recent activity must NOT promote it
+          updatedAt: NOW,
         }),
         makeThread({
           id: ThreadId.make('newer-created'),
@@ -308,7 +343,7 @@ describe('buildThreadListV2Items settled paging', () =>
           settledOverride: 'settled',
           settledAt: NOW,
           latestUserMessageAt: `2026-06-01T0${index}:00:00.000Z`,
-          // A turn adopted the message (same requestedAt): without it the
+          // a turn adopted the message (same requestedAt): without it the
           // thread reads as a queued turn start, which never settles.
           latestTurn: {
             turnId: TurnId.make(`turn-${index}`),
@@ -332,7 +367,7 @@ describe('buildThreadListV2Items settled paging', () =>
 
     expect(layout.hiddenSettledCount).toBe(2)
     expect(layout.items.filter((item) => item.variant === 'slim')).toHaveLength(2)
-    // Most recent settled first — the hidden ones are the oldest.
+    // most recent settled first — the hidden ones are the oldest.
     expect(layout.items.map((item) => item.thread.id)).toEqual(['active', 'settled-3', 'settled-2'])
   })
 })

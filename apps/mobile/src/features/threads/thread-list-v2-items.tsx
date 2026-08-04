@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/thread-list-v2-items.tsx
+// render thread list v2 items
+
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -8,22 +11,22 @@ import { Platform, Pressable, useWindowDimensions, View } from 'react-native'
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable'
 
 import { AppText as Text } from '../../components/AppText'
+import { SymbolView } from '../../components/AppSymbol'
 import { ControlPillMenu } from '../../components/ControlPill'
 import { ProjectFavicon } from '../../components/ProjectFavicon'
 import { ProviderIcon } from '../../components/ProviderIcon'
 import { cn } from '../../lib/cn'
 import { relativeTime } from '../../lib/time'
 import { useThemeColor } from '../../lib/useThemeColor'
+import { useThreadOutboxFailureReason } from '../../state/use-thread-outbox'
 import { useThreadPr } from '../../state/use-thread-pr'
 import { ThreadSwipeable } from '../home/thread-swipe-actions'
-import { resolveThreadListV2Status, type ThreadListV2Status } from './threadListV2'
+import { resolveThreadListV2Presentation, type ThreadListV2Status } from './threadListV2'
 
-/**
- * Thread List v2 renders one flat native list: rich edge-to-edge rows for
- * active work and a receded settled tail, all with native swipe and
- * long-press actions. State reads through colored status labels and text
- * hierarchy rather than card fills.
- */
+// thread List v2 renders one flat native list: rich edge-to-edge rows for
+// active work and a receded settled tail, all with native swipe and
+// long-press actions. State reads through colored status labels and text
+// hierarchy rather than card fills.
 
 const MONO_FONT = Platform.select({
   ios: 'Menlo',
@@ -31,8 +34,8 @@ const MONO_FONT = Platform.select({
   default: 'monospace',
 })
 
-// Status hues follow the system-wide convention set by sidebar v1 and the
-// Live Activity/widgets (amber approval, indigo input, sky working) so a
+// status hues follow the system-wide convention set by sidebar v1 and the
+// live Activity/widgets (amber approval, indigo input, sky working) so a
 // thread reads the same color everywhere it surfaces.
 const STATUS_LABEL_BY_STATUS: Partial<
   Record<ThreadListV2Status, { label: string; className: string }>
@@ -43,12 +46,30 @@ const STATUS_LABEL_BY_STATUS: Partial<
   failed: { label: 'Failed', className: 'text-red-700 dark:text-red-300' },
 }
 
+function QueuedFailureSubtitle(props: { readonly reason: string })
+{
+  const dangerColor = useThemeColor('--color-danger-foreground')
+  return (
+    <View className="mt-px flex-row items-center gap-1.5">
+      <SymbolView
+        name="exclamationmark.triangle"
+        size={10}
+        tintColor={dangerColor}
+        type="monochrome"
+      />
+      <Text className="shrink text-xs text-danger-foreground" numberOfLines={1}>
+        {props.reason}
+      </Text>
+    </View>
+  )
+}
+
 function threadTimeLabel(thread: EnvironmentThreadShell): string
 {
   return relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)
 }
 
-// Menus stay lifecycle-focused: settle/un-settle plus delete. Archive keeps
+// menus stay lifecycle-focused: settle/un-settle plus delete. Archive keeps
 // its own surface (thread screen / settings) rather than crowding the row.
 const CARD_MENU_ACTIONS: MenuAction[] = [
   { id: 'settle', title: 'Settle', image: 'checkmark' },
@@ -60,13 +81,13 @@ const SLIM_MENU_ACTIONS: MenuAction[] = [
   { id: 'delete', title: 'Delete', image: 'trash', attributes: { destructive: true } },
 ]
 
-// Pre-settlement servers: no lifecycle items, archive fills the gap.
+// pre-settlement servers: no lifecycle items, archive fills the gap.
 const LEGACY_MENU_ACTIONS: MenuAction[] = [
   { id: 'archive', title: 'Archive', image: 'archivebox' },
   { id: 'delete', title: 'Delete', image: 'trash', attributes: { destructive: true } },
 ]
 
-/** Rounded-row radius shared with the v1 sidebar rows. */
+// rounded-row radius shared with the v1 sidebar rows.
 const SIDEBAR_V2_ROW_RADIUS = 12
 
 export const ThreadListV2SettledDivider = memo(function ThreadListV2SettledDivider(props: {
@@ -94,34 +115,34 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   readonly project: EnvironmentProject | null
   readonly projectTitle?: string
   readonly providerDriver: string | null
-  /** Which machine hosts the thread. Null when only one environment is
-      connected — repeating the same label on every row is noise. Mirrors
-      the web sidebar's remote-environment cloud icon, but as text since
-      phones have no hover tooltips. */
+  // which machine hosts the thread. Null when only one environment is
+  // connected — repeating the same label on every row is noise. Mirrors
+  // the web sidebar's remote-environment cloud icon, but as text since
+  // phones have no hover tooltips.
   readonly environmentLabel: string | null
-  /** Hosting surface. "screen" (default) renders the compact Home idiom:
-      flat edge-to-edge rows on the screen background with inset hairlines.
-      "sidebar" renders the iPad split-view idiom: rounded rows blending
-      into the drawer surface, selection filled with the accent color —
-      matching the v1 sidebar rows. */
+  // hosting surface. "screen" (default) renders the compact Home idiom:
+  // flat edge-to-edge rows on the screen background with inset hairlines.
+  // "sidebar" renders the iPad split-view idiom: rounded rows blending
+  // into the drawer surface, selection filled with the accent color —
+  // matching the v1 sidebar rows.
   readonly pane?: 'screen' | 'sidebar'
-  /** Highlights the thread open in the detail pane (iPad split view). The
-      compact Home list never sets it — phones navigate away on select. */
+  // highlights the thread open in the detail pane (iPad split view). The
+  // compact Home list never sets it — phones navigate away on select.
   readonly selected?: boolean
-  /** Override for narrow panes (iPad sidebar); defaults to window width. */
+  // override for narrow panes (iPad sidebar); defaults to window width.
   readonly fullSwipeWidth?: number
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void
   readonly onSettleThread: (thread: EnvironmentThreadShell) => void
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void
-  /** False on environments whose server predates thread.settle/unsettle:
-      swipe + menu fall back to Archive instead of failing on use. */
+  // false on environments whose server predates thread.settle/unsettle:
+  // swipe + menu fall back to Archive instead of failing on use.
   readonly settlementSupported: boolean
   readonly onSwipeableWillOpen: (methods: SwipeableMethods) => void
   readonly onSwipeableClose: (methods: SwipeableMethods) => void
-  /** Reports this row's live PR state up so the partition can auto-settle
-      merged/closed work (mirrors web's onChangeRequestState). */
+  // reports this row's live PR state up so the partition can auto-settle
+  // merged/closed work (mirrors web's onChangeRequestState).
   readonly onChangeRequestState?: (
     threadKey: string,
     state: 'open' | 'closed' | 'merged' | null,
@@ -145,6 +166,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   } = props
 
   const pr = useThreadPr(thread, props.projectCwd ?? props.project?.workspaceRoot ?? null)
+  const queuedFailureReason = useThreadOutboxFailureReason(thread.environmentId, thread.id)
   const prState = pr?.state ?? null
   const threadKey = `${thread.environmentId}:${thread.id}`
   useEffect(() =>
@@ -159,7 +181,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
   const sidebarPane = props.pane === 'sidebar'
   const selected = props.selected === true
 
-  const status = resolveThreadListV2Status(thread)
+  const prAccessibilityLabel = pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title
+  const presentation = resolveThreadListV2Presentation(
+    thread,
+    queuedFailureReason,
+    prAccessibilityLabel,
+  )
+  const status = presentation.status
   const statusLabel = STATUS_LABEL_BY_STATUS[status]
   const timeLabel = threadTimeLabel(thread)
 
@@ -178,13 +206,13 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     [handleArchive, handleDelete, handleSettle, handleUnsettle],
   )
 
-  // Swipe: the v2 primary action is the lifecycle transition. Every settled
+  // swipe: the v2 primary action is the lifecycle transition. Every settled
   // row can un-settle — explicit settles clear the override, auto-settled
   // rows get pinned active until real activity clears the pin.
   const canUnsettle = variant === 'slim'
   const primaryAction = useMemo(() =>
   {
-    // Pre-settlement server: archive is the swipe action, as in v1. (Slim
+    // pre-settlement server: archive is the swipe action, as in v1. (Slim
     // rows cannot occur here — unsupported environments never classify as
     // settled.)
     if (!props.settlementSupported)
@@ -218,7 +246,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     thread.title,
   ])
 
-  // The sidebar pane fills selected rows with the accent color (matching the
+  // the sidebar pane fills selected rows with the accent color (matching the
   // v1 sidebar), so every piece of row text needs a white-on-accent variant.
   const cardContent = (
     <>
@@ -259,7 +287,11 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         {thread.title}
       </Text>
       <View className="mt-1 flex-row items-center gap-2">
-        {status === 'failed' && thread.session?.lastError ? (
+        {queuedFailureReason !== null && presentation.failureReason !== null ? (
+          <View className="flex-1">
+            <QueuedFailureSubtitle reason={presentation.failureReason} />
+          </View>
+        ) : status === 'failed' && presentation.failureReason !== null ? (
           <Text
             className={cn(
               'flex-1 text-xs',
@@ -269,12 +301,12 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             )}
             numberOfLines={1}
           >
-            {thread.session.lastError}
+            {presentation.failureReason}
           </Text>
         ) : thread.branch || props.environmentLabel ? (
-          /* "branch · machine" share one truncating line. The machine sits
-             last so a tight fit cuts the repetitive label, not the branch —
-             and machine-only fills the row for non-git projects. */
+          // "branch · machine" share one truncating line. The machine sits
+          // last so a tight fit cuts the repetitive label, not the branch —
+          // and machine-only fills the row for non-git projects.
           <Text
             className={cn(
               'flex-1 text-xs',
@@ -308,7 +340,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         ) : (
           <View className="flex-1" />
         )}
-        {pr ? (
+        {queuedFailureReason === null && pr ? (
           <Text
             accessibilityLabel={pr.accessibilityLabel}
             className={cn('text-xs', selected ? 'text-white' : pr.textClassName)}
@@ -317,7 +349,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
             #{pr.label}
           </Text>
         ) : null}
-        {props.providerDriver ? (
+        {queuedFailureReason === null && props.providerDriver ? (
           <View className="opacity-60">
             <ProviderIcon provider={props.providerDriver} size={14} />
           </View>
@@ -330,7 +362,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     variant === 'card' ? (
       <Pressable
         accessibilityHint={`Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`}
-        accessibilityLabel={thread.title}
+        accessibilityLabel={presentation.accessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
         onPress={() =>
@@ -356,10 +388,10 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
         {sidebarPane ? (
           cardContent
         ) : (
-          /* Flat native list rows: no tonal containers — colored status
-             labels and text hierarchy carry state, an inset hairline
-             separates rows. The opaque screen background stays so swipe
-             actions reveal behind the row. */
+          // flat native list rows: no tonal containers — colored status
+          // labels and text hierarchy carry state, an inset hairline
+          // separates rows. The opaque screen background stays so swipe
+          // actions reveal behind the row.
           <View className="bg-screen">
             <View className="px-5 py-2.5">{cardContent}</View>
             <View className="ml-5 h-px bg-border-subtle" />
@@ -369,7 +401,7 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
     ) : (
       <Pressable
         accessibilityHint={`Opens the thread. Swipe left to ${primaryAction.label.toLowerCase()}.`}
-        accessibilityLabel={thread.title}
+        accessibilityLabel={presentation.accessibilityLabel}
         accessibilityRole="button"
         accessibilityState={{ selected }}
         className={sidebarPane ? undefined : 'bg-screen'}
@@ -408,23 +440,34 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
               />
             </View>
           ) : null}
-          <Text
-            className={cn(
-              'flex-1 text-base',
-              selected ? 'text-user-bubble-foreground' : 'text-foreground-muted',
-            )}
-            numberOfLines={1}
-          >
-            {thread.title}
-          </Text>
+          <View className="flex-1">
+            <Text
+              className={cn(
+                'text-base',
+                selected ? 'text-user-bubble-foreground' : 'text-foreground-muted',
+              )}
+              numberOfLines={1}
+            >
+              {thread.title}
+            </Text>
+            {queuedFailureReason !== null && presentation.failureReason !== null ? (
+              <QueuedFailureSubtitle reason={presentation.failureReason} />
+            ) : null}
+          </View>
           <Text
             className={cn(
               'text-sm tabular-nums',
-              selected ? 'text-user-bubble-foreground-muted' : 'text-foreground-tertiary',
+              selected
+                ? 'text-user-bubble-foreground-muted'
+                : queuedFailureReason !== null
+                  ? statusLabel?.className
+                  : 'text-foreground-tertiary',
             )}
             style={{ fontFamily: MONO_FONT }}
           >
-            {relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)}
+            {queuedFailureReason !== null
+              ? statusLabel?.label
+              : relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)}
           </Text>
         </View>
       </Pressable>
@@ -440,8 +483,8 @@ export const ThreadListV2Row = memo(function ThreadListV2Row(props: {
           sidebarPane ? { borderRadius: SIDEBAR_V2_ROW_RADIUS, overflow: 'hidden' } : undefined
         }
         enableTrackpadSwipe
-        // Full swipe commits the advertised lifecycle action (Settle /
-        // Un-settle), never the destructive delete.
+        // full swipe commits the advertised lifecycle action (Settle /
+        // un-settle), never the destructive delete.
         fullSwipeAction="primary"
         fullSwipeWidth={props.fullSwipeWidth ?? windowWidth - 32}
         onDelete={handleDelete}

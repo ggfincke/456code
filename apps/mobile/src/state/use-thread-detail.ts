@@ -1,6 +1,11 @@
+// apps/mobile/src/state/use-thread-detail.ts
+// manage thread detail target through a React hook
+
 import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
+import { useMemo } from 'react'
 
+import { mergeThreadDetailWithShell } from './thread-shell-fallback'
 import { useEnvironmentThread } from './threads'
 import { useThreadSelection } from './use-thread-selection'
 
@@ -17,11 +22,25 @@ export function useThreadDetail(target: ThreadDetailTarget)
 
 export function useSelectedThreadDetailState()
 {
-  const { selectedThread } = useThreadSelection()
-  return useThreadDetail({
-    environmentId: selectedThread?.environmentId ?? null,
-    threadId: selectedThread?.id ?? null,
+  const { selectedThreadRef, selectedThread } = useThreadSelection()
+  const state = useThreadDetail({
+    environmentId: selectedThreadRef?.environmentId ?? null,
+    threadId: selectedThreadRef?.threadId ?? null,
   })
+  return useMemo(() =>
+  {
+    if (selectedThreadRef === null)
+    {
+      return state
+    }
+    const detail = Option.getOrNull(state.data)
+    const merged = mergeThreadDetailWithShell(
+      selectedThreadRef.environmentId,
+      detail,
+      selectedThread,
+    )
+    return { ...state, data: Option.fromNullishOr(merged) }
+  }, [selectedThread, selectedThreadRef, state])
 }
 
 export function useSelectedThreadDetail()

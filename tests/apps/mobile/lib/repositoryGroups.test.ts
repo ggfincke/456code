@@ -28,6 +28,7 @@ function makeThread(
 ): EnvironmentThreadShell
 {
   return {
+    providerSwitch: null,
     runtimeMode: 'full-access',
     interactionMode: 'default',
     branch: null,

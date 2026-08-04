@@ -34,6 +34,7 @@ import type {
   PendingUserInputDraftAnswer,
   ThreadFeedEntry,
 } from '../../lib/threadActivity'
+import type { ThreadProviderSwitchNotice } from '../../lib/thread-activity/provider-switch'
 import { PendingApprovalCard } from './PendingApprovalCard'
 import { PendingUserInputCard } from './PendingUserInputCard'
 import {
@@ -62,14 +63,17 @@ export interface ThreadDetailScreenProps
   readonly draftMessage: string
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>
   readonly connectionStateLabel: EnvironmentConnectionPhase
-  /** Message sync status for the selected thread (drives the composer status pill). */
+  // message sync status for the selected thread (drives the composer status pill).
   readonly threadSyncStatus?: EnvironmentThreadStatus
   readonly activeThreadBusy: boolean
   readonly sendBlockedReason: string | null
+  readonly providerSwitchActive: boolean
+  readonly providerSwitchNotice: ThreadProviderSwitchNotice | null
   readonly environmentId: EnvironmentId
   readonly projectWorkspaceRoot: string | null
   readonly threadCwd: string | null
   readonly selectedThreadQueueCount: number
+  readonly selectedThreadQueueFailureReason: string | null
   readonly serverConfig: ServerConfig | null
   readonly layoutVariant?: LayoutVariant
   readonly usesAutomaticContentInsets?: boolean
@@ -81,10 +85,13 @@ export interface ThreadDetailScreenProps
   readonly onRemoveDraftImage: (imageId: string) => void
   readonly onStopThread: () => void
   readonly onSendMessage: () => Promise<MessageId | null>
+  readonly onDiscardQueuedMessage: () => void
   readonly onReconnectEnvironment: () => void
   readonly onUpdateThreadModelSelection: (modelSelection: ModelSelection) => void
   readonly onUpdateThreadRuntimeMode: (runtimeMode: RuntimeMode) => void
   readonly onUpdateThreadInteractionMode: (interactionMode: ProviderInteractionMode) => void
+  readonly onRetryProviderSwitch: () => void
+  readonly onDismissProviderSwitchNotice: () => void
   readonly onRespondToApproval: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
@@ -199,9 +206,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const [anchorMessageId, setAnchorMessageId] = useState<MessageId | null>(null)
   const composerBottomInset = composerExpanded ? 0 : Math.max(insets.bottom, 12)
   const contentPresentationKind = props.contentPresentation.kind
-  // The raw sync status enters "synchronizing" on every full fetch, cached or
+  // the raw sync status enters "synchronizing" on every full fetch, cached or
   // not. Whether messages are already on screen decides the pill label: no
-  // data yet → "Loading messages", cached data reconciling → "Syncing".
+  // data yet -> "Loading messages", cached data reconciling -> "Syncing".
   const threadSyncPhase = (() =>
   {
     switch (props.threadSyncStatus)
@@ -222,7 +229,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   const composerChrome = composerExpanded ? COMPOSER_EXPANDED_CHROME : COMPOSER_COLLAPSED_CHROME
   const composerOverlapHeight = composerChrome + composerBottomInset
   const estimatedOverlayHeight = composerOverlapHeight
-  // The overlay's measured height includes the home-indicator inset (the
+  // the overlay's measured height includes the home-indicator inset (the
   // composer pads it), but contentInsetAdjustmentBehavior="automatic" makes
   // UIKit add the safe-area bottom to the content inset AGAIN — leaving a
   // dead strip between the resting content and the composer. Report the
@@ -283,7 +290,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
         return
       }
       lastScrolledAnchorMessageIdRef.current = anchorMessageId
-      // Wait for the keyboard dismissal (started by blur() on send) to finish
+      // wait for the keyboard dismissal (started by blur() on send) to finish
       // before scrolling: scrollMessageToEnd freezes keyboard-driven inset
       // updates while it runs, and a close event swallowed by that freeze
       // leaves the keyboard padding permanently applied — overshooting the
@@ -468,8 +475,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               selectedThread={props.selectedThread}
               serverConfig={props.serverConfig}
               queueCount={props.selectedThreadQueueCount}
+              queueFailureReason={props.selectedThreadQueueFailureReason}
               activeThreadBusy={props.activeThreadBusy}
               sendBlockedReason={props.sendBlockedReason}
+              providerSwitchActive={props.providerSwitchActive}
+              providerSwitchNotice={props.providerSwitchNotice}
               environmentId={props.environmentId}
               projectCwd={props.projectWorkspaceRoot}
               bottomInset={composerBottomInset}
@@ -479,10 +489,13 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
               onRemoveDraftImage={props.onRemoveDraftImage}
               onStopThread={props.onStopThread}
               onSendMessage={handleSendMessage}
+              onDiscardQueuedMessage={props.onDiscardQueuedMessage}
               onReconnectEnvironment={props.onReconnectEnvironment}
               onUpdateModelSelection={props.onUpdateThreadModelSelection}
               onUpdateRuntimeMode={props.onUpdateThreadRuntimeMode}
               onUpdateInteractionMode={props.onUpdateThreadInteractionMode}
+              onRetryProviderSwitch={props.onRetryProviderSwitch}
+              onDismissProviderSwitchNotice={props.onDismissProviderSwitchNotice}
               onExpandedChange={setComposerExpanded}
             />
           </View>

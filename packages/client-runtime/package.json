@@ -11,6 +11,10 @@
       "types": "./src/provider-switch/index.ts",
       "default": "./src/provider-switch/index.ts"
     },
+    "./thread-activity": {
+      "types": "./src/thread-activity/index.ts",
+      "default": "./src/thread-activity/index.ts"
+    },
     "./authorization": {
       "types": "./src/authorization/index.ts",
       "default": "./src/authorization/index.ts"
