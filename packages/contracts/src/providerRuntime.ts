@@ -324,6 +324,13 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
 })
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type
 
+export const ContextWindowUpdatedActivityPayload = Schema.Struct({
+  ...ThreadTokenUsageSnapshot.fields,
+  provider: Schema.optional(ProviderDriverKind),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+})
+export type ContextWindowUpdatedActivityPayload = typeof ContextWindowUpdatedActivityPayload.Type
+
 const ThreadTokenUsageUpdatedPayload = Schema.Struct({
   usage: ThreadTokenUsageSnapshot,
 })

@@ -5,6 +5,7 @@ import type { ServerProviderAccountUsage } from '@t3tools/contracts'
 import { useClientSettings } from '~/hooks/useSettings'
 import { cn } from '~/lib/utils'
 import { type ContextWindowSnapshot, formatContextWindowTokens } from '~/lib/contextWindow'
+import type { ThreadContextWindowSelection } from './composerContextWindow'
 import { Popover, PopoverPopup, PopoverTrigger } from '../ui/popover'
 import {
   formatProviderUsagePercent,
@@ -27,8 +28,27 @@ function tightestAccountWindow(usage: ServerProviderAccountUsage | undefined)
   )
 }
 
+// the thread has usage on record, but none of it can be attributed to the
+// provider named in the popup header — an em dash beats a wrong number.
+function EmptyContextWindowDetails(props: { providerDisplayName?: string | null | undefined })
+{
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-3">
+        <div className="font-medium text-muted-foreground text-xs">Context window</div>
+        <div className="text-[11px] tabular-nums text-muted-foreground/70">—</div>
+      </div>
+      <div className="text-pretty text-[11px] leading-4 text-muted-foreground/60">
+        {props.providerDisplayName ?? 'This agent'} has not reported context usage on this thread
+        yet.
+      </div>
+    </div>
+  )
+}
+
 function ContextWindowDetails(props: {
   usage: ContextWindowSnapshot
+  qualifier?: string | undefined
   providerDisplayName?: string | null | undefined
 })
 {
@@ -44,7 +64,12 @@ function ContextWindowDetails(props: {
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between gap-3">
-        <div className="font-medium text-muted-foreground text-xs">Context window</div>
+        <div className="flex min-w-0 items-baseline gap-1.5">
+          <div className="font-medium text-muted-foreground text-xs">Context window</div>
+          {props.qualifier ? (
+            <div className="truncate text-[10px] text-muted-foreground/50">{props.qualifier}</div>
+          ) : null}
+        </div>
         {props.usage.maxTokens !== null && usedPercentage ? (
           <div className="text-[11px] tabular-nums text-muted-foreground/70">
             <span>{usedPercentage}</span>
@@ -83,7 +108,9 @@ function ContextWindowDetails(props: {
           </span>
         </div>
       ) : null}
-      {props.usage.compactsAutomatically ? (
+      {/* the compaction note names the labelled provider, so it is only true
+          for a snapshot that provider actually recorded */}
+      {props.usage.compactsAutomatically && !props.qualifier ? (
         <div className="mt-1 text-pretty text-[11px] font-medium text-muted-foreground/70">
           {props.providerDisplayName ?? 'It'} automatically compacts its context when needed.
         </div>
@@ -93,14 +120,21 @@ function ContextWindowDetails(props: {
 }
 
 export function ComposerUsageMeter(props: {
-  contextUsage: ContextWindowSnapshot | null
+  contextUsage: ThreadContextWindowSelection
   accountUsage?: ServerProviderAccountUsage | undefined
   providerDisplayName?: string | null
 })
 {
-  const { accountUsage, contextUsage, providerDisplayName } = props
+  const { accountUsage, contextUsage: contextSelection, providerDisplayName } = props
   const usageDisplayMode = useClientSettings((settings) => settings.providerUsageDisplayMode)
-  if (!contextUsage && !accountUsage) return null
+  // only the current provider's snapshot may drive the ring. A snapshot the
+  // thread has switched away from stays behind its qualifier in the popup so
+  // the meter itself never reads as the new provider's usage.
+  const contextUsage = contextSelection.state === 'current' ? contextSelection.snapshot : null
+  const carriedOverUsage =
+    contextSelection.state === 'previous-provider' ? contextSelection.snapshot : null
+  const hasContextSection = contextSelection.state !== 'none'
+  if (!hasContextSection && !accountUsage) return null
 
   const contextPercentage = Math.max(0, Math.min(100, contextUsage?.usedPercentage ?? 0))
   const accountWindow = tightestAccountWindow(accountUsage)
@@ -121,9 +155,11 @@ export function ComposerUsageMeter(props: {
     ? contextUsage.maxTokens !== null && contextUsedLabel
       ? `Usage: context window ${contextUsedLabel} used${accountUsage ? '; provider plan usage available' : ''}`
       : `Usage: context window ${formatContextWindowTokens(contextUsage.usedTokens)} tokens used${accountUsage ? '; provider plan usage available' : ''}`
-    : accountWindow
-      ? `Provider usage: ${formatProviderUsagePercent(accountWindow, usageDisplayMode)} in the ${accountWindow.label} window`
-      : 'Provider usage'
+    : hasContextSection
+      ? `Usage: no context window reported for the current provider${accountUsage ? '; provider plan usage available' : ''}`
+      : accountWindow
+        ? `Provider usage: ${formatProviderUsagePercent(accountWindow, usageDisplayMode)} in the ${accountWindow.label} window`
+        : 'Provider usage'
 
   return (
     <Popover>
@@ -194,9 +230,17 @@ export function ComposerUsageMeter(props: {
           {accountUsage ? (
             <ProviderUsageDetails usage={accountUsage} displayMode={usageDisplayMode} />
           ) : null}
-          {accountUsage && contextUsage ? <div className="h-px bg-border/65" /> : null}
+          {accountUsage && hasContextSection ? <div className="h-px bg-border/65" /> : null}
           {contextUsage ? (
             <ContextWindowDetails usage={contextUsage} providerDisplayName={providerDisplayName} />
+          ) : carriedOverUsage ? (
+            <ContextWindowDetails
+              usage={carriedOverUsage}
+              qualifier="from previous provider"
+              providerDisplayName={providerDisplayName}
+            />
+          ) : contextSelection.state === 'unavailable' ? (
+            <EmptyContextWindowDetails providerDisplayName={providerDisplayName} />
           ) : null}
         </div>
       </PopoverPopup>
