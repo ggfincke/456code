@@ -1,3 +1,7 @@
+// apps/server/src/sourceControl/GitLab/GitLabCli.ts
+// provides GitLab CLI operations for source control
+
+// @effect-diagnostics deterministicKeys:off - preserve the existing service identity after this ownership move
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -13,12 +17,12 @@ import {
   type VcsError,
 } from '@t3tools/contracts'
 
-import * as VcsProcess from '../vcs/VcsProcess.ts'
+import * as VcsProcess from '../../vcs/VcsProcess.ts'
 import {
   decodeGitLabMergeRequestJson,
   decodeGitLabMergeRequestListJson,
 } from './gitLabMergeRequests.ts'
-import type * as SourceControlProvider from './SourceControlProvider.ts'
+import type * as SourceControlProvider from '../SourceControlProvider.ts'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 

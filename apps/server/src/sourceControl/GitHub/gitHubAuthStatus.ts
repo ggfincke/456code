@@ -1,3 +1,5 @@
+// apps/server/src/sourceControl/GitHub/gitHubAuthStatus.ts
+// parses GitHub CLI authentication status
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 

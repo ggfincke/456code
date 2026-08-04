@@ -1,10 +1,20 @@
+// tests/apps/server/sourceControl/Bitbucket/BitbucketSourceControlProvider.test.ts
+// verifies the Bitbucket source control provider
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 
-import * as BitbucketApi from '../../../../apps/server/src/sourceControl/BitbucketApi.ts'
-import * as BitbucketSourceControlProvider from '../../../../apps/server/src/sourceControl/BitbucketSourceControlProvider.ts'
+import * as BitbucketApi from '../../../../../apps/server/src/sourceControl/Bitbucket/BitbucketApi.ts'
+import * as BitbucketSourceControlProvider from '../../../../../apps/server/src/sourceControl/Bitbucket/BitbucketSourceControlProvider.ts'
+import {
+  assertForwardsListChangeRequestsInput,
+  assertProviderNeutralChangeRequest,
+  expectedCreateInputWithParsedOwnerRef,
+  standardCrossRepositorySummary,
+  standardListChangeRequestsInput,
+  standardOwnerRefCreateInput,
+} from '../providerNeutralMapTestHelpers.ts'
 
 function makeProvider(bitbucket: Partial<BitbucketApi.BitbucketApi['Service']>)
 {
@@ -16,20 +26,12 @@ function makeProvider(bitbucket: Partial<BitbucketApi.BitbucketApi['Service']>)
 it.effect('maps Bitbucket PR summaries into provider-neutral change requests', () =>
   Effect.gen(function* ()
   {
+    const summary = {
+      ...standardCrossRepositorySummary('bitbucket'),
+      updatedAt: Option.none(),
+    }
     const provider = yield* makeProvider({
-      getPullRequest: () =>
-        Effect.succeed({
-          number: 42,
-          title: 'Add Bitbucket provider',
-          url: 'https://bitbucket.org/pingdotgg/t3code/pull-requests/42',
-          baseRefName: 'main',
-          headRefName: 'feature/source-control',
-          state: 'open',
-          updatedAt: Option.none(),
-          isCrossRepository: true,
-          headRepositoryNameWithOwner: 'fork/t3code',
-          headRepositoryOwnerLogin: 'fork',
-        }),
+      getPullRequest: () => Effect.succeed(summary),
     })
 
     const changeRequest = yield* provider.getChangeRequest({
@@ -37,19 +39,7 @@ it.effect('maps Bitbucket PR summaries into provider-neutral change requests', (
       reference: '42',
     })
 
-    assert.deepStrictEqual(changeRequest, {
-      provider: 'bitbucket',
-      number: 42,
-      title: 'Add Bitbucket provider',
-      url: 'https://bitbucket.org/pingdotgg/t3code/pull-requests/42',
-      baseRefName: 'main',
-      headRefName: 'feature/source-control',
-      state: 'open',
-      updatedAt: Option.none(),
-      isCrossRepository: true,
-      headRepositoryNameWithOwner: 'fork/t3code',
-      headRepositoryOwnerLogin: 'fork',
-    })
+    assertProviderNeutralChangeRequest(changeRequest, 'bitbucket', summary)
   }),
 )
 
@@ -105,19 +95,9 @@ it.effect('lists Bitbucket PRs through provider-neutral input names', () =>
       },
     })
 
-    yield* provider.listChangeRequests({
-      cwd: '/repo',
-      headSelector: 'feature/provider',
-      state: 'all',
-      limit: 10,
-    })
+    yield* provider.listChangeRequests(standardListChangeRequestsInput)
 
-    assert.deepStrictEqual(listInput, {
-      cwd: '/repo',
-      headSelector: 'feature/provider',
-      state: 'all',
-      limit: 10,
-    })
+    assertForwardsListChangeRequestsInput(listInput)
   }),
 )
 
@@ -135,42 +115,10 @@ it.effect('creates Bitbucket PRs through provider-neutral input names', () =>
     })
 
     yield* provider.createChangeRequest({
-      cwd: '/repo',
-      baseRefName: 'main',
-      headSelector: 'owner:feature/provider',
+      ...standardOwnerRefCreateInput,
       title: 'Provider PR',
-      bodyFile: '/tmp/body.md',
     })
 
-    assert.deepStrictEqual(createInput, {
-      cwd: '/repo',
-      baseBranch: 'main',
-      headSelector: 'owner:feature/provider',
-      source: {
-        owner: 'owner',
-        refName: 'feature/provider',
-      },
-      title: 'Provider PR',
-      bodyFile: '/tmp/body.md',
-    })
-  }),
-)
-
-it.effect('uses Bitbucket API repository detection for default branch lookup', () =>
-  Effect.gen(function* ()
-  {
-    let cwdInput: string | null = null
-    const provider = yield* makeProvider({
-      getDefaultBranch: (input) =>
-      {
-        cwdInput = input.cwd
-        return Effect.succeed('main')
-      },
-    })
-
-    const defaultBranch = yield* provider.getDefaultBranch({ cwd: '/repo' })
-
-    assert.strictEqual(defaultBranch, 'main')
-    assert.strictEqual(cwdInput, '/repo')
+    assert.deepStrictEqual(createInput, expectedCreateInputWithParsedOwnerRef('Provider PR'))
   }),
 )

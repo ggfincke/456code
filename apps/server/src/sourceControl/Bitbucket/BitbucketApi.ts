@@ -1,3 +1,7 @@
+// apps/server/src/sourceControl/Bitbucket/BitbucketApi.ts
+// provides Bitbucket API operations for source control
+
+// @effect-diagnostics deterministicKeys:off - preserve the existing service identity after this ownership move
 import * as Config from 'effect/Config'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -22,9 +26,9 @@ import {
   normalizeBitbucketPullRequestRecord,
   type NormalizedBitbucketPullRequestRecord,
 } from './bitbucketPullRequests.ts'
-import * as SourceControlProvider from './SourceControlProvider.ts'
-import * as GitVcsDriver from '../vcs/GitVcsDriver.ts'
-import * as VcsDriverRegistry from '../vcs/VcsDriverRegistry.ts'
+import * as SourceControlProvider from '../SourceControlProvider.ts'
+import * as GitVcsDriver from '../../vcs/GitVcsDriver.ts'
+import * as VcsDriverRegistry from '../../vcs/VcsDriverRegistry.ts'
 
 const DEFAULT_API_BASE_URL = 'https://api.bitbucket.org/2.0'
 
@@ -876,8 +880,8 @@ export const make = Effect.gen(function* ()
         ),
         Effect.map(defaultChangeRequestTargetBranch),
       ),
-    // Bitbucket Cloud pull requests are Git-backed and Bitbucket does not provide
-    // an official checkout CLI. This provider-local path uses GitVcsDriver as a
+    // pull requests in Bitbucket Cloud are Git-backed without an official checkout CLI
+    // this provider-local path uses GitVcsDriver as a
     // narrow escape hatch to materialize Bitbucket PR refs. Do not generalize this
     // as the source-control provider model: if we support non-Git-compatible
     // hosting providers or native JJ/Sapling checkout flows, move this into a

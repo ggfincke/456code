@@ -1,16 +1,18 @@
+// apps/server/src/sourceControl/AzureDevOps/AzureDevOpsSourceControlProvider.ts
+// adapts Azure DevOps CLI operations to the source control provider
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import { SourceControlProviderError, type ChangeRequest } from '@t3tools/contracts'
 
 import * as AzureDevOpsCli from './AzureDevOpsCli.ts'
-import * as SourceControlProvider from './SourceControlProvider.ts'
+import * as SourceControlProvider from '../SourceControlProvider.ts'
 import {
   combinedAuthOutput,
   firstSafeAuthLine,
   providerAuth,
   type SourceControlAuthProbeInput,
   type SourceControlCliDiscoverySpec,
-} from './SourceControlProviderDiscovery.ts'
+} from '../SourceControlProviderDiscovery.ts'
 
 function parseAzureAuth(input: SourceControlAuthProbeInput)
 {

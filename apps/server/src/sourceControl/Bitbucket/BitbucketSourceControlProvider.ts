@@ -1,3 +1,5 @@
+// apps/server/src/sourceControl/Bitbucket/BitbucketSourceControlProvider.ts
+// adapts Bitbucket API operations to the source control provider
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
@@ -5,8 +7,8 @@ import { SourceControlProviderError, type ChangeRequest } from '@t3tools/contrac
 
 import * as BitbucketApi from './BitbucketApi.ts'
 import type { NormalizedBitbucketPullRequestRecord } from './bitbucketPullRequests.ts'
-import * as SourceControlProvider from './SourceControlProvider.ts'
-import type { SourceControlApiDiscoverySpec } from './SourceControlProviderDiscovery.ts'
+import * as SourceControlProvider from '../SourceControlProvider.ts'
+import type { SourceControlApiDiscoverySpec } from '../SourceControlProviderDiscovery.ts'
 
 function toChangeRequest(summary: NormalizedBitbucketPullRequestRecord): ChangeRequest
 {

@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/GitHub/GitHubCli.test.ts
+// verifies GitHub CLI source control operations
 import { assert, it, afterEach, describe, expect, vi } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -5,8 +7,8 @@ import * as PlatformError from 'effect/PlatformError'
 import { ChildProcessSpawner } from 'effect/unstable/process'
 import { VcsProcessExitError, VcsProcessSpawnError } from '@t3tools/contracts'
 
-import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
-import * as GitHubCli from '../../../../apps/server/src/sourceControl/GitHubCli.ts'
+import * as VcsProcess from '../../../../../apps/server/src/vcs/VcsProcess.ts'
+import * as GitHubCli from '../../../../../apps/server/src/sourceControl/GitHub/GitHubCli.ts'
 
 const processOutput = (stdout: string): VcsProcess.VcsProcessOutput => ({
   exitCode: ChildProcessSpawner.ExitCode(0),

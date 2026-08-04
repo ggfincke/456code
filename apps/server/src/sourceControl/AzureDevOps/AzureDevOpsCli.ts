@@ -1,3 +1,7 @@
+// apps/server/src/sourceControl/AzureDevOps/AzureDevOpsCli.ts
+// provides Azure DevOps CLI operations for source control
+
+// @effect-diagnostics deterministicKeys:off - preserve the existing service identity after this ownership move
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -11,13 +15,13 @@ import {
   type VcsError,
 } from '@t3tools/contracts'
 
-import * as VcsProcess from '../vcs/VcsProcess.ts'
+import * as VcsProcess from '../../vcs/VcsProcess.ts'
 import {
   decodeAzureDevOpsPullRequestJson,
   decodeAzureDevOpsPullRequestListJson,
   type NormalizedAzureDevOpsPullRequestRecord,
 } from './azureDevOpsPullRequests.ts'
-import * as SourceControlProvider from './SourceControlProvider.ts'
+import * as SourceControlProvider from '../SourceControlProvider.ts'
 
 const DEFAULT_TIMEOUT_MS = 30_000
 
@@ -503,7 +507,7 @@ export const make = Effect.gen(function* ()
     createRepository: (input) =>
     {
       const repository = parseRepositorySpecifier(input.repository)
-      // Azure Repos access is governed by project/organization permissions.
+      // access to Azure Repos is governed by project/organization permissions
       // `az repos create` does not expose a per-repository visibility flag, so
       // the generic source-control visibility input is intentionally not
       // translated into CLI args for this provider.

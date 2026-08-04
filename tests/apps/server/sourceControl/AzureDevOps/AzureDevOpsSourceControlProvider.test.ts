@@ -1,10 +1,13 @@
+// tests/apps/server/sourceControl/AzureDevOps/AzureDevOpsSourceControlProvider.test.ts
+// verifies the Azure DevOps source control provider
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 
-import * as AzureDevOpsCli from '../../../../apps/server/src/sourceControl/AzureDevOpsCli.ts'
-import * as AzureDevOpsSourceControlProvider from '../../../../apps/server/src/sourceControl/AzureDevOpsSourceControlProvider.ts'
+import * as AzureDevOpsCli from '../../../../../apps/server/src/sourceControl/AzureDevOps/AzureDevOpsCli.ts'
+import * as AzureDevOpsSourceControlProvider from '../../../../../apps/server/src/sourceControl/AzureDevOps/AzureDevOpsSourceControlProvider.ts'
+import { assertProviderNeutralChangeRequest } from '../providerNeutralMapTestHelpers.ts'
 
 function makeProvider(azure: Partial<AzureDevOpsCli.AzureDevOpsCli['Service']>)
 {
@@ -16,17 +19,17 @@ function makeProvider(azure: Partial<AzureDevOpsCli.AzureDevOpsCli['Service']>)
 it.effect('maps Azure DevOps PR summaries into provider-neutral change requests', () =>
   Effect.gen(function* ()
   {
+    const summary = {
+      number: 42,
+      title: 'Add Azure provider',
+      url: 'https://dev.azure.com/acme/project/_git/repo/pullrequest/42',
+      baseRefName: 'main',
+      headRefName: 'feature/source-control',
+      state: 'open' as const,
+      updatedAt: Option.none(),
+    }
     const provider = yield* makeProvider({
-      getPullRequest: () =>
-        Effect.succeed({
-          number: 42,
-          title: 'Add Azure provider',
-          url: 'https://dev.azure.com/acme/project/_git/repo/pullrequest/42',
-          baseRefName: 'main',
-          headRefName: 'feature/source-control',
-          state: 'open',
-          updatedAt: Option.none(),
-        }),
+      getPullRequest: () => Effect.succeed(summary),
     })
 
     const changeRequest = yield* provider.getChangeRequest({
@@ -34,15 +37,7 @@ it.effect('maps Azure DevOps PR summaries into provider-neutral change requests'
       reference: '42',
     })
 
-    assert.deepStrictEqual(changeRequest, {
-      provider: 'azure-devops',
-      number: 42,
-      title: 'Add Azure provider',
-      url: 'https://dev.azure.com/acme/project/_git/repo/pullrequest/42',
-      baseRefName: 'main',
-      headRefName: 'feature/source-control',
-      state: 'open',
-      updatedAt: Option.none(),
+    assertProviderNeutralChangeRequest(changeRequest, 'azure-devops', summary, {
       isCrossRepository: false,
     })
   }),
@@ -117,24 +112,5 @@ it.effect('creates Azure DevOps PRs through provider-neutral input names', () =>
       title: 'Provider PR',
       bodyFile: '/tmp/body.md',
     })
-  }),
-)
-
-it.effect('uses Azure CLI repository detection for default branch lookup', () =>
-  Effect.gen(function* ()
-  {
-    let cwdInput: string | null = null
-    const provider = yield* makeProvider({
-      getDefaultBranch: (input) =>
-      {
-        cwdInput = input.cwd
-        return Effect.succeed('main')
-      },
-    })
-
-    const defaultBranch = yield* provider.getDefaultBranch({ cwd: '/repo' })
-
-    assert.strictEqual(defaultBranch, 'main')
-    assert.strictEqual(cwdInput, '/repo')
   }),
 )

@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/SourceControlDiscovery.test.ts
+// verifies source control discovery across registered providers
 import { assert, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
@@ -9,10 +11,10 @@ import { VcsProcessSpawnError } from '@t3tools/contracts'
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import * as VcsDriverRegistry from '../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
 import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
-import * as AzureDevOpsCli from '../../../../apps/server/src/sourceControl/AzureDevOpsCli.ts'
-import * as BitbucketApi from '../../../../apps/server/src/sourceControl/BitbucketApi.ts'
-import * as GitHubCli from '../../../../apps/server/src/sourceControl/GitHubCli.ts'
-import * as GitLabCli from '../../../../apps/server/src/sourceControl/GitLabCli.ts'
+import * as AzureDevOpsCli from '../../../../apps/server/src/sourceControl/AzureDevOps/AzureDevOpsCli.ts'
+import * as BitbucketApi from '../../../../apps/server/src/sourceControl/Bitbucket/BitbucketApi.ts'
+import * as GitHubCli from '../../../../apps/server/src/sourceControl/GitHub/GitHubCli.ts'
+import * as GitLabCli from '../../../../apps/server/src/sourceControl/GitLab/GitLabCli.ts'
 import * as SourceControlDiscovery from '../../../../apps/server/src/sourceControl/SourceControlDiscovery.ts'
 import * as SourceControlProviderRegistry from '../../../../apps/server/src/sourceControl/SourceControlProviderRegistry.ts'
 

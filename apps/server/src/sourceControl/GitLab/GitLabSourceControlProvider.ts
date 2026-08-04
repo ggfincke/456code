@@ -1,10 +1,12 @@
+// apps/server/src/sourceControl/GitLab/GitLabSourceControlProvider.ts
+// adapts GitLab CLI operations to the source control provider
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import { SourceControlProviderError, type ChangeRequest } from '@t3tools/contracts'
 
 import * as GitLabCli from './GitLabCli.ts'
-import * as SourceControlProvider from './SourceControlProvider.ts'
+import * as SourceControlProvider from '../SourceControlProvider.ts'
 import {
   combinedAuthOutput,
   firstSafeAuthLine,
@@ -14,7 +16,7 @@ import {
   type SourceControlAuthProbeInput,
   type SourceControlCliDiscoverySpec,
   type SourceControlUnknownRemoteRefinementInput,
-} from './SourceControlProviderDiscovery.ts'
+} from '../SourceControlProviderDiscovery.ts'
 import { findAuthenticatedGitLabHost, parseGitLabAuthStatusHosts } from './gitLabAuthStatus.ts'
 
 function toChangeRequest(summary: GitLabCli.GitLabMergeRequestSummary): ChangeRequest

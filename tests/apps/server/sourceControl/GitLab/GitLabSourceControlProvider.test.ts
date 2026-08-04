@@ -1,12 +1,22 @@
+// tests/apps/server/sourceControl/GitLab/GitLabSourceControlProvider.test.ts
+// verifies the GitLab source control provider
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import { ChildProcessSpawner } from 'effect/unstable/process'
 
-import * as GitLabCli from '../../../../apps/server/src/sourceControl/GitLabCli.ts'
-import { parseGitLabAuthStatusHosts } from '../../../../apps/server/src/sourceControl/gitLabAuthStatus.ts'
-import * as GitLabSourceControlProvider from '../../../../apps/server/src/sourceControl/GitLabSourceControlProvider.ts'
+import * as GitLabCli from '../../../../../apps/server/src/sourceControl/GitLab/GitLabCli.ts'
+import { parseGitLabAuthStatusHosts } from '../../../../../apps/server/src/sourceControl/GitLab/gitLabAuthStatus.ts'
+import * as GitLabSourceControlProvider from '../../../../../apps/server/src/sourceControl/GitLab/GitLabSourceControlProvider.ts'
+import {
+  assertForwardsListChangeRequestsInput,
+  assertProviderNeutralChangeRequest,
+  expectedCreateInputWithParsedOwnerRef,
+  standardCrossRepositorySummary,
+  standardListChangeRequestsInput,
+  standardOwnerRefCreateInput,
+} from '../providerNeutralMapTestHelpers.ts'
 
 function makeProvider(gitlab: Partial<GitLabCli.GitLabCli['Service']>)
 {
@@ -18,19 +28,9 @@ function makeProvider(gitlab: Partial<GitLabCli.GitLabCli['Service']>)
 it.effect('maps GitLab MR summaries into provider-neutral change requests', () =>
   Effect.gen(function* ()
   {
+    const summary = standardCrossRepositorySummary('gitlab')
     const provider = yield* makeProvider({
-      getMergeRequest: () =>
-        Effect.succeed({
-          number: 42,
-          title: 'Add GitLab provider',
-          url: 'https://gitlab.com/pingdotgg/t3code/-/merge_requests/42',
-          baseRefName: 'main',
-          headRefName: 'feature/source-control',
-          state: 'open',
-          isCrossRepository: true,
-          headRepositoryNameWithOwner: 'fork/t3code',
-          headRepositoryOwnerLogin: 'fork',
-        }),
+      getMergeRequest: () => Effect.succeed(summary),
     })
 
     const changeRequest = yield* provider.getChangeRequest({
@@ -38,19 +38,7 @@ it.effect('maps GitLab MR summaries into provider-neutral change requests', () =
       reference: '42',
     })
 
-    assert.deepStrictEqual(changeRequest, {
-      provider: 'gitlab',
-      number: 42,
-      title: 'Add GitLab provider',
-      url: 'https://gitlab.com/pingdotgg/t3code/-/merge_requests/42',
-      baseRefName: 'main',
-      headRefName: 'feature/source-control',
-      state: 'open',
-      updatedAt: Option.none(),
-      isCrossRepository: true,
-      headRepositoryNameWithOwner: 'fork/t3code',
-      headRepositoryOwnerLogin: 'fork',
-    })
+    assertProviderNeutralChangeRequest(changeRequest, 'gitlab', summary)
   }),
 )
 
@@ -110,19 +98,9 @@ it.effect('lists GitLab MRs through provider-neutral input names', () =>
       },
     })
 
-    yield* provider.listChangeRequests({
-      cwd: '/repo',
-      headSelector: 'feature/provider',
-      state: 'all',
-      limit: 10,
-    })
+    yield* provider.listChangeRequests(standardListChangeRequestsInput)
 
-    assert.deepStrictEqual(listInput, {
-      cwd: '/repo',
-      headSelector: 'feature/provider',
-      state: 'all',
-      limit: 10,
-    })
+    assertForwardsListChangeRequestsInput(listInput)
   }),
 )
 
@@ -140,24 +118,11 @@ it.effect('creates GitLab MRs through provider-neutral input names', () =>
     })
 
     yield* provider.createChangeRequest({
-      cwd: '/repo',
-      baseRefName: 'main',
-      headSelector: 'owner:feature/provider',
+      ...standardOwnerRefCreateInput,
       title: 'Provider MR',
-      bodyFile: '/tmp/body.md',
     })
 
-    assert.deepStrictEqual(createInput, {
-      cwd: '/repo',
-      baseBranch: 'main',
-      headSelector: 'owner:feature/provider',
-      source: {
-        owner: 'owner',
-        refName: 'feature/provider',
-      },
-      title: 'Provider MR',
-      bodyFile: '/tmp/body.md',
-    })
+    assert.deepStrictEqual(createInput, expectedCreateInputWithParsedOwnerRef('Provider MR'))
   }),
 )
 

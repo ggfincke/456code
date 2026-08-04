@@ -1,3 +1,5 @@
+// apps/server/src/sourceControl/GitHub/GitHubSourceControlProvider.ts
+// adapts GitHub CLI operations to the source control provider
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
@@ -11,14 +13,14 @@ import {
 import * as GitHubCli from './GitHubCli.ts'
 import { findAuthenticatedGitHubAccount, parseGitHubAuthStatus } from './gitHubAuthStatus.ts'
 import { decodeGitHubPullRequestListJson } from './gitHubPullRequests.ts'
-import * as SourceControlProvider from './SourceControlProvider.ts'
+import * as SourceControlProvider from '../SourceControlProvider.ts'
 import {
   combinedAuthOutput,
   firstSafeAuthLine,
   providerAuth,
   type SourceControlAuthProbeInput,
   type SourceControlCliDiscoverySpec,
-} from './SourceControlProviderDiscovery.ts'
+} from '../SourceControlProviderDiscovery.ts'
 
 function toChangeRequest(summary: GitHubCli.GitHubPullRequestSummary): ChangeRequest
 {

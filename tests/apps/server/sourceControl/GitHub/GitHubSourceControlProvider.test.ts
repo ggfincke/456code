@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/GitHub/GitHubSourceControlProvider.test.ts
+// verifies the GitHub source control provider
 import { assert, it } from '@effect/vitest'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
@@ -5,10 +7,14 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import { ChildProcessSpawner } from 'effect/unstable/process'
 
-import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
-import * as GitHubCli from '../../../../apps/server/src/sourceControl/GitHubCli.ts'
-import { parseGitHubAuthStatus } from '../../../../apps/server/src/sourceControl/gitHubAuthStatus.ts'
-import * as GitHubSourceControlProvider from '../../../../apps/server/src/sourceControl/GitHubSourceControlProvider.ts'
+import * as VcsProcess from '../../../../../apps/server/src/vcs/VcsProcess.ts'
+import * as GitHubCli from '../../../../../apps/server/src/sourceControl/GitHub/GitHubCli.ts'
+import { parseGitHubAuthStatus } from '../../../../../apps/server/src/sourceControl/GitHub/gitHubAuthStatus.ts'
+import * as GitHubSourceControlProvider from '../../../../../apps/server/src/sourceControl/GitHub/GitHubSourceControlProvider.ts'
+import {
+  assertProviderNeutralChangeRequest,
+  standardCrossRepositorySummary,
+} from '../providerNeutralMapTestHelpers.ts'
 
 const processResult = (
   stdout: string,
@@ -31,22 +37,45 @@ function makeProvider(github: Partial<GitHubCli.GitHubCli['Service']>)
   )
 }
 
+const githubAuthHostsFixture = {
+  hosts: {
+    'github.com': [
+      {
+        state: 'success',
+        active: true,
+        host: 'github.com',
+        login: 'active-user',
+        tokenSource: 'keyring',
+        gitProtocol: 'ssh',
+      },
+      {
+        state: 'error',
+        active: false,
+        host: 'github.com',
+        login: 'stale-user',
+        tokenSource: 'keyring',
+        gitProtocol: 'ssh',
+      },
+    ],
+    'github.example.test': [
+      {
+        state: 'success',
+        active: false,
+        host: 'github.example.test',
+        login: 'enterprise-user',
+        tokenSource: 'keyring',
+        gitProtocol: 'ssh',
+      },
+    ],
+  },
+} as const
+
 it.effect('maps GitHub PR summaries into provider-neutral change requests', () =>
   Effect.gen(function* ()
   {
+    const summary = standardCrossRepositorySummary('github')
     const provider = yield* makeProvider({
-      getPullRequest: () =>
-        Effect.succeed({
-          number: 42,
-          title: 'Add GitHub provider',
-          url: 'https://github.com/pingdotgg/t3code/pull/42',
-          baseRefName: 'main',
-          headRefName: 'feature/source-control',
-          state: 'open',
-          isCrossRepository: true,
-          headRepositoryNameWithOwner: 'fork/t3code',
-          headRepositoryOwnerLogin: 'fork',
-        }),
+      getPullRequest: () => Effect.succeed(summary),
     })
 
     const changeRequest = yield* provider.getChangeRequest({
@@ -54,19 +83,7 @@ it.effect('maps GitHub PR summaries into provider-neutral change requests', () =
       reference: '42',
     })
 
-    assert.deepStrictEqual(changeRequest, {
-      provider: 'github',
-      number: 42,
-      title: 'Add GitHub provider',
-      url: 'https://github.com/pingdotgg/t3code/pull/42',
-      baseRefName: 'main',
-      headRefName: 'feature/source-control',
-      state: 'open',
-      updatedAt: Option.none(),
-      isCrossRepository: true,
-      headRepositoryNameWithOwner: 'fork/t3code',
-      headRepositoryOwnerLogin: 'fork',
-    })
+    assertProviderNeutralChangeRequest(changeRequest, 'github', summary)
   }),
 )
 
@@ -217,33 +234,8 @@ it.effect('creates GitHub PRs through provider-neutral input names', () =>
 
 it('accepts active authenticated GitHub accounts when another account fails', () =>
 {
-  const auth = GitHubSourceControlProvider.discovery.parseAuth(
-    processResult(
-      JSON.stringify({
-        hosts: {
-          'github.com': [
-            {
-              state: 'success',
-              active: true,
-              host: 'github.com',
-              login: 'active-user',
-              tokenSource: 'keyring',
-              gitProtocol: 'ssh',
-            },
-            {
-              state: 'error',
-              active: false,
-              host: 'github.com',
-              login: 'stale-user',
-              tokenSource: 'keyring',
-              gitProtocol: 'ssh',
-              error: 'The token in keyring is invalid.',
-            },
-          ],
-        },
-      }),
-    ),
-  )
+  const authJson = JSON.stringify(githubAuthHostsFixture)
+  const auth = GitHubSourceControlProvider.discovery.parseAuth(processResult(authJson))
 
   assert.deepStrictEqual(
     {
@@ -257,6 +249,29 @@ it('accepts active authenticated GitHub accounts when another account fails', ()
       host: Option.some('github.com'),
     },
   )
+  assert.deepStrictEqual(parseGitHubAuthStatus(authJson).accounts, [
+    {
+      host: 'github.com',
+      account: 'active-user',
+      authenticated: true,
+      active: true,
+      error: null,
+    },
+    {
+      host: 'github.com',
+      account: 'stale-user',
+      authenticated: false,
+      active: false,
+      error: null,
+    },
+    {
+      host: 'github.example.test',
+      account: 'enterprise-user',
+      authenticated: true,
+      active: false,
+      error: null,
+    },
+  ])
 })
 
 it('parses GitHub auth JSON from stdout when stderr has warnings', () =>
@@ -292,69 +307,6 @@ it('parses GitHub auth JSON from stdout when stderr has warnings', () =>
       account: Option.some('active-user'),
       host: Option.some('github.com'),
     },
-  )
-})
-
-it('parses GitHub auth status accounts by host and active state', () =>
-{
-  assert.deepStrictEqual(
-    parseGitHubAuthStatus(
-      JSON.stringify({
-        hosts: {
-          'github.com': [
-            {
-              state: 'success',
-              active: true,
-              host: 'github.com',
-              login: 'active-user',
-              tokenSource: 'keyring',
-              gitProtocol: 'ssh',
-            },
-            {
-              state: 'error',
-              active: false,
-              host: 'github.com',
-              login: 'stale-user',
-              tokenSource: 'keyring',
-              gitProtocol: 'ssh',
-            },
-          ],
-          'github.example.test': [
-            {
-              state: 'success',
-              active: false,
-              host: 'github.example.test',
-              login: 'enterprise-user',
-              tokenSource: 'keyring',
-              gitProtocol: 'ssh',
-            },
-          ],
-        },
-      }),
-    ).accounts,
-    [
-      {
-        host: 'github.com',
-        account: 'active-user',
-        authenticated: true,
-        active: true,
-        error: null,
-      },
-      {
-        host: 'github.com',
-        account: 'stale-user',
-        authenticated: false,
-        active: false,
-        error: null,
-      },
-      {
-        host: 'github.example.test',
-        account: 'enterprise-user',
-        authenticated: true,
-        active: false,
-        error: null,
-      },
-    ],
   )
 })
 

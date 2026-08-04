@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/Bitbucket/BitbucketApi.test.ts
+// verifies Bitbucket API source control operations
 import { assert, it, vi } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as ConfigProvider from 'effect/ConfigProvider'
@@ -14,10 +16,10 @@ import {
 } from 'effect/unstable/http'
 
 import { GitCommandError } from '@t3tools/contracts'
-import * as BitbucketApi from '../../../../apps/server/src/sourceControl/BitbucketApi.ts'
-import * as GitVcsDriver from '../../../../apps/server/src/vcs/GitVcsDriver.ts'
-import * as VcsDriverRegistry from '../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
-import type * as VcsDriver from '../../../../apps/server/src/vcs/VcsDriver.ts'
+import * as BitbucketApi from '../../../../../apps/server/src/sourceControl/Bitbucket/BitbucketApi.ts'
+import * as GitVcsDriver from '../../../../../apps/server/src/vcs/GitVcsDriver.ts'
+import * as VcsDriverRegistry from '../../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
+import type * as VcsDriver from '../../../../../apps/server/src/vcs/VcsDriver.ts'
 
 const bitbucketPullRequest = {
   id: 42,
@@ -475,7 +477,9 @@ it.effect('creates pull requests using the official REST payload shape', () =>
   return Effect.gen(function* ()
   {
     const fileSystem = yield* FileSystem.FileSystem
-    const bodyFile = yield* fileSystem.makeTempFileScoped({ prefix: 'bitbucket-pr-body-' })
+    const bodyFile = yield* fileSystem.makeTempFileScoped({
+      prefix: 'bitbucket-pr-body-',
+    })
     yield* fileSystem.writeFileString(bodyFile, 'PR body')
 
     const bitbucket = yield* BitbucketApi.BitbucketApi
@@ -743,7 +747,10 @@ it.effect('checks out fork pull requests through an ensured fork remote', () =>
           links: {
             html: { href: 'https://bitbucket.org/octocat/t3code' },
             clone: [
-              { name: 'https', href: 'https://bitbucket.org/octocat/t3code.git' },
+              {
+                name: 'https',
+                href: 'https://bitbucket.org/octocat/t3code.git',
+              },
               { name: 'ssh', href: 'git@bitbucket.org:octocat/t3code.git' },
             ],
           },

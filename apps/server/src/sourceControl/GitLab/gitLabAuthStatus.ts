@@ -1,3 +1,5 @@
+// apps/server/src/sourceControl/GitLab/gitLabAuthStatus.ts
+// parses GitLab CLI authentication status
 const HOST_LINE_PATTERN = /^(?:[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?|\[[a-f0-9:.]+\])(?::\d+)?$/iu
 const LOGGED_IN_PATTERN = /Logged in to .+? as\s+([^\s(]+)/iu
 

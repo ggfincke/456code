@@ -1,3 +1,7 @@
+// apps/server/src/sourceControl/GitHub/GitHubCli.ts
+// provides GitHub CLI operations for source control
+
+// @effect-diagnostics deterministicKeys:off - preserve the existing service identity after this ownership move
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -11,7 +15,7 @@ import {
   type VcsError,
 } from '@t3tools/contracts'
 
-import * as VcsProcess from '../vcs/VcsProcess.ts'
+import * as VcsProcess from '../../vcs/VcsProcess.ts'
 import {
   decodeGitHubPullRequestJson,
   decodeGitHubPullRequestListJson,
@@ -299,12 +303,8 @@ function normalizeRepositoryCloneUrls(
   }
 }
 
-/**
- * `gh repo create` prints the canonical URL of the new repository on stdout
- * (e.g. `https://github.com/owner/repo`). Reading it back here avoids a
- * follow-up `gh repo view`, which can race GitHub's GraphQL eventual
- * consistency window and falsely report the just-created repo as missing.
- */
+// `gh repo create` prints the canonical repository URL on stdout
+// reading it avoids racing GitHub's eventual consistency with `gh repo view`
 function deriveRepositoryCloneUrlsFromCreateOutput(
   stdout: string,
   repository: string,
@@ -332,7 +332,7 @@ function deriveRepositoryCloneUrlsFromCreateOutput(
     }
     catch
     {
-      // Fall through to the input-derived defaults below.
+      // fall through to the input-derived defaults below.
     }
   }
   return {

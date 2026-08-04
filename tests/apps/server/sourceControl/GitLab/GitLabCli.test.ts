@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/GitLab/GitLabCli.test.ts
+// verifies GitLab CLI source control operations
 import { assert, it, afterEach, expect, vi } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -5,8 +7,8 @@ import { ChildProcessSpawner } from 'effect/unstable/process'
 
 import { VcsProcessExitError } from '@t3tools/contracts'
 
-import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
-import * as GitLabCli from '../../../../apps/server/src/sourceControl/GitLabCli.ts'
+import * as VcsProcess from '../../../../../apps/server/src/vcs/VcsProcess.ts'
+import * as GitLabCli from '../../../../../apps/server/src/sourceControl/GitLab/GitLabCli.ts'
 
 const mockedRun = vi.fn<VcsProcess.VcsProcess['Service']['run']>()
 const layer = it.layer(

@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/AzureDevOps/AzureDevOpsCli.test.ts
+// verifies Azure DevOps CLI source control operations
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it, afterEach, describe, expect, vi } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -8,8 +10,8 @@ import * as PlatformError from 'effect/PlatformError'
 import { ChildProcessSpawner } from 'effect/unstable/process'
 import { VcsProcessExitError, VcsProcessSpawnError } from '@t3tools/contracts'
 
-import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
-import * as AzureDevOpsCli from '../../../../apps/server/src/sourceControl/AzureDevOpsCli.ts'
+import * as VcsProcess from '../../../../../apps/server/src/vcs/VcsProcess.ts'
+import * as AzureDevOpsCli from '../../../../../apps/server/src/sourceControl/AzureDevOps/AzureDevOpsCli.ts'
 
 const processOutput = (stdout: string): VcsProcess.VcsProcessOutput => ({
   exitCode: ChildProcessSpawner.ExitCode(0),
