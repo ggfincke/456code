@@ -35,6 +35,7 @@ export interface AcpClientOptions
   readonly maximumRetainedNotifications?: number
   readonly logger?: (event: AcpProtocol.AcpProtocolLogEvent) => Effect.Effect<void, never>
   readonly onIncomingConnectionBytes?: (consumedBytes: number) => void
+  readonly onTermination?: (error: AcpError.AcpError) => Effect.Effect<void, never, never>
 }
 
 type AcpClientRaw = {
@@ -49,224 +50,168 @@ export class AcpClient extends Context.Service<
   {
     readonly raw: AcpClientRaw
     readonly agent: {
-      /**
-       * Initializes the ACP session and negotiates capabilities.
-       * @see https://agentclientprotocol.com/protocol/schema#initialize
-       */
+      // initializes the ACP session and negotiates capabilities.
+      // @see https://agentclientprotocol.com/protocol/schema#initialize
       readonly initialize: (
         payload: AcpSchema.InitializeRequest,
       ) => Effect.Effect<AcpSchema.InitializeResponse, AcpError.AcpError>
-      /**
-       * Performs ACP authentication when the agent requires it.
-       * @see https://agentclientprotocol.com/protocol/schema#authenticate
-       */
+      // performs ACP authentication when the agent requires it.
+      // @see https://agentclientprotocol.com/protocol/schema#authenticate
       readonly authenticate: (
         payload: AcpSchema.AuthenticateRequest,
       ) => Effect.Effect<AcpSchema.AuthenticateResponse, AcpError.AcpError>
-      /**
-       * Logs out the current ACP identity.
-       * @see https://agentclientprotocol.com/protocol/schema#logout
-       */
+      // logs out the current ACP identity.
+      // @see https://agentclientprotocol.com/protocol/schema#logout
       readonly logout: (
         payload: AcpSchema.LogoutRequest,
       ) => Effect.Effect<AcpSchema.LogoutResponse, AcpError.AcpError>
-      /**
-       * Starts a new ACP session.
-       * @see https://agentclientprotocol.com/protocol/schema#session/new
-       */
+      // starts a new ACP session.
+      // @see https://agentclientprotocol.com/protocol/schema#session/new
       readonly createSession: (
         payload: AcpSchema.NewSessionRequest,
       ) => Effect.Effect<AcpSchema.NewSessionResponse, AcpError.AcpError>
-      /**
-       * Loads a previously saved ACP session.
-       * @see https://agentclientprotocol.com/protocol/schema#session/load
-       */
+      // loads a previously saved ACP session.
+      // @see https://agentclientprotocol.com/protocol/schema#session/load
       readonly loadSession: (
         payload: AcpSchema.LoadSessionRequest,
       ) => Effect.Effect<AcpSchema.LoadSessionResponse, AcpError.AcpError>
-      /**
-       * Lists available ACP sessions.
-       * @see https://agentclientprotocol.com/protocol/schema#session/list
-       */
+      // lists available ACP sessions.
+      // @see https://agentclientprotocol.com/protocol/schema#session/list
       readonly listSessions: (
         payload: AcpSchema.ListSessionsRequest,
       ) => Effect.Effect<AcpSchema.ListSessionsResponse, AcpError.AcpError>
-      /**
-       * Forks an ACP session.
-       * @see https://agentclientprotocol.com/protocol/schema#session/fork
-       */
+      // forks an ACP session.
+      // @see https://agentclientprotocol.com/protocol/schema#session/fork
       readonly forkSession: (
         payload: AcpSchema.ForkSessionRequest,
       ) => Effect.Effect<AcpSchema.ForkSessionResponse, AcpError.AcpError>
-      /**
-       * Resumes an ACP session.
-       * @see https://agentclientprotocol.com/protocol/schema#session/resume
-       */
+      // resumes an ACP session.
+      // @see https://agentclientprotocol.com/protocol/schema#session/resume
       readonly resumeSession: (
         payload: AcpSchema.ResumeSessionRequest,
       ) => Effect.Effect<AcpSchema.ResumeSessionResponse, AcpError.AcpError>
-      /**
-       * Closes an ACP session.
-       * @see https://agentclientprotocol.com/protocol/schema#session/close
-       */
+      // closes an ACP session.
+      // @see https://agentclientprotocol.com/protocol/schema#session/close
       readonly closeSession: (
         payload: AcpSchema.CloseSessionRequest,
       ) => Effect.Effect<AcpSchema.CloseSessionResponse, AcpError.AcpError>
-      /**
-       * Selects the active model for a session.
-       * @see https://agentclientprotocol.com/protocol/schema#session/set_model
-       */
+      // selects the active model for a session.
+      // @see https://agentclientprotocol.com/protocol/schema#session/set_model
       readonly setSessionModel: (
         payload: AcpSchema.SetSessionModelRequest,
       ) => Effect.Effect<AcpSchema.SetSessionModelResponse, AcpError.AcpError>
-      /**
-       * Updates a session configuration option.
-       * @see https://agentclientprotocol.com/protocol/schema#session/set_config_option
-       */
+      // updates a session configuration option.
+      // @see https://agentclientprotocol.com/protocol/schema#session/set_config_option
       readonly setSessionConfigOption: (
         payload: AcpSchema.SetSessionConfigOptionRequest,
       ) => Effect.Effect<AcpSchema.SetSessionConfigOptionResponse, AcpError.AcpError>
-      /**
-       * Sends a prompt turn to the agent.
-       * @see https://agentclientprotocol.com/protocol/schema#session/prompt
-       */
+      // sends a prompt turn to the agent.
+      // @see https://agentclientprotocol.com/protocol/schema#session/prompt
       readonly prompt: (
         payload: AcpSchema.PromptRequest,
       ) => Effect.Effect<AcpSchema.PromptResponse, AcpError.AcpError>
-      /**
-       * Sends a real ACP `session/cancel` notification.
-       * @see https://agentclientprotocol.com/protocol/schema#session/cancel
-       */
+      // sends a real ACP `session/cancel` notification.
+      // @see https://agentclientprotocol.com/protocol/schema#session/cancel
       readonly cancel: (
         payload: AcpSchema.CancelNotification,
       ) => Effect.Effect<void, AcpError.AcpError>
     }
-    /**
-     * Registers a handler for `session/request_permission`.
-     * @see https://agentclientprotocol.com/protocol/schema#session/request_permission
-     */
+    // registers a handler for `session/request_permission`.
+    // @see https://agentclientprotocol.com/protocol/schema#session/request_permission
     readonly handleRequestPermission: (
       handler: (
         request: AcpSchema.RequestPermissionRequest,
       ) => Effect.Effect<AcpSchema.RequestPermissionResponse, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `session/elicitation`.
-     * @see https://agentclientprotocol.com/protocol/schema#session/elicitation
-     */
+    // registers a handler for `session/elicitation`.
+    // @see https://agentclientprotocol.com/protocol/schema#session/elicitation
     readonly handleElicitation: (
       handler: (
         request: AcpSchema.ElicitationRequest,
       ) => Effect.Effect<AcpSchema.ElicitationResponse, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `fs/read_text_file`.
-     * @see https://agentclientprotocol.com/protocol/schema#fs/read_text_file
-     */
+    // registers a handler for `fs/read_text_file`.
+    // @see https://agentclientprotocol.com/protocol/schema#fs/read_text_file
     readonly handleReadTextFile: (
       handler: (
         request: AcpSchema.ReadTextFileRequest,
       ) => Effect.Effect<AcpSchema.ReadTextFileResponse, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `fs/write_text_file`.
-     * @see https://agentclientprotocol.com/protocol/schema#fs/write_text_file
-     */
+    // registers a handler for `fs/write_text_file`.
+    // @see https://agentclientprotocol.com/protocol/schema#fs/write_text_file
     readonly handleWriteTextFile: (
       handler: (
         request: AcpSchema.WriteTextFileRequest,
       ) => Effect.Effect<AcpSchema.WriteTextFileResponse | void, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `terminal/create`.
-     * @see https://agentclientprotocol.com/protocol/schema#terminal/create
-     */
+    // registers a handler for `terminal/create`.
+    // @see https://agentclientprotocol.com/protocol/schema#terminal/create
     readonly handleCreateTerminal: (
       handler: (
         request: AcpSchema.CreateTerminalRequest,
       ) => Effect.Effect<AcpSchema.CreateTerminalResponse, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `terminal/output`.
-     * @see https://agentclientprotocol.com/protocol/schema#terminal/output
-     */
+    // registers a handler for `terminal/output`.
+    // @see https://agentclientprotocol.com/protocol/schema#terminal/output
     readonly handleTerminalOutput: (
       handler: (
         request: AcpSchema.TerminalOutputRequest,
       ) => Effect.Effect<AcpSchema.TerminalOutputResponse, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `terminal/wait_for_exit`.
-     * @see https://agentclientprotocol.com/protocol/schema#terminal/wait_for_exit
-     */
+    // registers a handler for `terminal/wait_for_exit`.
+    // @see https://agentclientprotocol.com/protocol/schema#terminal/wait_for_exit
     readonly handleTerminalWaitForExit: (
       handler: (
         request: AcpSchema.WaitForTerminalExitRequest,
       ) => Effect.Effect<AcpSchema.WaitForTerminalExitResponse, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `terminal/kill`.
-     * @see https://agentclientprotocol.com/protocol/schema#terminal/kill
-     */
+    // registers a handler for `terminal/kill`.
+    // @see https://agentclientprotocol.com/protocol/schema#terminal/kill
     readonly handleTerminalKill: (
       handler: (
         request: AcpSchema.KillTerminalRequest,
       ) => Effect.Effect<AcpSchema.KillTerminalResponse | void, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `terminal/release`.
-     * @see https://agentclientprotocol.com/protocol/schema#terminal/release
-     */
+    // registers a handler for `terminal/release`.
+    // @see https://agentclientprotocol.com/protocol/schema#terminal/release
     readonly handleTerminalRelease: (
       handler: (
         request: AcpSchema.ReleaseTerminalRequest,
       ) => Effect.Effect<AcpSchema.ReleaseTerminalResponse | void, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `session/update`.
-     * @see https://agentclientprotocol.com/protocol/schema#session/update
-     */
+    // registers a handler for `session/update`.
+    // @see https://agentclientprotocol.com/protocol/schema#session/update
     readonly handleSessionUpdate: (
       handler: (
         notification: AcpSchema.SessionNotification,
       ) => Effect.Effect<void, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a handler for `session/elicitation/complete`.
-     * @see https://agentclientprotocol.com/protocol/schema#session/elicitation/complete
-     */
+    // registers a handler for `session/elicitation/complete`.
+    // @see https://agentclientprotocol.com/protocol/schema#session/elicitation/complete
     readonly handleElicitationComplete: (
       handler: (
         notification: AcpSchema.ElicitationCompleteNotification,
       ) => Effect.Effect<void, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a fallback extension request handler.
-     * @see https://agentclientprotocol.com/protocol/extensibility
-     */
+    // registers a fallback extension request handler.
+    // @see https://agentclientprotocol.com/protocol/extensibility
     readonly handleUnknownExtRequest: (
       handler: (method: string, params: unknown) => Effect.Effect<unknown, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a fallback extension notification handler.
-     * @see https://agentclientprotocol.com/protocol/extensibility
-     */
+    // registers a fallback extension notification handler.
+    // @see https://agentclientprotocol.com/protocol/extensibility
     readonly handleUnknownExtNotification: (
       handler: (method: string, params: unknown) => Effect.Effect<void, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a typed extension request handler.
-     * @see https://agentclientprotocol.com/protocol/extensibility
-     */
+    // registers a typed extension request handler.
+    // @see https://agentclientprotocol.com/protocol/extensibility
     readonly handleExtRequest: <A, I>(
       method: string,
       payload: Schema.Codec<A, I>,
       handler: (payload: A) => Effect.Effect<unknown, AcpError.AcpError>,
     ) => Effect.Effect<void>
-    /**
-     * Registers a typed extension notification handler.
-     * @see https://agentclientprotocol.com/protocol/extensibility
-     */
+    // registers a typed extension notification handler.
+    // @see https://agentclientprotocol.com/protocol/extensibility
     readonly handleExtNotification: <A, I>(
       method: string,
       payload: Schema.Codec<A, I>,
@@ -462,6 +407,7 @@ export const make = Effect.fn('effect-acp/AcpClient.make')(function* (
     ...(options.onIncomingConnectionBytes
       ? { onIncomingConnectionBytes: options.onIncomingConnectionBytes }
       : {}),
+    ...(options.onTermination ? { onTermination: options.onTermination } : {}),
     onNotification: dispatchNotification,
     onExtRequest: dispatchExtRequest,
   })

@@ -8,10 +8,13 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
+import * as PlatformError from 'effect/PlatformError'
 import * as Queue from 'effect/Queue'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
+import * as Sink from 'effect/Sink'
 import * as Scope from 'effect/Scope'
+import * as Stdio from 'effect/Stdio'
 import * as Stream from 'effect/Stream'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 
@@ -94,6 +97,145 @@ it.layer(NodeServices.layer)('effect-acp client', (it) =>
       return yield* spawner.spawn(command)
     })
 
+  const terminationRecorder = Effect.gen(function* ()
+  {
+    const errors = yield* Ref.make<Array<AcpError.AcpError>>([])
+    const observed = yield* Deferred.make<void>()
+    return {
+      errors,
+      observed,
+      onTermination: (error: AcpError.AcpError) =>
+        Ref.update(errors, (current) => [...current, error]).pipe(
+          Effect.andThen(Deferred.succeed(observed, undefined)),
+          Effect.asVoid,
+        ),
+    }
+  })
+
+  const registerDefaultPermissionHandlers = (acp: AcpClient.AcpClient['Service']) =>
+    Effect.gen(function* ()
+    {
+      yield* acp.handleRequestPermission(() =>
+        Effect.succeed({
+          outcome: {
+            outcome: 'selected',
+            optionId: 'allow',
+          },
+        }),
+      )
+      yield* acp.handleElicitation(() =>
+        Effect.succeed({
+          action: {
+            action: 'accept',
+            content: {
+              approved: true,
+            },
+          },
+        }),
+      )
+    })
+
+  const initializeAuthenticatedSession = (acp: AcpClient.AcpClient['Service']) =>
+    Effect.gen(function* ()
+    {
+      yield* acp.agent.initialize({
+        protocolVersion: 1,
+        clientCapabilities: {
+          fs: { readTextFile: false, writeTextFile: false },
+          terminal: false,
+        },
+        clientInfo: {
+          name: 'effect-acp-test',
+          version: '0.0.0',
+        },
+      })
+      yield* acp.agent.authenticate({ methodId: 'cursor_login' })
+      return yield* acp.agent.createSession({
+        cwd: process.cwd(),
+        mcpServers: [],
+      })
+    })
+
+  it.effect('forwards input EOF termination exactly once', () =>
+    Effect.gen(function* ()
+    {
+      const { stdio, input } = yield* makeInMemoryStdio()
+      const recorder = yield* terminationRecorder
+      const scope = yield* Scope.make()
+      yield* AcpClient.make(stdio, { onTermination: recorder.onTermination }).pipe(
+        Effect.provideService(Scope.Scope, scope),
+      )
+
+      yield* Queue.end(input)
+      yield* Deferred.await(recorder.observed)
+      yield* Effect.yieldNow
+
+      const errors = yield* Ref.get(recorder.errors)
+      assert.equal(errors.length, 1)
+      assert.equal(errors[0]?._tag, 'AcpInputStreamEndedError')
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.effect('forwards child exit termination exactly once', () =>
+    Effect.gen(function* ()
+    {
+      const recorder = yield* terminationRecorder
+      const handle = yield* makeHandle({ ACP_MOCK_EXIT_IMMEDIATELY_CODE: '7' })
+      const scope = yield* Scope.make()
+      yield* Layer.buildWithScope(
+        AcpClient.layerChildProcess(handle, {
+          onTermination: recorder.onTermination,
+        }),
+        scope,
+      )
+
+      yield* Deferred.await(recorder.observed)
+      yield* Effect.yieldNow
+
+      const errors = yield* Ref.get(recorder.errors)
+      assert.equal(errors.length, 1)
+      assert.equal(errors[0]?._tag, 'AcpProcessExitedError')
+      if (errors[0]?._tag === 'AcpProcessExitedError')
+      {
+        assert.equal(errors[0].code, 7)
+      }
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
+  it.effect('forwards transport termination exactly once', () =>
+    Effect.gen(function* ()
+    {
+      const recorder = yield* terminationRecorder
+      const scope = yield* Scope.make()
+      const stdio = Stdio.make({
+        args: Effect.succeed([]),
+        stdin: Stream.fail(
+          PlatformError.systemError({
+            module: 'Stdio',
+            method: 'stdin',
+            _tag: 'Unknown',
+            cause: new Error('transport failed'),
+          }),
+        ),
+        stdout: () => Sink.drain,
+        stderr: () => Sink.drain,
+      })
+      yield* AcpClient.make(stdio, { onTermination: recorder.onTermination }).pipe(
+        Effect.provideService(Scope.Scope, scope),
+      )
+
+      yield* Deferred.await(recorder.observed)
+      yield* Effect.yieldNow
+
+      const errors = yield* Ref.get(recorder.errors)
+      assert.equal(errors.length, 1)
+      assert.equal(errors[0]?._tag, 'AcpTransportError')
+      yield* Scope.close(scope, Exit.void)
+    }),
+  )
+
   it.effect('initializes, prompts, receives updates, and handles permission requests', () =>
     Effect.gen(function* ()
     {
@@ -110,24 +252,7 @@ it.layer(NodeServices.layer)('effect-acp client', (it) =>
       {
         const acp = yield* AcpClient.AcpClient
 
-        yield* acp.handleRequestPermission(() =>
-          Effect.succeed({
-            outcome: {
-              outcome: 'selected',
-              optionId: 'allow',
-            },
-          }),
-        )
-        yield* acp.handleElicitation(() =>
-          Effect.succeed({
-            action: {
-              action: 'accept',
-              content: {
-                approved: true,
-              },
-            },
-          }),
-        )
+        yield* registerDefaultPermissionHandlers(acp)
         yield* acp.handleSessionUpdate((notification) =>
           Ref.update(updates, (current) => [...current, notification]),
         )
@@ -151,25 +276,7 @@ it.layer(NodeServices.layer)('effect-acp client', (it) =>
           (payload) => Ref.update(typedNotifications, (current) => [...current, payload]),
         )
 
-        const init = yield* acp.agent.initialize({
-          protocolVersion: 1,
-          clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            terminal: false,
-          },
-          clientInfo: {
-            name: 'effect-acp-test',
-            version: '0.0.0',
-          },
-        })
-        assert.equal(init.protocolVersion, 1)
-
-        yield* acp.agent.authenticate({ methodId: 'cursor_login' })
-
-        const session = yield* acp.agent.createSession({
-          cwd: process.cwd(),
-          mcpServers: [],
-        })
+        const session = yield* initializeAuthenticatedSession(acp)
         assert.equal(session.sessionId, 'mock-session-1')
 
         const prompt = yield* acp.agent.prompt({
@@ -215,48 +322,14 @@ it.layer(NodeServices.layer)('effect-acp client', (it) =>
         {
           const acp = yield* AcpClient.AcpClient
 
-          yield* acp.handleRequestPermission(() =>
-            Effect.succeed({
-              outcome: {
-                outcome: 'selected',
-                optionId: 'allow',
-              },
-            }),
-          )
-          yield* acp.handleElicitation(() =>
-            Effect.succeed({
-              action: {
-                action: 'accept',
-                content: {
-                  approved: true,
-                },
-              },
-            }),
-          )
+          yield* registerDefaultPermissionHandlers(acp)
           yield* acp.handleExtRequest(
             'x/typed_request',
             Schema.Struct({ message: Schema.String }),
             () => Effect.succeed({ ok: true }),
           )
 
-          yield* acp.agent.initialize({
-            protocolVersion: 1,
-            clientCapabilities: {
-              fs: { readTextFile: false, writeTextFile: false },
-              terminal: false,
-            },
-            clientInfo: {
-              name: 'effect-acp-test',
-              version: '0.0.0',
-            },
-          })
-
-          yield* acp.agent.authenticate({ methodId: 'cursor_login' })
-
-          const session = yield* acp.agent.createSession({
-            cwd: process.cwd(),
-            mcpServers: [],
-          })
+          const session = yield* initializeAuthenticatedSession(acp)
 
           return yield* Effect.exit(
             acp.agent.prompt({
@@ -292,24 +365,7 @@ it.layer(NodeServices.layer)('effect-acp client', (it) =>
       {
         const acp = yield* AcpClient.AcpClient
 
-        yield* acp.handleRequestPermission(() =>
-          Effect.succeed({
-            outcome: {
-              outcome: 'selected',
-              optionId: 'allow',
-            },
-          }),
-        )
-        yield* acp.handleElicitation(() =>
-          Effect.succeed({
-            action: {
-              action: 'accept',
-              content: {
-                approved: true,
-              },
-            },
-          }),
-        )
+        yield* registerDefaultPermissionHandlers(acp)
         yield* acp.handleExtRequest(
           'x/typed_request',
           Schema.Struct({ message: Schema.String }),
@@ -327,23 +383,7 @@ it.layer(NodeServices.layer)('effect-acp client', (it) =>
           (payload) => Ref.update(typedNotifications, (current) => [...current, payload]),
         )
 
-        yield* acp.agent.initialize({
-          protocolVersion: 1,
-          clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            terminal: false,
-          },
-          clientInfo: {
-            name: 'effect-acp-test',
-            version: '0.0.0',
-          },
-        })
-        yield* acp.agent.authenticate({ methodId: 'cursor_login' })
-
-        const session = yield* acp.agent.createSession({
-          cwd: process.cwd(),
-          mcpServers: [],
-        })
+        const session = yield* initializeAuthenticatedSession(acp)
         yield* acp.agent.prompt({
           sessionId: session.sessionId,
           prompt: [{ type: 'text', text: 'hello' }],
@@ -431,24 +471,7 @@ it.layer(NodeServices.layer)('effect-acp client', (it) =>
       {
         const acp = yield* AcpClient.AcpClient
 
-        yield* acp.handleRequestPermission(() =>
-          Effect.succeed({
-            outcome: {
-              outcome: 'selected',
-              optionId: 'allow',
-            },
-          }),
-        )
-        yield* acp.handleElicitation(() =>
-          Effect.succeed({
-            action: {
-              action: 'accept',
-              content: {
-                approved: true,
-              },
-            },
-          }),
-        )
+        yield* registerDefaultPermissionHandlers(acp)
         yield* acp.handleExtRequest(
           'x/typed_request',
           Schema.Struct({ message: Schema.String }),
@@ -464,23 +487,7 @@ it.layer(NodeServices.layer)('effect-acp client', (it) =>
         )
         yield* acp.handleSessionUpdate(() => Ref.update(successfulHandlers, (count) => count + 1))
 
-        yield* acp.agent.initialize({
-          protocolVersion: 1,
-          clientCapabilities: {
-            fs: { readTextFile: false, writeTextFile: false },
-            terminal: false,
-          },
-          clientInfo: {
-            name: 'effect-acp-test',
-            version: '0.0.0',
-          },
-        })
-        yield* acp.agent.authenticate({ methodId: 'cursor_login' })
-
-        const session = yield* acp.agent.createSession({
-          cwd: process.cwd(),
-          mcpServers: [],
-        })
+        const session = yield* initializeAuthenticatedSession(acp)
         yield* acp.agent.prompt({
           sessionId: session.sessionId,
           prompt: [{ type: 'text', text: 'hello' }],

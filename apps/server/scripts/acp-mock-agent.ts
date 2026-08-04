@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// apps/server/scripts/acp-mock-agent.ts
+// provides deterministic ACP behavior and fault injection for server tests
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 
@@ -38,6 +41,10 @@ const emitOverlappingXAiPromptCompleteOutOfOrder =
 const failPrompt = process.env.T3_ACP_FAIL_PROMPT === '1'
 const failSetConfigOption = process.env.T3_ACP_FAIL_SET_CONFIG_OPTION === '1'
 const exitOnSetConfigOption = process.env.T3_ACP_EXIT_ON_SET_CONFIG_OPTION === '1'
+const exitDuringPromptCode = Number(process.env.T3_ACP_EXIT_DURING_PROMPT_CODE)
+const exitDuringPromptDelayMs = Number(process.env.T3_ACP_EXIT_DURING_PROMPT_DELAY_MS ?? '0')
+const malformedStdoutDuringPrompt = process.env.T3_ACP_MALFORMED_STDOUT_DURING_PROMPT === '1'
+const closeStdoutDuringPrompt = process.env.T3_ACP_CLOSE_STDOUT_DURING_PROMPT === '1'
 const promptResponseText = process.env.T3_ACP_PROMPT_RESPONSE_TEXT
 const promptDelayMs = Number(process.env.T3_ACP_PROMPT_DELAY_MS ?? '0')
 const permissionOptionIds = {
@@ -496,6 +503,39 @@ const program = Effect.gen(function* ()
     {
       const requestedSessionId = String(request.sessionId ?? sessionId)
       promptCount += 1
+
+      if (process.env.T3_ACP_EXIT_DURING_PROMPT_CODE !== undefined)
+      {
+        const exitCode = Number.isInteger(exitDuringPromptCode) ? exitDuringPromptCode : 1
+        if (Number.isFinite(exitDuringPromptDelayMs) && exitDuringPromptDelayMs > 0)
+        {
+          yield* Effect.sleep(`${exitDuringPromptDelayMs} millis`).pipe(
+            Effect.andThen(Effect.sync(() => process.exit(exitCode))),
+            Effect.forkChild,
+          )
+        }
+        else
+        {
+          return yield* Effect.sync(() => process.exit(exitCode)).pipe(Effect.andThen(Effect.never))
+        }
+      }
+
+      if (malformedStdoutDuringPrompt)
+      {
+        yield* Effect.sync(() => process.stdout.write('{malformed-json\n'))
+        return yield* Effect.never
+      }
+
+      if (closeStdoutDuringPrompt)
+      {
+        yield* Effect.sync(() =>
+          process.stdout.end(() =>
+          {
+            process.exit(0)
+          }),
+        )
+        return yield* Effect.never
+      }
 
       if (Number.isFinite(promptDelayMs) && promptDelayMs > 0)
       {

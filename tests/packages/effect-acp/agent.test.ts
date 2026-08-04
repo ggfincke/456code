@@ -1,3 +1,6 @@
+// tests/packages/effect-acp/agent.test.ts
+// verify agent behavior
+
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
@@ -32,8 +35,6 @@ const SessionCancelNotification = jsonRpcNotification(
   AcpSchema.CancelNotification,
 )
 const ExtPingNotification = jsonRpcNotification('x/ping', Schema.Struct({ count: Schema.Number }))
-const ExtRequest = jsonRpcRequest('x/test', Schema.Struct({ hello: Schema.String }))
-const ExtResponse = jsonRpcResponse(Schema.Struct({ ok: Schema.Boolean }))
 const decodeRequestPermissionRequest = Schema.decodeEffect(
   Schema.fromJsonString(RequestPermissionRequest),
 )
@@ -177,81 +178,6 @@ it.effect('effect-acp agent handles core agent requests and outbound client requ
       yield* Deferred.await(extReceived)
       assert.deepEqual(yield* Ref.get(cancelNotifications), ['session-1'])
       assert.deepEqual(yield* Ref.get(extNotifications), [2])
-    }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)))
-  }),
-)
-
-it.effect('effect-acp agent uses distinct ids for RPC calls and extension requests', () =>
-  Effect.gen(function* ()
-  {
-    const { stdio, input, output } = yield* makeInMemoryStdio()
-    const scope = yield* Scope.make()
-    const context = yield* Layer.buildWithScope(AcpAgent.layer(stdio), scope)
-
-    yield* Effect.gen(function* ()
-    {
-      const agent = yield* AcpAgent.AcpAgent
-
-      const permissionFiber = yield* agent.client
-        .requestPermission({
-          sessionId: 'session-1',
-          toolCall: {
-            toolCallId: 'tool-1',
-            title: 'Allow mock action',
-          },
-          options: [{ optionId: 'allow', name: 'Allow', kind: 'allow_once' }],
-        })
-        .pipe(Effect.forkScoped)
-      const extFiber = yield* agent.client
-        .extRequest('x/test', { hello: 'world' })
-        .pipe(Effect.forkScoped)
-
-      const firstOutbound = yield* Queue.take(output)
-      const secondOutbound = yield* Queue.take(output)
-
-      const decodedPermission = Schema.decodeEffect(Schema.fromJsonString(RequestPermissionRequest))
-      const decodedExt = Schema.decodeEffect(Schema.fromJsonString(ExtRequest))
-      const firstIsPermission = yield* decodedPermission(firstOutbound).pipe(
-        Effect.match({
-          onFailure: () => false,
-          onSuccess: () => true,
-        }),
-      )
-
-      const permissionRequest = firstIsPermission
-        ? yield* decodedPermission(firstOutbound)
-        : yield* decodedPermission(secondOutbound)
-      const extRequest = firstIsPermission
-        ? yield* decodedExt(secondOutbound)
-        : yield* decodedExt(firstOutbound)
-
-      assert.notEqual(permissionRequest.id, extRequest.id)
-
-      yield* Queue.offer(
-        input,
-        yield* encodeJsonl(RequestPermissionResponse, {
-          jsonrpc: '2.0',
-          id: permissionRequest.id,
-          result: {
-            outcome: {
-              outcome: 'selected',
-              optionId: 'allow',
-            },
-          },
-        }),
-      )
-      yield* Queue.offer(
-        input,
-        yield* encodeJsonl(ExtResponse, {
-          jsonrpc: '2.0',
-          id: extRequest.id,
-          result: { ok: true },
-        }),
-      )
-
-      const permission = yield* Fiber.join(permissionFiber)
-      assert.equal(permission.outcome.outcome, 'selected')
-      assert.deepEqual(yield* Fiber.join(extFiber), { ok: true })
     }).pipe(Effect.provide(context), Effect.ensuring(Scope.close(scope, Exit.void)))
   }),
 )

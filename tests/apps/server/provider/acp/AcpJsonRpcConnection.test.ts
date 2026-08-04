@@ -1,5 +1,6 @@
 // tests/apps/server/provider/acp/AcpJsonRpcConnection.test.ts
 // verifies scoped ACP JSON-RPC session lifecycle and replay handling
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from 'node:path'
 import * as NodeOS from 'node:os'
@@ -727,4 +728,57 @@ describe('AcpSessionRuntime', () =>
       Effect.ensuring(Effect.sync(() => NodeFS.rmSync(tempDir, { recursive: true, force: true }))),
     )
   })
+
+  const terminationFaultCases = [
+    {
+      name: 'process exit',
+      env: { T3_ACP_EXIT_DURING_PROMPT_CODE: '9' },
+      expectedTag: 'AcpProcessExitedError',
+    },
+    {
+      name: 'malformed stdout',
+      env: { T3_ACP_MALFORMED_STDOUT_DURING_PROMPT: '1' },
+      expectedTag: 'AcpProtocolParseError',
+    },
+    {
+      name: 'stdout closure',
+      env: { T3_ACP_CLOSE_STDOUT_DURING_PROMPT: '1' },
+      expectedTag: 'AcpProcessExitedError',
+    },
+  ] as const
+
+  for (const faultCase of terminationFaultCases)
+  {
+    it.effect(`emits exactly one termination fact for ${faultCase.name}`, () =>
+      Effect.gen(function* ()
+      {
+        const runtime = yield* AcpSessionRuntime.AcpSessionRuntime
+        yield* runtime.start()
+        yield* runtime
+          .prompt({ prompt: [{ type: 'text', text: 'trigger fault' }] })
+          .pipe(Effect.ignore, Effect.forkChild)
+
+        const facts = Array.from(
+          yield* Stream.runCollect(Stream.take(runtime.getTerminationEvents(), 1)),
+        )
+        expect(facts).toHaveLength(1)
+        expect(facts[0]?._tag).toBe(faultCase.expectedTag)
+      }).pipe(
+        Effect.provide(
+          AcpSessionRuntime.layer({
+            authMethodId: 'test',
+            spawn: {
+              command: mockAgentCommand,
+              args: mockAgentArgs,
+              env: faultCase.env,
+            },
+            cwd: process.cwd(),
+            clientInfo: { name: 't3-test', version: '0.0.0' },
+          }),
+        ),
+        Effect.scoped,
+        Effect.provide(NodeServices.layer),
+      ),
+    )
+  }
 })
