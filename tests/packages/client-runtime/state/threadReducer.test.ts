@@ -842,8 +842,62 @@ describe('applyThreadDetailEvent', () =>
     })
   })
 
-  describe('no-op events', () =>
+  describe('approval response events', () =>
   {
+    it('upserts approval outcomes from response-requested events without duplicates', () =>
+    {
+      const respondingEvent = {
+        ...baseEventFields,
+        sequence: 15,
+        occurredAt: '2026-04-01T13:00:00.000Z',
+        aggregateKind: 'thread' as const,
+        aggregateId: ThreadId.make('thread-1'),
+        type: 'thread.approval-response-requested' as const,
+        payload: {
+          threadId: ThreadId.make('thread-1'),
+          requestId: ApprovalRequestId.make('req-1'),
+          decision: 'accept' as const,
+          createdAt: '2026-04-01T13:00:00.000Z',
+          approvalOutcome: {
+            requestId: ApprovalRequestId.make('req-1'),
+            status: 'responding' as const,
+            requestedDecision: 'accept' as const,
+            decision: null,
+            actionId: 'action-1',
+            updatedAt: '2026-04-01T13:00:00.000Z',
+          },
+        },
+      }
+      const first = applyThreadDetailEvent(baseThread, respondingEvent)
+
+      expect(first.kind).toBe('updated')
+      if (first.kind !== 'updated') return
+      expect(first.thread.approvalOutcomes).toEqual([respondingEvent.payload.approvalOutcome])
+
+      const unknownEvent = {
+        ...respondingEvent,
+        sequence: 16,
+        occurredAt: '2026-04-01T13:00:01.000Z',
+        payload: {
+          ...respondingEvent.payload,
+          approvalOutcome: {
+            ...respondingEvent.payload.approvalOutcome,
+            status: 'unknown' as const,
+            detail: 'Delivery is ambiguous.',
+            updatedAt: '2026-04-01T13:00:01.000Z',
+          },
+        },
+      }
+      const second = applyThreadDetailEvent(first.thread, unknownEvent)
+
+      expect(second.kind).toBe('updated')
+      if (second.kind === 'updated')
+      {
+        expect(second.thread.approvalOutcomes).toEqual([unknownEvent.payload.approvalOutcome])
+        expect(second.thread.activities).toBe(first.thread.activities)
+      }
+    })
+
     it('returns unchanged for approval-response-requested', () =>
     {
       const result = applyThreadDetailEvent(baseThread, {

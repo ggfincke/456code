@@ -388,7 +388,12 @@ describe('environment entity projections', () =>
     const messages = harness.registry.get(messagesAtom)
     const activities = harness.registry.get(activitiesAtom)
 
-    expect(scopedDetail).toEqual({ ...detail, environmentId: ENVIRONMENT_ID })
+    // threadDetail normalizes an absent approvalOutcomes to an empty list
+    expect(scopedDetail).toEqual({
+      ...detail,
+      environmentId: ENVIRONMENT_ID,
+      approvalOutcomes: [],
+    })
     expect(harness.registry.get(statusAtom)).toBe('live')
     expect(harness.registry.get(otherThreadDetailAtom)).toBe(otherValue)
 

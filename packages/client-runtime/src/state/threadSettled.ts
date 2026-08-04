@@ -1,8 +1,23 @@
+// packages/client-runtime/src/state/threadSettled.ts
+// manage change request state like state
+
 import type { OrchestrationThreadShell } from '@t3tools/contracts'
+import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
 
 export type ChangeRequestStateLike = 'open' | 'closed' | 'merged'
 
 const DAY_MS = 24 * 60 * 60 * 1_000
+
+export function hasBlockingApprovalOutcome(
+  shell: Pick<OrchestrationThreadShell, 'approvalOutcomes'>,
+): boolean
+{
+  return Boolean(
+    shell.approvalOutcomes?.some(
+      (outcome) => !classifyApprovalFailure({ approvalOutcome: outcome }).clearsBlockingRequest,
+    ),
+  )
+}
 
 export function threadLastActivityAt(shell: OrchestrationThreadShell): string | null
 {
@@ -72,58 +87,64 @@ export function hasQueuedTurnStart(
   )
 }
 
-/**
- * A thread may be settled only when none of effectiveSettled's activity
- * blockers hold. This is deliberately the same list: anything the partition
- * refuses to CLASSIFY as settled must also be refused as a settle TARGET.
- * The server enforces its own invariants; this client-side twin exists so
- * the UI can disable/reject before a round trip.
- */
+// a thread may be settled only when none of effectiveSettled's activity
+// blockers hold. This is deliberately the same list: anything the partition
+// refuses to CLASSIFY as settled must also be refused as a settle TARGET.
+// the server enforces its own invariants; this client-side twin exists so
+// the UI can disable/reject before a round trip.
 export function canSettle(
   shell: Pick<
     OrchestrationThreadShell,
-    'hasPendingApprovals' | 'hasPendingUserInput' | 'session' | 'latestUserMessageAt' | 'latestTurn'
+    | 'approvalOutcomes'
+    | 'hasPendingApprovals'
+    | 'hasPendingUserInput'
+    | 'session'
+    | 'latestUserMessageAt'
+    | 'latestTurn'
   >,
   options: { readonly now: string },
 ): boolean
 {
-  if (shell.hasPendingApprovals || shell.hasPendingUserInput) return false
+  if (shell.hasPendingApprovals || hasBlockingApprovalOutcome(shell) || shell.hasPendingUserInput)
+  {
+    return false
+  }
   if (shell.session?.status === 'starting' || shell.session?.status === 'running') return false
-  // Queued work is as blocked-on-progress as a live session: settling it
+  // queued work is as blocked-on-progress as a live session: settling it
   // (or auto-settling it on a closed PR) would hide a just-requested turn.
   if (hasQueuedTurnStart(shell, options)) return false
   return true
 }
 
-/**
- * The snooze lifecycle fields plus everything needed to detect a raised
- * hand. Snooze is an overlay on the active state: a snoozed thread stays
- * "active" in the data model and is only suppressed from the inbox until
- * its wake time passes or the thread demands attention.
- */
+// the snooze lifecycle fields plus everything needed to detect a raised
+// hand. Snooze is an overlay on the active state: a snoozed thread stays
+// "active" in the data model and is only suppressed from the inbox until
+// its wake time passes or the thread demands attention.
 export type ThreadSnoozeShell = Pick<
   OrchestrationThreadShell,
   | 'snoozedUntil'
   | 'snoozedAt'
+  | 'approvalOutcomes'
   | 'hasPendingApprovals'
   | 'hasPendingUserInput'
   | 'session'
   | 'latestTurn'
 >
 
-/**
- * A snoozed thread "raises its hand" when something happens that outranks
- * the user's snooze: the agent is blocked on them (approval / user input),
- * the session failed, or a run completed after the snooze was set — the
- * v1 taste of event-based snooze ("something happened" wakes early).
- * Raising a hand never clears the server-side snooze fields; it only stops
- * the thread from CLASSIFYING as snoozed, exactly like blocked work and
- * effectiveSettled.
- */
+// a snoozed thread "raises its hand" when something happens that outranks
+// the user's snooze: the agent is blocked on them (approval / user input),
+// the session failed, or a run completed after the snooze was set — the
+// v1 taste of event-based snooze ("something happened" wakes early).
+// raising a hand never clears the server-side snooze fields; it only stops
+// the thread from CLASSIFYING as snoozed, exactly like blocked work and
+// effectiveSettled.
 export function threadRaisedHandWhileSnoozed(shell: ThreadSnoozeShell): boolean
 {
-  if (shell.hasPendingApprovals || shell.hasPendingUserInput) return true
-  // Only a FRESH failure raises the hand: a thread snoozed while already
+  if (shell.hasPendingApprovals || hasBlockingApprovalOutcome(shell) || shell.hasPendingUserInput)
+  {
+    return true
+  }
+  // only a FRESH failure raises the hand: a thread snoozed while already
   // failed stays snoozed — that snooze was the user saying "I saw it, not
   // now". session.updatedAt stamps the status edge, so an error newer than
   // the snooze is new information.
@@ -146,34 +167,38 @@ export function threadRaisedHandWhileSnoozed(shell: ThreadSnoozeShell): boolean
   return false
 }
 
-/**
- * A thread may be snoozed unless the agent is blocked on the user: hiding a
- * pending approval or user-input request defeats the request, and a queued
- * turn start (a message no turn has adopted yet) is invisible pending work
- * the same way it is for settle. A running session IS snoozable — snooze
- * only affects visibility, never the agent. Client-side twin of the server
- * invariants so the UI can reject before a round trip.
- */
+// a thread may be snoozed unless the agent is blocked on the user: hiding a
+// pending approval or user-input request defeats the request, and a queued
+// turn start (a message no turn has adopted yet) is invisible pending work
+// the same way it is for settle. A running session IS snoozable — snooze
+// only affects visibility, never the agent. Client-side twin of the server
+// invariants so the UI can reject before a round trip.
 export function canSnooze(
   shell: Pick<
     OrchestrationThreadShell,
-    'hasPendingApprovals' | 'hasPendingUserInput' | 'latestUserMessageAt' | 'latestTurn' | 'session'
+    | 'approvalOutcomes'
+    | 'hasPendingApprovals'
+    | 'hasPendingUserInput'
+    | 'latestUserMessageAt'
+    | 'latestTurn'
+    | 'session'
   >,
   options: { readonly now: string },
 ): boolean
 {
-  if (shell.hasPendingApprovals || shell.hasPendingUserInput) return false
+  if (shell.hasPendingApprovals || hasBlockingApprovalOutcome(shell) || shell.hasPendingUserInput)
+  {
+    return false
+  }
   if (hasQueuedTurnStart(shell, options)) return false
   return true
 }
 
-/**
- * Snoozed resolution: hidden from the inbox while the wake time is in the
- * future and the thread has not raised its hand. Timer wakes are derived —
- * no server event fires when snoozedUntil passes; the stale fields simply
- * stop classifying as snoozed (and feed the woke indicator until the user
- * visits or re-engages).
- */
+// snoozed resolution: hidden from the inbox while the wake time is in the
+// future and the thread has not raised its hand. Timer wakes are derived —
+// no server event fires when snoozedUntil passes; the stale fields simply
+// stop classifying as snoozed (and feed the woke indicator until the user
+// visits or re-engages).
 export function effectiveSnoozed(
   shell: ThreadSnoozeShell,
   options: { readonly now: string },
@@ -261,12 +286,15 @@ export function effectiveSettled(
   },
 ): boolean
 {
-  // Blocked work must remain visible even when a user explicitly settled it.
-  if (shell.hasPendingApprovals || shell.hasPendingUserInput) return false
+  // blocked work must remain visible even when a user explicitly settled it.
+  if (shell.hasPendingApprovals || hasBlockingApprovalOutcome(shell) || shell.hasPendingUserInput)
+  {
+    return false
+  }
   if (shell.session?.status === 'starting' || shell.session?.status === 'running') return false
   if (hasQueuedTurnStart(shell, { now: options.now }))
   {
-    // The queued-turn blocker alone is forgivable: it is clock-derived, and
+    // the queued-turn blocker alone is forgivable: it is clock-derived, and
     // list callers pass a coarser `now` than the settle action used. When
     // the server already adjudicated the queued message by accepting a
     // settle after it (settledAt stamps server accept time), trust that

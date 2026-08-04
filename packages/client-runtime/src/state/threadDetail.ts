@@ -2,6 +2,7 @@
 // reduces thread detail projection state
 
 import type {
+  ApprovalOutcome,
   OrchestrationCheckpointSummary,
   OrchestrationLatestTurn,
   OrchestrationMessage,
@@ -24,37 +25,76 @@ const EMPTY_MESSAGES: ReadonlyArray<OrchestrationMessage> = Object.freeze([])
 const EMPTY_ACTIVITIES: ReadonlyArray<OrchestrationThreadActivity> = Object.freeze([])
 const EMPTY_PROPOSED_PLANS: ReadonlyArray<OrchestrationProposedPlan> = Object.freeze([])
 const EMPTY_CHECKPOINTS: ReadonlyArray<OrchestrationCheckpointSummary> = Object.freeze([])
+const EMPTY_APPROVAL_OUTCOMES: ReadonlyArray<ApprovalOutcome> = Object.freeze([])
 
-/**
- * Combine detail-only collections with the shell's authoritative thread metadata.
- *
- * Shell and detail subscriptions are intentionally independent. A cached detail can
- * therefore briefly outlive a newer shell snapshot after reconnecting. Workspace
- * consumers must use the shell branch/worktree/project fields so they do not target
- * a stale checkout while retaining messages, activities, plans, and checkpoints
- * from the detail subscription.
- */
+function mergeApprovalOutcomes(
+  detail: ReadonlyArray<ApprovalOutcome> | undefined,
+  shell: ReadonlyArray<ApprovalOutcome> | undefined,
+): ReadonlyArray<ApprovalOutcome>
+{
+  if (detail === undefined)
+  {
+    return shell ?? EMPTY_APPROVAL_OUTCOMES
+  }
+  if (shell === undefined || shell === detail)
+  {
+    return detail
+  }
+
+  const outcomes = new Map(detail.map((outcome) => [outcome.requestId, outcome]))
+  for (const outcome of shell)
+  {
+    const current = outcomes.get(outcome.requestId)
+    if (current === undefined || outcome.updatedAt >= current.updatedAt)
+    {
+      outcomes.set(outcome.requestId, outcome)
+    }
+  }
+  return [...outcomes.values()]
+}
+
+// combine detail-only collections with the shell's authoritative thread metadata.
+//
+// shell and detail subscriptions are intentionally independent. A cached detail can
+// therefore briefly outlive a newer shell snapshot after reconnecting. Workspace
+// consumers must use the shell branch/worktree/project fields so they do not target
+// a stale checkout while retaining messages, activities, plans, and checkpoints
+// from the detail subscription.
+//
+// * providerSwitch belongs to the same shell-authoritative group as modelSelection
+//   and session: taking it from the detail lets a warm cache pair an old selection
+//   with a cleared switch (or hide a newer shell's active switch), which the switch
+//   pill and the composer send gate both read as a torn state.
 export function mergeEnvironmentThread(
   detail: EnvironmentThread | null,
   shell: EnvironmentThreadShell | null,
 ): EnvironmentThread | null
 {
-  if (detail === null || shell === null)
+  if (detail === null)
   {
-    return detail
+    return null
+  }
+  const normalizedDetail =
+    detail.approvalOutcomes === undefined
+      ? { ...detail, approvalOutcomes: EMPTY_APPROVAL_OUTCOMES }
+      : detail
+  if (shell === null)
+  {
+    return normalizedDetail
   }
   if (detail.environmentId !== shell.environmentId || detail.id !== shell.id)
   {
-    return detail
+    return normalizedDetail
   }
 
   return {
-    ...detail,
+    ...normalizedDetail,
     environmentId: shell.environmentId,
     id: shell.id,
     projectId: shell.projectId,
     title: shell.title,
     modelSelection: shell.modelSelection,
+    providerSwitch: shell.providerSwitch,
     runtimeMode: shell.runtimeMode,
     interactionMode: shell.interactionMode,
     branch: shell.branch,
@@ -69,6 +109,7 @@ export function mergeEnvironmentThread(
     snoozedUntil: shell.snoozedUntil,
     snoozedAt: shell.snoozedAt,
     session: shell.session,
+    approvalOutcomes: mergeApprovalOutcomes(detail.approvalOutcomes, shell.approvalOutcomes),
   }
 }
 
@@ -106,7 +147,13 @@ export function createEnvironmentThreadDetailAtoms<E>(
         return previousValue
       }
       previousSource = source
-      previousValue = source === null ? null : scopeThread(ref.environmentId, source)
+      previousValue =
+        source === null
+          ? null
+          : scopeThread(ref.environmentId, {
+              ...source,
+              approvalOutcomes: source.approvalOutcomes ?? EMPTY_APPROVAL_OUTCOMES,
+            })
       return previousValue
     }).pipe(
       Atom.setIdleTTL(THREAD_STATE_IDLE_TTL_MS),

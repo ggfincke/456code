@@ -72,6 +72,18 @@ function makeShell(input: {
     hasPendingApprovals: input.pending === 'approval',
     hasPendingUserInput: input.pending === 'user-input',
     hasActionableProposedPlan: false,
+    ...(input.approvalStatus === undefined
+      ? {}
+      : {
+          approvalOutcomes: [
+            {
+              requestId: ApprovalRequestId.make('approval-1'),
+              status: input.approvalStatus,
+              decision: null,
+              updatedAt: NOW,
+            },
+          ],
+        }),
   }
 }
 
@@ -301,6 +313,28 @@ describe('effectiveSettled', () =>
       }),
     ).toBe(false)
   })
+
+  it.each(['responding', 'unknown'] as const)(
+    'blocks settling for %s outcomes even when the shell pending flag is clear',
+    (approvalStatus) =>
+    {
+      const shell = makeShell({
+        settledOverride: 'settled',
+        activityAt: STALE,
+        approvalStatus,
+      })
+
+      expect(shell.hasPendingApprovals).toBe(false)
+      expect(canSettle(shell, { now: NOW })).toBe(false)
+      expect(
+        effectiveSettled(shell, {
+          now: NOW,
+          autoSettleAfterDays: 3,
+          changeRequestState: 'merged',
+        }),
+      ).toBe(false)
+    },
+  )
 
   it('keeps a new turn active from queued through starting and running', () =>
   {

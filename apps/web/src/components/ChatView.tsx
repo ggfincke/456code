@@ -1567,10 +1567,50 @@ function ChatViewContent(props: ChatViewProps)
   const phase = derivePhase(activeThread?.session ?? null)
   const threadActivities = activeThread?.activities ?? EMPTY_ACTIVITIES
   const workLogEntries = useMemo(() => deriveWorkLogEntries(threadActivities), [threadActivities])
-  const pendingApprovals = useMemo(
-    () => derivePendingApprovals(threadActivities),
-    [threadActivities],
+  const providerSwitchTimelineEvents = useMemo(
+    () => deriveProviderSwitchTimelineEvents(threadActivities, resolveProviderSwitchInstance),
+    [resolveProviderSwitchInstance, threadActivities],
   )
+  // the summary a switch left behind is owned by the provider the thread now
+  // targets, so the pill names that instance and reports only what the thread's
+  // durable delivery record proves
+  const pendingHandoffPresentation = useMemo(() =>
+  {
+    const handoff = activeThread?.pendingHandoff
+    if (!activeThread || !handoff)
+    {
+      return null
+    }
+    const selection = activeThread.modelSelection
+    return resolvePendingHandoffPresentation({
+      handoff,
+      activities: threadActivities,
+      sentSinceHandoff: activeThread.messages.some(
+        (message) => message.role === 'user' && message.createdAt >= handoff.createdAt,
+      ),
+      targetLabel: formatProviderSwitchTargetLabel({
+        instanceId: selection.instanceId,
+        displayName: resolveProviderSwitchInstance(selection.instanceId)?.displayName,
+        model: selection.model,
+      }),
+    })
+  }, [activeThread, resolveProviderSwitchInstance, threadActivities])
+  const pendingApprovals = useMemo(
+    () => derivePendingApprovals(threadActivities, activeThread?.approvalOutcomes),
+    [activeThread?.approvalOutcomes, threadActivities],
+  )
+  const approvalResponseDisabledRequestIds = useMemo(() =>
+  {
+    const requestIds = new Set(respondingRequestIds)
+    for (const approval of pendingApprovals)
+    {
+      if (approval.status === 'responding' || approval.status === 'unknown')
+      {
+        requestIds.add(approval.requestId)
+      }
+    }
+    return [...requestIds]
+  }, [pendingApprovals, respondingRequestIds])
   const pendingUserInputs = useMemo(
     () => derivePendingUserInputs(threadActivities),
     [threadActivities],

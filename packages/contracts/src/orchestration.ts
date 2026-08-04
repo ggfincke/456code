@@ -504,6 +504,8 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  // optional so payloads from pre-outcome servers still decode
+  approvalOutcomes: Schema.optional(Schema.Array(ApprovalOutcome)),
 })
 export type OrchestrationThread = typeof OrchestrationThread.Type
 
@@ -557,6 +559,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  // optional so payloads from pre-outcome servers still decode
+  approvalOutcomes: Schema.optional(Schema.Array(ApprovalOutcome)),
 })
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type
 
@@ -1337,6 +1341,8 @@ export const ThreadApprovalResponseRequestedPayload = Schema.Struct({
   requestId: ApprovalRequestId,
   decision: ProviderApprovalDecision,
   createdAt: IsoDateTime,
+  // additive: live clients can render responding state without waiting for projection
+  approvalOutcome: Schema.optional(ApprovalOutcome),
 })
 
 const ThreadUserInputResponseRequestedPayload = Schema.Struct({

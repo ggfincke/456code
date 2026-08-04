@@ -155,19 +155,6 @@ function extractActivityRequestId(payload: unknown): ApprovalRequestId | null
   return typeof requestId === 'string' ? ApprovalRequestId.make(requestId) : null
 }
 
-function isStalePendingApprovalFailureDetail(detail: string | null): boolean
-{
-  if (detail === null)
-  {
-    return false
-  }
-  return (
-    detail.includes('stale pending approval request') ||
-    detail.includes('unknown pending approval request') ||
-    detail.includes('unknown pending permission request')
-  )
-}
-
 function derivePendingUserInputCountFromActivities(
   activities: ReadonlyArray<ProjectionThreadActivity>,
 ): number
@@ -2136,6 +2123,31 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                 : event.payload.activity.createdAt,
               resolvedAt: event.payload.activity.createdAt,
             })
+            const payload =
+              typeof event.payload.activity.payload === 'object' &&
+              event.payload.activity.payload !== null
+                ? (event.payload.activity.payload as Record<string, unknown>)
+                : null
+            const evidence =
+              typeof payload?.acceptanceEvidence === 'object' && payload.acceptanceEvidence !== null
+                ? encodeUnknownJsonString(payload.acceptanceEvidence)
+                : encodeUnknownJsonString({ providerEventId: event.payload.activity.id })
+            yield* updateApprovalOutcome({
+              requestId,
+              status: 'accepted',
+              requestedDecision:
+                payload?.requestedDecision === 'accept' ||
+                payload?.requestedDecision === 'acceptForSession' ||
+                payload?.requestedDecision === 'decline' ||
+                payload?.requestedDecision === 'cancel'
+                  ? payload.requestedDecision
+                  : resolvedDecision,
+              decision: resolvedDecision,
+              detail: null,
+              actionId: typeof payload?.actionId === 'string' ? payload.actionId : null,
+              acceptanceEvidence: evidence,
+              updatedAt: event.payload.activity.createdAt,
+            })
             return
           }
           if (event.payload.activity.kind === 'provider.approval.respond.failed')
@@ -2145,31 +2157,49 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               event.payload.activity.payload !== null
                 ? (event.payload.activity.payload as Record<string, unknown>)
                 : null
-            const detail = typeof payload?.detail === 'string' ? payload.detail.toLowerCase() : null
-            if (isStalePendingApprovalFailureDetail(detail))
+            const rawDetail = typeof payload?.detail === 'string' ? payload.detail : null
+            const embeddedOutcome =
+              typeof payload?.approvalOutcome === 'object' && payload.approvalOutcome !== null
+                ? (payload.approvalOutcome as Record<string, unknown>)
+                : null
+            const classification = classifyApprovalFailure(payload)
+            const outcomeStatus = classification.status
+            if (Option.isNone(existingRow))
             {
-              if (Option.isNone(existingRow))
-              {
-                return
-              }
-              if (existingRow.value.status === 'resolved')
-              {
-                return
-              }
-              yield* projectionPendingApprovalRepository.upsert({
-                requestId,
-                threadId: existingRow.value.threadId,
-                turnId: existingRow.value.turnId,
-                status: 'resolved',
-                decision: null,
-                createdAt: existingRow.value.createdAt,
-                resolvedAt: event.payload.activity.createdAt,
-              })
               return
             }
+            yield* projectionPendingApprovalRepository.upsert({
+              requestId,
+              threadId: existingRow.value.threadId,
+              turnId: existingRow.value.turnId,
+              status: classification.clearsBlockingRequest ? 'resolved' : 'pending',
+              decision: null,
+              createdAt: existingRow.value.createdAt,
+              resolvedAt: classification.clearsBlockingRequest
+                ? event.payload.activity.createdAt
+                : null,
+            })
+            yield* updateApprovalOutcome({
+              requestId,
+              status: outcomeStatus,
+              requestedDecision:
+                embeddedOutcome?.requestedDecision === 'accept' ||
+                embeddedOutcome?.requestedDecision === 'acceptForSession' ||
+                embeddedOutcome?.requestedDecision === 'decline' ||
+                embeddedOutcome?.requestedDecision === 'cancel'
+                  ? embeddedOutcome.requestedDecision
+                  : existingRow.value.decision,
+              decision: null,
+              detail:
+                typeof embeddedOutcome?.detail === 'string' ? embeddedOutcome.detail : rawDetail,
+              actionId:
+                typeof embeddedOutcome?.actionId === 'string' ? embeddedOutcome.actionId : null,
+              acceptanceEvidence: null,
+              updatedAt: event.payload.activity.createdAt,
+            })
             return
           }
-          // Only approval-requested activities should create pending-approval
+          // only approval-requested activities should create pending-approval
           // rows.  Other activity kinds that happen to carry a requestId
           // (e.g. user-input.requested / user-input.resolved) must not
           // pollute this projection — they have their own accounting via
@@ -2193,6 +2223,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               : event.payload.activity.createdAt,
             resolvedAt: null,
           })
+          yield* updateApprovalOutcome({
+            requestId,
+            status: 'pending',
+            requestedDecision: null,
+            decision: null,
+            detail: null,
+            actionId: null,
+            acceptanceEvidence: null,
+            updatedAt: event.payload.activity.createdAt,
+          })
           return
         }
 
@@ -2207,12 +2247,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               ? existingRow.value.threadId
               : event.payload.threadId,
             turnId: Option.isSome(existingRow) ? existingRow.value.turnId : null,
-            status: 'resolved',
-            decision: event.payload.decision,
+            status: 'pending',
+            decision: null,
             createdAt: Option.isSome(existingRow)
               ? existingRow.value.createdAt
               : event.payload.createdAt,
-            resolvedAt: event.payload.createdAt,
+            resolvedAt: null,
+          })
+          yield* updateApprovalOutcome({
+            requestId: event.payload.requestId,
+            status: 'responding',
+            requestedDecision: event.payload.decision,
+            decision: null,
+            detail: null,
+            actionId: event.payload.approvalOutcome?.actionId ?? null,
+            acceptanceEvidence: null,
+            updatedAt: event.payload.createdAt,
           })
           return
         }

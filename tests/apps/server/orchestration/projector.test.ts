@@ -109,10 +109,217 @@ describe('orchestration projector', () =>
         proposedPlans: [],
         activities: [],
         checkpoints: [],
+        approvalOutcomes: [],
         session: null,
       },
     ])
   })
+
+  it.effect('projects provider switch outcomes from their terminal events', () =>
+    Effect.gen(function* ()
+    {
+      const now = '2026-01-01T00:00:00.000Z'
+      const threadId = 'thread-provider-switch-outcomes'
+      let model = yield* projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: 'thread.created',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-create-provider-switch-outcomes',
+          payload: {
+            threadId,
+            projectId: 'project-1',
+            title: 'Provider switch outcomes',
+            modelSelection: { instanceId: 'codex', model: 'gpt-5-codex' },
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            branch: null,
+            worktreePath: null,
+            origin: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: 'thread.provider-switch-requested',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-request-provider-switch-failure',
+          payload: {
+            threadId,
+            targetModelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+            expectedCurrentInstanceId: 'codex',
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 3,
+          type: 'thread.provider-switch-failed',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-fail-provider-switch',
+          payload: {
+            threadId,
+            reasonCode: 'compaction-failed',
+            detail: 'Compaction failed.',
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 4,
+          type: 'thread.provider-switch-requested',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-request-provider-switch-completion',
+          payload: {
+            threadId,
+            targetModelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+            expectedCurrentInstanceId: 'codex',
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 5,
+          type: 'thread.provider-switched',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-complete-provider-switch',
+          payload: {
+            modelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+            fromInstanceId: 'codex',
+            fromModel: 'gpt-5-codex',
+            handoffText: 'Durable handoff.',
+          },
+        }),
+      )
+
+      const thread = model.threads[0]
+      expect(thread?.providerSwitch).toBeNull()
+      expect(thread?.pendingHandoff?.text).toBe('Durable handoff.')
+      expect(thread?.activities).toMatchObject([
+        {
+          id: 'event-3',
+          kind: 'provider.switch.failed',
+          payload: {
+            reasonCode: 'compaction-failed',
+            retryTargetModelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+          },
+        },
+        {
+          id: 'event-5',
+          kind: 'provider.switch.completed',
+          payload: {
+            targetModelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+          },
+        },
+      ])
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 6,
+          type: 'thread.activity-appended',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-record-provider-handoff-delivery',
+          payload: {
+            threadId,
+            activity: {
+              id: 'provider-handoff-delivered',
+              tone: 'info',
+              kind: 'provider.handoff.delivered',
+              summary: 'Provider handoff delivered',
+              payload: {
+                type: 'provider.handoff.delivered',
+                handoffKey: 'durable-handoff-key',
+                providerSessionIdentity: 'provider-session-1',
+              },
+              turnId: null,
+              createdAt: now,
+            },
+          },
+        }),
+      )
+      expect(model.threads[0]?.pendingHandoff).toBeNull()
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 7,
+          type: 'thread.activity-appended',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-append-historical-failure-activity',
+          payload: {
+            threadId,
+            activity: {
+              id: 'historical-provider-switch-failed',
+              tone: 'error',
+              kind: 'provider.switch.failed',
+              summary: 'Provider switch failed',
+              payload: { detail: 'Compaction failed.' },
+              turnId: null,
+              sequence: 3,
+              createdAt: now,
+            },
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 8,
+          type: 'thread.activity-appended',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-append-historical-completion-activity',
+          payload: {
+            threadId,
+            activity: {
+              id: 'historical-provider-switch-completed',
+              tone: 'info',
+              kind: 'provider.switch.completed',
+              summary: 'Provider switch completed',
+              payload: {
+                fromInstanceId: 'codex',
+                fromModel: 'gpt-5-codex',
+                toInstanceId: 'claudeAgent',
+                toModel: 'sonnet',
+              },
+              turnId: null,
+              sequence: 5,
+              createdAt: now,
+            },
+          },
+        }),
+      )
+      expect(model.threads[0]?.activities.map((activity) => activity.id)).toEqual([
+        'historical-provider-switch-failed',
+        'historical-provider-switch-completed',
+        'provider-handoff-delivered',
+      ])
+    }),
+  )
 
   it.effect('keeps imported history before continued native activities', () =>
     Effect.gen(function* ()

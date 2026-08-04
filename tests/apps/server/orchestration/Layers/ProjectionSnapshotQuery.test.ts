@@ -380,6 +380,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
               completedAt: '2026-02-24T00:00:08.000Z',
             },
           ],
+          approvalOutcomes: [],
           session: {
             threadId: ThreadId.make('thread-1'),
             status: 'running',
@@ -463,6 +464,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           hasPendingApprovals: true,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          approvalOutcomes: [],
         },
       ])
 

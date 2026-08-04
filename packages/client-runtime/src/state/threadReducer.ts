@@ -82,6 +82,7 @@ export function applyThreadDetailEvent(
           activities: [],
           checkpoints: [],
           session: null,
+          approvalOutcomes: [],
         },
       }
 
@@ -547,37 +548,78 @@ export function applyThreadDetailEvent(
     // ── Activities ──────────────────────────────────────────────────
     case 'thread.activity-appended':
     {
-      const activities = pipe(
-        thread.activities,
-        Arr.filter((activity) => activity.id !== event.payload.activity.id),
-        Arr.append(event.payload.activity),
-        Arr.sort(compareOrchestrationThreadActivities),
+      const isProviderSwitchActivity =
+        event.payload.activity.kind === 'provider.switch.failed' ||
+        event.payload.activity.kind === 'provider.switch.completed'
+      const activity =
+        isProviderSwitchActivity && event.payload.activity.sequence === undefined
+          ? { ...event.payload.activity, sequence: event.sequence }
+          : event.payload.activity
+      const replacedActivityId = isProviderSwitchActivity
+        ? thread.activities.findLast(
+            (entry) =>
+              event.causationEventId === entry.id ||
+              isAdjacentProviderSwitchActivity(entry, activity),
+          )?.id
+        : undefined
+      const activities = upsertThreadActivity(
+        thread.activities.filter((entry) => entry.id !== replacedActivityId),
+        activity,
       )
 
       return {
         kind: 'updated',
-        thread: { ...thread, activities, updatedAt: event.occurredAt },
+        thread: {
+          ...thread,
+          activities,
+          pendingHandoff:
+            event.payload.activity.kind === 'provider.handoff.delivered'
+              ? null
+              : thread.pendingHandoff,
+          updatedAt: event.occurredAt,
+        },
+      }
+    }
+
+    case 'thread.approval-response-requested':
+    {
+      const approvalOutcome = event.payload.approvalOutcome
+      if (approvalOutcome === undefined)
+      {
+        return { kind: 'unchanged' }
+      }
+      const approvalOutcomes = Arr.append(
+        Arr.filter(
+          thread.approvalOutcomes ?? [],
+          (outcome) => outcome.requestId !== approvalOutcome.requestId,
+        ),
+        approvalOutcome,
+      )
+      return {
+        kind: 'updated',
+        thread: {
+          ...thread,
+          approvalOutcomes,
+          updatedAt: event.occurredAt,
+        },
       }
     }
 
     // ── Events that don't mutate thread state directly ──────────────
-    case 'thread.approval-response-requested':
     case 'thread.user-input-response-requested':
     case 'thread.checkpoint-revert-requested':
       return { kind: 'unchanged' }
   }
 
-  // Forward-compatible: ignore unrecognized event types.
+  // forward-compatible: ignore unrecognized event types.
   return { kind: 'unchanged' }
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
-/**
- * Turn state to settle a still-running latest turn with when its session
- * leaves the "running" status, or null while the session is (re)starting or
- * running and the turn must stay unsettled.
- */
+// turn state to settle a still-running latest turn with when its session
+// leaves the "running" status, or null while the session is (re)starting or
+// running and the turn must stay unsettled.
 function settledTurnStateForSessionStatus(
   status: OrchestrationSession['status'],
 ): 'completed' | 'interrupted' | 'error' | null

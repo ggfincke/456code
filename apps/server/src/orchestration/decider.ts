@@ -10,6 +10,7 @@ import {
   ThreadImportContinuationActivityPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
 } from '@t3tools/contracts'
+import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
 import * as DateTime from 'effect/DateTime'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
@@ -127,32 +128,14 @@ function importContinuationConsentMatches(
   )
 }
 
-/**
- * Blocked-on-you work derived from the thread's retained activities: an
- * approval or user-input request with no later resolution for the same
- * requestId. The server-side twin of the shell's hasPendingApprovals /
- * hasPendingUserInput flags, which the decider read model does not carry.
- * The clearing rules MUST match ProjectionPipeline's pending accounting —
- * resolved activities always clear, respond.failed clears only when the
- * failure detail marks the request stale/unknown — or settle would be
- * rejected on threads whose shell flags read as clear.
- */
-function isStaleRequestFailureDetail(payload: Record<string, unknown> | null): boolean
-{
-  const detail = typeof payload?.detail === 'string' ? payload.detail.toLowerCase() : null
-  if (detail === null) return false
-  return (
-    detail.includes('stale pending approval request') ||
-    detail.includes('unknown pending approval request') ||
-    detail.includes('unknown pending permission request') ||
-    detail.includes('stale pending user-input request') ||
-    detail.includes('unknown pending user-input request') ||
-    detail.includes('unknown pending user input request') ||
-    detail.includes('unknown pending codex user input request')
-  )
-}
+// blocked-on-you work derived from the thread's retained activities: an
+// approval or user-input request with no later resolution for the same
+// requestId. The server-side twin of the shell's hasPendingApprovals /
+// hasPendingUserInput flags, which the decider read model does not carry.
+// the clearing rules MUST match ProjectionPipeline's pending accounting;
+// classifyApprovalFailure is the shared source of truth for failures.
 
-// Scans the read model's activities, which the projector caps at the most
+// scans the read model's activities, which the projector caps at the most
 // recent 500. That bound is safe here: an OPEN approval/user-input request
 // blocks its turn, so the thread cannot accumulate hundreds of later
 // activities while one is outstanding — a request that has scrolled out of
@@ -1131,6 +1114,12 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           requestId: command.requestId,
           decision: command.decision,
           createdAt: command.createdAt,
+          approvalOutcome: {
+            requestId: command.requestId,
+            status: 'responding',
+            requestedDecision: command.decision,
+            updatedAt: command.createdAt,
+          },
         },
       }
     }

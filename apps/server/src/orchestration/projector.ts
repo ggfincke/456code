@@ -53,6 +53,91 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, 'id' | 'projectId'>>
 const MAX_THREAD_MESSAGES = 2_000
 const MAX_THREAD_CHECKPOINTS = 500
+const isApprovalOutcome = Schema.is(ApprovalOutcome)
+
+function upsertApprovalOutcome(
+  outcomes: OrchestrationThread['approvalOutcomes'],
+  outcome: ApprovalOutcome,
+): ReadonlyArray<ApprovalOutcome>
+{
+  const current = outcomes ?? []
+  const existing = current.find((entry) => entry.requestId === outcome.requestId)
+  if (
+    existing !== undefined &&
+    (existing.status === 'accepted' || existing.status === 'stale-terminal') &&
+    existing.status !== outcome.status
+  )
+  {
+    return current
+  }
+  return [...current.filter((entry) => entry.requestId !== outcome.requestId), outcome]
+}
+
+function approvalOutcomeFromActivity(
+  activity: OrchestrationThread['activities'][number],
+): ApprovalOutcome | null
+{
+  const payload =
+    typeof activity.payload === 'object' && activity.payload !== null
+      ? (activity.payload as Record<string, unknown>)
+      : null
+  const embedded = payload?.approvalOutcome
+  if (activity.kind === 'provider.approval.respond.failed')
+  {
+    const classification = classifyApprovalFailure(payload)
+    if (isApprovalOutcome(embedded))
+    {
+      return { ...embedded, status: classification.status }
+    }
+    const requestId = typeof payload?.requestId === 'string' ? payload.requestId : null
+    if (requestId === null)
+    {
+      return null
+    }
+    const detail =
+      typeof payload?.detail === 'string' ? payload.detail : 'Provider response failed.'
+    return {
+      requestId: ApprovalRequestId.make(requestId),
+      status: classification.status,
+      detail,
+      updatedAt: activity.createdAt,
+    }
+  }
+  if (isApprovalOutcome(embedded))
+  {
+    return embedded
+  }
+  const requestId = typeof payload?.requestId === 'string' ? payload.requestId : null
+  if (requestId === null)
+  {
+    return null
+  }
+  if (activity.kind === 'approval.requested')
+  {
+    return {
+      requestId: ApprovalRequestId.make(requestId),
+      status: 'pending',
+      updatedAt: activity.createdAt,
+    }
+  }
+  if (activity.kind === 'approval.resolved')
+  {
+    const decision =
+      payload?.decision === 'accept' ||
+      payload?.decision === 'acceptForSession' ||
+      payload?.decision === 'decline' ||
+      payload?.decision === 'cancel'
+        ? payload.decision
+        : null
+    return {
+      requestId: ApprovalRequestId.make(requestId),
+      status: 'accepted',
+      decision,
+      updatedAt: activity.createdAt,
+    }
+  }
+  return null
+}
 
 function checkpointStatusToLatestTurnState(status: 'ready' | 'missing' | 'error')
 {
@@ -364,6 +449,7 @@ export function projectEvent(
             activities: [],
             checkpoints: [],
             session: null,
+            approvalOutcomes: [],
           },
           event.type,
           'thread',
@@ -1037,12 +1123,52 @@ export function projectEvent(
               activities: importFinalized
                 ? compactFinalizedImportActivities(activities)
                 : retainThreadActivities(activities),
+              pendingHandoff:
+                activity.kind === 'provider.handoff.delivered' ? null : thread.pendingHandoff,
+              ...(approvalOutcome === null
+                ? {}
+                : {
+                    approvalOutcomes: upsertApprovalOutcome(
+                      thread.approvalOutcomes,
+                      approvalOutcome,
+                    ),
+                  }),
               ...(importFinalized
                 ? {
                     messages: [],
                     checkpoints: [],
                   }
                 : {}),
+              updatedAt: event.occurredAt,
+            }),
+          }
+        }),
+      )
+
+    case 'thread.approval-response-requested':
+      return decodeForEvent(
+        ThreadApprovalResponseRequestedPayload,
+        event.payload,
+        event.type,
+        'payload',
+      ).pipe(
+        Effect.map((payload) =>
+        {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
+          if (!thread)
+          {
+            return nextBase
+          }
+          const outcome = payload.approvalOutcome ?? {
+            requestId: payload.requestId,
+            status: 'responding' as const,
+            requestedDecision: payload.decision,
+            updatedAt: payload.createdAt,
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              approvalOutcomes: upsertApprovalOutcome(thread.approvalOutcomes, outcome),
               updatedAt: event.occurredAt,
             }),
           }

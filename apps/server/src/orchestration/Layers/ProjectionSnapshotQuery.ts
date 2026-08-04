@@ -2,6 +2,9 @@
 // loads orchestration projection snapshots
 
 import {
+  ApprovalAcceptanceEvidence,
+  ApprovalOutcomeStatus,
+  ApprovalRequestId,
   ChatAttachment,
   CheckpointRef,
   IsoDateTime,
@@ -29,7 +32,9 @@ import {
   type OrchestrationThreadShell,
   ModelSelection,
   ProjectId,
+  ProviderApprovalDecision,
   ThreadId,
+  type ApprovalOutcome,
 } from '@t3tools/contracts'
 import * as Arr from 'effect/Array'
 import * as Effect from 'effect/Effect'
@@ -135,6 +140,18 @@ const ProjectionImportThreadRowSchema = Schema.Struct({
 })
 const ProjectionThreadImportFinalizedRowSchema = Schema.Struct({
   isFinalized: Schema.Number,
+})
+const ProjectionApprovalOutcomeDbRowSchema = Schema.Struct({
+  requestId: ApprovalRequestId,
+  threadId: ThreadId,
+  status: ApprovalOutcomeStatus,
+  requestedDecision: Schema.NullOr(ProviderApprovalDecision),
+  decision: Schema.NullOr(ProviderApprovalDecision),
+  detail: Schema.NullOr(Schema.String),
+  actionId: Schema.NullOr(Schema.String),
+  acceptanceEvidence: Schema.NullOr(Schema.fromJsonString(ApprovalAcceptanceEvidence)),
+  updatedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
 })
 const WorkspaceRootLookupInput = Schema.Struct({
   workspaceRoot: Schema.String,
@@ -423,6 +440,22 @@ function mapProposedPlanRow(
   }
 }
 
+function mapApprovalOutcomeRow(
+  row: Schema.Schema.Type<typeof ProjectionApprovalOutcomeDbRowSchema>,
+): ApprovalOutcome
+{
+  return {
+    requestId: row.requestId,
+    status: row.status,
+    ...(row.requestedDecision === null ? {} : { requestedDecision: row.requestedDecision }),
+    ...(row.decision === null ? {} : { decision: row.decision }),
+    ...(row.detail === null ? {} : { detail: row.detail }),
+    ...(row.actionId === null ? {} : { actionId: row.actionId }),
+    ...(row.acceptanceEvidence === null ? {} : { acceptanceEvidence: row.acceptanceEvidence }),
+    updatedAt: row.updatedAt ?? row.createdAt,
+  }
+}
+
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)
 {
   return (cause: unknown): ProjectionRepositoryError =>
@@ -520,6 +553,54 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
+      `,
+  })
+
+  // both queries deliberately ship every outcome status: terminal rows
+  // (accepted / stale-terminal) clear optimistic approval cards on snapshot
+  // consumers, so filtering them out silently breaks approval resolution.
+  // bounding snapshot growth needs a retention policy instead (see the
+  // mega-review 2026-08-02 P2 I follow-up)
+  const listApprovalOutcomeRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionApprovalOutcomeDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          request_id AS "requestId",
+          thread_id AS "threadId",
+          outcome_status AS "status",
+          outcome_requested_decision AS "requestedDecision",
+          outcome_decision AS "decision",
+          outcome_detail AS "detail",
+          outcome_action_id AS "actionId",
+          outcome_acceptance_evidence AS "acceptanceEvidence",
+          outcome_updated_at AS "updatedAt",
+          created_at AS "createdAt"
+        FROM projection_pending_approvals
+        ORDER BY thread_id ASC, created_at ASC, request_id ASC
+      `,
+  })
+
+  const listApprovalOutcomeRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionApprovalOutcomeDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          request_id AS "requestId",
+          thread_id AS "threadId",
+          outcome_status AS "status",
+          outcome_requested_decision AS "requestedDecision",
+          outcome_decision AS "decision",
+          outcome_detail AS "detail",
+          outcome_action_id AS "actionId",
+          outcome_acceptance_evidence AS "acceptanceEvidence",
+          outcome_updated_at AS "updatedAt",
+          created_at AS "createdAt"
+        FROM projection_pending_approvals
+        WHERE thread_id = ${threadId}
+        ORDER BY created_at ASC, request_id ASC
       `,
   })
 
@@ -1286,6 +1367,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               ),
             ),
           ),
+          listApprovalOutcomeRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                'ProjectionSnapshotQuery.getSnapshot:listApprovalOutcomes:query',
+                'ProjectionSnapshotQuery.getSnapshot:listApprovalOutcomes:decodeRows',
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -1300,6 +1389,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             checkpointRows,
             latestTurnRows,
             stateRows,
+            approvalOutcomeRows,
           ]) =>
             Effect.gen(function* ()
             {
@@ -1309,6 +1399,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>()
               const sessionsByThread = new Map<string, OrchestrationSession>()
               const latestTurnByThread = new Map<string, OrchestrationLatestTurn>()
+              const approvalOutcomesByThread = new Map<string, Array<ApprovalOutcome>>()
 
               let updatedAt: string | null = null
 
@@ -1448,6 +1539,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 })
               }
 
+              for (const row of approvalOutcomeRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt ?? row.createdAt)
+                const outcomes = approvalOutcomesByThread.get(row.threadId) ?? []
+                outcomes.push(mapApprovalOutcomeRow(row))
+                approvalOutcomesByThread.set(row.threadId, outcomes)
+              }
+
               const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(
                 projectRows,
                 { includeDeleted: true },
@@ -1491,6 +1590,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 activities: activitiesByThread.get(row.threadId) ?? [],
                 checkpoints: checkpointsByThread.get(row.threadId) ?? [],
                 session: sessionsByThread.get(row.threadId) ?? null,
+                approvalOutcomes: approvalOutcomesByThread.get(row.threadId) ?? [],
               }))
 
               const snapshot = {
@@ -1577,6 +1677,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               ),
             ),
           ),
+          listApprovalOutcomeRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                'ProjectionSnapshotQuery.getCommandReadModel:listApprovalOutcomes:query',
+                'ProjectionSnapshotQuery.getCommandReadModel:listApprovalOutcomes:decodeRows',
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -1589,6 +1697,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             sessionRows,
             latestTurnRows,
             stateRows,
+            approvalOutcomeRows,
           ]) =>
             Effect.sync(() =>
             {
@@ -1694,6 +1803,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 Array<OrchestrationThreadActivity>
               >()
               const sessionByThread = new Map<string, OrchestrationSession>()
+              const approvalOutcomesByThread = new Map<string, Array<ApprovalOutcome>>()
 
               for (let index = 0; index < sessionRows.length; index += 1)
               {
@@ -1703,6 +1813,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                   continue
                 }
                 sessionByThread.set(row.threadId, mapSessionRow(row))
+              }
+
+              for (const row of approvalOutcomeRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt ?? row.createdAt)
+                const outcomes = approvalOutcomesByThread.get(row.threadId) ?? []
+                outcomes.push(mapApprovalOutcomeRow(row))
+                approvalOutcomesByThread.set(row.threadId, outcomes)
               }
 
               for (let index = 0; index < proposedPlanRows.length; index += 1)
@@ -1770,6 +1888,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                   activities: commandActivitiesByThread.get(row.threadId) ?? [],
                   checkpoints: [],
                   session: sessionByThread.get(row.threadId) ?? null,
+                  approvalOutcomes: approvalOutcomesByThread.get(row.threadId) ?? [],
                 })
               }
 
@@ -2348,7 +2467,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
   const getThreadShellById: ProjectionSnapshotQueryShape['getThreadShellById'] = (threadId) =>
     Effect.gen(function* ()
     {
-      const [threadRow, latestTurnRow, sessionRow] = yield* Effect.all([
+      const [threadRow, latestTurnRow, sessionRow, approvalOutcomeRows] = yield* Effect.all([
         getActiveThreadRowById({ threadId }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
@@ -2370,6 +2489,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             toPersistenceSqlOrDecodeError(
               'ProjectionSnapshotQuery.getThreadShellById:getSession:query',
               'ProjectionSnapshotQuery.getThreadShellById:getSession:decodeRow',
+            ),
+          ),
+        ),
+        listApprovalOutcomeRowsByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              'ProjectionSnapshotQuery.getThreadShellById:listApprovalOutcomes:query',
+              'ProjectionSnapshotQuery.getThreadShellById:listApprovalOutcomes:decodeRows',
             ),
           ),
         ),
@@ -2404,6 +2531,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
+        approvalOutcomes: approvalOutcomeRows.map(mapApprovalOutcomeRow),
       } satisfies OrchestrationThreadShell)
     })
 
@@ -2431,6 +2559,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         checkpointRows,
         latestTurnRow,
         sessionRow,
+        approvalOutcomeRows,
       ] = yield* Effect.all([
         getActiveThreadRowById({ threadId }).pipe(
           Effect.mapError(
@@ -2485,6 +2614,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             toPersistenceSqlOrDecodeError(
               'ProjectionSnapshotQuery.getThreadDetailById:getSession:query',
               'ProjectionSnapshotQuery.getThreadDetailById:getSession:decodeRow',
+            ),
+          ),
+        ),
+        listApprovalOutcomeRowsByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              'ProjectionSnapshotQuery.getThreadDetailById:listApprovalOutcomes:query',
+              'ProjectionSnapshotQuery.getThreadDetailById:listApprovalOutcomes:decodeRows',
             ),
           ),
         ),
@@ -2561,6 +2698,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           completedAt: row.completedAt,
         })),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
+        approvalOutcomes: approvalOutcomeRows.map(mapApprovalOutcomeRow),
       }
 
       return Option.some(
