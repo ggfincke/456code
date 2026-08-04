@@ -57,13 +57,14 @@ import Migration0039 from './Migrations/039_ProposalImplementationAttempts.ts'
 import Migration0040 from './Migrations/040_ProjectionThreadsPendingHandoff.ts'
 import Migration0041 from './Migrations/041_RepairProjectionPendingUserInputCounts.ts'
 import Migration0042 from './Migrations/042_ProjectionThreadsProviderSwitch.ts'
-import Migration0043 from './Migrations/043_ProposalRetainedRefAttempts.ts'
-import Migration0044 from './Migrations/044_ImportReplacementIntents.ts'
 import Migration0045 from './Migrations/045_OrchestrationReactorDelivery.ts'
+import Migration0044 from './Migrations/044_ImportReplacementIntents.ts'
+import Migration0043 from './Migrations/043_ProposalRetainedRefAttempts.ts'
 import Migration0046 from './Migrations/046_AttachmentLifecycle.ts'
-import Migration0050 from './Migrations/050_AttachmentLifecycleGenerations.ts'
 import Migration0047 from './Migrations/047_PendingApprovalOutcome.ts'
 import Migration0048 from './Migrations/048_CheckpointRevertOperations.ts'
+import Migration0049 from './Migrations/049_OrchestrationCommandReceiptErrorCode.ts'
+import Migration0050 from './Migrations/050_AttachmentLifecycleGenerations.ts'
 
 // migration loader with all migrations defined inline.
 //
@@ -116,12 +117,13 @@ export const migrationEntries = [
   [40, 'ProjectionThreadsPendingHandoff', Migration0040],
   [41, 'RepairProjectionPendingUserInputCounts', Migration0041],
   [42, 'ProjectionThreadsProviderSwitch', Migration0042],
-  [43, 'ProposalRetainedRefAttempts', Migration0043],
-  [44, 'ImportReplacementIntents', Migration0044],
   [45, 'OrchestrationReactorDelivery', Migration0045],
+  [44, 'ImportReplacementIntents', Migration0044],
+  [43, 'ProposalRetainedRefAttempts', Migration0043],
   [46, 'AttachmentLifecycle', Migration0046],
   [47, 'PendingApprovalOutcome', Migration0047],
   [48, 'CheckpointRevertOperations', Migration0048],
+  [49, 'OrchestrationCommandReceiptErrorCode', Migration0049],
   [50, 'AttachmentLifecycleGenerations', Migration0050],
 ] as const
 

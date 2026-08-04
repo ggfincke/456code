@@ -1,3 +1,6 @@
+// apps/server/src/orchestration/Errors.ts
+// define orchestration errors
+
 import * as SchemaIssue from 'effect/SchemaIssue'
 import * as Schema from 'effect/Schema'
 
@@ -36,6 +39,7 @@ export class OrchestrationCommandInvariantError extends Schema.TaggedErrorClass<
   {
     commandType: Schema.String,
     detail: Schema.String,
+    code: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 )
@@ -51,6 +55,7 @@ export class OrchestrationCommandPreviouslyRejectedError extends Schema.TaggedEr
   {
     commandId: Schema.String,
     detail: Schema.String,
+    code: Schema.optional(Schema.String),
     cause: Schema.optional(Schema.Defect()),
   },
 )

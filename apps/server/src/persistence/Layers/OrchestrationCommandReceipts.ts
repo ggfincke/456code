@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts
+// assemble orchestration command receipts Effect layer
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 import * as Effect from 'effect/Effect'
@@ -27,7 +30,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* ()
           accepted_at,
           result_sequence,
           status,
-          error
+          error,
+          error_code
         )
         VALUES (
           ${receipt.commandId},
@@ -36,7 +40,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* ()
           ${receipt.acceptedAt},
           ${receipt.resultSequence},
           ${receipt.status},
-          ${receipt.error}
+          ${receipt.error},
+          ${receipt.errorCode}
         )
         ON CONFLICT (command_id)
         DO UPDATE SET
@@ -45,7 +50,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* ()
           accepted_at = excluded.accepted_at,
           result_sequence = excluded.result_sequence,
           status = excluded.status,
-          error = excluded.error
+          error = excluded.error,
+          error_code = excluded.error_code
       `,
   })
 
@@ -61,7 +67,8 @@ const makeOrchestrationCommandReceiptRepository = Effect.gen(function* ()
           accepted_at AS "acceptedAt",
           result_sequence AS "resultSequence",
           status,
-          error
+          error,
+          error_code AS "errorCode"
         FROM orchestration_command_receipts
         WHERE command_id = ${commandId}
       `,

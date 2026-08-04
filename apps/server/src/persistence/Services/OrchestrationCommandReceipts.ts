@@ -1,11 +1,10 @@
-/**
- * OrchestrationCommandReceiptRepository - Repository interface for command receipts.
- *
- * Owns persistence operations for deduplication and status tracking of
- * orchestration command handling.
- *
- * @module OrchestrationCommandReceiptRepository
- */
+// apps/server/src/persistence/Services/OrchestrationCommandReceipts.ts
+// define orchestration command receipts service contract
+
+// owns persistence operations for deduplication and status tracking of
+// orchestration command handling.
+//
+// @module OrchestrationCommandReceiptRepository
 import {
   CommandId,
   IsoDateTime,
@@ -30,6 +29,7 @@ export const OrchestrationCommandReceipt = Schema.Struct({
   resultSequence: NonNegativeInt,
   status: OrchestrationCommandReceiptStatus,
   error: Schema.NullOr(Schema.String),
+  errorCode: Schema.NullOr(Schema.String),
 })
 export type OrchestrationCommandReceipt = typeof OrchestrationCommandReceipt.Type
 
@@ -43,18 +43,14 @@ export type GetByCommandIdInput = typeof GetByCommandIdInput.Type
  */
 export interface OrchestrationCommandReceiptRepositoryShape
 {
-  /**
-   * Insert or replace a command receipt row.
-   *
-   * Upserts by `commandId` for idempotent command-result tracking.
-   */
+  // insert or replace a command receipt row.
+  //
+  // upserts by `commandId` for idempotent command-result tracking.
   readonly upsert: (
     receipt: OrchestrationCommandReceipt,
   ) => Effect.Effect<void, OrchestrationCommandReceiptRepositoryError>
 
-  /**
-   * Read a command receipt by command id.
-   */
+  // read a command receipt by command id.
   readonly getByCommandId: (
     input: GetByCommandIdInput,
   ) => Effect.Effect<

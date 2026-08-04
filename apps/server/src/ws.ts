@@ -92,19 +92,43 @@ import * as WorkersStatusBroadcaster from './workers/WorkersStatusBroadcaster.ts
 import { readWorkersReadiness } from './workers/WorkersReadiness.ts'
 import * as SourceControlDiscovery from './sourceControl/SourceControlDiscovery.ts'
 import * as SourceControlRepositoryService from './sourceControl/SourceControlRepositoryService.ts'
-import * as AzureDevOpsCli from './sourceControl/AzureDevOpsCli.ts'
-import * as BitbucketApi from './sourceControl/BitbucketApi.ts'
-import * as GitHubCli from './sourceControl/GitHubCli.ts'
-import * as GitLabCli from './sourceControl/GitLabCli.ts'
-import * as SourceControlProviderRegistry from './sourceControl/SourceControlProviderRegistry.ts'
-import * as GitVcsDriver from './vcs/GitVcsDriver.ts'
-import * as VcsDriverRegistry from './vcs/VcsDriverRegistry.ts'
-import * as VcsProjectConfig from './vcs/VcsProjectConfig.ts'
-import * as VcsProcess from './vcs/VcsProcess.ts'
 import * as PairingGrantStore from './auth/PairingGrantStore.ts'
 import * as SessionStore from './auth/SessionStore.ts'
 import { failEnvironmentAuthInvalid, failEnvironmentInternal } from './auth/http.ts'
+
+// prefer a continuation implementation provided by the server layer graph
+// (see server.ts providing ImportContinuationLive onto the ws route layer);
+// harness graphs without one fall back to an inert bind so imports still work
+const ImportContinuationFromContext = Layer.effect(
+  ImportContinuation.ImportContinuationDeps,
+  Effect.serviceOption(ImportContinuation.ImportContinuationDeps).pipe(
+    Effect.map(
+      Option.getOrElse(() =>
+        ImportContinuation.ImportContinuationDeps.of({
+          bind: (request) =>
+            Effect.succeed({
+              state: 'history-only',
+              providerInstanceId: request.providerInstanceId,
+              continuationIdentity: null,
+              reason: 'continuation module not wired',
+            }),
+        }),
+      ),
+    ),
+  ),
+)
+
 const isOrchestrationDispatchCommandError = Schema.is(OrchestrationDispatchCommandError)
+const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError)
+const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
+  OrchestrationCommandPreviouslyRejectedError,
+)
+
+const readOrchestrationCommandErrorCode = (error: unknown): string | undefined =>
+  isOrchestrationCommandInvariantError(error) ||
+  isOrchestrationCommandPreviouslyRejectedError(error)
+    ? error.code
+    : undefined
 
 // T3 Connect is not part of this build. The contract-defined cloud and
 // self-update RPCs stay registered so the WS method registry is complete, and
