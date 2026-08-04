@@ -29,6 +29,8 @@ import {
   orchestrationCommandDuration,
 } from '../../observability/Metrics.ts'
 import { toPersistenceSqlError } from '../../persistence/Errors.ts'
+import { AttachmentLifecycleRepository } from '../../persistence/Services/AttachmentLifecycle.ts'
+import { CheckpointRevertOperations } from '../../persistence/Services/CheckpointRevertOperations.ts'
 import { OrchestrationEventStore } from '../../persistence/Services/OrchestrationEventStore.ts'
 import { OrchestrationCommandReceiptRepository } from '../../persistence/Services/OrchestrationCommandReceipts.ts'
 import {
@@ -49,6 +51,21 @@ const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
 )
 const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError)
+// every phase that still owns checkpoint refs or the stage directory: a turn
+// started here would capture against refs the revert is about to delete, so
+// post-restore bookkeeping phases stay closed until cleanup is verified
+const checkpointRevertGateClosedPhases = new Set([
+  'admitted',
+  'target-staged',
+  'restore-ready',
+  'restore-started',
+  'filesystem-restored',
+  'provider-pending',
+  'provider-outcome-recorded',
+  'projection-finalized',
+  'cleanup-pending',
+  'manual-required',
+])
 
 interface CommandEnvelope
 {
@@ -84,6 +101,8 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   const sql = yield* SqlClient.SqlClient
   const eventStore = yield* OrchestrationEventStore
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository
+  const attachmentLifecycle = yield* AttachmentLifecycleRepository
+  const checkpointRevertOperations = yield* CheckpointRevertOperations
   const projectionPipeline = yield* OrchestrationProjectionPipeline
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
   const crypto = yield* Crypto.Crypto
@@ -160,29 +179,53 @@ const makeOrchestrationEngine = Effect.gen(function* ()
           return yield* new OrchestrationCommandPreviouslyRejectedError({
             commandId: envelope.command.commandId,
             detail: existingReceipt.value.error ?? 'Previously rejected.',
+            ...(existingReceipt.value.errorCode === null
+              ? {}
+              : { code: existingReceipt.value.errorCode }),
           })
         }
 
-        const eventBase = yield* decideOrchestrationCommand({
-          command: envelope.command,
-          readModel: commandReadModel,
-        }).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
-          Effect.mapError((cause) =>
-            isOrchestrationCommandInvariantError(cause)
-              ? cause
-              : new OrchestrationCommandInvariantError({
-                  commandType: envelope.command.type,
-                  detail: 'Failed to generate an event identifier.',
-                  cause,
-                }),
-          ),
-        )
-        const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase]
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* ()
             {
+              if (envelope.command.type === 'thread.turn.start')
+              {
+                const activeRevert = yield* checkpointRevertOperations.getActiveByThread(
+                  envelope.command.threadId,
+                )
+                if (
+                  Option.isSome(activeRevert) &&
+                  checkpointRevertGateClosedPhases.has(activeRevert.value.phase)
+                )
+                {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: envelope.command.type,
+                    code: 'checkpoint-revert-in-progress',
+                    detail:
+                      `Checkpoint revert '${activeRevert.value.operationId}' is in progress ` +
+                      `for thread '${envelope.command.threadId}' ` +
+                      `(phase '${activeRevert.value.phase}').`,
+                  })
+                }
+              }
+
+              const eventBase = yield* decideOrchestrationCommand({
+                command: envelope.command,
+                readModel: commandReadModel,
+              }).pipe(
+                Effect.provideService(Crypto.Crypto, crypto),
+                Effect.mapError((cause) =>
+                  isOrchestrationCommandInvariantError(cause)
+                    ? cause
+                    : new OrchestrationCommandInvariantError({
+                        commandType: envelope.command.type,
+                        detail: 'Failed to generate an event identifier.',
+                        cause,
+                      }),
+                ),
+              )
+              const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase]
               const committedEvents: OrchestrationEvent[] = []
               let nextCommandReadModel = commandReadModel
 

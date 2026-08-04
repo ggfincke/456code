@@ -124,6 +124,23 @@ const initRepoWithCommit = (
     return { initialBranch }
   })
 
+const seedFeatureBranchWithOrigin = (branchName: string) =>
+  Effect.gen(function* ()
+  {
+    const cwd = yield* makeTmpDir()
+    const remote = yield* makeTmpDir('git-vcs-driver-remote-')
+    const { initialBranch } = yield* initRepoWithCommit(cwd)
+    yield* git(remote, ['init', '--bare'])
+    yield* git(cwd, ['remote', 'add', 'origin', remote])
+    yield* git(cwd, ['push', '-u', 'origin', initialBranch])
+    yield* git(cwd, ['checkout', '-b', branchName])
+    yield* writeTextFile(cwd, 'feature.txt', 'feature\n')
+    yield* git(cwd, ['add', 'feature.txt'])
+    yield* git(cwd, ['commit', '-m', 'feature commit'])
+    yield* git(cwd, ['push', '-u', 'origin', branchName])
+    return { cwd, remote, initialBranch }
+  })
+
 it.effect('uses stable diagnostics for every parsed non-repository command', () =>
 {
   const commands: Array<{ readonly args: ReadonlyArray<string>; readonly lcAll?: string }> = []
@@ -513,7 +530,7 @@ it.effect('refreshes the current branch after an external checkout', () =>
       const initialRefs = yield* driver.listRefs({ cwd, refresh: true })
       assert.isTrue(initialRefs.refs.find((ref) => ref.name === initialBranch)?.current)
 
-      // Raw execute intentionally bypasses the driver's mutation invalidation,
+      // raw execute intentionally bypasses the driver's mutation invalidation,
       // matching a checkout performed by another process.
       yield* driver.execute({
         operation: 'GitVcsDriver.test.externalCheckout',
@@ -850,17 +867,7 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
     it.effect('reports default-branch delta separately from upstream delta', () =>
       Effect.gen(function* ()
       {
-        const cwd = yield* makeTmpDir()
-        const remote = yield* makeTmpDir('git-vcs-driver-remote-')
-        const { initialBranch } = yield* initRepoWithCommit(cwd)
-        yield* git(remote, ['init', '--bare'])
-        yield* git(cwd, ['remote', 'add', 'origin', remote])
-        yield* git(cwd, ['push', '-u', 'origin', initialBranch])
-        yield* git(cwd, ['checkout', '-b', 'feature/synced'])
-        yield* writeTextFile(cwd, 'feature.txt', 'feature\n')
-        yield* git(cwd, ['add', 'feature.txt'])
-        yield* git(cwd, ['commit', '-m', 'feature commit'])
-        yield* git(cwd, ['push', '-u', 'origin', 'feature/synced'])
+        const { cwd } = yield* seedFeatureBranchWithOrigin('feature/synced')
 
         const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetails(cwd)
 
@@ -874,17 +881,7 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
     it.effect('reports remote divergence without reading working-tree details', () =>
       Effect.gen(function* ()
       {
-        const cwd = yield* makeTmpDir()
-        const remote = yield* makeTmpDir('git-vcs-driver-remote-')
-        const { initialBranch } = yield* initRepoWithCommit(cwd)
-        yield* git(remote, ['init', '--bare'])
-        yield* git(cwd, ['remote', 'add', 'origin', remote])
-        yield* git(cwd, ['push', '-u', 'origin', initialBranch])
-        yield* git(cwd, ['checkout', '-b', 'feature/remote-status'])
-        yield* writeTextFile(cwd, 'feature.txt', 'feature\n')
-        yield* git(cwd, ['add', 'feature.txt'])
-        yield* git(cwd, ['commit', '-m', 'feature commit'])
-        yield* git(cwd, ['push', '-u', 'origin', 'feature/remote-status'])
+        const { cwd } = yield* seedFeatureBranchWithOrigin('feature/remote-status')
         yield* writeTextFile(cwd, 'untracked.txt', 'local-only\n')
 
         const status = yield* (yield* GitVcsDriver.GitVcsDriver).statusDetailsRemote(cwd)
@@ -1121,7 +1118,7 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
         const file = status.workingTree.files.find((f) => f.path === 'feature.ts')
         assert.ok(file)
         // HEAD has 1 line. Staged has 2 lines (+1). Unstaged has 3 lines (+2 from HEAD).
-        // Combined net from HEAD: +2 insertions.
+        // combined net from HEAD: +2 insertions.
         assert.equal(file.insertions, 2)
         assert.equal(file.deletions, 0)
       }),

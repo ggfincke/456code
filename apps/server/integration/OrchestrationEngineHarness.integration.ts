@@ -50,6 +50,7 @@ import { AnalyticsService } from '../src/telemetry/Services/AnalyticsService.ts'
 import { CheckpointReactorLive } from '../src/orchestration/Layers/CheckpointReactor.ts'
 import * as RepositoryIdentityResolver from '../src/project/RepositoryIdentityResolver.ts'
 import { OrchestrationEngineLive } from '../src/orchestration/Layers/OrchestrationEngine.ts'
+import { CheckpointRevertOperationsLive } from '../src/persistence/Layers/CheckpointRevertOperations.ts'
 import { OrchestrationProjectionPipelineLive } from '../src/orchestration/Layers/ProjectionPipeline.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { RuntimeReceiptBusTest } from '../src/orchestration/Layers/RuntimeReceiptBus.ts'
@@ -279,6 +280,7 @@ export const makeOrchestrationIntegrationHarness = (
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath)
     const orchestrationLayer = OrchestrationEngineLive.pipe(
+      Layer.provide(CheckpointRevertOperationsLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -351,6 +353,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(serverSettingsLayer),
     )
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
+      Layer.provideMerge(CheckpointRevertOperationsLive),
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(
         Layer.succeed(VcsStatusBroadcaster, {

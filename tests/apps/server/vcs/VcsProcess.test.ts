@@ -1,3 +1,6 @@
+// tests/apps/server/vcs/VcsProcess.test.ts
+// verify vcs process run behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { describe, expect, it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'
@@ -230,37 +233,41 @@ describe('VcsProcess.run', () =>
     }).pipe(provideLive),
   )
 
-  it.effect('truncates output and appends the marker when requested', () =>
+  it.effect.each([
+    {
+      name: 'appends the marker when requested',
+      operation: 'test.truncate-marker',
+      appendTruncationMarker: true,
+      expectMarker: true,
+    },
+    {
+      name: 'omits the marker when truncation markers are disabled',
+      operation: 'test.truncate-silent',
+      appendTruncationMarker: undefined,
+      expectMarker: false,
+    },
+  ])('truncates output and $name', ({ operation, appendTruncationMarker, expectMarker }) =>
     Effect.gen(function* ()
     {
       const result = yield* run({
-        operation: 'test.truncate-marker',
+        operation,
         command: 'node',
         args: ['-e', "process.stdout.write('x'.repeat(2048))"],
         cwd: process.cwd(),
         maxOutputBytes: 128,
-        appendTruncationMarker: true,
+        ...(appendTruncationMarker === undefined ? {} : { appendTruncationMarker }),
       })
 
       expect(result.stdoutTruncated).toBe(true)
-      expect(result.stdout).toContain('[truncated]')
-      expect(result.stderrTruncated).toBe(false)
-    }).pipe(provideLive),
-  )
-
-  it.effect('truncates without the marker when truncation markers are disabled', () =>
-    Effect.gen(function* ()
-    {
-      const result = yield* run({
-        operation: 'test.truncate-silent',
-        command: 'node',
-        args: ['-e', "process.stdout.write('x'.repeat(2048))"],
-        cwd: process.cwd(),
-        maxOutputBytes: 128,
-      })
-
-      expect(result.stdoutTruncated).toBe(true)
-      expect(result.stdout).not.toContain('[truncated]')
+      if (expectMarker)
+      {
+        expect(result.stdout).toContain('[truncated]')
+        expect(result.stderrTruncated).toBe(false)
+      }
+      else
+      {
+        expect(result.stdout).not.toContain('[truncated]')
+      }
     }).pipe(provideLive),
   )
 

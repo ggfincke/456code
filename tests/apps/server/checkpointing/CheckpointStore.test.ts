@@ -1,6 +1,8 @@
 // tests/apps/server/checkpointing/CheckpointStore.test.ts
 // verifies checkpoint capture and exact diff behavior across VCS drivers
+
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFSP from 'node:fs/promises'
 import * as NodePath from 'node:path'
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
@@ -143,6 +145,35 @@ it.layer(TestLayer)('CheckpointStore.layer', (it) =>
 
   describe('captureCheckpoint', () =>
   {
+    it.effect('keeps the winning ref when a stale expected-absent capture loses the CAS', () =>
+      Effect.gen(function* ()
+      {
+        const tmp = yield* makeTmpDir()
+        yield* initRepoWithCommit(tmp)
+        const checkpointStore = yield* CheckpointStore.CheckpointStore
+        const checkpointRef = checkpointRefForThreadTurn(ThreadId.make('thread-checkpoint-cas'), 0)
+
+        yield* writeTextFile(NodePath.join(tmp, 'README.md'), 'winning baseline\n')
+        const winner = yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef,
+          expected: { kind: 'absent' },
+        })
+        expect(winner.outcome).toBe('published')
+
+        yield* writeTextFile(NodePath.join(tmp, 'README.md'), 'stale contender\n')
+        const stale = yield* checkpointStore.captureCheckpoint({
+          cwd: tmp,
+          checkpointRef,
+          expected: { kind: 'absent' },
+        })
+
+        expect(stale.outcome).toBe('lost-race')
+        expect(yield* git(tmp, ['rev-parse', checkpointRef])).toBe(winner.commitOid)
+        expect(yield* git(tmp, ['show', `${checkpointRef}:README.md`])).toBe('winning baseline')
+      }),
+    )
+
     it.effect('captures raw working-tree bytes without invoking required Git filters', () =>
       Effect.gen(function* ()
       {
@@ -199,6 +230,87 @@ it.layer(TestLayer)('CheckpointStore.layer', (it) =>
         )
         expect(yield* git(tmp, ['diff', '--cached', '--no-ext-diff', '--no-textconv'])).toBe('')
       }),
+    )
+  })
+
+  describe('staged restore', () =>
+  {
+    it.effect(
+      'stages, preflights without mutation, converges partial work, and detects corruption',
+      () =>
+        Effect.gen(function* ()
+        {
+          const tmp = yield* makeTmpDir('checkpoint-staged-worktree-')
+          const stagePath = yield* makeTmpDir('checkpoint-staged-tree-')
+          yield* initRepoWithCommit(tmp)
+          const checkpointStore = yield* CheckpointStore.CheckpointStore
+          const checkpointRef = checkpointRefForThreadTurn(
+            ThreadId.make('thread-checkpoint-staged'),
+            1,
+          )
+          const readmePath = NodePath.join(tmp, 'README.md')
+          const nestedPath = NodePath.join(tmp, 'nested', 'target.txt')
+          yield* writeTextFile(readmePath, '# checkpoint target\n')
+          yield* Effect.promise(() =>
+            NodeFSP.mkdir(NodePath.dirname(nestedPath), { recursive: true }),
+          )
+          yield* writeTextFile(nestedPath, 'nested checkpoint target\n')
+          yield* checkpointStore.captureCheckpoint({ cwd: tmp, checkpointRef })
+
+          const staged = yield* checkpointStore.stageCheckpointTree({
+            cwd: tmp,
+            ref: checkpointRef,
+            stagePath,
+          })
+          expect(staged.verified).toBe(true)
+          expect(staged.fileCount).toBeGreaterThanOrEqual(2)
+          expect(
+            yield* Effect.promise(() =>
+              NodeFSP.readFile(NodePath.join(stagePath, 'README.md'), 'utf8'),
+            ),
+          ).toBe('# checkpoint target\n')
+
+          yield* writeTextFile(readmePath, '# live mutation\n')
+          yield* writeTextFile(NodePath.join(tmp, 'extra.txt'), 'remove during restore\n')
+          const statusBefore = yield* git(tmp, ['status', '--porcelain=v1'])
+          const readmeBefore = yield* Effect.promise(() => NodeFSP.readFile(readmePath, 'utf8'))
+          const preflight = yield* checkpointStore.verifyRestorePreconditions({
+            cwd: tmp,
+            ref: checkpointRef,
+          })
+          expect(preflight.fileCount).toBe(staged.fileCount)
+          expect(yield* git(tmp, ['status', '--porcelain=v1'])).toBe(statusBefore)
+          expect(yield* Effect.promise(() => NodeFSP.readFile(readmePath, 'utf8'))).toBe(
+            readmeBefore,
+          )
+
+          yield* Effect.promise(() => NodeFSP.rm(readmePath))
+          const stagedNested = yield* Effect.promise(() =>
+            NodeFSP.readFile(NodePath.join(stagePath, 'nested', 'target.txt')),
+          )
+          yield* Effect.promise(() => NodeFSP.writeFile(nestedPath, stagedNested))
+          yield* checkpointStore.applyStagedRestore({
+            cwd: tmp,
+            ref: checkpointRef,
+            stagePath,
+          })
+          const verified = yield* checkpointStore.postVerifyRestore({
+            cwd: tmp,
+            ref: checkpointRef,
+          })
+          expect(verified.verified).toBe(true)
+          expect(yield* Effect.promise(() => NodeFSP.readFile(readmePath, 'utf8'))).toBe(
+            '# checkpoint target\n',
+          )
+          const fileSystem = yield* FileSystem.FileSystem
+          expect(yield* fileSystem.exists(NodePath.join(tmp, 'extra.txt'))).toBe(false)
+
+          yield* Effect.promise(() => NodeFSP.writeFile(readmePath, '# corrupted after restore\n'))
+          const corrupted = yield* Effect.result(
+            checkpointStore.postVerifyRestore({ cwd: tmp, ref: checkpointRef }),
+          )
+          expect(corrupted._tag).toBe('Failure')
+        }),
     )
   })
 

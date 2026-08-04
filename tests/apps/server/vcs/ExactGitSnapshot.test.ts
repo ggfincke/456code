@@ -1,5 +1,6 @@
 // tests/apps/server/vcs/ExactGitSnapshot.test.ts
 // verifies raw bounded Git snapshots and filter-free tree materialization
+
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off
 
 import * as NodeChildProcess from 'node:child_process'
@@ -11,9 +12,13 @@ import * as NodeUtil from 'node:util'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 
 import {
+  applyStagedExactGitTreeRestore,
   captureExactGitSnapshot,
   materializeExactGitTree,
+  preflightExactGitTreeRestore,
   restoreExactGitTree,
+  verifyExactGitTreeMaterialization,
+  verifyExactGitTreeRestore,
 } from '../../../../apps/server/src/vcs/ExactGitSnapshot.ts'
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile)
@@ -385,6 +390,87 @@ describe.sequential('ExactGitSnapshot', () =>
         process.env.T3_EXACT_GIT_FILTER_MARKER = previousMarker
       }
     }
+  })
+
+  it('verifies staging and converges a restore after partial filesystem application', async () =>
+  {
+    const { repositoryRoot } = await initializeRepository()
+    const artifactRoot = await temporaryRoot('456code-exact-git-staged-artifacts-')
+    const stageRoot = await temporaryRoot('456code-exact-git-stage-')
+    const indexPath = NodePath.join(artifactRoot, 'snapshot.index')
+    const nestedPath = NodePath.join(repositoryRoot, 'nested', 'target.txt')
+    await NodeFSP.mkdir(NodePath.dirname(nestedPath), { recursive: true })
+    await NodeFSP.writeFile(NodePath.join(repositoryRoot, 'tracked.txt'), 'target tracked\n')
+    await NodeFSP.writeFile(nestedPath, 'target nested\n')
+    const snapshot = await captureExactGitSnapshot({
+      repositoryRoot,
+      indexPath,
+      signal: new AbortController().signal,
+    })
+    await materializeExactGitTree({
+      repositoryRoot,
+      treeOid: snapshot.treeOid,
+      destinationRoot: stageRoot,
+      signal: new AbortController().signal,
+    })
+
+    await expect(
+      verifyExactGitTreeMaterialization({
+        repositoryRoot,
+        treeOid: snapshot.treeOid,
+        rootPath: stageRoot,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ verified: true, fileCount: snapshot.fileCount })
+
+    await NodeFSP.writeFile(NodePath.join(repositoryRoot, 'tracked.txt'), 'live mutation\n')
+    await NodeFSP.writeFile(NodePath.join(repositoryRoot, 'extra.txt'), 'remove me\n')
+    const indexBefore = await NodeFSP.readFile(NodePath.join(repositoryRoot, '.git', 'index'))
+    const trackedBefore = await NodeFSP.readFile(NodePath.join(repositoryRoot, 'tracked.txt'))
+    await expect(
+      preflightExactGitTreeRestore({
+        repositoryRoot,
+        treeOid: snapshot.treeOid,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ treeOid: snapshot.treeOid })
+    expect(await NodeFSP.readFile(NodePath.join(repositoryRoot, '.git', 'index'))).toEqual(
+      indexBefore,
+    )
+    expect(await NodeFSP.readFile(NodePath.join(repositoryRoot, 'tracked.txt'))).toEqual(
+      trackedBefore,
+    )
+
+    await NodeFSP.rm(NodePath.join(repositoryRoot, 'tracked.txt'))
+    await NodeFSP.writeFile(
+      nestedPath,
+      await NodeFSP.readFile(NodePath.join(stageRoot, 'nested', 'target.txt')),
+    )
+    await applyStagedExactGitTreeRestore({
+      repositoryRoot,
+      treeOid: snapshot.treeOid,
+      stageRoot,
+      signal: new AbortController().signal,
+    })
+    await expect(
+      verifyExactGitTreeRestore({
+        repositoryRoot,
+        treeOid: snapshot.treeOid,
+        signal: new AbortController().signal,
+      }),
+    ).resolves.toMatchObject({ verified: true })
+    await expect(NodeFSP.access(NodePath.join(repositoryRoot, 'extra.txt'))).rejects.toMatchObject({
+      code: 'ENOENT',
+    })
+
+    await NodeFSP.writeFile(NodePath.join(repositoryRoot, 'tracked.txt'), 'corrupted\n')
+    await expect(
+      verifyExactGitTreeRestore({
+        repositoryRoot,
+        treeOid: snapshot.treeOid,
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({ code: 'verification-failed' })
   })
 
   it('admits clean gitlinks and rejects dirty submodules', async () =>

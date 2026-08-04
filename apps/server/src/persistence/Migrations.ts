@@ -63,6 +63,7 @@ import Migration0045 from './Migrations/045_OrchestrationReactorDelivery.ts'
 import Migration0046 from './Migrations/046_AttachmentLifecycle.ts'
 import Migration0050 from './Migrations/050_AttachmentLifecycleGenerations.ts'
 import Migration0047 from './Migrations/047_PendingApprovalOutcome.ts'
+import Migration0048 from './Migrations/048_CheckpointRevertOperations.ts'
 
 // migration loader with all migrations defined inline.
 //
@@ -120,6 +121,7 @@ export const migrationEntries = [
   [45, 'OrchestrationReactorDelivery', Migration0045],
   [46, 'AttachmentLifecycle', Migration0046],
   [47, 'PendingApprovalOutcome', Migration0047],
+  [48, 'CheckpointRevertOperations', Migration0048],
   [50, 'AttachmentLifecycleGenerations', Migration0050],
 ] as const
 

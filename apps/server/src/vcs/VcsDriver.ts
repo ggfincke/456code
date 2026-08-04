@@ -1,3 +1,6 @@
+// apps/server/src/vcs/VcsDriver.ts
+// define vcs capture checkpoint input
+
 import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
 
@@ -14,10 +17,24 @@ import type {
 import { CheckpointRef } from '@t3tools/contracts'
 import * as VcsProcess from './VcsProcess.ts'
 
+// what the target ref must hold when a capture publishes its commit; captures
+// that omit it read the ref before snapshotting and require it to be unchanged
+export type VcsCheckpointRefExpectation =
+  { readonly kind: 'absent' } | { readonly kind: 'commit'; readonly commitOid: string }
+
 export interface VcsCaptureCheckpointInput
 {
   readonly cwd: string
   readonly checkpointRef: CheckpointRef
+  readonly expected?: VcsCheckpointRefExpectation
+}
+
+// `lost-race` means another writer published the ref first, so the captured
+// commit was never installed and the caller must drop its snapshot
+export interface VcsCaptureCheckpointResult
+{
+  readonly outcome: 'published' | 'lost-race'
+  readonly commitOid: string
 }
 
 export interface VcsRestoreCheckpointInput
@@ -44,7 +61,9 @@ export interface VcsDeleteCheckpointRefsInput
 
 export interface VcsCheckpointOps
 {
-  readonly captureCheckpoint: (input: VcsCaptureCheckpointInput) => Effect.Effect<void, VcsError>
+  readonly captureCheckpoint: (
+    input: VcsCaptureCheckpointInput,
+  ) => Effect.Effect<VcsCaptureCheckpointResult, VcsError>
   readonly hasCheckpointRef: (
     input: Omit<VcsRestoreCheckpointInput, 'fallbackToHead'>,
   ) => Effect.Effect<boolean, VcsError>

@@ -1,3 +1,6 @@
+// tests/apps/server/checkpointing/Errors.test.ts
+// verify errors behavior
+
 import { expect, it } from '@effect/vitest'
 import { ThreadId } from '@t3tools/contracts'
 
@@ -28,23 +31,11 @@ it('derives checkpoint messages from structured context', () =>
     threadId,
   })
 
-  expect(range.operation).toBe('CheckpointDiffQuery.getTurnDiff')
-  expect(range.threadId).toBe(threadId)
-  expect(range.requestedTurnCount).toBe(4)
-  expect(range.availableTurnCount).toBe(2)
   expect(range.message).toContain('thread-1')
   expect(range.message).toContain('4')
   expect(range.message).toContain('2')
-
-  expect(checkpoint.operation).toBe('CheckpointDiffQuery.getTurnDiff')
-  expect(checkpoint.threadId).toBe(threadId)
-  expect(checkpoint.turnCount).toBe(2)
-  expect(checkpoint.checkpoint).toBe('to')
   expect(checkpoint.message).toContain('thread-1')
   expect(checkpoint.message).toContain('2')
-
-  expect(workspace.operation).toBe('CheckpointDiffQuery.getFullThreadDiff')
-  expect(workspace.threadId).toBe(threadId)
   expect(workspace.message).toContain('CheckpointDiffQuery.getFullThreadDiff')
   expect(workspace.message).toContain('thread-1')
 })

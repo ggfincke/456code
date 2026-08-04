@@ -14,12 +14,22 @@ import {
 } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
+import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as TestClock from 'effect/testing/TestClock'
 
+import {
+  ATTACHMENT_CLEANUP_GRACE,
+  AttachmentCleanupReactorLive,
+} from '../../../../../apps/server/src/orchestration/Layers/AttachmentCleanupReactor.ts'
+import { AttachmentCleanupReactor } from '../../../../../apps/server/src/orchestration/Services/AttachmentCleanupReactor.ts'
+import { CheckpointRevertOperationsLive } from '../../../../../apps/server/src/persistence/Layers/CheckpointRevertOperations.ts'
+import { AttachmentLifecycleRepository } from '../../../../../apps/server/src/persistence/Services/AttachmentLifecycle.ts'
 import { OrchestrationCommandReceiptRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts'
 import { OrchestrationEventStoreLive } from '../../../../../apps/server/src/persistence/Layers/OrchestrationEventStore.ts'
 import {
@@ -805,12 +815,13 @@ it.layer(
   Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-attachments-overwrite-')),
 )('OrchestrationProjectionPipeline', (it) =>
 {
-  it.effect('removes unreferenced attachment files when a thread is reverted', () =>
+  it.effect('removes reverted attachment files after durable cleanup grace', () =>
     Effect.gen(function* ()
     {
       const fileSystem = yield* FileSystem.FileSystem
       const path = yield* Path.Path
       const projectionPipeline = yield* OrchestrationProjectionPipeline
+      const cleanupReactor = yield* AttachmentCleanupReactor
       const eventStore = yield* OrchestrationEventStore
       const { attachmentsDir } = yield* ServerConfig
       const now = '2026-01-01T00:00:00.000Z'
@@ -819,6 +830,34 @@ it.layer(
       const removeAttachmentId = 'thread-revert-files-00000000-0000-4000-8000-000000000002'
       const otherThreadAttachmentId =
         'thread-revert-files-extra-00000000-0000-4000-8000-000000000003'
+
+      yield* stageOwnedAttachment({
+        stagingKey: 'revert-keep-staging',
+        commandId: 'cmd-revert-keep-staging',
+        threadId,
+        messageId: 'message-revert-keep-staging',
+        attachmentId: keepAttachmentId,
+        ownerSequence: 4,
+        now,
+      })
+      yield* stageOwnedAttachment({
+        stagingKey: 'revert-remove-staging',
+        commandId: 'cmd-revert-remove-staging',
+        threadId,
+        messageId: 'message-revert-remove-staging',
+        attachmentId: removeAttachmentId,
+        ownerSequence: 6,
+        now,
+      })
+      yield* stageOwnedAttachment({
+        stagingKey: 'revert-other-staging',
+        commandId: 'cmd-revert-other-staging',
+        threadId: ThreadId.make('Thread Revert.Files.Extra'),
+        messageId: 'message-revert-other-staging',
+        attachmentId: otherThreadAttachmentId,
+        ownerSequence: 1,
+        now,
+      })
 
       const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
         eventStore
@@ -2748,6 +2787,7 @@ const engineLayer = it.layer(
     Layer.provide(OrchestrationProjectionPipelineLive),
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+    Layer.provide(CheckpointRevertOperationsLive),
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provideMerge(SqlitePersistenceMemory),
     Layer.provideMerge(
