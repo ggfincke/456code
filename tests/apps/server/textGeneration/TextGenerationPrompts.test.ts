@@ -30,7 +30,7 @@ describe('buildCommitMessagePrompt', () =>
     expect(result.prompt).toContain('Staged patch:')
     expect(result.prompt).toContain('diff --git a/README.md b/README.md')
     expect(result.prompt).toContain('Branch: main')
-    // Should NOT include the branch generation instruction
+    // should NOT include the branch generation instruction
     expect(result.prompt).not.toContain('branch must be a short semantic git branch fragment')
   })
 
@@ -210,31 +210,28 @@ describe('sanitizeThreadTitle', () =>
 
 describe('normalizeCliError', () =>
 {
-  it("detects 'Command not found' and includes CLI name in the message", () =>
+  it.each([
+    {
+      cli: 'claude',
+      operation: 'generateCommitMessage' as const,
+      displayName: 'Claude CLI',
+    },
+    {
+      cli: 'codex',
+      operation: 'generateBranchName' as const,
+      displayName: 'Codex CLI',
+    },
+  ])("detects 'Command not found' and brands $displayName", ({ cli, operation, displayName }) =>
   {
     const error = normalizeCliError(
-      'claude',
-      'generateCommitMessage',
-      new Error('Command not found: claude'),
+      cli,
+      operation,
+      new Error(`Command not found: ${cli}`),
       'Something went wrong',
     )
 
     expect(error).toBeInstanceOf(TextGenerationError)
-    expect(error.detail).toContain('Claude CLI')
-    expect(error.detail).toContain('not available on PATH')
-  })
-
-  it('uses the CLI name from the first argument for codex', () =>
-  {
-    const error = normalizeCliError(
-      'codex',
-      'generateBranchName',
-      new Error('Command not found: codex'),
-      'Something went wrong',
-    )
-
-    expect(error).toBeInstanceOf(TextGenerationError)
-    expect(error.detail).toContain('Codex CLI')
+    expect(error.detail).toContain(displayName)
     expect(error.detail).toContain('not available on PATH')
   })
 

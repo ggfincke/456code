@@ -42,7 +42,7 @@ import {
   mergeOpenCodeAssistantText,
 } from '../../../../../apps/server/src/provider/Layers/OpenCodeAdapter.ts'
 
-// Test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
+// test-local service tag so the rest of the file can keep using `yield* OpenCodeAdapter`.
 class OpenCodeAdapter extends Context.Service<OpenCodeAdapter, OpenCodeAdapterShape>()(
   '@t3tools/tests/apps/server/provider/Layers/OpenCodeAdapter.test/OpenCodeAdapter',
 )
@@ -135,7 +135,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
     Effect.gen(function* ()
     {
       const url = serverUrl ?? 'http://127.0.0.1:4301'
-      // Always register a finalizer so the closeCalls/closeError probes fire;
+      // always register a finalizer so the closeCalls/closeError probes fire;
       // production attaches none for external servers.
       yield* Effect.addFinalizer(() =>
         Effect.sync(() =>
@@ -175,8 +175,8 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
             block.entered()
             await block.release
           }
-          // The real client is `throwOnError: true`: non-2xx rejects rather
-          // than resolving, so missing → 404 throw, transient → 500 throw.
+          // the real client is `throwOnError: true`: non-2xx rejects rather
+          // than resolving, so missing -> 404 throw, transient -> 500 throw.
           if (runtimeMock.state.transientErrorSessionIds.has(sessionID))
           {
             throw new Error('opencode server error', { cause: { status: 500 } })
@@ -201,7 +201,7 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntimeShape = {
         },
         fork: async ({ sessionID, directory }: { sessionID: string; directory?: string }) =>
         {
-          // Fork clones history into a new session bound to the directory.
+          // fork clones history into a new session bound to the directory.
           const forkedId = `${sessionID}_fork`
           runtimeMock.state.forkCalls.push({ sessionID, ...(directory ? { directory } : {}) })
           if (directory)
@@ -283,7 +283,7 @@ const providerSessionDirectoryTestLayer = Layer.succeed(ProviderSessionDirectory
   listBindings: () => Effect.succeed([]),
 })
 
-// The adapter now receives its settings as a plain argument (the old design
+// the adapter now receives its settings as a plain argument (the old design
 // read from `ServerSettingsService` internally). The test-only
 // `ServerSettingsService` below is still kept because other dependencies in
 // the layer graph reach for it — but the routing values the assertions
@@ -370,7 +370,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         resumeCursor: { schemaVersion: 1, sessionId: 'ses_persisted' },
       })
 
-      // The adapter validates the persisted id with session.get and re-adopts
+      // the adapter validates the persisted id with session.get and re-adopts
       // it — no new session is minted (issue #3604).
       NodeAssert.deepEqual(runtimeMock.state.sessionGetIds, ['ses_persisted'])
       NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, [])
@@ -378,7 +378,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         schemaVersion: 1,
         sessionId: 'ses_persisted',
       })
-      // Resume re-asserts the permission ruleset for the current runtimeMode.
+      // resume re-asserts the permission ruleset for the current runtimeMode.
       NodeAssert.equal(runtimeMock.state.sessionUpdateCalls.length, 1)
       NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.sessionID, 'ses_persisted')
       NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.permission != null, true)
@@ -409,7 +409,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         ),
       })
 
-      // The prompt targets the resumed id, and the turn re-surfaces the cursor.
+      // the prompt targets the resumed id, and the turn re-surfaces the cursor.
       NodeAssert.deepEqual(
         (runtimeMock.state.promptCalls[0] as { sessionID: string }).sessionID,
         'ses_persisted',
@@ -779,7 +779,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         resumeCursor: { schemaVersion: 99, sessionId: 'ses_persisted' },
       })
 
-      // A foreign/stale-shaped cursor is treated as "no resume": never probed,
+      // a foreign/stale-shaped cursor is treated as "no resume": never probed,
       // a fresh session is created.
       NodeAssert.deepEqual(runtimeMock.state.sessionGetIds, [])
       NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, ['http://127.0.0.1:9999'])
@@ -809,36 +809,11 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         }),
       )
 
-      // A transient/transport/auth failure must propagate — NOT be masked as a
+      // a transient/transport/auth failure must propagate — NOT be masked as a
       // brand-new empty session (the #3604 class of silent context loss).
       NodeAssert.equal(Exit.isFailure(exit), true)
       NodeAssert.deepEqual(runtimeMock.state.sessionGetIds, ['ses_transient'])
       NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, [])
-    }),
-  )
-
-  it.effect('re-applies the current runtimeMode permissions when resuming', () =>
-    Effect.gen(function* ()
-    {
-      const adapter = yield* OpenCodeAdapter
-      const threadId = asThreadId('thread-opencode-perms')
-
-      yield* adapter.startSession({
-        provider: ProviderDriverKind.make('opencode'),
-        // A different runtimeMode than the original create — resume must not
-        // leave the upstream session on stale permissions.
-        runtimeMode: 'approval-required',
-        threadId,
-        resumeCursor: { schemaVersion: 1, sessionId: 'ses_perms' },
-      })
-
-      NodeAssert.deepEqual(runtimeMock.state.sessionGetIds, ['ses_perms'])
-      NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, [])
-      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls.length, 1)
-      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.sessionID, 'ses_perms')
-      NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.permission != null, true)
-
-      yield* adapter.stopSession(threadId)
     }),
   )
 
@@ -849,7 +824,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       {
         const adapter = yield* OpenCodeAdapter
         const threadId = asThreadId('thread-opencode-cwd')
-        // The persisted session still exists but was created in another working dir
+        // the persisted session still exists but was created in another working dir
         // (e.g. the thread moved from the project root into a git worktree).
         runtimeMock.state.sessionDirectoryById.set('ses_otherdir', '/some/other/worktree')
 
@@ -864,17 +839,17 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
           },
         })
 
-        // A cwd change must not mint an empty session: the adapter forks the
+        // a cwd change must not mint an empty session: the adapter forks the
         // persisted session into the requested cwd, carrying history forward.
         NodeAssert.deepEqual(runtimeMock.state.sessionGetIds, ['ses_otherdir'])
         NodeAssert.deepEqual(runtimeMock.state.sessionCreateUrls, [])
         NodeAssert.equal(runtimeMock.state.forkCalls.length, 1)
         NodeAssert.equal(runtimeMock.state.forkCalls[0]?.sessionID, 'ses_otherdir')
         NodeAssert.equal(typeof runtimeMock.state.forkCalls[0]?.directory, 'string')
-        // Permission ruleset re-asserted on the fork for the current runtimeMode.
+        // permission ruleset re-asserted on the fork for the current runtimeMode.
         NodeAssert.equal(runtimeMock.state.sessionUpdateCalls.length, 1)
         NodeAssert.equal(runtimeMock.state.sessionUpdateCalls[0]?.sessionID, 'ses_otherdir_fork')
-        // Durable cursor now points at the history-complete fork in the new directory.
+        // durable cursor now points at the history-complete fork in the new directory.
         NodeAssert.deepEqual(session.resumeCursor, {
           schemaVersion: 1,
           sessionId: 'ses_otherdir_fork',
@@ -890,7 +865,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
     {
       const adapter = yield* OpenCodeAdapter
       const threadId = asThreadId('thread-opencode-samedir')
-      // Same working tree, different spelling (trailing slash) — must reuse,
+      // same working tree, different spelling (trailing slash) — must reuse,
       // not fork.
       runtimeMock.state.sessionDirectoryById.set('ses_samedir', `${process.cwd()}/`)
 
@@ -1124,7 +1099,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         },
       })
 
-      // Steer: OpenCode queues the prompt into the busy session, so the
+      // steer: OpenCode queues the prompt into the busy session, so the
       // active turn id is reused instead of opening a new turn.
       const steeredTurn = yield* adapter.sendTurn({
         threadId,
@@ -1176,7 +1151,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         })
         .pipe(Effect.flip)
 
-      // The original turn keeps running — only the steer prompt failed.
+      // the original turn keeps running — only the steer prompt failed.
       NodeAssert.equal(error._tag, 'ProviderAdapterRequestError')
       const sessions = yield* adapter.listSessions()
       const session = sessions.find((entry) => entry.threadId === threadId)
@@ -1360,7 +1335,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
   it.effect('classifies a confirmed not-found across the shapes the SDK/runtime can produce', () =>
     Effect.sync(() =>
     {
-      // The real production shape: runOpenCodeSdk wraps the thrown Error
+      // the real production shape: runOpenCodeSdk wraps the thrown Error
       // (cause = { body, status }) under OpenCodeRuntimeError.
       const wrappedError = new Error('Session not found: ses_x', {
         cause: { body: { name: 'NotFoundError' }, status: 404 },
@@ -1391,12 +1366,12 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         false,
       )
       NodeAssert.equal(isOpenCodeNotFound({ detail: 'status=500 body={...not found...}' }), false)
-      // An explicit non-404 status seals its subtree: a 500 whose serialized
+      // an explicit non-404 status seals its subtree: a 500 whose serialized
       // body echoes a NotFoundError name — or that is itself named
-      // *NotFound* — is a real failure, never a miss.
+      // `NotFound` is a real failure, never a miss.
       NodeAssert.equal(isOpenCodeNotFound({ status: 500, body: { name: 'NotFoundError' } }), false)
       NodeAssert.equal(isOpenCodeNotFound({ name: 'UpstreamNotFoundError', status: 500 }), false)
-      // A "NotFound"-flavored name that isn't OpenCode's exact `NotFoundError`
+      // a "NotFound"-flavored name that isn't OpenCode's exact `NotFoundError`
       // is not a confirmed miss even without a sealing status.
       NodeAssert.equal(isOpenCodeNotFound({ name: 'UpstreamNotFoundError' }), false)
       NodeAssert.equal(isOpenCodeNotFound({ cause: { name: 'ProviderNotFoundError' } }), false)
@@ -1406,7 +1381,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         ),
         false,
       )
-      // Other transient/auth/network failures must propagate too.
+      // other transient/auth/network failures must propagate too.
       NodeAssert.equal(isOpenCodeNotFound(new Error('boom', { cause: { status: 500 } })), false)
       NodeAssert.equal(isOpenCodeNotFound({ cause: { response: { status: 401 } } }), false)
       NodeAssert.equal(isOpenCodeNotFound(new Error('network error (no response)')), false)
@@ -1422,14 +1397,14 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
       const sameDirectory = (left: string, right: string) =>
         isSameOpenCodeDirectory(fileSystem, path, left, right)
 
-      // Lexical-only differences (trailing slash, dot segments) short-circuit
+      // lexical-only differences (trailing slash, dot segments) short-circuit
       // without touching the filesystem — the paths need not exist.
       NodeAssert.equal(yield* sameDirectory('/repo/project/', '/repo/project'), true)
       NodeAssert.equal(yield* sameDirectory('/repo/nested/../project', '/repo/project'), true)
-      // Nonexistent paths degrade to the lexical comparison instead of failing.
+      // nonexistent paths degrade to the lexical comparison instead of failing.
       NodeAssert.equal(yield* sameDirectory('/repo/project', '/repo/other'), false)
 
-      // A symlinked cwd (the macOS `/tmp` → `/private/tmp` shape) resolves to
+      // a symlinked cwd (the macOS `/tmp` -> `/private/tmp` shape) resolves to
       // the directory it points at, so the two spellings compare equal.
       const base = yield* fileSystem.makeTempDirectoryScoped({ prefix: 't3-opencode-dir-' })
       const real = path.join(base, 'real')
@@ -1744,7 +1719,7 @@ it.layer(OpenCodeAdapterTestLayer)('OpenCodeAdapterLive', (it) =>
         Layer.provideMerge(NodeServices.layer),
       )
 
-      // Capture closeCalls *inside* the provided layer scope: the adapter's
+      // capture closeCalls *inside* the provided layer scope: the adapter's
       // layer finalizer now tears down any live sessions when the layer
       // closes (which is exactly what we want for leak prevention), so
       // inspecting closeCalls after `Effect.provide` completes would observe

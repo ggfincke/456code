@@ -1,11 +1,10 @@
-/**
- * ServerConfig - Runtime configuration services.
- *
- * Defines process-level server configuration and networking helpers used by
- * startup and runtime layers.
- *
- * @module ServerConfig
- */
+// apps/server/src/config.ts
+// expose default port
+
+// defines process-level server configuration and networking helpers used by
+// startup and runtime layers.
+//
+// @module ServerConfig
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'

@@ -1548,10 +1548,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       )
 
-      // This test intentionally avoids `mockCommandSpawnerLayer` so the real
+      // this test intentionally avoids `mockCommandSpawnerLayer` so the real
       // `probeCodexAppServerProvider` path runs — including the full
       // `codex app-server` RPC handshake via `CodexClient.layerChildProcess`.
-      // We point `binaryPath` at a name that cannot exist on any machine so
+      // we point `binaryPath` at a name that cannot exist on any machine so
       // the real `ChildProcessSpawner` deterministically returns ENOENT; the
       // probe wraps that as `CodexAppServerSpawnError` and
       // `checkCodexProviderStatus` turns it into the user-visible "not
@@ -1567,7 +1567,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             decodeServerSettings(
               deepMerge(encodedDefaultServerSettings, {
                 providers: {
-                  // Disable every built-in probe that would otherwise spawn
+                  // disable every built-in probe that would otherwise spawn
                   // on the CI host. `enabled: false` short-circuits each
                   // driver's probe *before* it touches the spawner, so the
                   // test environment stays isolated from the dev
@@ -1584,7 +1584,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
                 // accepts + decodes them. Cast the patch to `unknown` so
                 // the `Schema.decodeSync` below does the real validation.
                 providerInstances: {
-                  // Matches the shape the user had in `.456code/dev/settings.json`
+                  // matches the shape the user had in `.456code/dev/settings.json`
                   // when the bug was reported: a custom enabled Codex instance
                   // pointing at a binary the server has to actually spawn.
                   codex_personal: {
@@ -1669,10 +1669,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         }),
       )
 
-      // Guards the second half of the reported bug: changing
+      // guards the second half of the reported bug: changing
       // `providers.codex.binaryPath` in settings must tear down the live
       // instance and rebuild it so a fresh probe runs with the new binary.
-      // This test drives the real settings stream → registry reconcile →
+      // this test drives the real settings stream -> registry reconcile ->
       // aggregator sync pipeline and asserts that `getProviders` reflects
       // the new background probe's outcome.
       //
@@ -1731,7 +1731,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           yield* Effect.gen(function* ()
           {
             const registry = yield* ProviderRegistry.ProviderRegistry
-            // Boot-time probe: the default codex instance is enabled with
+            // boot-time probe: the default codex instance is enabled with
             // `firstMissing`, so the real spawner yields ENOENT and the
             // snapshot should be `status: "error"`.
             let initialProviders = yield* registry.getProviders
@@ -1754,10 +1754,10 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             assert.strictEqual(initialCodex?.installed, false)
             assert.deepStrictEqual(spawnedCommands, [firstMissing])
 
-            // Drive a settings change. The Hydration layer's
+            // drive a settings change. The Hydration layer's
             // `SettingsWatcherLive` consumes this via `streamChanges`,
             // calls `reconcile`, which rebuilds the codex instance (the
-            // envelope changed because `binaryPath` differs → `entryEqual`
+            // envelope changed because `binaryPath` differs -> `entryEqual`
             // is false). The registry's `Stream.runForEach(
             // instanceRegistry.streamChanges, () => syncLiveSources)`
             // fires `syncLiveSources`, which subscribes and launches a fresh
@@ -1768,7 +1768,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
               },
             })
 
-            // Poll until the injected process boundary observes the new
+            // poll until the injected process boundary observes the new
             // executable. This verifies the public settings-to-probe behavior
             // without depending on timestamps assigned by TestClock.
             const refreshed = yield* Effect.gen(function* ()
@@ -2013,7 +2013,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
       it.effect('returns ready and labels Bedrock-backed Claude as authenticated', () =>
         Effect.gen(function* ()
         {
-          // Bedrock authenticates via external AWS credentials, so the SDK init
+          // bedrock authenticates via external AWS credentials, so the SDK init
           // reports only `apiProvider` with no subscription or token.
           const status = yield* checkClaudeProviderStatus(
             defaultClaudeSettings,
@@ -2191,52 +2191,41 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         ),
       )
 
-      it.effect('does not duplicate Claude in full subscription labels', () =>
-        Effect.gen(function* ()
+      it.effect.each([
         {
-          const status = yield* checkClaudeProviderStatus(
-            defaultClaudeSettings,
-            claudeCapabilities({
-              subscriptionType: 'Claude Max Subscription',
-            }),
-          )
-          assert.strictEqual(status.auth.status, 'authenticated')
-          assert.strictEqual(status.auth.type, 'Claude Max Subscription')
-          assert.strictEqual(status.auth.label, 'Claude Max Subscription')
-        }).pipe(
-          Effect.provide(
-            mockSpawnerLayer((args) =>
-            {
-              const joined = args.join(' ')
-              if (joined === '--version') return { stdout: '1.0.0\n', stderr: '', code: 0 }
-              throw new Error(`Unexpected args: ${joined}`)
-            }),
-          ),
-        ),
-      )
-
-      it.effect('does not duplicate Claude in provider-prefixed subscription names', () =>
-        Effect.gen(function* ()
+          name: 'full subscription labels',
+          subscriptionType: 'Claude Max Subscription',
+          expectedType: 'Claude Max Subscription',
+          expectedLabel: 'Claude Max Subscription',
+        },
         {
-          const status = yield* checkClaudeProviderStatus(
-            defaultClaudeSettings,
-            claudeCapabilities({
-              subscriptionType: 'Claude Max',
-            }),
-          )
-          assert.strictEqual(status.auth.status, 'authenticated')
-          assert.strictEqual(status.auth.type, 'Claude Max')
-          assert.strictEqual(status.auth.label, 'Claude Max Subscription')
-        }).pipe(
-          Effect.provide(
-            mockSpawnerLayer((args) =>
-            {
-              const joined = args.join(' ')
-              if (joined === '--version') return { stdout: '1.0.0\n', stderr: '', code: 0 }
-              throw new Error(`Unexpected args: ${joined}`)
-            }),
+          name: 'provider-prefixed subscription names',
+          subscriptionType: 'Claude Max',
+          expectedType: 'Claude Max',
+          expectedLabel: 'Claude Max Subscription',
+        },
+      ])(
+        'does not duplicate Claude in $name',
+        ({ subscriptionType, expectedType, expectedLabel }) =>
+          Effect.gen(function* ()
+          {
+            const status = yield* checkClaudeProviderStatus(
+              defaultClaudeSettings,
+              claudeCapabilities({ subscriptionType }),
+            )
+            assert.strictEqual(status.auth.status, 'authenticated')
+            assert.strictEqual(status.auth.type, expectedType)
+            assert.strictEqual(status.auth.label, expectedLabel)
+          }).pipe(
+            Effect.provide(
+              mockSpawnerLayer((args) =>
+              {
+                const joined = args.join(' ')
+                if (joined === '--version') return { stdout: '1.0.0\n', stderr: '', code: 0 }
+                throw new Error(`Unexpected args: ${joined}`)
+              }),
+            ),
           ),
-        ),
       )
 
       it.effect('returns claude auth email from initialization result', () =>

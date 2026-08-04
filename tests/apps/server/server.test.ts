@@ -35,6 +35,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ResolvedKeybindingRule,
+  type SourceControlDiscoveryResult,
   ThreadId,
   TurnId,
   WS_METHODS,
@@ -80,8 +81,15 @@ import { vi } from 'vite-plus/test'
 const TEST_EPOCH = DateTime.makeUnsafe('1970-01-01T00:00:00.000Z')
 
 import * as ServerConfig from '../../../apps/server/src/config.ts'
-import { makeRoutesLayer } from '../../../apps/server/src/server.ts'
+import {
+  makeRoutesLayer,
+  makeSourceControlDiscoveryLayer,
+} from '../../../apps/server/src/server.ts'
 import { resolveAvailableEditorsForConfig } from '../../../apps/server/src/ws.ts'
+import { ImportContinuationDepsUnbound } from '../../../apps/server/src/import/continuationContract.ts'
+import { ImportReplacementIntentRepository } from '../../../apps/server/src/persistence/Services/ImportReplacementIntents.ts'
+import { OrchestrationProjectionPipeline } from '../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts'
+import { AttachmentLifecycleRepository } from '../../../apps/server/src/persistence/Services/AttachmentLifecycle.ts'
 import * as CheckpointDiffQuery from '../../../apps/server/src/checkpointing/CheckpointDiffQuery.ts'
 import * as GitManager from '../../../apps/server/src/git/GitManager.ts'
 import * as Keybindings from '../../../apps/server/src/keybindings.ts'
@@ -112,9 +120,12 @@ import * as GitVcsDriver from '../../../apps/server/src/vcs/GitVcsDriver.ts'
 import * as VcsDriver from '../../../apps/server/src/vcs/VcsDriver.ts'
 import * as VcsStatusBroadcaster from '../../../apps/server/src/vcs/VcsStatusBroadcaster.ts'
 import * as VcsDriverRegistry from '../../../apps/server/src/vcs/VcsDriverRegistry.ts'
+import * as VcsProcess from '../../../apps/server/src/vcs/VcsProcess.ts'
 import * as VcsProvisioningService from '../../../apps/server/src/vcs/VcsProvisioningService.ts'
 import * as GitWorkflowService from '../../../apps/server/src/git/GitWorkflowService.ts'
 import * as ReviewService from '../../../apps/server/src/review/ReviewService.ts'
+import * as SourceControlDiscovery from '../../../apps/server/src/sourceControl/SourceControlDiscovery.ts'
+import * as SourceControlProviderRegistry from '../../../apps/server/src/sourceControl/SourceControlProviderRegistry.ts'
 import * as SourceControlRepositoryService from '../../../apps/server/src/sourceControl/SourceControlRepositoryService.ts'
 import * as ServerSecretStore from '../../../apps/server/src/auth/ServerSecretStore.ts'
 import * as EnvironmentAuth from '../../../apps/server/src/auth/EnvironmentAuth.ts'
@@ -184,6 +195,7 @@ const makeDefaultOrchestrationReadModel = () =>
         settledOverride: null,
         settledAt: null,
         latestTurn: null,
+        providerSwitch: null,
         messages: [],
         session: null,
         activities: [],
@@ -210,6 +222,7 @@ const makeDefaultOrchestrationThreadShell = (
     branch: null,
     worktreePath: null,
     latestTurn: null,
+    providerSwitch: null,
     createdAt: now,
     updatedAt: now,
     archivedAt: null,
@@ -365,6 +378,7 @@ const buildAppUnderTest = (options?: {
     sourceControlRepositoryService?: Partial<
       SourceControlRepositoryService.SourceControlRepositoryService['Service']
     >
+    sourceControlDiscovery?: Partial<SourceControlDiscovery.SourceControlDiscovery['Service']>
     reviewService?: Partial<ReviewService.ReviewService['Service']>
     vcsStatusBroadcaster?: Partial<VcsStatusBroadcaster.VcsStatusBroadcaster['Service']>
     projectSetupScriptRunner?: Partial<ProjectSetupScriptRunner.ProjectSetupScriptRunner['Service']>
@@ -735,9 +749,18 @@ const buildAppUnderTest = (options?: {
       Layer.provide(reviewLayer),
       Layer.provide(vcsProvisioningLayer),
       Layer.provide(
-        Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
-          ...options?.layers?.sourceControlRepositoryService,
-        }),
+        Layer.mergeAll(
+          Layer.mock(SourceControlRepositoryService.SourceControlRepositoryService)({
+            ...options?.layers?.sourceControlRepositoryService,
+          }),
+          Layer.mock(SourceControlDiscovery.SourceControlDiscovery)({
+            discover: Effect.succeed({
+              versionControlSystems: [],
+              sourceControlProviders: [],
+            }),
+            ...options?.layers?.sourceControlDiscovery,
+          }),
+        ),
       ),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provide(
@@ -776,13 +799,27 @@ const buildAppUnderTest = (options?: {
         ),
       ),
       Layer.provide(
-        Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
-          readEvents: () => Stream.empty,
-          dispatch: () => Effect.succeed({ sequence: 0 }),
-          streamDomainEvents: Stream.empty,
-          latestSequence: Effect.succeed(0),
-          ...options?.layers?.orchestrationEngine,
-        }),
+        Layer.mergeAll(
+          Layer.mock(OrchestrationEngine.OrchestrationEngineService)({
+            readEvents: () => Stream.empty,
+            dispatch: () => Effect.succeed({ sequence: 0 }),
+            streamDomainEvents: Stream.empty,
+            latestSequence: Effect.succeed(0),
+            ...options?.layers?.orchestrationEngine,
+          }),
+          Layer.mock(ImportReplacementIntentRepository)({
+            getByIntentKey: () => Effect.succeed(Option.none()),
+            findOpenBySourceIdentity: () => Effect.succeed(Option.none()),
+            insertIfAbsent: (intent) => Effect.succeed(intent),
+            casTransition: () => Effect.succeed(false),
+            listOpen: () => Effect.succeed([]),
+            retire: () => Effect.succeed(false),
+          }),
+          Layer.mock(OrchestrationProjectionPipeline)({}),
+          Layer.mock(AttachmentLifecycleRepository)({
+            markDispatchFailure: () => Effect.void,
+          }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProjectionSnapshotQuery.ProjectionSnapshotQuery)(
@@ -875,6 +912,7 @@ const buildAppUnderTest = (options?: {
       ),
       Layer.provideMerge(makeAuthTestLayer()),
       Layer.provideMerge(ServerSecretStore.layer),
+      Layer.provide(ImportContinuationDepsUnbound),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
@@ -1264,6 +1302,122 @@ const getWsServerUrl = (
 
 it.layer(NodeServices.layer)('server router seam', (it) =>
 {
+  it.effect('composes source control discovery over the exact root services', () =>
+    Effect.gen(function* ()
+    {
+      const cwd = '/tmp/source-control-discovery-layer-sentinel'
+      const baseDir = '/tmp/source-control-discovery-layer-sentinel-state'
+      const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined)
+      const config = ServerConfig.make({
+        logLevel: 'Info',
+        traceMinLevel: 'Info',
+        traceTimingEnabled: true,
+        traceBatchWindowMs: 200,
+        traceMaxBytes: 10 * 1024 * 1024,
+        traceMaxFiles: 10,
+        otlpTracesUrl: undefined,
+        otlpMetricsUrl: undefined,
+        otlpExportIntervalMs: 10_000,
+        otlpServiceName: 't3-server',
+        mode: 'desktop',
+        port: 0,
+        host: '127.0.0.1',
+        cwd,
+        baseDir,
+        ...derivedPaths,
+        staticDir: undefined,
+        devUrl: undefined,
+        noBrowser: true,
+        startupPresentation: 'browser',
+        desktopBootstrapToken: defaultDesktopBootstrapToken,
+        autoBootstrapProjectFromCwd: false,
+        logWebSocketEvents: false,
+        tailscaleServeEnabled: false,
+        tailscaleServePort: 443,
+      })
+      const processInputs: Array<VcsProcess.VcsProcessInput> = []
+      const process = VcsProcess.VcsProcess.of({
+        run: (input) =>
+          Effect.sync(() =>
+          {
+            processInputs.push(input)
+            return {
+              exitCode: ChildProcessSpawner.ExitCode(0),
+              stdout: `${input.command} sentinel version`,
+              stderr: '',
+              stdoutTruncated: false,
+              stderrTruncated: false,
+            }
+          }),
+      })
+      const sourceControlProviders: SourceControlDiscoveryResult['sourceControlProviders'] = [
+        {
+          kind: 'github',
+          label: 'Sentinel GitHub',
+          executable: 'sentinel-gh',
+          status: 'available',
+          version: Option.some('sentinel-version'),
+          installHint: 'sentinel install hint',
+          detail: Option.none(),
+          auth: {
+            status: 'authenticated',
+            account: Option.some('sentinel-account'),
+            host: Option.none(),
+            detail: Option.none(),
+          },
+        },
+      ]
+      let providerDiscoveryCalls = 0
+      const providerRegistry = SourceControlProviderRegistry.SourceControlProviderRegistry.of({
+        get: () => Effect.die('unused source control provider lookup'),
+        resolveHandle: () => Effect.die('unused source control provider handle resolution'),
+        resolve: () => Effect.die('unused source control provider resolution'),
+        discover: Effect.sync(() =>
+        {
+          providerDiscoveryCalls += 1
+          return sourceControlProviders
+        }),
+      })
+      const rootServices = Layer.mergeAll(
+        Layer.succeed(ServerConfig.ServerConfig, config),
+        Layer.succeed(VcsProcess.VcsProcess, process),
+        Layer.succeed(
+          SourceControlProviderRegistry.SourceControlProviderRegistry,
+          providerRegistry,
+        ),
+      )
+
+      yield* Effect.gen(function* ()
+      {
+        assert.strictEqual(yield* ServerConfig.ServerConfig, config)
+        assert.strictEqual(yield* VcsProcess.VcsProcess, process)
+        assert.strictEqual(
+          yield* SourceControlProviderRegistry.SourceControlProviderRegistry,
+          providerRegistry,
+        )
+
+        const discovery = yield* SourceControlDiscovery.SourceControlDiscovery
+        const result = yield* discovery.discover
+
+        assert.equal(providerDiscoveryCalls, 1)
+        assert.deepEqual(
+          processInputs
+            .map((input) => ({ command: input.command, cwd: input.cwd }))
+            .sort((left, right) => left.command.localeCompare(right.command)),
+          [
+            { command: 'git', cwd },
+            { command: 'jj', cwd },
+          ],
+        )
+        assert.deepEqual(result.sourceControlProviders, sourceControlProviders)
+        assert.deepEqual(
+          result.versionControlSystems.map((item) => item.kind),
+          ['git', 'jj'],
+        )
+      }).pipe(Effect.provide(makeSourceControlDiscoveryLayer(rootServices)))
+    }),
+  )
+
   it.effect('serves static index content for GET / when staticDir is configured', () =>
     Effect.gen(function* ()
     {
@@ -1775,6 +1929,9 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         withWsRpcClient(wsUrl, (client) =>
           Effect.all({
             serverConfig: client[WS_METHODS.serverGetConfig]({}).pipe(Effect.flip),
+            sourceControlDiscovery: client[WS_METHODS.serverDiscoverSourceControl]({}).pipe(
+              Effect.flip,
+            ),
             mdxDocument: client[WS_METHODS.projectsReadMdxDocument]({
               threadId: defaultThreadId,
               relativePath: 'overview.mdx',
@@ -2328,7 +2485,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
   it.effect('allows reusing the desktop bootstrap credential', () =>
     Effect.gen(function* ()
     {
-      // The desktop-bootstrap grant is delivered over trusted IPC at
+      // the desktop-bootstrap grant is delivered over trusted IPC at
       // backend launch and needs to stay claimable after a renderer
       // refresh, so it's intentionally reusable (unlike user-facing
       // one-time pairing credentials).
@@ -2364,6 +2521,31 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(response.auth.policy, 'desktop-managed-local')
       assert.equal(response.shellResumeCompletionMarker, true)
       assert.equal(response.threadResumeCompletionMarker, true)
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('uses the injected source control discovery service over websocket rpc', () =>
+    Effect.gen(function* ()
+    {
+      const sentinelResult = {
+        versionControlSystems: [],
+        sourceControlProviders: [],
+      } satisfies SourceControlDiscoveryResult
+      yield* buildAppUnderTest({
+        layers: {
+          sourceControlDiscovery: {
+            discover: Effect.succeed(sentinelResult),
+          },
+        },
+      })
+
+      const result = yield* Effect.scoped(
+        withWsRpcClient(yield* getWsServerUrl('/ws'), (client) =>
+          client[WS_METHODS.serverDiscoverSourceControl]({}),
+        ),
+      )
+
+      assert.deepEqual(result, sentinelResult)
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
@@ -2770,43 +2952,6 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       const wsUrl = yield* getWsServerUrl('/ws')
       const response = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverUpsertKeybinding](rule)),
-      )
-
-      assert.deepEqual(response.issues, [])
-      assert.deepEqual(response.keybindings, [resolved])
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  )
-
-  it.effect('routes websocket rpc server.removeKeybinding', () =>
-    Effect.gen(function* ()
-    {
-      const rule: KeybindingRule = {
-        command: 'terminal.toggle',
-        key: 'ctrl+k',
-      }
-      const resolved: ResolvedKeybindingRule = {
-        command: 'terminal.toggle',
-        shortcut: {
-          key: 'j',
-          metaKey: false,
-          ctrlKey: false,
-          shiftKey: false,
-          altKey: false,
-          modKey: true,
-        },
-      }
-
-      yield* buildAppUnderTest({
-        layers: {
-          keybindings: {
-            removeKeybindingRule: () => Effect.succeed([resolved]),
-          },
-        },
-      })
-
-      const wsUrl = yield* getWsServerUrl('/ws')
-      const response = yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) => client[WS_METHODS.serverRemoveKeybinding](rule)),
       )
 
       assert.deepEqual(response.issues, [])
@@ -4566,6 +4711,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
             settledOverride: null,
             settledAt: null,
             latestTurn: null,
+            providerSwitch: null,
             messages: [],
             session: null,
             activities: [],
@@ -4757,6 +4903,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
                 branch: command.branch,
                 worktreePath: command.worktreePath,
                 latestTurn: null,
+                providerSwitch: null,
                 createdAt: command.createdAt,
                 updatedAt: command.createdAt,
                 archivedAt: null,
@@ -5193,7 +5340,6 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
             getThreadDetailSnapshot: () =>
               Effect.gen(function* ()
               {
-                yield* Effect.sleep('25 millis')
                 yield* PubSub.publish(liveEvents, messageEvent)
                 return Option.some({ snapshotSequence: 1, thread })
               }),
@@ -5226,7 +5372,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       yield* buildAppUnderTest({
         layers: {
           orchestrationEngine: {
-            // Head is far ahead of the client's afterSequence (gap > 1000).
+            // head is far ahead of the client's afterSequence (gap > 1000).
             latestSequence: Effect.succeed(100_000),
             readEvents: () =>
               Stream.sync(() =>
@@ -5270,7 +5416,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
 
       const [first, second] = Array.from(items)
-      // Large gap => fresh snapshot, and the unbounded replay is never started.
+      // large gap => fresh snapshot, and the unbounded replay is never started.
       assert.equal(first?.kind, 'snapshot')
       if (first?.kind === 'snapshot')
       {
@@ -5406,7 +5552,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         layers: {
           orchestrationEngine: {
             latestSequence: Effect.succeed(50),
-            // A burst of message-sent deltas for the busy thread, plus one
+            // a burst of message-sent deltas for the busy thread, plus one
             // thread.created for a different thread, all within one batch.
             readEvents: (_afterSequence, limit) =>
             {
@@ -5442,7 +5588,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       const upsertedIds = collected.flatMap((item) =>
         item.kind === 'thread-upserted' ? [item.thread.id] : [],
       )
-      // Both threads surface, and the busy thread's 20-event burst collapses to
+      // both threads surface, and the busy thread's 20-event burst collapses to
       // a single shell refetch (not 20). The new thread is not stuck behind it.
       assert.include(upsertedIds, busyThreadId)
       assert.include(upsertedIds, newThreadId)
@@ -5587,7 +5733,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         layers: {
           orchestrationEngine: {
             latestSequence: Effect.succeed(2),
-            // A thread.deleted followed, within the same coalescing window, by a
+            // a thread.deleted followed, within the same coalescing window, by a
             // later refetchable event for the same thread. The later event wins
             // coalescing; its shell refetch returns none (the row is gone), which
             // must still surface a removal rather than be swallowed.
@@ -5900,12 +6046,33 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
-  it.effect('archives without dispatching session stop when the thread has no session', () =>
+  it.effect.each([
+    {
+      name: 'the thread has no session',
+      threadId: ThreadId.make('thread-archive-no-session'),
+      commandId: CommandId.make('cmd-thread-archive-no-session'),
+      session: null,
+    },
+    {
+      name: 'the thread session is already stopped',
+      threadId: ThreadId.make('thread-archive-stopped-session'),
+      commandId: CommandId.make('cmd-thread-archive-stopped-session'),
+      session: {
+        threadId: ThreadId.make('thread-archive-stopped-session'),
+        status: 'stopped' as const,
+        providerName: 'claudeAgent' as const,
+        runtimeMode: 'full-access' as const,
+        activeTurnId: null,
+        lastError: null,
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    },
+  ])('archives without dispatching session stop when $name', ({ threadId, commandId, session }) =>
     Effect.gen(function* ()
     {
-      const threadId = ThreadId.make('thread-archive-no-session')
       const effects: string[] = []
       const dispatchedCommands: Array<OrchestrationCommand> = []
+      const now = '2026-01-01T00:00:00.000Z'
 
       yield* buildAppUnderTest({
         layers: {
@@ -5928,7 +6095,13 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           projectionSnapshotQuery: {
             getThreadShellById: () =>
               Effect.succeed(
-                Option.some(makeDefaultOrchestrationThreadShell({ id: threadId, session: null })),
+                Option.some(
+                  makeDefaultOrchestrationThreadShell({
+                    id: threadId,
+                    updatedAt: now,
+                    session,
+                  }),
+                ),
               ),
           },
         },
@@ -5939,7 +6112,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         withWsRpcClient(wsUrl, (client) =>
           client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
             type: 'thread.archive',
-            commandId: CommandId.make('cmd-thread-archive-no-session'),
+            commandId,
             threadId,
           }),
         ),
@@ -5954,160 +6127,80 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
-  it.effect(
-    'archives without dispatching session stop when the thread session is already stopped',
-    () =>
-      Effect.gen(function* ()
-      {
-        const threadId = ThreadId.make('thread-archive-stopped-session')
-        const effects: string[] = []
-        const dispatchedCommands: Array<OrchestrationCommand> = []
-        const now = '2026-01-01T00:00:00.000Z'
+  it.effect('archives and still closes terminals when session stop dies', () =>
+    Effect.gen(function* ()
+    {
+      const threadId = ThreadId.make('thread-archive-stop-die')
+      const effects: string[] = []
+      const dispatchedCommands: Array<OrchestrationCommand> = []
+      const now = '2026-01-01T00:00:00.000Z'
 
-        yield* buildAppUnderTest({
-          layers: {
-            terminalManager: {
-              close: (input) =>
-                Effect.sync(() =>
-                {
-                  effects.push(`terminal.close:${input.threadId}`)
-                }),
-            },
-            orchestrationEngine: {
-              dispatch: (command) =>
-                Effect.sync(() =>
-                {
-                  dispatchedCommands.push(command)
-                  effects.push(`dispatch:${command.type}`)
-                  return { sequence: dispatchedCommands.length }
-                }),
-            },
-            projectionSnapshotQuery: {
-              getThreadShellById: () =>
-                Effect.succeed(
-                  Option.some(
-                    makeDefaultOrchestrationThreadShell({
-                      id: threadId,
-                      updatedAt: now,
-                      session: {
-                        threadId,
-                        status: 'stopped',
-                        providerName: 'claudeAgent',
-                        runtimeMode: 'full-access',
-                        activeTurnId: null,
-                        lastError: null,
-                        updatedAt: now,
-                      },
-                    }),
-                  ),
-                ),
-            },
-          },
-        })
-
-        const wsUrl = yield* getWsServerUrl('/ws')
-        const dispatchResult = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-              type: 'thread.archive',
-              commandId: CommandId.make('cmd-thread-archive-stopped-session'),
-              threadId,
-            }),
-          ),
-        )
-
-        assert.equal(dispatchResult.sequence, 1)
-        assert.deepEqual(effects, ['dispatch:thread.archive', `terminal.close:${threadId}`])
-        assert.deepEqual(
-          dispatchedCommands.map((command) => command.type),
-          ['thread.archive'],
-        )
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  )
-
-  it.effect.each([{ stopOutcome: 'fail' as const }, { stopOutcome: 'die' as const }])(
-    'archives and still closes terminals when session stop $stopOutcome',
-    ({ stopOutcome }) =>
-      Effect.gen(function* ()
-      {
-        const threadId = ThreadId.make(`thread-archive-stop-${stopOutcome}`)
-        const effects: string[] = []
-        const dispatchedCommands: Array<OrchestrationCommand> = []
-        const now = '2026-01-01T00:00:00.000Z'
-
-        yield* buildAppUnderTest({
-          layers: {
-            terminalManager: {
-              close: (input) =>
-                Effect.sync(() =>
-                {
-                  effects.push(`terminal.close:${input.threadId}`)
-                }),
-            },
-            orchestrationEngine: {
-              dispatch: (command) =>
+      yield* buildAppUnderTest({
+        layers: {
+          terminalManager: {
+            close: (input) =>
+              Effect.sync(() =>
               {
-                dispatchedCommands.push(command)
-                effects.push(`dispatch:${command.type}`)
-                if (command.type === 'thread.session.stop')
-                {
-                  return stopOutcome === 'fail'
-                    ? Effect.fail(
-                        new OrchestrationListenerCallbackError({
-                          listener: 'domain-event',
-                          detail: 'simulated archive stop failure',
-                        }),
-                      )
-                    : Effect.die(new Error('simulated archive stop defect'))
-                }
-                return Effect.succeed({ sequence: dispatchedCommands.length })
-              },
-            },
-            projectionSnapshotQuery: {
-              getThreadShellById: () =>
-                Effect.succeed(
-                  Option.some(
-                    makeDefaultOrchestrationThreadShell({
-                      id: threadId,
-                      updatedAt: now,
-                      session: {
-                        threadId,
-                        status: 'ready',
-                        providerName: 'claudeAgent',
-                        runtimeMode: 'full-access',
-                        activeTurnId: null,
-                        lastError: null,
-                        updatedAt: now,
-                      },
-                    }),
-                  ),
-                ),
+                effects.push(`terminal.close:${input.threadId}`)
+              }),
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+            {
+              dispatchedCommands.push(command)
+              effects.push(`dispatch:${command.type}`)
+              if (command.type === 'thread.session.stop')
+              {
+                return Effect.die(new Error('simulated archive stop defect'))
+              }
+              return Effect.succeed({ sequence: dispatchedCommands.length })
             },
           },
-        })
+          projectionSnapshotQuery: {
+            getThreadShellById: () =>
+              Effect.succeed(
+                Option.some(
+                  makeDefaultOrchestrationThreadShell({
+                    id: threadId,
+                    updatedAt: now,
+                    session: {
+                      threadId,
+                      status: 'ready',
+                      providerName: 'claudeAgent',
+                      runtimeMode: 'full-access',
+                      activeTurnId: null,
+                      lastError: null,
+                      updatedAt: now,
+                    },
+                  }),
+                ),
+              ),
+          },
+        },
+      })
 
-        const wsUrl = yield* getWsServerUrl('/ws')
-        const dispatchResult = yield* Effect.scoped(
-          withWsRpcClient(wsUrl, (client) =>
-            client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
-              type: 'thread.archive',
-              commandId: CommandId.make(`cmd-thread-archive-stop-${stopOutcome}`),
-              threadId,
-            }),
-          ),
-        )
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const dispatchResult = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: 'thread.archive',
+            commandId: CommandId.make('cmd-thread-archive-stop-die'),
+            threadId,
+          }),
+        ),
+      )
 
-        assert.equal(dispatchResult.sequence, 1)
-        assert.deepEqual(effects, [
-          'dispatch:thread.archive',
-          'dispatch:thread.session.stop',
-          `terminal.close:${threadId}`,
-        ])
-        assert.deepEqual(
-          dispatchedCommands.map((command) => command.type),
-          ['thread.archive', 'thread.session.stop'],
-        )
-      }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+      assert.equal(dispatchResult.sequence, 1)
+      assert.deepEqual(effects, [
+        'dispatch:thread.archive',
+        'dispatch:thread.session.stop',
+        `terminal.close:${threadId}`,
+      ])
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ['thread.archive', 'thread.session.stop'],
+      )
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
   it.effect(

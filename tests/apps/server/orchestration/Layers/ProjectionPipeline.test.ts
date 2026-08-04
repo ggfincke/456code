@@ -49,8 +49,10 @@ import { OrchestrationProjectionPipeline } from '../../../../../apps/server/src/
 import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 
+const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
-  OrchestrationProjectionPipelineLive.pipe(
+  Layer.merge(OrchestrationProjectionPipelineLive, AttachmentCleanupReactorLive).pipe(
     Layer.provideMerge(OrchestrationEventStoreLive),
     Layer.provideMerge(ServerConfig.layerTest(process.cwd(), { prefix })),
     Layer.provideMerge(SqlitePersistenceMemory),
@@ -64,6 +66,40 @@ const exists = (filePath: string) =>
     const fileInfo = yield* Effect.result(fileSystem.stat(filePath))
     return fileInfo._tag === 'Success'
   })
+
+const stageOwnedAttachment = Effect.fn('stageOwnedAttachment')(function* (input: {
+  readonly stagingKey: string
+  readonly commandId: string
+  readonly threadId: ThreadId
+  readonly messageId: string
+  readonly attachmentId: string
+  readonly ownerSequence: number
+  readonly now: string
+})
+{
+  const repository = yield* AttachmentLifecycleRepository
+  const relativePath = `${input.attachmentId}.png`
+  yield* repository.stage({
+    stagingKey: input.stagingKey,
+    commandId: CommandId.make(input.commandId),
+    threadId: input.threadId,
+    messageId: MessageId.make(input.messageId),
+    attachmentIndex: 0,
+    attachmentId: input.attachmentId,
+    stagingRelativePath: `.staging/${input.stagingKey}/${relativePath}`,
+    relativePath,
+    mimeType: 'image/png',
+    byteCount: 5,
+    contentDigest: input.stagingKey,
+    now: input.now,
+  })
+  yield* repository.associateAccepted({
+    commandId: CommandId.make(input.commandId),
+    ownerSequence: input.ownerSequence,
+    ownerEventType: 'thread.message-sent',
+    now: input.now,
+  })
+})
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer('t3-projection-pipeline-test-')
 
@@ -190,7 +226,7 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
         assert.equal(row.lastAppliedSequence, 3)
       }
 
-      // Settled lifecycle through the DB pipeline: thread.settled writes the
+      // settled lifecycle through the DB pipeline: thread.settled writes the
       // override + timestamp, thread.unsettled(user) flips to the active pin.
       yield* eventStore.append({
         type: 'thread.settled',
@@ -311,8 +347,7 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-base-')))(
             WHERE message_id = 'message-attachments'
           `
         assert.equal(rows.length, 1)
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        assert.deepEqual(JSON.parse(rows[0]?.attachmentsJson ?? 'null'), [
+        assert.deepEqual(decodeUnknownJsonString(rows[0]?.attachmentsJson ?? 'null'), [
           {
             type: 'image',
             id: 'thread-attachments-att-1',
@@ -387,8 +422,7 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-atta
             WHERE message_id = 'message-attachments-safe'
           `
         assert.equal(rows.length, 1)
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        assert.deepEqual(JSON.parse(rows[0]?.attachmentsJson ?? 'null'), [
+        assert.deepEqual(decodeUnknownJsonString(rows[0]?.attachmentsJson ?? 'null'), [
           {
             type: 'image',
             id: 'thread-attachments-safe-att-1',
@@ -534,8 +568,7 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
           WHERE message_id = 'message-clear-attachments'
         `
         assert.equal(rows.length, 1)
-        // @effect-diagnostics-next-line preferSchemaOverJson:off
-        assert.deepEqual(JSON.parse(rows[0]?.attachmentsJson ?? 'null'), [])
+        assert.deepEqual(decodeUnknownJsonString(rows[0]?.attachmentsJson ?? 'null'), [])
       }),
   )
 })
@@ -672,8 +705,7 @@ it.layer(
               WHERE message_id = 'message-overwrite'
             `
       assert.equal(rows.length, 1)
-      // @effect-diagnostics-next-line preferSchemaOverJson:off
-      assert.deepEqual(JSON.parse(rows[0]?.attachmentsJson ?? 'null'), [
+      assert.deepEqual(decodeUnknownJsonString(rows[0]?.attachmentsJson ?? 'null'), [
         {
           type: 'image',
           id: 'thread-overwrite-att-2',
@@ -1045,7 +1077,18 @@ it.layer(
       })
 
       assert.isTrue(yield* exists(keepPath))
+      assert.isTrue(yield* exists(removePath))
+      assert.isTrue(yield* exists(otherThreadPath))
+
+      const graceExpiresAt = Date.parse(now) + Duration.toMillis(ATTACHMENT_CLEANUP_GRACE)
+      yield* TestClock.setTime(graceExpiresAt - 1)
+      yield* cleanupReactor.drain
+      assert.isTrue(yield* exists(removePath))
+
+      yield* TestClock.setTime(graceExpiresAt)
+      yield* cleanupReactor.drain
       assert.isFalse(yield* exists(removePath))
+      assert.isTrue(yield* exists(keepPath))
       assert.isTrue(yield* exists(otherThreadPath))
     }),
   )
@@ -1055,12 +1098,13 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-atta
   'OrchestrationProjectionPipeline',
   (it) =>
   {
-    it.effect('removes thread attachment directory when thread is deleted', () =>
+    it.effect('removes deleted-thread attachments after durable cleanup grace', () =>
       Effect.gen(function* ()
       {
         const fileSystem = yield* FileSystem.FileSystem
         const path = yield* Path.Path
         const projectionPipeline = yield* OrchestrationProjectionPipeline
+        const cleanupReactor = yield* AttachmentCleanupReactor
         const eventStore = yield* OrchestrationEventStore
         const { attachmentsDir } = yield* ServerConfig
         const now = '2026-01-01T00:00:00.000Z'
@@ -1068,6 +1112,25 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-atta
         const attachmentId = 'thread-delete-files-00000000-0000-4000-8000-000000000001'
         const otherThreadAttachmentId =
           'thread-delete-files-extra-00000000-0000-4000-8000-000000000002'
+
+        yield* stageOwnedAttachment({
+          stagingKey: 'delete-thread-staging',
+          commandId: 'cmd-delete-thread-staging',
+          threadId,
+          messageId: 'message-delete-thread-staging',
+          attachmentId,
+          ownerSequence: 3,
+          now,
+        })
+        yield* stageOwnedAttachment({
+          stagingKey: 'delete-other-staging',
+          commandId: 'cmd-delete-other-staging',
+          threadId: ThreadId.make('Thread Delete.Files.Extra'),
+          messageId: 'message-delete-other-staging',
+          attachmentId: otherThreadAttachmentId,
+          ownerSequence: 1,
+          now,
+        })
 
         const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
           eventStore
@@ -1179,6 +1242,16 @@ it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-atta
           },
         })
 
+        assert.isTrue(yield* exists(threadAttachmentPath))
+        assert.isTrue(yield* exists(otherThreadAttachmentPath))
+
+        const graceExpiresAt = Date.parse(now) + Duration.toMillis(ATTACHMENT_CLEANUP_GRACE)
+        yield* TestClock.setTime(graceExpiresAt - 1)
+        yield* cleanupReactor.drain
+        assert.isTrue(yield* exists(threadAttachmentPath))
+
+        yield* TestClock.setTime(graceExpiresAt)
+        yield* cleanupReactor.drain
         assert.isFalse(yield* exists(threadAttachmentPath))
         assert.isTrue(yield* exists(otherThreadAttachmentPath))
       }),
@@ -1422,7 +1495,7 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
         },
       })
 
-      // Interim assistant message completes mid-turn (commentary between
+      // interim assistant message completes mid-turn (commentary between
       // tool calls) — the turn must stay running and unsettled.
       yield* eventStore.append({
         type: 'thread.message-sent',
@@ -1458,7 +1531,7 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
       `
       assert.deepEqual(runningRows, [{ state: 'running', completedAt: null }])
 
-      // The session leaving "running" is the turn-end signal.
+      // the session leaving "running" is the turn-end signal.
       yield* eventStore.append({
         type: 'thread.session-set',
         eventId: EventId.make('evt-tl4'),
@@ -1602,7 +1675,7 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
         })
 
       yield* appendRunningSessionSet('evt-ts2', oldTurnId, '2026-01-01T00:00:01.000Z')
-      // A steer: a new turn becomes active without the provider ever
+      // a steer: a new turn becomes active without the provider ever
       // completing the previous one.
       yield* appendRunningSessionSet('evt-ts3', newTurnId, '2026-01-01T00:00:30.000Z')
 
@@ -1906,6 +1979,174 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
           { turnId: 'turn-interrupted', checkpointTurnCount: null, status: 'interrupted' },
         ])
       }),
+  )
+
+  it.effect('deduplicates adjacent provider-switch activities at the SQL boundary', () =>
+    Effect.gen(function* ()
+    {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline
+      const eventStore = yield* OrchestrationEventStore
+      const sql = yield* SqlClient.SqlClient
+      const threadId = ThreadId.make('thread-provider-switch-parity')
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.tap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
+
+      yield* appendAndProject({
+        type: 'project.created',
+        eventId: EventId.make('evt-provider-switch-parity-project'),
+        aggregateKind: 'project',
+        aggregateId: ProjectId.make('project-provider-switch-parity'),
+        occurredAt: '2026-02-26T12:20:00.000Z',
+        commandId: CommandId.make('cmd-provider-switch-parity-project'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-provider-switch-parity-project'),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make('project-provider-switch-parity'),
+          title: 'Provider Switch Parity',
+          workspaceRoot: '/tmp/project-provider-switch-parity',
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: '2026-02-26T12:20:00.000Z',
+          updatedAt: '2026-02-26T12:20:00.000Z',
+        },
+      })
+      yield* appendAndProject({
+        type: 'thread.created',
+        eventId: EventId.make('evt-provider-switch-parity-thread'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-02-26T12:20:01.000Z',
+        commandId: CommandId.make('cmd-provider-switch-parity-thread'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-provider-switch-parity-thread'),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make('project-provider-switch-parity'),
+          title: 'Provider Switch Parity',
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5-codex',
+          },
+          runtimeMode: 'full-access',
+          branch: null,
+          worktreePath: null,
+          createdAt: '2026-02-26T12:20:01.000Z',
+          updatedAt: '2026-02-26T12:20:01.000Z',
+        },
+      })
+      yield* appendAndProject({
+        type: 'thread.provider-switch-requested',
+        eventId: EventId.make('evt-provider-switch-parity-requested'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-02-26T12:20:02.000Z',
+        commandId: CommandId.make('cmd-provider-switch-parity-requested'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-provider-switch-parity-requested'),
+        metadata: {},
+        payload: {
+          threadId,
+          targetModelSelection: {
+            instanceId: ProviderInstanceId.make('claude'),
+            model: 'sonnet',
+          },
+          expectedCurrentInstanceId: ProviderInstanceId.make('codex'),
+        },
+      })
+      yield* appendAndProject({
+        type: 'thread.provider-switched',
+        eventId: EventId.make('evt-provider-switch-parity-canonical'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-02-26T12:20:03.000Z',
+        commandId: CommandId.make('cmd-provider-switch-parity-canonical'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-provider-switch-parity-canonical'),
+        metadata: {},
+        payload: {
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('claude'),
+            model: 'sonnet',
+          },
+          fromInstanceId: ProviderInstanceId.make('codex'),
+          fromModel: 'gpt-5-codex',
+          handoffText: 'Continue from the provider handoff.',
+        },
+      })
+      const legacyActivityEvent = yield* appendAndProject({
+        type: 'thread.activity-appended',
+        eventId: EventId.make('evt-provider-switch-parity-legacy'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-02-26T12:20:04.000Z',
+        commandId: CommandId.make('cmd-provider-switch-parity-legacy'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-provider-switch-parity-legacy'),
+        metadata: {},
+        payload: {
+          threadId,
+          activity: {
+            id: EventId.make('activity-provider-switch-parity-legacy'),
+            tone: 'info',
+            kind: 'provider.switch.completed',
+            summary: 'Provider switch completed',
+            payload: {
+              fromInstanceId: ProviderInstanceId.make('codex'),
+              fromModel: 'gpt-5-codex',
+              toInstanceId: ProviderInstanceId.make('claude'),
+              toModel: 'sonnet',
+            },
+            turnId: null,
+            createdAt: '2026-02-26T12:20:03.000Z',
+          },
+        },
+      })
+      yield* appendAndProject({
+        type: 'thread.provider-switched',
+        eventId: EventId.make('evt-provider-switch-parity-canonical-replay'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-02-26T12:20:05.000Z',
+        commandId: CommandId.make('cmd-provider-switch-parity-canonical-replay'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-provider-switch-parity-canonical-replay'),
+        metadata: {},
+        payload: {
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('claude'),
+            model: 'sonnet',
+          },
+          fromInstanceId: ProviderInstanceId.make('codex'),
+          fromModel: 'gpt-5-codex',
+          handoffText: 'Continue from the provider handoff.',
+        },
+      })
+
+      const activities = yield* sql<{
+        readonly activityId: string
+        readonly kind: string
+        readonly sequence: number | null
+      }>`
+        SELECT
+          activity_id AS "activityId",
+          kind,
+          sequence
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+        ORDER BY sequence, activity_id
+      `
+      assert.deepEqual(activities, [
+        {
+          activityId: 'activity-provider-switch-parity-legacy',
+          kind: 'provider.switch.completed',
+          sequence: legacyActivityEvent.sequence,
+        },
+      ])
+    }),
   )
 
   it.effect('clears stale pending approvals from projected shell summaries', () =>

@@ -41,7 +41,11 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from '../Errors.ts'
-import { mapAcpToAdapterError } from '../acp/AcpAdapterSupport.ts'
+import {
+  classifyAcpTermination,
+  mapAcpToAdapterError,
+  type AcpTerminationClassification,
+} from '../acp/AcpAdapterSupport.ts'
 import type * as AcpSessionRuntime from '../acp/AcpSessionRuntime.ts'
 import {
   makeAcpAssistantItemEvent,
@@ -84,6 +88,7 @@ function encodeJsonStringForDiagnostics(input: unknown): string | undefined
 export interface GrokAdapterLiveOptions
 {
   readonly environment?: NodeJS.ProcessEnv
+  readonly enableAbnormalTermination?: boolean
   readonly nativeEventLogPath?: string
   readonly nativeEventLogger?: EventNdjsonLogger
   readonly instanceId?: ProviderInstanceId
@@ -107,6 +112,7 @@ interface GrokSessionContext
 {
   readonly threadId: ThreadId
   readonly acpSessionId: string
+  readonly generationId: string
   session: ProviderSession
   readonly scope: Scope.Closeable
   readonly acp: AcpSessionRuntime.AcpSessionRuntime['Service']
@@ -116,13 +122,14 @@ interface GrokSessionContext
   turns: Array<{ id: TurnId; items: Array<unknown> }>
   lastPlanFingerprint: string | undefined
   activeTurnId: TurnId | undefined
-  /** Turns already interrupted; late prompt RPCs must not resurrect them. */
+  // turns already interrupted; late prompt RPCs must not resurrect them.
   interruptedTurnIds: Set<TurnId>
-  /** Number of sendTurn prompts currently in flight or being prepared.
-   * >0 means a turn is actively running, so a new sendTurn is a steer that
-   * continues it, and only the last remaining prompt settles the turn. */
+  // number of sendTurn prompts currently in flight or being prepared.
+  // >0 means a turn is actively running, so a new sendTurn is a steer that
+  // continues it, and only the last remaining prompt settles the turn.
   promptsInFlight: number
   currentModelId: string | undefined
+  readonly finalizationState: Ref.Ref<'open' | 'graceful' | 'abnormal'>
   stopped: boolean
 }
 
@@ -309,7 +316,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         readonly errorMessage?: string
         readonly completedStopReason?: EffectAcpSchema.StopReason | null
         readonly emitTurnCompletion?: boolean
-        /** Interrupt/cancel: drop every outstanding prompt slot and settle once. */
+        // interrupt/cancel: drop every outstanding prompt slot and settle once.
         readonly settleAllPrompts?: boolean
       },
     ) =>
@@ -538,27 +545,58 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       return Effect.succeed(ctx)
     }
 
-    const stopSessionInternal = (ctx: GrokSessionContext) =>
+    const finalizeSessionLocked = (
+      ctx: GrokSessionContext,
+      classification: AcpTerminationClassification,
+    ) =>
       Effect.gen(function* ()
       {
-        if (ctx.stopped) return
+        const claimed = yield* Ref.modify(ctx.finalizationState, (state) =>
+          state === 'open'
+            ? ([true, classification.finalization] as const)
+            : ([false, state] as const),
+        )
+        if (!claimed) return
         ctx.stopped = true
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals)
         yield* settlePendingUserInputsAsCancelled(ctx.pendingUserInputs)
+        const liveCtx = sessions.get(ctx.threadId)
+        const isLiveGeneration = liveCtx === ctx && liveCtx.generationId === ctx.generationId
+        if (isLiveGeneration)
+        {
+          sessions.delete(ctx.threadId)
+        }
+        if (
+          isLiveGeneration &&
+          (classification.finalization === 'graceful' ||
+            options?.enableAbnormalTermination === true)
+        )
+        {
+          yield* offerRuntimeEvent({
+            type: 'session.exited',
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: ctx.threadId,
+            payload: {
+              exitKind: classification.exitKind,
+              reason: classification.reason,
+              recoverable: classification.recoverable,
+            },
+          })
+        }
         if (ctx.notificationFiber)
         {
           yield* Fiber.interrupt(ctx.notificationFiber)
         }
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void))
-        sessions.delete(ctx.threadId)
-        yield* offerRuntimeEvent({
-          type: 'session.exited',
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: ctx.threadId,
-          payload: { exitKind: 'graceful' },
-        })
-      })
+      }).pipe(Effect.uninterruptible)
+
+    const finalizeSession = (
+      ctx: GrokSessionContext,
+      classification: AcpTerminationClassification,
+    ) => withThreadLock(ctx.threadId, finalizeSessionLocked(ctx, classification))
+
+    const gracefulStop = classifyAcpTermination({ _tag: 'AdapterStop' })
 
     const startSession: GrokAdapterShape['startSession'] = (input) =>
       withThreadLock(
@@ -616,7 +654,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           }
           if (existing && !existing.stopped)
           {
-            yield* stopSessionInternal(existing)
+            yield* finalizeSessionLocked(existing, gracefulStop)
           }
 
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>()
@@ -818,6 +856,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           })
 
           const now = yield* nowIso
+          const generationId = yield* randomUUIDv4
           const session: ProviderSession = {
             provider: PROVIDER,
             providerInstanceId: boundInstanceId,
@@ -838,6 +877,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           const ctx: GrokSessionContext = {
             threadId: input.threadId,
             acpSessionId: started.sessionId,
+            generationId,
             session,
             scope: sessionScope,
             acp,
@@ -850,6 +890,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             interruptedTurnIds: new Set(),
             promptsInFlight: 0,
             currentModelId: boundModelId,
+            finalizationState: yield* Ref.make<'open' | 'graceful' | 'abnormal'>('open'),
             stopped: false,
           }
 
@@ -961,6 +1002,10 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           sessions.set(input.threadId, ctx)
           sessionScopeTransferred = true
 
+          yield* Stream.runForEach(Stream.take(acp.getTerminationEvents(), 1), (cause) =>
+            finalizeSession(ctx, classifyAcpTermination(cause)),
+          ).pipe(Effect.forkChild)
+
           yield* offerRuntimeEvent({
             type: 'session.started',
             ...(yield* makeEventStamp()),
@@ -995,16 +1040,16 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           Effect.gen(function* ()
           {
             const ctx = yield* requireSession(input.threadId)
-            // A sendTurn while a prompt is in flight is a steer: the agent
+            // a sendTurn while a prompt is in flight is a steer: the agent
             // folds the new prompt into the ongoing work, so the active turn
             // id is reused instead of opening a new turn.
             const steeringTurnId = ctx.promptsInFlight > 0 ? ctx.activeTurnId : undefined
             const turnId = steeringTurnId ?? TurnId.make(yield* randomUUIDv4)
-            // Count this prompt immediately so a superseded in-flight prompt
+            // count this prompt immediately so a superseded in-flight prompt
             // resolving from here on does not settle the turn; decremented on
             // preparation failure here, and after the prompt below otherwise.
             ctx.promptsInFlight += 1
-            // Bind the turn id before cooperative yields so interruptTurn can
+            // bind the turn id before cooperative yields so interruptTurn can
             // settle this prompt even if stop arrives during preparation.
             ctx.activeTurnId = turnId
             ctx.session = {
@@ -1176,7 +1221,17 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                 Ref.set(
                   promptFailureMessageRef,
                   mapAcpToAdapterError(PROVIDER, input.threadId, 'session/prompt', error).message,
-                ).pipe(Effect.andThen(prepared.acp.drainEvents)),
+                ).pipe(
+                  Effect.andThen(
+                    Effect.suspend(() =>
+                    {
+                      const liveCtx = sessions.get(input.threadId)
+                      return liveCtx?.acpSessionId === prepared.acpSessionId && !liveCtx.stopped
+                        ? prepared.acp.drainEvents
+                        : Effect.void
+                    }),
+                  ),
+                ),
               ),
               Effect.mapError((error) =>
                 mapAcpToAdapterError(PROVIDER, input.threadId, 'session/prompt', error),
@@ -1206,7 +1261,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
                   detail: 'Grok session changed before the turn completed.',
                 })
               }
-              // Keep prompt settlement atomic with respect to Stop and steering.
+              // keep prompt settlement atomic with respect to Stop and steering.
               // interruptTurn marks its target before waiting for this lock, so
               // cancellation can still win while queued ACP events are drained.
               for (let yieldAttempt = 0; yieldAttempt < 8; yieldAttempt += 1)
@@ -1249,7 +1304,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
               const remainingPrompts = Math.max(0, ctx.promptsInFlight - 1)
               ctx.promptsInFlight = remainingPrompts
 
-              // Only the last remaining prompt settles the turn. A steer-
+              // only the last remaining prompt settles the turn. A steer-
               // superseded prompt resolving while another is in flight or
               // pending must leave the merged turn running.
               if (
@@ -1548,7 +1603,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
         Effect.gen(function* ()
         {
           const ctx = yield* requireSession(threadId)
-          yield* stopSessionInternal(ctx)
+          yield* finalizeSessionLocked(ctx, gracefulStop)
         }),
       )
 
@@ -1563,7 +1618,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       })
 
     const stopAll: GrokAdapterShape['stopAll'] = () =>
-      Effect.forEach(Array.from(sessions.values()), stopSessionInternal, { discard: true })
+      Effect.forEach(Array.from(sessions.values()), (ctx) => finalizeSession(ctx, gracefulStop), {
+        discard: true,
+      })
 
     yield* Effect.addFinalizer(() =>
       Effect.ignore(stopAll()).pipe(

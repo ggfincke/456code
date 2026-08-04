@@ -1,3 +1,6 @@
+// tests/apps/server/provider/providerMaintenance.test.ts
+// verify provider maintenance behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import { expect, it } from '@effect/vitest'
 import * as NodeFS from 'node:fs'
@@ -138,35 +141,37 @@ it.layer(NodeServices.layer)('providerMaintenance', (it) =>
     ),
   )
 
-  it('marks providers with unknown current versions as unknown', () =>
-  {
-    expect(
-      createProviderVersionAdvisory({
-        driver: driver('packageTool'),
-        currentVersion: null,
-        latestVersion: '9.9.9',
-      }),
-    ).toMatchObject({
-      status: 'unknown',
+  it.each([
+    {
+      name: 'unknown current versions',
       currentVersion: null,
       latestVersion: '9.9.9',
-    })
-  })
-
-  it('marks providers with unknown latest versions as unknown', () =>
+      expected: {
+        status: 'unknown',
+        currentVersion: null,
+        latestVersion: '9.9.9',
+      },
+    },
+    {
+      name: 'unknown latest versions',
+      currentVersion: '1.0.0',
+      latestVersion: null,
+      expected: {
+        status: 'unknown',
+        currentVersion: '1.0.0',
+        latestVersion: null,
+        message: null,
+      },
+    },
+  ])('marks providers with $name as unknown', ({ currentVersion, latestVersion, expected }) =>
   {
     expect(
       createProviderVersionAdvisory({
         driver: driver('packageTool'),
-        currentVersion: '1.0.0',
-        latestVersion: null,
+        currentVersion,
+        latestVersion,
       }),
-    ).toMatchObject({
-      status: 'unknown',
-      currentVersion: '1.0.0',
-      latestVersion: null,
-      message: null,
-    })
+    ).toMatchObject(expected)
   })
 
   it('marks installed providers behind latest when a newer provider version is available', () =>

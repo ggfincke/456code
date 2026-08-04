@@ -2713,7 +2713,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
   const getThreadDetailSnapshot: ProjectionSnapshotQueryShape['getThreadDetailSnapshot'] = (
     threadId,
   ) =>
-    // Read the thread detail and the snapshot sequence within a single
+    // read the thread detail and the snapshot sequence within a single
     // transaction so the sequence is consistent with the returned state; a
     // projector update landing between two separate reads could otherwise return
     // a sequence ahead of the thread detail, causing the client to resume from

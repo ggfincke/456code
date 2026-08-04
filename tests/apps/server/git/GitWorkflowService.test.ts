@@ -1,3 +1,6 @@
+// tests/apps/server/git/GitWorkflowService.test.ts
+// verify git workflow service behavior
+
 import { assert, describe, expect, it, vi } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -26,13 +29,12 @@ function makeLayer(input: {
 
 describe('GitWorkflowService', () =>
 {
-  it.effect('returns an empty local status when no VCS repository is detected', () =>
-    Effect.gen(function* ()
+  it.effect.each([
     {
-      const workflow = yield* GitWorkflowService.GitWorkflowService
-      const status = yield* workflow.localStatus({ cwd: '/not-a-repo' })
-
-      assert.deepStrictEqual(status, {
+      name: 'local status',
+      call: (workflow: GitWorkflowService.GitWorkflowService['Service']) =>
+        workflow.localStatus({ cwd: '/not-a-repo' }),
+      expected: {
         isRepo: false,
         hasPrimaryRemote: false,
         isDefaultRef: false,
@@ -43,23 +45,13 @@ describe('GitWorkflowService', () =>
           insertions: 0,
           deletions: 0,
         },
-      })
-    }).pipe(
-      Effect.provide(
-        makeLayer({
-          detect: () => Effect.succeed(null),
-        }),
-      ),
-    ),
-  )
-
-  it.effect('returns an empty full status when no VCS repository is detected', () =>
-    Effect.gen(function* ()
+      },
+    },
     {
-      const workflow = yield* GitWorkflowService.GitWorkflowService
-      const status = yield* workflow.status({ cwd: '/not-a-repo' })
-
-      assert.deepStrictEqual(status, {
+      name: 'full status',
+      call: (workflow: GitWorkflowService.GitWorkflowService['Service']) =>
+        workflow.status({ cwd: '/not-a-repo' }),
+      expected: {
         isRepo: false,
         hasPrimaryRemote: false,
         isDefaultRef: false,
@@ -75,7 +67,26 @@ describe('GitWorkflowService', () =>
         behindCount: 0,
         aheadOfDefaultCount: 0,
         pr: null,
-      })
+      },
+    },
+    {
+      name: 'ref list',
+      call: (workflow: GitWorkflowService.GitWorkflowService['Service']) =>
+        workflow.listRefs({ cwd: '/not-a-repo' }),
+      expected: {
+        refs: [],
+        isRepo: false,
+        hasPrimaryRemote: false,
+        nextCursor: null,
+        totalCount: 0,
+      },
+    },
+  ])('returns an empty $name when no VCS repository is detected', ({ call, expected }) =>
+    Effect.gen(function* ()
+    {
+      const workflow = yield* GitWorkflowService.GitWorkflowService
+      const result = yield* call(workflow)
+      assert.deepStrictEqual(result, expected)
     }).pipe(
       Effect.provide(
         makeLayer({
@@ -119,28 +130,6 @@ describe('GitWorkflowService', () =>
       assert.equal(status.mock.calls.length, 0)
     }).pipe(Effect.provide(testLayer))
   })
-
-  it.effect('returns an empty ref list when no VCS repository is detected', () =>
-    Effect.gen(function* ()
-    {
-      const workflow = yield* GitWorkflowService.GitWorkflowService
-      const refs = yield* workflow.listRefs({ cwd: '/not-a-repo' })
-
-      assert.deepStrictEqual(refs, {
-        refs: [],
-        isRepo: false,
-        hasPrimaryRemote: false,
-        nextCursor: null,
-        totalCount: 0,
-      })
-    }).pipe(
-      Effect.provide(
-        makeLayer({
-          detect: () => Effect.succeed(null),
-        }),
-      ),
-    ),
-  )
 
   it.effect('structures workflow detection failures without exposing upstream details', () =>
   {

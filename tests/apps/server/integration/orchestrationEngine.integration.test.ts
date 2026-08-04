@@ -1,3 +1,6 @@
+// tests/apps/server/integration/orchestrationEngine.integration.test.ts
+// verify orchestration engine integration behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
@@ -897,9 +900,12 @@ it.live('reverts to an earlier checkpoint and trims checkpoint projections + git
         NodeFS.readFileSync(NodePath.join(harness.workspaceDir, 'README.md'), 'utf8'),
         'v2\n',
       )
-      assert.equal(
-        gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 2)),
-        false,
+      // stale-ref deletion is the revert's last, post-projection cleanup step,
+      // so it can still be in flight when the projection already reads reverted
+      yield* waitForSync(
+        () => gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 2)),
+        (exists) => !exists,
+        'stale checkpoint ref deleted by revert cleanup',
       )
       assert.deepEqual(harness.adapterHarness!.getRollbackCalls(THREAD_ID), [1])
 

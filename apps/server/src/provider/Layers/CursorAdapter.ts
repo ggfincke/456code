@@ -27,6 +27,7 @@ import * as Fiber from 'effect/Fiber'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as PubSub from 'effect/PubSub'
+import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
@@ -43,7 +44,12 @@ import {
   ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from '../Errors.ts'
-import { acpPermissionOutcome, mapAcpToAdapterError } from '../acp/AcpAdapterSupport.ts'
+import {
+  acpPermissionOutcome,
+  classifyAcpTermination,
+  mapAcpToAdapterError,
+  type AcpTerminationClassification,
+} from '../acp/AcpAdapterSupport.ts'
 import type * as AcpSessionRuntime from '../acp/AcpSessionRuntime.ts'
 import {
   makeAcpAssistantItemEvent,
@@ -89,24 +95,21 @@ function encodeJsonStringForDiagnostics(input: unknown): string | undefined
 export interface CursorAdapterLiveOptions
 {
   readonly environment?: NodeJS.ProcessEnv
+  readonly enableAbnormalTermination?: boolean
   readonly nativeEventLogPath?: string
   readonly nativeEventLogger?: EventNdjsonLogger
-  /**
-   * Selections are honored when `modelSelection.instanceId` matches this value.
-   * Defaults to the legacy built-in instance id (`cursor`).
-   */
+  // selections are honored when `modelSelection.instanceId` matches this value.
+  // defaults to the legacy built-in instance id (`cursor`).
   readonly instanceId?: ProviderInstanceId
-  /**
-   * Optional per-session settings resolver. When provided the adapter yields
-   * this effect at the start of every session and uses the result instead of
-   * the `cursorSettings` captured at construction.
-   *
-   * Production instances bind settings to the instance scope (the hydration
-   * layer rebuilds the adapter on config change) and leave this undefined.
-   * Test suites that mutate `ServerSettingsService` mid-flight — e.g. to
-   * swap `binaryPath` to a mock ACP wrapper — pass a resolver that reads
-   * the latest snapshot so the closure isn't stale.
-   */
+  // optional per-session settings resolver. When provided the adapter yields
+  // this effect at the start of every session and uses the result instead of
+  // the `cursorSettings` captured at construction.
+  //
+  // production instances bind settings to the instance scope (the hydration
+  // layer rebuilds the adapter on config change) and leave this undefined.
+  // test suites that mutate `ServerSettingsService` mid-flight — e.g. to
+  // swap `binaryPath` to a mock ACP wrapper — pass a resolver that reads
+  // the latest snapshot so the closure isn't stale.
   readonly resolveSettings?: Effect.Effect<CursorSettings>
 }
 
@@ -124,6 +127,8 @@ interface PendingUserInput
 interface CursorSessionContext
 {
   readonly threadId: ThreadId
+  readonly acpSessionId: string
+  readonly generationId: string
   session: ProviderSession
   readonly scope: Scope.Closeable
   readonly acp: AcpSessionRuntime.AcpSessionRuntime['Service']
@@ -133,10 +138,11 @@ interface CursorSessionContext
   readonly turns: Array<{ id: TurnId; items: Array<unknown> }>
   lastPlanFingerprint: string | undefined
   activeTurnId: TurnId | undefined
-  /** Number of sendTurn prompts currently in flight or being prepared.
-   * >0 means a turn is actively running, so a new sendTurn is a steer that
-   * continues it, and only the last remaining prompt settles the turn. */
+  // number of sendTurn prompts currently in flight or being prepared.
+  // >0 means a turn is actively running, so a new sendTurn is a steer that
+  // continues it, and only the last remaining prompt settles the turn.
   promptsInFlight: number
+  readonly finalizationState: Ref.Ref<'open' | 'graceful' | 'abnormal'>
   stopped: boolean
 }
 
@@ -474,27 +480,58 @@ export function makeCursorAdapter(
       return Effect.succeed(ctx)
     }
 
-    const stopSessionInternal = (ctx: CursorSessionContext) =>
+    const finalizeSessionLocked = (
+      ctx: CursorSessionContext,
+      classification: AcpTerminationClassification,
+    ) =>
       Effect.gen(function* ()
       {
-        if (ctx.stopped) return
+        const claimed = yield* Ref.modify(ctx.finalizationState, (state) =>
+          state === 'open'
+            ? ([true, classification.finalization] as const)
+            : ([false, state] as const),
+        )
+        if (!claimed) return
         ctx.stopped = true
         yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals)
         yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs)
+        const liveCtx = sessions.get(ctx.threadId)
+        const isLiveGeneration = liveCtx === ctx && liveCtx.generationId === ctx.generationId
+        if (isLiveGeneration)
+        {
+          sessions.delete(ctx.threadId)
+        }
+        if (
+          isLiveGeneration &&
+          (classification.finalization === 'graceful' ||
+            options?.enableAbnormalTermination === true)
+        )
+        {
+          yield* offerRuntimeEvent({
+            type: 'session.exited',
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: ctx.threadId,
+            payload: {
+              exitKind: classification.exitKind,
+              reason: classification.reason,
+              recoverable: classification.recoverable,
+            },
+          })
+        }
         if (ctx.notificationFiber)
         {
           yield* Fiber.interrupt(ctx.notificationFiber)
         }
         yield* Effect.ignore(Scope.close(ctx.scope, Exit.void))
-        sessions.delete(ctx.threadId)
-        yield* offerRuntimeEvent({
-          type: 'session.exited',
-          ...(yield* makeEventStamp()),
-          provider: PROVIDER,
-          threadId: ctx.threadId,
-          payload: { exitKind: 'graceful' },
-        })
-      })
+      }).pipe(Effect.uninterruptible)
+
+    const finalizeSession = (
+      ctx: CursorSessionContext,
+      classification: AcpTerminationClassification,
+    ) => withThreadLock(ctx.threadId, finalizeSessionLocked(ctx, classification))
+
+    const gracefulStop = classifyAcpTermination({ _tag: 'AdapterStop' })
 
     const startSession: CursorAdapterShape['startSession'] = (input) =>
       withThreadLock(
@@ -552,7 +589,7 @@ export function makeCursorAdapter(
           }
           if (existing && !existing.stopped)
           {
-            yield* stopSessionInternal(existing)
+            yield* finalizeSessionLocked(existing, gracefulStop)
           }
 
           const pendingApprovals = new Map<ApprovalRequestId, PendingApproval>()
@@ -570,7 +607,7 @@ export function makeCursorAdapter(
             threadId: input.threadId,
           })
 
-          // Resolve the CursorSettings used to spawn the ACP child. Production
+          // resolve the CursorSettings used to spawn the ACP child. Production
           // leaves `options.resolveSettings` undefined so we use the value
           // captured at adapter construction — per-instance isolation is
           // enforced by the hydration layer rebuilding this adapter whenever
@@ -811,6 +848,7 @@ export function makeCursorAdapter(
           })
 
           const now = yield* nowIso
+          const generationId = yield* randomUUIDv4
           const session: ProviderSession = {
             provider: PROVIDER,
             providerInstanceId: boundInstanceId,
@@ -830,6 +868,8 @@ export function makeCursorAdapter(
 
           ctx = {
             threadId: input.threadId,
+            acpSessionId: started.sessionId,
+            generationId,
             session,
             scope: sessionScope,
             acp,
@@ -840,6 +880,7 @@ export function makeCursorAdapter(
             lastPlanFingerprint: undefined,
             activeTurnId: undefined,
             promptsInFlight: 0,
+            finalizationState: yield* Ref.make<'open' | 'graceful' | 'abnormal'>('open'),
             stopped: false,
           }
 
@@ -944,6 +985,10 @@ export function makeCursorAdapter(
           sessions.set(input.threadId, ctx)
           sessionScopeTransferred = true
 
+          yield* Stream.runForEach(Stream.take(acp.getTerminationEvents(), 1), (cause) =>
+            finalizeSession(ctx, classifyAcpTermination(cause)),
+          ).pipe(Effect.forkChild)
+
           yield* offerRuntimeEvent({
             type: 'session.started',
             ...(yield* makeEventStamp()),
@@ -974,12 +1019,12 @@ export function makeCursorAdapter(
       Effect.gen(function* ()
       {
         const ctx = yield* requireSession(input.threadId)
-        // A sendTurn while a prompt is in flight is a steer: the agent folds
+        // a sendTurn while a prompt is in flight is a steer: the agent folds
         // the new prompt into the ongoing work, so the active turn id is
         // reused instead of opening a new turn.
         const steeringTurnId = ctx.promptsInFlight > 0 ? ctx.activeTurnId : undefined
         const turnId = steeringTurnId ?? TurnId.make(yield* randomUUIDv4)
-        // Count this prompt immediately so a superseded in-flight prompt
+        // count this prompt immediately so a superseded in-flight prompt
         // resolving from here on does not settle the turn; the matching
         // decrement is the `ensuring` below.
         ctx.promptsInFlight += 1
@@ -1102,7 +1147,7 @@ export function makeCursorAdapter(
             model: resolvedModel,
           }
 
-          // Only the last remaining prompt settles the turn — a steer-
+          // only the last remaining prompt settles the turn — a steer-
           // superseded prompt resolving (usually cancelled) while another is
           // in flight or pending must leave the merged turn running.
           if (ctx.promptsInFlight === 1)
@@ -1220,7 +1265,7 @@ export function makeCursorAdapter(
         Effect.gen(function* ()
         {
           const ctx = yield* requireSession(threadId)
-          yield* stopSessionInternal(ctx)
+          yield* finalizeSessionLocked(ctx, gracefulStop)
         }),
       )
 
@@ -1235,10 +1280,12 @@ export function makeCursorAdapter(
       })
 
     const stopAll: CursorAdapterShape['stopAll'] = () =>
-      Effect.forEach(sessions.values(), stopSessionInternal, { discard: true })
+      Effect.forEach(Array.from(sessions.values()), (ctx) => finalizeSession(ctx, gracefulStop), {
+        discard: true,
+      })
 
     yield* Effect.addFinalizer(() =>
-      Effect.forEach(sessions.values(), stopSessionInternal, { discard: true }).pipe(
+      stopAll().pipe(
         Effect.catch((cause) =>
           Effect.logError('Failed to emit Cursor session shutdown event.', { cause }),
         ),

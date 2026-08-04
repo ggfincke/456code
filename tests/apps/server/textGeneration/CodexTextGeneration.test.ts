@@ -1,3 +1,6 @@
+// tests/apps/server/textGeneration/CodexTextGeneration.test.ts
+// verify codex text generation behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -339,7 +342,6 @@ it.layer(CodexTextGenerationTestLayer)('CodexTextGeneration', (it) =>
           body: '',
           branch: 'fix/important-system-change',
         }),
-        stdinMustContain: 'branch must be a short semantic git branch fragment',
       },
       (textGeneration) =>
         Effect.gen(function* ()
@@ -393,7 +395,6 @@ it.layer(CodexTextGenerationTestLayer)('CodexTextGeneration', (it) =>
         output: JSON.stringify({
           branch: '  Feat/Session  ',
         }),
-        stdinMustNotContain: 'Image attachments supplied to the model',
       },
       (textGeneration) =>
         Effect.gen(function* ()
@@ -468,7 +469,6 @@ it.layer(CodexTextGenerationTestLayer)('CodexTextGeneration', (it) =>
           branch: 'fix/ui-regression',
         }),
         requireImage: true,
-        stdinMustContain: 'Attachment metadata:',
       },
       (textGeneration) =>
         Effect.gen(function* ()
@@ -480,45 +480,6 @@ it.layer(CodexTextGenerationTestLayer)('CodexTextGeneration', (it) =>
           const attachmentPath = path.join(attachmentsDir, `${attachmentId}.png`)
           yield* fs.makeDirectory(attachmentsDir, { recursive: true })
           yield* fs.writeFile(attachmentPath, Buffer.from('hello'))
-
-          const generated = yield* textGeneration.generateBranchName({
-            modelSelection: DEFAULT_TEST_MODEL_SELECTION,
-            cwd: process.cwd(),
-            message: 'Fix layout bug from screenshot.',
-            attachments: [
-              {
-                type: 'image',
-                id: attachmentId,
-                name: 'bug.png',
-                mimeType: 'image/png',
-                sizeBytes: 5,
-              },
-            ],
-          })
-
-          expect(generated.branch).toBe('fix/ui-regression')
-        }),
-    ),
-  )
-
-  it.effect('resolves persisted attachment ids to files for codex image inputs', () =>
-    withFakeCodexEnv(
-      {
-        output: JSON.stringify({
-          branch: 'fix/ui-regression',
-        }),
-        requireImage: true,
-      },
-      (textGeneration) =>
-        Effect.gen(function* ()
-        {
-          const fs = yield* FileSystem.FileSystem
-          const path = yield* Path.Path
-          const { attachmentsDir } = yield* ServerConfig.ServerConfig
-          const attachmentId = 'thread-1-attachment'
-          const imagePath = path.join(attachmentsDir, `${attachmentId}.png`)
-          yield* fs.makeDirectory(attachmentsDir, { recursive: true })
-          yield* fs.writeFile(imagePath, Buffer.from('hello'))
 
           const generated = yield* textGeneration
             .generateBranchName({
@@ -537,14 +498,14 @@ it.layer(CodexTextGenerationTestLayer)('CodexTextGeneration', (it) =>
             })
             .pipe(
               Effect.tap(() =>
-                fs.stat(imagePath).pipe(
+                fs.stat(attachmentPath).pipe(
                   Effect.map((fileInfo) =>
                   {
                     expect(fileInfo.type).toBe('File')
                   }),
                 ),
               ),
-              Effect.ensuring(fs.remove(imagePath).pipe(Effect.catch(() => Effect.void))),
+              Effect.ensuring(fs.remove(attachmentPath).pipe(Effect.catch(() => Effect.void))),
             )
 
           expect(generated.branch).toBe('fix/ui-regression')

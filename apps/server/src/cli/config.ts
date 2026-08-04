@@ -1,3 +1,6 @@
+// apps/server/src/cli/config.ts
+// resolve server config
+
 import * as NetService from '@t3tools/shared/Net'
 import { parsePersistedServerObservabilitySettings } from '@t3tools/shared/serverSettings'
 import { DesktopBackendBootstrap, PortSchema } from '@t3tools/contracts'

@@ -1,3 +1,6 @@
+// apps/server/src/orchestration/Layers/OrchestrationEngine.ts
+// assemble orchestration engine Effect layer
+
 import type {
   OrchestrationEvent,
   OrchestrationReadModel,
@@ -235,6 +238,16 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent)
                 yield* projectionPipeline.projectEvent(savedEvent)
                 committedEvents.push(savedEvent)
+
+                if (savedEvent.type === 'thread.message-sent')
+                {
+                  yield* attachmentLifecycle.associateAccepted({
+                    commandId: envelope.command.commandId,
+                    ownerSequence: savedEvent.sequence,
+                    ownerEventType: savedEvent.type,
+                    now: savedEvent.occurredAt,
+                  })
+                }
               }
 
               const lastSavedEvent = committedEvents.at(-1) ?? null
@@ -254,6 +267,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 resultSequence: lastSavedEvent.sequence,
                 status: 'accepted',
                 error: null,
+                errorCode: null,
               })
 
               return {
@@ -351,6 +365,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                   resultSequence: commandReadModel.snapshotSequence,
                   status: 'rejected',
                   error: error.message,
+                  errorCode: error.code ?? null,
                 })
                 .pipe(Effect.catch(() => Effect.void))
             }
@@ -389,14 +404,14 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   return {
     readEvents,
     dispatch,
-    // Each access creates a fresh PubSub subscription so that multiple
+    // each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.
     get streamDomainEvents(): OrchestrationEngineShape['streamDomainEvents']
     {
       return Stream.fromPubSub(eventPubSub)
     },
-    // The command read model's snapshotSequence tracks the latest committed
+    // the command read model's snapshotSequence tracks the latest committed
     // event sequence (updated on the worker fiber). A plain property read is a
     // consistent, committed value — reassignment of `commandReadModel` is
     // atomic on the single-threaded event loop.

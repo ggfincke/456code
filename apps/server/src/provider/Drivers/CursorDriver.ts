@@ -1,18 +1,17 @@
 // apps/server/src/provider/Drivers/CursorDriver.ts
 // creates Cursor ACP instances bound to their exact connection source
-/**
- * CursorDriver — `ProviderDriver` for the Cursor Agent (`cursor-agent`) runtime.
- *
- * Cursor exposes an ACP-based CLI. Model catalog and capability refreshes
- * happen during the managed provider status check via Cursor's
- * `list_available_models` extension method.
- *
- * Text generation is supported via the ACP runtime — `makeCursorTextGeneration`
- * drives `runtime.prompt` with a structured-output schema and collects the
- * agent's `agent_message_chunk` stream into a single JSON blob.
- *
- * @module provider/Drivers/CursorDriver
- */
+
+// CursorDriver — `ProviderDriver` for the Cursor Agent (`cursor-agent`) runtime.
+//
+// cursor exposes an ACP-based CLI. Model catalog and capability refreshes
+// happen during the managed provider status check via Cursor's
+// `list_available_models` extension method.
+//
+// text generation is supported via the ACP runtime — `makeCursorTextGeneration`
+// drives `runtime.prompt` with a structured-output schema and collects the
+// agent's `agent_message_chunk` stream into a single JSON blob.
+//
+// @module provider/Drivers/CursorDriver
 import { CursorSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
 import * as Duration from 'effect/Duration'
 import * as Crypto from 'effect/Crypto'
@@ -151,6 +150,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
 
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
+        enableAbnormalTermination: false,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       })
@@ -173,7 +173,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
         initialSnapshot: (settings) =>
           buildInitialCursorProviderSnapshot(settings.provider).pipe(Effect.map(stampIdentity)),
         checkProvider,
-        // Model catalog and capabilities come exclusively from Cursor's
+        // model catalog and capabilities come exclusively from Cursor's
         // list_available_models extension method during provider checks.
         enrichSnapshot: ({ settings, snapshot: currentSnapshot, publishSnapshot }) =>
           enrichCursorSnapshot({

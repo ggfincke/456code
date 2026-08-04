@@ -165,7 +165,7 @@ function hasOpenBlockingRequest(thread: {
     }
     else if (
       isBlockingRequestFailureActivityKind(activity.kind) &&
-      isStaleRequestFailureDetail(payload)
+      classifyApprovalFailure(payload).clearsBlockingRequest
     )
     {
       openRequestIds.delete(requestId)
@@ -174,24 +174,22 @@ function hasOpenBlockingRequest(thread: {
   return openRequestIds.size > 0
 }
 
-/**
- * A queued turn start — a user message no turn has picked up yet — is work
- * in flight even though session is still null (turn.start emits
- * message-sent + turn-start-requested; the session arrives later). Detection
- * mirrors the client's hasQueuedTurnStart: the newest user message is
- * strictly newer than every latestTurn timestamp (adoption stamps the new
- * turn's requestedAt with the message time, clearing this), and only within
- * the adoption grace window — historical threads whose last user message
- * postdates their turn timestamps (older-server data, mid-turn messages)
- * must not be blocked forever. A failed session start (status "error")
- * clears the block immediately.
- *
- * The age check is bounded on BOTH sides: message timestamps are
- * client-supplied, so a client clock ahead of the server yields a negative
- * age. Without the lower bound that negative age satisfies `<= grace` for
- * as long as the skew lasts, extending the block far past the intended two
- * minutes.
- */
+// a queued turn start — a user message no turn has picked up yet — is work
+// in flight even though session is still null (turn.start emits
+// message-sent + turn-start-requested; the session arrives later). Detection
+// mirrors the client's hasQueuedTurnStart: the newest user message is
+// strictly newer than every latestTurn timestamp (adoption stamps the new
+// turn's requestedAt with the message time, clearing this), and only within
+// the adoption grace window — historical threads whose last user message
+// postdates their turn timestamps (older-server data, mid-turn messages)
+// must not be blocked forever. A failed session start (status "error")
+// clears the block immediately.
+//
+// the age check is bounded on BOTH sides: message timestamps are
+// client-supplied, so a client clock ahead of the server yields a negative
+// age. Without the lower bound that negative age satisfies `<= grace` for
+// as long as the skew lasts, extending the block far past the intended two
+// minutes.
 function threadHasQueuedTurnStart(
   thread: {
     readonly messages: ReadonlyArray<{ readonly role: string; readonly createdAt: string }>
@@ -557,7 +555,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
-      // Server-side twin of the client's canSettle session check: a stale
+      // server-side twin of the client's canSettle session check: a stale
       // or raced client must not settle a thread whose session is coming
       // alive or working.
       if (thread.session?.status === 'starting' || thread.session?.status === 'running')
@@ -569,7 +567,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // Pending approval / user-input requests are blocked-on-you work: a
+      // pending approval / user-input requests are blocked-on-you work: a
       // raced or stale client must not park them behind a settled override
       // that would surface only after the request resolves.
       if (hasOpenBlockingRequest(thread))
@@ -582,7 +580,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         )
       }
       const occurredAt = yield* nowIso
-      // Settling inside the adoption window would hide just-requested work.
+      // settling inside the adoption window would hide just-requested work.
       if (threadHasQueuedTurnStart(thread, occurredAt))
       {
         return yield* Effect.fail(
@@ -592,7 +590,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // Settling an already-settled thread re-emits with the original
+      // settling an already-settled thread re-emits with the original
       // settledAt: the engine rejects zero-event commands, and bulk-settle /
       // double-click must stay silent no-ops rather than surface errors.
       const alreadySettled = thread.settledOverride === 'settled' && thread.settledAt !== null
@@ -607,7 +605,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         payload: {
           threadId: command.threadId,
           settledAt: alreadySettled ? thread.settledAt : occurredAt,
-          // A re-emission is a projected no-op: keep the existing updatedAt
+          // a re-emission is a projected no-op: keep the existing updatedAt
           // so duplicate settles neither rewind nor churn ordering. A fresh
           // settle stamps the command time.
           updatedAt: alreadySettled ? thread.updatedAt : occurredAt,
@@ -622,7 +620,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
-      // Idempotent by re-emission (see thread.settle): reducing the event a
+      // idempotent by re-emission (see thread.settle): reducing the event a
       // second time lands on the same override state. A re-emission keeps
       // the existing updatedAt so duplicates do not churn ordering.
       const alreadyPinnedActive = thread.settledOverride === 'active'
@@ -651,7 +649,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         threadId: command.threadId,
       })
       const occurredAt = yield* nowIso
-      // A wake time in the past would create a thread that is snoozed and
+      // a wake time in the past would create a thread that is snoozed and
       // woken at once — the row would never leave the inbox but still carry
       // snooze state. Reject instead of silently normalizing. The negated
       // comparison also catches unparseable wake times (IsoDateTime is
@@ -666,7 +664,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // Blocked-on-you work must not be snoozed away: a pending approval or
+      // blocked-on-you work must not be snoozed away: a pending approval or
       // user-input request is the agent waiting on the user, and hiding it
       // defeats the request. (A running session IS snoozable — snooze only
       // affects visibility, never the agent.)
@@ -679,7 +677,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // A queued turn start — a user message no turn has adopted yet — is
+      // a queued turn start — a user message no turn has adopted yet — is
       // invisible pending work: no session, no pending flags. Snoozing in
       // that window would hide a just-requested turn exactly the way settle
       // would.
@@ -692,7 +690,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // Re-snoozing an already-snoozed thread to the SAME wake time is a
+      // re-snoozing an already-snoozed thread to the SAME wake time is a
       // duplicate (double-click, raced clients): re-emit with the original
       // timestamps so the projection is a no-op. A different wake time is a
       // real change and stamps fresh.
@@ -724,7 +722,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
-      // Idempotent by re-emission (see thread.settle): waking a thread that
+      // idempotent by re-emission (see thread.settle): waking a thread that
       // is not snoozed lands on the same null state without churning
       // updatedAt.
       const alreadyAwake = thread.snoozedUntil == null
@@ -874,6 +872,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         // resume cursor and double-inject context alongside the handoff
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-same-instance',
           detail: `Thread '${command.threadId}' is already bound to provider instance '${thread.modelSelection.instanceId}'; provider switch requires a different instance.`,
         })
       }
@@ -884,6 +883,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-running-turn',
           detail: `Thread '${command.threadId}' has a running turn and cannot switch providers.`,
         })
       }
@@ -892,6 +892,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-queued-turn',
           detail: `Thread '${command.threadId}' has a queued turn start and cannot switch providers.`,
         })
       }
@@ -899,22 +900,25 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-blocking-request',
           detail: `Thread '${command.threadId}' has a pending approval or user-input request and cannot switch providers.`,
         })
       }
       const occurredAt = yield* nowIso
+      const eventBase = yield* withEventBase({
+        aggregateKind: 'thread',
+        aggregateId: command.threadId,
+        occurredAt,
+        commandId: command.commandId,
+      })
       return {
-        ...(yield* withEventBase({
-          aggregateKind: 'thread',
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...eventBase,
         type: 'thread.provider-switch-requested',
         payload: {
           threadId: command.threadId,
           targetModelSelection: command.targetModelSelection,
-          expectedCurrentInstanceId: command.expectedCurrentInstanceId ?? null,
+          expectedCurrentInstanceId: command.expectedCurrentInstanceId,
+          sourceModelSelection: thread.modelSelection,
         },
       }
     }
@@ -1025,10 +1029,10 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           createdAt: command.createdAt,
         },
       }
-      // Real activity resets ANY override: it wakes an explicitly settled
+      // real activity resets ANY override: it wakes an explicitly settled
       // thread, and it clears a keep-active pin back to neutral so the
       // thread can auto-settle again after this burst of work goes stale.
-      // A snooze clears the same way — sending a message to a snoozed
+      // a snooze clears the same way — sending a message to a snoozed
       // thread is the user re-engaging, so the return ticket is spent.
       const lifecycleResetEvents: Array<Omit<OrchestrationEvent, 'sequence'>> = []
       if (targetThread.settledOverride !== null)
@@ -1303,7 +1307,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           session: command.session,
         },
       }
-      // Only a session coming alive is activity worth waking a settled thread
+      // only a session coming alive is activity worth waking a settled thread
       // for — status writes like ready/stopped/error arrive after the fact and
       // must not fight a user's explicit settle. Snooze is deliberately NOT
       // cleared here: snooze never pauses the agent, so its session starting
@@ -1313,7 +1317,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       // as snoozed, without spending the return ticket.
       const isSessionActivity =
         command.session.status === 'starting' || command.session.status === 'running'
-      // Real activity resets ANY override (settled wakes, active unpins).
+      // real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !isSessionActivity)
       {
         return sessionSetEvent
@@ -1691,10 +1695,10 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           activity: command.activity,
         },
       }
-      // An approval or user-input request is blocked-on-you work — it must
+      // an approval or user-input request is blocked-on-you work — it must
       // never stay hidden inside a settled slim row.
       const wakesSettledThread = isBlockingRequestActivityKind(command.activity.kind)
-      // Real activity resets ANY override (settled wakes, active unpins).
+      // real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !wakesSettledThread)
       {
         return activityAppendedEvent

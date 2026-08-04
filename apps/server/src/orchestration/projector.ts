@@ -46,6 +46,7 @@ import {
   ThreadUnsettledPayload,
   ThreadUnsnoozedPayload,
   ThreadRevertedPayload,
+  ThreadApprovalResponseRequestedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
 } from './Schemas.ts'
@@ -146,11 +147,9 @@ function checkpointStatusToLatestTurnState(status: 'ready' | 'missing' | 'error'
   return 'completed' as const
 }
 
-/**
- * Turn state to settle a still-running latest turn with when its session
- * leaves the "running" status, or null while the session is (re)starting or
- * running and the turn must stay unsettled.
- */
+// turn state to settle a still-running latest turn with when its session
+// leaves the "running" status, or null while the session is (re)starting or
+// running and the turn must stay unsettled.
 function settledTurnStateForSessionStatus(
   status: OrchestrationSession['status'],
 ): 'completed' | 'interrupted' | 'error' | null
@@ -304,6 +303,18 @@ function retainThreadActivities(
   }
   return [latestImportContinuation, ...retainedActivities].toSorted(
     compareOrchestrationThreadActivities,
+  )
+}
+
+function appendProjectedActivity(
+  activities: ReadonlyArray<OrchestrationThread['activities'][number]>,
+  activity: OrchestrationThread['activities'][number],
+): ReadonlyArray<OrchestrationThread['activities'][number]>
+{
+  return retainThreadActivities(
+    [...activities.filter((entry) => entry.id !== activity.id), activity].toSorted(
+      compareOrchestrationThreadActivities,
+    ),
   )
 }
 
@@ -868,7 +879,7 @@ export function projectEvent(
           'session',
         )
 
-        // Leaving the "running" session status is the turn-end signal: settle
+        // leaving the "running" session status is the turn-end signal: settle
         // a still-running latest turn so its duration reflects the whole turn.
         const settledTurnState = settledTurnStateForSessionStatus(session.status)
         return {
@@ -900,7 +911,7 @@ export function projectEvent(
                   ? {
                       ...thread.latestTurn,
                       state: settledTurnState,
-                      // A running turn's completedAt can only hold a mid-turn
+                      // a running turn's completedAt can only hold a mid-turn
                       // placeholder checkpoint timestamp — the session leaving
                       // "running" is the authoritative turn end.
                       completedAt: session.updatedAt,
@@ -975,7 +986,7 @@ export function projectEvent(
           'checkpoint',
         )
 
-        // Do not let a placeholder (status "missing") overwrite a checkpoint
+        // do not let a placeholder (status "missing") overwrite a checkpoint
         // that has already been captured with a real git ref (status "ready").
         // ProviderRuntimeIngestion may fire multiple turn.diff.updated events
         // per turn; without this guard later placeholders would clobber the
@@ -993,7 +1004,7 @@ export function projectEvent(
           .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
           .slice(-MAX_THREAD_CHECKPOINTS)
 
-        // Mid-turn diff updates produce placeholder checkpoints; record the
+        // mid-turn diff updates produce placeholder checkpoints; record the
         // checkpoint, but don't settle a turn its session is still running.
         const turnStillRunning =
           thread.session?.status === 'running' && thread.session.activeTurnId === payload.turnId

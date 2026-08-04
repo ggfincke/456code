@@ -55,6 +55,14 @@ const BENIGN_ERROR_LOG_SNIPPETS = [
   'state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back',
 ]
 const CODEX_APP_SERVER_FORCE_KILL_AFTER = '2 seconds' as const
+// deadlines for the app-server round trips that gate a turn. without these, a
+// request that never draws a response leaves the thread wedged on "working"
+// forever w/ nothing logged: the protocol layer waits on a deferred that only a
+// matching response id can complete. generous enough that a healthy but busy
+// provider never trips them.
+const CODEX_SESSION_START_TIMEOUT = '120 seconds' as const
+const CODEX_TURN_START_TIMEOUT = '60 seconds' as const
+const CODEX_MCP_RELOAD_TIMEOUT = '15 seconds' as const
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
   'not found',
   'missing thread',
@@ -78,7 +86,7 @@ const CodexUserInputAnswerObject = Schema.Struct({
 const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema)
 const isCodexUserInputAnswerObject = Schema.is(CodexUserInputAnswerObject)
 
-// TODO: Verify `packages/effect-codex-app-server/scripts/generate.ts` so the generated
+// TODO verify `packages/effect-codex-app-server/scripts/generate.ts` so the generated
 // `V2TurnStartParams` schema includes `collaborationMode` directly.
 const CodexTurnStartParamsWithCollaborationMode = EffectCodexSchema.V2TurnStartParams.pipe(
   Schema.fieldsAssign({
@@ -298,7 +306,7 @@ function makeCodexResumeCursor(threadId: string, requireExisting: boolean): Code
 function runtimeModeToThreadConfig(input: RuntimeMode): {
   readonly approvalPolicy: EffectCodexSchema.V2ThreadStartParams__AskForApproval
   readonly sandbox: EffectCodexSchema.V2ThreadStartParams__SandboxMode
-  // Always explicit: omitting the field on resume keeps the thread's previous
+  // always explicit: omitting the field on resume keeps the thread's previous
   // reviewer, which would leave auto_review sticky after switching modes.
   readonly approvalsReviewer: EffectCodexSchema.V2ThreadStartParams__ApprovalsReviewer
 }
@@ -1257,8 +1265,23 @@ export const makeCodexSessionRuntime = (
       { concurrency: 1, discard: true },
     )
 
+    // ! this fibre is the only consumer of every Codex notification. A failure
+    // ! inside `handleRawNotification` would end the stream and silently deafen
+    // ! the session for the rest of its life — turn/item events would stop
+    // ! arriving with no error surfaced anywhere. Isolate each notification so
+    // ! one undecodable payload can never take the pump down.
     yield* Stream.fromQueue(serverNotifications).pipe(
-      Stream.runForEach(handleRawNotification),
+      Stream.runForEach((notification) =>
+        handleRawNotification(notification).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logError('Dropped a Codex notification; session pump continues.', {
+              method: notification.method,
+              threadId: options.threadId,
+              cause,
+            }),
+          ),
+        ),
+      ),
       Effect.forkIn(runtimeScope),
     )
 
@@ -1330,7 +1353,17 @@ export const makeCodexSessionRuntime = (
     const start = Effect.fn('CodexSessionRuntime.start')(function* ()
     {
       yield* emitSessionEvent('session/connecting', 'Starting Codex App Server session.')
-      yield* client.request('initialize', buildCodexInitializeParams())
+      yield* client.request('initialize', buildCodexInitializeParams()).pipe(
+        Effect.timeoutOrElse({
+          duration: CODEX_SESSION_START_TIMEOUT,
+          orElse: () =>
+            new CodexErrors.CodexAppServerRequestError({
+              code: -32000,
+              errorMessage: `Codex did not answer 'initialize' within ${CODEX_SESSION_START_TIMEOUT}.`,
+              method: 'initialize',
+            }),
+        }),
+      )
       yield* client.notify('initialized', undefined)
 
       const requestedModel = normalizeCodexModelSlug(options.model)
@@ -1351,7 +1384,17 @@ export const makeCodexSessionRuntime = (
             method: 'thread/resumeFallback',
             message: 'resume fell back to a fresh provider thread; native history was not found',
           }),
-      })
+      }).pipe(
+        Effect.timeoutOrElse({
+          duration: CODEX_SESSION_START_TIMEOUT,
+          orElse: () =>
+            new CodexErrors.CodexAppServerRequestError({
+              code: -32000,
+              errorMessage: `Codex did not open a thread within ${CODEX_SESSION_START_TIMEOUT}.`,
+              method: 'thread/start',
+            }),
+        }),
+      )
 
       const providerThreadId = opened.thread.id
       const session = {
@@ -1411,7 +1454,18 @@ export const makeCodexSessionRuntime = (
           const providerThreadId = yield* readProviderThreadId
           if (hasConfiguredMcpServer(options.appServerArgs))
           {
+            // refreshing the tool catalog is best-effort; a slow or silent
+            // reload must never hold the turn hostage
             yield* client.request('config/mcpServer/reload', undefined).pipe(
+              Effect.timeoutOrElse({
+                duration: CODEX_MCP_RELOAD_TIMEOUT,
+                orElse: () =>
+                  new CodexErrors.CodexAppServerRequestError({
+                    code: -32000,
+                    errorMessage: `Codex did not answer 'config/mcpServer/reload' within ${CODEX_MCP_RELOAD_TIMEOUT}.`,
+                    method: 'config/mcpServer/reload',
+                  }),
+              }),
               Effect.catch((cause) =>
                 Effect.logWarning('Failed to refresh Codex MCP tool catalog before turn.', {
                   cause,
@@ -1432,7 +1486,17 @@ export const makeCodexSessionRuntime = (
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
           })
-          const rawResponse = yield* client.raw.request('turn/start', params)
+          const rawResponse = yield* client.raw.request('turn/start', params).pipe(
+            Effect.timeoutOrElse({
+              duration: CODEX_TURN_START_TIMEOUT,
+              orElse: () =>
+                new CodexErrors.CodexAppServerRequestError({
+                  code: -32000,
+                  errorMessage: `Codex did not answer 'turn/start' within ${CODEX_TURN_START_TIMEOUT}.`,
+                  method: 'turn/start',
+                }),
+            }),
+          )
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
             Effect.mapError((error) =>
               CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(

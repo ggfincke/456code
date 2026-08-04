@@ -1,5 +1,7 @@
 // tests/apps/server/provider/Layers/CursorAdapter.test.ts
 // verifies Cursor ACP session behavior
+
+// @effect-diagnostics globalTimers:off - session-drop polls need wall-clock waits; the test clock freezes Effect.sleep
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from 'node:path'
 import * as NodeOS from 'node:os'
@@ -19,9 +21,20 @@ import * as TestClock from 'effect/testing/TestClock'
 import { createModelSelection } from '@t3tools/shared/model'
 
 import {
+  STRICT_IMPORT_RESUME_CURSOR,
   assertActiveImportedSessionBlocksFreshStart,
+  assertInvalidStrictMarkerPreservesActive,
+  assertMalformedStrictImportRejected,
   assertMissingImportedSessionRejected,
+  assertStrictImportMarkerPreserved,
 } from './acpImportLineageTestHelpers.ts'
+import {
+  assertAbnormalChildExitFinalizesOnce,
+  assertAbnormalExitDisabledByDefault,
+  assertOneExitWhenStopRacesTermination,
+  assertStopClosesAcpChild,
+  waitForAcpSessionDrop,
+} from './acpLifecycleTestHelpers.ts'
 import {
   ApprovalRequestId,
   CursorSettings,
@@ -37,7 +50,7 @@ import type { CursorAdapterShape } from '../../../../../apps/server/src/provider
 import { makeCursorAdapter } from '../../../../../apps/server/src/provider/Layers/CursorAdapter.ts'
 const decodeCursorSettings = Schema.decodeSync(CursorSettings)
 
-// Test-local service tag so the rest of the file can keep using `yield* CursorAdapter`.
+// test-local service tag so the rest of the file can keep using `yield* CursorAdapter`.
 class CursorAdapter extends Context.Service<CursorAdapter, CursorAdapterShape>()(
   '@t3tools/tests/apps/server/provider/Layers/CursorAdapter.test/CursorAdapter',
 )
@@ -154,7 +167,15 @@ function waitForJsonLogMatch(
   })
 }
 
-// Tests mutate `ServerSettingsService` mid-flight (e.g. setting
+function waitForCursorSessionDrop(
+  adapter: CursorAdapterShape,
+  threadId: ThreadId,
+): Effect.Effect<void>
+{
+  return waitForAcpSessionDrop(adapter, threadId, 'Cursor')
+}
+
+// tests mutate `ServerSettingsService` mid-flight (e.g. setting
 // `providers.cursor.binaryPath` to a mock ACP wrapper). The adapter
 // captures `cursorSettings` once at construction, so without a resolver
 // the mutation is invisible — sessions would spawn the constructor's
@@ -213,11 +234,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           instanceId: ProviderInstanceId.make('cursor'),
           model: 'default',
         },
-        resumeCursor: {
-          schemaVersion: 1,
-          sessionId: 'mock-session-1',
-          requireExisting: true,
-        },
+        resumeCursor: STRICT_IMPORT_RESUME_CURSOR,
       })
       const turn = yield* adapter.sendTurn({
         threadId,
@@ -226,14 +243,11 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       })
       const listed = (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId)
 
-      const expectedCursor = {
-        schemaVersion: 1,
-        sessionId: 'mock-session-1',
-        requireExisting: true,
-      }
-      assert.deepStrictEqual(session.resumeCursor, expectedCursor)
-      assert.deepStrictEqual(turn.resumeCursor, expectedCursor)
-      assert.deepStrictEqual(listed?.resumeCursor, expectedCursor)
+      assertStrictImportMarkerPreserved({
+        sessionResumeCursor: session.resumeCursor,
+        turnResumeCursor: turn.resumeCursor,
+        listedResumeCursor: listed?.resumeCursor,
+      })
 
       yield* adapter.stopSession(threadId)
     }),
@@ -248,6 +262,10 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
       const wrapperPath = yield* Effect.promise(() => makeMockAgentWrapper())
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
+      const ordinaryCursor = {
+        schemaVersion: 1,
+        sessionId: 'mock-session-1',
+      }
       const session = yield* adapter.startSession({
         threadId,
         provider: ProviderDriverKind.make('cursor'),
@@ -257,10 +275,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           instanceId: ProviderInstanceId.make('cursor'),
           model: 'default',
         },
-        resumeCursor: {
-          schemaVersion: 1,
-          sessionId: 'mock-session-1',
-        },
+        resumeCursor: ordinaryCursor,
       })
       const turn = yield* adapter.sendTurn({
         threadId,
@@ -268,12 +283,11 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
         attachments: [],
       })
 
-      const expectedCursor = {
-        schemaVersion: 1,
-        sessionId: 'mock-session-1',
-      }
-      assert.deepStrictEqual(session.resumeCursor, expectedCursor)
-      assert.deepStrictEqual(turn.resumeCursor, expectedCursor)
+      assertStrictImportMarkerPreserved({
+        sessionResumeCursor: session.resumeCursor,
+        turnResumeCursor: turn.resumeCursor,
+        expectedCursor: ordinaryCursor,
+      })
 
       yield* adapter.stopSession(threadId)
     }),
@@ -307,9 +321,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
         }),
       )
 
-      assert.equal(error._tag, 'ProviderAdapterValidationError')
-      assert.include(error.message, 'valid existing native session id')
-      assert.isFalse(yield* adapter.hasSession(threadId))
+      yield* assertMalformedStrictImportRejected(adapter, threadId, error)
     }),
   )
 
@@ -350,12 +362,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
         }),
       )
 
-      assert.equal(error._tag, 'ProviderAdapterValidationError')
-      assert.isTrue(yield* adapter.hasSession(threadId))
-      assert.deepStrictEqual(
-        (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId)?.resumeCursor,
-        active.resumeCursor,
-      )
+      yield* assertInvalidStrictMarkerPreservesActive(adapter, threadId, error, active.resumeCursor)
 
       yield* adapter.stopSession(threadId)
     }),
@@ -412,11 +419,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           instanceId: ProviderInstanceId.make('cursor'),
           model: 'default',
         },
-        resumeCursor: {
-          schemaVersion: 1,
-          sessionId: 'mock-session-1',
-          requireExisting: true,
-        },
+        resumeCursor: STRICT_IMPORT_RESUME_CURSOR,
       })
       const error = yield* Effect.flip(
         adapter.startSession({
@@ -588,31 +591,85 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
     {
       const adapter = yield* CursorAdapter
       const settings = yield* ServerSettingsService
-      const threadId = ThreadId.make('cursor-stop-session-close')
       const tempDir = yield* Effect.promise(() =>
         NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), 'cursor-adapter-exit-log-')),
       )
       const exitLogPath = NodePath.join(tempDir, 'exit.log')
-
       const wrapperPath = yield* Effect.promise(() =>
-        makeMockAgentWrapper({
-          T3_ACP_EXIT_LOG_PATH: exitLogPath,
-        }),
+        makeMockAgentWrapper({ T3_ACP_EXIT_LOG_PATH: exitLogPath }),
       )
       yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
 
-      yield* adapter.startSession({
-        threadId,
+      yield* assertStopClosesAcpChild(adapter, {
+        threadId: ThreadId.make('cursor-stop-session-close'),
         provider: ProviderDriverKind.make('cursor'),
-        cwd: process.cwd(),
-        runtimeMode: 'full-access',
         modelSelection: { instanceId: ProviderInstanceId.make('cursor'), model: 'default' },
+        readExitLog: Effect.promise(() => waitForFileContent(exitLogPath)),
+      })
+    }),
+  )
+
+  it.effect('finalizes an active Cursor session once when its ACP child exits', () =>
+    Effect.gen(function* ()
+    {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({
+          T3_ACP_EMIT_TOOL_CALLS: '1',
+          T3_ACP_EXIT_DURING_PROMPT_CODE: '9',
+          T3_ACP_EXIT_DURING_PROMPT_DELAY_MS: '100',
+        }),
+      )
+      const cursorConfig = decodeCursorSettings({ binaryPath: wrapperPath })
+      const adapter = yield* makeCursorAdapter(cursorConfig, {
+        enableAbnormalTermination: true,
+        resolveSettings: Effect.succeed(cursorConfig),
       })
 
-      yield* adapter.stopSession(threadId)
+      yield* assertAbnormalChildExitFinalizesOnce(adapter, {
+        threadId: ThreadId.make('cursor-abnormal-child-exit'),
+        provider: ProviderDriverKind.make('cursor'),
+        label: 'Cursor',
+        promptInFlight: 'await-request',
+      })
+    }),
+  )
 
-      const exitLog = yield* Effect.promise(() => waitForFileContent(exitLogPath))
-      assert.include(exitLog, 'SIGTERM')
+  it.effect('keeps abnormal Cursor exit emission disabled by default', () =>
+    Effect.gen(function* ()
+    {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_EXIT_DURING_PROMPT_CODE: '9' }),
+      )
+      const cursorConfig = decodeCursorSettings({ binaryPath: wrapperPath })
+      const adapter = yield* makeCursorAdapter(cursorConfig, {
+        resolveSettings: Effect.succeed(cursorConfig),
+      })
+
+      yield* assertAbnormalExitDisabledByDefault(adapter, {
+        threadId: ThreadId.make('cursor-abnormal-child-exit-disabled'),
+        provider: ProviderDriverKind.make('cursor'),
+        label: 'Cursor',
+      })
+    }),
+  )
+
+  it.effect('emits one Cursor exit when graceful stop races ACP termination', () =>
+    Effect.gen(function* ()
+    {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockAgentWrapper({ T3_ACP_EXIT_DURING_PROMPT_CODE: '9' }),
+      )
+      const cursorConfig = decodeCursorSettings({ binaryPath: wrapperPath })
+      const adapter = yield* makeCursorAdapter(cursorConfig, {
+        enableAbnormalTermination: true,
+        resolveSettings: Effect.succeed(cursorConfig),
+      })
+
+      yield* assertOneExitWhenStopRacesTermination(adapter, {
+        threadId: ThreadId.make('cursor-stop-termination-race'),
+        provider: ProviderDriverKind.make('cursor'),
+        label: 'Cursor',
+      })
     }),
   )
 
@@ -638,6 +695,10 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
           ),
         )
         yield* settings.updateSettings({ providers: { cursor: { binaryPath: wrapperPath } } })
+        const events: Array<ProviderRuntimeEvent> = []
+        yield* Stream.runForEach(adapter.streamEvents, (event) =>
+          Effect.sync(() => events.push(event)),
+        ).pipe(Effect.forkChild)
 
         const [firstSession, secondSession] = yield* Effect.all(
           [
@@ -661,8 +722,14 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
 
         assert.equal(firstSession.threadId, threadId)
         assert.equal(secondSession.threadId, threadId)
+        yield* Effect.yieldNow
+        assert.isTrue(yield* adapter.hasSession(threadId))
+        assert.equal((yield* adapter.listSessions()).length, 1)
+        assert.equal(events.filter((event) => event.type === 'session.exited').length, 1)
 
         yield* adapter.stopSession(threadId)
+        yield* Effect.yieldNow
+        assert.equal(events.filter((event) => event.type === 'session.exited').length, 2)
 
         const exitLog = yield* Effect.promise(() => waitForFileContent(exitLogPath))
         assert.equal(exitLog.match(/SIGTERM/g)?.length ?? 0, 2)
@@ -1654,7 +1721,7 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
     () =>
     {
       const customInstanceId = ProviderInstanceId.make('cursor_secondary')
-      // Custom-instance cases can't share the suite-level `CursorAdapter`
+      // custom-instance cases can't share the suite-level `CursorAdapter`
       // layer because that one binds `instanceId: "cursor"`. We build a
       // fresh layer graph — including a fresh `ServerSettingsService` — so
       // mid-test `updateSettings` calls target the same service instance the

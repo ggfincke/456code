@@ -1,15 +1,13 @@
 // apps/server/src/provider/Layers/CodexAdapter.ts
 // implements codex provider session behavior
 
-/**
- * CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
- *
- * Wraps the typed Codex session runtime behind the `CodexAdapter` service
- * contract and maps runtime failures into the shared `ProviderAdapterError`
- * algebra.
- *
- * @module CodexAdapterLive
- */
+// CodexAdapterLive - Scoped live implementation for the Codex provider adapter.
+//
+// wraps the typed Codex session runtime behind the `CodexAdapter` service
+// contract and maps runtime failures into the shared `ProviderAdapterError`
+// algebra.
+//
+// @module CodexAdapterLive
 import {
   type CanonicalItemType,
   type CanonicalRequestType,
@@ -1482,15 +1480,13 @@ function mapToRuntimeEvents(
   return []
 }
 
-/**
- * Build a Codex provider adapter bound to a specific `CodexSettings` payload.
- *
- * The adapter is a captured closure over `codexConfig` — the `binaryPath` and
- * `homePath` are read from that payload, not from `ServerSettingsService`.
- * This is what makes multi-instance routing possible: each `ProviderInstance`
- * in the registry owns its own closure with its own config, so two Codex
- * instances with different `homePath`s cannot step on each other.
- */
+// build a Codex provider adapter bound to a specific `CodexSettings` payload.
+//
+// the adapter is a captured closure over `codexConfig` — the `binaryPath` and
+// `homePath` are read from that payload, not from `ServerSettingsService`.
+// this is what makes multi-instance routing possible: each `ProviderInstance`
+// in the registry owns its own closure with its own config, so two Codex
+// instances with different `homePath`s cannot step on each other.
 export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
   codexConfig: CodexSettings,
   options?: CodexAdapterLiveOptions,
@@ -1609,7 +1605,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
             }
             yield* Queue.offerAll(runtimeEventQueue, runtimeEvents)
           }),
-        ).pipe(Effect.forkChild)
+        ).pipe(Effect.forkIn(sessionScope))
 
         const started = yield* runtime.start().pipe(
           Effect.mapError(
@@ -1881,10 +1877,3 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
     },
   } satisfies CodexAdapterShape
 })
-
-// NOTE: the old `CodexAdapterLive` / `makeCodexAdapterLive` singleton Layer
-// exports have been removed as part of the per-instance-driver refactor.
-// `makeCodexAdapter(codexConfig, options?)` is now invoked directly by
-// `CodexDriver.create()` for each configured instance; downstream consumers
-// (server bootstrap, integration harness, this module's tests) will be
-// migrated to the registry in a follow-up pass.

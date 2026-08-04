@@ -80,15 +80,14 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
 } as const
 
 const encodeThreadOriginJson = Schema.encodeSync(Schema.fromJsonString(ThreadOrigin))
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
 
 type ProjectorName =
   (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES]
 
-/**
- * Turn state to settle still-running turns with when their session leaves the
- * "running" status, or null while the session is (re)starting or running and
- * turns must stay unsettled.
- */
+// turn state to settle still-running turns with when their session leaves the
+// "running" status, or null while the session is (re)starting or running and
+// turns must stay unsettled.
 function settledTurnStateForSessionStatus(
   status: OrchestrationSessionStatus,
 ): 'completed' | 'interrupted' | 'error' | null
@@ -1109,7 +1108,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                       : {}),
                     createdAt: event.occurredAt,
                   }
-                : null,
+                : existingRow.value.pendingHandoff,
             updatedAt: event.occurredAt,
           })
           return
@@ -1213,6 +1212,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             event.payload.activity.sequence !== undefined
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            pendingHandoff:
+              event.payload.activity.kind === 'provider.handoff.delivered'
+                ? null
+                : existingRow.value.pendingHandoff,
             updatedAt: event.occurredAt,
           })
           if (!isImportedTranscriptActivity)
@@ -1751,7 +1754,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                 threadId: event.payload.threadId,
               })
             }
-            // Leaving the "running" session status is the turn-end signal:
+            // leaving the "running" session status is the turn-end signal:
             // settle still-running turns so their duration reflects the whole
             // turn rather than the last assistant message.
             const settledTurnState = settledTurnStateForSessionStatus(event.payload.session.status)
@@ -1771,7 +1774,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                       ...turn,
                       turnId: turn.turnId,
                       state: settledTurnState,
-                      // A running turn's completedAt can only hold a mid-turn
+                      // a running turn's completedAt can only hold a mid-turn
                       // placeholder checkpoint timestamp — the session leaving
                       // "running" is the authoritative turn end.
                       completedAt: event.payload.session.updatedAt,
@@ -1781,7 +1784,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             return
           }
 
-          // A new active turn supersedes any still-running turn on the same
+          // a new active turn supersedes any still-running turn on the same
           // thread — steering can open a new turn without the provider ever
           // completing the previous one.
           const otherRunningTurns = yield* projectionTurnRepository.listByThreadId({
@@ -1886,7 +1889,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           {
             return
           }
-          // A completed assistant message only settles the turn once the
+          // a completed assistant message only settles the turn once the
           // session is no longer running it — providers may emit several
           // assistant messages per turn (commentary between tool calls), and
           // the turn must stay unsettled until the provider reports turn end
@@ -1984,7 +1987,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
         case 'thread.turn-diff-completed':
         {
-          // Mid-turn diff updates produce placeholder checkpoints; record the
+          // mid-turn diff updates produce placeholder checkpoints; record the
           // checkpoint, but don't settle a turn its session is still running.
           const session = yield* projectionThreadSessionRepository.getByThreadId({
             threadId: event.payload.threadId,

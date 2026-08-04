@@ -1,5 +1,6 @@
 // tests/apps/server/git/GitManager.test.ts
 // verifies git actions and pull request workflows
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
@@ -28,11 +29,11 @@ import {
   ProviderInstanceId,
   TextGenerationError,
 } from '@t3tools/contracts'
-import * as GitHubCli from '../../../../apps/server/src/sourceControl/GitHubCli.ts'
+import * as GitHubCli from '../../../../apps/server/src/sourceControl/GitHub/GitHubCli.ts'
 import * as TextGeneration from '../../../../apps/server/src/textGeneration/TextGeneration.ts'
 import * as GitVcsDriver from '../../../../apps/server/src/vcs/GitVcsDriver.ts'
 import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
-import * as GitHubSourceControlProvider from '../../../../apps/server/src/sourceControl/GitHubSourceControlProvider.ts'
+import * as GitHubSourceControlProvider from '../../../../apps/server/src/sourceControl/GitHub/GitHubSourceControlProvider.ts'
 import * as SourceControlProviderRegistry from '../../../../apps/server/src/sourceControl/SourceControlProviderRegistry.ts'
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import * as ProjectSetupScriptRunner from '../../../../apps/server/src/project/ProjectSetupScriptRunner.ts'
@@ -60,7 +61,7 @@ interface FakeGhScenario
   }
   repositoryCloneUrls?: Record<string, { url: string; sshUrl: string }>
   failWith?: GitHubCli.GitHubCliError
-  /** Let this many gh calls succeed before failWith kicks in (default 0 = fail immediately). */
+  // let this many gh calls succeed before failWith kicks in (default 0 = fail immediately).
   failAfterCalls?: number
 }
 
@@ -654,6 +655,65 @@ function preparePullRequestThread(
 {
   return manager.preparePullRequestThread(input)
 }
+
+const seedStickyPrStatus = (input: {
+  branch: string
+  pr: {
+    number: number
+    title: string
+    url: string
+    baseRefName: string
+    headRefName: string
+  }
+  pushUpstream?: boolean
+}) =>
+  Effect.gen(function* ()
+  {
+    const repoDir = yield* makeTempDir('t3code-git-manager-')
+    yield* initRepo(repoDir)
+    yield* runGit(repoDir, ['checkout', '-b', input.branch])
+    const remoteDir = yield* createBareRemote()
+    yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
+    if (input.pushUpstream !== false)
+    {
+      yield* runGit(repoDir, ['push', '-u', 'origin', input.branch])
+    }
+
+    const { manager } = yield* makeManager({
+      ghScenario: {
+        // @effect-diagnostics-next-line preferSchemaOverJson:off
+        prListSequence: [JSON.stringify([input.pr])],
+        failWith: new GitHubCli.GitHubCliUnavailableError({
+          command: 'gh',
+          cwd: repoDir,
+          cause: new Error('rate limited'),
+        }),
+        failAfterCalls: 1,
+      },
+    })
+
+    return { repoDir, remoteDir, manager, existingPr: input.pr }
+  })
+
+const seedForkMainCollisionRepo = (seedFileName: string, seedContents: string) =>
+  Effect.gen(function* ()
+  {
+    const repoDir = yield* makeTempDir('t3code-git-manager-')
+    yield* initRepo(repoDir)
+    const originDir = yield* createBareRemote()
+    const forkDir = yield* createBareRemote()
+    yield* runGit(repoDir, ['remote', 'add', 'origin', originDir])
+    yield* runGit(repoDir, ['push', '-u', 'origin', 'main'])
+    yield* runGit(repoDir, ['remote', 'add', 'fork-seed', forkDir])
+    yield* runGit(repoDir, ['checkout', '-b', 'fork-main-source'])
+    NodeFS.writeFileSync(NodePath.join(repoDir, seedFileName), seedContents)
+    yield* runGit(repoDir, ['add', seedFileName])
+    yield* runGit(repoDir, ['commit', '-m', `Fork main ${seedFileName}`])
+    yield* runGit(repoDir, ['push', '-u', 'fork-seed', 'fork-main-source:main'])
+    yield* runGit(repoDir, ['checkout', 'main'])
+    const mainBefore = (yield* runGit(repoDir, ['rev-parse', 'main'])).stdout.trim()
+    return { repoDir, forkDir, mainBefore }
+  })
 
 function makeManager(input?: {
   ghScenario?: FakeGhScenario
@@ -1302,37 +1362,21 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
   it.effect('status keeps the last known PR when a later lookup fails', () =>
     Effect.gen(function* ()
     {
-      const repoDir = yield* makeTempDir('t3code-git-manager-')
-      yield* initRepo(repoDir)
-      yield* runGit(repoDir, ['checkout', '-b', 'feature/pr-sticky'])
-      const remoteDir = yield* createBareRemote()
-      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
-      yield* runGit(repoDir, ['push', '-u', 'origin', 'feature/pr-sticky'])
-
-      const existingPr = {
-        number: 214,
-        title: 'Sticky PR',
-        url: 'https://github.com/pingdotgg/codething-mvp/pull/214',
-        baseRefName: 'main',
-        headRefName: 'feature/pr-sticky',
-      }
-      const { manager } = yield* makeManager({
-        ghScenario: {
-          // @effect-diagnostics-next-line preferSchemaOverJson:off
-          prListSequence: [JSON.stringify([existingPr])],
-          failWith: new GitHubCli.GitHubCliUnavailableError({
-            command: 'gh',
-            cwd: repoDir,
-            cause: new Error('rate limited'),
-          }),
-          failAfterCalls: 1,
+      const { repoDir, manager } = yield* seedStickyPrStatus({
+        branch: 'feature/pr-sticky',
+        pr: {
+          number: 214,
+          title: 'Sticky PR',
+          url: 'https://github.com/pingdotgg/codething-mvp/pull/214',
+          baseRefName: 'main',
+          headRefName: 'feature/pr-sticky',
         },
       })
 
       const first = yield* manager.status({ cwd: repoDir })
       expect(first.pr?.number).toBe(214)
 
-      // An explicit invalidation (user refresh, git action) bypasses the PR
+      // an explicit invalidation (user refresh, git action) bypasses the PR
       // cache and forces a live lookup — which now fails. The badge must keep
       // the last known PR instead of blanking out.
       yield* manager.invalidateStatus(repoDir)
@@ -1346,38 +1390,21 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
     () =>
       Effect.gen(function* ()
       {
-        const repoDir = yield* makeTempDir('t3code-git-manager-')
-        yield* initRepo(repoDir)
-        yield* runGit(repoDir, ['checkout', '-b', 'feature/pr-retarget'])
-
-        const originRemote = yield* createBareRemote()
-        yield* runGit(repoDir, ['remote', 'add', 'origin', originRemote])
-        yield* runGit(repoDir, ['push', '-u', 'origin', 'feature/pr-retarget'])
-
-        const existingPr = {
-          number: 214,
-          title: 'Sticky PR',
-          url: 'https://github.com/pingdotgg/codething-mvp/pull/214',
-          baseRefName: 'main',
-          headRefName: 'feature/pr-retarget',
-        }
-        const { manager } = yield* makeManager({
-          ghScenario: {
-            // @effect-diagnostics-next-line preferSchemaOverJson:off
-            prListSequence: [JSON.stringify([existingPr])],
-            failWith: new GitHubCli.GitHubCliUnavailableError({
-              command: 'gh',
-              cwd: repoDir,
-              cause: new Error('rate limited'),
-            }),
-            failAfterCalls: 1,
+        const { repoDir, manager } = yield* seedStickyPrStatus({
+          branch: 'feature/pr-retarget',
+          pr: {
+            number: 214,
+            title: 'Sticky PR',
+            url: 'https://github.com/pingdotgg/codething-mvp/pull/214',
+            baseRefName: 'main',
+            headRefName: 'feature/pr-retarget',
           },
         })
 
         const first = yield* manager.status({ cwd: repoDir })
         expect(first.pr?.number).toBe(214)
 
-        // Retarget the branch to a different remote/upstream (e.g. the PR was
+        // retarget the branch to a different remote/upstream (e.g. the PR was
         // reopened against a fork). The previously cached PR belonged to the
         // old upstream and must not be shown against the new one.
         const forkRemote = yield* createBareRemote()
@@ -1398,29 +1425,15 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
   it.effect('status keeps the last known PR when the branch gains its first upstream', () =>
     Effect.gen(function* ()
     {
-      const repoDir = yield* makeTempDir('t3code-git-manager-')
-      yield* initRepo(repoDir)
-      yield* runGit(repoDir, ['checkout', '-b', 'feature/pr-sticky-first-push'])
-      const remoteDir = yield* createBareRemote()
-      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
-
-      const existingPr = {
-        number: 215,
-        title: 'Sticky first-push PR',
-        url: 'https://github.com/pingdotgg/codething-mvp/pull/215',
-        baseRefName: 'main',
-        headRefName: 'feature/pr-sticky-first-push',
-      }
-      const { manager } = yield* makeManager({
-        ghScenario: {
-          // @effect-diagnostics-next-line preferSchemaOverJson:off
-          prListSequence: [JSON.stringify([existingPr])],
-          failWith: new GitHubCli.GitHubCliUnavailableError({
-            command: 'gh',
-            cwd: repoDir,
-            cause: new Error('rate limited'),
-          }),
-          failAfterCalls: 1,
+      const { repoDir, manager } = yield* seedStickyPrStatus({
+        branch: 'feature/pr-sticky-first-push',
+        pushUpstream: false,
+        pr: {
+          number: 215,
+          title: 'Sticky first-push PR',
+          url: 'https://github.com/pingdotgg/codething-mvp/pull/215',
+          baseRefName: 'main',
+          headRefName: 'feature/pr-sticky-first-push',
         },
       })
 
@@ -1438,30 +1451,14 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
   it.effect('status drops the last known PR when the tracked remote is repointed', () =>
     Effect.gen(function* ()
     {
-      const repoDir = yield* makeTempDir('t3code-git-manager-')
-      yield* initRepo(repoDir)
-      yield* runGit(repoDir, ['checkout', '-b', 'feature/pr-repointed'])
-      const originalRemoteDir = yield* createBareRemote()
-      yield* runGit(repoDir, ['remote', 'add', 'origin', originalRemoteDir])
-      yield* runGit(repoDir, ['push', '-u', 'origin', 'feature/pr-repointed'])
-
-      const existingPr = {
-        number: 216,
-        title: 'Old remote PR',
-        url: 'https://github.com/pingdotgg/codething-mvp/pull/216',
-        baseRefName: 'main',
-        headRefName: 'feature/pr-repointed',
-      }
-      const { manager } = yield* makeManager({
-        ghScenario: {
-          // @effect-diagnostics-next-line preferSchemaOverJson:off
-          prListSequence: [JSON.stringify([existingPr])],
-          failWith: new GitHubCli.GitHubCliUnavailableError({
-            command: 'gh',
-            cwd: repoDir,
-            cause: new Error('rate limited'),
-          }),
-          failAfterCalls: 1,
+      const { repoDir, manager } = yield* seedStickyPrStatus({
+        branch: 'feature/pr-repointed',
+        pr: {
+          number: 216,
+          title: 'Old remote PR',
+          url: 'https://github.com/pingdotgg/codething-mvp/pull/216',
+          baseRefName: 'main',
+          headRefName: 'feature/pr-repointed',
         },
       })
 
@@ -1482,30 +1479,14 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
   it.effect("status keeps the last known PR when the current remote URL can't be resolved", () =>
     Effect.gen(function* ()
     {
-      const repoDir = yield* makeTempDir('t3code-git-manager-')
-      yield* initRepo(repoDir)
-      yield* runGit(repoDir, ['checkout', '-b', 'feature/pr-config-hiccup'])
-      const remoteDir = yield* createBareRemote()
-      yield* runGit(repoDir, ['remote', 'add', 'origin', remoteDir])
-      yield* runGit(repoDir, ['push', '-u', 'origin', 'feature/pr-config-hiccup'])
-
-      const existingPr = {
-        number: 217,
-        title: 'Config hiccup PR',
-        url: 'https://github.com/pingdotgg/codething-mvp/pull/217',
-        baseRefName: 'main',
-        headRefName: 'feature/pr-config-hiccup',
-      }
-      const { manager } = yield* makeManager({
-        ghScenario: {
-          // @effect-diagnostics-next-line preferSchemaOverJson:off
-          prListSequence: [JSON.stringify([existingPr])],
-          failWith: new GitHubCli.GitHubCliUnavailableError({
-            command: 'gh',
-            cwd: repoDir,
-            cause: new Error('rate limited'),
-          }),
-          failAfterCalls: 1,
+      const { repoDir, manager } = yield* seedStickyPrStatus({
+        branch: 'feature/pr-config-hiccup',
+        pr: {
+          number: 217,
+          title: 'Config hiccup PR',
+          url: 'https://github.com/pingdotgg/codething-mvp/pull/217',
+          baseRefName: 'main',
+          headRefName: 'feature/pr-config-hiccup',
         },
       })
 
@@ -3485,21 +3466,7 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
     () =>
       Effect.gen(function* ()
       {
-        const collisionRepoDir = yield* makeTempDir('t3code-git-manager-')
-        yield* initRepo(collisionRepoDir)
-        const collisionOriginDir = yield* createBareRemote()
-        const collisionForkDir = yield* createBareRemote()
-        yield* runGit(collisionRepoDir, ['remote', 'add', 'origin', collisionOriginDir])
-        yield* runGit(collisionRepoDir, ['push', '-u', 'origin', 'main'])
-        yield* runGit(collisionRepoDir, ['remote', 'add', 'fork-seed', collisionForkDir])
-        yield* runGit(collisionRepoDir, ['checkout', '-b', 'fork-main-source'])
-        NodeFS.writeFileSync(NodePath.join(collisionRepoDir, 'fork-main.txt'), 'fork main\n')
-        yield* runGit(collisionRepoDir, ['add', 'fork-main.txt'])
-        yield* runGit(collisionRepoDir, ['commit', '-m', 'Fork main branch'])
-        yield* runGit(collisionRepoDir, ['push', '-u', 'fork-seed', 'fork-main-source:main'])
-        yield* runGit(collisionRepoDir, ['checkout', 'main'])
-        const mainBefore = (yield* runGit(collisionRepoDir, ['rev-parse', 'main'])).stdout.trim()
-
+        const collision = yield* seedForkMainCollisionRepo('fork-main.txt', 'fork main\n')
         const { manager: collisionManager } = yield* makeManager({
           ghScenario: {
             pullRequest: {
@@ -3515,26 +3482,26 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
             },
             repositoryCloneUrls: {
               'octocat/codething-mvp': {
-                url: collisionForkDir,
-                sshUrl: collisionForkDir,
+                url: collision.forkDir,
+                sshUrl: collision.forkDir,
               },
             },
           },
         })
 
         const collisionResult = yield* preparePullRequestThread(collisionManager, {
-          cwd: collisionRepoDir,
+          cwd: collision.repoDir,
           reference: '91',
           mode: 'worktree',
         })
 
         expect(collisionResult.branch).toBe('456code/pr-91/main')
         expect(collisionResult.worktreePath).not.toBeNull()
-        expect((yield* runGit(collisionRepoDir, ['branch', '--show-current'])).stdout.trim()).toBe(
+        expect((yield* runGit(collision.repoDir, ['branch', '--show-current'])).stdout.trim()).toBe(
           'main',
         )
-        expect((yield* runGit(collisionRepoDir, ['rev-parse', 'main'])).stdout.trim()).toBe(
-          mainBefore,
+        expect((yield* runGit(collision.repoDir, ['rev-parse', 'main'])).stdout.trim()).toBe(
+          collision.mainBefore,
         )
         expect(
           (yield* runGit(collisionResult.worktreePath as string, [
@@ -3543,28 +3510,11 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
           ])).stdout.trim(),
         ).toBe('456code/pr-91/main')
 
-        const overwriteRepoDir = yield* makeTempDir('t3code-git-manager-')
-        yield* initRepo(overwriteRepoDir)
-        const overwriteOriginDir = yield* createBareRemote()
-        const overwriteForkDir = yield* createBareRemote()
-        yield* runGit(overwriteRepoDir, ['remote', 'add', 'origin', overwriteOriginDir])
-        yield* runGit(overwriteRepoDir, ['push', '-u', 'origin', 'main'])
-        yield* runGit(overwriteRepoDir, ['remote', 'add', 'fork-seed', overwriteForkDir])
-        yield* runGit(overwriteRepoDir, ['checkout', '-b', 'fork-main-source'])
-        NodeFS.writeFileSync(
-          NodePath.join(overwriteRepoDir, 'fork-main-second.txt'),
+        const overwrite = yield* seedForkMainCollisionRepo(
+          'fork-main-second.txt',
           'fork main second\n',
         )
-        yield* runGit(overwriteRepoDir, ['add', 'fork-main-second.txt'])
-        yield* runGit(overwriteRepoDir, ['commit', '-m', 'Fork main second branch'])
-        yield* runGit(overwriteRepoDir, ['push', '-u', 'fork-seed', 'fork-main-source:main'])
-        yield* runGit(overwriteRepoDir, ['checkout', 'main'])
-        const localMainBefore = (yield* runGit(overwriteRepoDir, [
-          'rev-parse',
-          'main',
-        ])).stdout.trim()
-        yield* runGit(overwriteRepoDir, ['checkout', '-b', 'feature/root-branch'])
-
+        yield* runGit(overwrite.repoDir, ['checkout', '-b', 'feature/root-branch'])
         const { manager: overwriteManager } = yield* makeManager({
           ghScenario: {
             pullRequest: {
@@ -3580,22 +3530,22 @@ it.layer(GitManagerTestLayer)('GitManager', (it) =>
             },
             repositoryCloneUrls: {
               'octocat/codething-mvp': {
-                url: overwriteForkDir,
-                sshUrl: overwriteForkDir,
+                url: overwrite.forkDir,
+                sshUrl: overwrite.forkDir,
               },
             },
           },
         })
 
         const overwriteResult = yield* preparePullRequestThread(overwriteManager, {
-          cwd: overwriteRepoDir,
+          cwd: overwrite.repoDir,
           reference: '92',
           mode: 'worktree',
         })
 
         expect(overwriteResult.branch).toBe('456code/pr-92/main')
-        expect((yield* runGit(overwriteRepoDir, ['rev-parse', 'main'])).stdout.trim()).toBe(
-          localMainBefore,
+        expect((yield* runGit(overwrite.repoDir, ['rev-parse', 'main'])).stdout.trim()).toBe(
+          overwrite.mainBefore,
         )
         expect(
           (yield* runGit(overwriteResult.worktreePath as string, [

@@ -187,7 +187,7 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
   Layer.provide(ProviderSessionRuntime.layer),
 )
 
-// `ProviderAdapterRegistryLive` is now a facade that resolves kind → adapter
+// `ProviderAdapterRegistryLive` is now a facade that resolves kind -> adapter
 // by looking up the default `ProviderInstance` per driver in the instance
 // registry. Adapter construction itself moved inside each driver's
 // `create()`; `ProviderEventLoggersLive` owns the shared native/canonical
@@ -307,11 +307,12 @@ const AuthLayerLive = EnvironmentAuth.layer.pipe(
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
+  // includes durable reactor delivery and runner registration
   Layer.provideMerge(OrchestrationLayerLive),
 )
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
-  // Core Services
+  // core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
@@ -321,16 +322,16 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(Keybindings.layer),
   Layer.provideMerge(ProviderRegistryLive),
-  // The instance registry is the new routing keystone — text generation,
+  // the instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
-  // Shared native/canonical NDJSON writers used by both the per-instance
+  // shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).
-  // Provided once at the runtime level so every consumer sees the same
+  // provided once at the runtime level so every consumer sees the same
   // logger instances.
   Layer.provideMerge(ProviderEventLoggers.ProviderEventLoggersLive),
   // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
@@ -374,7 +375,7 @@ const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 )
 
-// The contract's `EnvironmentHttpApi` still carries the T3 Connect group for
+// the contract's `EnvironmentHttpApi` still carries the T3 Connect group for
 // clients that predate its removal. This server serves only the local groups,
 // so `/api/connect/*` is simply not routed.
 class LocalEnvironmentHttpApi extends HttpApi.make('environment')
@@ -516,5 +517,5 @@ export const makeServerLayer = Layer.unwrap(
   }),
 )
 
-// Important: Only `ServerConfig` should be provided by the CLI layer!!! Don't let other requirements leak into the launch layer.
+// important: Only `ServerConfig` should be provided by the CLI layer!!! Don't let other requirements leak into the launch layer.
 export const runServer = Layer.launch(makeServerLayer)

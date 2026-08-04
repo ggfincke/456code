@@ -1,5 +1,6 @@
 // tests/apps/server/proposal/ProposalService.test.ts
 // verifies exact immutable proposals without mutating the user worktree or index
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeChildProcess from 'node:child_process'
@@ -30,12 +31,16 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { describe, expect } from 'vite-plus/test'
 
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
+import { PersistenceSqlError } from '../../../../apps/server/src/persistence/Errors.ts'
 import * as ProposalGitEngine from '../../../../apps/server/src/proposal/ProposalGitEngine.ts'
 import * as ProposalRepository from '../../../../apps/server/src/proposal/ProposalRepository.ts'
+import * as ProposalRetainedRefAttemptStore from '../../../../apps/server/src/proposal/ProposalRetainedRefAttemptStore.ts'
 import * as ProposalService from '../../../../apps/server/src/proposal/ProposalService.ts'
 
 const execFile = NodeUtil.promisify(NodeChildProcess.execFile)
-const TestLayer = ProposalService.layer.pipe(Layer.provideMerge(SqlitePersistenceMemory))
+const TestLayer = Layer.mergeAll(ProposalService.layer, ProposalRetainedRefAttemptStore.layer).pipe(
+  Layer.provideMerge(SqlitePersistenceMemory),
+)
 
 async function git(cwd: string, args: ReadonlyArray<string>): Promise<string>
 {
@@ -200,6 +205,130 @@ it.layer(TestLayer)('ProposalService', (it) =>
 
   describe('interruption cleanup', () =>
   {
+    it.effect('refuses to delete retained refs that do not form one canonical pair', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* Effect.acquireRelease(
+          Effect.promise(() => initializeRepository('456code-proposal-delete-defense-')),
+          (directory) =>
+            Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })).pipe(
+              Effect.ignore,
+            ),
+        )
+        const gitEngine = yield* ProposalGitEngine.make
+        const baseRetainedRef = `refs/t3/proposals/${'a'.repeat(64)}/base`
+        const proposedRetainedRef = `refs/t3/proposals/${'b'.repeat(64)}/proposed`
+        yield* Effect.promise(() => git(cwd, ['update-ref', baseRetainedRef, 'HEAD']))
+        yield* Effect.promise(() => git(cwd, ['update-ref', proposedRetainedRef, 'HEAD']))
+
+        yield* gitEngine.deleteRetainedRefs({ cwd, baseRetainedRef, proposedRetainedRef })
+
+        expect(
+          yield* Effect.promise(() => git(cwd, ['show-ref', '--verify', baseRetainedRef])),
+        ).not.toBe('')
+        expect(
+          yield* Effect.promise(() => git(cwd, ['show-ref', '--verify', proposedRetainedRef])),
+        ).not.toBe('')
+      }),
+    )
+
+    it.effect('registers ownership before creating retained refs', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* Effect.acquireRelease(
+          Effect.promise(() => initializeRepository('456code-proposal-register-order-')),
+          (directory) =>
+            Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })).pipe(
+              Effect.ignore,
+            ),
+        )
+        const rejectingStore = ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore.of({
+          register: () =>
+            Effect.fail(
+              new PersistenceSqlError({
+                operation: 'ProposalService.test.register-refusal',
+              }),
+            ),
+          finalize: () => Effect.void,
+          remove: () => Effect.void,
+          list: Effect.succeed([]),
+        })
+        const gitEngine = yield* ProposalGitEngine.make.pipe(
+          Effect.provideService(
+            ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore,
+            rejectingStore,
+          ),
+        )
+
+        const rejected = yield* gitEngine
+          .prepare({
+            cwd,
+            proposalId: ProposalId.make('proposal-register-order'),
+            revisionId: ProposalRevisionId.make('revision-register-order'),
+            changes: {
+              _tag: 'typed',
+              operations: [
+                {
+                  _tag: 'add',
+                  path: 'ordered.txt',
+                  content: { encoding: 'utf8', data: 'ordered\n' },
+                },
+              ],
+            },
+          })
+          .pipe(Effect.flip)
+
+        expect(rejected.code).toBe('persistence-failed')
+        expect(yield* Effect.promise(() => git(cwd, ['for-each-ref', 'refs/t3/proposals']))).toBe(
+          '',
+        )
+      }),
+    )
+
+    it.effect('removes the attempt when ref creation fails ordinarily', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* Effect.acquireRelease(
+          Effect.promise(() => initializeRepository('456code-proposal-ref-failure-')),
+          (directory) =>
+            Effect.promise(() => NodeFSP.rm(directory, { recursive: true, force: true })).pipe(
+              Effect.ignore,
+            ),
+        )
+        const proposalId = ProposalId.make('proposal-ref-failure')
+        const revisionId = ProposalRevisionId.make('revision-ref-failure')
+        const token = sha256(`${proposalId}\0${revisionId}`)
+        const blockingPath = NodePath.join(cwd, '.git', 'refs', 't3', 'proposals', token)
+        yield* Effect.promise(async () =>
+        {
+          await NodeFSP.mkdir(NodePath.dirname(blockingPath), { recursive: true })
+          await NodeFSP.writeFile(blockingPath, 'blocks ref directory\n')
+        })
+        const gitEngine = yield* ProposalGitEngine.make
+        const store = yield* ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore
+
+        yield* gitEngine
+          .prepare({
+            cwd,
+            proposalId,
+            revisionId,
+            changes: {
+              _tag: 'typed',
+              operations: [
+                {
+                  _tag: 'add',
+                  path: 'fails.txt',
+                  content: { encoding: 'utf8', data: 'fails\n' },
+                },
+              ],
+            },
+          })
+          .pipe(Effect.flip)
+
+        expect(yield* store.list).toEqual([])
+      }),
+    )
+
     it.effect('deletes retained refs when persistence is interrupted', () =>
       Effect.gen(function* ()
       {
@@ -255,9 +384,20 @@ it.layer(TestLayer)('ProposalService', (it) =>
           yield* Effect.promise(() => NodeTimersPromises.setTimeout(10))
         }
         expect(retainedRefs).toHaveLength(2)
+        const attemptStore = yield* ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore
+        const interruptedToken = NodePath.basename(NodePath.dirname(retainedRefs[0]!))
+        const interruptedAttempt = (yield* attemptStore.list).find(
+          (attempt) => attempt.refToken === interruptedToken,
+        )
+        expect(interruptedAttempt).toBeDefined()
 
         yield* Fiber.interrupt(upsertFiber)
 
+        expect(
+          (yield* attemptStore.list).some(
+            (attempt) => attempt.refToken === interruptedAttempt?.refToken,
+          ),
+        ).toBe(false)
         expect(yield* Effect.promise(() => proposalRefFiles(cwd))).toEqual([])
       }),
     )
@@ -333,6 +473,14 @@ it.layer(TestLayer)('ProposalService', (it) =>
         expect(proposalRows[0]?.count).toBe(0)
         expect(revisionRows[0]?.count).toBe(0)
         expect(yield* Effect.promise(() => proposalRefFiles(cwd))).toEqual([])
+        const preparedToken = ProposalGitEngine.proposalRetainedRefPairToken(
+          prepared.baseRetainedRef,
+          prepared.proposedRetainedRef,
+        )
+        expect(
+          (yield* (yield* ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore)
+            .list).some((attempt) => attempt.refToken === preparedToken),
+        ).toBe(false)
       }),
     )
   })
@@ -439,6 +587,12 @@ it.layer(TestLayer)('ProposalService', (it) =>
         )
 
         expect(first.revision).toBe(1)
+        const retainedRefAttempts =
+          yield* (yield* ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore).list
+        const firstToken = first.baseSnapshot.retainedRef.split('/')[3]
+        expect(
+          retainedRefAttempts.find((attempt) => attempt.refToken === firstToken)?.durableAt,
+        ).not.toBeNull()
         expect(first.narrativeSha256).toBe(sha256(narrativeMdx))
         expect(first.narrativeByteLength).toBe(Buffer.byteLength(narrativeMdx, 'utf8'))
         expect(yield* service.narrative({ proposalId, revision: 1 })).toEqual({

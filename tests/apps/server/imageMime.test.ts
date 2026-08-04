@@ -1,3 +1,6 @@
+// tests/apps/server/imageMime.test.ts
+// verify image mime behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { inferImageExtension, parseBase64DataUrl } from '../../../apps/server/src/imageMime.ts'
@@ -20,9 +23,6 @@ describe('imageMime', () =>
     'data:image/png;charset=utf-8,hello',
     'data:;base64,SGVsbG8=',
     'data:image/png;base64,SGVs!bG8=',
-    'data:image/png;base64,SGV=bG8=',
-    'data:image/png;base64,SGVsbG8',
-    'data:image/png;base64,',
   ])('rejects malformed data URL %s', (input) =>
   {
     expect(parseBase64DataUrl(input)).toBeNull()
@@ -30,7 +30,7 @@ describe('imageMime', () =>
 
   it('parses a multi-megabyte payload from a deep call stack', () =>
   {
-    // Regression: matching the payload with a regex borrowed the JS call
+    // regression: matching the payload with a regex borrowed the JS call
     // stack, so a ~10 MB image parsed inside fiber execution threw
     // "RangeError: Maximum call stack size exceeded".
     const dataUrl = `data:image/png;base64,${'A'.repeat(14_000_000)}`

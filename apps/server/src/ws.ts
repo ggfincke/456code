@@ -251,75 +251,44 @@ const makeWsRpcLayer = (
       const processResourceMonitor = yield* ProcessResourceMonitor.ProcessResourceMonitor
       const workerBrokerStore = yield* WorkerBrokerStore.WorkerBrokerStore
       const workersStatusBroadcaster = yield* WorkersStatusBroadcaster.WorkersStatusBroadcaster
-      const authorizationError = (requiredScope: AuthEnvironmentScope) =>
-        new EnvironmentAuthorizationError({
-          message: `The authenticated token is missing required scope: ${requiredScope}.`,
-          requiredScope,
-        })
-      const authorizeEffect = <A, E, R>(
-        requiredScope: AuthEnvironmentScope,
-        effect: Effect.Effect<A, E, R>,
-      ): Effect.Effect<A, E | EnvironmentAuthorizationError, R> =>
-        currentSession.scopes.includes(requiredScope)
-          ? effect
-          : Effect.fail(authorizationError(requiredScope))
-      const authorizeStream = <A, E, R>(
-        requiredScope: AuthEnvironmentScope,
-        stream: Stream.Stream<A, E, R>,
-      ): Stream.Stream<A, E | EnvironmentAuthorizationError, R> =>
-        currentSession.scopes.includes(requiredScope)
-          ? stream
-          : Stream.fail(authorizationError(requiredScope))
-      const requiredScopeForMethod = (method: string): AuthEnvironmentScope =>
-      {
-        const requiredScope = RPC_REQUIRED_SCOPE.get(method)
-        if (requiredScope === undefined)
-        {
-          throw new Error(`RPC method ${method} has no declared authorization scope.`)
-        }
-        return requiredScope
-      }
-      const observeRpcEffect = <A, E, R>(
-        method: string,
-        effect: Effect.Effect<A, E, R>,
-        traceAttributes?: Readonly<Record<string, unknown>>,
-      ) =>
-        instrumentRpcEffect(
-          method,
-          authorizeEffect(requiredScopeForMethod(method), effect),
-          traceAttributes,
-        )
-      const observeRpcStream = <A, E, R>(
-        method: string,
-        stream: Stream.Stream<A, E, R>,
-        traceAttributes?: Readonly<Record<string, unknown>>,
-      ) =>
-        instrumentRpcStream(
-          method,
-          authorizeStream(requiredScopeForMethod(method), stream),
-          traceAttributes,
-        )
-      const observeRpcStreamEffect = <A, StreamError, StreamContext, EffectError, EffectContext>(
-        method: string,
-        effect: Effect.Effect<
-          Stream.Stream<A, StreamError, StreamContext>,
-          EffectError,
-          EffectContext
-        >,
-        traceAttributes?: Readonly<Record<string, unknown>>,
-      ) =>
-        instrumentRpcStreamEffect(
-          method,
-          authorizeEffect(requiredScopeForMethod(method), effect),
-          traceAttributes,
-        )
+      const { observeRpcEffect, observeRpcStream, observeRpcStreamEffect } =
+        makeRpcAuthorization(currentSession)
+      const workspaceRpcHandlers = makeWorkspaceRpcHandlers({
+        workspaceEntries,
+        workspaceFileSystem,
+        externalLauncher,
+        projectionSnapshotQuery,
+        readWorkspaceMdxDocument: WorkspaceMdxDocument.readWorkspaceMdxDocument,
+        issueAssetUrl,
+        observeRpcEffect,
+      })
+      const proposalRpcHandlers = makeProposalRpcHandlers({
+        proposalService,
+        proposalGenerationService,
+        proposalImplementationAttemptService,
+        projectionSnapshotQuery,
+        serverEnvironment,
+        compileSafeDocumentSource: WorkspaceMdxDocument.compileSafeDocumentSource,
+        observeRpcEffect,
+      })
+      const previewRpcHandlers = makePreviewRpcHandlers({
+        previewManager,
+        previewAutomationBroker,
+        portDiscovery,
+        observeRpcEffect,
+        observeRpcStream,
+        observeRpcStreamEffect,
+      })
       const toDispatchCommandError = (cause: unknown, fallbackMessage: string) =>
-        isOrchestrationDispatchCommandError(cause)
-          ? cause
-          : new OrchestrationDispatchCommandError({
-              message: cause instanceof Error ? cause.message : fallbackMessage,
-              cause,
-            })
+      {
+        if (isOrchestrationDispatchCommandError(cause)) return cause
+        const code = readOrchestrationCommandErrorCode(cause)
+        return new OrchestrationDispatchCommandError({
+          message: cause instanceof Error ? cause.message : fallbackMessage,
+          ...(code === undefined ? {} : { code }),
+          cause,
+        })
+      }
       const randomUUID = crypto.randomUUIDv4.pipe(
         Effect.mapError((cause) =>
           toDispatchCommandError(cause, 'Failed to generate orchestration command identifier.'),
@@ -376,234 +345,15 @@ const makeWsRpcLayer = (
       const toBootstrapDispatchCommandCauseError = (cause: Cause.Cause<unknown>) =>
       {
         const error = Cause.squash(cause)
-        return isOrchestrationDispatchCommandError(error)
-          ? error
-          : new OrchestrationDispatchCommandError({
-              message:
-                error instanceof Error ? error.message : 'Failed to bootstrap thread turn start.',
-              cause,
-            })
-      }
-
-      const toShellStreamEvent = (
-        event: OrchestrationEvent,
-      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-      {
-        switch (event.type)
-        {
-          case 'project.created':
-          case 'project.meta-updated':
-            return projectUpsertOrRemove(event.payload.projectId, event.sequence)
-          case 'project.deleted':
-            return Effect.succeed(
-              Option.some({
-                kind: 'project-removed' as const,
-                sequence: event.sequence,
-                projectId: event.payload.projectId,
-              }),
-            )
-          case 'thread.deleted':
-          case 'thread.archived':
-            return Effect.succeed(
-              Option.some({
-                kind: 'thread-removed' as const,
-                sequence: event.sequence,
-                threadId: event.payload.threadId,
-              }),
-            )
-          case 'thread.unarchived':
-            return threadUpsertOrRemove(event.payload.threadId, event.sequence)
-          default:
-            if (event.aggregateKind !== 'thread')
-            {
-              return Effect.succeed(Option.none())
-            }
-            return threadUpsertOrRemove(ThreadId.make(event.aggregateId), event.sequence)
-        }
-      }
-
-      // Coalescing makes each projection read represent every event for that
-      // aggregate in the current window. Retry a typed persistence failure once
-      // so a brief read failure cannot strand the shell at its previous state.
-      // If both attempts fail, log and drop the stream item; treating an error as
-      // a missing row would incorrectly remove a still-active aggregate.
-      const retryShellProjectionRead = <A, E>(
-        aggregateKind: 'project' | 'thread',
-        aggregateId: string,
-        read: Effect.Effect<A, E>,
-      ): Effect.Effect<Option.Option<A>, never, never> =>
-        read.pipe(
-          Effect.retry({ times: 1 }),
-          Effect.map(Option.some),
-          Effect.tapError((error) =>
-            Effect.logWarning('orchestration shell projection refetch failed', {
-              aggregateKind,
-              aggregateId,
-              error,
-            }),
-          ),
-          Effect.orElseSucceed(() => Option.none()),
-        )
-
-      const projectUpsertOrRemove = (
-        projectId: ProjectId,
-        sequence: number,
-      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-        retryShellProjectionRead(
-          'project',
-          projectId,
-          projectionSnapshotQuery.getProjectShellById(projectId),
-        ).pipe(
-          Effect.map(
-            Option.flatMap((project) =>
-              Option.match(project, {
-                onNone: () =>
-                  Option.some<OrchestrationShellStreamEvent>({
-                    kind: 'project-removed' as const,
-                    sequence,
-                    projectId,
-                  }),
-                onSome: (nextProject) =>
-                  Option.some<OrchestrationShellStreamEvent>({
-                    kind: 'project-upserted' as const,
-                    sequence,
-                    project: nextProject,
-                  }),
-              }),
-            ),
-          ),
-        )
-
-      // Refetch a thread's shell and emit an upsert if it is still active, or a
-      // `thread-removed` if the projection has no active row for it. Emitting a
-      // removal on a `none` (rather than dropping the event) is what keeps
-      // coalescing correct: when a burst collapses a `thread.deleted`/`archived`
-      // into a later refetchable event for the same thread, the refetch returns
-      // `none` for the now-inactive row and this still tells the sidebar to drop
-      // it. A `thread-removed` the client does not have is a harmless no-op. The
-      // projection commits in the same transaction before the event publishes,
-      // so a `none` reliably means the thread is deleted or archived, not
-      // not-yet-persisted.
-      const threadUpsertOrRemove = (
-        threadId: ThreadId,
-        sequence: number,
-      ): Effect.Effect<Option.Option<OrchestrationShellStreamEvent>, never, never> =>
-        retryShellProjectionRead(
-          'thread',
-          threadId,
-          projectionSnapshotQuery.getThreadShellById(threadId),
-        ).pipe(
-          Effect.map(
-            Option.flatMap((thread) =>
-              Option.match(thread, {
-                onNone: () =>
-                  Option.some<OrchestrationShellStreamEvent>({
-                    kind: 'thread-removed' as const,
-                    sequence,
-                    threadId,
-                  }),
-                onSome: (nextThread) =>
-                  Option.some<OrchestrationShellStreamEvent>({
-                    kind: 'thread-upserted' as const,
-                    sequence,
-                    thread: nextThread,
-                  }),
-              }),
-            ),
-          ),
-        )
-
-      // Turn a batch of domain events into shell stream items, coalescing by
-      // aggregate first. `toShellStreamEvent` re-reads the *current* projected
-      // shell for an aggregate, so within a batch only the latest event per
-      // aggregate matters: a burst of streaming `thread.message-sent` deltas for
-      // one thread collapses into a single shell refetch, and an unrelated
-      // `thread.created` in the same batch is never stuck behind those DB reads.
-      //
-      // Input events arrive in ascending sequence; we keep the last (highest
-      // sequence) event per aggregate, then re-sort ascending before emitting so
-      // the client — which applies shell items strictly by increasing sequence
-      // and drops any `sequence <= snapshotSequence` — never skips a coalesced
-      // item. The refetch runs with bounded concurrency (order-preserving).
-      const SHELL_REFETCH_CONCURRENCY = 8
-      const coalesceShellEvents = (
-        events: ReadonlyArray<OrchestrationEvent>,
-      ): Effect.Effect<ReadonlyArray<OrchestrationShellStreamEvent>, never, never> =>
-        Effect.gen(function* ()
-        {
-          if (events.length === 0)
-          {
-            return []
-          }
-          const latestByAggregate = new Map<string, OrchestrationEvent>()
-          for (const event of events)
-          {
-            latestByAggregate.set(`${event.aggregateKind}:${event.aggregateId}`, event)
-          }
-          const survivors = Array.from(latestByAggregate.values()).sort(
-            (left, right) => left.sequence - right.sequence,
-          )
-          const shellEvents = yield* Effect.forEach(survivors, toShellStreamEvent, {
-            concurrency: SHELL_REFETCH_CONCURRENCY,
-          })
-          return shellEvents.flatMap((option) => (Option.isSome(option) ? [option.value] : []))
+        if (isOrchestrationDispatchCommandError(error)) return error
+        const code = readOrchestrationCommandErrorCode(error)
+        return new OrchestrationDispatchCommandError({
+          message:
+            error instanceof Error ? error.message : 'Failed to bootstrap thread turn start.',
+          ...(code === undefined ? {} : { code }),
+          cause,
         })
-
-      // Small time/size window over which to coalesce shell events. The window
-      // bounds the worst-case added latency for a brand-new thread to appear in
-      // the sidebar (imperceptible), while collapsing high-frequency streaming
-      // traffic so it can't serialize the shell stream behind per-event DB reads.
-      const SHELL_COALESCE_WINDOW = Duration.millis(50)
-      const SHELL_COALESCE_MAX_CHUNK = 512
-      const coalesceShellStream = <E, R>(
-        stream: Stream.Stream<OrchestrationEvent, E, R>,
-      ): Stream.Stream<OrchestrationShellStreamEvent, E, R> =>
-        stream.pipe(
-          Stream.groupedWithin(SHELL_COALESCE_MAX_CHUNK, SHELL_COALESCE_WINDOW),
-          Stream.mapEffect(coalesceShellEvents),
-          Stream.flatMap((items) => Stream.fromIterable(items)),
-        )
-
-      type ShellLiveInput =
-        | { readonly kind: 'event'; readonly event: OrchestrationEvent }
-        | { readonly kind: 'synchronized' }
-
-      // A completion marker is queued alongside raw live events so it cannot
-      // overtake an event still waiting in the coalescing window. Split each
-      // batch at markers and coalesce only the event segments on either side.
-      const coalesceShellLiveInputs = (
-        inputs: ReadonlyArray<ShellLiveInput>,
-      ): Effect.Effect<ReadonlyArray<OrchestrationShellStreamItem>, never, never> =>
-        Effect.gen(function* ()
-        {
-          const output: Array<OrchestrationShellStreamItem> = []
-          let pendingEvents: Array<OrchestrationEvent> = []
-
-          for (const input of inputs)
-          {
-            if (input.kind === 'event')
-            {
-              pendingEvents.push(input.event)
-              continue
-            }
-
-            output.push(...(yield* coalesceShellEvents(pendingEvents)))
-            pendingEvents = []
-            output.push({ kind: 'synchronized' })
-          }
-
-          output.push(...(yield* coalesceShellEvents(pendingEvents)))
-          return output
-        })
-
-      const coalesceShellLiveStream = <E, R>(
-        stream: Stream.Stream<ShellLiveInput, E, R>,
-      ): Stream.Stream<OrchestrationShellStreamItem, E, R> =>
-        stream.pipe(
-          Stream.groupedWithin(SHELL_COALESCE_MAX_CHUNK, SHELL_COALESCE_WINDOW),
-          Stream.mapEffect(coalesceShellLiveInputs),
-          Stream.flatMap((items) => Stream.fromIterable(items)),
-        )
+      }
 
       const dispatchBootstrapTurnStart = (
         command: Extract<OrchestrationCommand, { type: 'thread.turn.start' }>,
