@@ -1,5 +1,6 @@
 // tests/apps/server/import/importService.test.ts
 // verifies import command ordering, skips, continuation, and stable identifiers
+
 // @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectFailure:off
 
 import * as NodeFSP from 'node:fs/promises'
@@ -20,6 +21,7 @@ import * as Deferred from 'effect/Deferred'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
+import * as Option from 'effect/Option'
 import { TestClock } from 'effect/testing'
 
 import {
@@ -43,8 +45,73 @@ import type {
 import type { ImportFileSourceDescriptor } from '../../../../apps/server/src/import/sourceCatalog.ts'
 import type { ImportSource } from '../../../../apps/server/src/import/types.ts'
 import { fileContinuationIdentity } from '../../../../apps/server/src/provider/continuationIdentity.ts'
+import type {
+  ImportReplacementIntent,
+  ImportReplacementIntentRepositoryShape,
+} from '../../../../apps/server/src/persistence/Services/ImportReplacementIntents.ts'
 
 const temporaryPaths: string[] = []
+
+function makeReplacementIntentMemory(): ImportReplacementIntentRepositoryShape
+{
+  const rows = new Map<string, ImportReplacementIntent>()
+  return {
+    getByIntentKey: (intentKey) => Effect.succeed(Option.fromNullishOr(rows.get(intentKey))),
+    findOpenBySourceIdentity: (identity) =>
+      Effect.succeed(
+        Option.fromNullishOr(
+          [...rows.values()].find(
+            (row) =>
+              row.phase !== 'retired' &&
+              row.source === identity.source &&
+              row.sourcePath === identity.sourcePath &&
+              row.nativeSessionId === identity.nativeSessionId &&
+              row.providerInstanceId === identity.providerInstanceId,
+          ),
+        ),
+      ),
+    insertIfAbsent: (intent) =>
+      Effect.sync(() =>
+      {
+        const existing = rows.get(intent.intentKey)
+        if (existing !== undefined) return existing
+        rows.set(intent.intentKey, intent)
+        return intent
+      }),
+    casTransition: (transition) =>
+      Effect.sync(() =>
+      {
+        const current = rows.get(transition.intentKey)
+        if (current === undefined || current.phase !== transition.expectedPhase) return false
+        rows.set(transition.intentKey, {
+          ...current,
+          phase: transition.nextPhase,
+          threadEvidence: transition.threadEvidence,
+          attachmentEvidence: transition.attachmentEvidence,
+          indexEvidence: transition.indexEvidence,
+          attemptCount: transition.attemptCount,
+          lastError: transition.lastError,
+          retryAfter: transition.retryAfter,
+          updatedAt: transition.updatedAt,
+        })
+        return true
+      }),
+    listOpen: () => Effect.succeed([...rows.values()].filter((row) => row.phase !== 'retired')),
+    retire: (input) =>
+      Effect.sync(() =>
+      {
+        const current = rows.get(input.intentKey)
+        if (current === undefined || current.phase !== input.expectedPhase) return false
+        rows.set(input.intentKey, {
+          ...current,
+          phase: 'retired',
+          updatedAt: input.retiredAt,
+          retiredAt: input.retiredAt,
+        })
+        return true
+      }),
+  }
+}
 
 function continuationIdentityFor(request: ContinuationRequest)
 {
@@ -189,8 +256,14 @@ function runImport(input: {
       continuationIdentity: fileContinuationIdentity(driverKind, scanRoot),
     }),
   )
-  let activeProjectId = input.existingProjectId ?? null
+  let activeProjectId =
+    input.existingProjectId ??
+    (input.existingThreadId === undefined ? null : ProjectId.make('existing-project'))
   const activeThreadIds = new Set<ThreadId>()
+  const createdThreads = new Map<ThreadId, ImportedThreadMatch>()
+  const replacementIntents = makeReplacementIntentMemory()
+  let existingThreadDeleted = false
+  const visibleThreadCounts = [input.existingThreadId === undefined ? 0 : 1]
   const tombstonedProjectIds = new Set<ProjectId>()
   let injectedProjectDelete = false
   return make.pipe(
@@ -230,12 +303,33 @@ function runImport(input: {
             )
             {
               activeThreadIds.add(command.threadId)
+              createdThreads.set(command.threadId, {
+                threadId: command.threadId,
+                projectId: command.projectId,
+                contentHash: command.origin?.contentHash ?? '',
+                source: command.origin?.source ?? source,
+                sourcePath: command.origin?.sourcePath ?? input.sourcePath,
+                nativeSessionId: command.origin?.nativeSessionId ?? null,
+                providerInstanceId: command.origin?.providerInstanceId ?? null,
+                modelSelection: command.modelSelection,
+                archived: false,
+              })
             }
+            if (command.type === 'thread.delete')
+            {
+              activeThreadIds.delete(command.threadId)
+              createdThreads.delete(command.threadId)
+              if (command.threadId === input.existingThreadId) existingThreadDeleted = true
+            }
+            visibleThreadCounts.push(
+              activeThreadIds.size +
+                (input.existingThreadId !== undefined && !existingThreadDeleted ? 1 : 0),
+            )
             return Effect.succeed({ sequence: commands.length })
           }),
         findThreadByContentHash: (lookup) =>
           Effect.succeed(
-            input.existingThreadId === undefined
+            input.existingThreadId === undefined || existingThreadDeleted
               ? null
               : {
                   threadId: input.existingThreadId,
@@ -252,7 +346,26 @@ function runImport(input: {
                   archived: input.existingArchived ?? false,
                 },
           ),
-        findThreadById: () => Effect.succeed(null),
+        findThreadById: (threadId) =>
+          Effect.succeed(
+            createdThreads.get(threadId) ??
+              (threadId === input.existingThreadId && !existingThreadDeleted
+                ? {
+                    threadId,
+                    projectId: input.existingProjectId ?? ProjectId.make('existing-project'),
+                    contentHash: input.existingContentHash ?? '',
+                    source,
+                    sourcePath: input.sourcePath,
+                    nativeSessionId: 'native',
+                    providerInstanceId: input.providerInstanceId ?? defaultInstanceId,
+                    modelSelection: input.existingModelSelection ?? {
+                      instanceId: defaultInstanceId,
+                      model: 'gpt-imported',
+                    },
+                    archived: input.existingArchived ?? false,
+                  }
+                : null),
+          ),
         findProjectByWorkspaceRoot: () => Effect.succeed(activeProjectId),
         isImportFinalized: () => Effect.succeed(input.existingFinalized ?? true),
         normalizeWorkspaceRoot: (root) => Effect.succeed(root),
@@ -278,6 +391,24 @@ function runImport(input: {
           }),
         threadExistsInShell: (threadId) =>
           Effect.succeed(input.existingThreadId === threadId || activeThreadIds.has(threadId)),
+        replacementIntents,
+        verifyReplacementThread: (replacement) =>
+          Effect.succeed({
+            replacementThreadId: replacement.replacementThreadId,
+            projectId: replacement.replacementProjectId,
+            sourceVersion: replacement.sourceVersion,
+            messageCount: replacement.expectedMessageCount,
+            activityCount: replacement.expectedActivityCount,
+            snapshotSequence: 0,
+            verifiedAt: '2026-01-01T00:00:00.000Z',
+          }),
+        verifyReplacementAttachments: () => Effect.succeed({ complete: true }),
+        cleanupDeletedThreadAttachments: () => Effect.succeed({ complete: true }),
+        verifyReplacementIndex: ({ replacementThreadId, sourceThreadId }) =>
+          Effect.succeed({
+            replacementVisible: activeThreadIds.has(replacementThreadId),
+            sourceVisible: !existingThreadDeleted && sourceThreadId === input.existingThreadId,
+          }),
         fallbackModelSelection: {
           instanceId: ProviderInstanceId.make('fallback'),
           model: 'gpt-fallback',
@@ -345,6 +476,7 @@ function runImport(input: {
       followupResult,
       result,
       targetResolutions,
+      visibleThreadCounts,
     })),
   )
 }
@@ -1069,6 +1201,52 @@ describe('ImportService', () =>
       expect(run.commands.map((command) => command.type)).toEqual(['thread.messages.import'])
       expect(run.continuations).toEqual([])
       expect(run.result.skipped[0]?.threadId).toBe(existingThreadId)
+    }),
+  )
+
+  it.effect('keeps at least one visible thread through active replacement boundaries', () =>
+    Effect.gen(function* ()
+    {
+      const sourcePath = yield* Effect.promise(() => temporaryFile(rollout(2)))
+      const sourceThreadId = ThreadId.make('active-incomplete-thread')
+      const { commands, result, visibleThreadCounts } = yield* runImport({
+        sourcePath,
+        existingThreadId: sourceThreadId,
+        existingContentHash: 'older-content-version',
+        existingFinalized: false,
+      })
+
+      expect(result.failed).toEqual([])
+      const replacementCreateIndex = commands.findIndex(
+        (command) => command.type === 'thread.create' && command.threadId !== sourceThreadId,
+      )
+      const sourceDeleteIndex = commands.findIndex(
+        (command) => command.type === 'thread.delete' && command.threadId === sourceThreadId,
+      )
+      expect(replacementCreateIndex).toBeGreaterThanOrEqual(0)
+      expect(sourceDeleteIndex).toBeGreaterThan(replacementCreateIndex)
+      expect(Math.min(...visibleThreadCounts)).toBeGreaterThanOrEqual(1)
+
+      const retry = yield* runImport({
+        sourcePath,
+        existingThreadId: sourceThreadId,
+        existingContentHash: 'older-content-version',
+        existingFinalized: false,
+      })
+      const replacementCreate = commands[replacementCreateIndex]
+      const retryReplacementCreate = retry.commands.find(
+        (command) => command.type === 'thread.create' && command.threadId !== sourceThreadId,
+      )
+      const sourceDelete = commands[sourceDeleteIndex]
+      const retrySourceDelete = retry.commands.find(
+        (command) => command.type === 'thread.delete' && command.threadId === sourceThreadId,
+      )
+      expect(retryReplacementCreate).toMatchObject({
+        commandId: replacementCreate?.commandId,
+        threadId:
+          replacementCreate && 'threadId' in replacementCreate ? replacementCreate.threadId : null,
+      })
+      expect(retrySourceDelete).toMatchObject({ commandId: sourceDelete?.commandId })
     }),
   )
 

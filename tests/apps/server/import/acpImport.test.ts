@@ -1,5 +1,6 @@
 // tests/apps/server/import/acpImport.test.ts
 // verifies ACP catalog pagination, capability gates, and replay normalization
+
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off
 
 import * as NodeBuffer from 'node:buffer'
@@ -359,7 +360,7 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
     }).pipe(TestClock.withLive),
   )
 
-  it.effect('rejects over-bound catalog identity and cwd fields', () =>
+  it.effect('rejects invalid catalog identity and cwd fields', () =>
     Effect.gen(function* ()
     {
       const cases = [
@@ -367,56 +368,31 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
           sessionId: `${'é'.repeat(256)}a`,
           cwd: '/workspace',
           expectedDetail: 'session id longer than 512 bytes',
+          checkScanAndLoad: false,
+          checkUnsafeMessage: false,
         },
         {
           sessionId: 'acp-session-overlong-cwd',
           cwd: `/${'é'.repeat(2_048)}`,
           expectedDetail: 'cwd longer than 4096 bytes',
+          checkScanAndLoad: false,
+          checkUnsafeMessage: false,
         },
-      ]
-
-      for (const testCase of cases)
-      {
-        const binaryPath = yield* Effect.promise(() =>
-          makeProtocolAgentWrapper({
-            sessionId: testCase.sessionId,
-            cwd: testCase.cwd,
-            title: null,
-            model: 'test-model',
-          }),
-        )
-        const error = yield* Effect.flip(
-          scanAcpImportCatalog({
-            driverKind: 'cursor',
-            providerInstanceId: cursorProviderInstanceId,
-            cwd: process.cwd(),
-            binaryPath,
-          }),
-        )
-
-        assert.equal(error.code, 'invalid-source')
-        assert.include(error.message, testCase.expectedDetail)
-        assert.isAtMost(NodeBuffer.Buffer.byteLength(error.message, 'utf8'), 1_024)
-      }
-    }).pipe(TestClock.withLive),
-  )
-
-  it.effect('rejects C0, C1, and bidirectional controls from catalog identity and cwd fields', () =>
-    Effect.gen(function* ()
-    {
-      // Representative charset samples: C0 NUL in session id, C1 NEL in cwd.
-      const cases = [
         {
           sessionId: 'unsafe\u0000session',
           cwd: '/workspace',
           expectedDetail: 'session id containing unsafe control or bidirectional characters',
+          checkScanAndLoad: true,
+          checkUnsafeMessage: true,
         },
         {
           sessionId: 'unsafe-c1-cwd',
           cwd: '/workspace/\u0085spoof',
           expectedDetail: 'cwd containing unsafe control or bidirectional characters',
+          checkScanAndLoad: true,
+          checkUnsafeMessage: true,
         },
-      ]
+      ] as const
 
       for (const testCase of cases)
       {
@@ -435,13 +411,19 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
           binaryPath,
         }
         const scanError = yield* Effect.flip(scanAcpImportCatalog(options))
-        const scanAndLoadError = yield* Effect.flip(scanAndLoadAcpImportCatalog(options))
-
-        for (const error of [scanError, scanAndLoadError])
+        assert.equal(scanError.code, 'invalid-source')
+        assert.include(scanError.message, testCase.expectedDetail)
+        assert.isAtMost(NodeBuffer.Buffer.byteLength(scanError.message, 'utf8'), 1_024)
+        if (testCase.checkUnsafeMessage)
         {
-          assert.equal(error.code, 'invalid-source')
-          assert.include(error.message, testCase.expectedDetail)
-          assert.isFalse(hasUnsafeCatalogCharacter(error.message))
+          assert.isFalse(hasUnsafeCatalogCharacter(scanError.message))
+        }
+        if (testCase.checkScanAndLoad)
+        {
+          const scanAndLoadError = yield* Effect.flip(scanAndLoadAcpImportCatalog(options))
+          assert.equal(scanAndLoadError.code, 'invalid-source')
+          assert.include(scanAndLoadError.message, testCase.expectedDetail)
+          assert.isFalse(hasUnsafeCatalogCharacter(scanAndLoadError.message))
         }
       }
     }).pipe(TestClock.withLive),
@@ -482,7 +464,7 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
   it.effect('redacts and bounds agent list and load failures at scan and batch boundaries', () =>
     Effect.gen(function* ()
     {
-      // List path: scan + scanAndLoad + batch, with wire-byte growth.
+      // list path: scan + scanAndLoad + batch, with wire-byte growth.
       {
         const privateJsonToken = 'private-list-json-token'
         const privateXaiApiKey = 'private-list-xai-api-key'
@@ -548,7 +530,7 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
         assert.isAbove(wireUsage.consumedBytes, scanAndLoadWireBytes)
       }
 
-      // Load path: scanAndLoad + batch (catalog succeeds; load fails).
+      // load path: scanAndLoad + batch (catalog succeeds; load fails).
       {
         const privateAuthorization = 'private-load-authorization'
         const privateOpenAiApiKey = 'private-load-openai-api-key'

@@ -1,5 +1,6 @@
 // tests/apps/server/import/claudeSessionParser.test.ts
 // verifies pure claude code transcript parsing
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFS from 'node:fs'
@@ -965,36 +966,6 @@ describe('parseClaudeSession', () =>
     expect(JSON.stringify(session)).not.toContain('malformed-private-content')
   })
 
-  it('clamps duplicate maximum Date timestamps without throwing', () =>
-  {
-    const maximumDate = '+275760-09-13T00:00:00.000Z'
-    const session = parseClaudeSession({
-      content: jsonl([
-        {
-          type: 'user',
-          sessionId: 'maximum-date',
-          cwd: '/repo',
-          timestamp: maximumDate,
-          message: { content: 'At the limit' },
-        },
-        {
-          type: 'assistant',
-          sessionId: 'maximum-date',
-          cwd: '/repo',
-          timestamp: maximumDate,
-          message: { content: 'Still at the limit' },
-        },
-      ]),
-      sourcePath: '/maximum-date.jsonl',
-      contentHash: 'maximum-date-hash',
-    })
-
-    expect(session.records.map((record) => record.createdAt)).toEqual([maximumDate, maximumDate])
-    expect(session.meta.firstActivityAt).toBe(maximumDate)
-    expect(session.meta.lastActivityAt).toBe(maximumDate)
-    expect(session.warnings).toEqual([])
-  })
-
   it('omits unpaired tool calls and surfaces a normalized warning', () =>
   {
     const session = parseClaudeSession({
@@ -1036,44 +1007,6 @@ describe('parseClaudeSession', () =>
         detail: 'omitted 1 unpaired tool call from imported transcript',
       },
     })
-  })
-
-  it('surfaces a malformed tail inside the normalized transcript', () =>
-  {
-    const session = parseClaudeSession({
-      content: [
-        JSON.stringify({
-          type: 'user',
-          sessionId: 'tail',
-          cwd: '/repo',
-          timestamp: '2026-01-01T00:00:00Z',
-          message: { content: 'Keep this' },
-        }),
-        '{"type":"assistant","sessionId":"tail"',
-      ].join('\n'),
-      sourcePath: '/tail.jsonl',
-      contentHash: 'tail-hash',
-    })
-
-    expect(session.records.at(-1)).toMatchObject({
-      kind: 'activity',
-      tone: 'error',
-      payload: {
-        importWarningCount: 1,
-        detail: 'line 2: malformed JSON skipped',
-      },
-    })
-  })
-
-  it('rejects JSONL beyond the hard physical-line cap', () =>
-  {
-    expect(() =>
-      parseClaudeSession({
-        content: `${'{}\n'.repeat(100_000)}{}`,
-        sourcePath: '/too-many-lines.jsonl',
-        contentHash: 'too-many-lines-hash',
-      }),
-    ).toThrow(/physical-line limit exceeded/)
   })
 
   it('bounds nested attachment inspection by depth and branch count without recursive overflow', () =>

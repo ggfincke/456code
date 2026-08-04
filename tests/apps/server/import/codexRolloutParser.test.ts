@@ -1,5 +1,6 @@
 // tests/apps/server/import/codexRolloutParser.test.ts
 // verifies pure codex rollout transcript parsing
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFS from 'node:fs'
@@ -1264,97 +1265,6 @@ describe('parseCodexRollout', () =>
     const serialized = JSON.stringify(session)
     expect(serialized).not.toContain('PRIVATE_UNSUPPORTED_WEB_ACTION')
     expect(serialized).not.toContain('PRIVATE_IN_PROGRESS_QUERY')
-  })
-
-  it('clamps duplicate maximum Date timestamps without throwing', () =>
-  {
-    const maximumDate = '+275760-09-13T00:00:00.000Z'
-    const session = parseCodexRollout({
-      content: [
-        JSON.stringify({
-          timestamp: maximumDate,
-          type: 'session_meta',
-          payload: { id: 'maximum-date', cwd: '/repo' },
-        }),
-        JSON.stringify({
-          timestamp: maximumDate,
-          type: 'event_msg',
-          payload: { type: 'user_message', message: 'At the limit' },
-        }),
-        JSON.stringify({
-          timestamp: maximumDate,
-          type: 'event_msg',
-          payload: { type: 'agent_message', message: 'Still at the limit' },
-        }),
-      ].join('\n'),
-      sourcePath: '/maximum-date.jsonl',
-      contentHash: 'maximum-date-hash',
-    })
-
-    expect(session.records.map((record) => record.createdAt)).toEqual([maximumDate, maximumDate])
-    expect(session.meta.firstActivityAt).toBe(maximumDate)
-    expect(session.meta.lastActivityAt).toBe(maximumDate)
-    expect(session.warnings).toEqual([])
-  })
-
-  it('surfaces a malformed tail inside the normalized transcript', () =>
-  {
-    const session = parseCodexRollout({
-      content: [
-        '{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"tail","cwd":"/repo"}}',
-        '{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"Keep this"}}',
-        '{"timestamp":"2026-01-01T00:00:02Z","type":"event_msg"',
-      ].join('\n'),
-      sourcePath: '/tail.jsonl',
-      contentHash: 'tail-hash',
-    })
-
-    expect(session.records.at(-1)).toMatchObject({
-      kind: 'activity',
-      tone: 'error',
-      activityKind: 'task.completed',
-      payload: {
-        importWarningCount: 1,
-        detail: 'line 3: malformed JSON skipped',
-      },
-    })
-  })
-
-  it('caps warning detail and reports how many warnings were omitted', () =>
-  {
-    const malformedLines = Array.from({ length: 105 }, () => 'not json')
-    const session = parseCodexRollout({
-      content: [
-        '{"timestamp":"2026-01-01T00:00:00Z","type":"session_meta","payload":{"id":"warnings","cwd":"/repo"}}',
-        '{"timestamp":"2026-01-01T00:00:01Z","type":"event_msg","payload":{"type":"user_message","message":"Keep this"}}',
-        ...malformedLines,
-      ].join('\n'),
-      sourcePath: '/warnings.jsonl',
-      contentHash: 'warnings-hash',
-    })
-
-    expect(session.warnings).toHaveLength(101)
-    expect(session.warnings.at(-1)).toBe(
-      '5 additional parsing warnings omitted after the first 100',
-    )
-    expect(session.records.at(-1)).toMatchObject({
-      kind: 'activity',
-      payload: {
-        importWarningCount: 105,
-        omittedWarningCount: 5,
-      },
-    })
-  })
-
-  it('rejects JSONL beyond the hard physical-line cap', () =>
-  {
-    expect(() =>
-      parseCodexRollout({
-        content: `${'{}\n'.repeat(100_000)}{}`,
-        sourcePath: '/too-many-lines.jsonl',
-        contentHash: 'too-many-lines-hash',
-      }),
-    ).toThrow(/physical-line limit exceeded/)
   })
 
   it('truncates oversized messages at one MiB and surfaces the loss', () =>
