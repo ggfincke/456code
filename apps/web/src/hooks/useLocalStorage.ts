@@ -1,3 +1,6 @@
+// apps/web/src/hooks/useLocalStorage.ts
+// manage local storage operation error through a React hook
+
 import * as Schema from 'effect/Schema'
 import * as Record from 'effect/Record'
 import { useCallback, useMemo, useSyncExternalStore } from 'react'

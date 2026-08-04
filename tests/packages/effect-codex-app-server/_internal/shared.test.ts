@@ -1,3 +1,6 @@
+// tests/packages/effect-codex-app-server/_internal/shared.test.ts
+// verify shared behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'

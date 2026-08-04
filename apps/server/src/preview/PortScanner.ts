@@ -1,16 +1,15 @@
-/**
- * In-process PortScanner implementation.
- *
- * macOS/Linux: parses `lsof -iTCP -sTCP:LISTEN -P -n -F pcn` (-F output is a
- * stable line-prefixed field format; this is the only `lsof` flag set we rely
- * on).
- *
- * Windows / lsof missing: checks a curated list of common dev ports through
- * the shared Net service.
- *
- * Polling is reference-counted via scoped `retain`. A single layer-scoped fiber
- * polls forever, but each tick is a no-op when the retain count is zero.
- */
+// apps/server/src/preview/PortScanner.ts
+// implement port discovery
+
+// macOS/Linux: parses `lsof -iTCP -sTCP:LISTEN -P -n -F pcn` (-F output is a
+// stable line-prefixed field format; this is the only `lsof` flag set we rely
+// on).
+//
+// windows / lsof missing: checks a curated list of common dev ports through
+// the shared Net service.
+//
+// polling is reference-counted via scoped `retain`. A single layer-scoped fiber
+// polls forever, but each tick is a no-op when the retain count is zero.
 import { ThreadId, type DiscoveredLocalServer } from '@t3tools/contracts'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Net from '@t3tools/shared/Net'
@@ -131,7 +130,7 @@ const parseLsofOutput = (
 
 const parsePortFromLsofName = (name: string): number | null =>
 {
-  // Examples: "*:5173", "127.0.0.1:5173", "[::1]:5173", "localhost:5173",
+  // examples: "*:5173", "127.0.0.1:5173", "[::1]:5173", "localhost:5173",
   //           "192.168.1.10:5173 (LISTEN)" — we only care if the host part is local.
   const trimmed = name.split(' ', 1)[0]?.trim() ?? ''
   if (trimmed.length === 0) return null
@@ -330,7 +329,7 @@ export const make = Effect.gen(function* PortDiscoveryMake()
     ),
   )
 
-  // Single layer-scoped polling fiber. Ticks are no-ops when no client is
+  // single layer-scoped polling fiber. Ticks are no-ops when no client is
   // currently retained, so the cost is one Ref.get every POLL_INTERVAL.
   yield* Effect.forkScoped(pollTick().pipe(Effect.repeat(Schedule.spaced(POLL_INTERVAL))))
 
@@ -342,7 +341,7 @@ export const make = Effect.gen(function* PortDiscoveryMake()
     ])
     if (wasIdle)
     {
-      // Run an immediate scan + broadcast so the new retainer doesn't have
+      // run an immediate scan + broadcast so the new retainer doesn't have
       // to wait up to POLL_INTERVAL for the first emission.
       yield* pollTick()
     }

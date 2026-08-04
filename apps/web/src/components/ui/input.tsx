@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/input.tsx
+// render reusable input UI primitives
+
 'use client'
 
 import { Input as InputPrimitive } from '@base-ui/react/input'

@@ -1,3 +1,6 @@
+// apps/server/src/serverLogger.ts
+// expose server logger live
+
 import * as Effect from 'effect/Effect'
 import * as Logger from 'effect/Logger'
 import * as References from 'effect/References'

@@ -1,3 +1,6 @@
+// tests/apps/server/vcs/GitVcsDriver.test.ts
+// verify git vcs driver behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'

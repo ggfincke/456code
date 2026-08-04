@@ -1,3 +1,6 @@
+// tests/scripts/resolve-nightly-release.test.ts
+// verify resolve nightly release behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as Config from 'effect/Config'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/WorkspaceConnectionStatus.tsx
+// render workspace connection status
+
 import { SymbolView } from '../../components/AppSymbol'
 import { ActivityIndicator, Pressable } from 'react-native'
 

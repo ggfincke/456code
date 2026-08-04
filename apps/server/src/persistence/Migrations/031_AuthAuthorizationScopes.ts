@@ -1,10 +1,11 @@
+// apps/server/src/persistence/Migrations/031_AuthAuthorizationScopes.ts
+// apply persistence migration 031 auth authorization scopes
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-/**
- * This is an intentional alpha cutover: role-bearing credentials and sessions
- * cannot safely be assigned new capabilities implicitly.
- */
+// this is an intentional alpha cutover: role-bearing credentials and sessions
+// cannot safely be assigned new capabilities implicitly.
 export default Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient

@@ -270,7 +270,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   const lastBufferReplayKeyRef = useRef<string | null>(null)
   const sentInitialInputKeyRef = useRef<string | null>(null)
   const [readyBufferReplayKey, setReadyBufferReplayKey] = useState<string | null>(null)
-  /** Default grid is always valid for attach; onResize refines cols/rows. Requiring a cached size blocked bootstrap for new terminal routes. */
+  // default grid is always valid for attach; onResize refines cols/rows. Requiring a cached size blocked bootstrap for new terminal routes.
   const [hasMeasuredSurface, setHasMeasuredSurface] = useState(true)
   const [pendingModifierState, setPendingModifierState] = useState<{
     readonly terminalId: string
@@ -373,7 +373,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   const isRunning = terminal.status === 'running' || terminal.status === 'starting'
   const isAcceptingInput = terminal.status === 'running'
 
-  // When the process ends while this screen is attached (e.g. typing `exit`),
+  // when the process ends while this screen is attached (e.g. typing `exit`),
   // close the session and leave the screen, mirroring the web drawer's
   // onSessionExited flow. Only react to a running -> exited transition
   // observed on this screen so already-exited sessions can still be opened
@@ -382,7 +382,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   const reopenedStaleTerminalKeyRef = useRef<string | null>(null)
   const pendingExitNavigationRef = useRef<string | null>(null)
 
-  // Attach subscriptions are cached with an idle TTL, so revisiting a
+  // attach subscriptions are cached with an idle TTL, so revisiting a
   // terminal whose session ended while unobserved reuses the stale stream
   // without a new attach RPC — the server never respawns anything. Detect
   // that (dead status with processed events, never seen running here) and
@@ -419,7 +419,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
       },
     }).then((result) =>
     {
-      // Release the guard on failure so a later render can retry the respawn.
+      // release the guard on failure so a later render can retry the respawn.
       if (result._tag === 'Failure' && reopenedStaleTerminalKeyRef.current === terminalKey)
       {
         reopenedStaleTerminalKeyRef.current = null
@@ -874,7 +874,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
 
   const navigateAwayAfterExit = useCallback(() =>
   {
-    // With other shells still live, fall through to the previous one instead
+    // with other shells still live, fall through to the previous one instead
     // of dropping the user back on the thread.
     const fallbackTerminalId = previousLiveTerminalId({
       sessions: terminalMenuSessions,
@@ -896,7 +896,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
       navigation.goBack()
       return
     }
-    // Deep-linked/root mounts have nothing to pop; land on the thread
+    // deep-linked/root mounts have nothing to pop; land on the thread
     // instead of stranding the user on a dead terminal.
     if (selectedThread)
     {
@@ -911,7 +911,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
 
   useEffect(() =>
   {
-    // Detached (hidden surface or environment drop): forget the running
+    // detached (hidden surface or environment drop): forget the running
     // marker so a reattach takes the stale-reopen path instead of misreading
     // the dead snapshot as an exit observed on this screen. A pending exit
     // navigation stays armed — it only clears once the session runs again —
@@ -924,19 +924,19 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     if (isRunning)
     {
       runningTerminalKeyRef.current = terminalKey
-      // The session came back (e.g. respawned elsewhere) before the user
+      // the session came back (e.g. respawned elsewhere) before the user
       // returned; a stale pending exit must not eject a live terminal.
       pendingExitNavigationRef.current = null
       return
     }
-    // The web drawer treats both exited and closed as session end.
+    // the web drawer treats both exited and closed as session end.
     const sessionEnded = terminal.status === 'exited' || terminal.status === 'closed'
     if (!sessionEnded || runningTerminalKeyRef.current !== terminalKey)
     {
       return
     }
     runningTerminalKeyRef.current = null
-    // Mark this key handled so the stale-attach effect doesn't respawn the
+    // mark this key handled so the stale-attach effect doesn't respawn the
     // session the user just ended.
     reopenedStaleTerminalKeyRef.current = terminalKey
     if (selectedThread)
@@ -954,7 +954,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
       navigateAwayAfterExit()
       return
     }
-    // An unfocused screen can't navigate; leave when the user returns so
+    // an unfocused screen can't navigate; leave when the user returns so
     // they never land on the dead session.
     pendingExitNavigationRef.current = terminalKey
   }, [
@@ -1012,7 +1012,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     setTerminalFontSize(stepTerminalFontSize(fontSize, 1))
   }, [fontSize, setTerminalFontSize])
 
-  // Android mirror of the iOS NativeHeaderToolbar terminal menu below: text
+  // android mirror of the iOS NativeHeaderToolbar terminal menu below: text
   // size, session switching, and "Open new terminal", rendered through the
   // token-styled anchored menu (the native header items are iOS-only).
   const androidTerminalMenuActions = useMemo<MenuAction[]>(
@@ -1189,10 +1189,10 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     <>
       <NativeStackScreenOptions
         options={{
-          // Static header config lives in Stack.tsx (SOLID_HEADER_OPTIONS — the pty
+          // static header config lives in Stack.tsx (SOLID_HEADER_OPTIONS — the pty
           // scrolls internally, nothing for glass to sample). Default title/subtitle
           // styling, like every other page.
-          // Android draws its own in-flow header (AndroidScreenHeader below);
+          // android draws its own in-flow header (AndroidScreenHeader below);
           // the native stack header stays iOS-only.
           headerShown: Platform.OS !== 'android',
           title: 'Terminal',

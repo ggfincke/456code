@@ -1,3 +1,6 @@
+// apps/mobile/src/components/StatusPill.tsx
+// render status pill
+
 import { View } from 'react-native'
 
 import { AppText as Text } from './AppText'

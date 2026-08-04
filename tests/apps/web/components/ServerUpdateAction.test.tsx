@@ -1,3 +1,6 @@
+// tests/apps/web/components/ServerUpdateAction.test.tsx
+// verify server update action behavior
+
 import type { Dispatch, ReactElement, SetStateAction } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import * as Cause from 'effect/Cause'
@@ -163,7 +166,7 @@ describe('ServerUpdateAction', () =>
     )
     await flushPromises()
 
-    // The click-based deadline would have fired by now. Success gets a fresh
+    // the click-based deadline would have fired by now. Success gets a fresh
     // twelve-minute reconnect window, so the action remains disabled.
     await vi.advanceTimersByTimeAsync(2 * 60_000)
     expect(renderAction().props.disabled).toBe(true)

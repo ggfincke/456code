@@ -1,3 +1,6 @@
+// apps/mobile/src/components/BrandMark.tsx
+// render brand mark
+
 import Constants from 'expo-constants'
 import { Image } from 'expo-image'
 import { View } from 'react-native'

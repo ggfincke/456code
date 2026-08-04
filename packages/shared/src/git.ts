@@ -1,3 +1,6 @@
+// packages/shared/src/git.ts
+// expose worktree branch prefix
+
 import type {
   VcsRef,
   SourceControlProviderInfo,
@@ -11,7 +14,7 @@ import * as Result from 'effect/Result'
 import { detectSourceControlProviderFromRemoteUrl } from './sourceControl.ts'
 
 export const WORKTREE_BRANCH_PREFIX = '456code'
-// Canonical form is `456code/<8 hex>`. Older mobile builds generated `456code/<uuid>`
+// canonical form is `456code/<8 hex>`. Older mobile builds generated `456code/<uuid>`
 // via Crypto.randomUUID() (always RFC 4122 v4), so the matcher also accepts exactly
 // that shape — version nibble `4`, variant nibble `[89ab]` — to keep those threads
 // eligible for branch regeneration without loosening beyond what was ever generated.
@@ -19,10 +22,8 @@ const TEMP_WORKTREE_BRANCH_PATTERN = new RegExp(
   `^${WORKTREE_BRANCH_PREFIX}\\/(?:[0-9a-f]{8}|[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$`,
 )
 
-/**
- * Sanitize an arbitrary string into a valid, lowercase git refName fragment.
- * Strips quotes, collapses separators, limits to 64 chars.
- */
+// sanitize an arbitrary string into a valid, lowercase git refName fragment.
+// strips quotes, collapses separators, limits to 64 chars.
 export function sanitizeBranchFragment(raw: string): string
 {
   const normalized = raw
@@ -42,10 +43,8 @@ export function sanitizeBranchFragment(raw: string): string
   return branchFragment.length > 0 ? branchFragment : 'update'
 }
 
-/**
- * Sanitize a string into a `feature/…` refName name.
- * Preserves an existing `feature/` prefix or slash-separated namespace.
- */
+// sanitize a string into a `feature/…` refName name.
+// preserves an existing `feature/` prefix or slash-separated namespace.
 export function sanitizeFeatureBranchName(raw: string): string
 {
   const sanitized = sanitizeBranchFragment(raw)
@@ -58,10 +57,8 @@ export function sanitizeFeatureBranchName(raw: string): string
 
 const AUTO_FEATURE_BRANCH_FALLBACK = 'feature/update'
 
-/**
- * Resolve a unique `feature/…` refName name that doesn't collide with
- * any existing refName. Appends a numeric suffix when needed.
- */
+// resolve a unique `feature/…` refName name that doesn't collide with
+// any existing refName. Appends a numeric suffix when needed.
 export function resolveAutoFeatureBranchName(
   existingBranchNames: readonly string[],
   preferredBranch?: string,
@@ -87,9 +84,7 @@ export function resolveAutoFeatureBranchName(
   return `${resolvedBase}-${suffix}`
 }
 
-/**
- * Strip the remote prefix from a remote ref such as `origin/feature/demo`.
- */
+// strip the remote prefix from a remote ref such as `origin/feature/demo`.
 export function deriveLocalBranchNameFromRemoteRef(branchName: string): string
 {
   const firstSeparatorIndex = branchName.indexOf('/')
@@ -104,7 +99,7 @@ export function buildTemporaryWorktreeBranchName(
   randomHex: (byteLength: number) => string,
 ): string
 {
-  // Normalize to exactly 8 lowercase hex chars so a UUID-shaped callback
+  // normalize to exactly 8 lowercase hex chars so a UUID-shaped callback
   // still produces the canonical temporary branch form.
   const token = randomHex(4)
     .toLowerCase()
@@ -118,9 +113,7 @@ export function isTemporaryWorktreeBranch(refName: string): boolean
   return TEMP_WORKTREE_BRANCH_PATTERN.test(refName.trim().toLowerCase())
 }
 
-/**
- * Normalize a git remote URL into a stable comparison key.
- */
+// normalize a git remote URL into a stable comparison key.
 export function normalizeGitRemoteUrl(value: string): string
 {
   const normalized = value
@@ -158,9 +151,7 @@ export function normalizeGitRemoteUrl(value: string): string
   return normalized
 }
 
-/**
- * Best-effort parse of a GitHub `owner/repo` identifier from common remote URL shapes.
- */
+// best-effort parse of a GitHub `owner/repo` identifier from common remote URL shapes.
 export function parseGitHubRepositoryNameWithOwnerFromRemoteUrl(url: string | null): string | null
 {
   const trimmed = url?.trim() ?? ''
@@ -201,9 +192,7 @@ function deriveLocalBranchNameCandidatesFromRemoteRef(
   return [...candidates]
 }
 
-/**
- * Hide `origin/*` remote refs when a matching local refName already exists.
- */
+// hide `origin/*` remote refs when a matching local refName already exists.
 export function dedupeRemoteBranchesWithLocalMatches(
   refs: ReadonlyArray<VcsRef>,
 ): ReadonlyArray<VcsRef>

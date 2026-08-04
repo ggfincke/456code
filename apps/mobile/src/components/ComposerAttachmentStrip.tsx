@@ -1,3 +1,6 @@
+// apps/mobile/src/components/ComposerAttachmentStrip.tsx
+// render composer attachment strip
+
 import { SymbolView } from '../components/AppSymbol'
 import { Image, Pressable, ScrollView, View } from 'react-native'
 import { useThemeColor } from '../lib/useThemeColor'
@@ -6,24 +9,22 @@ import type { DraftComposerImageAttachment } from '../lib/composerImages'
 
 export interface ComposerAttachmentStripProps
 {
-  /** Attachment images to display. */
+  // attachment images to display.
   readonly attachments: ReadonlyArray<DraftComposerImageAttachment>
-  /** Called when the user taps the remove button on an image. */
+  // called when the user taps the remove button on an image.
   readonly onRemove: (imageId: string) => void
-  /** Called when the user taps on an image thumbnail to preview it. */
+  // called when the user taps on an image thumbnail to preview it.
   readonly onPressImage?: (previewUri: string) => void
-  /** Image thumbnail size in points.  Defaults to 72. */
+  // image thumbnail size in points.  Defaults to 72.
   readonly imageSize?: number
-  /** Border radius of each image thumbnail.  Defaults to 16. */
+  // border radius of each image thumbnail.  Defaults to 16.
   readonly imageBorderRadius?: number
-  /** Whether the remove button should sit in its own gutter instead of overlapping the image. */
+  // whether the remove button should sit in its own gutter instead of overlapping the image.
   readonly removeButtonPlacement?: 'overlay' | 'gutter'
 }
 
-/**
- * A horizontally-scrollable strip of image attachment thumbnails with remove
- * buttons.  Used by both the thread composer and the new-task draft screen.
- */
+// a horizontally-scrollable strip of image attachment thumbnails with remove
+// buttons.  Used by both the thread composer and the new-task draft screen.
 export function ComposerAttachmentStrip(props: ComposerAttachmentStripProps)
 {
   const subtleBg = useThemeColor('--color-subtle')

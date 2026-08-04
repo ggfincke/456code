@@ -1,3 +1,6 @@
+// apps/web/src/routes/settings.providers.tsx
+// render the settings providers route
+
 import { createFileRoute } from '@tanstack/react-router'
 
 import { ProviderSettingsPanel } from '../components/settings/SettingsPanels'

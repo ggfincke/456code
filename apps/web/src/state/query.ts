@@ -1,3 +1,6 @@
+// apps/web/src/state/query.ts
+// manage environment query view state
+
 import { useAtomRefresh, useAtomValue } from '@effect/atom-react'
 import * as Cause from 'effect/Cause'
 import * as Option from 'effect/Option'

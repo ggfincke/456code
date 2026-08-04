@@ -1,3 +1,6 @@
+// tests/apps/web/state/desktopUpdate.test.ts
+// verify desktop update state atom behavior
+
 import type { DesktopUpdateState } from '@t3tools/contracts'
 import * as AsyncResult from 'effect/unstable/reactivity/AsyncResult'
 import { AtomRegistry } from 'effect/unstable/reactivity'

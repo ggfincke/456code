@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/sharing/incoming-share-inbox.test.ts
+// verify incoming share inbox behavior
+
 import { describe, expect, it, vi } from '@effect/vitest'
 import type { SharePayload } from 'expo-sharing'
 

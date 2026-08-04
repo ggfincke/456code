@@ -1,3 +1,6 @@
+// apps/mobile/src/features/archive/ArchivedThreadsScreen.tsx
+// render archived threads screen
+
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -139,7 +142,7 @@ function ArchivedThreadsHeader(props: {
 
   if (Platform.OS === 'android')
   {
-    // Single header row matching the app's Android chrome (AndroidScreenHeader
+    // single header row matching the app's Android chrome (AndroidScreenHeader
     // palette): back chevron, inline search, filter menu.
     return (
       <>
@@ -418,7 +421,7 @@ function ArchivedThreadRow(props: {
   return (
     <ThreadSwipeable
       backgroundColor={cardColor}
-      // Round + clip the swipeable container so the group's corners stay
+      // round + clip the swipeable container so the group's corners stay
       // rounded while rows swipe; the row itself stays square inside.
       containerStyle={{
         borderTopLeftRadius: props.isFirst ? 20 : 0,

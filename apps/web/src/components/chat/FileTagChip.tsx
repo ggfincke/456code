@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/FileTagChip.tsx
+// render file tag chip
+
 import { inferEntryKindFromPath } from '../../pierre-icons'
 import {
   CHAT_INLINE_CHIP_CLASS_NAME,

@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/copyTextWithHaptic.ts
+// define copy text clipboard write error
+
 import * as Schema from 'effect/Schema'
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'

@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/files/filePath.test.ts
+// verify resolve workspace relative file path behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

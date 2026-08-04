@@ -1,3 +1,6 @@
+// packages/effect-acp/test/examples/cursor-acp-client.example.ts
+// verify cursor acp client example behavior
+
 import * as Effect from 'effect/Effect'
 import * as Console from 'effect/Console'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'

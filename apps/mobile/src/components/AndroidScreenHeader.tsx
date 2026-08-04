@@ -1,3 +1,6 @@
+// apps/mobile/src/components/AndroidScreenHeader.tsx
+// render android screen header
+
 import type { ReactNode } from 'react'
 import { Pressable, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'

@@ -1,3 +1,6 @@
+// apps/web/src/browser/BrowserViewportResizeHandles.tsx
+// render browser viewport resize handles
+
 'use client'
 
 import type {

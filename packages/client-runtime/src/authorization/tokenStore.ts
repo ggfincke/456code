@@ -1,3 +1,6 @@
+// packages/client-runtime/src/authorization/tokenStore.ts
+// manage token state
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { RelayManagedEndpoint } from '@t3tools/contracts/relay'
 import * as Context from 'effect/Context'

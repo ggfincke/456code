@@ -1,3 +1,6 @@
+// apps/server/src/provider/testUtils/providerRegistryMock.ts
+// create provider registry layer
+
 import { ProviderRegistry, type ProviderRegistryShape } from '../Services/ProviderRegistry.ts'
 import type { ServerProvider } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'

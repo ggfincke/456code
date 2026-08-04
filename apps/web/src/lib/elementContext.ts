@@ -1,3 +1,6 @@
+// apps/web/src/lib/elementContext.ts
+// normalize element context selection
+
 import { type ThreadId } from '@t3tools/contracts'
 import type { PickedElementPayload, PickedElementStackFrame } from '@t3tools/contracts'
 
@@ -16,30 +19,30 @@ const TRAILING_ELEMENT_CONTEXT_BLOCK_PATTERN =
  */
 export interface ElementContextSelection
 {
-  /** Page URL where the element was picked. */
+  // page URL where the element was picked.
   pageUrl: string
-  /** Best-effort `<title>`. */
+  // best-effort `<title>`.
   pageTitle: string | null
-  /** Lowercase tag, e.g. `"button"`. */
+  // lowercase tag, e.g. `"button"`.
   tagName: string
-  /** CSS selector — may be null when react-grab can't compute one. */
+  // CSS selector — may be null when react-grab can't compute one.
   selector: string | null
-  /** Truncated outer-HTML preview. */
+  // truncated outer-HTML preview.
   htmlPreview: string
-  /** Nearest React component display name, or null. */
+  // nearest React component display name, or null.
   componentName: string | null
-  /** Source frame (file + line) — null when unavailable. */
+  // source frame (file + line) — null when unavailable.
   source: PickedElementStackFrame | null
-  /** Author CSS (no UA defaults). May be empty. */
+  // author CSS (no UA defaults). May be empty.
   styles: string
 }
 
 export interface ElementContextDraft extends ElementContextSelection
 {
-  /** Stable composer-side id used for keyed rendering + dedupe. */
+  // stable composer-side id used for keyed rendering + dedupe.
   id: string
   threadId: ThreadId
-  /** ISO-8601 wall clock pick time. */
+  // ISO-8601 wall clock pick time.
   pickedAt: string
 }
 
@@ -67,11 +70,9 @@ function normalizeText(value: string): string
   return value.replace(/\r\n/g, '\n').replace(/^\n+|\n+$/g, '')
 }
 
-/**
- * Sanitize a payload coming back from the desktop bridge before it lands in
- * the composer draft. Trims/clamps every string field so we never persist a
- * 5MB outerHTML blob and silently break `localStorage`.
- */
+// sanitize a payload coming back from the desktop bridge before it lands in
+// the composer draft. Trims/clamps every string field so we never persist a
+// 5MB outerHTML blob and silently break `localStorage`.
 export function normalizeElementContextSelection(
   raw: PickedElementPayload,
 ): ElementContextSelection | null
@@ -102,10 +103,8 @@ export function normalizeElementContextSelection(
   }
 }
 
-/**
- * Stable dedupe key. Two picks of the same element on the same page produce
- * the same key, so we don't end up with a runaway chip row from spam-clicks.
- */
+// stable dedupe key. Two picks of the same element on the same page produce
+// the same key, so we don't end up with a runaway chip row from spam-clicks.
 export function elementContextDedupKey(context: ElementContextSelection): string
 {
   return [context.pageUrl, context.selector ?? '', context.tagName, context.componentName ?? '']
@@ -119,10 +118,8 @@ function shortenTagLabel(tagName: string): string
   return `${tagName.slice(0, ELEMENT_CONTEXT_LABEL_TAG_MAX - 1)}…`
 }
 
-/**
- * Compact chip label — `<Button>` for component picks, `<button>` otherwise.
- * Component name takes priority because it's higher-signal for the agent.
- */
+// compact chip label — `<Button>` for component picks, `<button>` otherwise.
+// component name takes priority because it's higher-signal for the agent.
 export function formatElementContextLabel(context: ElementContextSelection): string
 {
   if (context.componentName) return `<${context.componentName}>`
@@ -192,11 +189,9 @@ function buildSingleContextLines(context: ElementContextSelection): string[]
   return lines
 }
 
-/**
- * Serialize element-context drafts into the `<element_context>` block we
- * append to the user's outgoing message text. Mirrors the `<terminal_context>`
- * block format so it composes cleanly when both are present.
- */
+// serialize element-context drafts into the `<element_context>` block we
+// append to the user's outgoing message text. Mirrors the `<terminal_context>`
+// block format so it composes cleanly when both are present.
 export function buildElementContextBlock(contexts: ReadonlyArray<ElementContextSelection>): string
 {
   if (contexts.length === 0) return ''
@@ -230,11 +225,9 @@ export function newElementContextId(): string
   return `${ELEMENT_CONTEXT_ID_PREFIX}${nextElementContextSequence.toString(36)}`
 }
 
-/**
- * Mirror image of `appendElementContextsToPrompt` for transcript display:
- * detects (and strips) a trailing `<element_context>` block so we can render
- * the original prompt body and chips separately in user-message bubbles.
- */
+// mirror image of `appendElementContextsToPrompt` for transcript display:
+// detects (and strips) a trailing `<element_context>` block so we can render
+// the original prompt body and chips separately in user-message bubbles.
 export function extractTrailingElementContexts(prompt: string): ExtractedElementContexts
 {
   const match = TRAILING_ELEMENT_CONTEXT_BLOCK_PATTERN.exec(prompt)

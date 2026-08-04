@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/011_OrchestrationThreadCreatedRuntimeMode.ts
+// apply persistence migration 011 orchestration thread created runtime mode
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

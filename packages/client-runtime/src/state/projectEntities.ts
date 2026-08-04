@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/projectEntities.ts
+// manage create environment project atoms state
+
 import type {
   EnvironmentId,
   OrchestrationProjectShell,

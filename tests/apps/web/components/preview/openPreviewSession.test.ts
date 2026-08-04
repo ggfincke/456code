@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/openPreviewSession.test.ts
+// verify open preview session behavior
+
 import type { PreviewOpenInput, PreviewSessionSnapshot, ScopedThreadRef } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'

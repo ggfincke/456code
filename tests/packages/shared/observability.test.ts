@@ -1,3 +1,6 @@
+// tests/packages/shared/observability.test.ts
+// verify error tag behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Arr from 'effect/Array'

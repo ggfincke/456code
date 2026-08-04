@@ -1,3 +1,6 @@
+// tests/apps/mobile/connection/storage.test.ts
+// verify mobile connection catalog storage behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import { vi } from 'vite-plus/test'

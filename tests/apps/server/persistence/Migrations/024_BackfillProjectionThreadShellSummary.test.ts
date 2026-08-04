@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/Migrations/024_BackfillProjectionThreadShellSummary.test.ts
+// verify 024 backfill projection thread shell summary behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/managedRelayTokenStore.ts
+// manage managed relay token state
+
 import { ManagedRelay } from '@t3tools/client-runtime/relay'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'

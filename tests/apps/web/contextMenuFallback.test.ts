@@ -1,3 +1,6 @@
+// tests/apps/web/contextMenuFallback.test.ts
+// verify show context menu fallback behavior
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import { showContextMenuFallback } from '../../../apps/web/src/contextMenuFallback'

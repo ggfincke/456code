@@ -1,3 +1,6 @@
+// packages/ssh/src/config.ts
+// parse known hosts hostnames
+
 import type { DesktopDiscoveredSshHost } from '@t3tools/contracts'
 
 import * as Config from 'effect/Config'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/review-section-menu.ts
+// build review section menu
+
 import type { ReviewSectionItem } from './reviewModel'
 
 export interface ReviewSectionMenu

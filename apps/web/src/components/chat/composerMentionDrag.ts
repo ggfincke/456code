@@ -1,10 +1,11 @@
+// apps/web/src/components/chat/composerMentionDrag.ts
+// expose composer mention drag type
+
 import { serializeComposerFileLink } from '@t3tools/shared/composerTrigger'
 
-/**
- * Drag payload type carrying a serialized composer mention. Set on drags that
- * start in the workspace file tree so the composer can tell them apart from
- * OS file drags and plain text selections.
- */
+// drag payload type carrying a serialized composer mention. Set on drags that
+// start in the workspace file tree so the composer can tell them apart from
+// OS file drags and plain text selections.
 export const COMPOSER_MENTION_DRAG_TYPE = 'application/x-456code-composer-mention'
 
 export function composerMentionFromTreePath(treePath: string): string | null
@@ -62,7 +63,7 @@ export function makeComposerMentionDragHandlers(
   host: ComposerMentionDropHost,
 ): ComposerMentionDragHandlers
 {
-  // Claim the event for the composer: React's stopPropagation only halts the
+  // claim the event for the composer: React's stopPropagation only halts the
   // synthetic dispatch, so the native event must be stopped too or the
   // editor's own DOM listeners still process the drag.
   const claim = (event: ComposerMentionDragEvent): boolean =>
@@ -90,7 +91,7 @@ export function makeComposerMentionDragHandlers(
       {
         return
       }
-      // The tree constrains its drags to effectAllowed "move"; naming any
+      // the tree constrains its drags to effectAllowed "move"; naming any
       // other effect makes the browser cancel the drop without firing it.
       event.dataTransfer.dropEffect = 'move'
       host.setDragActive(true)

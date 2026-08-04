@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// scripts/build-desktop-artifact.ts
+// build desktop artifact
 
 import { fromYaml } from '@t3tools/shared/schemaYaml'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
@@ -51,7 +53,7 @@ const StageWorkspaceConfig = Schema.Struct({
     libc: Schema.optional(Schema.Array(Schema.String)),
   }),
   // pnpm 11 only reads these from pnpm-workspace.yaml (not package.json#pnpm).
-  // Without allowBuilds the staged `vp install --prod` fails with
+  // without allowBuilds the staged `vp install --prod` fails with
   // ERR_PNPM_IGNORED_BUILDS for packages that have lifecycle scripts.
   allowBuilds: Schema.optional(Schema.Record(Schema.String, Schema.Boolean)),
   patchedDependencies: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -622,7 +624,7 @@ export function createStageWorkspaceConfig(input: {
   const { platform, arch, allowBuilds, patchedDependencies, overrides } = input
   const hostOs = platform === 'mac' ? 'darwin' : platform === 'win' ? 'win32' : 'linux'
   const hostCpu = arch === 'universal' ? ['arm64', 'x64'] : [arch]
-  // Linux AppImages and Windows WSL backends both execute a Linux/glibc Node
+  // linux AppImages and Windows WSL backends both execute a Linux/glibc Node
   // process that loads Linux-native optional deps at runtime (e.g.
   // @yuuang/ffi-rs-linux-x64-gnu). Keep libc explicit so pnpm includes those
   // optional packages in the staged production install.
@@ -698,7 +700,7 @@ const BuildEnvConfig = Config.all({
   verbose: Config.boolean('T3CODE_DESKTOP_VERBOSE').pipe(Config.withDefault(false)),
   mockUpdates: Config.boolean('T3CODE_DESKTOP_MOCK_UPDATES').pipe(Config.withDefault(false)),
   mockUpdateServerPort: Config.string('T3CODE_DESKTOP_MOCK_UPDATE_SERVER_PORT').pipe(Config.option),
-  // Path to a prebuilt Linux node-pty binary (pty.node) for the target arch,
+  // path to a prebuilt Linux node-pty binary (pty.node) for the target arch,
   // produced by the Linux CI job and handed to the Windows packaging job. Placed
   // into the staged node-pty so the WSL backend ships a ready binary and never
   // compiles on the user's machine.
@@ -719,7 +721,7 @@ function invalidMockUpdateServerPortReason(
   if (!Number.isFinite(parsed)) return 'not-numeric'
   if (!Number.isInteger(parsed)) return 'not-integer'
   if (parsed < 1 || parsed > 65535) return 'out-of-range'
-  // This mapper is only called after schema decoding failed. An otherwise
+  // this mapper is only called after schema decoding failed. An otherwise
   // valid integer therefore used a representation the decoder did not accept.
   return 'not-numeric'
 }
@@ -1140,7 +1142,7 @@ export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefi
   return `http://localhost:${mockUpdateServerPort ?? 3000}`
 }
 
-// Electron Builder detects pnpm from npm_config_user_agent, whose value uses
+// electron Builder detects pnpm from npm_config_user_agent, whose value uses
 // user-agent syntax (pnpm/11.10.0) rather than packageManager syntax
 // (pnpm@11.10.0).
 export function resolvePackageManagerUserAgent(packageManager: string): string
@@ -1178,7 +1180,7 @@ export const createBuildConfig = Effect.fn('createBuildConfig')(function* (
     directories: {
       buildResources: 'apps/desktop/resources',
     },
-    // The Windows primary backend runs the server bundle through
+    // the Windows primary backend runs the server bundle through
     // ELECTRON_RUN_AS_NODE (asar-aware), so it reads bin.mjs straight out of
     // app.asar. The WSL backend instead launches plain `wsl.exe -- node`, which
     // cannot read inside an asar archive, so everything it loads must be on the
@@ -1245,7 +1247,7 @@ export const createBuildConfig = Effect.fn('createBuildConfig')(function* (
     const winConfig: Record<string, unknown> = {
       target: [target],
       icon: 'icon.ico',
-      // Resource editing applies the product metadata and icon independently
+      // resource editing applies the product metadata and icon independently
       // of code signing. Disabling it for local unsigned builds leaves the
       // packaged executable with Electron's stock icon.
       signAndEditExecutable: true,
@@ -1285,13 +1287,13 @@ const assertPlatformBuildResources = Effect.fn('assertPlatformBuildResources')(f
   }
 })
 
-// Stage the prebuilt Linux node-pty binary into the packaged app so the WSL
+// stage the prebuilt Linux node-pty binary into the packaged app so the WSL
 // backend never compiles on the user's machine. node-pty publishes no Linux
 // prebuilt and the WSL Linux Node can't load the Windows/Electron binary, so the
-// Linux CI job builds pty.node and hands it here. We drop it into the staged
+// linux CI job builds pty.node and hands it here. We drop it into the staged
 // node-pty's prebuilds/linux-<arch>/ with a 456code marker the WSL preflight
 // checks (arch + node-pty version; the binary is N-API, hence ABI-stable across
-// Node versions). A missing prebuild is a warning, not an error, so local and
+// node versions). A missing prebuild is a warning, not an error, so local and
 // non-Windows builds still succeed — they just won't ship a working WSL backend.
 const stageWslNodePtyPrebuild = Effect.fn('stageWslNodePtyPrebuild')(function* (input: {
   readonly stageAppDir: string
@@ -1330,7 +1332,7 @@ const stageWslNodePtyPrebuild = Effect.fn('stageWslNodePtyPrebuild')(function* (
     })
   }
 
-  // Resolve through the (pnpm) symlink so we write into the stage's own node-pty
+  // resolve through the (pnpm) symlink so we write into the stage's own node-pty
   // copy, never a shared content-addressable store.
   const nodePtyLink = path.join(input.stageAppDir, 'node_modules', 'node-pty')
   const nodePtyDir = yield* fs.realPath(nodePtyLink).pipe(Effect.orElseSucceed(() => nodePtyLink))
@@ -1511,7 +1513,7 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
       options.arch,
       serverPackageJson.dependencies['@ff-labs/fff-node'],
     ),
-    // Windows artifacts also bundle the same-architecture WSL Linux backend, which loads the
+    // windows artifacts also bundle the same-architecture WSL Linux backend, which loads the
     // fff native binary through ffi-rs. The platform fff binary above is the
     // host's (win32), so promote the matching Linux fff binaries too; without
     // them file-finding in WSL fails to load its Linux native package.

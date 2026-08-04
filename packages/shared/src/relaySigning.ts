@@ -1,3 +1,6 @@
+// packages/shared/src/relaySigning.ts
+// expose stable stringify
+
 function isRecord(value: unknown): value is Record<string, unknown>
 {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

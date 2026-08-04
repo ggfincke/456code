@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/SourceControlProvider.test.ts
+// verifies source control provider transport sanitization
 import { assert, it } from '@effect/vitest'
 
 import { transportSafeSourceControlErrorValue } from '../../../../apps/server/src/sourceControl/SourceControlProvider.ts'

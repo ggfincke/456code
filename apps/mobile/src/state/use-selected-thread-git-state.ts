@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-selected-thread-git-state.ts
+// manage selected thread git state through a React hook
+
 import { useMemo } from 'react'
 
 import { dedupeRemoteBranchesWithLocalMatches } from '@t3tools/shared/git'

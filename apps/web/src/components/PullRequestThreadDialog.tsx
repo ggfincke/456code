@@ -1,3 +1,6 @@
+// apps/web/src/components/PullRequestThreadDialog.tsx
+// render pull request thread dialog
+
 import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { isAtomCommandInterrupted } from '@t3tools/client-runtime/state/runtime'
 import { useDebouncedValue } from '@tanstack/react-pacer'

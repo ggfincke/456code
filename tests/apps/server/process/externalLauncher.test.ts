@@ -1,3 +1,6 @@
+// tests/apps/server/process/externalLauncher.test.ts
+// verify external launcher behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/useReviewDiffData.ts
+// manage format header diff summary through a React hook
+
 import { useEffect, useMemo } from 'react'
 
 import { countReviewCommentContexts, parseReviewInlineComments } from './reviewCommentSelection'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/threadTerminalPanelModel.ts
+// define thread terminal subscription identity
+
 import type { EnvironmentId, TerminalAttachInput } from '@t3tools/contracts'
 
 export interface ThreadTerminalSubscriptionIdentity

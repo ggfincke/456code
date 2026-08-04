@@ -1,3 +1,6 @@
+// tests/packages/shared/DrainableWorker.test.ts
+// verify make drainable worker behavior
+
 import { it } from '@effect/vitest'
 import { describe, expect } from 'vite-plus/test'
 import * as Deferred from 'effect/Deferred'

@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/cloud/publicConfig.test.ts
+// verify resolve cloud public config behavior
+
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import {

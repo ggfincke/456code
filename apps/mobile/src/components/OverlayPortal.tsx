@@ -1,7 +1,10 @@
+// apps/mobile/src/components/OverlayPortal.tsx
+// render overlay portal
+
 import { type ReactNode, useEffect, useRef, useState } from 'react'
 import { View } from 'react-native'
 
-// Minimal in-tree portal for Android overlays. AndroidAnchoredMenu projects
+// minimal in-tree portal for Android overlays. AndroidAnchoredMenu projects
 // its dropdown here instead of into an RN Modal: a Modal is a separate native
 // window, so presenting one moves window focus and closes the soft keyboard —
 // which matters for menus anchored to the keyboard-sticky composer pills.
@@ -21,14 +24,14 @@ function emit()
   }
 }
 
-/** Projects children into the app-root OverlayPortalHost. */
+// projects children into the app-root OverlayPortalHost.
 export function OverlayPortal(props: { readonly children: ReactNode })
 {
   const keyRef = useRef<number | null>(null)
   keyRef.current ??= nextKey++
   const key = keyRef.current
 
-  // No dependency array: re-project after every render so the host always
+  // no dependency array: re-project after every render so the host always
   // shows the current content (menus re-render while open — drill-in, theme).
   useEffect(() =>
   {
@@ -48,7 +51,7 @@ export function OverlayPortal(props: { readonly children: ReactNode })
   return null
 }
 
-/** Mounted once at the app root, above the navigation container. */
+// mounted once at the app root, above the navigation container.
 export function OverlayPortalHost()
 {
   const [current, setCurrent] = useState<Entries>(() => new Map())

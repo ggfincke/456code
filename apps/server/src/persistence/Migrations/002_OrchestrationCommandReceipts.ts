@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/002_OrchestrationCommandReceipts.ts
+// apply persistence migration 002 orchestration command receipts
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

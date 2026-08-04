@@ -1,12 +1,11 @@
-/**
- * Optional integration check against a real `grok agent stdio` install.
- * Enable with: T3_GROK_ACP_PROBE=1 bun run test GrokAcpCliProbe
- *
- * The probe assumes either `XAI_API_KEY` is set in the environment or
- * the user has previously run `grok login`. Without credentials the
- * agent's `authenticate` request will fail and the test will surface
- * the error.
- */
+// tests/apps/server/provider/acp/GrokAcpCliProbe.test.ts
+// enable with: T3_GROK_ACP_PROBE=1 bun run test GrokAcpCliProbe
+
+//
+// the probe assumes either `XAI_API_KEY` is set in the environment or
+// the user has previously run `grok login`. Without credentials the
+// agent's `authenticate` request will fail and the test will surface
+// the error.
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -47,9 +46,9 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === '1')('Grok ACP CLI probe', () =
 
       expect(typeof started.sessionId).toBe('string')
 
-      // Modern grok-shell advertises models through the typed
+      // modern grok-shell advertises models through the typed
       // `SessionModelState` field, not via a `configOptions` entry.
-      // If this assertion fails the upstream surface has regressed.
+      // if this assertion fails the upstream surface has regressed.
       const models = result.models
       expect(models).toBeDefined()
       expect(typeof models?.currentModelId).toBe('string')
@@ -66,7 +65,7 @@ describe.runIf(process.env.T3_GROK_ACP_PROBE === '1')('Grok ACP CLI probe', () =
       expect(currentModelId).toBeDefined()
       if (!currentModelId) return
 
-      // No-op switch — selecting the model the session already runs on must
+      // no-op switch — selecting the model the session already runs on must
       // succeed against every Grok build that implements `session/set_model`.
       yield* runtime.setSessionModel(currentModelId)
     }).pipe(Effect.scoped, Effect.provide(NodeServices.layer)),

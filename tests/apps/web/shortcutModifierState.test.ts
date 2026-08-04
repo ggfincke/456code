@@ -1,3 +1,6 @@
+// tests/apps/web/shortcutModifierState.test.ts
+// verify shortcut modifier state behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

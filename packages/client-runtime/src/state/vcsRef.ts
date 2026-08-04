@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/vcsRef.ts
+// manage vcs ref target state
+
 import type { EnvironmentId, VcsRef as ContractVcsRef } from '@t3tools/contracts'
 
 export interface VcsRefTarget

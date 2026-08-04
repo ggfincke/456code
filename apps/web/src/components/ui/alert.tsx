@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/alert.tsx
+// render reusable alert UI primitives
+
 import { cva, type VariantProps } from 'class-variance-authority'
 import { Children, isValidElement } from 'react'
 import type * as React from 'react'

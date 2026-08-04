@@ -1,3 +1,6 @@
+// apps/server/src/project/RepositoryIdentityResolver.ts
+// define repository identity resolver options
+
 import type { RepositoryIdentity } from '@t3tools/contracts'
 import {
   detectSourceControlProviderFromGitRemoteUrl,

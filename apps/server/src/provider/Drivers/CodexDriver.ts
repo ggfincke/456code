@@ -1,28 +1,27 @@
 // apps/server/src/provider/Drivers/CodexDriver.ts
 // creates isolated Codex provider instances and source-bound continuation routes
-/**
- * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
- *
- * A driver is a plain value (not a Context.Service) whose `create()` returns
- * one `ProviderInstance` bundling:
- *   - `snapshot`   — the live `ServerProviderShape` for this instance;
- *   - `adapter`    — the Codex session/turn/approval runtime;
- *   - `textGeneration` — commit/PR/branch/title generation via `codex exec`.
- *
- * Each call to `create()` captures the `codexConfig` argument in closures
- * owned by the returned instance. Two instances created with different
- * `homePath`s (e.g. `codex_personal` + `codex_work`) therefore run with
- * fully independent Codex app-server processes and `CODEX_HOME`
- * environments — no shared mutable state.
- *
- * Resource lifecycle: `create()` runs in a scope handed in by the registry.
- * Closing that scope releases the adapter's child processes, the managed
- * snapshot's refresh fibre, and the text-generation binaries' transient
- * scratch files. The registry uses this to tear down an instance when its
- * `providerInstances` entry disappears or its config changes.
- *
- * @module provider/Drivers/CodexDriver
- */
+
+// CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
+//
+// a driver is a plain value (not a Context.Service) whose `create()` returns
+// one `ProviderInstance` bundling:
+//   - `snapshot`   — the live `ServerProviderShape` for this instance;
+//   - `adapter`    — the Codex session/turn/approval runtime;
+//   - `textGeneration` — commit/PR/branch/title generation via `codex exec`.
+//
+// each call to `create()` captures the `codexConfig` argument in closures
+// owned by the returned instance. Two instances created with different
+// `homePath`s (e.g. `codex_personal` + `codex_work`) therefore run with
+// fully independent Codex app-server processes and `CODEX_HOME`
+// environments — no shared mutable state.
+//
+// resource lifecycle: `create()` runs in a scope handed in by the registry.
+// closing that scope releases the adapter's child processes, the managed
+// snapshot's refresh fibre, and the text-generation binaries' transient
+// scratch files. The registry uses this to tear down an instance when its
+// `providerInstances` entry disappears or its config changes.
+//
+// @module provider/Drivers/CodexDriver
 import { CodexSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
 import * as Duration from 'effect/Duration'
 import * as Crypto from 'effect/Crypto'
@@ -67,11 +66,9 @@ const UPDATE = makePackageManagedProviderMaintenanceResolver({
   nativeUpdate: null,
 })
 
-/**
- * Services the driver needs to materialize an instance. Surfaced as the
- * driver's `R` so the registry layer aggregates these across every
- * registered driver and the runtime satisfies them once.
- */
+// services the driver needs to materialize an instance. Surfaced as the
+// driver's `R` so the registry layer aggregates these across every
+// registered driver and the runtime satisfies them once.
 export type CodexDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -82,12 +79,10 @@ export type CodexDriverEnv =
   | ServerConfig
   | ServerSettingsService
 
-/**
- * Stamp instance identity onto a `ServerProvider` snapshot produced by the
- * driver-kind-only codex helpers. Once `buildServerProvider` in
- * `providerSnapshot.ts` is widened to accept `instanceId`/`driver`, this
- * wrapper disappears.
- */
+// stamp instance identity onto a `ServerProvider` snapshot produced by the
+// driver-kind-only codex helpers. Once `buildServerProvider` in
+// `providerSnapshot.ts` is widened to accept `instanceId`/`driver`, this
+// wrapper disappears.
 const withInstanceIdentity =
   (input: {
     readonly instanceId: ProviderInstance['instanceId']
@@ -172,7 +167,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
       })
       const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv)
 
-      // Build a managed snapshot whose settings never change — mutations come
+      // build a managed snapshot whose settings never change — mutations come
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide `ChildProcessSpawner` so the check fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.

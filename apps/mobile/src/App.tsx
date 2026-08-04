@@ -1,3 +1,6 @@
+// apps/mobile/src/App.tsx
+// compose mobile application providers and navigation
+
 import { BlurTargetView } from 'expo-blur'
 import * as Linking from 'expo-linking'
 import * as SplashScreen from 'expo-splash-screen'
@@ -32,12 +35,12 @@ if (process.env.EXPO_PUBLIC_SHOWCASE === '1')
 
 void SplashScreen.preventAutoHideAsync().catch(() =>
 {
-  // The native module can be unavailable in non-native test environments.
+  // the native module can be unavailable in non-native test environments.
 })
 
 const appLinking = {
   prefixes: [Linking.createURL('/'), 'code456://', 'code456-dev://', 'code456-preview://'],
-  // The Expo dev client launches the app via
+  // the Expo dev client launches the app via
   // <scheme>://expo-development-client/?url=<packager> — that URL addresses
   // the launcher, not app navigation. Without this filter it falls through
   // to the NotFound wildcard route on every dev launch.

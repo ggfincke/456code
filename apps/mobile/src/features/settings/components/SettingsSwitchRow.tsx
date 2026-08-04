@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/components/SettingsSwitchRow.tsx
+// render settings switch row
+
 import type { ComponentProps } from 'react'
 import { Switch, View } from 'react-native'
 

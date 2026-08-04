@@ -1,11 +1,10 @@
-/**
- * ProjectionThreadActivityRepository - Projection repository interface for thread activity.
- *
- * Owns persistence operations for activity timeline entries projected from
- * orchestration events.
- *
- * @module ProjectionThreadActivityRepository
- */
+// apps/server/src/persistence/Services/ProjectionThreadActivities.ts
+// define projection thread activities service contract
+
+// owns persistence operations for activity timeline entries projected from
+// orchestration events.
+//
+// @module ProjectionThreadActivityRepository
 import {
   EventId,
   IsoDateTime,
@@ -49,26 +48,20 @@ export type DeleteProjectionThreadActivitiesInput =
  */
 export interface ProjectionThreadActivityRepositoryShape
 {
-  /**
-   * Insert or replace a projected thread activity row.
-   *
-   * Upserts by `activityId` and JSON-encodes payload.
-   */
+  // insert or replace a projected thread activity row.
+  //
+  // upserts by `activityId` and JSON-encodes payload.
   readonly upsert: (row: ProjectionThreadActivity) => Effect.Effect<void, ProjectionRepositoryError>
 
-  /**
-   * List projected thread activity rows for a thread.
-   *
-   * Returned in ascending runtime sequence order (or creation order when
-   * sequence is unavailable).
-   */
+  // list projected thread activity rows for a thread.
+  //
+  // returned in ascending runtime sequence order (or creation order when
+  // sequence is unavailable).
   readonly listByThreadId: (
     input: ListProjectionThreadActivitiesInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadActivity>, ProjectionRepositoryError>
 
-  /**
-   * Delete projected thread activity rows by thread.
-   */
+  // delete projected thread activity rows by thread.
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadActivitiesInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>

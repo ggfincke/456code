@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/vcsCommandScheduler.ts
+// manage vcs command scheduler state
+
 import type { EnvironmentId } from '@t3tools/contracts'
 
 import { createAtomCommandScheduler, type AtomCommandConcurrency } from './runtime.ts'

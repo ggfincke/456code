@@ -1,3 +1,6 @@
+// apps/web/src/providerSkillSearch.ts
+// search provider skills
+
 import type { ServerProviderSkill } from '@t3tools/contracts'
 import {
   insertRankedSearchResult,

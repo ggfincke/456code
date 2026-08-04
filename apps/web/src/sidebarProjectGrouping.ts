@@ -1,3 +1,6 @@
+// apps/web/src/sidebarProjectGrouping.ts
+// build physical to logical project key map
+
 import { scopeProjectRef } from '@t3tools/client-runtime/environment'
 import type { EnvironmentId, ScopedProjectRef } from '@t3tools/contracts'
 import {
@@ -22,7 +25,7 @@ export interface SidebarProjectSnapshot extends Project
   displayName: string
   groupedProjectCount: number
   environmentPresence: EnvironmentPresence
-  // True iff every non-primary member of this group lives in a
+  // true iff every non-primary member of this group lives in a
   // desktopLocal env (today: the WSL backend). The sidebar uses this
   // to differentiate "lives on this machine but in a sandbox" from
   // "lives on a real remote" so the project header can pick a
@@ -132,7 +135,7 @@ export function buildSidebarProjectSnapshots(input: {
   settings: ProjectGroupingSettings
   primaryEnvironmentId: EnvironmentId | null
   resolveEnvironmentLabel: (environmentId: EnvironmentId) => string | null
-  // Returns true when an env id maps to a desktopLocal saved-env
+  // returns true when an env id maps to a desktopLocal saved-env
   // record (today: the WSL backend). Defaults to "false for every
   // env" so callers that don't care about the distinction get the
   // legacy behavior.

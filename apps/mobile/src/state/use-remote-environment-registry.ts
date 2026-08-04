@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-remote-environment-registry.ts
+// manage set pending connection error through a React hook
+
 import { useAtomValue } from '@effect/atom-react'
 import type { PreparedConnection } from '@t3tools/client-runtime/connection'
 import type { EnvironmentId } from '@t3tools/contracts'

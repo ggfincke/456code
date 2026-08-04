@@ -1,11 +1,10 @@
-/**
- * ProjectionPendingApprovalRepository - Repository interface for pending approvals.
- *
- * Owns persistence operations for projected approval requests awaiting user
- * decisions.
- *
- * @module ProjectionPendingApprovalRepository
- */
+// apps/server/src/persistence/Services/ProjectionPendingApprovals.ts
+// define projection pending approvals service contract
+
+// owns persistence operations for projected approval requests awaiting user
+// decisions.
+//
+// @module ProjectionPendingApprovalRepository
 import {
   ApprovalRequestId,
   IsoDateTime,
@@ -52,34 +51,26 @@ export type DeleteProjectionPendingApprovalInput = typeof DeleteProjectionPendin
  */
 export interface ProjectionPendingApprovalRepositoryShape
 {
-  /**
-   * Insert or replace a projected pending approval row.
-   *
-   * Upserts by `requestId`.
-   */
+  // insert or replace a projected pending approval row.
+  //
+  // upserts by `requestId`.
   readonly upsert: (
     row: ProjectionPendingApproval,
   ) => Effect.Effect<void, ProjectionRepositoryError>
 
-  /**
-   * List pending approvals for a thread.
-   *
-   * Returned in ascending creation order.
-   */
+  // list pending approvals for a thread.
+  //
+  // returned in ascending creation order.
   readonly listByThreadId: (
     input: ListProjectionPendingApprovalsInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionPendingApproval>, ProjectionRepositoryError>
 
-  /**
-   * Read a pending approval row by request id.
-   */
+  // read a pending approval row by request id.
   readonly getByRequestId: (
     input: GetProjectionPendingApprovalInput,
   ) => Effect.Effect<Option.Option<ProjectionPendingApproval>, ProjectionRepositoryError>
 
-  /**
-   * Delete a pending approval row by request id.
-   */
+  // delete a pending approval row by request id.
   readonly deleteByRequestId: (
     input: DeleteProjectionPendingApprovalInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>

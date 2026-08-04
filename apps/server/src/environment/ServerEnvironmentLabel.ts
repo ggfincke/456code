@@ -1,3 +1,6 @@
+// apps/server/src/environment/ServerEnvironmentLabel.ts
+// resolve server environment label
+
 import { HostProcessHostname, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'

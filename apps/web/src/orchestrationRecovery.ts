@@ -1,3 +1,6 @@
+// apps/web/src/orchestrationRecovery.ts
+// derive replay retry decision
+
 export type OrchestrationRecoveryReason =
   'bootstrap' | 'sequence-gap' | 'resubscribe' | 'replay-failed'
 

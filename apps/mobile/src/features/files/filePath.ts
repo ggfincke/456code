@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/filePath.ts
+// define file breadcrumb
+
 import {
   isWorkspaceBrowserPreviewPath,
   isWorkspaceImagePreviewPath,

@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/sidebar.tsx
+// render reusable sidebar UI primitives
+
 import { mergeProps } from '@base-ui/react/merge-props'
 import { useRender } from '@base-ui/react/use-render'
 import { cva, type VariantProps } from 'class-variance-authority'
@@ -105,8 +108,8 @@ function SidebarProvider({
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
 
-  // This is the internal state of the sidebar.
-  // We use openProp and setOpenProp for control from outside the component.
+  // this is the internal state of the sidebar.
+  // we use openProp and setOpenProp for control from outside the component.
   const [_open, _setOpen] = React.useState(defaultOpen)
   const open = openProp ?? _open
   const setOpen = React.useCallback(
@@ -122,7 +125,7 @@ function SidebarProvider({
         _setOpen(openState)
       }
 
-      // This sets the cookie to keep the sidebar state.
+      // this sets the cookie to keep the sidebar state.
       await cookieStore.set({
         expires: Date.now() + SIDEBAR_COOKIE_MAX_AGE * 1000,
         name: SIDEBAR_COOKIE_NAME,
@@ -133,14 +136,14 @@ function SidebarProvider({
     [setOpenProp, open],
   )
 
-  // Helper to toggle the sidebar.
+  // helper to toggle the sidebar.
   const toggleSidebar = React.useCallback(() =>
   {
     return isMobile ? setOpenMobile((open) => !open) : setOpen((open) => !open)
   }, [isMobile, setOpen])
 
-  // We add a state so that we can do data-state="expanded" or "collapsed".
-  // This makes it easier to style the sidebar with Tailwind classes.
+  // we add a state so that we can do data-state="expanded" or "collapsed".
+  // this makes it easier to style the sidebar with Tailwind classes.
   const state = resolveSidebarState({ isMobile, open, openMobile })
 
   const contextValue = React.useMemo<SidebarContextProps>(
@@ -302,7 +305,7 @@ function Sidebar({
             side === 'left'
               ? 'left-0 group-data-[collapsible=offcanvas]:left-[calc(var(--sidebar-width)*-1)]'
               : 'right-0 group-data-[collapsible=offcanvas]:right-[calc(var(--sidebar-width)*-1)]',
-            // Adjust the padding for floating and inset variants.
+            // adjust the padding for floating and inset variants.
             variant === 'floating' || variant === 'inset'
               ? 'p-2 group-data-[collapsible=icon]:w-[calc(var(--sidebar-width-icon)+(--spacing(4))+2px)]'
               : 'group-data-[collapsible=icon]:w-(--sidebar-width-icon) group-data-[side=left]:border-r group-data-[side=right]:border-l',
@@ -608,7 +611,7 @@ function SidebarRail({
     }
     if (storedWidth === null) return
     const clampedWidth = clampSidebarWidth(storedWidth, resolvedResizable)
-    // Hydrate the CSS variable before the browser paints so a restored sidebar
+    // hydrate the CSS variable before the browser paints so a restored sidebar
     // never flashes at the default width first.
     wrapper.style.setProperty('--sidebar-width', `${clampedWidth}px`)
     resolvedResizable.onResize?.(clampedWidth)
@@ -639,7 +642,7 @@ function SidebarRail({
           <button
             aria-label={railLabel}
             className={cn(
-              /* disable pointer events only when offcanvas sidebar is collapsed, that's when the rail sits over the native scrollbar on windows and linux. icon mode stays fully clickable. */
+              // disable pointer events only when offcanvas sidebar is collapsed, that's when the rail sits over the native scrollbar on windows and linux. icon mode stays fully clickable.
               '-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none',
               'in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize',
               '[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize',
@@ -783,7 +786,7 @@ function SidebarGroupAction({ className, render, ...props }: useRender.Component
   const defaultProps = {
     className: cn(
       "absolute top-3.5 right-3 flex aspect-square w-5 items-center justify-center rounded-lg p-0 text-sidebar-foreground outline-hidden ring-ring transition-transform hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
-      // Increases the hit area of the button on mobile.
+      // increases the hit area of the button on mobile.
       'after:-inset-2 after:absolute md:after:hidden',
       'group-data-[collapsible=icon]:hidden',
       className,
@@ -925,7 +928,7 @@ function SidebarMenuAction({
   const defaultProps = {
     className: cn(
       "absolute top-1.5 right-1 flex aspect-square w-5 cursor-pointer items-center justify-center rounded-lg p-0 text-sidebar-foreground outline-hidden ring-ring transition-transform hover:bg-sidebar-row-hover hover:text-sidebar-foreground focus-visible:ring-2 peer-hover/menu-button:text-sidebar-foreground [&>svg:not([class*='size-'])]:size-4 [&>svg]:shrink-0",
-      // Increases the hit area of the button on mobile.
+      // increases the hit area of the button on mobile.
       'after:-inset-2 after:absolute md:after:hidden',
       'peer-data-[size=sm]/menu-button:top-1',
       'peer-data-[size=default]/menu-button:top-1.5',
@@ -974,7 +977,7 @@ function SidebarMenuSkeleton({
   showIcon?: boolean
 })
 {
-  // Random width between 50 to 90%. Intentionally wrapped in useMemo to avoid changing width on every render.
+  // random width between 50 to 90%. Intentionally wrapped in useMemo to avoid changing width on every render.
   const width = React.useMemo(() =>
   {
     return `${Math.floor(Math.random() * 40) + 50}%`

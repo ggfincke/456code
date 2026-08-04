@@ -1,3 +1,6 @@
+// tests/packages/shared/toolActivity.test.ts
+// verify tool activity behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { deriveToolActivityPresentation } from '../../../packages/shared/src/toolActivity.ts'

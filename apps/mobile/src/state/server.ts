@@ -1,3 +1,6 @@
+// apps/mobile/src/state/server.ts
+// manage server environment state
+
 import { createServerEnvironmentAtoms } from '@t3tools/client-runtime/state/server'
 import { createEnvironmentServerConfigsAtom } from '@t3tools/client-runtime/state/shell'
 

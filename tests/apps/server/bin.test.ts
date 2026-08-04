@@ -1,3 +1,6 @@
+// tests/apps/server/bin.test.ts
+// verify bin behavior
+
 // @effect-diagnostics nodeBuiltinImport:off - CLI integration exercises Node HTTP and filesystem boundaries.
 import * as NodeHttp from 'node:http'
 import * as NodeFS from 'node:fs'

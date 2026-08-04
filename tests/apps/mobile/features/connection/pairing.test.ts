@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/connection/pairing.test.ts
+// verify extract pairing url from qr payload behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

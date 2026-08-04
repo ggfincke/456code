@@ -1,10 +1,9 @@
-/**
- * Favicon helpers for the preview tab strip.
- *
- * Uses Google's s2 favicon endpoint (same approach as ami's tab strip).
- * Callers should always render a `<Globe />` fallback when the returned URL
- * fails to load via an `onError` handler.
- */
+// apps/web/src/lib/favicon.ts
+// provide web favicon
+
+// uses Google's s2 favicon endpoint (same approach as ami's tab strip).
+// callers should always render a `<Globe />` fallback when the returned URL
+// fails to load via an `onError` handler.
 const FAVICON_PROVIDER = 'https://www.google.com/s2/favicons'
 
 export function faviconUrlForOrigin(rawUrl: string | null | undefined, size = 32): string | null

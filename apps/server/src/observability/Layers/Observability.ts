@@ -1,3 +1,6 @@
+// apps/server/src/observability/Layers/Observability.ts
+// assemble observability Effect layer
+
 import { httpHeaderRedactionLayer } from '@t3tools/shared/httpObservability'
 import { makeLocalFileTracer, makeTraceSink } from '@t3tools/shared/observability'
 import * as Effect from 'effect/Effect'

@@ -1,3 +1,6 @@
+// tests/apps/web/cloud/dpop.test.ts
+// verify browser d po p proofs behavior
+
 import { verifyDpopProof } from '@t3tools/shared/dpop'
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

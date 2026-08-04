@@ -1,3 +1,6 @@
+// packages/client-runtime/src/environment/descriptor.ts
+// fetch remote environment descriptor
+
 import * as Effect from 'effect/Effect'
 
 import { environmentEndpointUrl } from './endpoint.ts'

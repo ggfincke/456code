@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/PendingApprovalCard.tsx
+// render pending approval card
+
 import type { ApprovalRequestId, ProviderApprovalDecision } from '@t3tools/contracts'
 import { Pressable, View } from 'react-native'
 

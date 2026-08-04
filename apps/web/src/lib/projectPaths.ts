@@ -1,3 +1,6 @@
+// apps/web/src/lib/projectPaths.ts
+// append browse path segment
+
 export {
   appendBrowsePathSegment,
   canNavigateUp,

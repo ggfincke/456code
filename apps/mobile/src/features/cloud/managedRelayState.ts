@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/managedRelayState.ts
+// manage managed relay state
+
 import { useAtomValue } from '@effect/atom-react'
 import {
   createManagedRelayQueryManager,

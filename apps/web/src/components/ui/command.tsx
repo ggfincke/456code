@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/command.tsx
+// render reusable command UI primitives
+
 'use client'
 
 import { Dialog as CommandDialogPrimitive } from '@base-ui/react/dialog'

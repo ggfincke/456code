@@ -1,3 +1,6 @@
+// packages/shared/src/Net.ts
+// define net error
+
 import * as NodeNet from 'node:net'
 
 import * as Data from 'effect/Data'
@@ -29,30 +32,22 @@ const closeServer = (server: NodeNet.Server) =>
   }
   catch
   {
-    // Ignore close failures during cleanup.
+    // ignore close failures during cleanup.
   }
 }
 
 export interface NetServiceShape
 {
-  /**
-   * Returns true when a TCP server can bind to {host, port}.
-   */
+  // returns true when a TCP server can bind to {host, port}.
   readonly canListenOnHost: (port: number, host: string) => Effect.Effect<boolean>
 
-  /**
-   * Checks loopback availability on both IPv4 and IPv6 localhost addresses.
-   */
+  // checks loopback availability on both IPv4 and IPv6 localhost addresses.
   readonly isPortAvailableOnLoopback: (port: number) => Effect.Effect<boolean>
 
-  /**
-   * Reserve an ephemeral loopback port and release it immediately.
-   */
+  // reserve an ephemeral loopback port and release it immediately.
   readonly reserveLoopbackPort: (host?: string) => Effect.Effect<number, NetError>
 
-  /**
-   * Resolve an available listening port, preferring the provided port first.
-   */
+  // resolve an available listening port, preferring the provided port first.
   readonly findAvailablePort: (preferred: number) => Effect.Effect<number, NetError>
 }
 
@@ -66,11 +61,9 @@ export class NetService extends Context.Service<NetService, NetServiceShape>()(
 
 export const make = () =>
 {
-  /**
-   * Returns true when a TCP server can bind to {host, port}.
-   * `EADDRNOTAVAIL` is treated as available so IPv6-absent hosts don't fail
-   * loopback availability checks.
-   */
+  // returns true when a TCP server can bind to {host, port}.
+  // `EADDRNOTAVAIL` is treated as available so IPv6-absent hosts don't fail
+  // loopback availability checks.
   const canListenOnHost = (port: number, host: string): Effect.Effect<boolean> =>
     Effect.callback<boolean>((resume) =>
     {
@@ -167,10 +160,8 @@ export const make = () =>
       )
     })
 
-  /**
-   * Reserve an ephemeral loopback port and release it immediately.
-   * Returns the reserved port number.
-   */
+  // reserve an ephemeral loopback port and release it immediately.
+  // returns the reserved port number.
   const reserveLoopbackPort = (host = '127.0.0.1'): Effect.Effect<number, NetError> =>
     Effect.callback<number, NetError>((resume) =>
     {

@@ -1,3 +1,6 @@
+// tests/apps/server/cli/project.test.ts
+// verify project behavior
+
 import { assert, it } from '@effect/vitest'
 
 import { EnvironmentInternalError } from '@t3tools/contracts'

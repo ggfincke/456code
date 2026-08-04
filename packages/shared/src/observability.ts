@@ -1,3 +1,6 @@
+// packages/shared/src/observability.ts
+// define trace attributes
+
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import type * as Exit from 'effect/Exit'

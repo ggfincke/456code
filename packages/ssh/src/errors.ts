@@ -1,3 +1,6 @@
+// packages/ssh/src/errors.ts
+// define ssh errors
+
 import * as Data from 'effect/Data'
 
 export class SshHostDiscoveryError extends Data.TaggedError('SshHostDiscoveryError')<{

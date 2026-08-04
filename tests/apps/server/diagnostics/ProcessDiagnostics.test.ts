@@ -1,3 +1,6 @@
+// tests/apps/server/diagnostics/ProcessDiagnostics.test.ts
+// verify process diagnostics behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'

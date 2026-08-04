@@ -1,3 +1,6 @@
+// apps/desktop/src/electron/ElectronMenu.ts
+// define electron menu position
+
 import type { ContextMenuItem } from '@t3tools/contracts'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Context from 'effect/Context'
@@ -76,8 +79,8 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
       continue
     }
 
-    // Header items are decorative section labels for the web fallback only —
-    // Electron's native menu has no equivalent affordance, so we skip them.
+    // header items are decorative section labels for the web fallback only —
+    // electron's native menu has no equivalent affordance, so we skip them.
     if (sourceItem.header === true)
     {
       continue
@@ -106,7 +109,7 @@ function normalizeContextMenuItems(source: readonly ContextMenuItem[]): ContextM
   return normalizedItems
 }
 
-// Renderer positions arrive in CSS pixels; popup() expects window points, so
+// renderer positions arrive in CSS pixels; popup() expects window points, so
 // page zoom must be factored in or menus drift proportionally to their
 // distance from the window origin.
 const normalizePosition = (

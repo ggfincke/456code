@@ -1,3 +1,6 @@
+// packages/shared/src/dpop.ts
+// compute dpop jwk thumbprint
+
 import { p256 } from '@noble/curves/nist'
 import { sha256 } from '@noble/hashes/sha2'
 import * as Encoding from 'effect/Encoding'

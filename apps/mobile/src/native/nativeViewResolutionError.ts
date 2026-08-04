@@ -1,3 +1,6 @@
+// apps/mobile/src/native/nativeViewResolutionError.ts
+// define native errors
+
 import * as Schema from 'effect/Schema'
 
 export class NativeViewResolutionError extends Schema.TaggedErrorClass<NativeViewResolutionError>()(

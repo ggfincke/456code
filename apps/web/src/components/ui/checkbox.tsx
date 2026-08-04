@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/checkbox.tsx
+// render reusable checkbox UI primitives
+
 'use client'
 
 import { Checkbox as CheckboxPrimitive } from '@base-ui/react/checkbox'

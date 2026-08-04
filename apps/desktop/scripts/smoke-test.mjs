@@ -1,3 +1,6 @@
+// apps/desktop/scripts/smoke-test.mjs
+// run the smoke test repository workflow
+
 import * as NodeChildProcess from 'node:child_process'
 import * as NodePath from 'node:path'
 import * as NodeURL from 'node:url'

@@ -1,3 +1,6 @@
+// apps/server/src/http.ts
+// determine whether loopback hostname
+
 import Mime from '@effect/platform-node/Mime'
 import {
   AuthOrchestrationOperateScope,
@@ -46,7 +49,7 @@ export const browserApiCorsLayer = Layer.unwrap(
   {
     const config = yield* ServerConfig.ServerConfig
     const devOrigin = config.devUrl?.origin
-    // Dev uses credentialed requests from Vite or the Electron custom origin, so both must be
+    // dev uses credentialed requests from Vite or the Electron custom origin, so both must be
     // explicit. Packaged desktop omits credentials and uses Effect's default wildcard origin.
     return HttpRouter.cors({
       ...(devOrigin

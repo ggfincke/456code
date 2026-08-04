@@ -1,5 +1,6 @@
 // tests/apps/web/importedSessionWorkLog.test.ts
 // verifies imported parser activities render through work-log conventions
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFSP from 'node:fs/promises'

@@ -1,3 +1,6 @@
+// apps/web/src/hooks/useCopyToClipboard.ts
+// manage clipboard api unavailable error through a React hook
+
 import * as React from 'react'
 import * as Schema from 'effect/Schema'
 
@@ -112,7 +115,7 @@ export function useCopyToClipboard<TContext = void>({
     )
   }, [])
 
-  // Cleanup timeout on unmount
+  // cleanup timeout on unmount
   React.useEffect(() =>
   {
     return (): void =>

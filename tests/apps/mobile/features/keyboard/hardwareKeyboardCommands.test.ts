@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/keyboard/hardwareKeyboardCommands.test.ts
+// verify parse active thread path behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { parseActiveThreadPath } from '../../../../../apps/mobile/src/features/keyboard/hardwareKeyboardCommands'

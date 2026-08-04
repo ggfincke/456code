@@ -1,3 +1,6 @@
+// apps/web/src/state/primaryEnvironment.ts
+// manage primary environment id atom state
+
 import { Atom } from 'effect/unstable/reactivity'
 
 import { environmentCatalog } from '../connection/catalog'

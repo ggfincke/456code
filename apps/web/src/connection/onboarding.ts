@@ -1,3 +1,6 @@
+// apps/web/src/connection/onboarding.ts
+// expose connect pairing
+
 import { ConnectionOnboarding } from '@t3tools/client-runtime/connection'
 import {
   createAtomCommandScheduler,

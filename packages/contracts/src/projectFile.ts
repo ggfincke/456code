@@ -1,15 +1,18 @@
+// packages/contracts/src/projectFile.ts
+// define project file contracts
+
 import * as Schema from 'effect/Schema'
 import * as SchemaTransformation from 'effect/SchemaTransformation'
 
 import { ProjectScriptIcon } from './orchestration.ts'
 
-/** File name of the checked-in 456code project file, resolved at the workspace root. */
+// file name of the checked-in 456code project file, resolved at the workspace root.
 export const PROJECT_FILE_NAME = '456code.json'
 
 const PROJECT_FILE_PATH_MAX_LENGTH = 512
 const PROJECT_FILE_MAX_SCRIPTS = 50
 
-// Annotations go on the encoded (string) side so they survive into the
+// annotations go on the encoded (string) side so they survive into the
 // published JSON Schema; decoding still trims and re-validates non-emptiness.
 const trimmedNonEmpty = (annotations: { readonly description: string }, maxLength?: number) =>
 {

@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/Migrations/031_AuthAuthorizationScopes.test.ts
+// verify 031 auth authorization scopes behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

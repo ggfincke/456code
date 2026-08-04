@@ -1,3 +1,6 @@
+// tests/packages/contracts/relay.test.ts
+// verify relay api security behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import * as OpenApi from 'effect/unstable/httpapi/OpenApi'
 

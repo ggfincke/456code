@@ -1,3 +1,6 @@
+// apps/mobile/src/features/archive/useArchivedThreadSnapshots.ts
+// manage refresh archived threads for environment through a React hook
+
 import { useAtomValue } from '@effect/atom-react'
 import {
   type ArchivedSnapshotEntry,

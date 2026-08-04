@@ -1,3 +1,6 @@
+// packages/shared/src/advertisedEndpoint.ts
+// normalize http base url
+
 import type {
   AdvertisedEndpoint,
   AdvertisedEndpointHostedHttpsCompatibility,

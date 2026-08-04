@@ -1,3 +1,6 @@
+// apps/mobile/src/persistence/imperative.ts
+// load saved connections
+
 import * as Effect from 'effect/Effect'
 
 import { runtime } from '../lib/runtime'

@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/033_ProjectionThreadsSettled.ts
+// apply persistence migration 033 projection threads settled
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

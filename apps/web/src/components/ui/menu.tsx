@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/menu.tsx
+// render reusable menu UI primitives
+
 'use client'
 
 import { Menu as MenuPrimitive } from '@base-ui/react/menu'

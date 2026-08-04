@@ -1,3 +1,6 @@
+// apps/web/src/components/sidebar/SidebarProviderUpdatePill.tsx
+// render sidebar provider update pill
+
 import { useNavigate } from '@tanstack/react-router'
 import { useAtomValue } from '@effect/atom-react'
 import type { ServerProvider } from '@t3tools/contracts'

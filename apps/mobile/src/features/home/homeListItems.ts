@@ -1,17 +1,20 @@
+// apps/mobile/src/features/home/homeListItems.ts
+// expose home initial visible threads
+
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 
 import type { PendingNewTask } from '../../state/use-pending-new-tasks'
 import type { HomeThreadGroup } from './homeThreadList'
 
-/** Threads shown per project before the "Show more" affordance appears. */
+// threads shown per project before the "Show more" affordance appears.
 export const HOME_INITIAL_VISIBLE_THREADS = 6
-/** Additional threads revealed per "Show more" tap. */
+// additional threads revealed per "Show more" tap.
 export const HOME_SHOW_MORE_STEP = 10
 
 export interface HomeGroupDisplayState
 {
   readonly collapsed: boolean
-  /** How many threads are currently revealed (clamped to the group size). */
+  // how many threads are currently revealed (clamped to the group size).
   readonly visibleCount: number
 }
 
@@ -50,9 +53,9 @@ export interface HomeShowMoreListItem
   readonly type: 'show-more'
   readonly key: string
   readonly groupKey: string
-  /** Threads still hidden. 0 means the group is fully expanded. */
+  // threads still hidden. 0 means the group is fully expanded.
   readonly hiddenCount: number
-  /** Whether more than the initial count is revealed, so "Show less" applies. */
+  // whether more than the initial count is revealed, so "Show less" applies.
   readonly canShowLess: boolean
 }
 
@@ -83,13 +86,11 @@ export function nextGroupDisplayState(
   }
 }
 
-/**
- * Structural equality for list items. Item objects are rebuilt on every
- * collapse/show-more toggle; without this the lists would consider every
- * mounted row changed and re-render all of them (each carrying a swipeable +
- * a vcs-status subscription). Group/thread references are stable across
- * toggles.
- */
+// structural equality for list items. Item objects are rebuilt on every
+// collapse/show-more toggle; without this the lists would consider every
+// mounted row changed and re-render all of them (each carrying a swipeable +
+// a vcs-status subscription). Group/thread references are stable across
+// toggles.
 export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem): boolean
 {
   switch (item.type)
@@ -126,9 +127,7 @@ export function homeListItemsAreEqual(previous: HomeListItem, item: HomeListItem
 export function buildHomeListLayout(input: {
   readonly groups: ReadonlyArray<HomeThreadGroup>
   readonly displayStates: ReadonlyMap<string, HomeGroupDisplayState>
-  /**
-   * When searching, pagination is suspended so every match stays visible.
-   */
+  // when searching, pagination is suspended so every match stays visible.
   readonly showAllThreads?: boolean
 }): HomeListLayout
 {
@@ -155,7 +154,7 @@ export function buildHomeListLayout(input: {
     }
 
     const totalCount = group.threads.length
-    // Default to the group's recent-activity window (last few days, or a small
+    // default to the group's recent-activity window (last few days, or a small
     // fallback for stale projects), capped at the initial page size. Until the
     // user taps "Show more", older threads stay hidden to save vertical space;
     // "Show less" resets visibleCount to the initial constant, which lands back
@@ -177,7 +176,7 @@ export function buildHomeListLayout(input: {
     const hiddenCount = totalCount - visibleCount
     const hasShowMoreRow = !input.showAllThreads && totalCount > baselineCount
 
-    // Pending (unsent) tasks lead the group and are never paginated away.
+    // pending (unsent) tasks lead the group and are never paginated away.
     for (const [pendingIndex, pendingTask] of group.pendingTasks.entries())
     {
       items.push({
@@ -208,7 +207,7 @@ export function buildHomeListLayout(input: {
         key: `show-more:${group.key}`,
         groupKey: group.key,
         hiddenCount,
-        // Compare against the group's own baseline, not the global page size:
+        // compare against the group's own baseline, not the global page size:
         // stale projects start below HOME_INITIAL_VISIBLE_THREADS, and "Show
         // less" must be offered as soon as anything beyond the baseline shows.
         canShowLess: visibleCount > baselineCount,

@@ -1,3 +1,6 @@
+// tests/apps/server/provider/acp/AcpRuntimeModel.test.ts
+// verify acp runtime model behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import type * as EffectAcpSchema from 'effect-acp/schema'

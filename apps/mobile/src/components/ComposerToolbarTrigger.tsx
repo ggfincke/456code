@@ -1,3 +1,6 @@
+// apps/mobile/src/components/ComposerToolbarTrigger.tsx
+// render composer toolbar trigger
+
 import type { ComponentProps, ReactNode } from 'react'
 import { useCallback, useMemo, useState } from 'react'
 import {
@@ -189,7 +192,7 @@ export function ComposerToolbarButton(props: {
       disabled={props.disabled}
       onPress={props.onPress}
       className={cn(
-        // Default width cap lives in the class chain (not the inline style)
+        // default width cap lives in the class chain (not the inline style)
         // so callers can lift it with max-w-full — flex-filling pills in the
         // thread composer stretch to the row's edge. The numeric maxWidth
         // prop still wins via the inline style below.

@@ -1,3 +1,6 @@
+// apps/server/src/textGeneration/TextGenerationPolicy.ts
+// expose text generation policy kind
+
 import * as Schema from 'effect/Schema'
 
 export const TextGenerationPolicyKind = Schema.Literals([

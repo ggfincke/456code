@@ -1,3 +1,6 @@
+// tests/apps/desktop/settings/DesktopClientSettings.diagnostics.test.ts
+// verify desktop client settings diagnostics behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

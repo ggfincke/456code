@@ -1,3 +1,6 @@
+// oxlint-plugin-456code/test/utils.ts
+// verify test behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as Data from 'effect/Data'

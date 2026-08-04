@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/methods/serverExposure.ts
+// manage get server exposure state
+
 import {
   AdvertisedEndpoint,
   DesktopServerExposureModeSchema,

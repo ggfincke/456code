@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/model.ts
+// implement primary connection target
+
 import { EnvironmentId } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 

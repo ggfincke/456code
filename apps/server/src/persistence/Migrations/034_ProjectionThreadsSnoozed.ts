@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/034_ProjectionThreadsSnoozed.ts
+// apply persistence migration 034 projection threads snoozed
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

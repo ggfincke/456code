@@ -1,3 +1,6 @@
+// apps/web/src/lib/diffCollapse.ts
+// determine whether all diff files collapsed
+
 export function areAllDiffFilesCollapsed(
   fileKeys: ReadonlyArray<string>,
   collapsedFileKeys: ReadonlySet<string>,

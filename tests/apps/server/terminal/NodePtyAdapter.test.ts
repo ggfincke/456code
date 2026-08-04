@@ -1,3 +1,6 @@
+// tests/apps/server/terminal/NodePtyAdapter.test.ts
+// verify node pty adapter behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'

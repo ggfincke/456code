@@ -1,3 +1,6 @@
+// packages/effect-acp/src/_internal/stdio.ts
+// create child stdio
+
 import * as Queue from 'effect/Queue'
 import * as Stream from 'effect/Stream'
 import * as Cause from 'effect/Cause'

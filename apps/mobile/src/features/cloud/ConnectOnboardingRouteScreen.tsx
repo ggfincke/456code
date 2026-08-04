@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/ConnectOnboardingRouteScreen.tsx
+// render the connect onboarding route screen route
+
 import { NativeHeaderToolbar } from '../../native/StackHeader'
 import { useAuth } from '@clerk/expo'
 import { StackActions, useNavigation } from '@react-navigation/native'
@@ -15,18 +18,16 @@ import { useConnectionController } from '../connection/useConnectionController'
 import { optOutOfConnectOnboarding } from './connectOnboardingOptOut'
 import { hasCloudPublicConfig } from './publicConfig'
 
-/**
- * Post-sign-in onboarding sheet for cloud relay access. Mobile never publishes
- * environments itself — it consumes ones published elsewhere — so this simply
- * surfaces the account's cloud environments right after sign-in so every
- * device can be connected in one go. It shows on every sign-in: sign-out
- * clears the connected environments, so each new session starts from zero.
- */
+// post-sign-in onboarding sheet for cloud relay access. Mobile never publishes
+// environments itself — it consumes ones published elsewhere — so this simply
+// surfaces the account's cloud environments right after sign-in so every
+// device can be connected in one go. It shows on every sign-in: sign-out
+// clears the connected environments, so each new session starts from zero.
 export function ConnectOnboardingRouteScreen()
 {
   const navigation = useNavigation()
 
-  // The route is deep-linkable; without cloud config the sheet would present
+  // the route is deep-linkable; without cloud config the sheet would present
   // empty with no chrome to dismiss it, so bail back out instead.
   useEffect(() =>
   {
@@ -59,7 +60,7 @@ function ConfiguredConnectOnboardingRouteScreen()
     cloudEnvironments: null,
   })
 
-  // Pull-to-refresh tracks its own spinner instead of discovery's refreshing
+  // pull-to-refresh tracks its own spinner instead of discovery's refreshing
   // flag, so background refreshes (e.g. the sign-in one) don't yank the
   // content down.
   const [isPullRefreshing, setIsPullRefreshing] = useState(false)
@@ -78,7 +79,7 @@ function ConfiguredConnectOnboardingRouteScreen()
     navigation.goBack()
   }, [navigation])
 
-  // Persist before dismissing so a quick sign-out/sign-in cannot race ahead
+  // persist before dismissing so a quick sign-out/sign-in cannot race ahead
   // of the preference write; the write is a local secure-store update.
   const handleDontShowAgain = useCallback(() =>
   {

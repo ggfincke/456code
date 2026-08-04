@@ -1,3 +1,6 @@
+// apps/mobile/src/features/layout/AdaptiveWorkspaceLayout.tsx
+// render adaptive workspace layout
+
 import type {
   EnvironmentProject,
   EnvironmentThreadShell,
@@ -53,14 +56,12 @@ interface AdaptiveWorkspaceContextValue
   readonly fileInspector: FileInspectorPaneLayout
   readonly primarySidebarSearchQuery: string
   readonly activateAuxiliaryPaneRole: (role: WorkspaceAuxiliaryPaneRole) => () => void
-  /**
-   * Route screens hand their inspector pane content to the workspace so it
-   * renders BESIDE the navigator (outside the native stack header) instead of
-   * inside the route. Returns a deactivate callback: the pane animates closed
-   * (content kept mounted for the exit transition) unless a newer
-   * registration already took over — stale deactivates never clobber it.
-   * Prefer useRegisterWorkspaceInspector over calling this directly.
-   */
+  // route screens hand their inspector pane content to the workspace so it
+  // renders BESIDE the navigator (outside the native stack header) instead of
+  // inside the route. Returns a deactivate callback: the pane animates closed
+  // (content kept mounted for the exit transition) unless a newer
+  // registration already took over — stale deactivates never clobber it.
+  // prefer useRegisterWorkspaceInspector over calling this directly.
   readonly registerWorkspaceInspector: (render: () => ReactNode) => () => void
   readonly setPrimarySidebarSearchQuery: (query: string) => void
   readonly showAuxiliaryPane: (role: WorkspaceAuxiliaryPaneRole) => void
@@ -108,26 +109,24 @@ export function useAdaptiveWorkspacePaneRole(role: WorkspaceAuxiliaryPaneRole)
   )
 }
 
-/**
- * Register this screen's inspector pane content with the workspace column.
- *
- * The column renders BESIDE the navigator — outside any screen — so the
- * registering screen's navigation and route contexts are captured here and
- * re-provided around the portal content. Without them, useNavigation/useRoute
- * inside the pane (e.g. GitOverviewSheet via useThreadSelection) throw
- * "Couldn't find a route object".
- *
- * Registration is FOCUS-scoped, driven by navigation events rather than the
- * screen's own render cycle: react-native-screens freezes blurred screens, so
- * a cleanup that depends on the blurred subtree re-rendering never runs and
- * would leak the pane into the next route. Blur deactivates the pane (it
- * animates closed, or is replaced seamlessly when the next route registers in
- * the same commit); focus re-registers it.
- */
+// register this screen's inspector pane content with the workspace column.
+//
+// the column renders BESIDE the navigator — outside any screen — so the
+// registering screen's navigation and route contexts are captured here and
+// re-provided around the portal content. Without them, useNavigation/useRoute
+// inside the pane (e.g. GitOverviewSheet via useThreadSelection) throw
+// "Couldn't find a route object".
+//
+// registration is FOCUS-scoped, driven by navigation events rather than the
+// screen's own render cycle: react-native-screens freezes blurred screens, so
+// a cleanup that depends on the blurred subtree re-rendering never runs and
+// would leak the pane into the next route. Blur deactivates the pane (it
+// animates closed, or is replaced seamlessly when the next route registers in
+// the same commit); focus re-registers it.
 export function useRegisterWorkspaceInspector(render: (() => ReactNode) | undefined)
 {
   const { registerWorkspaceInspector } = useAdaptiveWorkspaceLayout()
-  // Raw context values (not the useNavigation/useRoute wrappers) so the
+  // raw context values (not the useNavigation/useRoute wrappers) so the
   // portal re-provides exactly what this screen sees.
   const navigation = use(NavigationContext)
   const route = use(NavigationRouteContext)
@@ -160,7 +159,7 @@ export function useRegisterWorkspaceInspector(render: (() => ReactNode) | undefi
     deactivateRef.current = registerWorkspaceInspector(wrappedRenderRef.current)
   }, [registerWorkspaceInspector])
 
-  // Focus lifecycle. Blur/focus events fire even when the blurred subtree is
+  // focus lifecycle. Blur/focus events fire even when the blurred subtree is
   // frozen (events are navigation-driven, renders are not).
   useFocusEffect(
     useCallback(() =>
@@ -175,7 +174,7 @@ export function useRegisterWorkspaceInspector(render: (() => ReactNode) | undefi
     }, [syncRegistration]),
   )
 
-  // Content changes while focused re-register in place.
+  // content changes while focused re-register in place.
   useEffect(() =>
   {
     if (focusedRef.current)
@@ -184,7 +183,7 @@ export function useRegisterWorkspaceInspector(render: (() => ReactNode) | undefi
     }
   }, [syncRegistration, wrappedRender])
 
-  // Unmount: hand the pane back (owner-guarded, so a route that already
+  // unmount: hand the pane back (owner-guarded, so a route that already
   // took over is unaffected).
   useEffect(
     () => () =>
@@ -246,7 +245,7 @@ function AdaptiveWorkspaceLayoutContent(
     useState<WorkspaceAuxiliaryPaneRole | null>(null)
   const baseLayout = useMemo(() => deriveLayout({ width, height }), [height, width])
   const layout = baseLayout
-  // In split layouts the sidebar IS the thread list — it renders on every
+  // in split layouts the sidebar IS the thread list — it renders on every
   // route, including Home (which shows an empty-detail pane instead of the
   // compact list).
   const shouldRenderPrimarySidebar = layout.usesSplitView
@@ -316,7 +315,7 @@ function AdaptiveWorkspaceLayoutContent(
       return null
     }
   }, [environmentId, threadId])
-  // Wrapped in an object: bare functions in useState would be treated as
+  // wrapped in an object: bare functions in useState would be treated as
   // lazy initializers/updaters. `active: false` keeps the outgoing route's
   // content mounted so the pane can animate closed (or be replaced
   // seamlessly by the next route's registration in the same commit).
@@ -333,7 +332,7 @@ function AdaptiveWorkspaceLayoutContent(
 
     return () =>
     {
-      // During a push/replace the outgoing screen deactivates AFTER the
+      // during a push/replace the outgoing screen deactivates AFTER the
       // incoming screen registered — only the current owner may deactivate.
       if (workspaceInspectorOwner.current !== owner)
       {
@@ -342,7 +341,7 @@ function AdaptiveWorkspaceLayoutContent(
       setWorkspaceInspector((current) => (current === null ? null : { ...current, active: false }))
     }
   }, [])
-  // Once the close animation settles, drop the stale content entirely.
+  // once the close animation settles, drop the stale content entirely.
   const handleWorkspaceInspectorClosed = useCallback(() =>
   {
     setWorkspaceInspector((current) => (current !== null && !current.active ? null : current))
@@ -469,7 +468,7 @@ function AdaptiveWorkspaceLayoutContent(
     navigation.navigate('SettingsSheet', { screen: 'Settings' })
   }, [navigation])
 
-  // Minted here (root stack navigation) so the sidebar pane stays free of
+  // minted here (root stack navigation) so the sidebar pane stays free of
   // navigation hooks — on iOS it renders inside an independent nav tree.
   const handleOpenEnvironmentSettings = useCallback(() =>
   {
@@ -504,11 +503,11 @@ function AdaptiveWorkspaceLayoutContent(
     width: renderedSidebarWidth.value,
   }))
 
-  // Freeze the content pane at its SETTLED width while the side panes
+  // freeze the content pane at its SETTLED width while the side panes
   // animate. The navigator (native header + markdown feed) lays out ONCE per
   // pane toggle instead of re-measuring on every animation frame — the
   // animating columns merely clip/reveal it over a matching background.
-  // Continuously re-wrapping the chat feed was the main source of dropped
+  // continuously re-wrapping the chat feed was the main source of dropped
   // frames during sidebar/inspector transitions.
   const inspectorColumnTargetWidth =
     workspaceInspector !== null && workspaceInspector.active && panes.auxiliaryPaneVisible

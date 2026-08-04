@@ -1,3 +1,6 @@
+// apps/web/src/components/ProviderUpdatePrimaryNotification.tsx
+// render provider update primary notification
+
 import { useNavigate } from '@tanstack/react-router'
 import { useAtomValue } from '@effect/atom-react'
 import { DownloadIcon } from 'lucide-react'
@@ -106,11 +109,9 @@ function isTerminalProviderUpdateToastView(view: ProviderUpdateToastView)
   return view.phase === 'failed' || view.phase === 'unchanged' || view.phase === 'succeeded'
 }
 
-/**
- * The single-prompt provider update notification used when there is only one
- * local environment (no WSL backend). Non-WSL users see exactly this flow — the
- * per-environment split is gated behind WSL presence.
- */
+// the single-prompt provider update notification used when there is only one
+// local environment (no WSL backend). Non-WSL users see exactly this flow — the
+// per-environment split is gated behind WSL presence.
 export function ProviderUpdatePrimaryNotification()
 {
   const navigate = useNavigate()
@@ -123,7 +124,7 @@ export function ProviderUpdatePrimaryNotification()
   const { dismissedNotificationKeys, dismissNotificationKey } =
     useDismissedProviderUpdateNotificationKeys()
 
-  // If this flow unmounts (e.g. a WSL backend appears and we switch to the
+  // if this flow unmounts (e.g. a WSL backend appears and we switch to the
   // per-environment popover), close any prompt it owns so it does not linger.
   useEffect(() =>
   {

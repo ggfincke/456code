@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-terminal/android/src/main/java/expo/modules/code456terminal/TerminalFrame.kt
+// models decoded terminal frame data
 package expo.modules.code456terminal
 
 import java.nio.ByteBuffer

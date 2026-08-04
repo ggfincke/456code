@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/useNativeReviewDiffBridge.ts
+// manage native review diff bridge through a React hook
+
 import { useCallback, useMemo, useState } from 'react'
 import type { NativeSyntheticEvent } from 'react-native'
 

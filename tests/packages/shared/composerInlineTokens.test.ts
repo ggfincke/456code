@@ -1,3 +1,6 @@
+// tests/packages/shared/composerInlineTokens.test.ts
+// verify collect composer inline tokens behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { collectComposerInlineTokens } from '../../../packages/shared/src/composerInlineTokens.ts'

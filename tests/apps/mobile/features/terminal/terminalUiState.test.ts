@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/terminal/terminalUiState.test.ts
+// verify terminal ui state behavior
+
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 

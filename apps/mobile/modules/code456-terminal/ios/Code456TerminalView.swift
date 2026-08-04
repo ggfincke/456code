@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-terminal/ios/Code456TerminalView.swift
+// hosts the Ghostty terminal surface on iOS
 import ExpoModulesCore
 import Foundation
 import GhosttyKit
@@ -32,7 +34,7 @@ private enum GhosttyRuntime {
 /// responder press callbacks. Registered key commands are matched deterministically
 /// before that happens.
 private enum TerminalHardwareKeyEncoder {
-  /// Characters that produce a control byte when combined with Ctrl.
+  // characters that produce a control byte when combined with Ctrl
   private static let controlInputs = "abcdefghijklmnopqrstuvwxyz@[\\]^_-? "
 
   static func makeKeyCommands(action: Selector) -> [UIKeyCommand] {
@@ -120,8 +122,7 @@ private enum TerminalHardwareKeyEncoder {
 }
 
 private enum TerminalInputSequence {
-  /// Terminal Enter is carriage return. Sending line feed instead is Ctrl+J,
-  /// which raw-mode TUIs may interpret as the literal J key.
+  // terminal Enter is carriage return; line feed is Ctrl+J and may reach raw-mode TUIs as J
   static let carriageReturn = "\r"
 
   static func normalizingReturn(_ input: String) -> String {
@@ -378,7 +379,7 @@ public final class Code456TerminalView: ExpoView, UITextFieldDelegate {
 
   public func textField(_ textField: UITextField, shouldChangeCharactersIn range: NSRange, replacementString string: String) -> Bool {
     if !string.isEmpty {
-      // Some software keyboards deliver Return through this delegate instead of
+      // some software keyboards deliver Return through this delegate instead of
       // textFieldShouldReturn, so normalize that path too.
       emitInput(TerminalInputSequence.normalizingReturn(string))
       return false

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/nativeReviewDiffAdapter.ts
+// create native review diff style
+
 import type { NativeReviewDiffRow, NativeReviewDiffTheme } from '../diffs/nativeReviewDiffSurface'
 import type { NativeReviewDiffFile, NativeReviewDiffLanguage } from '../diffs/nativeReviewDiffTypes'
 import * as Arr from 'effect/Array'
@@ -124,7 +127,7 @@ export function createNativeReviewDiffTheme(
   if (scheme === 'dark')
   {
     return {
-      // Match the app surface (--color-sheet) so code views blend with the rest of
+      // match the app surface (--color-sheet) so code views blend with the rest of
       // the app instead of using a distinct code-editor background.
       background: '#0e0e0e',
       text: terminalTheme.foreground,
@@ -143,7 +146,7 @@ export function createNativeReviewDiffTheme(
   }
 
   return {
-    // Match the app surface (--color-sheet) so code views blend with the rest of the
+    // match the app surface (--color-sheet) so code views blend with the rest of the
     // app instead of using a distinct code-editor background.
     background: '#f2f2f7',
     text: '#070707',
@@ -515,11 +518,9 @@ export function buildNativeReviewDiffData(
   }
 }
 
-/**
- * Reuses the expensive flattened native row model across React development
- * render probes and unrelated draft updates. Only the latest comment version
- * is retained for each parsed diff so editing a comment cannot grow the cache.
- */
+// reuses the expensive flattened native row model across React development
+// render probes and unrelated draft updates. Only the latest comment version
+// is retained for each parsed diff so editing a comment cannot grow the cache.
 export function getCachedNativeReviewDiffData(
   input: BuildNativeReviewDiffDataInput,
 ): NativeReviewDiffData

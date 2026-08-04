@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/useDiscoveredLocalServers.ts
+// manage previewable server through a React hook
+
 import type { DiscoveredLocalServer } from '@t3tools/contracts'
 import { isLoopbackHost } from '@t3tools/shared/preview'
 import { useMemo } from 'react'
@@ -9,10 +12,8 @@ import { useDiscoveredPorts } from '~/portDiscoveryState'
 export interface PreviewableServer extends DiscoveredLocalServer
 {
   source: 'scanner' | 'configured' | 'recent'
-  /**
-   * True when the port scanner currently sees this server listening. A
-   * `configured` entry can also be `listening` when the scan enriched it.
-   */
+  // true when the port scanner currently sees this server listening. A
+  // `configured` entry can also be `listening` when the scan enriched it.
   listening: boolean
 }
 
@@ -23,10 +24,8 @@ interface UseDiscoveredLocalServersInput
   recentlySeenUrls?: ReadonlyArray<string> | undefined
 }
 
-/**
- * Merge the environment-level port snapshot with configured / recently-seen
- * URLs and return a stable sorted list.
- */
+// merge the environment-level port snapshot with configured / recently-seen
+// URLs and return a stable sorted list.
 export function useDiscoveredLocalServers(
   input: UseDiscoveredLocalServersInput,
 ): ReadonlyArray<PreviewableServer>
@@ -79,7 +78,7 @@ export function mergeServers(input: {
     const existing = seen.get(key)
     if (existing)
     {
-      // Enrich a configured entry with live process metadata; flip
+      // enrich a configured entry with live process metadata; flip
       // `listening` so it pulses green like a scanner-discovered entry.
       seen.set(key, {
         ...existing,

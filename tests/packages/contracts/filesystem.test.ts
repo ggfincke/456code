@@ -1,3 +1,6 @@
+// tests/packages/contracts/filesystem.test.ts
+// verify filesystem browse error behavior
+
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vite-plus/test'
 

@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/PanelLayoutControls.tsx
+// render panel layout controls
+
 import { Maximize2Icon, Minimize2Icon, PanelBottomIcon, PanelRightIcon } from 'lucide-react'
 import { memo } from 'react'
 

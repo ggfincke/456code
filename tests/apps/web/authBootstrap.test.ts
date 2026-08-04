@@ -1,3 +1,6 @@
+// tests/apps/web/authBootstrap.test.ts
+// verify resolve initial server auth gate state behavior
+
 import {
   EnvironmentAuthInvalidError,
   type AuthBrowserSessionResult,

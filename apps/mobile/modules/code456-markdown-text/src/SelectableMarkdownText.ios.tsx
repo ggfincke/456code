@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/SelectableMarkdownText.ios.tsx
+// render selectable markdown text ios
+
 import { useMemo } from 'react'
 import { View } from 'react-native'
 import { parseMarkdownWithOptions } from 'react-native-nitro-markdown/headless'
@@ -62,7 +65,7 @@ export function SelectableMarkdownText({
   }, [markdown, preserveSoftBreaks, skills])
 
   return (
-    // A percentage width here creates a cyclic intrinsic measurement inside
+    // a percentage width here creates a cyclic intrinsic measurement inside
     // shrink-to-fit containers such as user-message bubbles. Yoga then gives
     // the native text node an unbounded second pass and the parent only clips
     // the resulting single-line width instead of reflowing it.

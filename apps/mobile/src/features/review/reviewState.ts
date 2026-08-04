@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewState.ts
+// manage review state
+
 import { useAtomValue } from '@effect/atom-react'
 
 import type { EnvironmentId, ReviewDiffPreviewSource, ThreadId } from '@t3tools/contracts'

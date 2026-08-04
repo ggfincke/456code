@@ -1,3 +1,6 @@
+// apps/mobile/src/components/LoadingStrip.tsx
+// render loading strip
+
 import { useEffect, useState } from 'react'
 import { View } from 'react-native'
 import Animated, {

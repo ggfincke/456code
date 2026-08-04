@@ -1,3 +1,6 @@
+// apps/web/src/lib/projectScriptKeybindings.ts
+// decode project script keybinding rule
+
 import {
   KeybindingRule as KeybindingRuleSchema,
   type KeybindingCommand,

@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/field.tsx
+// render reusable field UI primitives
+
 'use client'
 
 import { Field as FieldPrimitive } from '@base-ui/react/field'

@@ -1,3 +1,6 @@
+// apps/server/src/auth/EnvironmentAuth.ts
+// handle server authentication
+
 import {
   AuthAccessTokenType,
   AuthAccessWriteScope,

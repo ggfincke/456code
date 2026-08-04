@@ -1,3 +1,6 @@
+// apps/web/src/lib/terminalFocus.ts
+// resolve terminal focus owner
+
 export type TerminalFocusOwner = 'drawer' | 'right-panel'
 
 export function getTerminalFocusOwner(): TerminalFocusOwner | null

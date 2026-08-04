@@ -91,12 +91,10 @@ export function getDiffLineStat(files: ReadonlyArray<FileDiffMetadata>): DiffLin
 
 interface RenderablePatchOptions
 {
-  /**
-   * Pierre's partial-patch parser keeps hunk render starts in source-file
-   * coordinates. Its virtualizer iterates partial patches as compact rows, so
-   * review diffs need compact render starts while retaining collapsedBefore
-   * for the "N unmodified lines" separator.
-   */
+  // pierre's partial-patch parser keeps hunk render starts in source-file
+  // coordinates. Its virtualizer iterates partial patches as compact rows, so
+  // review diffs need compact render starts while retaining collapsedBefore
+  // for the "N unmodified lines" separator.
   compactPartialHunkOffsets?: boolean
 }
 

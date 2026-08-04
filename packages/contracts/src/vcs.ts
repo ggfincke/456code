@@ -1,3 +1,6 @@
+// packages/contracts/src/vcs.ts
+// define vcs contracts
+
 import * as Schema from 'effect/Schema'
 import { NonNegativeInt, TrimmedNonEmptyString } from './baseSchemas.ts'
 

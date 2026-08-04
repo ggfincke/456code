@@ -19,12 +19,10 @@ import {
   withRecentThreadShortcut,
 } from './appShortcuts'
 
-/**
- * Owns the launcher app shortcuts (Android long-press menu): keeps the
- * static "New task" entry plus the recently opened threads in sync, and
- * routes shortcut taps — cold start included — to their in-app screens.
- * Mounted once in the root stack layout.
- */
+// owns the launcher app shortcuts (Android long-press menu): keeps the
+// static "New task" entry plus the recently opened threads in sync, and
+// routes shortcut taps — cold start included — to their in-app screens.
+// mounted once in the root stack layout.
 export function useAppShortcuts(state: NavigationState): void
 {
   useShortcutNavigation()
@@ -38,7 +36,7 @@ function useShortcutNavigation(): void
 
   useEffect(() =>
   {
-    // Cold start: the tapped shortcut arrives as the launch action, before
+    // cold start: the tapped shortcut arrives as the launch action, before
     // any listener can fire. Navigating from here pushes the target over the
     // initial Home route, so back returns home instead of exiting the app.
     if (!handledInitialAction.current)
@@ -74,12 +72,12 @@ function useRecentThreadShortcutSync(state: NavigationState): void
   // null until the persisted list loads; recording waits on it so the first
   // thread opened after a cold start cannot clobber older entries.
   const [recents, setRecents] = useState<ReadonlyArray<RecentThreadShortcut> | null>(null)
-  // Gates storage writes: a failed load falls back to an empty in-memory
+  // gates storage writes: a failed load falls back to an empty in-memory
   // list (so the launcher still gets the "New task" item), but persisting
   // that fallback would erase valid history over a transient read error.
-  // Real thread opens flip this on — by then the list is the new truth.
+  // real thread opens flip this on — by then the list is the new truth.
   const persistableRef = useRef(false)
-  // Saves are fire-and-forget; chaining them keeps an older list from
+  // saves are fire-and-forget; chaining them keeps an older list from
   // finishing after (and overwriting) a newer one.
   const saveQueueRef = useRef<Promise<unknown>>(Promise.resolve())
 

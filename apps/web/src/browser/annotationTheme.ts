@@ -1,3 +1,6 @@
+// apps/web/src/browser/annotationTheme.ts
+// read preview annotation theme
+
 import type { DesktopPreviewAnnotationTheme } from '@t3tools/contracts'
 
 const readVariable = (styles: CSSStyleDeclaration, name: string, fallback: string): string =>

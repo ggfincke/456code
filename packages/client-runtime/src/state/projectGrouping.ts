@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/projectGrouping.ts
+// manage project grouping settings state
+
 import { scopedProjectKey, scopeProjectRef } from '../environment/scoped.ts'
 import type { ScopedProjectRef, SidebarProjectGroupingMode } from '@t3tools/contracts'
 import type { ClientSettings } from '@t3tools/contracts/settings'

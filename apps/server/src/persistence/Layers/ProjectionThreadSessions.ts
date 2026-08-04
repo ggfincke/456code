@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Layers/ProjectionThreadSessions.ts
+// assemble projection thread sessions Effect layer
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 import * as Effect from 'effect/Effect'

@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/preview.ts
+// manage preview automation host focus concurrency key state
+
 import { WS_METHODS } from '@t3tools/contracts'
 import { Atom } from 'effect/unstable/reactivity'
 
@@ -46,7 +49,7 @@ export function createPreviewEnvironmentAtoms<R, E>(
     automationRequests: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: 'environment-data:preview:automation-requests',
       tag: WS_METHODS.previewAutomationConnect,
-      // Automation requests are commands, not cached query data. Dispose the
+      // automation requests are commands, not cached query data. Dispose the
       // stream immediately with its owner so stale requests cannot replay when
       // a thread remounts and the server can clear disconnected hosts promptly.
       idleTtlMs: 0,

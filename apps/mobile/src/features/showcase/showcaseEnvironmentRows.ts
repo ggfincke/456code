@@ -1,3 +1,6 @@
+// apps/mobile/src/features/showcase/showcaseEnvironmentRows.ts
+// apply showcase local environment display urls
+
 import { EnvironmentId } from '@t3tools/contracts'
 
 import type { RelayEnvironmentView } from '../connection/useConnectionController'

@@ -1,3 +1,6 @@
+// apps/desktop/src/backend/DesktopServerExposure.ts
+// expose desktop loopback host
+
 import {
   createAdvertisedEndpoint,
   type CreateAdvertisedEndpointInput,
@@ -215,7 +218,7 @@ const resolveDesktopCoreAdvertisedEndpoints = (
     }
     catch
     {
-      // Ignore malformed user-configured endpoints without dropping valid endpoints.
+      // ignore malformed user-configured endpoints without dropping valid endpoints.
     }
   }
 
@@ -445,8 +448,8 @@ export const make = Effect.gen(function* ()
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings
   const stateRef = yield* Ref.make(initialRuntimeState())
 
-  // Cache the `tailscale status` spawn for the TTL. On macOS, the Mac App
-  // Store Tailscale CLI lives inside Tailscale's sandbox container, so each
+  // cache the `tailscale status` spawn for the TTL. On macOS, the Mac App
+  // store Tailscale CLI lives inside Tailscale's sandbox container, so each
   // spawn re-triggers the "Other apps" TCC prompt.
   const cachedReadMagicDnsName = yield* Effect.cachedWithTTL(
     readTailscaleStatus.pipe(
@@ -568,7 +571,7 @@ export const make = Effect.gen(function* ()
       customHttpsEndpointUrls: config.desktopHttpsEndpointUrls,
     })
 
-    // Don't spawn the Tailscale CLI when the user hasn't opted into any
+    // don't spawn the Tailscale CLI when the user hasn't opted into any
     // network exposure. The spawn itself triggers a macOS "Other apps"
     // TCC prompt on Mac App Store Tailscale builds.
     if (state.mode !== 'network-accessible' && !state.tailscaleServeEnabled)

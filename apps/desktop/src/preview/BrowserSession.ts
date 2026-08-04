@@ -1,3 +1,6 @@
+// apps/desktop/src/preview/BrowserSession.ts
+// define browser session partition derivation error
+
 import type { Session } from 'electron'
 import { session } from 'electron'
 import * as Context from 'effect/Context'
@@ -11,8 +14,8 @@ import * as SynchronizedRef from 'effect/SynchronizedRef'
 
 const PREVIEW_PARTITION_PREFIX = 'persist:456code-preview-'
 
-// Permissions granted to preview web content. `clipboard-sanitized-write` is the
-// Electron permission behind `navigator.clipboard.writeText()` — note it is NOT
+// permissions granted to preview web content. `clipboard-sanitized-write` is the
+// electron permission behind `navigator.clipboard.writeText()` — note it is NOT
 // `clipboard-write`, which is not a valid Electron permission name. Async
 // clipboard writes are gated by the permission *check* handler (not only the
 // request handler), so both handlers must allow it; otherwise built-in "Copy"

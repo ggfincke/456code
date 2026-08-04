@@ -1,3 +1,6 @@
+// packages/effect-codex-app-server/test/examples/codex-app-server-probe.ts
+// verify codex app server probe behavior
+
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/useThreadListActions.ts
+// manage thread list actions through a React hook
+
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 import { canSettle } from '@t3tools/client-runtime/state/thread-settled'
 import * as Cause from 'effect/Cause'
@@ -13,8 +16,8 @@ import { environmentServerConfigsAtom } from '../../state/server'
 import { threadEnvironment } from '../../state/threads'
 import { useAtomCommand } from '../../state/use-atom-command'
 
-/** Version skew: never send settle/unsettle to a server that predates them
-    (capability defaults false on decode for older servers). */
+// version skew: never send settle/unsettle to a server that predates them
+// (capability defaults false on decode for older servers).
 function environmentSupportsSettlement(environmentId: EnvironmentThreadShell['environmentId'])
 {
   return (
@@ -57,7 +60,7 @@ function actionFailureTitle(action: ThreadListAction): string
   return 'Could not delete thread'
 }
 
-/** Resolves to true iff the action was dispatched and succeeded. */
+// resolves to true iff the action was dispatched and succeeded.
 function useThreadActionExecutor(
   onCompleted?: (action: ThreadListAction, thread: EnvironmentThreadShell) => void,
 )
@@ -93,7 +96,7 @@ function useThreadActionExecutor(
           )
           return false
         }
-        // Settle may only target what effectiveSettled could classify as
+        // settle may only target what effectiveSettled could classify as
         // settled: not starting/running sessions, not threads waiting on
         // approvals or user input. Anything else would hide live work.
         if (action === 'settle' && !canSettle(thread, { now: new Date().toISOString() }))
@@ -104,7 +107,7 @@ function useThreadActionExecutor(
           )
           return false
         }
-        // Archive keeps its original, narrower guard: never interrupt a
+        // archive keeps its original, narrower guard: never interrupt a
         // thread mid-turn.
         if (
           action === 'archive' &&
@@ -118,11 +121,10 @@ function useThreadActionExecutor(
           )
           return false
         }
+        // a user unsettle pin suppresses auto-settle until real activity clears it server-side
         const result =
           action === 'unsettle'
-            ? // reason "user" pins the thread active: auto-settle stays
-              // suppressed until real activity clears the pin server-side.
-              await unsettleMutation({
+            ? await unsettleMutation({
                 environmentId: thread.environmentId,
                 input: { threadId: thread.id, reason: 'user' },
               })
@@ -143,7 +145,7 @@ function useThreadActionExecutor(
           Alert.alert(actionFailureTitle(action), actionFailureMessage(action, result.cause))
           return false
         }
-        // Settled threads stay in the live shell stream; only the archive
+        // settled threads stay in the live shell stream; only the archive
         // lifecycle still feeds the archived-snapshot surface.
         if (action === 'archive' || action === 'unarchive' || action === 'delete')
         {

@@ -1,3 +1,6 @@
+// apps/mobile/src/state/session.ts
+// manage environment session state
+
 import { useAtomValue } from '@effect/atom-react'
 import { createEnvironmentSessionAtoms } from '@t3tools/client-runtime/state/session'
 import type { EnvironmentId } from '@t3tools/contracts'

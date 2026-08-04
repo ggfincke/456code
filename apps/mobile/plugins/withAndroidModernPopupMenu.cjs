@@ -1,3 +1,6 @@
+// apps/mobile/plugins/withAndroidModernPopupMenu.cjs
+// configure android modern popup menu in Expo projects
+
 const fs = require('node:fs')
 const path = require('node:path')
 const {
@@ -20,7 +23,7 @@ const POPUP_BACKGROUND_DRAWABLE = `<?xml version="1.0" encoding="utf-8"?>
 </shape>
 `
 
-// Checkable menu rows insert a CheckBox at the row's right edge; the theme
+// checkable menu rows insert a CheckBox at the row's right edge; the theme
 // swaps its square-box button for this check glyph so the selected option
 // shows a plain right-aligned check.
 const CHECK_DRAWABLE = `<?xml version="1.0" encoding="utf-8"?>
@@ -44,7 +47,7 @@ const CHECKBOX_BUTTON_SELECTOR = `<?xml version="1.0" encoding="utf-8"?>
 </selector>
 `
 
-// Replaces the default filled-triangle submenu indicator with a stroked ">"
+// replaces the default filled-triangle submenu indicator with a stroked ">"
 // chevron.
 const SUBMENU_ARROW_DRAWABLE = `<?xml version="1.0" encoding="utf-8"?>
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
@@ -105,17 +108,17 @@ function withPopupMenuStyles(config)
         'textAppearanceSmallPopupMenu',
         '@style/AppPopupMenu.TextAppearance',
       )
-      // Submenu popups show their parent item as a header row that reads a
+      // submenu popups show their parent item as a header row that reads a
       // separate theme attribute, so it needs the same themed text color.
       assignStyleItem(
         appTheme,
         'textAppearancePopupMenuHeader',
         '@style/AppPopupMenu.HeaderTextAppearance',
       )
-      // Menu item views resolve their submenu arrow from this style
+      // menu item views resolve their submenu arrow from this style
       // (android:listMenuViewStyle / android:subMenuArrow are public attrs).
       assignStyleItem(appTheme, 'android:listMenuViewStyle', '@style/AppPopupMenuListMenuView')
-      // Checkable rows inflate a plain CheckBox at the row end; restyle its
+      // checkable rows inflate a plain CheckBox at the row end; restyle its
       // button so the selected option shows a right-aligned check glyph
       // instead of a square box. Both framework and AppCompat attrs are set
       // since the popup may inflate either CheckBox flavor. App-wide for
@@ -165,7 +168,7 @@ function withPopupMenuStyles(config)
           { _: '@font/xml_dm_sans_regular', $: { name: 'android:fontFamily' } },
         ],
       },
-      // The framework default (Widget.Material.ListMenuView) only carries
+      // the framework default (Widget.Material.ListMenuView) only carries
       // subMenuArrow, so replacing the style wholesale is safe.
       {
         $: { name: 'AppPopupMenuListMenuView' },

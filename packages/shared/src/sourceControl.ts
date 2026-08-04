@@ -1,3 +1,6 @@
+// packages/shared/src/sourceControl.ts
+// resolve change request presentation
+
 import type { SourceControlProviderInfo, SourceControlProviderKind } from '@t3tools/contracts'
 
 export interface ChangeRequestPresentation

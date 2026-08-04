@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/DesktopIpcHandlers.ts
+// install desktop ipc handlers
+
 import * as Effect from 'effect/Effect'
 
 import * as DesktopIpc from './DesktopIpc.ts'

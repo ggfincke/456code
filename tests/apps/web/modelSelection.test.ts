@@ -1,3 +1,6 @@
+// tests/apps/web/modelSelection.test.ts
+// verify instance scoped model selection behavior
+
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from '@t3tools/contracts'
 import { DEFAULT_UNIFIED_SETTINGS, type UnifiedSettings } from '@t3tools/contracts/settings'
 import { describe, expect, it } from 'vite-plus/test'

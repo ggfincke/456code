@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/sidebar-header-actions.tsx
+// render sidebar header actions
+
 import { SymbolView } from '../../components/AppSymbol'
 import { Pressable, StyleSheet, View, useColorScheme } from 'react-native'
 
@@ -6,7 +9,7 @@ import { useThemeColor } from '../../lib/useThemeColor'
 export interface SidebarHeaderActionsProps
 {
   readonly onOpenSettings: () => void
-  /** Rendered inside a shared capsule group — buttons drop their own chrome. */
+  // rendered inside a shared capsule group — buttons drop their own chrome.
   readonly grouped?: boolean
 }
 

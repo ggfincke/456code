@@ -1,3 +1,6 @@
+// apps/web/src/threadRoutes.ts
+// resolve thread route render state
+
 import { scopeThreadRef } from '@t3tools/client-runtime/environment'
 import type { EnvironmentId, ScopedThreadRef, ThreadId } from '@t3tools/contracts'
 import type { DraftId } from './composerDraftStore'
@@ -96,10 +99,8 @@ export function resolveThreadRouteTarget(
   }
 }
 
-/**
- * Resolves the thread represented by either a canonical thread route or a
- * draft route whose promotion to a server thread has been recorded.
- */
+// resolves the thread represented by either a canonical thread route or a
+// draft route whose promotion to a server thread has been recorded.
 export function resolveActiveThreadRouteRef(
   target: ThreadRouteTarget | null,
   draftThread: DraftThreadRouteState | null,

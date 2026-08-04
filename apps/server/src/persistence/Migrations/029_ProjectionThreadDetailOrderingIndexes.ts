@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/029_ProjectionThreadDetailOrderingIndexes.ts
+// apply persistence migration 029 projection thread detail ordering indexes
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

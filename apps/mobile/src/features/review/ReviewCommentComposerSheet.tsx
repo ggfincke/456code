@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/ReviewCommentComposerSheet.tsx
+// render review comment composer sheet
+
 import { useNavigation, type StaticScreenProps } from '@react-navigation/native'
 import { TextInputWrapper } from 'expo-paste-input'
 import type { EnvironmentId, ThreadId } from '@t3tools/contracts'

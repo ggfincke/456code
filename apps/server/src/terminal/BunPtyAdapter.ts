@@ -1,5 +1,7 @@
-/// <reference types="bun" />
+// apps/server/src/terminal/BunPtyAdapter.ts
+// define bun pty unsupported platform error
 
+/// <reference types="bun" />
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Schema from 'effect/Schema'

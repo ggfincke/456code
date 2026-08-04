@@ -51,8 +51,8 @@ import { SettingsSwitchRow } from './components/SettingsSwitchRow'
 type NotificationStatus = 'checking' | 'enabled' | 'disabled' | 'unsupported'
 type LiveActivityStatus = 'checking' | 'enabled' | 'disabled' | 'signed-out' | 'linking'
 
-// Reflects whether the relay actually accepted this device's registration.
-// The notification and Live Activity switches are gated on this so they can
+// reflects whether the relay actually accepted this device's registration.
+// the notification and Live Activity switches are gated on this so they can
 // never read as enabled when the device cannot receive anything (e.g. the
 // registration request timed out).
 function useDeviceRegistered(): boolean
@@ -266,7 +266,7 @@ function ConfiguredSettingsRouteScreen()
     if (result.value.type === 'granted')
     {
       setNotificationStatus('enabled')
-      // Permission alone is not enough: the switch stays off until the relay
+      // permission alone is not enough: the switch stays off until the relay
       // registration succeeds, so tell the user the truth about which happened.
       if (getAgentAwarenessRegistrationStatus() === 'registered')
       {
@@ -382,9 +382,9 @@ function ConfiguredSettingsRouteScreen()
       {
         return
       }
-      // The environment link can succeed while this device's own registration
+      // the environment link can succeed while this device's own registration
       // (the push-to-start token the relay needs) has not — don't claim Live
-      // Activities are live until the device is actually registered.
+      // activities are live until the device is actually registered.
       if (getAgentAwarenessRegistrationStatus() === 'registered')
       {
         Alert.alert(
@@ -560,7 +560,7 @@ function ConfiguredSettingsRouteScreen()
               notificationStatus === 'checking' ||
               notificationStatus === 'unsupported'
             }
-            // Only reads as on when this device is actually registered with the
+            // only reads as on when this device is actually registered with the
             // relay; otherwise notifications cannot be delivered regardless of
             // the local iOS permission.
             value={
@@ -577,7 +577,7 @@ function ConfiguredSettingsRouteScreen()
             }
             icon="bolt.circle"
             label="Live Activity Updates"
-            // Same gate: a saved preference is meaningless until the device
+            // same gate: a saved preference is meaningless until the device
             // registration the relay needs to push updates has succeeded.
             value={
               agentAwarenessPushAvailable &&
@@ -624,10 +624,8 @@ function GeneralSettingsSection()
   )
 }
 
-/**
- * Device-local beta toggles. Mobile has no client-settings sync, so this is
- * the counterpart of web's Settings → Beta backed by mobile preferences.
- */
+// device-local beta toggles. Mobile has no client-settings sync, so this is
+// the counterpart of web's Settings -> Beta backed by mobile preferences.
 function BetaSettingsSection()
 {
   const preferencesResult = useAtomValue(mobilePreferencesAtom)
@@ -659,12 +657,12 @@ function AppSettingsSection()
   const icon = useThemeColor('--color-icon')
 
   const version = Constants.expoConfig?.version ?? '0.0.0'
-  // Fall back to "production" to match resolveAppVariant in app.config.ts, so a
+  // fall back to "production" to match resolveAppVariant in app.config.ts, so a
   // missing variant never mislabels a production build as development.
   const variant = (Constants.expoConfig?.extra?.appVariant as string | undefined) ?? 'production'
   const variantLabel = variant === 'production' ? '' : capitalize(variant)
   const versionLabel = variantLabel ? `${version} · ${variantLabel}` : version
-  // Which JS is actually running: the bundle shipped in the binary, or an OTA
+  // which JS is actually running: the bundle shipped in the binary, or an OTA
   // update downloaded on top of it. Surfacing this makes "am I even on the
   // right build?" answerable at a glance.
   const bundleLabel = Updates.isEnabled

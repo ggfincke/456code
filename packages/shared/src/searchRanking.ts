@@ -1,3 +1,6 @@
+// packages/shared/src/searchRanking.ts
+// normalize search query
+
 export type RankedSearchResult<T> = {
   item: T
   score: number
@@ -90,12 +93,8 @@ function findBoundaryMatchIndex(
   return bestIndex
 }
 
-/**
- * Scores how well `value` matches `query` using tiered match strategies.
- *
- * **Expects pre-normalized inputs**: both `value` and `query` must already be
- * trimmed and lowercased (e.g. via {@link normalizeSearchQuery}).
- */
+// score a pre-normalized value against a pre-normalized query using tiered strategies
+// callers trim & lowercase both inputs with `normalizeSearchQuery`
 export function scoreQueryMatch(input: {
   value: string
   query: string

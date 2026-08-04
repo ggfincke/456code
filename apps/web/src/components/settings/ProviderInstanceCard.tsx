@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/ProviderInstanceCard.tsx
+// render provider instance card
+
 'use client'
 
 import {
@@ -78,12 +81,10 @@ function makeEnvironmentDraftRow(
   }
 }
 
-/**
- * Read a string[] at `key` from the opaque config blob, filtering out
- * non-string entries. Used for `customModels`, which is always typed as
- * `string[]` by the concrete driver schemas but arrives here as
- * `Schema.Unknown`.
- */
+// read a string[] at `key` from the opaque config blob, filtering out
+// non-string entries. Used for `customModels`, which is always typed as
+// `string[]` by the concrete driver schemas but arrives here as
+// `Schema.Unknown`.
 function readConfigStringArray(config: unknown, key: string): ReadonlyArray<string>
 {
   if (config === null || typeof config !== 'object') return []
@@ -92,14 +93,12 @@ function readConfigStringArray(config: unknown, key: string): ReadonlyArray<stri
   return value.filter((entry): entry is string => typeof entry === 'string')
 }
 
-/**
- * Set `key` to an arbitrary value on the opaque config blob. Unlike
- * provider settings field updates, does not drop empty-looking values — the
- * caller is responsible for deciding whether an empty array / empty
- * object should be stored explicitly (e.g. `customModels: []` is a
- * meaningful "user cleared their custom list" state distinct from
- * "driver default").
- */
+// set `key` to an arbitrary value on the opaque config blob. Unlike
+// provider settings field updates, does not drop empty-looking values — the
+// caller is responsible for deciding whether an empty array / empty
+// object should be stored explicitly (e.g. `customModels: []` is a
+// meaningful "user cleared their custom list" state distinct from
+// "driver default").
 function nextConfigBlobWithValue(
   config: unknown,
   key: string,
@@ -340,20 +339,16 @@ interface ProviderInstanceCardProps
   readonly isExpanded: boolean
   readonly onExpandedChange: (open: boolean) => void
   readonly onUpdate: (nextInstance: ProviderInstanceConfig) => void
-  /**
-   * Pass `undefined` to hide the delete button entirely. Built-in default
-   * instance slots use `undefined` — they can't be deleted without losing
-   * the slot, and their "reset to defaults" affordance lives on an outer
-   * reset button instead. Explicit `| undefined` in the type accommodates
-   * `exactOptionalPropertyTypes: true`, where an absent key and
-   * `{ onDelete: undefined }` are treated as distinct shapes.
-   */
+  // pass `undefined` to hide the delete button entirely. Built-in default
+  // instance slots use `undefined` — they can't be deleted without losing
+  // the slot, and their "reset to defaults" affordance lives on an outer
+  // reset button instead. Explicit `| undefined` in the type accommodates
+  // `exactOptionalPropertyTypes: true`, where an absent key and
+  // `{ onDelete: undefined }` are treated as distinct shapes.
   readonly onDelete?: (() => void) | undefined
-  /**
-   * Optional outer reset button rendered next to the driver icon. Built-in
-   * default slots supply a reset-to-factory control here; custom instances
-   * omit it.
-   */
+  // optional outer reset button rendered next to the driver icon. Built-in
+  // default slots supply a reset-to-factory control here; custom instances
+  // omit it.
   readonly headerAction?: ReactNode | undefined
   readonly hiddenModels: ReadonlyArray<string>
   readonly favoriteModels: ReadonlyArray<string>
@@ -365,30 +360,28 @@ interface ProviderInstanceCardProps
   readonly isUpdating?: boolean | undefined
 }
 
-/**
- * A single configured provider-instance row in the Providers settings
- * section. Used for every row — both the built-in default instance for a
- * driver (rendered with `onDelete` omitted) and user-authored custom
- * instances (`onDelete` supplied). The only UI difference between the two
- * is whether the trash button is visible; every other field (display
- * name, config fields, models) behaves identically.
- *
- * Behavior notes:
- *   - `liveProvider` is matched by the caller via `instanceId`; when no
- *     match is available (e.g. the server hasn't probed yet, or the
- *     driver is not shipped by the current build) the card still renders
- *     with a neutral "checking" summary.
- *   - Unknown drivers (`driverOption === undefined`) get a read-only
- *     notice instead of editable fields, so fork instances round-trip
- *     without accidentally destroying their config.
- *   - The enabled Switch writes to the envelope's `instance.enabled`
- *     field; the server's registry consults this at `entry.enabled ?? true`
- *     before materializing the instance, and the probe also checks its
- *     driver-specific `config.enabled`. We treat the envelope flag as the
- *     single source of truth from the UI — built-in cards used to write
- *     the inner flag, but on the promotion-to-instance path every edit
- *     flows through the envelope.
- */
+// a single configured provider-instance row in the Providers settings
+// section. Used for every row — both the built-in default instance for a
+// driver (rendered with `onDelete` omitted) and user-authored custom
+// instances (`onDelete` supplied). The only UI difference between the two
+// is whether the trash button is visible; every other field (display
+// name, config fields, models) behaves identically.
+//
+// behavior notes:
+//   - `liveProvider` is matched by the caller via `instanceId`; when no
+//     match is available (e.g. the server hasn't probed yet, or the
+//     driver is not shipped by the current build) the card still renders
+//     with a neutral "checking" summary.
+//   - Unknown drivers (`driverOption === undefined`) get a read-only
+//     notice instead of editable fields, so fork instances round-trip
+//     without accidentally destroying their config.
+//   - The enabled Switch writes to the envelope's `instance.enabled`
+//     field; the server's registry consults this at `entry.enabled ?? true`
+//     before materializing the instance, and the probe also checks its
+//     driver-specific `config.enabled`. We treat the envelope flag as the
+//     single source of truth from the UI — built-in cards used to write
+//     the inner flag, but on the promotion-to-instance path every edit
+//     flows through the envelope.
 export function ProviderInstanceCard({
   instanceId,
   instance,
@@ -410,7 +403,7 @@ export function ProviderInstanceCard({
 }: ProviderInstanceCardProps)
 {
   const enabled = instance.enabled ?? true
-  // The server-reported status wins when present; otherwise fall back to
+  // the server-reported status wins when present; otherwise fall back to
   // "disabled"/"warning" based on the local `enabled` flag so the dot
   // reflects the persisted intent even before the first probe completes.
   const statusKey: ProviderStatusKey =
@@ -451,7 +444,7 @@ export function ProviderInstanceCard({
     },
   })
 
-  // Narrow `instance.driver` for callers that key on the closed
+  // narrow `instance.driver` for callers that key on the closed
   // `ProviderDriverKind` union (e.g. `normalizeModelSlug`'s alias table). Custom
   // fork drivers pass through as `null` and those callers fall back to
   // verbatim behaviour.
@@ -460,7 +453,7 @@ export function ProviderInstanceCard({
     : null
 
   const customModels = readConfigStringArray(instance.config, 'customModels')
-  // Server-returned models may lag behind settings writes. Treat probe
+  // server-returned models may lag behind settings writes. Treat probe
   // models as the source for built-ins only; custom rows come directly
   // from the current instance config so add/remove reflects immediately.
   const modelsForDisplay = deriveProviderModelsForDisplay({

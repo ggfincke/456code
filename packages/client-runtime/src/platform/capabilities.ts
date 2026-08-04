@@ -1,3 +1,6 @@
+// packages/client-runtime/src/platform/capabilities.ts
+// define prepared ssh environment
+
 import {
   type AuthClientPresentationMetadata,
   type AuthEnvironmentScope,

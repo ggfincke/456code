@@ -1,3 +1,6 @@
+// apps/mobile/src/state/queries.ts
+// manage thread detail view state
+
 import type { EnvironmentId, OrchestrationThread, ThreadId } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 import { useEffect, useMemo, useState } from 'react'

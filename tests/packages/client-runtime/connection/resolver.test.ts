@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/connection/resolver.test.ts
+// verify connection resolver behavior
+
 import { EnvironmentId, type DesktopSshEnvironmentTarget } from '@t3tools/contracts'
 import { RelayEnvironmentConnectScope } from '@t3tools/contracts/relay'
 import { RelayClientTracer } from '@t3tools/shared/relayTracing'

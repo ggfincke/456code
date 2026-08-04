@@ -1,3 +1,6 @@
+// apps/server/src/provider/acp/AcpNativeLogging.ts
+// create acp native logger factory
+
 import type { ProviderDriverKind, ThreadId } from '@t3tools/contracts'
 import { causeErrorTag, errorTag } from '@t3tools/shared/observability'
 import * as Cause from 'effect/Cause'

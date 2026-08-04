@@ -109,26 +109,26 @@ export function redactServerSettingsForClient(settings: ServerSettings): ServerS
 export class ServerSettingsService extends Context.Service<
   ServerSettingsService,
   {
-    /** Start the settings runtime and attach file watching. */
+    // start the settings runtime and attach file watching.
     readonly start: Effect.Effect<void, ServerSettingsError>
 
-    /** Await settings runtime readiness. */
+    // await settings runtime readiness.
     readonly ready: Effect.Effect<void, ServerSettingsError>
 
-    /** Read the current settings. */
+    // read the current settings.
     readonly getSettings: Effect.Effect<ServerSettings, ServerSettingsError>
 
-    /** Patch settings and persist. Returns the new full settings object. */
+    // patch settings and persist. Returns the new full settings object.
     readonly updateSettings: (
       patch: ServerSettingsPatch,
     ) => Effect.Effect<ServerSettings, ServerSettingsError>
 
-    /** Stream of settings change events. */
+    // stream of settings change events.
     readonly streamChanges: Stream.Stream<ServerSettings>
   }
 >()('456code/serverSettings/ServerSettingsService')
 {
-  /** @deprecated Import and use `layerTest` from this module. */
+  // @deprecated Import and use `layerTest` from this module.
   static readonly layerTest = (overrides: DeepPartial<ServerSettings> = {}) => layerTest(overrides)
 }
 
@@ -194,7 +194,7 @@ function fallbackTextGenerationProvider(settings: ServerSettings): ServerSetting
   }
 }
 
-// Values under these keys are compared as a whole — never stripped field-by-field.
+// values under these keys are compared as a whole — never stripped field-by-field.
 const ATOMIC_SETTINGS_KEYS: ReadonlySet<string> = new Set([
   'automaticGitFetchInterval',
   'sourceControlWriterModelSelection',
@@ -524,8 +524,8 @@ const make = Effect.gen(function* ()
 
     const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }))
 
-    // Debounce watch events so the file is fully written before we read it.
-    // Editors emit multiple events per save (truncate, write, rename) and
+    // debounce watch events so the file is fully written before we read it.
+    // editors emit multiple events per save (truncate, write, rename) and
     // `fs.watch` can fire before the content has been flushed to disk.
     const debouncedSettingsEvents = fs.watch(settingsDir).pipe(
       Stream.filter((event) =>

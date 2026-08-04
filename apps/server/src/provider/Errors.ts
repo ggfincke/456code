@@ -1,3 +1,6 @@
+// apps/server/src/provider/Errors.ts
+// define provider errors
+
 import * as Schema from 'effect/Schema'
 
 import type { CheckpointServiceError } from '../checkpointing/Errors.ts'

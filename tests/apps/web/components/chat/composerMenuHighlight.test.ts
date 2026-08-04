@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/composerMenuHighlight.test.ts
+// verify resolve composer menu active item id behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { resolveComposerMenuActiveItemId } from '../../../../../apps/web/src/components/chat/composerMenuHighlight'

@@ -1,3 +1,6 @@
+// apps/web/src/state/desktopSshHosts.ts
+// manage create desktop ssh hosts state atom state
+
 import type { DesktopBridge, DesktopDiscoveredSshHost } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'

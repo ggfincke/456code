@@ -1,3 +1,6 @@
+// tests/apps/web/proposedPlan.test.ts
+// verify proposed plan title behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

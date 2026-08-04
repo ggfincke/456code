@@ -1,3 +1,6 @@
+// tests/apps/web/components/GitActionsControl.logic.test.ts
+// verify when: ref is clean and has an open pr behavior
+
 import type { VcsStatusResult } from '@t3tools/contracts'
 import { assert, describe, it } from 'vite-plus/test'
 import {

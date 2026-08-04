@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/028_ProjectionThreadSessionInstanceId.ts
+// apply persistence migration 028 projection thread session instance id
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

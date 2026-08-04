@@ -1,3 +1,6 @@
+// apps/web/src/components/sidebar/SidebarChrome.tsx
+// render sidebar chrome
+
 import { useAtomValue } from '@effect/atom-react'
 import { SettingsIcon } from 'lucide-react'
 import { memo, useCallback } from 'react'

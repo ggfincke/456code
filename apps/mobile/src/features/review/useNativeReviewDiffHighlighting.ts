@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/useNativeReviewDiffHighlighting.ts
+// manage native review diff highlighting through a React hook
+
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import {

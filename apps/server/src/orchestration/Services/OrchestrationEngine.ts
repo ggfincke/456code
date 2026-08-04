@@ -1,15 +1,14 @@
-/**
- * OrchestrationEngineService - Service interface for orchestration command handling.
- *
- * Owns command validation/dispatch and in-memory read-model updates backed by
- * `OrchestrationEventStore` persistence. It does not own provider process
- * management or transport concerns (e.g. websocket request parsing).
- *
- * Uses Effect `Context.Service` for dependency injection. Command dispatch,
- * replay, and unknown-input decoding all return typed domain errors.
- *
- * @module OrchestrationEngineService
- */
+// apps/server/src/orchestration/Services/OrchestrationEngine.ts
+// define orchestration engine service contract
+
+// owns command validation/dispatch and in-memory read-model updates backed by
+// `OrchestrationEventStore` persistence. It does not own provider process
+// management or transport concerns (e.g. websocket request parsing).
+//
+// uses Effect `Context.Service` for dependency injection. Command dispatch,
+// replay, and unknown-input decoding all return typed domain errors.
+//
+// @module OrchestrationEngineService
 import type { OrchestrationCommand, OrchestrationEvent } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
@@ -23,46 +22,38 @@ import type { OrchestrationEventStoreError } from '../../persistence/Errors.ts'
  */
 export interface OrchestrationEngineShape
 {
-  /**
-   * Replay persisted orchestration events from an exclusive sequence cursor.
-   *
-   * @param fromSequenceExclusive - Sequence cursor (exclusive).
-   * @param limit - Maximum number of events to read. Defaults to the event
-   *   store's page-bounded default; pass a higher value when the caller must
-   *   read every event after the cursor (e.g. per-thread catch-up that filters
-   *   a small subset out of a potentially larger global range).
-   * @returns Stream containing ordered events.
-   */
+  // replay persisted orchestration events from an exclusive sequence cursor.
+  //
+  // @param fromSequenceExclusive - Sequence cursor (exclusive).
+  // @param limit - Maximum number of events to read. Defaults to the event
+  //   store's page-bounded default; pass a higher value when the caller must
+  //   read every event after the cursor (e.g. per-thread catch-up that filters
+  //   a small subset out of a potentially larger global range).
+  // @returns Stream containing ordered events.
   readonly readEvents: (
     fromSequenceExclusive: number,
     limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError, never>
 
-  /**
-   * Dispatch a validated orchestration command.
-   *
-   * @param command - Valid orchestration command.
-   * @returns Effect containing the sequence of the persisted event.
-   *
-   * Dispatch is serialized through an internal queue and deduplicated via
-   * command receipts.
-   */
+  // dispatch a validated orchestration command.
+  //
+  // @param command - Valid orchestration command.
+  // @returns Effect containing the sequence of the persisted event.
+  //
+  // dispatch is serialized through an internal queue and deduplicated via
+  // command receipts.
   readonly dispatch: (
     command: OrchestrationCommand,
   ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>
 
-  /**
-   * Stream persisted domain events in dispatch order.
-   *
-   * This is a hot runtime stream (new events only), not a historical replay.
-   */
+  // stream persisted domain events in dispatch order.
+  //
+  // this is a hot runtime stream (new events only), not a historical replay.
   readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>
 
-  /**
-   * The latest sequence reflected in the engine's authoritative command read
-   * model (0 if none). Used to gauge how far behind a resuming client is before
-   * choosing between an incremental replay and a fresh projected snapshot.
-   */
+  // the latest sequence reflected in the engine's authoritative command read
+  // model (0 if none). Used to gauge how far behind a resuming client is before
+  // choosing between an incremental replay and a fresh projected snapshot.
   readonly latestSequence: Effect.Effect<number, never, never>
 }
 

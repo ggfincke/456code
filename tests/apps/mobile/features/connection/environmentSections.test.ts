@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/connection/environmentSections.test.ts
+// verify mobile environment settings sections behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import type { RelayClientEnvironmentRecord } from '@t3tools/contracts/relay'
 import { describe, expect, it } from 'vite-plus/test'

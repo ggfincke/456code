@@ -1,3 +1,6 @@
+// tests/apps/web/browser/browserViewportLayout.test.ts
+// verify resolve browser viewport layout behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

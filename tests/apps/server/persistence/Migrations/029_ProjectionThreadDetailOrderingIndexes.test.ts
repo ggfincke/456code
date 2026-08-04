@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/Migrations/029_ProjectionThreadDetailOrderingIndexes.test.ts
+// verify 029 projection thread detail ordering indexes behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

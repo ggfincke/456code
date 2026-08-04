@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/ConnectionsRouteScreen.tsx
+// render the connections route screen route
+
 import { NativeHeaderToolbar } from '../../native/StackHeader'
 import { useNavigation } from '@react-navigation/native'
 import { SymbolView } from '../../components/AppSymbol'

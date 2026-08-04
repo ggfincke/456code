@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/shikiReviewHighlighter.ts
+// resolve active review highlighter engine
+
 import { createHighlighterCore, type HighlighterCore } from '@shikijs/core'
 import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript'
 import bashLanguage from '@shikijs/langs/bash'

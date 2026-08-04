@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/markdownLinks.ts
+// resolve markdown file icon
+
 import type { MARKDOWN_FILE_ICON_SOURCES } from './markdownFileIcons.generated'
 
 const WINDOWS_DRIVE_PATH_PATTERN = /^[A-Za-z]:[\\/]/
@@ -392,7 +395,7 @@ export function resolveMarkdownLinkPresentation(href: string): MarkdownLinkPrese
   }
   catch
   {
-    // Relative paths and non-URL link destinations are handled below.
+    // relative paths and non-URL link destinations are handled below.
   }
 
   const source = normalized.toLowerCase().startsWith('file:')

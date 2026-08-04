@@ -1,3 +1,6 @@
+// apps/mobile/src/state/entities.ts
+// manage projects through a React hook
+
 import { useAtomValue } from '@effect/atom-react'
 import type {
   EnvironmentProject,

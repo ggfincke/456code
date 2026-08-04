@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewPaneSelection.test.ts
+// verify resolve selected review file id behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { resolveSelectedReviewFileId } from '../../../../../apps/mobile/src/features/review/reviewPaneSelection'

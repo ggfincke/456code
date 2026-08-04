@@ -1,3 +1,6 @@
+// apps/web/src/state/use-atom-command.ts
+// manage atom command through a React hook
+
 import { RegistryContext } from '@effect/atom-react'
 import {
   type AtomCommand,

@@ -1,3 +1,6 @@
+// tests/apps/web/components/settings/ProviderInstanceCard.test.ts
+// verify derive provider models for display behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { ServerProviderModel } from '@t3tools/contracts'
 

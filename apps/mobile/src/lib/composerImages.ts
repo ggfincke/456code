@@ -15,7 +15,7 @@ export interface DraftComposerImageAttachment extends UploadChatImageAttachment
   readonly previewUri: string
 }
 
-/** Wire shape for startTurn: pure uploads without client draft id / previewUri. */
+// wire shape for startTurn: pure uploads without client draft id / previewUri.
 export function toUploadChatImageAttachments(
   attachments: ReadonlyArray<DraftComposerImageAttachment>,
 ): ReadonlyArray<UploadChatImageAttachment>

@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/terminalSession.test.ts
+// verify terminal session reducers behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { EnvironmentId, TerminalSessionSnapshot, ThreadId } from '@t3tools/contracts'

@@ -1,3 +1,6 @@
+// apps/mobile/plugins/withShareExtensionDisplayName.cjs
+// configure share extension display name in Expo projects
+
 'use strict'
 
 // expo-sharing intentionally uses a fixed target name and also uses that

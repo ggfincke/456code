@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/DiagnosticsSettings.tsx
+// render diagnostics settings
+
 import {
   AlertTriangleIcon,
   ChevronDownIcon,

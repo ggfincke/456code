@@ -1,3 +1,6 @@
+// packages/contracts/src/relayClient.ts
+// define relay client contracts
+
 import * as Schema from 'effect/Schema'
 
 export const RelayClientStatusSchema = Schema.Union([

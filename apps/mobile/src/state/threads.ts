@@ -1,3 +1,6 @@
+// apps/mobile/src/state/threads.ts
+// manage thread environment state
+
 import { useAtomValue } from '@effect/atom-react'
 import {
   createEnvironmentThreadDetailAtoms,

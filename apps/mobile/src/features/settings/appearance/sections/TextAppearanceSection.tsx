@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/appearance/sections/TextAppearanceSection.tsx
+// render text appearance section
+
 import {
   BASE_FONT_SIZE_STEP,
   MAX_BASE_FONT_SIZE,

@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/connection.ts
+// define saved remote connection
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { stripPairingTokenFromUrl } from '@t3tools/shared/remote'
 import { type EnvironmentConnectionPhase } from '@t3tools/client-runtime/connection'

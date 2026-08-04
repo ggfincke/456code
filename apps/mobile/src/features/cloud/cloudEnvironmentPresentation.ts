@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/cloudEnvironmentPresentation.ts
+// define available cloud environment presentation
+
 import type { RelayEnvironmentStatusResponse } from '@t3tools/contracts/relay'
 import { type EnvironmentConnectionPhase } from '@t3tools/client-runtime/connection'
 

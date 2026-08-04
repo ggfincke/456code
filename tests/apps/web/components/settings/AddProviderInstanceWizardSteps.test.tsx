@@ -1,3 +1,6 @@
+// tests/apps/web/components/settings/AddProviderInstanceWizardSteps.test.tsx
+// verify add provider instance wizard steps behavior
+
 import { Children, isValidElement, type ReactElement } from 'react'
 import { describe, expect, it, vi } from 'vite-plus/test'
 

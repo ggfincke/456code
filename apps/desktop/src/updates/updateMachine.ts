@@ -1,3 +1,6 @@
+// apps/desktop/src/updates/updateMachine.ts
+// derive desktop updater state transitions
+
 import type {
   DesktopRuntimeInfo,
   DesktopUpdateChannel,

@@ -1,3 +1,6 @@
+// oxlint-plugin-456code/utils.ts
+// expose unwrap expression
+
 import type { ESTree } from '@oxlint/plugins'
 import * as Option from 'effect/Option'
 

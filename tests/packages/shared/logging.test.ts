@@ -1,3 +1,6 @@
+// tests/packages/shared/logging.test.ts
+// verify rotating file sink behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'

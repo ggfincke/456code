@@ -1,3 +1,6 @@
+// tests/scripts/mobile-native-static-check.test.ts
+// verify mobile native static check behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as HostProcess from '@t3tools/shared/hostProcess'
 import { assert, it } from '@effect/vitest'

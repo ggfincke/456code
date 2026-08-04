@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/CloudWaitlistEnrollment.tsx
+// render cloud waitlist enrollment
+
 import { useWaitlist } from '@clerk/expo'
 import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
 import { useState } from 'react'

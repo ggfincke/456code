@@ -1,3 +1,6 @@
+// apps/server/src/provider/providerMaintenanceRunner.ts
+// define provider maintenance command result
+
 import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
@@ -83,8 +86,8 @@ const runProviderMaintenanceCommandWithSpawner = Effect.fn('ProviderMaintenanceR
     const collectCommandResult = Effect.fn('ProviderMaintenanceRunner.collectCommandResult')(
       function* ()
       {
-        // Resolve the executable for the host platform before spawning. On
-        // Windows the update tools are batch shims (e.g. `npm` -> `npm.cmd`),
+        // resolve the executable for the host platform before spawning. On
+        // windows the update tools are batch shims (e.g. `npm` -> `npm.cmd`),
         // which a bare ChildProcess.spawn cannot launch (spawn npm ENOENT);
         // resolveSpawnCommand finds the real `.cmd` and routes it through the
         // shell. On Linux/macOS (incl. the WSL backend) this is a no-op.

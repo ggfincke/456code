@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPendingTerminalContexts.tsx
+// render composer pending terminal contexts
+
 import { cn } from '~/lib/utils'
 import {
   type TerminalContextDraft,

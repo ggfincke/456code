@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/previewAutomationRequestConsumer.ts
+// define serialize preview automation error
+
 import type {
   PreviewAutomationHost,
   PreviewAutomationRequest,

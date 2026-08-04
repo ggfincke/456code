@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/auth.ts
+// manage empty auth access snapshot state
+
 import type {
   AuthAccessSnapshot,
   AuthAccessStreamEvent,

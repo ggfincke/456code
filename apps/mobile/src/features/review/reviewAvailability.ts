@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewAvailability.ts
+// resolve review availability
+
 export function resolveReviewAvailability(input: {
   readonly hasEnvironmentPresentation: boolean
   readonly isEnvironmentConnected: boolean

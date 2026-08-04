@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/023_ProjectionThreadShellSummary.ts
+// apply persistence migration 023 projection thread shell summary
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

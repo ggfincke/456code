@@ -1,3 +1,6 @@
+// tests/apps/server/provider/Layers/codexLaunchArgs.test.ts
+// verify resolve codex launch args behavior
+
 import * as NodeAssert from 'node:assert/strict'
 
 import { describe, it } from 'vite-plus/test'

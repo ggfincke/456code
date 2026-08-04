@@ -1,19 +1,18 @@
-/**
- * RuntimeReceiptBus - Internal checkpoint-reactor synchronization receipts.
- *
- * This service exists to expose short-lived orchestration milestones that are
- * useful in tests and harnesses but are not part of the production runtime
- * event model. `CheckpointReactor` publishes receipts such as baseline capture,
- * diff finalization, and turn-processing quiescence so integration tests can
- * wait for those exact points without inferring them indirectly from persisted
- * state.
- *
- * Production code should only call `publish`. Test code may subscribe via
- * `streamEventsForTest`, which is intentionally named to make the intended
- * usage explicit.
- *
- * @module RuntimeReceiptBus
- */
+// apps/server/src/orchestration/Services/RuntimeReceiptBus.ts
+// define runtime receipt bus service contract
+
+// this service exists to expose short-lived orchestration milestones that are
+// useful in tests and harnesses but are not part of the production runtime
+// event model. `CheckpointReactor` publishes receipts such as baseline capture,
+// diff finalization, and turn-processing quiescence so integration tests can
+// wait for those exact points without inferring them indirectly from persisted
+// state.
+//
+// production code should only call `publish`. Test code may subscribe via
+// `streamEventsForTest`, which is intentionally named to make the intended
+// usage explicit.
+//
+// @module RuntimeReceiptBus
 import { CheckpointRef, IsoDateTime, NonNegativeInt, ThreadId, TurnId } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 import * as Context from 'effect/Context'

@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/composerSlashMenuItems.ts
+// expose composer skill insertion text
+
 import type {
   ProviderDriverKind,
   ServerProviderSkill,
@@ -9,7 +12,7 @@ import { searchProviderSkills } from '../../providerSkillSearch'
 import type { ComposerCommandItem } from './ComposerCommandMenu'
 import { searchSlashCommandItems } from './composerSlashCommandSearch'
 
-/** Insertion text when a skill is picked from the `/` or `$` menu. */
+// insertion text when a skill is picked from the `/` or `  menu.
 export function composerSkillInsertionText(skillName: string): string
 {
   return `$${skillName} `
@@ -30,11 +33,9 @@ function enabledSkillNames(
   return names
 }
 
-/**
- * Build `/` menu items: built-ins + provider slash commands + skills.
- * Provider commands whose names collide with an enabled skill are omitted
- * so Claude dual-surfaced skills appear once under Skills (`$name` chips).
- */
+// build `/` menu items: built-ins + provider slash commands + skills.
+// provider commands whose names collide with an enabled skill are omitted
+// so Claude dual-surfaced skills appear once under Skills (`$name` chips).
 export function buildComposerSlashMenuItems(input: {
   provider: ProviderDriverKind
   query: string

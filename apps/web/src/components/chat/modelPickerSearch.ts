@@ -1,13 +1,14 @@
+// apps/web/src/components/chat/modelPickerSearch.ts
+// build model picker search text
+
 import { normalizeSearchQuery, scoreQueryMatch } from '@t3tools/shared/searchRanking'
 
 type ModelPickerSearchableModel = {
-  /** Driver kind — indexed so "codex" still matches a Codex Personal instance. */
+  // driver kind — indexed so "codex" still matches a Codex Personal instance.
   driverKind: string
-  /**
-   * Instance display name (e.g. "Codex Personal"). Indexed as a search
-   * field so typing the custom instance's user-authored name matches its
-   * models directly instead of just the driver kind.
-   */
+  // instance display name (e.g. "Codex Personal"). Indexed as a search
+  // field so typing the custom instance's user-authored name matches its
+  // models directly instead of just the driver kind.
   providerDisplayName: string
   name: string
   shortName?: string

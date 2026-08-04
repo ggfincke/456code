@@ -131,9 +131,7 @@ export function BranchToolbarBranchSelector({
   const createRefMutation = useAtomCommand(vcsEnvironment.createRef, {
     reportFailure: false,
   })
-  // ---------------------------------------------------------------------------
-  // Thread / project state (pushed down from parent to colocate with mutation)
-  // ---------------------------------------------------------------------------
+  // thread / project state (pushed down from parent to colocate with mutation)
   const threadRef = useMemo(
     () => scopeThreadRef(environmentId, threadId),
     [environmentId, threadId],
@@ -169,9 +167,7 @@ export function BranchToolbarBranchSelector({
       draftThreadEnvMode: draftThread?.envMode,
     })
 
-  // ---------------------------------------------------------------------------
-  // Thread branch mutation (colocated — only this component calls it)
-  // ---------------------------------------------------------------------------
+  // thread branch mutation (colocated — only this component calls it)
   const setThreadBranch = useCallback(
     (branch: string | null, worktreePath: string | null) =>
     {
@@ -228,9 +224,7 @@ export function BranchToolbarBranchSelector({
     ],
   )
 
-  // ---------------------------------------------------------------------------
-  // Git ref queries
-  // ---------------------------------------------------------------------------
+  // git ref queries
   const [isBranchMenuOpen, setIsBranchMenuOpen] = useState(false)
   const [branchQuery, setBranchQuery] = useState('')
   const deferredBranchQuery = useDeferredValue(branchQuery)
@@ -334,9 +328,7 @@ export function BranchToolbarBranchSelector({
         ? `Showing ${refs.length} of ${totalBranchCount} refs`
         : null
 
-  // ---------------------------------------------------------------------------
-  // Branch actions
-  // ---------------------------------------------------------------------------
+  // branch actions
   const copyBranchName = useCallback((branchName: string) =>
   {
     void writeTextToClipboard(branchName, 'branch name').then(
@@ -498,7 +490,7 @@ export function BranchToolbarBranchSelector({
     })
   }
 
-  // Default the worktree base to the repo default branch (origin/HEAD), only
+  // default the worktree base to the repo default branch (origin/HEAD), only
   // falling back to the checked-out branch when no default is known.
   const defaultBranchName = useMemo(
     () => refs.find((refName) => refName.isDefault)?.name ?? null,
@@ -528,9 +520,7 @@ export function BranchToolbarBranchSelector({
     worktreeBaseBranchCandidate,
   ])
 
-  // ---------------------------------------------------------------------------
-  // Combobox / list plumbing
-  // ---------------------------------------------------------------------------
+  // combobox / list plumbing
   const branchListScrollElementRef = useRef<HTMLElement | null>(null)
   const previousBranchListScrollTopRef = useRef<number | null>(null)
   const handleOpenChange = useCallback((open: boolean) =>
@@ -648,7 +638,7 @@ export function BranchToolbarBranchSelector({
     gitStatus: branchStatusQuery.data ?? null,
   })
   const branchPrStatus = prStatusIndicator(branchPr, branchStatusQuery.data?.sourceControlProvider)
-  // Action-oriented tooltip (the pill opens the PR), distinct from the sidebar's
+  // action-oriented tooltip (the pill opens the PR), distinct from the sidebar's
   // state-description tooltip.
   const branchPrTooltip = branchPr
     ? `Open ${sourceControlPresentation.terminology.singular} #${branchPr.number} (${branchPr.state}) in browser`

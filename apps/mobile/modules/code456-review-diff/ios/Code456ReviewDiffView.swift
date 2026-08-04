@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-review-diff/ios/Code456ReviewDiffView.swift
+// renders native review diffs on iOS
 import ExpoModulesCore
 import UIKit
 
@@ -397,8 +399,8 @@ public final class Code456ReviewDiffView: ExpoView, UIScrollViewDelegate {
   }
 
   public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-    // A direct gesture takes ownership from any interrupted programmatic jump.
-    // Resume visible-file events immediately so the inspector follows the finger.
+    // a direct gesture takes ownership from any interrupted programmatic jump.
+    // resume visible-file events immediately so the inspector follows the finger.
     isProgrammaticScrollActive = false
     contentView.isVerticalScrollActive = true
   }
@@ -513,7 +515,7 @@ public final class Code456ReviewDiffView: ExpoView, UIScrollViewDelegate {
           guard contentResetKey == self.contentResetKey else {
             return
           }
-          // A highlighter request from the previous file can finish after the view has
+          // a highlighter request from the previous file can finish after the view has
           // already reset. Never let that stale patch roll the native token state back.
           if let resetKey = patch.resetKey, resetKey != self.tokensResetKey {
             return
@@ -698,15 +700,15 @@ public final class Code456ReviewDiffView: ExpoView, UIScrollViewDelegate {
   }
 
   private func emitVisibleFileIfNeeded() {
-    // Keep the explicit destination selected while UIKit animates through the files
+    // keep the explicit destination selected while UIKit animates through the files
     // between the old and new offsets. Emitting every intermediate header forces a
-    // React render per crossing and makes the navigator visibly flash.
+    // react render per crossing and makes the navigator visibly flash.
     guard !isProgrammaticScrollActive else {
       return
     }
 
-    // The top of the combined diff is the explicit "All files" destination.
-    // Treat it as a first-class selection instead of immediately resolving the
+    // the top of the combined diff is the explicit "All files" destination.
+    // treat it as a first-class selection instead of immediately resolving the
     // first file header and undoing the navigator's optimistic selection.
     if scrollView.contentOffset.y <= 0.5 {
       guard lastVisibleFileId != nil else {
@@ -811,7 +813,7 @@ public final class Code456ReviewDiffView: ExpoView, UIScrollViewDelegate {
     onPullToRefresh([:])
   }
 
-  /// Driven from JS: set to false once the reload completes to dismiss the spinner.
+  // dismiss the spinner once JS reports that reload completed
   func setRefreshing(_ refreshing: Bool) {
     if refreshing {
       if !pullRefreshControl.isRefreshing {

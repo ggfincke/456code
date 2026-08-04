@@ -1,3 +1,6 @@
+// apps/desktop/scripts/dev-electron.mjs
+// run electron development workflow
+
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'
@@ -235,7 +238,7 @@ function killChildTree(signal)
     return
   }
 
-  // Kill direct children as a final fallback in case normal shutdown leaves stragglers.
+  // kill direct children as a final fallback in case normal shutdown leaves stragglers.
   NodeChildProcess.spawnSync('pkill', [`-${signal}`, '-P', String(process.pid)], {
     stdio: 'ignore',
   })

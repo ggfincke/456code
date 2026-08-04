@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewHighlighterState.test.ts
+// verify review highlighter state behavior
+
 import { assert, beforeEach, it } from 'vite-plus/test'
 import { AtomRegistry } from 'effect/unstable/reactivity'
 

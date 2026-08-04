@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/ReviewHighlighterProvider.tsx
+// provide review highlighter context
+
 import { createContext, type ReactNode, useContext, useMemo } from 'react'
 
 import { type ReviewHighlighterState, useReviewHighlighterState } from './reviewHighlighterState'

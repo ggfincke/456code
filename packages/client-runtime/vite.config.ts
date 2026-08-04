@@ -1,3 +1,6 @@
+// packages/client-runtime/vite.config.ts
+// configure client runtime Vite+ behavior
+
 import 'vite-plus/test/config'
 import { defineConfig } from 'vite-plus'
 

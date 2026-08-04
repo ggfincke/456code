@@ -1,3 +1,6 @@
+// apps/web/src/browser/browserViewportLayout.ts
+// resolve browser device viewport area
+
 import {
   PREVIEW_VIEWPORT_MAX_AREA,
   PREVIEW_VIEWPORT_MAX_DIMENSION,
@@ -12,10 +15,10 @@ export interface BrowserViewportLayout
   readonly canvasHeight: number
   readonly viewportX: number
   readonly viewportY: number
-  /** Visible footprint inside the preview panel after fit-to-panel scaling. */
+  // visible footprint inside the preview panel after fit-to-panel scaling.
   readonly viewportWidth: number
   readonly viewportHeight: number
-  /** Presentation-only scale; the guest keeps its requested CSS viewport. */
+  // presentation-only scale; the guest keeps its requested CSS viewport.
   readonly viewportScale: number
   readonly fillsPanel: boolean
 }

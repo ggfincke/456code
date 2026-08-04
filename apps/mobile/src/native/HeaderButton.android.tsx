@@ -1,3 +1,6 @@
+// apps/mobile/src/native/HeaderButton.android.tsx
+// render header button android
+
 import { requireNativeView } from 'expo'
 import type { NativeSyntheticEvent, StyleProp, ViewProps, ViewStyle } from 'react-native'
 

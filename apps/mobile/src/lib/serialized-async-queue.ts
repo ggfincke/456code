@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/serialized-async-queue.ts
+// implement serialized async queue
+
 /**
  * Runs asynchronous operations in call order while keeping the queue usable
  * after an individual operation rejects.

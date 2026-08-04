@@ -1,3 +1,6 @@
+// apps/mobile/src/features/showcase/ShowcaseCaptureCoordinator.tsx
+// render showcase capture coordinator
+
 import { useEffect, useRef, useState } from 'react'
 import { Keyboard, View } from 'react-native'
 import { CommonActions, StackActions, useNavigation } from '@react-navigation/native'
@@ -213,7 +216,7 @@ export function ShowcaseCaptureCoordinator(props: { readonly pathname: string })
       setReadyScene(null)
       return
     }
-    // Review owns its readiness marker because route activation happens before
+    // review owns its readiness marker because route activation happens before
     // the VCS request is parsed and the native diff surface is mounted.
     if (scene === 'review')
     {

@@ -1,5 +1,6 @@
 // apps/server/src/proposal/ProposalRepository.ts
 // persists proposal identities, immutable revisions, and content-addressed blobs
+
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off
 
 import * as NodeCrypto from 'node:crypto'

@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/PreviewView.test.tsx
+// verify preview view navigation behavior
+
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'

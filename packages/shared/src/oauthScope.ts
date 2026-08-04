@@ -1,3 +1,6 @@
+// packages/shared/src/oauthScope.ts
+// parse o auth scope
+
 import * as Schema from 'effect/Schema'
 
 const OAUTH_SCOPE_TOKEN = /^[\u0021\u0023-\u005b\u005d-\u007e]+$/u
@@ -17,10 +20,8 @@ export class OAuthScopeEncodingError extends Schema.TaggedErrorClass<OAuthScopeE
   }
 }
 
-/**
- * Decodes an RFC 6749 `scope` value as a set while preserving its first-seen
- * order for canonical responses and logs.
- */
+// decodes an RFC 6749 `scope` value as a set while preserving its first-seen
+// order for canonical responses and logs.
 export function parseOAuthScope(value: string): ReadonlyArray<string> | null
 {
   if (value.length === 0)

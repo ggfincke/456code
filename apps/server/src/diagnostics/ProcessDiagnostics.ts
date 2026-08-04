@@ -1,3 +1,6 @@
+// apps/server/src/diagnostics/ProcessDiagnostics.ts
+// parse posix process rows
+
 import type {
   ServerProcessDiagnosticsEntry,
   ServerProcessDiagnosticsResult,

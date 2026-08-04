@@ -1,3 +1,6 @@
+// packages/contracts/src/ipc.ts
+// define ipc contracts
+
 import type {
   VcsCreateRefInput,
   VcsCreateRefResult,
@@ -119,9 +122,9 @@ export interface ContextMenuItem<T extends string = string>
   label: string
   destructive?: boolean
   disabled?: boolean
-  /** Renders as a non-interactive section header label. Web fallback only — stripped on desktop native menus. */
+  // renders as a non-interactive section header label. Web fallback only — stripped on desktop native menus.
   header?: boolean
-  /** Icon keyword resolved by the web fallback. Stripped on desktop native menus. */
+  // icon keyword resolved by the web fallback. Stripped on desktop native menus.
   icon?: string
   children?: readonly ContextMenuItem<T>[]
 }
@@ -279,7 +282,7 @@ export const DesktopUpdateCheckResultSchema = Schema.Struct({
   state: DesktopUpdateStateSchema,
 })
 
-// Stable id for the Windows-native primary backend. Desktop side wraps
+// stable id for the Windows-native primary backend. Desktop side wraps
 // this with a brand inside DesktopBackendManager; web side keeps it as
 // a plain string so the env-runtime can compare against it without
 // importing brand machinery from the desktop package.
@@ -287,12 +290,12 @@ export const PRIMARY_LOCAL_ENVIRONMENT_ID = 'primary'
 
 export interface DesktopEnvironmentBootstrap
 {
-  // Stable backend instance id (e.g. "primary" or "wsl:ubuntu"). The
+  // stable backend instance id (e.g. "primary" or "wsl:ubuntu"). The
   // web env runtime keys local environments off this so projects
   // routed to a specific backend reopen against the same one.
   id: string
   label: string
-  // Concrete WSL distro used by the current backend run. This stays separate
+  // concrete WSL distro used by the current backend run. This stays separate
   // from id because a default-tracking instance keeps the stable
   // "wsl:default" IPC target while each run launches a specific distro.
   runningDistro?: string | null
@@ -450,7 +453,7 @@ export const DesktopServerExposureStateSchema = Schema.Struct({
 export interface PickFolderOptions
 {
   initialPath?: string | null
-  // When set, the desktop dialog opens against the named backend's
+  // when set, the desktop dialog opens against the named backend's
   // filesystem instead of the primary's. Used by callers that already
   // know which local environment they're targeting (e.g. opening a
   // project that lives inside WSL). Omitting it keeps the historical
@@ -478,20 +481,20 @@ export const DesktopWslDistroSchema = Schema.Struct({
 
 export interface DesktopWslState
 {
-  // True when the user has opted the WSL backend in; the actual backend
+  // true when the user has opted the WSL backend in; the actual backend
   // process is registered with the desktop pool independently of this
   // flag and may take a moment to come up after the user enables it.
   enabled: boolean
   // null means "track the current WSL default distro".
   distro: string | null
   available: boolean
-  // When true (and `enabled` is also true) the desktop runs only the
+  // when true (and `enabled` is also true) the desktop runs only the
   // WSL backend as the primary; the Windows-side Node backend is not
   // started. Toggling this requires an app restart because the
   // primary backend's spec is captured once at layer init.
   wslOnly: boolean
   distros: readonly DesktopWslDistro[]
-  // Reason the dual-mode WSL backend last failed preflight (no node, wrong
+  // reason the dual-mode WSL backend last failed preflight (no node, wrong
   // version, missing build tools), or null. Surfaced inline in Connections
   // settings. Always null in wsl-only mode — that path shows a dialog and
   // falls back to Windows instead.
@@ -507,10 +510,8 @@ export const DesktopWslStateSchema = Schema.Struct({
   preflightError: Schema.NullOr(Schema.String),
 })
 
-/**
- * Renderer-facing snapshot of a desktop preview tab. Mirrors the main-process
- * PreviewTabState shape but uses serialisable primitives only.
- */
+// renderer-facing snapshot of a desktop preview tab. Mirrors the main-process
+// PreviewTabState shape but uses serialisable primitives only.
 export type DesktopPreviewNavStatus =
   | { kind: 'Idle' }
   | { kind: 'Loading'; url: string; title: string }
@@ -523,10 +524,8 @@ export type DesktopPreviewNavStatus =
       description: string
     }
 
-/**
- * Emulated `prefers-color-scheme` for the guest page. "system" clears the
- * override so the page follows the OS appearance.
- */
+// emulated `prefers-color-scheme` for the guest page. "system" clears the
+// override so the page follows the OS appearance.
 export type DesktopPreviewColorScheme = 'system' | 'light' | 'dark'
 
 export const DesktopPreviewColorSchemeSchema: Schema.Codec<DesktopPreviewColorScheme> =
@@ -539,7 +538,7 @@ export interface DesktopPreviewTabState
   navStatus: DesktopPreviewNavStatus
   canGoBack: boolean
   canGoForward: boolean
-  /** Current zoom factor (1.0 = 100%). */
+  // current zoom factor (1.0 = 100%).
   zoomFactor: number
   colorScheme: DesktopPreviewColorScheme
   controller: 'human' | 'agent' | 'none'
@@ -611,19 +610,15 @@ export const DesktopPreviewPointerEventSchema: Schema.Codec<DesktopPreviewPointe
  */
 export interface DesktopPreviewWebviewConfig
 {
-  /** `persist:456code-preview` (or whatever the desktop chose). */
+  // `persist:456code-preview` (or whatever the desktop chose).
   partition: string
-  /**
-   * Canonical `<webview webpreferences="...">` string. Encodes the security
-   * posture (sandboxed but contextIsolation off so the picker preload can
-   * read the page's React DevTools hook). Always present.
-   */
+  // canonical `<webview webpreferences="...">` string. Encodes the security
+  // posture (sandboxed but contextIsolation off so the picker preload can
+  // read the page's React DevTools hook). Always present.
   webPreferences: string
-  /**
-   * Absolute `file://`-style URL to the picker preload bundle. Set to null
-   * when the bundle isn't present (older builds, broken install) — the
-   * renderer must then disable element-pick affordances.
-   */
+  // absolute `file://`-style URL to the picker preload bundle. Set to null
+  // when the bundle isn't present (older builds, broken install) — the
+  // renderer must then disable element-pick affordances.
   preloadUrl: string | null
 }
 
@@ -762,25 +757,25 @@ export const PickedElementStackFrameSchema: Schema.Codec<PickedElementStackFrame
  */
 export interface PickedElementPayload
 {
-  /** URL of the page the element was picked on. */
+  // URL of the page the element was picked on.
   pageUrl: string
-  /** Optional `<title>` of that page (best-effort). */
+  // optional `<title>` of that page (best-effort).
   pageTitle: string | null
-  /** Lowercase tag name, e.g. `"button"`. */
+  // lowercase tag name, e.g. `"button"`.
   tagName: string
-  /** CSS selector resolving back to the element on a re-render. */
+  // CSS selector resolving back to the element on a re-render.
   selector: string | null
-  /** Truncated outer-HTML preview (matches react-grab's `htmlPreview`). */
+  // truncated outer-HTML preview (matches react-grab's `htmlPreview`).
   htmlPreview: string
-  /** Nearest React component display name, or null when unavailable. */
+  // nearest React component display name, or null when unavailable.
   componentName: string | null
-  /** First source-mapped stack frame (file + line of the JSX source). */
+  // first source-mapped stack frame (file + line of the JSX source).
   source: PickedElementStackFrame | null
-  /** Full owner-stack frames; can be empty. Useful for richer context. */
+  // full owner-stack frames; can be empty. Useful for richer context.
   stack: ReadonlyArray<PickedElementStackFrame>
-  /** Author CSS only (UA defaults stripped) — react-grab's `styles`. */
+  // author CSS only (UA defaults stripped) — react-grab's `styles`.
   styles: string
-  /** Wall-clock pick time as ISO-8601 string. */
+  // wall-clock pick time as ISO-8601 string.
   pickedAt: string
 }
 
@@ -1005,9 +1000,9 @@ export const DesktopPreviewAutomationWaitForInputSchema = Schema.Struct({
 export interface DesktopBridge
 {
   getAppBranding: () => DesktopAppBranding | null
-  // One bootstrap per pool instance currently registered with bootstrap
+  // one bootstrap per pool instance currently registered with bootstrap
   // info (omits instances whose backend hasn't produced a config yet).
-  // The primary backend is identified by id === PRIMARY_LOCAL_ENVIRONMENT_ID.
+  // the primary backend is identified by id === PRIMARY_LOCAL_ENVIRONMENT_ID.
   getLocalEnvironmentBootstraps: () => readonly DesktopEnvironmentBootstrap[]
   getLocalEnvironmentBearerToken: () => Promise<string>
   getClientSettings: () => Promise<ClientSettings | null>
@@ -1061,10 +1056,8 @@ export interface DesktopBridge
   downloadUpdate: () => Promise<DesktopUpdateActionResult>
   installUpdate: () => Promise<DesktopUpdateActionResult>
   onUpdateState: (listener: (state: DesktopUpdateState) => void) => () => void
-  /**
-   * Desktop-only preview surface. Present iff the renderer is hosted by the
-   * Electron desktop build; web builds have `preview === undefined`.
-   */
+  // desktop-only preview surface. Present iff the renderer is hosted by the
+  // electron desktop build; web builds have `preview === undefined`.
   preview?: DesktopPreviewBridge
 }
 
@@ -1080,34 +1073,28 @@ export interface DesktopPreviewBridge
   zoomIn: (tabId: string) => Promise<void>
   zoomOut: (tabId: string) => Promise<void>
   resetZoom: (tabId: string) => Promise<void>
-  /** Reload bypassing the HTTP cache. */
+  // reload bypassing the HTTP cache.
   hardReload: (tabId: string) => Promise<void>
-  /**
-   * Emulate `prefers-color-scheme` on the guest page ("system" clears the
-   * override). Persists per tab and is re-applied across webview swaps.
-   */
+  // emulate `prefers-color-scheme` on the guest page ("system" clears the
+  // override). Persists per tab and is re-applied across webview swaps.
   setColorScheme: (tabId: string, colorScheme: DesktopPreviewColorScheme) => Promise<void>
-  /** Open the guest webview's DevTools (detached). */
+  // open the guest webview's DevTools (detached).
   openDevTools: (tabId: string) => Promise<void>
-  /** Drop cookies + storage data for the preview partition (all tabs). */
+  // drop cookies + storage data for the preview partition (all tabs).
   clearCookies: () => Promise<void>
-  /** Drop the HTTP cache for the preview partition (all tabs). */
+  // drop the HTTP cache for the preview partition (all tabs).
   clearCache: () => Promise<void>
-  /**
-   * One-shot config for mounting a preview `<webview>`. Replaces three
-   * earlier round-trip calls (`getBrowserPartition`, `getWebviewPreferences`,
-   * `getPickPreloadPath`) so adding a new field here only requires touching
-   * the contract + main, not the renderer's mount logic.
-   */
+  // one-shot config for mounting a preview `<webview>`. Replaces three
+  // earlier round-trip calls (`getBrowserPartition`, `getWebviewPreferences`,
+  // `getPickPreloadPath`) so adding a new field here only requires touching
+  // the contract + main, not the renderer's mount logic.
   getPreviewConfig: (environmentId: EnvironmentId) => Promise<DesktopPreviewWebviewConfig>
   setAnnotationTheme: (theme: DesktopPreviewAnnotationTheme) => Promise<void>
-  /**
-   * Activate the in-page element picker for the given tab. Resolves with
-   * the picked payload, or `null` when the user cancels (Escape / nav). The
-   * promise rejects if the picker can't be activated (no webview, etc.).
-   */
+  // activate the in-page element picker for the given tab. Resolves with
+  // the picked payload, or `null` when the user cancels (Escape / nav). The
+  // promise rejects if the picker can't be activated (no webview, etc.).
   pickElement: (tabId: string) => Promise<PreviewAnnotationPayload | null>
-  /** Cancel an in-flight preview annotation session. */
+  // cancel an in-flight preview annotation session.
   cancelPickElement: (tabId: string) => Promise<void>
   captureScreenshot: (tabId: string) => Promise<DesktopPreviewScreenshotArtifact>
   revealArtifact: (path: string) => Promise<void>
@@ -1168,11 +1155,9 @@ export interface LocalApi
   }
   server: {
     getConfig: () => Promise<ServerConfig>
-    /**
-     * Refresh provider snapshots. When `input.instanceId` is supplied only that
-     * configured instance is probed; otherwise every configured instance is
-     * refreshed (legacy untargeted refresh).
-     */
+    // refresh provider snapshots. When `input.instanceId` is supplied only that
+    // configured instance is probed; otherwise every configured instance is
+    // refreshed (legacy untargeted refresh).
     refreshProviders: (input?: {
       readonly instanceId?: ProviderInstanceId
     }) => Promise<ServerProviderUpdatedPayload>

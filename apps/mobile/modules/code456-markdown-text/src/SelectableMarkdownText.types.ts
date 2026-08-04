@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/SelectableMarkdownText.types.ts
+// define selectable markdown text contracts
+
 export interface NativeMarkdownTextStyle
 {
   readonly color: string

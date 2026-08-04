@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/label.tsx
+// render reusable label UI primitives
+
 'use client'
 
 import { mergeProps } from '@base-ui/react/merge-props'

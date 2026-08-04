@@ -1,3 +1,6 @@
+// scripts/release-smoke.ts
+// run the release smoke repository workflow
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'

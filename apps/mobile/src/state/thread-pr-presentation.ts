@@ -1,3 +1,6 @@
+// apps/mobile/src/state/thread-pr-presentation.ts
+// manage thread pr state
+
 import type { VcsStatusResult } from '@t3tools/contracts'
 import { resolveChangeRequestPresentation } from '@t3tools/shared/sourceControl'
 
@@ -8,9 +11,9 @@ export interface ThreadPrPresentation
   readonly number: number
   readonly state: ThreadPr['state']
   readonly url: string
-  /** Compact pull request number label, e.g. "3774". */
+  // compact pull request number label, e.g. "3774".
   readonly label: string
-  /** Full, provider-aware label for assistive technologies. */
+  // full, provider-aware label for assistive technologies.
   readonly accessibilityLabel: string
   readonly textClassName: string
 }

@@ -1,3 +1,6 @@
+// apps/web/src/composerHandleContext.ts
+// define composer handle ref
+
 import { createContext, use } from 'react'
 import type { ChatComposerHandle } from './components/chat/ChatComposer'
 

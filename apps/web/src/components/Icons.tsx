@@ -1,3 +1,6 @@
+// apps/web/src/components/Icons.tsx
+// render icons
+
 import React, { type SVGProps, useId } from 'react'
 import { cn } from '~/lib/utils'
 

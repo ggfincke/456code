@@ -1,3 +1,6 @@
+// tests/apps/web/browser/hostedBrowserWebviewStyle.test.ts
+// verify resolve hosted browser webview wrapper style behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

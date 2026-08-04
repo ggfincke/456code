@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/components/SettingsRow.tsx
+// render settings row
+
 import { useNavigation } from '@react-navigation/native'
 import type { ComponentProps } from 'react'
 import { Pressable, View } from 'react-native'

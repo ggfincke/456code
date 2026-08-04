@@ -1,3 +1,6 @@
+// apps/web/src/components/sidebar/SidebarUpdatePill.tsx
+// render sidebar update pill
+
 import { DownloadIcon, RotateCwIcon, TriangleAlertIcon, XIcon } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { isElectron } from '../../env'

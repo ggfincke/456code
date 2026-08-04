@@ -1,3 +1,6 @@
+// tests/apps/web/components/files/fileTreeDragMention.test.ts
+// verify create file tree drag mention controller behavior
+
 import { describe, expect, it } from '@effect/vitest'
 
 import { COMPOSER_MENTION_DRAG_TYPE } from '~/components/chat/composerMentionDrag'
@@ -46,7 +49,7 @@ describe('createFileTreeDragMentionController', () =>
 
   it('does not tag drags of selected text from the panel chrome', () =>
   {
-    // Only a drag that originates on a tree row is a mention; dragging a text
+    // only a drag that originates on a tree row is a mention; dragging a text
     // selection also carries text/plain, and tagging it would drop an invalid
     // pill into the composer.
     const controller = createFileTreeDragMentionController({ deselect: () =>

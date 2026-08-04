@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/previewAutomationTarget.test.ts
+// verify preview automation target selection behavior
+
 import type { PreviewSessionSnapshot } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

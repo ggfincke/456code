@@ -1,3 +1,6 @@
+// apps/server/src/provider/acp/XAiAcpExtension.ts
+// extract x ai ask user questions
+
 import type { ProviderUserInputAnswers, UserInputQuestion } from '@t3tools/contracts'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
@@ -212,10 +215,8 @@ export function makeXAiAskUserQuestionCancelledResponse(): XAiAskUserQuestionCan
   return { outcome: 'cancelled' }
 }
 
-/**
- * Adds Grok's private prompt-completion fallback around a standards-only ACP runtime.
- * The underlying runtime remains unaware of xAI methods and metadata.
- */
+// adds Grok's private prompt-completion fallback around a standards-only ACP runtime.
+// the underlying runtime remains unaware of xAI methods and metadata.
 export const makeXAiPromptCompletionRuntime = Effect.fn('makeXAiPromptCompletionRuntime')(
   function* (runtime: AcpSessionRuntime.AcpSessionRuntime['Service'])
   {

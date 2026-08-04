@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-review-diff/android/src/main/java/expo/modules/code456reviewdiff/ReviewDiffCanvasDrawing.kt
+// draws review diff rows on an Android canvas
 package expo.modules.code456reviewdiff
 
 import android.content.Context

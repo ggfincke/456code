@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/time.ts
+// expose relative time
+
 export function relativeTime(input: string): string
 {
   const timestamp = Date.parse(input)
@@ -6,8 +9,8 @@ export function relativeTime(input: string): string
     return '<1m'
   }
 
-  // Anything under a minute renders as "<1m" rather than a live seconds count.
-  // The seconds ticker changed width every second and reflowed the surrounding row.
+  // anything under a minute renders as "<1m" rather than a live seconds count.
+  // the seconds ticker changed width every second and reflowed the surrounding row.
   const deltaSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000))
   if (deltaSeconds < 60) return '<1m'
 

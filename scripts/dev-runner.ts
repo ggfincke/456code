@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// scripts/dev-runner.ts
+// run runner development workflow
 
 import * as NodeOS from 'node:os'
 
@@ -616,7 +618,7 @@ export function runDevRunnerWithInput(input: DevRunnerCliInput)
       env,
       extendEnv: false,
       shell: spawnCommand.shell,
-      // Keep Vite+ in the same process group so terminal signals (Ctrl+C)
+      // keep Vite+ in the same process group so terminal signals (Ctrl+C)
       // reach it directly. Effect defaults to detached: true on non-Windows,
       // which would put the runner in a new group and require manual forwarding.
       detached: false,

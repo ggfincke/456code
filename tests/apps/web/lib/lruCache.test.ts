@@ -1,3 +1,6 @@
+// tests/apps/web/lib/lruCache.test.ts
+// verify lru cache behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import { LRUCache } from '../../../../apps/web/src/lib/lruCache'
 
@@ -14,7 +17,7 @@ describe('LRUCache', () =>
     expect(cache.get('b')).toBe('B')
     expect(cache.get('c')).toBe('C')
 
-    // Promote b so the next insert evicts c (least recently used).
+    // promote b so the next insert evicts c (least recently used).
     expect(cache.get('b')).toBe('B')
     cache.set('d', 'D', 10)
     expect(cache.get('b')).toBe('B')

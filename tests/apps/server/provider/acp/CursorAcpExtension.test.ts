@@ -1,3 +1,6 @@
+// tests/apps/server/provider/acp/CursorAcpExtension.test.ts
+// verify cursor acp extension behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

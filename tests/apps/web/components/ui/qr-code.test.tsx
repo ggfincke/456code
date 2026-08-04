@@ -1,3 +1,6 @@
+// tests/apps/web/components/ui/qr-code.test.tsx
+// verify qr code svg behavior
+
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vite-plus/test'
 

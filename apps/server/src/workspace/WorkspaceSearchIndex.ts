@@ -1,3 +1,6 @@
+// apps/server/src/workspace/WorkspaceSearchIndex.ts
+// define workspace search index create failed
+
 import { FileFinder, type MixedItem, type MixedSearchResult } from '@ff-labs/fff-node'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -342,11 +345,9 @@ export const make = Effect.fn('WorkspaceSearchIndex.make')(function* (cwd: strin
   return WorkspaceSearchIndex.of({ list, refresh, search })
 })
 
-/**
- * A layer factory is required because every index is scoped to a concrete
- * workspace root. WorkspaceSearchIndexMap owns memoization and idle cleanup;
- * using a default cwd here would mix resources from different workspaces.
- */
+// a layer factory is required because every index is scoped to a concrete
+// workspace root. WorkspaceSearchIndexMap owns memoization and idle cleanup;
+// using a default cwd here would mix resources from different workspaces.
 export const layer = (cwd: string) => Layer.effect(WorkspaceSearchIndex, make(cwd))
 
 export class WorkspaceSearchIndexMap extends LayerMap.Service<WorkspaceSearchIndexMap>()(

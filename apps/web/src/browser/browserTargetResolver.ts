@@ -1,3 +1,6 @@
+// apps/web/src/browser/browserTargetResolver.ts
+// resolve browser navigation target
+
 import type {
   BrowserNavigationTarget,
   EnvironmentId,
@@ -112,7 +115,7 @@ export function resolveBrowserNavigationTarget(
     }
     catch
     {
-      // Preserve the existing direct-navigation behavior so the preview host
+      // preserve the existing direct-navigation behavior so the preview host
       // reports malformed URL errors through its normal navigation path.
     }
     if (parsed && isLoopbackHost(parsed.hostname))

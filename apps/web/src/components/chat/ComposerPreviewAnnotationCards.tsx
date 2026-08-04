@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPreviewAnnotationCards.tsx
+// render composer preview annotation cards
+
 import type { PreviewAnnotationPayload } from '@t3tools/contracts'
 import { Frame, MousePointerClick, Paintbrush, PenLine, X } from 'lucide-react'
 import type { ReactNode } from 'react'

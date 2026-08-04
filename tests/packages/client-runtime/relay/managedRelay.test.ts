@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/relay/managedRelay.test.ts
+// verify managed relay client behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { RelayEnvironmentStatusScope } from '@t3tools/contracts/relay'
 import { describe, expect, it } from '@effect/vitest'

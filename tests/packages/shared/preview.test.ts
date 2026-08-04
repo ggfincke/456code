@@ -1,3 +1,6 @@
+// tests/packages/shared/preview.test.ts
+// verify new preview tab id behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

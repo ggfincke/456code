@@ -1,3 +1,6 @@
+// tests/apps/server/startupAccess.test.ts
+// verify startup access behavior
+
 import { assert, expect, it } from '@effect/vitest'
 
 import {

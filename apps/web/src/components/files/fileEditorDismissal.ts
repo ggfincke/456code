@@ -1,3 +1,6 @@
+// apps/web/src/components/files/fileEditorDismissal.ts
+// install file editor dismissal
+
 interface FileEditorDismissalOptions
 {
   root: HTMLElement

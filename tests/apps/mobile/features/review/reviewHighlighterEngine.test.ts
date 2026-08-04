@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewHighlighterEngine.test.ts
+// verify resolve review highlighter engine preference behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

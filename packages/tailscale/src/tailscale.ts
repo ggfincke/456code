@@ -1,3 +1,6 @@
+// packages/tailscale/src/tailscale.ts
+// determine whether tailscale ipv4 address
+
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'

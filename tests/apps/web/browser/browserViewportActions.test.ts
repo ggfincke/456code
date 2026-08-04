@@ -1,3 +1,6 @@
+// tests/apps/web/browser/browserViewportActions.test.ts
+// verify browser viewport actions behavior
+
 import type { PreviewViewportSetting } from '@t3tools/contracts'
 import { describe, expect, it, vi } from 'vite-plus/test'
 

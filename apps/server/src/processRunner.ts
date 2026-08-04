@@ -1,3 +1,6 @@
+// apps/server/src/processRunner.ts
+// determine whether windows command not found
+
 import * as Context from 'effect/Context'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
@@ -28,10 +31,8 @@ export interface ProcessRunInput
   readonly maxOutputBytes?: number | undefined
   readonly outputMode?: 'error' | 'truncate' | undefined
   readonly truncatedMarker?: string | undefined
-  /**
-   * On timeout, return a synthetic timedOut result.
-   * Partial stdout/stderr are not preserved.
-   */
+  // on timeout, return a synthetic timedOut result.
+  // partial stdout/stderr are not preserved.
   readonly timeoutBehavior?: 'error' | 'timedOutResult' | undefined
 }
 

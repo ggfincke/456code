@@ -1,3 +1,6 @@
+// apps/web/src/keybindings.ts
+// resolve shortcut command
+
 import {
   type KeybindingCommand,
   type KeybindingShortcut,

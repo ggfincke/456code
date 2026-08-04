@@ -1,3 +1,6 @@
+// apps/web/src/state/desktopNetworkAccess.ts
+// manage desktop network access snapshot state
+
 import type {
   AdvertisedEndpoint,
   DesktopBridge,

@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/models.ts
+// manage environment project state
+
 import type {
   EnvironmentId,
   OrchestrationMessage,

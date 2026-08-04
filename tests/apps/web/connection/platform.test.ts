@@ -1,3 +1,6 @@
+// tests/apps/web/connection/platform.test.ts
+// verify desktop ssh pairing behavior
+
 import {
   AuthStandardClientScopes,
   EnvironmentId,

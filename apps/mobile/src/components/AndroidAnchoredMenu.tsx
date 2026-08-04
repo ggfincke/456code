@@ -1,3 +1,6 @@
+// apps/mobile/src/components/AndroidAnchoredMenu.tsx
+// render android anchored menu
+
 import type { MenuAction, MenuComponentProps } from '@react-native-menu/menu'
 import { BlurView } from 'expo-blur'
 import type { ReactNode } from 'react'
@@ -18,7 +21,7 @@ const MENU_WIDTH = 250
 const SCREEN_MARGIN = 12
 const ANCHOR_GAP = 6
 
-// Anchor position is snapshotted in window coordinates when the menu opens;
+// anchor position is snapshotted in window coordinates when the menu opens;
 // the overlay root measures itself the same way, and the menu is placed from
 // the delta. Both snapshots are taken at open time so later reflows (keyboard
 // show/hide, screen transitions) can't flip an opens-up menu to opens-down
@@ -41,39 +44,35 @@ export type AndroidAnchoredMenuProps = {
   readonly actions: readonly MenuAction[]
   readonly title?: string
   readonly onPressAction?: MenuComponentProps['onPressAction']
-  /** Applied to the anchor wrapper — call sites flex these to fill toolbars. */
+  // applied to the anchor wrapper — call sites flex these to fill toolbars.
   readonly className?: string
   readonly style?: StyleProp<ViewStyle>
-  /**
-   * Plain children open the menu on tap (the wrapper owns the press). A
-   * render function keeps the children interactive and hands them `open` to
-   * call from their own gesture — e.g. a row that selects on tap and opens
-   * this menu on long-press.
-   */
+  // plain children open the menu on tap (the wrapper owns the press). A
+  // render function keeps the children interactive and hands them `open` to
+  // call from their own gesture — e.g. a row that selects on tap and opens
+  // this menu on long-press.
   readonly children: ReactNode | ((open: () => void) => ReactNode)
 }
 
-/**
- * Token-styled anchored dropdown for Android, drop-in for the subset of the
- * MenuView contract the app uses (actions with state/subtitle/image/
- * attributes, one level of subactions). The native AppCompat PopupMenu caps
- * out on theming — stock animation, item metrics, and submenu chrome — so
- * ControlPillMenu renders this instead on Android while iOS keeps the native
- * UIMenu. Styling follows the themed native popup (12dp radius, plain rows,
- * trailing check glyph); submenus drill in under a muted parent-title header.
- */
+// token-styled anchored dropdown for Android, drop-in for the subset of the
+// MenuView contract the app uses (actions with state/subtitle/image/
+// attributes, one level of subactions). The native AppCompat PopupMenu caps
+// out on theming — stock animation, item metrics, and submenu chrome — so
+// ControlPillMenu renders this instead on Android while iOS keeps the native
+// UIMenu. Styling follows the themed native popup (12dp radius, plain rows,
+// trailing check glyph); submenus drill in under a muted parent-title header.
 export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps)
 {
   const [anchor, setAnchor] = useState<AnchorSnapshot | null>(null)
   const [path, setPath] = useState<readonly MenuAction[]>([])
-  // Height of the modal's root view, in the modal's own coordinate space.
-  // Menus that flip above their anchor are pinned by their BOTTOM edge
+  // height of the modal's root view, in the modal's own coordinate space.
+  // menus that flip above their anchor are pinned by their BOTTOM edge
   // (bottom = rootHeight - anchorTop), so drill-in height changes grow
   // upward without any re-measurement — positioning them via `top` from the
   // menu's measured height made every submenu transition settle over two
   // frames and jitter.
   const [rootHeight, setRootHeight] = useState<number | null>(null)
-  // Window frame of the overlay root, measured on layout. Anchor coordinates
+  // window frame of the overlay root, measured on layout. Anchor coordinates
   // are converted into this frame, so the menu lands correctly no matter
   // where the portal host sits (status bar, keyboard resize, etc.).
   const [overlay, setOverlay] = useState<OverlayFrame | null>(null)
@@ -113,7 +112,7 @@ export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps)
     })
   }, [])
 
-  // The dropdown renders in-window (no Modal takes focus), so the hardware
+  // the dropdown renders in-window (no Modal takes focus), so the hardware
   // back gesture needs explicit handling while it is open. Back steps out of
   // a drilled-in submenu one level at a time (mirroring the tappable parent
   // header) before closing the menu. Under predictive back
@@ -149,7 +148,7 @@ export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps)
     (action) => !(action.attributes?.hidden ?? false),
   )
 
-  // Anchor in overlay-local coordinates (both measured in window space).
+  // anchor in overlay-local coordinates (both measured in window space).
   const local =
     anchor === null || overlay === null
       ? null
@@ -169,7 +168,7 @@ export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps)
     overlay === null
       ? 0
       : Math.min(Math.max(preferredLeft, SCREEN_MARGIN), overlay.width - MENU_WIDTH - SCREEN_MARGIN)
-  // The keyboard stays up while the menu is open (in-window overlay, no
+  // the keyboard stays up while the menu is open (in-window overlay, no
   // focus change), so the space it covers is not usable — without this the
   // composer-pill menus "open down" into the IME and can't be tapped.
   const usableBottom =
@@ -181,7 +180,7 @@ export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps)
   const spaceAbove = local === null ? 0 : local.y - ANCHOR_GAP - SCREEN_MARGIN
   const opensDown = spaceBelow >= 280 || spaceBelow >= spaceAbove
   const maxHeight = Math.min(opensDown ? spaceBelow : spaceAbove, 480)
-  // The menu needs the overlay frame before it can be placed; it stays
+  // the menu needs the overlay frame before it can be placed; it stays
   // unmounted for that first frame so the fade-in plays at the final position.
   const placeable = local !== null && rootHeight !== null
 
@@ -262,7 +261,7 @@ export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps)
                   showsVerticalScrollIndicator={false}
                 >
                   {parent !== null ? (
-                    // Muted parent title as the submenu header; tapping it
+                    // muted parent title as the submenu header; tapping it
                     // steps back, but it reads as a label, not a button.
                     <Pressable
                       className="px-3.5 pb-1 pt-2.5"
@@ -301,7 +300,7 @@ export function AndroidAnchoredMenu(props: AndroidAnchoredMenuProps)
                         <View className="flex-1 gap-0.5">
                           <Text
                             className={cn(
-                              // Same face as the pill labels that open these menus.
+                              // same face as the pill labels that open these menus.
                               'text-sm font-sans-bold',
                               destructive && 'text-danger-foreground',
                             )}

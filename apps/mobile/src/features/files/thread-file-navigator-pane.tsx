@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/thread-file-navigator-pane.tsx
+// render thread file navigator pane
+
 import type { EnvironmentId, ProjectListEntriesResult } from '@t3tools/contracts'
 import { SymbolView } from '../../components/AppSymbol'
 import { useCallback, useMemo, useState, type ComponentProps } from 'react'

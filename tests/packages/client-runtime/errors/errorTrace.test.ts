@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/errors/errorTrace.test.ts
+// verify find error trace id behavior
+
 import * as Cause from 'effect/Cause'
 import { describe, expect, it } from 'vite-plus/test'
 

@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/cloud/cloudWaitlistJoin.test.ts
+// verify join cloud waitlist behavior
+
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import {

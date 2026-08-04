@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/MarkdownTextPrimitive.tsx
+// render markdown text primitive
+
 import React from 'react'
 import { Platform, StyleSheet, Text as RNText, type TextProps, type ViewStyle } from 'react-native'
 import Code456MarkdownTextRunNativeComponent from './Code456MarkdownTextRunNativeComponent'
@@ -16,22 +19,18 @@ const textDefaults: TextProps = {
 
 const useTextAncestorContext = () => React.useContext(TextAncestorContext)
 
-/**
- * Event fired by `onSelectionChange`. `start`/`end` are 0-based UTF-16 indices
- * into the rendered string. `start === end` means the selection was cleared.
- */
+// event fired by `onSelectionChange`. `start`/`end` are 0-based UTF-16 indices
+// into the rendered string. `start === end` means the selection was cleared.
 export type SelectionChangeEvent = {
   nativeEvent: { target: number; start: number; end: number }
 }
 
 export type MarkdownTextPrimitiveProps = TextProps & {
   uiTextView?: boolean
-  /**
-   * Fired when the native text selection changes. Only fires on iOS when
-   * `uiTextView` is true. Note: fires on every selection-edge adjustment
-   * (e.g. dragging a selection handle), so consumers driving expensive work
-   * off this event should debounce.
-   */
+  // fired when the native text selection changes. Only fires on iOS when
+  // `uiTextView` is true. Note: fires on every selection-edge adjustment
+  // (e.g. dragging a selection handle), so consumers driving expensive work
+  // off this event should debounce.
   onSelectionChange?: (event: SelectionChangeEvent) => void
 }
 
@@ -39,7 +38,7 @@ function MarkdownTextPrimitiveChild({ style, children, ...rest }: MarkdownTextPr
 {
   const [isAncestor, rootStyle] = useTextAncestorContext()
 
-  // Flatten the styles, and apply the root styles when needed
+  // flatten the styles, and apply the root styles when needed
   const flattenedStyle = React.useMemo(() => flattenStyles(rootStyle, style), [rootStyle, style])
   const contextValue = React.useMemo<[boolean, ViewStyle]>(
     () => [true, flattenedStyle],
@@ -98,7 +97,7 @@ function MarkdownTextPrimitiveInner(props: MarkdownTextPrimitiveProps)
 {
   const [isAncestor] = useTextAncestorContext()
 
-  // Even if the uiTextView prop is set, we can still default to using
+  // even if the uiTextView prop is set, we can still default to using
   // normal selection (i.e. base RN text) if the text doesn't need to be
   // selectable
   if ((!props.selectable || !props.uiTextView) && !isAncestor)

@@ -1,3 +1,6 @@
+// tests/packages/shared/chatList.test.ts
+// verify resolve chat list anchored end space behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

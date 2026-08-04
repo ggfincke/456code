@@ -1,3 +1,6 @@
+// tests/apps/server/codexModelOptions.test.ts
+// verify codex model options behavior
+
 import { assert, it } from '@effect/vitest'
 
 import { ProviderInstanceId } from '@t3tools/contracts'

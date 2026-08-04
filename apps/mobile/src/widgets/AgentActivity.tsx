@@ -1,3 +1,6 @@
+// apps/mobile/src/widgets/AgentActivity.tsx
+// render agent activity
+
 import { HStack, Image, Spacer, Text, VStack, ZStack } from '@expo/ui/swift-ui'
 import type { ComponentProps } from 'react'
 import {
@@ -49,7 +52,7 @@ export interface AgentActivityProps
   readonly activities: ReadonlyArray<AgentActivityRowProps>
 }
 
-// This function is serialized into the widget extension's JS bundle, so it
+// this function is serialized into the widget extension's JS bundle, so it
 // must stay self-contained: no references to module-scope helpers, only the
 // imported view/modifier factories.
 export function AgentActivity(
@@ -59,7 +62,7 @@ export function AgentActivity(
 {
   'widget'
 
-  // Use SwiftUI's semantic label colors rather than fixed hex keyed off the
+  // use SwiftUI's semantic label colors rather than fixed hex keyed off the
   // device color scheme. A Live Activity banner always renders over a dark
   // system material regardless of the device's light/dark setting, so
   // scheme-derived dark text read as unreadable dark-on-dark on the lock
@@ -68,11 +71,11 @@ export function AgentActivity(
   const primaryForeground = 'primary'
   const secondaryForeground = 'secondary'
 
-  // Status tints mirror the web sidebar's pills
+  // status tints mirror the web sidebar's pills
   // (apps/web/src/components/Sidebar.logic.ts resolveThreadStatusPill): amber
   // for approval, indigo for input, sky for working, emerald for completed.
-  // On iPhone the LA sits on a dark material, but macOS (iPhone Mirroring /
-  // Mac notification center) renders it on a light one — so pick the web
+  // on iPhone the LA sits on a dark material, but macOS (iPhone Mirroring /
+  // mac notification center) renders it on a light one — so pick the web
   // palette's light (-600) or dark (-300) variant off the color scheme.
   const isLightScheme = environment.colorScheme === 'light'
   const phaseTint = (phase: AgentActivityPhase | undefined): string =>
@@ -84,21 +87,26 @@ export function AgentActivity(
     switch (phase)
     {
       case 'waiting_for_approval':
-        return isLightScheme ? '#d97706' : '#fcd34d' // amber-600 / amber-300
+        // amber-600 / amber-300
+        return isLightScheme ? '#d97706' : '#fcd34d'
       case 'waiting_for_input':
-        return isLightScheme ? '#4f46e5' : '#a5b4fc' // indigo-600 / indigo-300
+        // indigo-600 / indigo-300
+        return isLightScheme ? '#4f46e5' : '#a5b4fc'
       case 'failed':
-        return isLightScheme ? '#dc2626' : '#fca5a5' // red-600 / red-300
+        // red-600 / red-300
+        return isLightScheme ? '#dc2626' : '#fca5a5'
       case 'completed':
-        return isLightScheme ? '#059669' : '#6ee7b7' // emerald-600 / emerald-300
+        // emerald-600 / emerald-300
+        return isLightScheme ? '#059669' : '#6ee7b7'
       case 'starting':
       case 'running':
       default:
-        return isLightScheme ? '#0284c7' : '#7dd3fc' // sky-600 / sky-300
+        // sky-600 / sky-300
+        return isLightScheme ? '#0284c7' : '#7dd3fc'
     }
   }
 
-  // Order attention-first so whatever needs the user floats to the top of every
+  // order attention-first so whatever needs the user floats to the top of every
   // presentation, then failures, then in-flight work, then finished/stale.
   const phasePriority = (phase: AgentActivityPhase): number =>
   {
@@ -123,16 +131,16 @@ export function AgentActivity(
   const failedRow = props.activities.find((row) => row.phase === 'failed')
   const heroRow = attentionRow ?? failedRow ?? row0
   const tint = phaseTint(heroRow?.phase)
-  // Headline count leans on the accent when a human is actually blocked.
+  // headline count leans on the accent when a human is actually blocked.
   const headerTint = attentionRow
     ? phaseTint(attentionRow.phase)
     : failedRow
       ? phaseTint(failedRow.phase)
       : tint
 
-  // With nothing active the aggregate only carries recently finished work, so
+  // with nothing active the aggregate only carries recently finished work, so
   // "0 active agents" (and a lone "0" in the expanded island) read as broken.
-  // Lead with the outcome instead. The outcome is derived here from the rows
+  // lead with the outcome instead. The outcome is derived here from the rows
   // rather than taken from the server subtitle (which keys off the newest
   // terminal row): every presentation — header text, tint, count slots,
   // minimal glyph — must agree, and a failure anywhere should dominate a
@@ -141,7 +149,7 @@ export function AgentActivity(
   const doneLabel = failedRow ? 'Failed' : 'Done'
   const outcomeLabel = failedRow ? 'Agent work failed' : 'Agent work completed'
 
-  // Header copy: "5 active agents" + (", 1 needs attention"). The banner renders
+  // header copy: "5 active agents" + (", 1 needs attention"). The banner renders
   // the two parts in-line so the attention half can carry the accent color;
   // `summary` is the short form for tight spots (expanded center, watch card).
   const agentWord = props.activeCount === 1 ? 'agent' : 'agents'
@@ -153,7 +161,7 @@ export function AgentActivity(
   const activeLabel = allDone ? doneLabel : `${props.activeCount} active`
   const summary = attentionSuffix || activeLabel
 
-  // Any registered scheme variant routes back to this app; taps are delivered
+  // any registered scheme variant routes back to this app; taps are delivered
   // to the widget's containing app, so the prod scheme is safe for all builds.
   const deepLinkRow = attentionRow ?? row0
   const deepLink =
@@ -161,7 +169,7 @@ export function AgentActivity(
       ? `code456://${deepLinkRow.deepLink.slice(1)}`
       : null
 
-  // A scannable status glyph per phase — reads faster than colored words and
+  // a scannable status glyph per phase — reads faster than colored words and
   // ties the compact / expanded / banner / watch presentations together.
   type SFName = NonNullable<ComponentProps<typeof Image>['systemName']>
   const phaseSymbol = (phase: AgentActivityPhase): SFName =>
@@ -194,7 +202,7 @@ export function AgentActivity(
     </HStack>
   )
 
-  // Single-line row used by every presentation: glyph, title, inline project,
+  // single-line row used by every presentation: glyph, title, inline project,
   // status. The project and status carry layoutPriority(1) so when space runs
   // out it's the title that truncates, never the (short) project name or the
   // status label. Single-line keeps rows inside the expanded island's hard
@@ -232,7 +240,7 @@ export function AgentActivity(
     </HStack>
   )
 
-  // The branded app mark. `assetName` resolves the template image set bundled in
+  // the branded app mark. `assetName` resolves the template image set bundled in
   // the widget extension's asset catalog. Image views only honor `resizable`
   // directly (frame/foregroundStyle are dropped), so we size it via a container
   // frame the resizable image fills and tint it through the container's
@@ -264,7 +272,7 @@ export function AgentActivity(
             <Text
               modifiers={[
                 font({ weight: 'semibold', size: 13 }),
-                // The all-done header carries the outcome tint (emerald /
+                // the all-done header carries the outcome tint (emerald /
                 // red) the way the Done/Failed status labels do.
                 foregroundStyle(allDone ? headerTint : primaryForeground),
                 lineLimit(1),
@@ -296,7 +304,7 @@ export function AgentActivity(
         {row4 ? renderCompactRow(row4) : null}
       </VStack>
     ),
-    // Compact card for the watchOS Smart Stack + CarPlay (the `.small` family):
+    // compact card for the watchOS Smart Stack + CarPlay (the `.small` family):
     // brand + count, then the single most important agent with its status glyph.
     bannerSmall: (
       <VStack alignment="leading" spacing={5} modifiers={[padding({ all: 10 })]}>
@@ -342,7 +350,7 @@ export function AgentActivity(
           : activeLabel}
       </Text>
     ),
-    // The shared/minimal form is a ~22pt circle — a single signal reads there,
+    // the shared/minimal form is a ~22pt circle — a single signal reads there,
     // the wordmark does not. Show the blocking/outcome phase glyph, else the
     // mark (all-done shows the hero row's checkmark/cross).
     minimal:
@@ -357,18 +365,18 @@ export function AgentActivity(
         </Text>
       </HStack>
     ),
-    // No center content: the phase glyphs + statuses in expandedBottom already
+    // no center content: the phase glyphs + statuses in expandedBottom already
     // carry the attention signal, and the expanded island's height budget is
     // tight enough that a summary line there pushed the third row off.
     expandedCenter: null,
-    // No trailing content: a timestamp is glanceable-lock-screen info, not
+    // no trailing content: a timestamp is glanceable-lock-screen info, not
     // useful in a view the user is actively holding open — and the trailing
     // region hugs the island's corner radius, which clipped it anyway.
     expandedTrailing: null,
     expandedBottom: (
-      // Vertical padding only: the expanded region provides its own horizontal
+      // vertical padding only: the expanded region provides its own horizontal
       // content margins, so `all` padding double-indented the rows.
-      // Horizontal padding keeps both edges clear of the island's corner
+      // horizontal padding keeps both edges clear of the island's corner
       // curvature (right edge clipped status labels; titles hugged the left).
       <VStack
         alignment="leading"

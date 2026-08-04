@@ -1,3 +1,6 @@
+// tests/apps/web/components/settings/SettingsPanels.logic.test.ts
+// verify project grouping toggle behavior
+
 import {
   DEFAULT_SERVER_SETTINGS,
   ProviderDriverKind,

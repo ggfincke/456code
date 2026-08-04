@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewFileVisibility.test.ts
+// verify review file visibility behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

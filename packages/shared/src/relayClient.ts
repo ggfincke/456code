@@ -1,3 +1,6 @@
+// packages/shared/src/relayClient.ts
+// create cloudflared relay client
+
 import * as Clock from 'effect/Clock'
 import type {
   RelayClientInstallProgressEvent,

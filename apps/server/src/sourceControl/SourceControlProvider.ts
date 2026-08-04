@@ -1,3 +1,5 @@
+// apps/server/src/sourceControl/SourceControlProvider.ts
+// defines the shared source control provider contract
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import type {
@@ -26,11 +28,8 @@ export interface SourceControlRefSelector
 
 const MAX_ERROR_TRANSPORT_VALUE_LENGTH = 256
 
-/**
- * Sanitizes user-provided source-control identifiers before attaching them to
- * contract errors. This is intentionally narrower than request validation: it
- * only strips URL secrets and bounds diagnostic values sent over transport.
- */
+// sanitizes source-control identifiers before attaching them to contract errors
+// this only strips URL secrets and bounds diagnostic values sent over transport
 export function transportSafeSourceControlErrorValue(value: string): string
 {
   let printable = ''
@@ -53,7 +52,7 @@ export function transportSafeSourceControlErrorValue(value: string): string
   }
   catch
   {
-    // Plain repository and change-request identifiers are not URLs.
+    // plain repository and change-request identifiers are not URLs.
   }
 
   return safe.slice(0, MAX_ERROR_TRANSPORT_VALUE_LENGTH)

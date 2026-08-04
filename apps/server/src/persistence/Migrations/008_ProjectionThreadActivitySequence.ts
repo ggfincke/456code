@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/008_ProjectionThreadActivitySequence.ts
+// apply persistence migration 008 projection thread activity sequence
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

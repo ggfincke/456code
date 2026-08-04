@@ -1,3 +1,6 @@
+// tests/apps/web/components/settings/AddProviderInstanceDialog.test.ts
+// verify resolve wizard navigation behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { resolveWizardNavigation } from '../../../../../apps/web/src/components/settings/AddProviderInstanceDialog.logic'

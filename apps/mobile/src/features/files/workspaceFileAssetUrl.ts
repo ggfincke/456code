@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/workspaceFileAssetUrl.ts
+// manage workspace file asset url through a React hook
+
 import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { useMemo } from 'react'
 

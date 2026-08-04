@@ -1,3 +1,6 @@
+// tests/packages/shared/dpop.test.ts
+// verify verify dpop proof behavior
+
 import * as NodeCrypto from 'node:crypto'
 
 import { assert, describe, it } from '@effect/vitest'

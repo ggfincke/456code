@@ -1,3 +1,6 @@
+// apps/mobile/src/features/projects/AddProjectLocalRoute.tsx
+// render the add project local route route
+
 import type { StaticScreenProps } from '@react-navigation/native'
 import { AddProjectLocalFolderScreen } from './AddProjectScreen'
 

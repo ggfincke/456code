@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/popover.tsx
+// render reusable popover UI primitives
+
 'use client'
 
 import { Popover as PopoverPrimitive } from '@base-ui/react/popover'

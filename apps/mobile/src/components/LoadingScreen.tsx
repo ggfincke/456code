@@ -1,3 +1,6 @@
+// apps/mobile/src/components/LoadingScreen.tsx
+// render loading screen
+
 import { ActivityIndicator, StatusBar, View, useColorScheme } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useThemeColor } from '../lib/useThemeColor'

@@ -1,6 +1,9 @@
+// apps/web/src/components/preview/BrowserMockup.tsx
+// render browser mockup
+
 import { cn } from '~/lib/utils'
 
-/** Browser-window thumbnail glyph for the "Local" recommendation cards. */
+// browser-window thumbnail glyph for the "Local" recommendation cards.
 export function BrowserMockup({ className }: { className?: string })
 {
   return (

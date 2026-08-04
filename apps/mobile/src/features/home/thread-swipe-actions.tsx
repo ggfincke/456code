@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/thread-swipe-actions.tsx
+// render thread swipe actions
+
 import { SymbolView } from '../../components/AppSymbol'
 import * as Haptics from 'expo-haptics'
 import {
@@ -32,7 +35,7 @@ import Animated, {
 
 import { AppText as Text } from '../../components/AppText'
 
-// Wide enough for the longest action label ("Unarchive").
+// wide enough for the longest action label ("Unarchive").
 const ACTION_ITEM_WIDTH = 58
 const ACTION_CIRCLE_SIZE = 36
 const ACTION_ICON_SIZE = 15
@@ -55,13 +58,11 @@ interface ThreadSwipePrimaryAction
   readonly onPress: () => void
 }
 
-/**
- * Delivers the scroll gate to swipeables via context so that flipping it does
- * NOT re-render whole rows: putting the flag in list extraData/renderItem deps
- * re-rendered every visible row (hooks, subscriptions and all) exactly at
- * scroll start — peak frame pressure. As a context value only the
- * ThreadSwipeable consumers re-render.
- */
+// delivers the scroll gate to swipeables via context so that flipping it does
+// NOT re-render whole rows: putting the flag in list extraData/renderItem deps
+// re-rendered every visible row (hooks, subscriptions and all) exactly at
+// scroll start — peak frame pressure. As a context value only the
+// ThreadSwipeable consumers re-render.
 const SwipeableScrollGateContext = createContext(true)
 
 export function SwipeableScrollGateProvider(props: {
@@ -76,17 +77,15 @@ export function SwipeableScrollGateProvider(props: {
   )
 }
 
-/**
- * Gates row swipes on list scroll activity, mirroring UIKit's own swipe
- * actions (`!isDragging && !isDecelerating`). failOffsetY on the swipe pan
- * covers the first pan of a scroll, but trackpad scroll sessions spawn fresh
- * gesture sessions (momentum catch, direction changes) whose reset
- * translation can re-activate a swipe mid-scroll — so while the list has
- * moved vertically during an active drag/momentum phase, row swipes are
- * disabled entirely.
- *
- * Spread the returned handlers onto the list and pass `swipeEnabled` to rows.
- */
+// gates row swipes on list scroll activity, mirroring UIKit's own swipe
+// actions (`!isDragging && !isDecelerating`). failOffsetY on the swipe pan
+// covers the first pan of a scroll, but trackpad scroll sessions spawn fresh
+// gesture sessions (momentum catch, direction changes) whose reset
+// translation can re-activate a swipe mid-scroll — so while the list has
+// moved vertically during an active drag/momentum phase, row swipes are
+// disabled entirely.
+//
+// spread the returned handlers onto the list and pass `swipeEnabled` to rows.
 export function useSwipeableScrollGate(options?: {
   readonly onScroll?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void
   readonly onScrollBeginDrag?: (event: NativeSyntheticEvent<NativeScrollEvent>) => void
@@ -131,7 +130,7 @@ export function useSwipeableScrollGate(options?: {
   const onScroll = useCallback(
     (event: NativeSyntheticEvent<NativeScrollEvent>) =>
     {
-      // Only vertical movement during a user drag arms the gate — a purely
+      // only vertical movement during a user drag arms the gate — a purely
       // horizontal row swipe never moves contentOffset.y, and inset-driven
       // offset changes at mount happen outside a drag.
       if (
@@ -150,7 +149,7 @@ export function useSwipeableScrollGate(options?: {
   {
     draggingRef.current = false
     clearSettle()
-    // If momentum follows, onMomentumScrollBegin cancels this and the gate
+    // if momentum follows, onMomentumScrollBegin cancels this and the gate
     // stays armed until the deceleration finishes.
     settleTimerRef.current = setTimeout(() => update(false), 160)
   }, [clearSettle, update])
@@ -178,30 +177,26 @@ export function useSwipeableScrollGate(options?: {
 export function ThreadSwipeable(props: {
   readonly backgroundColor: ColorValue
   readonly children: (close: () => void) => ReactNode
-  /** Uses action visuals that fit inside compact 44pt rows. The press target
-   * still spans the row's full height and width. */
+  // uses action visuals that fit inside compact 44pt rows. The press target
+  // still spans the row's full height and width.
   readonly compactActions?: boolean
   readonly containerStyle?: StyleProp<ViewStyle>
-  /** Disables NEW swipe activations (e.g. while the list scrolls). */
+  // disables NEW swipe activations (e.g. while the list scrolls).
   readonly enabled?: boolean
   readonly enableTrackpadSwipe?: boolean
-  /**
-   * What a full swipe commits: "delete" (default, v1 behavior — the Delete
-   * button stretches) or "primary" — the advertised primary action fires and
-   * its button stretches instead. A full swipe must always match the action
-   * the stretching button advertises.
-   */
+  // what a full swipe commits: "delete" (default, v1 behavior — the Delete
+  // button stretches) or "primary" — the advertised primary action fires and
+  // its button stretches instead. A full swipe must always match the action
+  // the stretching button advertises.
   readonly fullSwipeAction?: 'delete' | 'primary'
   readonly fullSwipeWidth: number
   readonly onDelete: () => void
   readonly onSwipeableClose?: (methods: SwipeableMethods) => void
   readonly onSwipeableWillOpen?: (methods: SwipeableMethods) => void
   readonly primaryAction: ThreadSwipePrimaryAction
-  /**
-   * Identity of the content being wrapped. When a recycled list reuses this
-   * component for a different item, the swipeable snaps back to closed so an
-   * open/mid-drag state can't leak onto another row.
-   */
+  // identity of the content being wrapped. When a recycled list reuses this
+  // component for a different item, the swipeable snaps back to closed so an
+  // open/mid-drag state can't leak onto another row.
   readonly resetKey?: string
   readonly simultaneousWithExternalGesture?: ComponentProps<
     typeof ReanimatedSwipeable
@@ -242,7 +237,7 @@ export function ThreadSwipeable(props: {
       dragOffsetFromRightEdge={8}
       enabled={props.enabled !== false && gateEnabled}
       enableTrackpadTwoFingerGesture={props.enableTrackpadSwipe ?? true}
-      // Fail the swipe once the pan is vertically dominant (patched-in RNGH
+      // fail the swipe once the pan is vertically dominant (patched-in RNGH
       // prop) — otherwise trackpad scrolls with ~8px of horizontal drift
       // start opening rows because the swipe pan runs simultaneously with
       // the list scroll gesture and never gets disqualified by Y movement.

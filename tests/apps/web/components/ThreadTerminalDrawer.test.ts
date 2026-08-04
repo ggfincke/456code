@@ -1,3 +1,6 @@
+// tests/apps/web/components/ThreadTerminalDrawer.test.ts
+// verify resolve terminal selection action position behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

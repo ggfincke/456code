@@ -1,3 +1,6 @@
+// tests/apps/server/provider/providerSnapshot.test.ts
+// verify provider models from settings behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import type { ModelCapabilities } from '@t3tools/contracts'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'

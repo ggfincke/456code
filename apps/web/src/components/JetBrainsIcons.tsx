@@ -1,3 +1,6 @@
+// apps/web/src/components/JetBrainsIcons.tsx
+// render jet brains icons
+
 import { useId } from 'react'
 import type { Icon } from './Icons'
 

@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# apps/mobile/modules/code456-terminal/scripts/build-libghostty-android.sh
+# builds the Ghostty library for Android
 
 set -euo pipefail
 

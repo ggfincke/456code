@@ -1,3 +1,6 @@
+// tests/packages/shared/composerTrigger.test.ts
+// verify serialize composer mention path behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

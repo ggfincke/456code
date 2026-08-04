@@ -1,3 +1,6 @@
+// tests/apps/web/state/desktopNetworkAccess.test.ts
+// verify desktop network access state behavior
+
 import type { AdvertisedEndpoint, DesktopServerExposureState } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import * as AsyncResult from 'effect/unstable/reactivity/AsyncResult'

@@ -1,3 +1,6 @@
+// packages/contracts/src/previewAutomation.ts
+// define preview automation contracts
+
 import { Schema } from 'effect'
 
 import { EnvironmentId, ThreadId, TrimmedNonEmptyString } from './baseSchemas.ts'
@@ -25,7 +28,7 @@ const OptionalTimeoutMs = Schema.optional(
     .annotate({ description: 'Maximum wait in milliseconds. Defaults to 15000; maximum 60000.' }),
 ).annotate({ description: 'Maximum wait in milliseconds. Defaults to 15000; maximum 60000.' })
 
-/** Operations understood by desktop hosts predating viewport resizing. */
+// operations understood by desktop hosts predating viewport resizing.
 export const PREVIEW_AUTOMATION_V1_OPERATIONS = [
   'status',
   'open',
@@ -41,7 +44,7 @@ export const PREVIEW_AUTOMATION_V1_OPERATIONS = [
   'recordingStop',
 ] as const
 
-/** Advertised by current desktop hosts for mixed-version routing. */
+// advertised by current desktop hosts for mixed-version routing.
 export const PREVIEW_AUTOMATION_OPERATIONS = [
   ...PREVIEW_AUTOMATION_V1_OPERATIONS,
   'resize',
@@ -73,9 +76,9 @@ export const PreviewAutomationStatus = Schema.Struct({
   url: Schema.NullOr(Schema.String),
   title: Schema.NullOr(Schema.String),
   loading: Schema.Boolean,
-  /** Optional for compatibility with desktop hosts predating viewport sizing. */
+  // optional for compatibility with desktop hosts predating viewport sizing.
   viewportSetting: Schema.optional(PreviewViewportSetting),
-  /** Measured guest-page viewport in CSS pixels when a webview is ready. */
+  // measured guest-page viewport in CSS pixels when a webview is ready.
   viewport: Schema.optional(PreviewRenderedViewportSize),
 })
 export type PreviewAutomationStatus = typeof PreviewAutomationStatus.Type
@@ -262,7 +265,7 @@ export const PreviewAutomationResizeResult = Schema.Struct({
 })
 export type PreviewAutomationResizeResult = typeof PreviewAutomationResizeResult.Type
 
-/** Mirrors DesktopPreviewColorScheme; declared here to keep this module free of ipc.ts imports. */
+// mirrors DesktopPreviewColorScheme; declared here to keep this module free of ipc.ts imports.
 export const PreviewAutomationColorScheme = Schema.Literals(['system', 'light', 'dark'])
 export type PreviewAutomationColorScheme = typeof PreviewAutomationColorScheme.Type
 
@@ -584,10 +587,8 @@ export type PreviewAutomationHostIdentity = typeof PreviewAutomationHostIdentity
 
 export const PreviewAutomationHost = Schema.Struct({
   ...PreviewAutomationHostIdentity.fields,
-  /**
-   * Missing means the pre-capability-negotiation V1 operation set. This lets
-   * a newer server safely coexist with an older desktop during rollout.
-   */
+  // missing means the pre-capability-negotiation V1 operation set. This lets
+  // a newer server safely coexist with an older desktop during rollout.
   supportedOperations: Schema.optional(Schema.Array(PreviewAutomationOperation)),
 })
 export type PreviewAutomationHost = typeof PreviewAutomationHost.Type

@@ -1,3 +1,6 @@
+// packages/shared/src/composerTrigger.ts
+// define composer trigger kind
+
 export type ComposerTriggerKind = 'path' | 'slash-command' | 'slash-model' | 'skill'
 export type ComposerSlashCommand = 'model' | 'plan' | 'orchestrate' | 'default'
 
@@ -58,13 +61,11 @@ function isWhitespace(char: string): boolean
   return char === ' ' || char === '\n' || char === '\t' || char === '\r'
 }
 
-/**
- * Detect an active trigger (@path, $skill, /command) at the cursor position.
- *
- * Accepts an optional `isWhitespaceChar` override so callers with inline
- * placeholder characters (e.g. terminal context chips on web) can treat
- * those as token boundaries.
- */
+// detect an active trigger (@path, $skill, /command) at the cursor position.
+//
+// accepts an optional `isWhitespaceChar` override so callers with inline
+// placeholder characters (e.g. terminal context chips on web) can treat
+// those as token boundaries.
 export function detectComposerTrigger(
   text: string,
   cursorInput: number,
@@ -75,8 +76,8 @@ export function detectComposerTrigger(
   const lineStart = text.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1
   const linePrefix = text.slice(lineStart, cursor)
 
-  // Preserve line-start `/model` (with optional args) as a dedicated trigger.
-  // General `/` commands are whitespace-bounded tokens below so a second `/`
+  // preserve line-start `/model` (with optional args) as a dedicated trigger.
+  // general `/` commands are whitespace-bounded tokens below so a second `/`
   // works after a skill chip.
   if (linePrefix.startsWith('/'))
   {

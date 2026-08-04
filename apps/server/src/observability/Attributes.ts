@@ -1,3 +1,6 @@
+// apps/server/src/observability/Attributes.ts
+// define metric attribute value
+
 import * as Cause from 'effect/Cause'
 import * as Exit from 'effect/Exit'
 

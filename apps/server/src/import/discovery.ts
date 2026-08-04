@@ -1,5 +1,6 @@
 // apps/server/src/import/discovery.ts
 // catalogs importable provider sessions without loading full transcripts
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFS from 'node:fs'

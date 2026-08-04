@@ -1,3 +1,6 @@
+// tests/apps/web/AppRoot.test.tsx
+// verify app root behavior
+
 import { Children, isValidElement, type ReactElement, type ReactNode } from 'react'
 import { RouterProvider } from '@tanstack/react-router'
 import { describe, expect, it } from 'vite-plus/test'

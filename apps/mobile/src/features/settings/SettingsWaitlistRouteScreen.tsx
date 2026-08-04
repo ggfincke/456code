@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/SettingsWaitlistRouteScreen.tsx
+// render the settings waitlist route screen route
+
 import { useAuth } from '@clerk/expo'
 import { StackActions, useFocusEffect, useNavigation } from '@react-navigation/native'
 import { useCallback } from 'react'

@@ -1,3 +1,6 @@
+// tests/apps/desktop/electron/ElectronTheme.test.ts
+// verify electron theme behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import { beforeEach, vi } from 'vite-plus/test'

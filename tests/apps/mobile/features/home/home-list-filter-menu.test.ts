@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/home/home-list-filter-menu.test.ts
+// verify build home list filter menu behavior
+
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import { buildHomeListFilterMenu } from '../../../../../apps/mobile/src/features/home/home-list-filter-menu'

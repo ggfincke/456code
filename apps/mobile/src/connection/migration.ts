@@ -1,3 +1,6 @@
+// apps/mobile/src/connection/migration.ts
+// migrate mobile persisted state
+
 import {
   BearerConnectionCredential,
   BearerConnectionProfile,

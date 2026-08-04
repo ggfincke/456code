@@ -1,3 +1,6 @@
+// apps/web/src/providerModels.ts
+// format provider driver kind label
+
 import {
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
@@ -70,7 +73,7 @@ export function isProviderEnabled(
   return getProviderSnapshot(providers, provider)?.enabled ?? false
 }
 
-// Resolve an instance selection to the correlated live driver. If the
+// resolve an instance selection to the correlated live driver. If the
 // instance is absent, fall back to a live enabled provider instead of
 // inferring a driver from the missing instance id.
 export function resolveSelectableProvider(

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewModel.ts
+// resolve review file preview state
+
 import { parsePatchFiles } from '@pierre/diffs/utils/parsePatchFiles'
 import type { ChangeTypes, FileDiffMetadata } from '@pierre/diffs/types'
 import type { OrchestrationCheckpointSummary, ReviewDiffPreviewSource } from '@t3tools/contracts'
@@ -348,10 +351,10 @@ export function getReviewFilePreviewState(file: ReviewRenderableFile): ReviewFil
   return { kind: 'render' }
 }
 
-// The flattened review list item model is inspired by pierre/diffs' iterator-first
+// the flattened review list item model is inspired by pierre/diffs' iterator-first
 // virtualization architecture, adapted here for React Native virtualization.
-// Original project: https://github.com/pingdotgg/pierre/tree/main/packages/diffs
-// Reference files:
+// original project: https://github.com/pingdotgg/pierre/tree/main/packages/diffs
+// reference files:
 // - src/utils/iterateOverDiff.ts
 // - src/components/VirtualizedFileDiff.ts
 export function buildReviewListItems(input: {

@@ -1,3 +1,6 @@
+// apps/mobile/src/state/remote-runtime-types.ts
+// manage environment runtime state
+
 import { type EnvironmentConnectionPhase } from '@t3tools/client-runtime/connection'
 import { EnvironmentId, ThreadId, type ServerConfig } from '@t3tools/contracts'
 

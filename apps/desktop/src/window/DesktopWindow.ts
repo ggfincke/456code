@@ -23,19 +23,27 @@ import * as PreviewManager from '../preview/Manager.ts'
 import * as DesktopAppSettings from '../settings/DesktopAppSettings.ts'
 
 const TITLEBAR_HEIGHT = 40
-const TITLEBAR_COLOR = '#01000000' // #00000000 does not work correctly on Linux
+// #00000000 does not work correctly on Linux
+const TITLEBAR_COLOR = '#01000000'
 const TITLEBAR_LIGHT_SYMBOL_COLOR = '#1f2937'
 const TITLEBAR_DARK_SYMBOL_COLOR = '#f8fafc'
 const MAIN_WINDOW_BOUNDS_PERSIST_DEBOUNCE_MS = 500
 const DEVELOPMENT_LOAD_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const
 const DEVELOPMENT_RETRYABLE_LOAD_ERROR_CODES = new Set([
-  -2, // ERR_FAILED
-  -7, // ERR_TIMED_OUT
-  -9, // ERR_UNEXPECTED (custom protocol handler rejected)
-  -102, // ERR_CONNECTION_REFUSED
-  -105, // ERR_NAME_NOT_RESOLVED
-  -106, // ERR_INTERNET_DISCONNECTED
-  -118, // ERR_CONNECTION_TIMED_OUT
+  // ERR_FAILED
+  -2,
+  // ERR_TIMED_OUT
+  -7,
+  // ERR_UNEXPECTED (custom protocol handler rejected)
+  -9,
+  // ERR_CONNECTION_REFUSED
+  -102,
+  // ERR_NAME_NOT_RESOLVED
+  -105,
+  // ERR_INTERNET_DISCONNECTED
+  -106,
+  // ERR_CONNECTION_TIMED_OUT
+  -118,
 ])
 
 type WindowTitleBarOptions = Pick<
@@ -64,18 +72,18 @@ export class DesktopWindow extends Context.Service<
     readonly revealOrCreateMain: Effect.Effect<Electron.BrowserWindow, DesktopWindowError>
     readonly activate: Effect.Effect<void, DesktopWindowError>
     readonly createMainIfBackendReady: Effect.Effect<void, DesktopWindowError>
-    // Show a lightweight "Connecting to WSL" splash window immediately (wsl-only
+    // show a lightweight "Connecting to WSL" splash window immediately (wsl-only
     // mode), before the WSL backend that serves the renderer is ready. It is
     // dismissed automatically once the real main window reveals.
     readonly showConnectingSplash: Effect.Effect<void>
-    // Marks the primary backend as ready so `createMainIfBackendReady` and the
+    // marks the primary backend as ready so `createMainIfBackendReady` and the
     // macOS "activate without windows" path may open the real main window. The
     // renderer now always loads the local client URL (getDesktopUrl) and connects
     // to the backend through the connection layer, so the reported httpBaseUrl is
     // no longer used to point the window at the backend — it is kept only for the
     // readiness log and to preserve the callback contract the backend pool drives.
     readonly handleBackendReady: (httpBaseUrl: URL) => Effect.Effect<void, DesktopWindowError>
-    // Called when the backend transitions back to "not ready" (clean stop,
+    // called when the backend transitions back to "not ready" (clean stop,
     // restart, crash). Clears the latch that lets `activate` auto-create a
     // window so a "macOS dock click" while the backend is down doesn't
     // produce a stranded window pointing at nothing.
@@ -95,7 +103,8 @@ function getIconOption(
   platform: NodeJS.Platform,
 ): { icon: string } | Record<string, never>
 {
-  if (platform === 'darwin') return {} // macOS uses .icns from app bundle
+  // macOS uses .icns from app bundle
+  if (platform === 'darwin') return {}
   const ext = platform === 'win32' ? 'ico' : 'png'
   return Option.match(iconPaths[ext], {
     onNone: () => ({}),
@@ -151,7 +160,7 @@ export function resolveInitialMainWindowBounds(
   return DesktopAppSettings.DEFAULT_MAIN_WINDOW_SIZE
 }
 
-// A self-contained "Connecting to WSL" splash, shown immediately in wsl-only
+// a self-contained "Connecting to WSL" splash, shown immediately in wsl-only
 // mode while the WSL backend (which serves the renderer) cold-boots. Inlined as
 // a data URL so it needs no bundled asset and no backend — pure CSS, no JS.
 function buildConnectingSplashDataUrl(shouldUseDarkColors: boolean): string
@@ -271,14 +280,14 @@ export const make = Effect.gen(function* ()
   const electronWindow = yield* ElectronWindow.ElectronWindow
   const previewManager = yield* PreviewManager.PreviewManager
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings
-  // Window-side latch for the primary backend's readiness. Set by
+  // window-side latch for the primary backend's readiness. Set by
   // handleBackendReady (driven by the pool's onReady callback), cleared
   // by handleBackendNotReady (driven by onShutdown). Only consumed by
   // createMainIfBackendReady, which gates the post-readiness window
   // open in development and the macOS "activate without windows" path.
   const backendReadyRef = yield* Ref.make(false)
   const mainWindowCreationMutex = yield* Semaphore.make(1)
-  // The transient "Connecting to WSL" splash window, tracked separately so it
+  // the transient "Connecting to WSL" splash window, tracked separately so it
   // is never mistaken for the real main window.
   const splashWindowRef = yield* Ref.make<Option.Option<Electron.BrowserWindow>>(Option.none())
   const context = yield* Effect.context<DesktopWindowRuntimeServices>()
@@ -712,7 +721,7 @@ export const make = Effect.gen(function* ()
     }
     bindFirstRevealTrigger(revealSubscribers, () =>
     {
-      // Reveal the real window, then close the connecting splash (if any) so the
+      // reveal the real window, then close the connecting splash (if any) so the
       // two don't overlap and there's no blank gap between them.
       if (persistedSettings.mainWindowMaximized)
       {
@@ -785,7 +794,7 @@ export const make = Effect.gen(function* ()
 
   const showConnectingSplash = Effect.gen(function* ()
   {
-    // Only when nothing is shown yet: no real window, no existing splash.
+    // only when nothing is shown yet: no real window, no existing splash.
     const existingSplash = yield* Ref.get(splashWindowRef)
     if (Option.isSome(existingSplash)) return
     const existingWindow = yield* electronWindow.currentMainOrFirst
@@ -826,7 +835,7 @@ export const make = Effect.gen(function* ()
     void splash.loadURL(buildConnectingSplashDataUrl(shouldUseDarkColors))
     yield* logWindowInfo('connecting splash shown')
   }).pipe(
-    // The splash is best-effort UX — never let it fail startup.
+    // the splash is best-effort UX — never let it fail startup.
     Effect.catch((error) =>
       logWindowWarning('failed to show connecting splash', { message: error.message }),
     ),
@@ -845,7 +854,7 @@ export const make = Effect.gen(function* ()
         yield* electronWindow.reveal(existingWindow.value)
         return
       }
-      // No real main window yet. While the backend is still cold-booting,
+      // no real main window yet. While the backend is still cold-booting,
       // re-reveal the connecting splash so taskbar/dock activation brings it
       // back instead of doing nothing. Once the backend is ready we fall
       // through to (re)create the real main -- including retrying a previously

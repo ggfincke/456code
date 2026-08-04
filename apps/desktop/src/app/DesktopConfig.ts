@@ -1,3 +1,6 @@
+// apps/desktop/src/app/DesktopConfig.ts
+// load and validate desktop process configuration
+
 import * as Config from 'effect/Config'
 import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Option from 'effect/Option'

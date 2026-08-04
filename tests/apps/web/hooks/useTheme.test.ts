@@ -1,3 +1,6 @@
+// tests/apps/web/hooks/useTheme.test.ts
+// verify theme failure handling behavior
+
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 function createStorage(overrides: Partial<Storage> = {}): Storage

@@ -1,3 +1,6 @@
+// packages/shared/src/dpopCommon.ts
+// normalize dpop htu
+
 import * as Schema from 'effect/Schema'
 
 export const DpopPublicJwk = Schema.Struct({

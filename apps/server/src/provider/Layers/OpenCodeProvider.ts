@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/OpenCodeProvider.ts
+// assemble open code provider Effect layer
+
 import {
   type ModelCapabilities,
   type OpenCodeSettings,

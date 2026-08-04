@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/authorization/remote.test.ts
+// verify remote environment authorization behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'

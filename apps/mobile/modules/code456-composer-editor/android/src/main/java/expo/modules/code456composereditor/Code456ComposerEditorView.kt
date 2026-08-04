@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-composer-editor/android/src/main/java/expo/modules/code456composereditor/Code456ComposerEditorView.kt
+// bridges the Android composer editor view
 package expo.modules.code456composereditor
 
 import android.content.Context

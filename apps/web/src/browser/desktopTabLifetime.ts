@@ -1,3 +1,6 @@
+// apps/web/src/browser/desktopTabLifetime.ts
+// define acquired desktop tab
+
 import { previewBridge } from '~/components/preview/previewBridge'
 
 interface DesktopTabLease

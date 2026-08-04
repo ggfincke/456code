@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/projectThreadCreationValidation.ts
+// validate project thread creation
+
 import { EnvironmentId, ProjectId } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 

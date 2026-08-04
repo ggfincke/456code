@@ -39,9 +39,7 @@ export type DesktopLifecycleRuntimeServices =
   | ElectronApp.ElectronApp
   | ElectronTheme.ElectronTheme
 
-/**
- * @effect-expect-leaking DesktopEnvironment | DesktopShutdown | DesktopState | DesktopWindow | ElectronApp | ElectronTheme
- */
+// @effect-expect-leaking DesktopEnvironment | DesktopShutdown | DesktopState | DesktopWindow | ElectronApp | ElectronTheme
 export class DesktopLifecycle extends Context.Service<
   DesktopLifecycle,
   {

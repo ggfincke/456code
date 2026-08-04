@@ -1,3 +1,6 @@
+// apps/web/src/logicalProject.ts
+// derive logical project key
+
 export {
   deriveLogicalProjectKey,
   deriveLogicalProjectKeyFromRef,

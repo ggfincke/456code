@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Layers/ProjectionThreadProposedPlans.ts
+// assemble projection thread proposed plans Effect layer
+
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'

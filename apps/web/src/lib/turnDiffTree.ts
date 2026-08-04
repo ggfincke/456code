@@ -1,3 +1,6 @@
+// apps/web/src/lib/turnDiffTree.ts
+// define turn diff stat
+
 import type { TurnDiffFileChange } from '../types'
 
 export interface TurnDiffStat

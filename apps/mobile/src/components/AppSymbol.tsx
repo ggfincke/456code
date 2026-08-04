@@ -1,3 +1,6 @@
+// apps/mobile/src/components/AppSymbol.tsx
+// render app symbol
+
 import {
   IconAdjustmentsHorizontal,
   IconAlertCircle,
@@ -144,7 +147,7 @@ const ANDROID_ICON_BY_SF_SYMBOL: Partial<Record<SFSymbol, Icon>> = {
   'xmark.circle.fill': IconCircleXFilled,
 }
 
-// Callers can pass `{ ios, android }` names where `android` is a Material
+// callers can pass `{ ios, android }` names where `android` is a Material
 // icon name (the raw expo-symbols contract). Resolve those here too so the
 // android key keeps working through this wrapper — it wins over the SF map
 // when both match (e.g. folder vs folder_open for expanded project groups).

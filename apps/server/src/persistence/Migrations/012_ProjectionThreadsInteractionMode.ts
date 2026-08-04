@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/012_ProjectionThreadsInteractionMode.ts
+// apply persistence migration 012 projection threads interaction mode
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

@@ -1,3 +1,6 @@
+// apps/web/src/state/presentation.ts
+// manage environment presentations state
+
 import { useAtomValue } from '@effect/atom-react'
 import type { EnvironmentPresentation } from '@t3tools/client-runtime/connection'
 import { createEnvironmentPresentationAtoms } from '@t3tools/client-runtime/state/presentation'

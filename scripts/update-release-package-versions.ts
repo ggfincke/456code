@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// scripts/update-release-package-versions.ts
+// update release package versions
 
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'

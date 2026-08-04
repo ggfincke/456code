@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/DesktopIpc.ts
+// define desktop ipc invoke event
+
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -170,9 +173,7 @@ export const make = (ipcMain: DesktopIpcMain): DesktopIpc['Service'] =>
 
 export const layer = (ipcMain: DesktopIpcMain) => Layer.succeed(DesktopIpc, make(ipcMain))
 
-/**
- * Convenience helpers for creating IPC methods
- */
+// convenience helpers for creating IPC methods
 
 export interface DesktopIpcMethodRegistration<
   Payload,

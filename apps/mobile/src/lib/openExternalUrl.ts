@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/openExternalUrl.ts
+// open external url
+
 import * as Schema from 'effect/Schema'
 import { Linking } from 'react-native'
 

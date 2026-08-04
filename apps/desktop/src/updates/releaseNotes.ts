@@ -1,3 +1,6 @@
+// apps/desktop/src/updates/releaseNotes.ts
+// normalize desktop update release notes
+
 import type { DesktopUpdateReleaseNote } from '@t3tools/contracts'
 
 interface ElectronReleaseNoteInfo

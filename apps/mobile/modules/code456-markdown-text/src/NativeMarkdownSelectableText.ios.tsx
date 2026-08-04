@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/NativeMarkdownSelectableText.ios.tsx
+// render native markdown selectable text ios
+
 import { Image, Linking, type TextStyle, useColorScheme } from 'react-native'
 
 import { MarkdownTextPrimitive } from './MarkdownTextPrimitive'

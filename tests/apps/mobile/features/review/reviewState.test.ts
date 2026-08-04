@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewState.test.ts
+// verify review state behavior
+
 import { assert, it } from 'vite-plus/test'
 
 import {

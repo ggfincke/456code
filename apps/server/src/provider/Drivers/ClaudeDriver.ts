@@ -1,19 +1,18 @@
 // apps/server/src/provider/Drivers/ClaudeDriver.ts
 // creates isolated Claude provider instances and source-bound continuation routes
-/**
- * ClaudeDriver — `ProviderDriver` for the Claude Agent SDK runtime.
- *
- * Mirrors `CodexDriver`: a plain value whose `create()` returns one
- * `ProviderInstance` bundling `snapshot` / `adapter` / `textGeneration`
- * closures captured over the per-instance `ClaudeSettings`.
- *
- * Unlike Codex, the Claude snapshot probe may invoke a secondary probe
- * (`probeClaudeCapabilities`) to read Anthropic account + slash-command
- * metadata. That probe is per-instance and keyed by binary + resolved HOME so
- * two concurrent Claude instances don't cross-contaminate account metadata.
- *
- * @module provider/Drivers/ClaudeDriver
- */
+
+// ClaudeDriver — `ProviderDriver` for the Claude Agent SDK runtime.
+//
+// mirrors `CodexDriver`: a plain value whose `create()` returns one
+// `ProviderInstance` bundling `snapshot` / `adapter` / `textGeneration`
+// closures captured over the per-instance `ClaudeSettings`.
+//
+// unlike Codex, the Claude snapshot probe may invoke a secondary probe
+// (`probeClaudeCapabilities`) to read Anthropic account + slash-command
+// metadata. That probe is per-instance and keyed by binary + resolved HOME so
+// two concurrent Claude instances don't cross-contaminate account metadata.
+//
+// @module provider/Drivers/ClaudeDriver
 import { ClaudeSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
 import * as Cache from 'effect/Cache'
 import * as Duration from 'effect/Duration'
@@ -159,7 +158,7 @@ export const ClaudeDriver: ProviderDriver<ClaudeSettings, ClaudeDriverEnv> = {
       const adapter = yield* makeClaudeAdapter(effectiveConfig, adapterOptions)
       const textGeneration = yield* makeClaudeTextGeneration(effectiveConfig, processEnv, cwd)
 
-      // Per-instance capabilities cache: keyed on binary + resolved HOME so
+      // per-instance capabilities cache: keyed on binary + resolved HOME so
       // account-specific probes never share auth metadata across instances.
       const capabilitiesProbeCache = yield* Cache.make({
         capacity: 1,

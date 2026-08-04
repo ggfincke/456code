@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-vcs-action-state.ts
+// manage vcs action state through a React hook
+
 import { useAtomValue } from '@effect/atom-react'
 import { type VcsActionState, type VcsActionTarget } from '@t3tools/client-runtime/state/vcs'
 import { Atom } from 'effect/unstable/reactivity'

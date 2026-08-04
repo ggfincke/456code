@@ -1,3 +1,6 @@
+// apps/web/src/components/SlowRpcRequestToastCoordinator.tsx
+// render slow rpc request toast coordinator
+
 import { useEffect, useRef } from 'react'
 
 import { type SlowRpcAckRequest, useSlowRpcAckRequests } from '../rpc/requestLatencyState'

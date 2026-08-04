@@ -1,3 +1,6 @@
+// apps/server/src/auth/PairingGrantStore.ts
+// manage pairing grant state
+
 import {
   AuthAdministrativeScopes,
   AuthStandardClientScopes,
@@ -260,7 +263,7 @@ type ConsumeResult =
     }
 
 const DEFAULT_ONE_TIME_TOKEN_TTL_MINUTES = Duration.minutes(5)
-// The desktop-bootstrap grant rides on a trusted IPC channel (fd3 or
+// the desktop-bootstrap grant rides on a trusted IPC channel (fd3 or
 // stdin) at backend launch, so it doesn't have to be short-lived the
 // way a user-facing pairing link does. Letting it live for the
 // lifetime of the backend process (24h is more than long enough for
@@ -340,7 +343,7 @@ export const make = Effect.gen(function* ()
       expiresAt: DateTime.add(now, {
         milliseconds: Duration.toMillis(DESKTOP_BOOTSTRAP_TTL_HOURS),
       }),
-      // Unbounded uses so the renderer can re-exchange the seed for a
+      // unbounded uses so the renderer can re-exchange the seed for a
       // fresh bearer session after a page reload (or after the prior
       // bearer expires). The seed itself stays inside the desktop
       // process and the rendered page, both of which the user already

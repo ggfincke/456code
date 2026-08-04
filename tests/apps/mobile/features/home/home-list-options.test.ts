@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/home/home-list-options.test.ts
+// verify home list options behavior
+
 import {
   DEFAULT_SIDEBAR_PROJECT_SORT_ORDER,
   DEFAULT_SIDEBAR_THREAD_SORT_ORDER,

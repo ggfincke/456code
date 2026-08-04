@@ -1,3 +1,6 @@
+// tests/apps/server/provider/Layers/OpenCodeProvider.test.ts
+// verify open code provider behavior
+
 import * as NodeAssert from 'node:assert/strict'
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
@@ -20,14 +23,12 @@ const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings)
 
 const DEFAULT_VERSION_STDOUT = 'opencode 1.14.19\n'
 
-/**
- * The legacy `OpenCodeProviderLive` Layer + `OpenCodeProvider` service tag
- * are deleted. The snapshot-producing logic they wrapped now lives in the
- * standalone `checkOpenCodeProviderStatus(settings, cwd)` Effect, which
- * drivers call directly when building their per-instance snapshot
- * `ServerProviderShape`. Tests mirror that shape: build a settings payload,
- * invoke the check, assert on the returned snapshot.
- */
+// the legacy `OpenCodeProviderLive` Layer + `OpenCodeProvider` service tag
+// are deleted. The snapshot-producing logic they wrapped now lives in the
+// standalone `checkOpenCodeProviderStatus(settings, cwd)` Effect, which
+// drivers call directly when building their per-instance snapshot
+// `ServerProviderShape`. Tests mirror that shape: build a settings payload,
+// invoke the check, assert on the returned snapshot.
 
 const runtimeMock = {
   state: {

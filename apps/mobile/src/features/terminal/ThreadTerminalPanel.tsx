@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/ThreadTerminalPanel.tsx
+// render thread terminal panel
+
 import { DEFAULT_TERMINAL_ID, type EnvironmentId, type ThreadId } from '@t3tools/contracts'
 import { SymbolView } from '../../components/AppSymbol'
 import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
@@ -67,13 +70,13 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
   const terminalKey = `${props.environmentId}:${props.threadId}:${terminalId}`
   const isRunning = terminal.status === 'running' || terminal.status === 'starting'
 
-  // Close the session and dismiss the panel when the process ends while
+  // close the session and dismiss the panel when the process ends while
   // attached (e.g. typing `exit`), mirroring the web drawer's
   // onSessionExited flow.
   const runningTerminalKeyRef = useRef<string | null>(null)
   const reopenedStaleTerminalKeyRef = useRef<string | null>(null)
 
-  // Attach subscriptions are cached with an idle TTL; reopening the panel
+  // attach subscriptions are cached with an idle TTL; reopening the panel
   // after its session ended reuses the stale stream without a new attach
   // RPC. Issue an explicit open so the server respawns the session and its
   // snapshot flows into the live subscription.
@@ -107,7 +110,7 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
       },
     }).then((result) =>
     {
-      // Release the guard on failure so a later render can retry the respawn.
+      // release the guard on failure so a later render can retry the respawn.
       if (result._tag === 'Failure' && reopenedStaleTerminalKeyRef.current === terminalKey)
       {
         reopenedStaleTerminalKeyRef.current = null
@@ -129,7 +132,7 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
 
   useEffect(() =>
   {
-    // Forget both markers while hidden: if the process ends while the panel
+    // forget both markers while hidden: if the process ends while the panel
     // is unobserved (or was just auto-closed), the next show must take the
     // stale-reopen path instead of treating it as a live exit or skipping
     // the respawn.
@@ -144,14 +147,14 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
       runningTerminalKeyRef.current = terminalKey
       return
     }
-    // The web drawer treats both exited and closed as session end.
+    // the web drawer treats both exited and closed as session end.
     const sessionEnded = terminal.status === 'exited' || terminal.status === 'closed'
     if (!sessionEnded || runningTerminalKeyRef.current !== terminalKey)
     {
       return
     }
     runningTerminalKeyRef.current = null
-    // Mark this key handled so the stale-attach effect doesn't respawn the
+    // mark this key handled so the stale-attach effect doesn't respawn the
     // session the user just ended.
     reopenedStaleTerminalKeyRef.current = terminalKey
     void closeTerminal({

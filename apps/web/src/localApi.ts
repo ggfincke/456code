@@ -1,3 +1,6 @@
+// apps/web/src/localApi.ts
+// create local api
+
 import type { ContextMenuItem, LocalApi } from '@t3tools/contracts'
 
 import { resetRequestLatencyStateForTests } from './rpc/requestLatencyState'

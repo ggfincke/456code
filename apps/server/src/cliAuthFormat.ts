@@ -1,3 +1,6 @@
+// apps/server/src/cliAuthFormat.ts
+// format issued pairing credential
+
 import type { AuthClientMetadata, AuthClientSession, AuthPairingLink } from '@t3tools/contracts'
 import * as DateTime from 'effect/DateTime'
 

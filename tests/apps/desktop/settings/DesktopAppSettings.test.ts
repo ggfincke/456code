@@ -1,3 +1,6 @@
+// tests/apps/desktop/settings/DesktopAppSettings.test.ts
+// verify desktop settings behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

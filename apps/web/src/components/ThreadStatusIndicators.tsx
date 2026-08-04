@@ -247,11 +247,9 @@ export function ThreadStatusLabel({
   )
 }
 
-/**
- * Non-interactive leading status icons for a thread row in compact contexts
- * like the command palette. Shows the change request state icon (if present) and the
- * thread status dot, matching the sidebar's leading indicators.
- */
+// non-interactive leading status icons for a thread row in compact contexts
+// like the command palette. Shows the change request state icon (if present) and the
+// thread status dot, matching the sidebar's leading indicators.
 export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummary })
 {
   const threadRef = scopeThreadRef(thread.environmentId, thread.id)
@@ -315,11 +313,9 @@ export function ThreadRowLeadingStatus({ thread }: { thread: SidebarThreadSummar
   )
 }
 
-/**
- * Non-interactive trailing status icons for a thread row in compact contexts
- * like the command palette. Shows a terminal-running indicator and a remote
- * environment indicator, matching the sidebar's trailing indicators.
- */
+// non-interactive trailing status icons for a thread row in compact contexts
+// like the command palette. Shows a terminal-running indicator and a remote
+// environment indicator, matching the sidebar's trailing indicators.
 export function ThreadRowTrailingStatus({ thread }: { thread: SidebarThreadSummary })
 {
   const runningTerminalIds = useThreadRunningTerminalIds({

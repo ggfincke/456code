@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/environment/endpoint.test.ts
+// verify advertised endpoint helpers behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

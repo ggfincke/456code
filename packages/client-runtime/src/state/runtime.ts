@@ -95,13 +95,11 @@ export interface AtomCommand<W, A, E>
 }
 
 export type AtomCommandConcurrency<W> =
-  /** Every invocation runs independently. */
+  // every invocation runs independently.
   | { readonly mode: 'parallel' }
   | {
-      /**
-       * `serial` preserves every invocation in FIFO order, `singleFlight` shares an active
-       * invocation, and `latest` coalesces queued invocations to the newest input.
-       */
+      // `serial` preserves every invocation in FIFO order, `singleFlight` shares an active
+      // invocation, and `latest` coalesces queued invocations to the newest input.
       readonly mode: 'serial' | 'singleFlight' | 'latest'
       readonly key: (input: W) => string
     }

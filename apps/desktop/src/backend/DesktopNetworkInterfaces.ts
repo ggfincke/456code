@@ -1,3 +1,6 @@
+// apps/desktop/src/backend/DesktopNetworkInterfaces.ts
+// define desktop network interface info
+
 import * as NodeOS from 'node:os'
 
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'

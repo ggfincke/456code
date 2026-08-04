@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/WorkspaceFileWebPreview.tsx
+// render workspace file web preview
+
 import { useState } from 'react'
 import { ActivityIndicator, View } from 'react-native'
 import { WebView } from 'react-native-webview'

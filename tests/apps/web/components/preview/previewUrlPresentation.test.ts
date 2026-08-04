@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/previewUrlPresentation.test.ts
+// verify format preview url behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { formatPreviewUrl } from '../../../../../apps/web/src/components/preview/previewUrlPresentation'

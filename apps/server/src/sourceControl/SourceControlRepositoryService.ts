@@ -1,3 +1,5 @@
+// apps/server/src/sourceControl/SourceControlRepositoryService.ts
+// coordinates source control repository clone and publish workflows
 import * as NodeOS from 'node:os'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -260,7 +262,7 @@ export const make = Effect.gen(function* ()
         url: remoteUrl,
       })
 
-      // An empty local repo (no commits) would make `git push HEAD:...` fail
+      // an empty local repo (no commits) would make `git push HEAD:...` fail
       // with an opaque "src refspec HEAD does not match any". Treat this as a
       // partial success: the remote was created and wired up, but there is
       // nothing to push yet.

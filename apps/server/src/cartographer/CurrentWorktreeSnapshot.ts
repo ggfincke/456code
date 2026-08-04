@@ -1,5 +1,6 @@
 // apps/server/src/cartographer/CurrentWorktreeSnapshot.ts
 // adapts exact Git snapshots into bounded Cartographer worktree captures
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeCrypto from 'node:crypto'

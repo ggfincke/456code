@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/EnvironmentConnectionNotice.tsx
+// render environment connection notice
+
 import {
   type EnvironmentConnectionPhase,
   type EnvironmentConnectionPresentation,

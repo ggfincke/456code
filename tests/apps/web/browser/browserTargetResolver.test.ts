@@ -1,3 +1,6 @@
+// tests/apps/web/browser/browserTargetResolver.test.ts
+// verify browser target resolver behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 

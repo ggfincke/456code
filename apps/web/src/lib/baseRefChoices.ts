@@ -1,3 +1,6 @@
+// apps/web/src/lib/baseRefChoices.ts
+// build base ref choices
+
 import type { VcsRef } from '@t3tools/contracts'
 
 export interface BaseRefChoice

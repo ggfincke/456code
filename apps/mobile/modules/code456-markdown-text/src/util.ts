@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/util.ts
+// share mobile util
+
 import { type StyleProp, StyleSheet, type TextStyle } from 'react-native'
 import type { NativeFontWeight } from './Code456MarkdownTextRunNativeComponent'
 
@@ -16,7 +19,7 @@ export function flattenStyles(rootStyle: TextStyle, style: StyleProp<TextStyle>)
   }
 }
 
-// Codegen doesn't like using integer values for enums (c++ L) so we'll conver them to the proper native prop
+// codegen doesn't like using integer values for enums (c++ L) so we'll conver them to the proper native prop
 // value before returning flattened styles.
 function fontWeightToNativeProp(fontWeight: TextStyle['fontWeight']): NativeFontWeight
 {

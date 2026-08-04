@@ -286,7 +286,7 @@ function makeTestLayer(input: {
   )
 }
 
-// Builds a DesktopWindow over a fake ElectronWindow whose `create` returns the
+// builds a DesktopWindow over a fake ElectronWindow whose `create` returns the
 // given outcomes in order (null => simulated open failure), and whose
 // currentMainOrFirst mirrors the real fallback to the first live window (the
 // splash, before any main is registered). Reveal targets are recorded so tests
@@ -1129,7 +1129,7 @@ describe('DesktopWindow', () =>
       Effect.gen(function* ()
       {
         const splash = makeFakeBrowserWindow()
-        // Only the splash is ever created; the backend never reports ready.
+        // only the splash is ever created; the backend never reports ready.
         const scenario = yield* makeSplashScenario([splash.window])
 
         yield* Effect.gen(function* ()
@@ -1139,7 +1139,7 @@ describe('DesktopWindow', () =>
           yield* desktopWindow.showConnectingSplash
           assert.equal(yield* Ref.get(scenario.createCalls), 1)
 
-          // Taskbar/dock activation during cold boot must bring the splash back
+          // taskbar/dock activation during cold boot must bring the splash back
           // rather than no-op and leave it hidden until the backend finishes.
           yield* desktopWindow.activate
           assert.equal(yield* Ref.get(scenario.createCalls), 1)

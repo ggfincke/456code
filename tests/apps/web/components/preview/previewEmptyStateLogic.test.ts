@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/previewEmptyStateLogic.test.ts
+// verify should show preview empty state behavior
+
 import type { PreviewSessionSnapshot } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

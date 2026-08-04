@@ -1,5 +1,5 @@
 // tests/apps/mobile/features/threads/ThreadComposer.test.ts
-// verifies imported-session composer notices remain visible and non-actionable
+// verifies mobile thread composer connection-status presentation
 
 import { describe, expect, it } from 'vite-plus/test'
 

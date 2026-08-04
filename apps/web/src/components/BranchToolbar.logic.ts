@@ -50,7 +50,7 @@ export function resolveEnvironmentOptionLabel(input: {
   return runtimeLabel ?? savedLabel ?? input.environmentId
 }
 
-// A remote (non-primary) environment is always surfaced, even when it is the
+// a remote (non-primary) environment is always surfaced, even when it is the
 // only environment available: with a single connected machine there is nothing
 // to pick, but the user still needs to see where the project runs.
 export function shouldShowEnvironmentIndicator(input: {
@@ -83,7 +83,7 @@ export interface PreviousWorktreeSeed
   worktreePath: string
 }
 
-// The most recently touched worktree in the project that the composer isn't
+// the most recently touched worktree in the project that the composer isn't
 // already pointing at. Backs the "Previous worktree" entry in the workspace
 // selector so a follow-up thread can hop back into the worktree you just
 // worked in without hunting for its branch. Archived threads don't compete —

@@ -1,3 +1,6 @@
+// apps/server/src/persistence/ProviderSessionRuntime.ts
+// coordinate provider session runtime
+
 import * as Arr from 'effect/Array'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -24,24 +27,20 @@ import {
   type ProviderSessionRuntimeRepositoryError,
 } from './Errors.ts'
 
-/**
- * ProviderSessionRuntimeRepository - Repository interface for provider runtime sessions.
- *
- * Owns persistence operations for provider runtime metadata and resume cursors.
- *
- * @module ProviderSessionRuntimeRepository
- */
+// ProviderSessionRuntimeRepository - Repository interface for provider runtime sessions.
+//
+// owns persistence operations for provider runtime metadata and resume cursors.
+//
+// @module ProviderSessionRuntimeRepository
 
 export const ProviderSessionRuntime = Schema.Struct({
   threadId: ThreadId,
   providerName: Schema.String,
-  /**
-   * User-defined routing key for the configured provider instance that
-   * owns this session. Nullable only at the storage/migration boundary:
-   * rows persisted before the driver/instance split carry only
-   * `providerName`. Repository consumers must materialize a concrete
-   * instance id before routing.
-   */
+  // user-defined routing key for the configured provider instance that
+  // owns this session. Nullable only at the storage/migration boundary:
+  // rows persisted before the driver/instance split carry only
+  // `providerName`. Repository consumers must materialize a concrete
+  // instance id before routing.
   providerInstanceId: Schema.NullOr(ProviderInstanceId),
   adapterKey: Schema.String,
   runtimeMode: RuntimeMode,
@@ -64,35 +63,27 @@ export type DeleteProviderSessionRuntimeInput = typeof DeleteProviderSessionRunt
 export class ProviderSessionRuntimeRepository extends Context.Service<
   ProviderSessionRuntimeRepository,
   {
-    /**
-     * Insert or replace a provider runtime row.
-     *
-     * Upserts by canonical `threadId`, including JSON payload/cursor fields.
-     */
+    // insert or replace a provider runtime row.
+    //
+    // upserts by canonical `threadId`, including JSON payload/cursor fields.
     readonly upsert: (
       runtime: ProviderSessionRuntime,
     ) => Effect.Effect<void, ProviderSessionRuntimeRepositoryError>
 
-    /**
-     * Read provider runtime state by canonical thread id.
-     */
+    // read provider runtime state by canonical thread id.
     readonly getByThreadId: (
       input: GetProviderSessionRuntimeInput,
     ) => Effect.Effect<Option.Option<ProviderSessionRuntime>, ProviderSessionRuntimeRepositoryError>
 
-    /**
-     * List all provider runtime rows.
-     *
-     * Returned in ascending last-seen order.
-     */
+    // list all provider runtime rows.
+    //
+    // returned in ascending last-seen order.
     readonly list: () => Effect.Effect<
       ReadonlyArray<ProviderSessionRuntime>,
       ProviderSessionRuntimeRepositoryError
     >
 
-    /**
-     * Delete provider runtime state by canonical thread id.
-     */
+    // delete provider runtime state by canonical thread id.
     readonly deleteByThreadId: (
       input: DeleteProviderSessionRuntimeInput,
     ) => Effect.Effect<void, ProviderSessionRuntimeRepositoryError>
@@ -282,7 +273,7 @@ export const make = Effect.gen(function* ()
         ),
       ),
       Effect.flatMap((rows) =>
-        // Skip rows that no longer decode (e.g. written by an older build)
+        // skip rows that no longer decode (e.g. written by an older build)
         // instead of failing the whole list — one stale row must not disable
         // every consumer that enumerates sessions, such as the reaper.
         Effect.forEach(rows, (row) =>

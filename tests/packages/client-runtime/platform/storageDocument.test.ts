@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/platform/storageDocument.test.ts
+// verify connection catalog document behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
 

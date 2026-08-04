@@ -1,3 +1,6 @@
+// apps/mobile/src/components/PierreEntryIcon.tsx
+// render pierre entry icon
+
 import { SymbolView } from '../components/AppSymbol'
 import { Image, type ImageStyle, type StyleProp } from 'react-native'
 

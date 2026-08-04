@@ -1,3 +1,6 @@
+// apps/mobile/src/features/layout/workspace-pane-divider.tsx
+// render workspace pane divider
+
 import { useCallback, useMemo, useRef, useState } from 'react'
 import {
   Platform,
@@ -16,14 +19,14 @@ interface WorkspacePaneDividerProps
 {
   readonly accessibilityLabel: string
   readonly currentWidth: number
-  /** 1 when dragging right grows the pane, -1 when dragging left grows it. */
+  // 1 when dragging right grows the pane, -1 when dragging left grows it.
   readonly resizeDirection: 1 | -1
   readonly onResizeStart?: () => void
   readonly onResizeBy: (delta: number) => void
   readonly onResizeEnd?: () => void
 }
 
-/** A forgiving divider target for touch, pointer, and VoiceOver users. */
+// a forgiving divider target for touch, pointer, and VoiceOver users.
 export function WorkspacePaneDivider(props: WorkspacePaneDividerProps)
 {
   const latestProps = useRef(props)

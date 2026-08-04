@@ -1,3 +1,6 @@
+// tests/apps/web/hooks/useCopyToClipboard.test.ts
+// verify write text to clipboard behavior
+
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import {

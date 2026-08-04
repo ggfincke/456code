@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/cloudWaitlistJoin.ts
+// define cloud waitlist join rejected error
+
 import * as Schema from 'effect/Schema'
 
 interface CloudWaitlistJoiner

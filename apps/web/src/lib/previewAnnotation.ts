@@ -1,3 +1,6 @@
+// apps/web/src/lib/previewAnnotation.ts
+// build preview annotation prompt
+
 import type { PreviewAnnotationPayload } from '@t3tools/contracts'
 import { buildElementContextBlock, normalizeElementContextSelection } from './elementContext'
 

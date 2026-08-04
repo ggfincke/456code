@@ -1,3 +1,6 @@
+// tests/packages/shared/model.test.ts
+// verify descriptor helpers behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import { ProviderDriverKind, ProviderInstanceId, type ModelCapabilities } from '@t3tools/contracts'
 

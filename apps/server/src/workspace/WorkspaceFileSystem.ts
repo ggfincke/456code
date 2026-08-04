@@ -196,19 +196,17 @@ async function revalidateOpenedWorkspaceFile(input: {
 export class WorkspaceFileSystem extends Context.Service<
   WorkspaceFileSystem,
   {
-    /** Read a UTF-8 text file relative to the workspace root. */
+    // read a UTF-8 text file relative to the workspace root.
     readonly readFile: (
       input: ProjectReadFileInput,
     ) => Effect.Effect<
       ProjectReadFileResult,
       WorkspaceFileSystemError | WorkspacePaths.WorkspacePathOutsideRootError
     >
-    /**
-     * Write a file relative to the workspace root.
-     *
-     * Creates parent directories as needed and rejects paths that escape the
-     * workspace root.
-     */
+    // write a file relative to the workspace root.
+    //
+    // creates parent directories as needed and rejects paths that escape the
+    // workspace root.
     readonly writeFile: (
       input: ProjectWriteFileInput,
     ) => Effect.Effect<

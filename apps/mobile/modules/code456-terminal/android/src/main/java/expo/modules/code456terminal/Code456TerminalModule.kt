@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-terminal/android/src/main/java/expo/modules/code456terminal/Code456TerminalModule.kt
+// registers the Android terminal module
 package expo.modules.code456terminal
 
 import expo.modules.kotlin.modules.Module
@@ -7,7 +9,7 @@ class Code456TerminalModule : Module() {
   override fun definition() = ModuleDefinition {
     Name("Code456TerminalSurface")
 
-    // Bumped when native hardware-keyboard handling changes; surfaced in the JS debug
+    // bumped when native hardware-keyboard handling changes; surfaced in the JS debug
     // logs so a stale native binary is distinguishable from a broken key pipeline.
     Constants(
       "hardwareKeyRevision" to 2,

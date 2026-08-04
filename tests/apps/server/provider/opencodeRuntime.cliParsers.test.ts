@@ -1,3 +1,6 @@
+// tests/apps/server/provider/opencodeRuntime.cliParsers.test.ts
+// verify parse models cli output behavior
+
 import * as NodeAssert from 'node:assert/strict'
 
 import { describe, it } from 'vite-plus/test'

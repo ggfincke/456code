@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/home/WorkspaceConnectionStatus.test.ts
+// verify workspace connection status behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import type { WorkspaceState } from '../../../../../apps/mobile/src/state/workspaceModel'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/terminalLaunchContext.ts
+// define pending terminal launch
+
 import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 
 interface TerminalLocationLike

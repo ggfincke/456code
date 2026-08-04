@@ -223,7 +223,7 @@ function applyTheme(theme: Theme, suppressTransitions = false)
   syncDesktopTheme(theme)
   if (suppressTransitions)
   {
-    // Force a reflow so the no-transitions class takes effect before removal
+    // force a reflow so the no-transitions class takes effect before removal
     // oxlint-disable-next-line no-unused-expressions
     document.documentElement.offsetHeight
     requestAnimationFrame(() =>
@@ -274,7 +274,7 @@ export function syncDesktopTheme(theme: Theme)
   })
 }
 
-// Apply immediately on module load to prevent flash
+// apply immediately on module load to prevent flash
 if (typeof document !== 'undefined' && typeof window !== 'undefined')
 {
   applyTheme(getStored())
@@ -306,7 +306,7 @@ function subscribe(listener: () => void): () => void
   {}
   listeners.push(listener)
 
-  // Listen for system preference changes
+  // listen for system preference changes
   const mq = typeof window.matchMedia === 'function' ? window.matchMedia(MEDIA_QUERY) : null
   const handleChange = () =>
   {
@@ -315,7 +315,7 @@ function subscribe(listener: () => void): () => void
   }
   mq?.addEventListener('change', handleChange)
 
-  // Listen for storage changes from other tabs
+  // listen for storage changes from other tabs
   const handleStorage = (e: StorageEvent) =>
   {
     if (e.key === STORAGE_KEY)
@@ -378,7 +378,7 @@ export function useTheme()
     emitChange()
   }, [])
 
-  // Keep DOM in sync on mount/change
+  // keep DOM in sync on mount/change
   useEffect(() =>
   {
     applyTheme(theme)

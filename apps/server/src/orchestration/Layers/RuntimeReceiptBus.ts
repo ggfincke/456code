@@ -1,13 +1,12 @@
-/**
- * RuntimeReceiptBus layers.
- *
- * `RuntimeReceiptBusLive` is the production default and intentionally does not
- * retain or broadcast receipts. `RuntimeReceiptBusTest` installs the in-memory
- * PubSub-backed implementation used by integration tests that need to await
- * checkpoint-reactor milestones precisely.
- *
- * @module RuntimeReceiptBus
- */
+// apps/server/src/orchestration/Layers/RuntimeReceiptBus.ts
+// assemble runtime receipt bus Effect layer
+
+// `RuntimeReceiptBusLive` is the production default and intentionally does not
+// retain or broadcast receipts. `RuntimeReceiptBusTest` installs the in-memory
+// PubSub-backed implementation used by integration tests that need to await
+// checkpoint-reactor milestones precisely.
+//
+// @module RuntimeReceiptBus
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as PubSub from 'effect/PubSub'

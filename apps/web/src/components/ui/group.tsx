@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/group.tsx
+// render reusable group UI primitives
+
 'use client'
 
 import { mergeProps } from '@base-ui/react/merge-props'

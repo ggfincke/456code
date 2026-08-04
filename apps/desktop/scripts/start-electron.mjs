@@ -1,3 +1,6 @@
+// apps/desktop/scripts/start-electron.mjs
+// start the Electron desktop development process
+
 import * as NodeChildProcess from 'node:child_process'
 
 import { desktopDir, resolveElectronLaunchCommand } from './electron-launcher.mjs'

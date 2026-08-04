@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/server.ts
+// manage server config projection state
+
 import {
   type EnvironmentId,
   type ServerConfig,
@@ -93,11 +96,9 @@ const cachedConfigSnapshotEvent = (config: ServerConfig): ServerConfigStreamEven
   config,
 })
 
-/**
- * Keeps a complete server configuration available during reconnects. Server
- * config carries the provider/model catalogue used by task creation, so it is
- * useful—and safe—to retain after a transport session ends.
- */
+// keeps a complete server configuration available during reconnects. Server
+// config carries the provider/model catalogue used by task creation, so it is
+// useful—and safe—to retain after a transport session ends.
 export const makeEnvironmentServerConfigState = Effect.fn('EnvironmentServerConfigState.make')(
   function* ()
   {

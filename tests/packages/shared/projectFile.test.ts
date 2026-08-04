@@ -1,3 +1,6 @@
+// tests/packages/shared/projectFile.test.ts
+// verify project file from json behavior
+
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vite-plus/test'
 

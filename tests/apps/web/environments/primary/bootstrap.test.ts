@@ -1,3 +1,6 @@
+// tests/apps/web/environments/primary/bootstrap.test.ts
+// verify environment bootstrap behavior
+
 import { EnvironmentId, type ExecutionEnvironmentDescriptor } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'

@@ -1,8 +1,11 @@
+// apps/web/src/contextMenuFallback.ts
+// show context menu fallback
+
 import type { ContextMenuItem } from '@t3tools/contracts'
 
 const SVG_NS = 'http://www.w3.org/2000/svg'
 
-// Inline Lucide-style icon paths (stroke-based, viewBox 0 0 24 24, strokeWidth 2).
+// inline Lucide-style icon paths (stroke-based, viewBox 0 0 24 24, strokeWidth 2).
 const ICON_PATHS: Record<string, ReadonlyArray<{ tag: string; attrs: Record<string, string> }>> = {
   pencil: [
     {
@@ -105,10 +108,8 @@ function isNodeWithinMenuStack(target: EventTarget | null, menuStack: readonly H
   return false
 }
 
-/**
- * Imperative DOM-based context menu for non-Electron environments.
- * Supports nested submenus and resolves with the clicked leaf item id.
- */
+// imperative DOM-based context menu for non-Electron environments.
+// supports nested submenus and resolves with the clicked leaf item id.
 export function showContextMenuFallback<T extends string>(
   items: readonly ContextMenuItem<T>[],
   position?: { x: number; y: number },

@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/switch.tsx
+// render reusable switch UI primitives
+
 'use client'
 
 import { Switch as SwitchPrimitive } from '@base-ui/react/switch'

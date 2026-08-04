@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/showcase/showcaseRetry.test.ts
+// verify showcase retry behavior
+
 import { assert, it } from '@effect/vitest'
 
 import { retryShowcaseOperation } from '../../../../../apps/mobile/src/features/showcase/showcaseRetry'

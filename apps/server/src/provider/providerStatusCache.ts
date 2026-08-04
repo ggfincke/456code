@@ -80,20 +80,18 @@ export const hydrateCachedProvider = (input: {
     : hydratedProvider
 }
 
-/**
- * Resolve the on-disk cache path for a provider instance snapshot.
- *
- * File naming: `<cacheDir>/<instanceId>.json`. For the default instance of
- * a built-in kind this equals the legacy `<kind>.json` path (because
- * `defaultInstanceIdForDriver(kind).toString() === kind`), so existing
- * cached snapshots remain readable without any rename step.
- *
- * Non-default instances (e.g. `codex_personal`) land in their own files and
- * never collide with other instances.
- *
- * Cache contents must still carry matching `instanceId` + `driver` identity
- * before hydration. The filename alone is not trusted as a routing key.
- */
+// resolve the on-disk cache path for a provider instance snapshot.
+//
+// file naming: `<cacheDir>/<instanceId>.json`. For the default instance of
+// a built-in kind this equals the legacy `<kind>.json` path (because
+// `defaultInstanceIdForDriver(kind).toString() === kind`), so existing
+// cached snapshots remain readable without any rename step.
+//
+// non-default instances (e.g. `codex_personal`) land in their own files and
+// never collide with other instances.
+//
+// cache contents must still carry matching `instanceId` + `driver` identity
+// before hydration. The filename alone is not trusted as a routing key.
 export const resolveProviderStatusCachePath = Effect.fn('resolveProviderStatusCachePath')(
   function* (input: {
     readonly cacheDir: string
@@ -105,13 +103,11 @@ export const resolveProviderStatusCachePath = Effect.fn('resolveProviderStatusCa
   },
 )
 
-/**
- * Legacy kind-keyed path resolver retained for callers that still think in
- * terms of `ProviderDriverKind`. Prefer `resolveProviderStatusCachePath` with an
- * `instanceId`; new code should route through the instance registry.
- *
- * @deprecated use `resolveProviderStatusCachePath` with an instance id.
- */
+// legacy kind-keyed path resolver retained for callers that still think in
+// terms of `ProviderDriverKind`. Prefer `resolveProviderStatusCachePath` with an
+// `instanceId`; new code should route through the instance registry.
+//
+// @deprecated use `resolveProviderStatusCachePath` with an instance id.
 export const resolveLegacyProviderStatusCachePath = Effect.fn(
   'resolveLegacyProviderStatusCachePath',
 )(function* (input: {

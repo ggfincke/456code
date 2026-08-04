@@ -401,7 +401,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const isRemoteThread =
     primaryEnvironmentId !== null && thread.environmentId !== primaryEnvironmentId
   const remoteEnvLabel = environment?.label ?? null
-  // A desktop-local secondary backend (e.g. the WSL backend) shows up as a
+  // a desktop-local secondary backend (e.g. the WSL backend) shows up as a
   // bearer environment whose connection id is prefixed "local:". It runs on the
   // user's own machine, so the cloud icon is misleading — label it "Local" and
   // suppress the cloud icon (the project header already shows a container icon
@@ -411,7 +411,7 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const threadEnvironmentLabel = isRemoteThread
     ? (remoteEnvLabel ?? (isDesktopLocalThread ? 'Local' : 'Remote'))
     : null
-  // For grouped projects, the thread may belong to a different environment
+  // for grouped projects, the thread may belong to a different environment
   // than the representative project.  Look up the thread's own project cwd
   // so git status (and thus PR detection) queries the correct path.
   const threadProject = useProject(
@@ -512,15 +512,15 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
   const handleRowDoubleClick = useCallback(
     (event: React.MouseEvent) =>
     {
-      // Already renaming this row: a double-click on the row chrome (outside the
+      // already renaming this row: a double-click on the row chrome (outside the
       // input) must not restart and discard the in-progress edit.
       if (renamingThreadKey === threadKey) return
-      // On mobile the first tap navigates and closes the sidebar sheet, so the
+      // on mobile the first tap navigates and closes the sidebar sheet, so the
       // inline rename can't be shown. Renaming there stays on the context menu.
       if (isMobile) return
       // cmd/ctrl/shift double-clicks are multi-select intent, not rename.
       if (event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
-      // Ignore double-clicks bubbling from nested controls (PR status, port,
+      // ignore double-clicks bubbling from nested controls (PR status, port,
       // archive buttons) — only the row body should enter inline rename.
       if ((event.target as HTMLElement).closest('button, a')) return
       event.preventDefault()
@@ -647,8 +647,8 @@ export const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThr
       void commitRename(threadRef, renamingTitle, thread.title)
     }
   }, [commitRename, renamingCommittedRef, renamingTitle, thread.title, threadRef])
-  // Keep clicks/double-clicks inside the rename input from bubbling to the row.
-  // Without stopping `dblclick`, double-clicking to select a word would re-fire
+  // keep clicks/double-clicks inside the rename input from bubbling to the row.
+  // without stopping `dblclick`, double-clicking to select a word would re-fire
   // the row's rename handler and reset the in-progress edit back to the title.
   const handleRenameInputClick = useCallback((event: React.MouseEvent<HTMLInputElement>) =>
   {
@@ -1238,7 +1238,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       ),
     [sidebarThreads],
   )
-  // Keep a ref so callbacks can read the latest map without appearing in
+  // keep a ref so callbacks can read the latest map without appearing in
   // dependency arrays (avoids invalidating every thread-row memo on each
   // thread-list change).
   const sidebarThreadByKeyRef = useRef(sidebarThreadByKey)
@@ -1837,7 +1837,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
         return
       }
 
-      // Ignore the trailing click of a plain double-click so it doesn't navigate
+      // ignore the trailing click of a plain double-click so it doesn't navigate
       // while a double-click is starting an inline rename. Placed after the
       // modifier branches so cmd/shift selection still processes every click.
       if (isTrailingDoubleClick(event.detail))
@@ -2006,7 +2006,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
       }
       void (async () =>
       {
-        // No options: branch, worktree, and env mode come from the user's
+        // no options: branch, worktree, and env mode come from the user's
         // configured defaults, never from the currently viewed thread.
         const result = await settlePromise(() =>
           handleNewThread(scopeProjectRef(member.environmentId, member.id)),
@@ -2291,7 +2291,7 @@ const SidebarProjectItem = memo(function SidebarProjectItem(props: SidebarProjec
 
       if (clicked === 'new-thread-on-branch')
       {
-        // Explicit branch carry-over: reuse the thread's worktree when it
+        // explicit branch carry-over: reuse the thread's worktree when it
         // has one, otherwise its branch on the local checkout.
         const result = await settlePromise(() =>
           handleNewThread(scopeProjectRef(thread.environmentId, thread.projectId), {
@@ -2673,14 +2673,14 @@ const SidebarProjectListRow = memo(function SidebarProjectListRow(props: Sidebar
 function LocalSecondaryStatus()
 {
   const { environments } = useEnvironments()
-  // The desktop reports which local secondary backends (e.g. the WSL backend)
+  // the desktop reports which local secondary backends (e.g. the WSL backend)
   // exist; the hook polls because the bridge has no change event. A backend that
   // is still cold-booting has no httpBaseUrl yet and isn't in the catalog, so we
   // surface "Connecting" straight from the bootstrap list and clear it once the
   // matching environment reports a connected phase.
   const secondaries = useDesktopLocalBootstraps()
 
-  // Connected desktop-local environments keyed by their backend URL so we can
+  // connected desktop-local environments keyed by their backend URL so we can
   // match a bootstrap (which only knows the URL) to its connection phase.
   const localEnvByUrl = useMemo(() =>
   {
@@ -3269,7 +3269,7 @@ function ProjectSidebar()
     })
   }, [projectOrder, projects])
 
-  // Build a mapping from physical project key → logical project key for
+  // build a mapping from physical project key -> logical project key for
   // cross-environment grouping.  Projects that share a repositoryIdentity
   // canonicalKey are treated as one logical project in the sidebar.
   const physicalToLogicalKey = useMemo(() =>
@@ -3322,7 +3322,7 @@ function ProjectSidebar()
       ),
     [sidebarThreads],
   )
-  // Resolve the active route's project key to a logical key so it matches the
+  // resolve the active route's project key to a logical key so it matches the
   // sidebar's grouped project entries.
   const activeRouteProjectKey = useMemo(() =>
   {
@@ -3339,7 +3339,7 @@ function ProjectSidebar()
     return physicalToLogicalKey.get(physicalKey) ?? physicalKey
   }, [routeThreadKey, sidebarThreadByKey, physicalToLogicalKey, projectPhysicalKeyByScopedRef])
 
-  // Group threads by logical project key so all threads from grouped projects
+  // group threads by logical project key so all threads from grouped projects
   // are displayed together.
   const threadsByProjectKey = useMemo(() =>
   {

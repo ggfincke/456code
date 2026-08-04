@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/use-project-actions.ts
+// manage create project thread through a React hook
+
 import { useCallback } from 'react'
 
 import { scopeThreadRef } from '@t3tools/client-runtime/environment'
@@ -38,7 +41,7 @@ export function useCreateProjectThread()
       readonly interactionMode: ProviderInteractionMode
       readonly initialMessageText: string
       readonly initialAttachments: ReadonlyArray<DraftComposerImageAttachment>
-      /** Reuse identifiers from a queued pending task instead of minting new ones. */
+      // reuse identifiers from a queued pending task instead of minting new ones.
       readonly turnMetadata?: TurnCommandMetadata
     }) =>
     {

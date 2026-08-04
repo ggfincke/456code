@@ -1,3 +1,6 @@
+// packages/client-runtime/src/rpc/http.ts
+// create environment http api client
+
 import {
   EnvironmentHttpApi,
   EnvironmentHttpCommonError,

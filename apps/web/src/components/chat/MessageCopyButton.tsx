@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/MessageCopyButton.tsx
+// render message copy button
+
 import { memo, useRef } from 'react'
 import { CopyIcon, CheckIcon } from 'lucide-react'
 import { Button } from '../ui/button'

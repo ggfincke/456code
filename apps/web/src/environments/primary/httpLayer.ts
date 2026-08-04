@@ -1,3 +1,6 @@
+// apps/web/src/environments/primary/httpLayer.ts
+// assemble http Effect layer
+
 import { remoteHttpClientLayer } from '@t3tools/client-runtime/rpc'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

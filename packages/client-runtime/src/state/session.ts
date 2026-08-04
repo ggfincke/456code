@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/session.ts
+// manage initial config option state
+
 import type { EnvironmentId, ServerConfig } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
@@ -53,7 +56,7 @@ export function createEnvironmentSessionAtoms<R, E>(
     ),
   )
 
-  // This is only the bootstrap config captured when a transport session is
+  // this is only the bootstrap config captured when a transport session is
   // established. Consumers that need current provider/settings state must use
   // createServerEnvironmentAtoms(...).configValueAtom instead.
   const initialConfigValueAtom = Atom.family((environmentId: EnvironmentId) =>

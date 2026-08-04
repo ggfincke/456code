@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/AddProviderInstanceDialog.logic.ts
+// derive add provider instance dialog presentation behavior
+
 export type WizardNavigation =
   | { readonly kind: 'navigate'; readonly step: number }
   | { readonly kind: 'blocked'; readonly step: number; readonly error: string }
@@ -6,14 +9,12 @@ const IDENTITY_STEP = 1
 
 export const ADD_PROVIDER_WIZARD_STEPS = ['Driver', 'Identity', 'Config'] as const
 
-/**
- * Resolve navigation within the add-provider wizard.
- *
- * Moving forward past Identity requires a valid instance id, whether the user
- * advances one step at a time or skips directly to Config from a step header.
- * A blocked skip lands on Identity so its existing inline validation is
- * visible. Backward navigation is always preserved.
- */
+// resolve navigation within the add-provider wizard.
+//
+// moving forward past Identity requires a valid instance id, whether the user
+// advances one step at a time or skips directly to Config from a step header.
+// a blocked skip lands on Identity so its existing inline validation is
+// visible. Backward navigation is always preserved.
 export function resolveWizardNavigation(
   currentStep: number,
   requestedStep: number,

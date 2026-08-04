@@ -1,3 +1,6 @@
+// apps/web/src/components/files/filePath.ts
+// define file breadcrumb
+
 export interface FileBreadcrumb
 {
   label: string

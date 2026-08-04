@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/errors/safeLog.test.ts
+// verify safe error log attributes behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { safeErrorLogAttributes } from '../../../../packages/client-runtime/src/errors/safeLog.ts'

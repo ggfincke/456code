@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/preload-workspace-file.ts
+// preload workspace file contents
+
 import { executeAtomQuery } from '@t3tools/client-runtime/state/runtime'
 import type { EnvironmentId } from '@t3tools/contracts'
 

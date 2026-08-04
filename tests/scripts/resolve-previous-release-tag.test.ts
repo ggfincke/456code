@@ -1,3 +1,6 @@
+// tests/scripts/resolve-previous-release-tag.test.ts
+// verify resolve previous release tag behavior
+
 import { assert, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'
 import * as Effect from 'effect/Effect'

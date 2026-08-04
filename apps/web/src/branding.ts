@@ -1,3 +1,6 @@
+// apps/web/src/branding.ts
+// expose hosted app channel
+
 import type { DesktopAppBranding } from '@t3tools/contracts'
 import { formatAppDisplayName } from './branding.logic'
 

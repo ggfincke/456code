@@ -1,5 +1,6 @@
 // apps/server/src/provider/Layers/EventNdjsonLogger.ts
 // batches provider events into shared rotating thread log sinks
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'

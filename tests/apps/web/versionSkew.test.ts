@@ -1,3 +1,6 @@
+// tests/apps/web/versionSkew.test.ts
+// verify version skew behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

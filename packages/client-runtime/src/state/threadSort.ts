@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/threadSort.ts
+// manage thread sort input state
+
 import type { ProjectId } from '@t3tools/contracts'
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from '@t3tools/contracts/settings'
 import * as Arr from 'effect/Array'

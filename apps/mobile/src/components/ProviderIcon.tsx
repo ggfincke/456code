@@ -1,3 +1,6 @@
+// apps/mobile/src/components/ProviderIcon.tsx
+// render provider icon
+
 import { useColorScheme } from 'react-native'
 import { Path, Svg } from 'react-native-svg'
 

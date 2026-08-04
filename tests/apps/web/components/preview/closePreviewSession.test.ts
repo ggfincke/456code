@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/closePreviewSession.test.ts
+// verify close preview session behavior
+
 import type { PreviewCloseInput, PreviewSessionSnapshot, ScopedThreadRef } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'

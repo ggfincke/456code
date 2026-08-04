@@ -1,3 +1,6 @@
+// packages/client-runtime/src/relay/managedRelayState.ts
+// manage managed relay state
+
 import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
@@ -178,8 +181,8 @@ export function setManagedRelaySession(
     const control = managedRelaySessionControls.get(current)
     if (control)
     {
-      // Clerk can replace its token reader during routine same-account refreshes.
-      // Keep the session stable so those refreshes do not invalidate queries or reconnect leases.
+      // clerk can replace its token reader during routine same-account refreshes.
+      // keep the session stable so those refreshes do not invalidate queries or reconnect leases.
       control.updateReadClerkToken(input.readClerkToken)
       return
     }

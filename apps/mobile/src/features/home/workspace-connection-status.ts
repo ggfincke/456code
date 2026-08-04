@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/workspace-connection-status.ts
+// determine whether show workspace connection status
+
 import type { WorkspaceState } from '../../state/workspaceModel'
 
 export function shouldShowWorkspaceConnectionStatus(state: WorkspaceState): boolean

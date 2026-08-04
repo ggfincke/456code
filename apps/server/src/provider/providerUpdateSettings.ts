@@ -1,3 +1,6 @@
+// apps/server/src/provider/providerUpdateSettings.ts
+// create provider snapshot settings
+
 import type { ServerSettings, ServerSettingsError } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Equal from 'effect/Equal'

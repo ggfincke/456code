@@ -1,3 +1,6 @@
+// apps/server/src/auth/SessionStore.ts
+// manage session state
+
 import {
   AuthSessionId,
   AuthStandardClientScopes,

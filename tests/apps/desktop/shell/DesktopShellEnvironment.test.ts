@@ -1,3 +1,6 @@
+// tests/apps/desktop/shell/DesktopShellEnvironment.test.ts
+// verify desktop shell environment behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

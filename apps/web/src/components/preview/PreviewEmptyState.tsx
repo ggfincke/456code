@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/PreviewEmptyState.tsx
+// render preview empty state
+
 import type { EnvironmentId } from '@t3tools/contracts'
 import { Globe, RadioTower } from 'lucide-react'
 

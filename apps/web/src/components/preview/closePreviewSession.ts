@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/closePreviewSession.ts
+// implement web close preview session
+
 import type { AtomCommandResult } from '@t3tools/client-runtime/state/runtime'
 import type {
   EnvironmentId,
@@ -19,10 +22,8 @@ interface ClosePreviewSessionInput<E>
   readonly threadRef: ScopedThreadRef
 }
 
-/**
- * Optimistically closes a preview while suppressing stale list responses for
- * the same tab. A failed close restores the last known snapshot.
- */
+// optimistically closes a preview while suppressing stale list responses for
+// the same tab. A failed close restores the last known snapshot.
 export async function closePreviewSession<E>(
   input: ClosePreviewSessionInput<E>,
 ): Promise<AtomCommandResult<void, E>>

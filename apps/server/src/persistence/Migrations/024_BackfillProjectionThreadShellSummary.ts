@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/024_BackfillProjectionThreadShellSummary.ts
+// apply persistence migration 024 backfill projection thread shell summary
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

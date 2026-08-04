@@ -1,3 +1,6 @@
+// packages/shared/src/relayAuth.ts
+// handle shared authentication
+
 import * as Schema from 'effect/Schema'
 
 const ClerkPublishableKeyPrefix = Schema.Literals(['pk_test', 'pk_live', 'unknown'])

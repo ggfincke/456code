@@ -1,11 +1,10 @@
-/**
- * TerminalManager - Terminal session orchestration service interface.
- *
- * Owns terminal lifecycle operations, output fanout, and session state
- * transitions for thread-scoped terminals.
- *
- * @module TerminalManager
- */
+// apps/server/src/terminal/Manager.ts
+// coordinate terminal lifecycle
+
+// owns terminal lifecycle operations, output fanout, and session state
+// transitions for thread-scoped terminals.
+//
+// @module TerminalManager
 import {
   DEFAULT_TERMINAL_ID,
   TerminalCwdError,
@@ -121,71 +120,53 @@ class TerminalProcessSignalError extends Schema.TaggedErrorClass<TerminalProcess
 export class TerminalManager extends Context.Service<
   TerminalManager,
   {
-    /**
-     * Open or attach to a terminal session.
-     *
-     * Reuses an existing session for the same thread/terminal id and restores
-     * persisted history on first open.
-     */
+    // open or attach to a terminal session.
+    //
+    // reuses an existing session for the same thread/terminal id and restores
+    // persisted history on first open.
     readonly open: (
       input: TerminalOpenInput,
     ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>
 
-    /**
-     * Attach to a terminal and stream its initial snapshot followed by live events.
-     *
-     * Returns an unsubscribe function.
-     */
+    // attach to a terminal and stream its initial snapshot followed by live events.
+    //
+    // returns an unsubscribe function.
     readonly attachStream: (
       input: TerminalAttachInput,
       listener: (event: TerminalAttachStreamEvent) => Effect.Effect<void>,
     ) => Effect.Effect<() => void, TerminalError>
 
-    /**
-     * Write input bytes to a terminal session.
-     */
+    // write input bytes to a terminal session.
     readonly write: (input: TerminalWriteInput) => Effect.Effect<void, TerminalError>
 
-    /**
-     * Resize the PTY backing a terminal session.
-     */
+    // resize the PTY backing a terminal session.
     readonly resize: (input: TerminalResizeInput) => Effect.Effect<void, TerminalError>
 
-    /**
-     * Clear terminal output history.
-     */
+    // clear terminal output history.
     readonly clear: (input: TerminalClearInput) => Effect.Effect<void, TerminalError>
 
-    /**
-     * Restart a terminal session in place.
-     *
-     * Always resets history before spawning the new process.
-     */
+    // restart a terminal session in place.
+    //
+    // always resets history before spawning the new process.
     readonly restart: (
       input: TerminalRestartInput,
     ) => Effect.Effect<TerminalSessionSnapshot, TerminalError>
 
-    /**
-     * Close an active terminal session.
-     *
-     * When `terminalId` is omitted, closes all sessions for the thread.
-     */
+    // close an active terminal session.
+    //
+    // when `terminalId` is omitted, closes all sessions for the thread.
     readonly close: (input: TerminalCloseInput) => Effect.Effect<void, TerminalError>
 
-    /**
-     * Subscribe to terminal runtime events with a direct callback.
-     *
-     * Returns an unsubscribe function.
-     */
+    // subscribe to terminal runtime events with a direct callback.
+    //
+    // returns an unsubscribe function.
     readonly subscribe: (
       listener: (event: TerminalEvent) => Effect.Effect<void>,
     ) => Effect.Effect<() => void>
 
-    /**
-     * Subscribe to lightweight terminal metadata with an initial full snapshot.
-     *
-     * Returns an unsubscribe function.
-     */
+    // subscribe to lightweight terminal metadata with an initial full snapshot.
+    //
+    // returns an unsubscribe function.
     readonly subscribeMetadata: (
       listener: (event: TerminalMetadataStreamEvent) => Effect.Effect<void>,
     ) => Effect.Effect<() => void>
@@ -261,7 +242,7 @@ export interface TerminalSessionState
   unsubscribeData: (() => void) | null
   unsubscribeExit: (() => void) | null
   hasRunningSubprocess: boolean
-  /** Normalized child command name when `hasRunningSubprocess`; cleared when idle. */
+  // normalized child command name when `hasRunningSubprocess`; cleared when idle.
   childCommandLabel: string | null
   runtimeEnv: Record<string, string> | null
 }
@@ -1204,8 +1185,8 @@ function shouldExcludeTerminalEnvKey(key: string): boolean
   return TERMINAL_ENV_BLOCKLIST.has(normalizedKey)
 }
 
-// Marker variables the AppImage runtime injects into the process it launches.
-// They describe the AppImage itself, not the user's session, so terminals must
+// marker variables the AppImage runtime injects into the process it launches.
+// they describe the AppImage itself, not the user's session, so terminals must
 // not inherit them.
 const APPIMAGE_RUNTIME_ENV_KEYS = ['APPIMAGE', 'APPDIR', 'ARGV0', 'OWD'] as const
 // PATH-style variables the AppImage runtime prepends with its temporary mount
@@ -1218,9 +1199,9 @@ function isPathSegmentUnderAppDir(segment: string, appDir: string): boolean
   return segment === appDir || segment.startsWith(`${appDir}/`)
 }
 
-// On Linux AppImage builds the runtime mounts the app under a temporary dir and
+// on Linux AppImage builds the runtime mounts the app under a temporary dir and
 // injects APPIMAGE/APPDIR/ARGV0/OWD plus mount entries on PATH/LD_LIBRARY_PATH.
-// The integrated terminal inherits the server process environment, so without
+// the integrated terminal inherits the server process environment, so without
 // this scrub those leak into the PTY and tools resolve against the AppImage
 // mount instead of the user's real environment (e.g. `php` reporting
 // PHP_BINARY as the AppImage path). See issue #1699. The scrub is gated on an
@@ -1338,7 +1319,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
   const logsDir = options.logsDir
   const historyLineLimit = options.historyLineLimit ?? DEFAULT_HISTORY_LINE_LIMIT
   const platform = yield* HostProcessPlatform
-  // Terminals must inherit the user's full environment (minus the blocklist
+  // terminals must inherit the user's full environment (minus the blocklist
   // applied in createTerminalSpawnEnv) — an allowlist here silently strips
   // things like PSModulePath, DISPLAY, proxies, and toolchain variables.
   // `options.env` is the test seam.

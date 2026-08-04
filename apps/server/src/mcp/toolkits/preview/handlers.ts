@@ -1,3 +1,6 @@
+// apps/server/src/mcp/toolkits/preview/handlers.ts
+// expose preview standard toolkit handlers live
+
 import * as Effect from 'effect/Effect'
 import type {
   PreviewAutomationOperation,

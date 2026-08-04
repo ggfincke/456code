@@ -1,3 +1,6 @@
+// tests/apps/server/textGeneration/GrokTextGeneration.test.ts
+// verify grok text generation behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from 'node:path'
 import * as NodeOS from 'node:os'

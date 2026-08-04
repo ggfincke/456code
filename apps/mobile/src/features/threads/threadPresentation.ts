@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/threadPresentation.ts
+// expose thread sort value
+
 import type { StatusTone } from '../../components/StatusPill'
 import type { OrchestrationLatestTurn, OrchestrationSession } from '@t3tools/contracts'
 import { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
@@ -14,15 +17,15 @@ export type ThreadStatusKind =
 export interface ThreadStatusPresentation extends StatusTone
 {
   readonly kind: ThreadStatusKind
-  /** Foreground color for the leading status icon. */
+  // foreground color for the leading status icon.
   readonly iconColor: string
-  /** Background color for the leading status icon circle. */
+  // background color for the leading status icon circle.
   readonly iconBackground: string
-  /** Whether the indicator represents in-flight activity. */
+  // whether the indicator represents in-flight activity.
   readonly pulse: boolean
 }
 
-/** Neutral icon colors for threads with no actionable status. */
+// neutral icon colors for threads with no actionable status.
 export const THREAD_STATUS_NEUTRAL_ICON = {
   iconColor: '#8e8e93',
   iconBackground: 'rgba(142,142,147,0.22)',
@@ -39,11 +42,9 @@ function isLatestTurnSettled(
   return session.status !== 'running'
 }
 
-/**
- * Resolves the user-facing status of a thread, in priority order. Returns
- * `null` for quiescent threads so rows stay free of "Idle"-style noise.
- * Mirrors `resolveThreadStatusPill` in apps/web/src/components/Sidebar.logic.ts.
- */
+// resolves the user-facing status of a thread, in priority order. Returns
+// `null` for quiescent threads so rows stay free of "Idle"-style noise.
+// mirrors `resolveThreadStatusPill` in apps/web/src/components/Sidebar.logic.ts.
 export function resolveThreadStatus(
   thread: EnvironmentThreadShell,
 ): ThreadStatusPresentation | null

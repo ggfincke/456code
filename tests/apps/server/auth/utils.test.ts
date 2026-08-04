@@ -1,3 +1,6 @@
+// tests/apps/server/auth/utils.test.ts
+// verify derive auth client metadata behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { deriveAuthClientMetadata } from '../../../../apps/server/src/auth/utils.ts'

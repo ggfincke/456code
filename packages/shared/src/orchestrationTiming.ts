@@ -1,3 +1,6 @@
+// packages/shared/src/orchestrationTiming.ts
+// format duration
+
 type LatestTurnTiming = {
   readonly turnId: string | null
   readonly startedAt: string | null

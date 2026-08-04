@@ -1,14 +1,13 @@
-/**
- * In-memory PreviewManager implementation.
- *
- * Sessions are keyed by `(threadId, tabId)`; a single thread can host
- * multiple tabs (browser-style). `open` always creates a new tab — tab
- * lifecycle is owned by the renderer.
- *
- * Events are published via Effect's `PubSub`, so subscriber failures are
- * isolated from the publishing call (a closed WS subscriber queue cannot
- * fail an in-progress `navigate()`).
- */
+// apps/server/src/preview/Manager.ts
+// coordinate preview lifecycle
+
+// sessions are keyed by `(threadId, tabId)`; a single thread can host
+// multiple tabs (browser-style). `open` always creates a new tab — tab
+// lifecycle is owned by the renderer.
+//
+// events are published via Effect's `PubSub`, so subscriber failures are
+// isolated from the publishing call (a closed WS subscriber queue cannot
+// fail an in-progress `navigate()`).
 import {
   type PreviewCloseInput,
   type PreviewEvent,
@@ -68,7 +67,7 @@ interface PreviewSessionState
 
 interface ManagerState
 {
-  /** All sessions across every thread, keyed by `${threadId}\u0000${tabId}`. */
+  // all sessions across every thread, keyed by `${threadId}\u0000${tabId}`.
   readonly sessions: ReadonlyMap<string, PreviewSessionState>
 }
 
@@ -147,22 +146,20 @@ const buildIdleSnapshot = (input: {
 export const make = Effect.gen(function* PreviewManagerMake()
 {
   const stateRef = yield* SynchronizedRef.make<ManagerState>(initialState)
-  // Unbounded PubSub is fine here — events are tiny and we don't want to
+  // unbounded PubSub is fine here — events are tiny and we don't want to
   // block publishers if a subscriber is slow. WS clients backpressure on
   // their own queues downstream.
   const eventsPubSub = yield* PubSub.unbounded<PreviewEvent>()
   const events: Stream.Stream<PreviewEvent> = Stream.fromPubSub(eventsPubSub)
 
-  /**
-   * Atomic read-modify-write over the session for `(threadId, tabId)`. The
-   * mutator runs under the SynchronizedRef so concurrent writers cannot
-   * interleave. Lookup failures travel through the modify result so both
-   * branches yield the same `[A, S]` shape `modifyEffect` requires.
-   *
-   * The event is published INSIDE the lock so observers see events in the
-   * same order as the underlying state transitions. Publishing an unbounded
-   * PubSub is non-blocking, so this is cheap.
-   */
+  // atomic read-modify-write over the session for `(threadId, tabId)`. The
+  // mutator runs under the SynchronizedRef so concurrent writers cannot
+  // interleave. Lookup failures travel through the modify result so both
+  // branches yield the same `[A, S]` shape `modifyEffect` requires.
+  //
+  // the event is published INSIDE the lock so observers see events in the
+  // same order as the underlying state transitions. Publishing an unbounded
+  // PubSub is non-blocking, so this is cheap.
   const mutateExistingSession = <R, E>(
     threadId: string,
     tabId: string,
@@ -358,7 +355,7 @@ export const make = Effect.gen(function* PreviewManagerMake()
   const refresh: PreviewManager['Service']['refresh'] = Effect.fn('PreviewManager.refresh')(
     function* (input)
     {
-      // Verify the session exists; the desktop bridge handles the actual reload
+      // verify the session exists; the desktop bridge handles the actual reload
       // and will report progress back via `reportStatus`. No event emitted.
       yield* mutateExistingSession(input.threadId, input.tabId, (session) =>
         Effect.succeed({ next: session, emit: null, result: undefined as void }),

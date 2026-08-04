@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/select.tsx
+// render reusable select UI primitives
+
 'use client'
 
 import { mergeProps } from '@base-ui/react/merge-props'

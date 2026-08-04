@@ -1,3 +1,6 @@
+// apps/web/src/cloud/publicConfig.ts
+// configure web public config
+
 import { normalizeSecureRelayUrl } from '@t3tools/shared/relayUrl'
 
 export interface CloudPublicConfig

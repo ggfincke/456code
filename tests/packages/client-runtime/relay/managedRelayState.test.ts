@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/relay/managedRelayState.test.ts
+// verify create managed relay query manager behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import type {
   RelayClientDeviceRecord,

@@ -1,11 +1,10 @@
-/**
- * Anonymous PostHog telemetry service.
- *
- * Persists an installation-scoped anonymous identifier, buffers events in
- * memory, and flushes batches over Effect's HTTP client.
- *
- * @module AnalyticsService
- */
+// apps/server/src/telemetry/AnalyticsService.ts
+// provide analytics service behavior
+
+// persists an installation-scoped anonymous identifier, buffers events in
+// memory, and flushes batches over Effect's HTTP client.
+//
+// @module AnalyticsService
 import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Config from 'effect/Config'
 import * as Context from 'effect/Context'
@@ -47,18 +46,18 @@ const TelemetryEnvConfig = Config.all({
 export class AnalyticsService extends Context.Service<
   AnalyticsService,
   {
-    /** Record an anonymous event for best-effort buffered delivery. */
+    // record an anonymous event for best-effort buffered delivery.
     readonly record: (
       event: string,
       properties?: Readonly<Record<string, unknown>>,
     ) => Effect.Effect<void>
 
-    /** Flush all currently queued telemetry events. */
+    // flush all currently queued telemetry events.
     readonly flush: Effect.Effect<void>
   }
 >()('456code/telemetry/AnalyticsService')
 {
-  /** No-op layer for callers that intentionally disable telemetry. */
+  // no-op layer for callers that intentionally disable telemetry.
   static readonly layerTest = Layer.succeed(
     AnalyticsService,
     AnalyticsService.of({

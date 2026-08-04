@@ -1,3 +1,6 @@
+// apps/web/src/browser/ElectronBrowserHost.tsx
+// render electron browser host
+
 'use client'
 
 import { parseScopedThreadKey } from '@t3tools/client-runtime/environment'

@@ -1,3 +1,6 @@
+// apps/desktop/scripts/wait-for-resources.mjs
+// wait for resources
+
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeNet from 'node:net'
 import * as NodePath from 'node:path'

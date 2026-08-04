@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/observability/tracing.test.ts
+// verify tracing behavior
+
 import { expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'

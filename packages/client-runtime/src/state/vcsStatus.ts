@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/vcsStatus.ts
+// manage vcs status target state
+
 import type { EnvironmentId } from '@t3tools/contracts'
 
 export interface VcsStatusTarget

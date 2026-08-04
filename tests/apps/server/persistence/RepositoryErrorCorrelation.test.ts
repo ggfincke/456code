@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/RepositoryErrorCorrelation.test.ts
+// verify persistence error correlation behavior
+
 import { AuthSessionId, ThreadId, type AuthEnvironmentScope } from '@t3tools/contracts'
 import { assert, describe, it } from '@effect/vitest'
 import * as DateTime from 'effect/DateTime'

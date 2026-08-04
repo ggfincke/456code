@@ -1,3 +1,6 @@
+// apps/web/src/providerSkillPresentation.ts
+// format provider skill display name
+
 import type { ServerProviderSkill } from '@t3tools/contracts'
 
 function titleCaseWords(value: string): string

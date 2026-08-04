@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/previewViewportReadiness.ts
+// determine whether preview viewport ready
+
 import type { PreviewRenderedViewportSize, PreviewViewportSetting } from '@t3tools/contracts'
 
 import { browserViewportSettingKey } from '~/browser/browserViewportLayout'
@@ -30,7 +33,7 @@ export function isPreviewViewportReady(input: {
     return false
   }
 
-  // Electron rounds CSS pixels through the guest's fractional zoom/device scale,
+  // electron rounds CSS pixels through the guest's fractional zoom/device scale,
   // so a successfully applied fixed viewport can measure one pixel either way.
   const tolerance = 1
   return (

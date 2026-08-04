@@ -1,3 +1,6 @@
+// apps/web/src/shortcutModifierState.ts
+// manage shortcut modifier state
+
 import { useEffect, useState } from 'react'
 
 export interface ShortcutModifierState

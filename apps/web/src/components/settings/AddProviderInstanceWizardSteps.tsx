@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/AddProviderInstanceWizardSteps.tsx
+// render add provider instance wizard steps
+
 import { CheckIcon } from 'lucide-react'
 
 import { cn } from '../../lib/utils'

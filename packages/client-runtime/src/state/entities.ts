@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/entities.ts
+// manage invalid scoped project key error state
+
 import {
   EnvironmentId,
   ProjectId,

@@ -1,3 +1,6 @@
+// oxlint-plugin-456code/rules/namespace-node-imports.ts
+// implement repository namespace node imports
+
 import { defineRule } from '@oxlint/plugins'
 
 const NODE_MODULE_ALIASES = new Map([

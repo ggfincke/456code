@@ -1,3 +1,6 @@
+// tests/scripts/mock-update-server.test.ts
+// verify mock update server behavior
+
 import { NodeHttpServer, NodeServices } from '@effect/platform-node'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

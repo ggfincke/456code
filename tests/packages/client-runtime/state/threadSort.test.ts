@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/threadSort.test.ts
+// verify sort threads behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { ProjectId } from '@t3tools/contracts'

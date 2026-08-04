@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/projectThreadStartTurn.ts
+// derive thread title from prompt
+
 import {
   CommandId,
   MessageId,
@@ -39,15 +42,13 @@ export interface ProjectThreadStartTurnSpec
   readonly branch: string | null
   readonly worktreePath: string | null
   readonly startFromOrigin: boolean
-  /** Generated temp branch for worktree mode; unused for local mode. */
+  // generated temp branch for worktree mode; unused for local mode.
   readonly worktreeBranchName: string
 }
 
-/**
- * Single source of the `thread.turn.start` bootstrap payload used to create a
- * thread from a project draft — shared by the immediate send path and the
- * offline outbox drain so both deliver identical commands.
- */
+// single source of the `thread.turn.start` bootstrap payload used to create a
+// thread from a project draft — shared by the immediate send path and the
+// offline outbox drain so both deliver identical commands.
 export function buildProjectThreadStartTurnInput(spec: ProjectThreadStartTurnSpec)
 {
   const title = deriveThreadTitleFromPrompt(spec.text)

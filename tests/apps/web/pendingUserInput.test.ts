@@ -1,3 +1,6 @@
+// tests/apps/web/pendingUserInput.test.ts
+// verify resolve pending user input answer behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

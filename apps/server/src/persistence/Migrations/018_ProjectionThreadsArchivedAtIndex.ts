@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/018_ProjectionThreadsArchivedAtIndex.ts
+// apply persistence migration 018 projection threads archived at index
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

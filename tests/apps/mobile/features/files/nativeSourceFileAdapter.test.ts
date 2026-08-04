@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/files/nativeSourceFileAdapter.test.ts
+// verify native source file adapter behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

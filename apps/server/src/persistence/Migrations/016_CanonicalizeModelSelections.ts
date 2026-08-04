@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/016_CanonicalizeModelSelections.ts
+// apply persistence migration 016 canonicalize model selections
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
@@ -221,7 +224,7 @@ export default Effect.gen(function* ()
       AND json_type(payload_json, '$.model') IS NOT NULL
   `
 
-  // Backfill thread.created events that predate the model field entirely
+  // backfill thread.created events that predate the model field entirely
   yield* sql`
     UPDATE orchestration_events
     SET payload_json = json_set(

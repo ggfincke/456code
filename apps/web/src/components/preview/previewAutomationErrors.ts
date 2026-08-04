@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/previewAutomationErrors.ts
+// define preview errors
+
 import {
   EnvironmentId,
   type PreviewAutomationHost,

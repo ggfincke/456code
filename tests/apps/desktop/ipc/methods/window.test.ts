@@ -1,3 +1,6 @@
+// tests/apps/desktop/ipc/methods/window.test.ts
+// verify get local environment bootstraps behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

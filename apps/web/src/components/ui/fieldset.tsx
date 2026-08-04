@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/fieldset.tsx
+// render reusable fieldset UI primitives
+
 'use client'
 
 import { Fieldset as FieldsetPrimitive } from '@base-ui/react/fieldset'

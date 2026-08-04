@@ -1,3 +1,6 @@
+// tests/apps/desktop/preview/PickPreload.test.ts
+// verify compute label position behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { computeLabelPosition } from '../../../../apps/desktop/src/preview/PickLabelPosition.ts'
@@ -58,7 +61,7 @@ describe('computeLabelPosition', () =>
       labelWidth: 120,
       labelHeight: 18,
     })
-    // labelY = 4 - 18 - 4 = -18 → flip → 44 + 4 = 48
+    // labelY = 4 - 18 - 4 = -18 -> flip -> 44 + 4 = 48
     expect(y).toBe(48)
   })
 
@@ -72,8 +75,8 @@ describe('computeLabelPosition', () =>
       labelWidth: 120,
       labelHeight: 18,
     })
-    // Above overflows top → flip below = 800 + 4 = 804 → also overflows
-    // bottom → pin to viewportHeight - labelHeight - margin = 778.
+    // above overflows top -> flip below = 800 + 4 = 804 -> also overflows
+    // bottom -> pin to viewportHeight - labelHeight - margin = 778.
     expect(y).toBe(800 - 18 - 4)
   })
 

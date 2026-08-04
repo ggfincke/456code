@@ -1,3 +1,6 @@
+// apps/mobile/src/features/archive/ArchivedThreadsRouteScreen.tsx
+// render the archived threads route screen route
+
 import type { EnvironmentId } from '@t3tools/contracts'
 import * as Arr from 'effect/Array'
 import * as Order from 'effect/Order'

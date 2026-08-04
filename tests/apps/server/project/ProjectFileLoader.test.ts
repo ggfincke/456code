@@ -1,3 +1,6 @@
+// tests/apps/server/project/ProjectFileLoader.test.ts
+// verify project file loader load behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it, describe, expect } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

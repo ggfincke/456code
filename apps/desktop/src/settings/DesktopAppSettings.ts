@@ -1,3 +1,6 @@
+// apps/desktop/src/settings/DesktopAppSettings.ts
+// resolve default desktop settings
+
 import {
   DesktopServerExposureModeSchema,
   DesktopUpdateChannelSchema,
@@ -28,14 +31,14 @@ export interface DesktopSettings
   readonly tailscaleServePort: number
   readonly updateChannel: DesktopUpdateChannel
   readonly updateChannelConfiguredByUser: boolean
-  // Was a "local" | "wsl" swap mode in an earlier iteration of the WSL
+  // was a "local" | "wsl" swap mode in an earlier iteration of the WSL
   // integration. We now run Windows and WSL backends side by side, so the
   // setting is just whether the WSL backend should be running alongside the
   // primary. Persisted documents that still carry the legacy `wslMode: "wsl"`
   // value are migrated to `wslBackendEnabled: true` on load.
   readonly wslBackendEnabled: boolean
   readonly wslDistro: string | null
-  // When true (and wslBackendEnabled is also true) the desktop runs only
+  // when true (and wslBackendEnabled is also true) the desktop runs only
   // the WSL backend as the primary, and the Windows-side Node backend is
   // not started. Designed for users who develop entirely inside WSL and
   // don't want a second backend process running. Defaults to false so
@@ -96,7 +99,7 @@ const DesktopSettingsDocument = Schema.Struct({
   tailscaleServePort: Schema.optionalKey(Schema.Number),
   updateChannel: Schema.optionalKey(DesktopUpdateChannelSchema),
   updateChannelConfiguredByUser: Schema.optionalKey(Schema.Boolean),
-  // Newer form of the WSL toggle. `wslMode` is still accepted on load so
+  // newer form of the WSL toggle. `wslMode` is still accepted on load so
   // existing on-disk settings keep working; on the next persist we write the
   // new boolean and the legacy key drops out.
   wslBackendEnabled: Schema.optionalKey(Schema.Boolean),
@@ -218,7 +221,7 @@ function normalizeDesktopSettingsDocument(
     parsed.updateChannelConfiguredByUser === true ||
     (isLegacySettings && Option.contains(parsedUpdateChannel, 'nightly'))
 
-  // Newer form wins when both are present; otherwise fall back to the legacy
+  // newer form wins when both are present; otherwise fall back to the legacy
   // `wslMode === "wsl"` signal so users coming off the swap-mode build keep
   // their WSL backend enabled.
   const wslBackendEnabled =

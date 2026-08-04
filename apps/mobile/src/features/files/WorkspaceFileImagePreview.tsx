@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/WorkspaceFileImagePreview.tsx
+// render workspace file image preview
+
 import { useAtomValue } from '@effect/atom-react'
 import { useMemo, useState } from 'react'
 import { ActivityIndicator, Image, Pressable, View } from 'react-native'

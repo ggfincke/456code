@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/NodeSqliteClient.test.ts
+// verify node sqlite client behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

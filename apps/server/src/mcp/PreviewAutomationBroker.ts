@@ -484,9 +484,9 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake()
       const assigned = assignments.get(assignmentKey)
       const assignedConnection = assigned ? current.clients.get(assigned.clientId) : undefined
       const hasLiveAssignment = assignedConnection?.environmentId === input.scope.environmentId
-      // Keep one provider session on one physical desktop runtime so a
+      // keep one provider session on one physical desktop runtime so a
       // multi-step browser interaction cannot jump between independent
-      // Electron cookie/DOM state. A live assignment that predates an
+      // electron cookie/DOM state. A live assignment that predates an
       // operation is not silently moved to a newer client: the caller gets a
       // capability failure and can deliberately start a fresh provider
       // session. A dead lease is pruned above and may fail over.
@@ -599,7 +599,7 @@ export const make = Effect.gen(function* PreviewAutomationBrokerMake()
       })
     })
     const result = yield* awaitResponse().pipe(Effect.ensuring(removePending))
-    // A stop artifact identifies the globally recorded tab, not the caller's browsing target.
+    // a stop artifact identifies the globally recorded tab, not the caller's browsing target.
     const responseTabId = input.operation === 'recordingStop' ? undefined : readResultTabId(result)
     const resultTabId = responseTabId === undefined ? input.tabId : responseTabId
     if (resultTabId === undefined) return result

@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/030_ProjectionThreadShellArchiveIndexes.ts
+// apply persistence migration 030 projection thread shell archive indexes
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

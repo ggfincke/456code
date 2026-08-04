@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/GitActionProgressOverlay.tsx
+// render git action progress overlay
+
 import * as Haptics from 'expo-haptics'
 import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
 import { SymbolView } from '../../components/AppSymbol'

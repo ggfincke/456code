@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/PreviewView.tsx
+// render preview view
+
 'use client'
 
 import { scopedThreadKey } from '@t3tools/client-runtime/environment'
@@ -61,10 +64,8 @@ interface Props
 
 const localApi = typeof window === 'undefined' ? null : ensureLocalApi()
 
-/**
- * Single-tab preview surface: chrome row on top, one webview below, empty
- * state when no session exists for the thread.
- */
+// single-tab preview surface: chrome row on top, one webview below, empty
+// state when no session exists for the thread.
 export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, visible }: Props)
 {
   const [focusUrlNonce, setFocusUrlNonce] = useState<number | undefined>(undefined)
@@ -122,7 +123,7 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
     {
       if (tabId && previewBridge)
       {
-        // Drive the webview imperatively; `usePreviewBridge` mirrors the
+        // drive the webview imperatively; `usePreviewBridge` mirrors the
         // resolved URL back to the server so other clients stay in sync.
         await previewBridge.navigate(tabId, resolvedUrl)
         rememberPreviewUrl(threadRef, resolvedUrl)
@@ -148,7 +149,7 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
       }
       catch
       {
-        // Server-side `failed` event renders the unreachable view.
+        // server-side `failed` event renders the unreachable view.
       }
     },
     [navigateToResolvedUrl],
@@ -163,7 +164,7 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
       }
       catch
       {
-        // Server-side `failed` event renders the unreachable view.
+        // server-side `failed` event renders the unreachable view.
       }
     },
     [navigateToResolvedUrl, threadRef.environmentId],
@@ -536,7 +537,7 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
       void previewBridge.cancelPickElement(tabId).catch(() => undefined)
       return
     }
-    // Snapshot whatever the user was focused on (typically the chat
+    // snapshot whatever the user was focused on (typically the chat
     // composer textarea or the chrome-row pick button) BEFORE main steals
     // focus into the guest webContents. We restore it when the pick
     // resolves so the user's typing context isn't lost — otherwise after
@@ -568,15 +569,15 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
       }
       catch
       {
-        // Picker failed (e.g. webview navigated). Treat as silent cancel.
+        // picker failed (e.g. webview navigated). Treat as silent cancel.
       }
       finally
       {
         pickActiveRef.current = false
-        // Avoid `setState on unmounted component` if the panel/thread closed
+        // avoid `setState on unmounted component` if the panel/thread closed
         // while the pick was in flight.
         if (isMountedRef.current) setPickActive(false)
-        // Best-effort: restore focus to whatever the user had before the
+        // best-effort: restore focus to whatever the user had before the
         // pick stole it into the guest webContents. Skip if the previously-
         // focused element was unmounted or is no longer focusable.
         if (
@@ -591,14 +592,14 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
           }
           catch
           {
-            // Some elements throw on .focus() (detached iframes, etc.).
+            // some elements throw on .focus() (detached iframes, etc.).
           }
         }
       }
     })()
   }, [addImage, addPreviewAnnotation, tabId, threadRef])
 
-  // If the active tab changes mid-pick (close, thread switch, hot restart),
+  // if the active tab changes mid-pick (close, thread switch, hot restart),
   // tell main to tear down the in-flight session AND reset our local toggle
   // state so the button doesn't get stuck pressed against a stale tab id.
   useEffect(() =>
@@ -615,7 +616,7 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
     }
   }, [tabId])
 
-  // Subscribe only while visible; `toggle-panel` is owned by ChatView's
+  // subscribe only while visible; `toggle-panel` is owned by ChatView's
   // URL-aware handler regardless of whether the panel is currently mounted.
   useEffect(() =>
   {
@@ -669,7 +670,7 @@ export function PreviewView({ threadRef, tabId: requestedTabId, configuredUrls, 
         recording={tabId !== null && activeRecordingTabId === tabId}
         onPickElement={previewBridge && tabId ? handlePickElement : undefined}
         pickActive={pickActive}
-        // Disable when there's no tab (nothing to pick on) OR the page
+        // disable when there's no tab (nothing to pick on) OR the page
         // failed to load (a React overlay covers the webview, so the
         // user wouldn't be able to actually click anything underneath).
         pickDisabled={!tabId || isUnreachable}

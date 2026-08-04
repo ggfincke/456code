@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/snapshots.ts
+// manage create environment snapshot atom state
+
 import type { EnvironmentId, OrchestrationShellSnapshot } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 import { AsyncResult, Atom } from 'effect/unstable/reactivity'

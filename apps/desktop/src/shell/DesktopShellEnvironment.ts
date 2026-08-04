@@ -1,3 +1,6 @@
+// apps/desktop/src/shell/DesktopShellEnvironment.ts
+// define desktop shell environment command error
+
 import * as Context from 'effect/Context'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'

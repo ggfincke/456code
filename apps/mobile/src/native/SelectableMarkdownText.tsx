@@ -1,3 +1,6 @@
+// apps/mobile/src/native/SelectableMarkdownText.tsx
+// render selectable markdown text
+
 import type { SelectableMarkdownTextProps } from '@t3tools/mobile-markdown-text/renderer'
 
 type MobileSelectableMarkdownTextProps = Omit<SelectableMarkdownTextProps, 'highlightCode'>

@@ -20,7 +20,7 @@ import {
   markProjectFaviconLoaded,
 } from './projectFaviconCache'
 
-/* ─── Component ──────────────────────────────────────────────────────── */
+// ─── Component ────────────────────────────────────────────────────────
 export function ProjectFavicon(props: {
   readonly environmentId: EnvironmentId
   readonly open?: boolean

@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/timelineScrollAnchoring.ts
+// resolve row bottom
+
 export type TimelineScrollMode = 'following-end' | 'anchoring-new-turn' | 'free-scrolling'
 
 export interface TimelineListMeasurementState

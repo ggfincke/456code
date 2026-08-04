@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/resolver.ts
+// implement connection resolver
+
 import { RelayEnvironmentConnectScope } from '@t3tools/contracts/relay'
 import { withRelayClientTracing } from '@t3tools/shared/relayTracing'
 import * as Context from 'effect/Context'

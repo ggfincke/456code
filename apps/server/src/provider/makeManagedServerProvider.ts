@@ -1,3 +1,6 @@
+// apps/server/src/provider/makeManagedServerProvider.ts
+// provide make managed server integration
+
 import type { ServerProvider } from '@t3tools/contracts'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'

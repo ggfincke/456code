@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/HomeRouteScreen.tsx
+// render the home route screen route
+
 import * as Arr from 'effect/Array'
 import * as Order from 'effect/Order'
 import { useNavigation } from '@react-navigation/native'
@@ -19,7 +22,7 @@ import { buildHomeProjectScopes } from './homeThreadList'
 import { usePendingTaskListActions } from './usePendingTaskListActions'
 import { useThreadListActions } from './useThreadListActions'
 
-/* ─── Route screen ───────────────────────────────────────────────────── */
+// ─── Route screen ─────────────────────────────────────────────────────
 
 export function HomeRouteScreen()
 {
@@ -83,7 +86,7 @@ export function HomeRouteScreen()
     }
   }, [projectFilterOptions, selectedProjectKey])
 
-  // In split layouts the persistent sidebar IS the thread list — Home becomes
+  // in split layouts the persistent sidebar IS the thread list — Home becomes
   // an empty detail pane so selecting a thread never transitions layouts.
   if (layout.usesSplitView)
   {
@@ -150,7 +153,7 @@ export function HomeRouteScreen()
           onSearchQueryChange={setSearchQuery}
           onSelectThread={(thread) =>
           {
-            // Settled threads are live shells: opening one is plain
+            // settled threads are live shells: opening one is plain
             // navigation, and sending a message un-settles server-side.
             navigation.navigate('Thread', {
               environmentId: thread.environmentId,

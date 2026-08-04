@@ -1,3 +1,6 @@
+// tests/packages/contracts/project.test.ts
+// verify project rpc errors behavior
+
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vite-plus/test'
 

@@ -1,3 +1,6 @@
+// apps/desktop/src/preview/PlaywrightInjectedRuntime.ts
+// extract playwright injected runtime source
+
 // @effect-diagnostics nodeBuiltinImport:off - Extracts Playwright's installed Node bundle for browser injection.
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeModule from 'node:module'

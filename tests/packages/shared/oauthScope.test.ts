@@ -1,3 +1,6 @@
+// tests/packages/shared/oauthScope.test.ts
+// verify o auth scopes behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import * as Schema from 'effect/Schema'
 

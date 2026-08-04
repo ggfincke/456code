@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/files/sourceHighlightingState.test.ts
+// verify source highlighting state behavior
+
 import { AtomRegistry } from 'effect/unstable/reactivity'
 import * as AsyncResult from 'effect/unstable/reactivity/AsyncResult'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'

@@ -1,3 +1,6 @@
+// tests/apps/desktop/scripts/electron-launcher.test.mjs
+// verify electron development launcher behavior
+
 import { assert, describe, it } from 'vite-plus/test'
 
 import {

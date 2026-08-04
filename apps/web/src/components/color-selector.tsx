@@ -1,3 +1,6 @@
+// apps/web/src/components/color-selector.tsx
+// render color selector
+
 'use client'
 
 import { useState } from 'react'

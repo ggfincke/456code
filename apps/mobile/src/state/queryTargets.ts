@@ -1,3 +1,6 @@
+// apps/mobile/src/state/queryTargets.ts
+// manage checkpoint diff target state
+
 import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 
 export interface CheckpointDiffTarget

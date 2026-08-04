@@ -1,3 +1,6 @@
+// apps/mobile/src/state/shell.ts
+// manage shell environment state
+
 import {
   createEnvironmentShellAtoms,
   createEnvironmentShellSummaryAtom,

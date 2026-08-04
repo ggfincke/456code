@@ -46,12 +46,12 @@ export interface DesktopBackendOutputLogShape
   ) => Effect.Effect<void>
 }
 
-// Factory for per-instance backend output logs. `forInstance(id)` returns
+// factory for per-instance backend output logs. `forInstance(id)` returns
 // a writer that targets a distinct rotating log file — the primary
 // instance keeps `server-child.log` so the historical path stays stable
 // for ops; other instances get `server-child-<sanitized-id>.log`.
 //
-// Writers are cached per id within a single factory instance so repeated
+// writers are cached per id within a single factory instance so repeated
 // `forInstance` calls (e.g. during a backend restart that re-resolves
 // services) reuse the same rotating writer rather than racing each other
 // on the same file.
@@ -341,7 +341,7 @@ const backendLogFilePathForInstance = (
   id: string,
 ): string =>
 {
-  // Primary keeps the historical "server-child.log" path so ops scripts
+  // primary keeps the historical "server-child.log" path so ops scripts
   // and packaged-build log inspection still find it where it always lived.
   if (id === PRIMARY_BACKEND_LOG_INSTANCE_ID)
   {
@@ -351,7 +351,7 @@ const backendLogFilePathForInstance = (
   return environment.path.join(environment.logDir, `server-child-${sanitized}.log`)
 }
 
-// Just the IO sink. Cacheable by resolved file path so two ids that
+// just the IO sink. Cacheable by resolved file path so two ids that
 // sanitize to the same filename share a single RotatingLogFileWriter
 // (no race on currentSize tracking). Splitting the sink off from the
 // per-call shape lets the shape annotate writes with the *caller's*
@@ -450,7 +450,7 @@ const backendOutputLogFactoryLayer = Layer.effect(
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
     const factoryScope = yield* Scope.Scope
-    // Per-file-path cache of the IO sink only. The per-call shape
+    // per-file-path cache of the IO sink only. The per-call shape
     // wraps the sink with the caller's instance id so a cache hit on
     // a path collision (e.g. "wsl:default" and "wsl_default" both
     // resolve to server-child-wsl_default.log) doesn't attribute the

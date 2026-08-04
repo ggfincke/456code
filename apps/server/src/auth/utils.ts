@@ -1,3 +1,6 @@
+// apps/server/src/auth/utils.ts
+// handle server authentication
+
 import type {
   AuthClientMetadata,
   AuthClientMetadataDeviceType,

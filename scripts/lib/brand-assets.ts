@@ -1,3 +1,6 @@
+// scripts/lib/brand-assets.ts
+// run the brand assets repository workflow
+
 export const BRAND_ASSET_PATHS = {
   developmentIconComposerProject: 'assets/dev/app-icon.icon',
   developmentIosIconPng: 'assets/dev/ocean-ios-1024.png',

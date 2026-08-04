@@ -1,3 +1,6 @@
+// apps/mobile/src/native/composerEditorRevision.ts
+// define composer native event snapshot
+
 export interface ComposerNativeEventSnapshot
 {
   readonly eventCount: number
@@ -46,7 +49,7 @@ export function resolveComposerControlledEventCount(
     }
   }
 
-  // A value emitted by native paired with a different selection is an
+  // a value emitted by native paired with a different selection is an
   // intermediate React render. Keep it behind the native revision so it
   // cannot move the caret while newer keystrokes are being processed.
   if (newestValueEventCount !== null && mostRecentEventCount > 0)

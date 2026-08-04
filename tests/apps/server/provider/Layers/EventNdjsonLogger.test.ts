@@ -1,5 +1,6 @@
 // tests/apps/server/provider/Layers/EventNdjsonLogger.test.ts
 // verifies provider event log serialization, batching, and rotation
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'

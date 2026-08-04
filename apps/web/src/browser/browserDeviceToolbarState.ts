@@ -1,3 +1,6 @@
+// apps/web/src/browser/browserDeviceToolbarState.ts
+// manage browser device toolbar state
+
 import type { PreviewViewportSetting } from '@t3tools/contracts'
 
 export function reconcileLockedAspectRatio(

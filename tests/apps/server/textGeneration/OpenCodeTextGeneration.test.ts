@@ -1,3 +1,6 @@
+// tests/apps/server/textGeneration/OpenCodeTextGeneration.test.ts
+// verify open code text generation behavior
+
 import { OpenCodeSettings, ProviderInstanceId, TextGenerationError } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
@@ -46,8 +49,8 @@ const OpenCodeRuntimeTestDouble: OpenCodeRuntime.OpenCodeRuntimeShape = {
       const index = runtimeMock.state.startCalls.length + 1
       const url = `http://127.0.0.1:${4_300 + index}`
       runtimeMock.state.startCalls.push(binaryPath)
-      // The production runtime binds server lifetime to the caller's scope.
-      // Mirror that here so the closeCalls probe observes scope close.
+      // the production runtime binds server lifetime to the caller's scope.
+      // mirror that here so the closeCalls probe observes scope close.
       yield* Effect.addFinalizer(() =>
         Effect.sync(() =>
         {

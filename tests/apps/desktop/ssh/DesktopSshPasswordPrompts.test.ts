@@ -1,3 +1,6 @@
+// tests/apps/desktop/ssh/DesktopSshPasswordPrompts.test.ts
+// verify desktop ssh password prompts behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Duration from 'effect/Duration'

@@ -1,3 +1,6 @@
+// tests/apps/web/lib/terminalContext.test.ts
+// verify terminal context behavior
+
 import { ThreadId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

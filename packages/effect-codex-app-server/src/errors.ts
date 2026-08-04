@@ -1,3 +1,6 @@
+// packages/effect-codex-app-server/src/errors.ts
+// define effect codex app server errors
+
 import * as Schema from 'effect/Schema'
 import type * as SchemaIssue from 'effect/SchemaIssue'
 

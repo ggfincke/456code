@@ -1,3 +1,6 @@
+// packages/client-runtime/src/rpc/session.ts
+// define rpc session
+
 import { type ServerConfig, WS_METHODS } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import * as Deferred from 'effect/Deferred'

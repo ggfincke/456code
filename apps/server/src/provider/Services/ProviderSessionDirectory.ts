@@ -1,3 +1,6 @@
+// apps/server/src/provider/Services/ProviderSessionDirectory.ts
+// define provider session directory service contract
+
 import type {
   ProviderInstanceId,
   ProviderDriverKind,
@@ -18,11 +21,9 @@ export interface ProviderRuntimeBinding
 {
   readonly threadId: ThreadId
   readonly provider: ProviderDriverKind
-  /**
-   * Routing key for the configured provider instance that owns this
-   * session. The persistence layer promotes legacy null rows before
-   * exposing bindings; runtime callers must not infer this from `provider`.
-   */
+  // routing key for the configured provider instance that owns this
+  // session. The persistence layer promotes legacy null rows before
+  // exposing bindings; runtime callers must not infer this from `provider`.
   readonly providerInstanceId?: ProviderInstanceId
   readonly adapterKey?: string
   readonly status?: ProviderSessionRuntimeStatus

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/ConnectionEnvironmentRow.tsx
+// render connection environment row
+
 import { SymbolView } from '../../components/AppSymbol'
 import { connectionStatusText } from '@t3tools/client-runtime/connection'
 import type { AtomCommandResult } from '@t3tools/client-runtime/state/runtime'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/sharing/IncomingShareProvider.tsx
+// provide incoming share context
+
 import Constants from 'expo-constants'
 import * as Crypto from 'expo-crypto'
 import {
@@ -135,8 +138,8 @@ async function removeReplayedImagePayloadFiles(
   await Promise.all([...uris].map(removeOwnedFile))
 }
 
-// Keep one operation queue across provider remounts (including development
-// Strict Mode remounts) so two app lifecycle notifications cannot ingest the
+// keep one operation queue across provider remounts (including development
+// strict Mode remounts) so two app lifecycle notifications cannot ingest the
 // same native handoff independently.
 const incomingShareInbox = new IncomingShareInbox({
   loadDrafts: loadIncomingShareDrafts,

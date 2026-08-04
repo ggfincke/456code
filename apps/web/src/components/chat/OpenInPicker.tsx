@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/OpenInPicker.tsx
+// render open in picker
+
 import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from '@t3tools/contracts'
 import { memo, useCallback, useEffect, useMemo } from 'react'
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from '../../keybindings'

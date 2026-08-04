@@ -1,3 +1,6 @@
+// apps/web/src/components/desktop/SshPasswordPromptDialog.tsx
+// render ssh password prompt dialog
+
 import type { DesktopSshPasswordPromptRequest } from '@t3tools/contracts'
 import { useEffect, useId, useRef, useState } from 'react'
 

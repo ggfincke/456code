@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/NewTaskDraftRouteScreen.tsx
+// render the new task draft route screen route
+
 import type { StaticScreenProps } from '@react-navigation/native'
 import { useMemo } from 'react'
 import { NativeStackScreenOptions } from '../../native/StackHeader'
@@ -16,7 +19,7 @@ export function NewTaskDraftRouteScreen({ route }: StaticScreenProps<NewTaskDraf
 {
   const params = route.params ?? {}
 
-  // Keyed on the params object so a fresh navigation to this (already
+  // keyed on the params object so a fresh navigation to this (already
   // mounted) screen produces a new reference, letting the draft screen
   // re-apply the requested project.
   const initialProjectRef = useMemo(

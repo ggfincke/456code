@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewDiffRendering.tsx
+// render review diff rendering
+
 import { Platform, Text as NativeText, View } from 'react-native'
 
 import { cn } from '../../lib/cn'

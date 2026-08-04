@@ -1,22 +1,21 @@
 // apps/server/src/provider/Layers/ProviderAdapterRegistry.ts
 // resolves provider routes from one live instance registry snapshot
-/**
- * ProviderAdapterRegistryLive — facade over `ProviderInstanceRegistry`.
- *
- * `ProviderAdapterRegistry` historically mapped one `ProviderDriverKind` to one
- * adapter via the four `<X>AdapterLive` singleton Layers. The per-instance
- * refactor moved adapter construction inside each `ProviderDriver.create()`:
- * adapters are now bundled on the `ProviderInstance` that the
- * `ProviderInstanceRegistry` owns.
- *
- * This facade fulfills the `ProviderAdapterRegistryShape` contract by doing
- * dynamic look-ups against `ProviderInstanceRegistry` on every call. That
- * means settings-driven hot-reload shows up here automatically — adding a
- * new instance via settings makes `getByInstance` resolve immediately
- * without rebuilding the facade.
- *
- * @module ProviderAdapterRegistryLive
- */
+
+// ProviderAdapterRegistryLive — facade over `ProviderInstanceRegistry`.
+//
+// `ProviderAdapterRegistry` historically mapped one `ProviderDriverKind` to one
+// adapter via the four `<X>AdapterLive` singleton Layers. The per-instance
+// refactor moved adapter construction inside each `ProviderDriver.create()`:
+// adapters are now bundled on the `ProviderInstance` that the
+// `ProviderInstanceRegistry` owns.
+//
+// this facade fulfills the `ProviderAdapterRegistryShape` contract by doing
+// dynamic look-ups against `ProviderInstanceRegistry` on every call. That
+// means settings-driven hot-reload shows up here automatically — adding a
+// new instance via settings makes `getByInstance` resolve immediately
+// without rebuilding the facade.
+//
+// @module ProviderAdapterRegistryLive
 import {
   defaultInstanceIdForDriver,
   ProviderInstanceId,
@@ -88,7 +87,7 @@ const makeProviderAdapterRegistry = Effect.fn('makeProviderAdapterRegistry')(fun
           const defaultId = defaultInstanceIdForDriver(instance.driverKind)
           if (instance.instanceId === defaultId)
           {
-            // Only the default-instance rows show up through the legacy
+            // only the default-instance rows show up through the legacy
             // shim — custom instances like `codex_personal` have no
             // `ProviderDriverKind` equivalent.
             kinds.add(instance.driverKind)
@@ -104,7 +103,7 @@ const makeProviderAdapterRegistry = Effect.fn('makeProviderAdapterRegistry')(fun
     getInstanceInfo,
     listInstances,
     listProviders,
-    // Proxy directly — the facade has no state of its own; the instance
+    // proxy directly — the facade has no state of its own; the instance
     // registry already coalesces adds/removes/rebuilds into one emission.
     streamChanges: registry.streamChanges,
     subscribeChanges: registry.subscribeChanges,
@@ -116,13 +115,13 @@ export const ProviderAdapterRegistryLive = Layer.effect(
   makeProviderAdapterRegistry(),
 )
 
-// Exposed for tests that want to build a facade over a pre-assembled
+// exposed for tests that want to build a facade over a pre-assembled
 // `ProviderInstanceRegistry` without pulling in the whole boot graph.
 export { makeProviderAdapterRegistry }
 
-// Re-export for consumers that need the accessor shape. The service tag
+// re-export for consumers that need the accessor shape. The service tag
 // itself lives in `Services/ProviderAdapterRegistry.ts`.
 export { ProviderAdapterRegistry } from '../Services/ProviderAdapterRegistry.ts'
-// Re-export for consumers (including tests) that construct a
+// re-export for consumers (including tests) that construct a
 // `ProviderInstanceId` before calling `getByInstance`.
 export { ProviderInstanceId }

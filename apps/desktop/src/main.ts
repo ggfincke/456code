@@ -1,3 +1,6 @@
+// apps/desktop/src/main.ts
+// start the desktop Electron process
+
 for (const stream of [process.stdout, process.stderr])
 {
   stream.on('error', (err: NodeJS.ErrnoException) =>
@@ -156,7 +159,7 @@ const desktopWindowLayer = DesktopWindow.layer.pipe(
   Layer.provideMerge(desktopPreviewLayer),
 )
 
-// Pool layer instantiates the backend factory once for the Windows
+// pool layer instantiates the backend factory once for the Windows
 // primary instance and exposes it via pool.primary. Consumers go through
 // the pool now; the legacy DesktopBackendManager service is gone. The
 // WSL second instance gets registered later in the migration. See

@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ProviderInstanceIcon.tsx
+// render provider instance icon
+
 import { type CSSProperties, memo } from 'react'
 import { type ProviderDriverKind } from '@t3tools/contracts'
 

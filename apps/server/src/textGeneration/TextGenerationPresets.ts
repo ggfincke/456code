@@ -1,3 +1,6 @@
+// apps/server/src/textGeneration/TextGenerationPresets.ts
+// expose default text generation policy
+
 import type { TextGenerationPolicy, TextGenerationPolicyKind } from './TextGenerationPolicy.ts'
 
 export const defaultTextGenerationPolicy: TextGenerationPolicy = {

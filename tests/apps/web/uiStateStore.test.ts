@@ -1,3 +1,6 @@
+// tests/apps/web/uiStateStore.test.ts
+// verify ui state store pure functions behavior
+
 import { ProjectId, ThreadId } from '@t3tools/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 

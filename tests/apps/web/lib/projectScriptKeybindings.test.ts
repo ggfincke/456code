@@ -1,3 +1,6 @@
+// tests/apps/web/lib/projectScriptKeybindings.test.ts
+// verify project script keybindings behavior
+
 import { MAX_KEYBINDING_VALUE_LENGTH, type KeybindingCommand } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

@@ -1,3 +1,6 @@
+// tests/apps/web/environments/primary/desktopAuth.test.ts
+// verify desktop primary auth behavior
+
 import type { DesktopBridge } from '@t3tools/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from '@effect/vitest'
 

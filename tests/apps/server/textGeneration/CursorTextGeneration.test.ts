@@ -1,3 +1,6 @@
+// tests/apps/server/textGeneration/CursorTextGeneration.test.ts
+// verify cursor text generation behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from 'node:path'
 import * as NodeOS from 'node:os'

@@ -1,3 +1,6 @@
+// tests/apps/mobile/native/composerEditorRevision.test.ts
+// verify acknowledge composer native event behavior
+
 import { describe, expect, it } from '@effect/vitest'
 
 import {

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/new-task-flow-provider.tsx
+// render new task flow provider
+
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import type {
@@ -65,7 +68,7 @@ function pendingTaskDraftKey(messageId: string): string
   return `pending-task:${messageId}`
 }
 
-// The message id owned by the currently active editing session, tracked
+// the message id owned by the currently active editing session, tracked
 // across provider instances. An in-flight flush from a dismissed session
 // consults it so it never drops the draft or releases the drain lock out from
 // under a newer session editing the same task.
@@ -224,7 +227,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
   const [branchQuery, setBranchQuery] = useState('')
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null)
   const [editingPendingTask, setEditingPendingTask] = useState<QueuedThreadMessage | null>(null)
-  // Mirrors `editingPendingTask` synchronously so the unmount flush cannot act
+  // mirrors `editingPendingTask` synchronously so the unmount flush cannot act
   // on a task whose editing session already ended this render.
   const editingPendingTaskRef = useRef<QueuedThreadMessage | null>(null)
 
@@ -257,7 +260,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     [projects, selectedEnvironmentId],
   )
 
-  // Stand-in for the edited task's project while its shell is not loaded
+  // stand-in for the edited task's project while its shell is not loaded
   // (environment offline / still synchronizing), built from the metadata
   // snapshotted at enqueue time.
   const editingPendingProject = useMemo<EnvironmentProject | null>(() =>
@@ -271,7 +274,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       environmentId: editingPendingTask.environmentId,
       id: creation.projectId,
       title: creation.projectTitle ?? 'Unknown project',
-      // Deliberately empty when the snapshot has no cwd — downstream consumers
+      // deliberately empty when the snapshot has no cwd — downstream consumers
       // (branch queries, worktree bootstrap) must skip it, not receive a
       // fabricated path.
       workspaceRoot: creation.projectCwd ?? '',
@@ -287,7 +290,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     projectsForEnvironment.find(
       (project) => scopedProjectKey(project.environmentId, project.id) === selectedProjectKey,
     ) ??
-    // While editing a queued task whose project shell is absent, keep the task
+    // while editing a queued task whose project shell is absent, keep the task
     // pinned to its own project — falling through to an arbitrary first
     // project would silently retarget it (and its reused turn identifiers).
     (editingPendingProject !== null &&
@@ -296,7 +299,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       ? editingPendingProject
       : (projectsForEnvironment[0] ?? null))
 
-  // Only offer machines that actually host the currently selected repository, so
+  // only offer machines that actually host the currently selected repository, so
   // switching computers moves the same repo across machines instead of jumping to
   // whatever unrelated project happens to be first on the other machine. Repository
   // identity is the primary signal; projects that haven't reported one yet (still
@@ -362,7 +365,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
   const selectedEnvironmentServerConfig = useEnvironmentServerConfig(
     selectedProject?.environmentId ?? null,
   )
-  // While a queued pending task is being edited its draft lives under a key
+  // while a queued pending task is being edited its draft lives under a key
   // scoped to the queued message, so per-project new-task drafts stay intact.
   const selectedProjectDraftKey = editingPendingTask
     ? pendingTaskDraftKey(editingPendingTask.messageId)
@@ -375,7 +378,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
   const workspaceMode = selectedProjectDraft.workspaceSelection?.mode ?? 'local'
   const selectedBranchName = selectedProjectDraft.workspaceSelection?.branch ?? null
   const selectedWorktreePath = selectedProjectDraft.workspaceSelection?.worktreePath ?? null
-  // Keep the user's explicit choice separate from the resolved display value:
+  // keep the user's explicit choice separate from the resolved display value:
   // only the explicit flag is ever written back to the draft, so the resolved
   // value keeps tracking the server setting when the config loads late.
   const draftStartFromOrigin = selectedProjectDraft.workspaceSelection?.startFromOrigin
@@ -568,7 +571,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     {
       const projectsOnTarget = projects.filter((project) => project.environmentId === environmentId)
       const repositoryKey = selectedProject?.repositoryIdentity?.canonicalKey ?? null
-      // Prefer the repository identity; projects without one (e.g. not yet
+      // prefer the repository identity; projects without one (e.g. not yet
       // indexed) fall back to workspace basename, then title, so switching
       // computers still follows the same repo instead of resetting to
       // whatever project is first on the target machine.
@@ -667,7 +670,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     {
       return
     }
-    // The default may only exist as origin/<default> (isRemote), which
+    // the default may only exist as origin/<default> (isRemote), which
     // availableBranches filters out — search the unfiltered refs for it.
     const preferredBranch =
       allBranchRefs.find((branch) => branch.isDefault) ??
@@ -708,7 +711,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       return false
     }
     const draftKey = pendingTaskDraftKey(message.messageId)
-    // Only hydrate a fresh editing draft; reopening mid-edit keeps newer edits.
+    // only hydrate a fresh editing draft; reopening mid-edit keeps newer edits.
     if (isComposerDraftEmpty(getComposerDraftSnapshot(draftKey)))
     {
       setComposerDraftText(draftKey, message.text)
@@ -730,7 +733,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     activeEditingMessageId = message.messageId
     editingPendingTaskRef.current = message
     setEditingPendingTask(message)
-    // Hold the outbox drain off this task while it is open in the editor.
+    // hold the outbox drain off this task while it is open in the editor.
     holdEditingQueuedMessage(message.messageId)
     return true
   }, [])
@@ -751,7 +754,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       }
       const workspaceSelection = draft.workspaceSelection
       const mode = workspaceSelection?.mode ?? 'local'
-      // When the selection is the stand-in built from the queued snapshot,
+      // when the selection is the stand-in built from the queued snapshot,
       // persist the original (possibly absent) snapshot values — the
       // stand-in's placeholder title/workspaceRoot must never be written back
       // as if they were real project metadata.
@@ -779,7 +782,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
           workspaceMode: mode,
           branch: workspaceSelection?.branch ?? null,
           worktreePath: mode === 'worktree' ? null : (workspaceSelection?.worktreePath ?? null),
-          // The draft only carries the flag when the user touched it; fall
+          // the draft only carries the flag when the user touched it; fall
           // back to the resolved default (server settings) so queued tasks
           // drain with the same origin mode the composer displayed.
           ...((workspaceSelection?.startFromOrigin ?? startFromOrigin)
@@ -815,7 +818,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     setEditingPendingTask(null)
   }, [])
 
-  // If the queued task disappears mid-edit (deleted from the list, or
+  // if the queued task disappears mid-edit (deleted from the list, or
   // delivered), end the editing session immediately without saving — a later
   // flush must not resurrect it, and the composer should fall back to the
   // regular per-project draft.
@@ -836,7 +839,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
     }
   }, [finishEditingPendingTask, queuedMessagesByThreadKey])
 
-  // Leaving the flow mid-edit (sheet dismissed or draft screen popped) saves
+  // leaving the flow mid-edit (sheet dismissed or draft screen popped) saves
   // the current edits back into the queued task so nothing typed here is lost.
   const editingFlushRef = useRef<(() => void) | null>(null)
   useEffect(() =>
@@ -864,8 +867,8 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
 
       if (!message)
       {
-        // The edits are currently unsendable (e.g. the prompt was cleared).
-        // Keep both the draft and the drain lock: the stale queued payload
+        // the edits are currently unsendable (e.g. the prompt was cleared).
+        // keep both the draft and the drain lock: the stale queued payload
         // must not auto-send content the user just removed, and reopening the
         // task resumes from the saved draft.
         return
@@ -876,7 +879,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
       void updateThreadOutboxMessage(message)
         .then(() =>
         {
-          // If this task was reopened (possibly in a fresh provider) while
+          // if this task was reopened (possibly in a fresh provider) while
           // the save was in flight, that session owns the draft and the lock.
           if (activeEditingMessageId === editing.messageId)
           {
@@ -887,7 +890,7 @@ export function NewTaskFlowProvider(props: React.PropsWithChildren)
         })
         .catch((error) =>
         {
-          // Keep the drain lock and the draft: delivering the stale payload
+          // keep the drain lock and the draft: delivering the stale payload
           // would silently drop the newer edits. Reopening the task retries.
           console.warn('[new-task] failed to save edited pending task', error)
         })

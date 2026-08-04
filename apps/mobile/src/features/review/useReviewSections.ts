@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/useReviewSections.ts
+// manage review sections through a React hook
+
 import { useCallback, useEffect, useMemo } from 'react'
 
 import type { EnvironmentId, OrchestrationCheckpointSummary, ThreadId } from '@t3tools/contracts'

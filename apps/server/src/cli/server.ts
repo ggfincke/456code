@@ -1,3 +1,6 @@
+// apps/server/src/cli/server.ts
+// run server command
+
 import * as Effect from 'effect/Effect'
 import { Command, GlobalFlag } from 'effect/unstable/cli'
 

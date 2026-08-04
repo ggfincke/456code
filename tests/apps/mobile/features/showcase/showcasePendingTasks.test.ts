@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/showcase/showcasePendingTasks.test.ts
+// verify showcase pending tasks behavior
+
 import type { EnvironmentProject } from '@t3tools/client-runtime/state/shell'
 import { EnvironmentId, ProjectId, ProviderInstanceId } from '@t3tools/contracts'
 import { assert, it } from '@effect/vitest'

@@ -1,3 +1,6 @@
+// tests/apps/web/clientPersistenceStorage.test.ts
+// verify client persistence storage behavior
+
 import { DEFAULT_CLIENT_SETTINGS } from '@t3tools/contracts'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 

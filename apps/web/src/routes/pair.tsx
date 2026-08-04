@@ -1,3 +1,6 @@
+// apps/web/src/routes/pair.tsx
+// render the pair route
+
 import { createFileRoute, redirect, useNavigate } from '@tanstack/react-router'
 
 import {

@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/CopyTextButton.tsx
+// render copy text button
+
 import { SymbolView } from 'expo-symbols'
 import * as Clipboard from 'expo-clipboard'
 import * as Haptics from 'expo-haptics'

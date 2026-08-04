@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/FileMarkdownPreview.tsx
+// render file markdown preview
+
 import { useCallback, useMemo, useState } from 'react'
 import {
   Markdown,

@@ -1,3 +1,6 @@
+// apps/web/src/components/AppSidebarLayout.tsx
+// render app sidebar layout
+
 import { useAtomValue } from '@effect/atom-react'
 import * as Schema from 'effect/Schema'
 import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
@@ -74,7 +77,7 @@ function SidebarControl()
       toggleSidebar()
     }
 
-    // Capture before focused editors consume commands such as Mod+B for rich-text formatting.
+    // capture before focused editors consume commands such as Mod+B for rich-text formatting.
     window.addEventListener('keydown', onKeyDown, true)
     return () => window.removeEventListener('keydown', onKeyDown, true)
   }, [keybindings, toggleSidebar])
@@ -110,7 +113,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode })
 {
   const navigate = useNavigate()
   const sidebarV2Enabled = useClientSettings((settings) => settings.sidebarV2Enabled)
-  // Settings routes render the settings nav, which lives in the v1 component
+  // settings routes render the settings nav, which lives in the v1 component
   // and is identical for both sidebars — so v1 stays mounted there.
   const pathname = useLocation({ select: (location) => location.pathname })
   const isOnSettings = pathname === '/settings' || pathname.startsWith('/settings/')

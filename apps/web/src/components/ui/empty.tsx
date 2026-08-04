@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/empty.tsx
+// render reusable empty UI primitives
+
 import { cva, type VariantProps } from 'class-variance-authority'
 
 import { cn } from '~/lib/utils'

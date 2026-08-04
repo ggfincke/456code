@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - Host-side simulator and emulator automation uses Node subprocess and timing APIs directly.
+// scripts/mobile-showcase.ts
+// run the mobile showcase repository workflow
 
+// @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalDate:off - Host-side simulator and emulator automation uses Node subprocess and timing APIs directly.
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeNet from 'node:net'
@@ -922,7 +924,7 @@ async function captureIos(
   registerCleanup({ udid: simulator.udid, startedByRunner, createdByRunner })
   if (!startedByRunner)
   {
-    // Clear transient SpringBoard state (permission prompts, stale URL-open
+    // clear transient SpringBoard state (permission prompts, stale URL-open
     // confirmations, keyboards) without erasing the developer's simulator.
     await runCommand('xcrun', ['simctl', 'shutdown', simulator.udid])
   }
@@ -997,7 +999,7 @@ async function captureIos(
         const isLastAttempt = attempt === 1
         try
         {
-          // A freshly installed Expo development build can spend well over 30s
+          // a freshly installed Expo development build can spend well over 30s
           // applying an already-bundled update after it reaches 100%. Killing it
           // at that point sends the next capture back to the dev launcher.
           await waitForIosShowcaseScene(simulator.udid, scene, 120_000)

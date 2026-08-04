@@ -1,3 +1,6 @@
+// apps/mobile/src/connection/storage.ts
+// persist storage data
+
 import {
   ConnectionPersistenceError,
   ConnectionRegistrationStore,

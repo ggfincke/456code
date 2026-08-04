@@ -162,7 +162,7 @@ export interface CodexRuntimeInfo
   readonly reasoningEffort: string
 }
 
-// Values come from trusted config, but keep the block single-line regardless.
+// values come from trusted config, but keep the block single-line regardless.
 function toSingleLine(value: string): string
 {
   return value.replaceAll(/\s+/g, ' ').trim()

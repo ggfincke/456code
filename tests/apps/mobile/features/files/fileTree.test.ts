@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/files/fileTree.test.ts
+// verify mobile file tree helpers behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { ProjectEntry } from '@t3tools/contracts'
 

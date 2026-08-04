@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/publicConfig.ts
+// configure mobile public config
+
 import Constants from 'expo-constants'
 import { relayClerkTokenOptions } from '@t3tools/shared/relayAuth'
 import { normalizeSecureRelayUrl } from '@t3tools/shared/relayUrl'

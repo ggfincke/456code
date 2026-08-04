@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/nativeTerminalModule.ts
+// resolve native terminal surface view
+
 import type { ComponentType } from 'react'
 import type { NativeSyntheticEvent, ViewProps } from 'react-native'
 import { requireNativeView, requireOptionalNativeModule } from 'expo'
@@ -88,11 +91,9 @@ export function resolveNativeTerminalSurfaceView(): ComponentType<NativeTerminal
   return cachedNativeTerminalSurfaceView ?? null
 }
 
-/**
- * Revision of the native hardware-keyboard handling compiled into the installed binary,
- * or `null` when the binary predates the revision constant (or the module is missing).
- * Used in terminal debug logs to detect stale native builds.
- */
+// revision of the native hardware-keyboard handling compiled into the installed binary,
+// or `null` when the binary predates the revision constant (or the module is missing).
+// used in terminal debug logs to detect stale native builds.
 export function getNativeTerminalHardwareKeyRevision(): number | null
 {
   try

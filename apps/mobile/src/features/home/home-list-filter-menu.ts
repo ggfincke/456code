@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/home-list-filter-menu.ts
+// build home list filter menu
+
 import type { EnvironmentId, SidebarThreadSortOrder } from '@t3tools/contracts'
 
 import type { HomeProjectSortOrder } from './homeThreadList'
@@ -46,9 +49,9 @@ export function buildHomeListFilterMenu(props: {
   readonly onProjectChange: (projectKey: string | null) => void
   readonly onProjectSortOrderChange: (sortOrder: HomeProjectSortOrder) => void
   readonly onThreadSortOrderChange: (sortOrder: SidebarThreadSortOrder) => void
-  /** False hides the sort/group submenus. Thread List v2 uses a fixed
-      creation-order layout, so offering those controls while it silently
-      ignores them would be a lie; the environment filter still applies. */
+  // false hides the sort/group submenus. Thread List v2 uses a fixed
+  // creation-order layout, so offering those controls while it silently
+  // ignores them would be a lie; the environment filter still applies.
   readonly listOrganization?: boolean
 }): HomeListFilterMenu
 {

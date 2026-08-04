@@ -12,9 +12,7 @@ function policyInstruction(instruction: string | undefined): ReadonlyArray<strin
   return trimmed ? ['', 'Additional instructions:', limitSection(trimmed, 4_000)] : []
 }
 
-// ---------------------------------------------------------------------------
-// Commit message
-// ---------------------------------------------------------------------------
+// commit message
 
 export interface CommitMessagePromptInput
 {
@@ -73,9 +71,7 @@ export function buildCommitMessagePrompt(input: CommitMessagePromptInput)
   }
 }
 
-// ---------------------------------------------------------------------------
 // change request content
-// ---------------------------------------------------------------------------
 
 export interface PrContentPromptInput
 {
@@ -135,9 +131,7 @@ export function buildPrContentPrompt(input: PrContentPromptInput)
   return { prompt, outputSchema }
 }
 
-// ---------------------------------------------------------------------------
-// Branch name
-// ---------------------------------------------------------------------------
+// branch name
 
 export interface BranchNamePromptInput
 {
@@ -202,9 +196,7 @@ export function buildBranchNamePrompt(input: BranchNamePromptInput)
   return { prompt, outputSchema }
 }
 
-// ---------------------------------------------------------------------------
-// Thread title
-// ---------------------------------------------------------------------------
+// thread title
 
 export interface ThreadTitlePromptInput
 {

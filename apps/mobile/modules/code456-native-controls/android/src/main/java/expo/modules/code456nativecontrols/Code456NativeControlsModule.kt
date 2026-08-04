@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-native-controls/android/src/main/java/expo/modules/code456nativecontrols/Code456NativeControlsModule.kt
+// registers Android native control views
 package expo.modules.code456nativecontrols
 
 import expo.modules.kotlin.modules.Module
@@ -23,7 +25,7 @@ class Code456NativeControlsModule : Module() {
     }
 
     Function("prepareShowcaseCapture") {
-      // Android app data is cleared by the host runner before launch.
+      // android app data is cleared by the host runner before launch.
     }
 
     Function("markShowcaseReady") { scene: String ->

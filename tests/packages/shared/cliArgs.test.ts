@@ -1,3 +1,6 @@
+// tests/packages/shared/cliArgs.test.ts
+// verify tokenize cli args behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { parseCliArgs, tokenizeCliArgs } from '../../../packages/shared/src/cliArgs.ts'

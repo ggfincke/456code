@@ -1,3 +1,6 @@
+// apps/web/src/browser/hostedBrowserWebviewStyle.ts
+// resolve hosted browser webview wrapper style
+
 import type { BrowserSurfaceRect } from './browserSurfaceStore'
 
 export interface HostedBrowserWebviewSize
@@ -45,7 +48,7 @@ export function resolveHostedBrowserWebviewWrapperStyle(input: {
     height: hiddenSize.height,
     zIndex: -1,
     pointerEvents: 'none',
-    // Keep the guest CSS-visible even while physically offscreen. Electron
+    // keep the guest CSS-visible even while physically offscreen. Electron
     // webviews can keep metadata/status alive under `visibility:hidden` while
     // CDP Runtime/Input commands stall, which breaks offscreen automation.
     visibility: 'visible',

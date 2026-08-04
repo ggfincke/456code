@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/index.ts
+// drive connection provider sessions
+
 export * from './catalog.ts'
 export * as Connectivity from './connectivity.ts'
 export * as CredentialStore from './credentialStore.ts'

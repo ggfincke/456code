@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/scroll-area.tsx
+// render reusable scroll area UI primitives
+
 'use client'
 
 import { ScrollArea as ScrollAreaPrimitive } from '@base-ui/react/scroll-area'

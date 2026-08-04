@@ -699,12 +699,12 @@ function OpenCommandPaletteDialog(props: {
   const browseEnvironmentId = addProjectEnvironmentId ?? defaultAddProjectEnvironmentId
   const browseEnvironment =
     environments.find((environment) => environment.environmentId === browseEnvironmentId) ?? null
-  // A desktop-local secondary backend (today: the WSL backend). The picker is
+  // a desktop-local secondary backend (today: the WSL backend). The picker is
   // available against these too — the desktop dispatches pickFolder into the
   // backend's filesystem when routed by its instance id.
   const browseEnvironmentIsDesktopLocal =
     browseEnvironment !== null && isDesktopLocalConnectionTarget(browseEnvironment.entry.target)
-  // Map the browsed desktop-local env to its desktop pool instance id (e.g.
+  // map the browsed desktop-local env to its desktop pool instance id (e.g.
   // "wsl:ubuntu"). The catalog environmentId is descriptor-derived and won't
   // route on the desktop side; pickFolder only recognizes the pool id, which
   // the bootstrap list exposes. Match on backend URL, exactly as Sidebar's
@@ -1743,7 +1743,7 @@ function OpenCommandPaletteDialog(props: {
     setBrowseGeneration((generation) => generation + 1)
   }
 
-  // Resolve the add-project path from browse data when available. When the
+  // resolve the add-project path from browse data when available. When the
   // query has a trailing separator (e.g. "~/projects/foo/"), parentPath is the
   // directory itself. Otherwise the user typed a partial leaf name, so we need
   // the exact browse entry's fullPath or fall back to the raw query.
@@ -1840,7 +1840,7 @@ function OpenCommandPaletteDialog(props: {
   const canOpenProjectFromFileManager =
     isBrowsing &&
     browseEnvironmentId !== null &&
-    // For a desktop-local (WSL) env, only offer the picker once we have resolved
+    // for a desktop-local (WSL) env, only offer the picker once we have resolved
     // its desktop pool instance id. Without it pickFolder can't be routed to the
     // WSL filesystem and would open the primary (Windows) picker, then add the
     // chosen Windows path against the WSL env -- a wrong-path footgun. Stay
@@ -1985,10 +1985,10 @@ function OpenCommandPaletteDialog(props: {
         browseEnvironmentId === primaryEnvironmentId && browseEnvironmentPlatform === 'Linux'
           ? ((await window.desktopBridge?.getWslState().catch(() => null)) ?? null)
           : null
-      // Route the picker to the browsed env's backend filesystem. The desktop
+      // route the picker to the browsed env's backend filesystem. The desktop
       // only resolves a "wsl:*" pool instance id, so for a desktop-local env we
       // pass the bootstrap-mapped instance id (not the catalog environmentId).
-      // A WSL-only primary has no secondary bootstrap, so resolve its instance
+      // a WSL-only primary has no secondary bootstrap, so resolve its instance
       // id from desktop settings. Windows and combo-mode primaries still omit
       // the target to preserve the native primary picker. The desktop converts
       // a WSL UNC selection back to a Linux path before returning.
@@ -2008,7 +2008,7 @@ function OpenCommandPaletteDialog(props: {
     }
     catch
     {
-      // Ignore picker failures and leave the palette open.
+      // ignore picker failures and leave the palette open.
       setIsPickingProjectFolder(false)
       return
     }
@@ -2031,7 +2031,7 @@ function OpenCommandPaletteDialog(props: {
       }
       catch
       {
-        // Keep UNC routing strict when the live primary identity cannot be read.
+        // keep UNC routing strict when the live primary identity cannot be read.
       }
       const selection = resolveWslProjectSelection(
         pickedPath,

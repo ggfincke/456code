@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/methods/wsl.ts
+// manage get wsl state
+
 import { DesktopWslStateSchema, type DesktopWslState } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
@@ -23,7 +26,7 @@ const readWslState: Effect.Effect<
   const wslBackend = yield* DesktopWslBackend.DesktopWslBackend
   const settings = yield* appSettings.get
   const available = yield* wslEnvironment.isAvailable
-  // Only enumerate distros when WSL is actually available — listDistros on a
+  // only enumerate distros when WSL is actually available — listDistros on a
   // non-WSL host would spawn wsl.exe and hit the timeout for nothing.
   const distros = available ? yield* wslEnvironment.listDistros : []
   const preflightError = yield* wslBackend.lastPreflightError
@@ -33,7 +36,7 @@ const readWslState: Effect.Effect<
     available,
     wslOnly: settings.wslOnly,
     distros,
-    // Only the dual-mode secondary records this; a wsl-only failure surfaces via
+    // only the dual-mode secondary records this; a wsl-only failure surfaces via
     // a dialog + Windows fallback, so it stays null there.
     preflightError: settings.wslOnly ? null : Option.getOrNull(preflightError),
   }
@@ -73,7 +76,7 @@ export const setWslBackendEnabled = makeIpcMethod({
       yield* lifecycle.relaunch(`wslBackendEnabled=${enabled}`)
       return state
     }
-    // Reconcile is idempotent and never fails; no need for a swap-style
+    // reconcile is idempotent and never fails; no need for a swap-style
     // rollback when the WSL side has trouble coming up. With both
     // backends running side by side, "WSL didn't start" is a transient
     // state on one instance — the primary stays up either way.
@@ -93,9 +96,9 @@ export const setWslDistro = makeIpcMethod({
     const lifecycle = yield* DesktopLifecycle.DesktopLifecycle
     const change = yield* appSettings.setWslDistro(distro)
     const settings = yield* appSettings.get
-    // In active wsl-only mode the pool's primary IS the WSL backend, and its
+    // in active wsl-only mode the pool's primary IS the WSL backend, and its
     // distro is captured when that backend starts, so relaunch to replace it.
-    // When WSL is disabled, this only stages a preference for the next enable.
+    // when WSL is disabled, this only stages a preference for the next enable.
     if (settings.wslBackendEnabled && settings.wslOnly && change.changed)
     {
       const state = yield* readWslState

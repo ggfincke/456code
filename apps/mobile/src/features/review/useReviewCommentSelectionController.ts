@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/useReviewCommentSelectionController.ts
+// manage review comment selection controller through a React hook
+
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { NativeSyntheticEvent } from 'react-native'
 import { useNavigation } from '@react-navigation/native'

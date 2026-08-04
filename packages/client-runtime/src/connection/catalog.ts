@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/catalog.ts
+// implement bearer connection profile
+
 import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
@@ -97,15 +100,13 @@ export const ConnectionRegistration = Schema.Union([
 ])
 export type ConnectionRegistration = typeof ConnectionRegistration.Type
 
-/**
- * Platform-managed registrations are reconciled from the host (the desktop
- * bootstrap IPC) rather than persisted by the user. They cover the primary
- * local environment plus any additional desktop-local backends running
- * alongside it (e.g. a parallel WSL backend). The primary stays on same-origin
- * cookie auth (`PrimaryConnectionRegistration`); secondary local backends live
- * on a separate loopback origin and authenticate with a bearer token minted
- * from their bootstrap credential (`BearerConnectionRegistration`).
- */
+// platform-managed registrations are reconciled from the host (the desktop
+// bootstrap IPC) rather than persisted by the user. They cover the primary
+// local environment plus any additional desktop-local backends running
+// alongside it (e.g. a parallel WSL backend). The primary stays on same-origin
+// cookie auth (`PrimaryConnectionRegistration`); secondary local backends live
+// on a separate loopback origin and authenticate with a bearer token minted
+// from their bootstrap credential (`BearerConnectionRegistration`).
 export const PlatformConnectionRegistration = Schema.Union([
   PrimaryConnectionRegistration,
   BearerConnectionRegistration,

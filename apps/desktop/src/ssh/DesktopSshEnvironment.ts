@@ -1,3 +1,6 @@
+// apps/desktop/src/ssh/DesktopSshEnvironment.ts
+// determine whether desktop ssh password prompt cancellation
+
 import type {
   DesktopDiscoveredSshHost,
   DesktopSshEnvironmentBootstrap,

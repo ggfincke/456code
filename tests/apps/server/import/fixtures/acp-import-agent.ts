@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // tests/apps/server/import/fixtures/acp-import-agent.ts
 // serves deterministic ACP catalogs and replay history for importer tests
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFS from 'node:fs'

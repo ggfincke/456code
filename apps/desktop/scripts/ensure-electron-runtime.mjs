@@ -1,3 +1,6 @@
+// apps/desktop/scripts/ensure-electron-runtime.mjs
+// run the ensure electron runtime repository workflow
+
 import * as NodeFS from 'node:fs'
 import * as NodeModule from 'node:module'
 import * as NodeOS from 'node:os'

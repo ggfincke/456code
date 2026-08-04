@@ -1,3 +1,6 @@
+// apps/server/src/project/ProjectSetupScriptRunner.ts
+// define project setup script runner result no script
+
 import { ProjectId } from '@t3tools/contracts'
 import { projectScriptRuntimeEnv, setupProjectScript } from '@t3tools/shared/projectScripts'
 import * as Context from 'effect/Context'

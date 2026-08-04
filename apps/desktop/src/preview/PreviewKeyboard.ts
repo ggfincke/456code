@@ -1,3 +1,6 @@
+// apps/desktop/src/preview/PreviewKeyboard.ts
+// create preview automation key sequence
+
 import type { PreviewAutomationPressInput } from '@t3tools/contracts'
 
 interface KeyDefinition
@@ -83,11 +86,9 @@ const PRINTABLE_KEYS: ReadonlyArray<KeyDefinition> = [
   { code: 'Slash', key: '/', shiftedKey: '?', keyCode: 191 },
 ]
 
-/**
- * Chromium does not infer macOS editing commands from synthetic Meta chords.
- * Keep the common browser editing/navigation shortcuts explicit so dispatched
- * key events behave like their physical-key equivalents.
- */
+// chromium does not infer macOS editing commands from synthetic Meta chords.
+// keep the common browser editing/navigation shortcuts explicit so dispatched
+// key events behave like their physical-key equivalents.
 const MAC_EDITING_COMMANDS: Readonly<Record<string, string>> = {
   'Meta+Backspace': 'deleteToBeginningOfLine',
   'Meta+ArrowUp': 'moveToBeginningOfDocument',
@@ -177,10 +178,8 @@ function resolveKeyDefinition(input: PreviewAutomationPressInput): KeyDefinition
   }
 }
 
-/**
- * Build Chromium CDP key packets using the same required fields and down-event
- * choice as Playwright's pinned Chromium keyboard implementation.
- */
+// build Chromium CDP key packets using the same required fields and down-event
+// choice as Playwright's pinned Chromium keyboard implementation.
 export function makePreviewAutomationKeySequence(
   input: PreviewAutomationPressInput,
   options?: { readonly isMac?: boolean },

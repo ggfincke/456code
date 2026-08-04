@@ -1,3 +1,6 @@
+// tests/apps/desktop/backend/DesktopBackendConfiguration.test.ts
+// verify desktop backend configuration behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -314,10 +317,10 @@ describe('DesktopBackendConfiguration', () =>
       {
         const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration
 
-        // Resolve both before any token is cached, concurrently, so the
+        // resolve both before any token is cached, concurrently, so the
         // generate step (a yield point) can interleave. The atomic
         // get-or-create must still hand both the same token; a non-atomic
-        // Ref would let each generate its own and break the shared-token
+        // ref would let each generate its own and break the shared-token
         // invariant.
         const [primary, wsl] = yield* Effect.all(
           [configuration.resolvePrimary, configuration.resolveWsl({ port: 5000, distro: null })],
@@ -487,7 +490,7 @@ describe('DesktopBackendConfiguration', () =>
 
           assert.equal(config.executablePath, 'wsl.exe')
           assert.equal(config.bootstrap.port, 5050)
-          // Binds to 0.0.0.0 inside WSL so the backend is reachable via
+          // binds to 0.0.0.0 inside WSL so the backend is reachable via
           // both wslhost-forwarded localhost and the distro's eth0 IP.
           assert.equal(config.bootstrap.host, '0.0.0.0')
           assert.equal(config.bootstrap.tailscaleServeEnabled, false)
@@ -497,7 +500,7 @@ describe('DesktopBackendConfiguration', () =>
           assert.equal(config.httpBaseUrl.href, 'http://172.27.0.99:5050/')
           assert.equal(config.env.OPENAI_API_KEY, 'openai-key')
           assert.equal(config.env.ANTHROPIC_API_KEY, 'anthropic-key')
-          // The existing WSLENV is preserved byte-for-byte (note the empty
+          // the existing WSLENV is preserved byte-for-byte (note the empty
           // "::" segment survives — WSL ignores it, so we don't normalize
           // it away) and ANTHROPIC_API_KEY is appended. OPENAI_API_KEY is
           // already declared, so it isn't forwarded twice.
@@ -549,7 +552,7 @@ describe('DesktopBackendConfiguration', () =>
 
           // wsl-only is persisted but WSL is unavailable, so the primary must
           // not spawn wsl.exe (which would loop on preflight failures while the
-          // Connections backend control is hidden). Resolve the Windows primary.
+          // connections backend control is hidden). Resolve the Windows primary.
           assert.equal(config.executablePath, process.execPath)
           assert.equal(config.bootstrap.t3Home, environment.baseDir)
           assert.isTrue(Option.isNone(config.preflightFailure))
@@ -776,7 +779,7 @@ describe('DesktopBackendConfiguration', () =>
       yield* Effect.gen(function* ()
       {
         const configuration = yield* DesktopBackendConfiguration.DesktopBackendConfiguration
-        // Mirrors the resolvePrimary fall-back: the label must follow the
+        // mirrors the resolvePrimary fall-back: the label must follow the
         // backend that actually resolves, not the persisted preference, so the
         // env switcher can't show "WSL" for a Windows backend.
         const label = yield* configuration.resolvePrimaryLabel
@@ -806,7 +809,7 @@ describe('DesktopBackendConfiguration', () =>
     // getLocalEnvironmentBootstraps is a sync IPC method: it resolves the
     // primary instance's lazy label through Effect.runSync. The label chains
     // to wslEnvironment.isAvailable, whose real layer probes the filesystem.
-    // That probe must run once at layer build and expose a resolved value, not
+    // that probe must run once at layer build and expose a resolved value, not
     // a live async effect — otherwise runSync throws in the handler. Build the
     // real WSL layer (not the sync test stub) and resolve the label with a
     // top-level runSync, exactly as the handler does.

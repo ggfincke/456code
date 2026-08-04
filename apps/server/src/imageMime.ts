@@ -1,3 +1,6 @@
+// apps/server/src/imageMime.ts
+// parse base64 data url
+
 import Mime from '@effect/platform-node/Mime'
 
 export const IMAGE_EXTENSION_BY_MIME_TYPE: Record<string, string> = {
@@ -29,26 +32,33 @@ export const SAFE_IMAGE_FILE_EXTENSIONS = new Set([
   '.webp',
 ])
 
-// Whether `code` is a character the base64 payload may contain, aside from
+// whether `code` is a character the base64 payload may contain, aside from
 // the whitespace handled separately below.
 function isBase64Char(code: number): boolean
 {
   return (
-    (code >= 0x61 && code <= 0x7a) || // a-z
-    (code >= 0x41 && code <= 0x5a) || // A-Z
-    (code >= 0x30 && code <= 0x39) || // 0-9
-    code === 0x2b || // +
-    code === 0x2f || // /
-    code === 0x3d // =
+    // a-z
+    (code >= 0x61 && code <= 0x7a) ||
+    // A-Z
+    (code >= 0x41 && code <= 0x5a) ||
+    // 0-9
+    (code >= 0x30 && code <= 0x39) ||
+    // +
+    code === 0x2b ||
+    // /
+    code === 0x2f ||
+    // =
+    code === 0x3d
   )
 }
 
 function isBase64Whitespace(code: number): boolean
 {
-  return code === 0x0d || code === 0x0a || code === 0x20 // \r \n space
+  // \r \n space
+  return code === 0x0d || code === 0x0a || code === 0x20
 }
 
-// Data URLs carry the full image payload, so this parser must never run a
+// data URLs carry the full image payload, so this parser must never run a
 // regex across the payload: V8's regex engine borrows the JS call stack, and
 // matching a multi-megabyte string from a deep call stack (e.g. inside fiber
 // execution) throws "Maximum call stack size exceeded".

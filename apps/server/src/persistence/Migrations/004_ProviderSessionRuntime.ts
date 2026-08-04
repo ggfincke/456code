@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/004_ProviderSessionRuntime.ts
+// apply persistence migration 004 provider session runtime
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/Layers/ProviderRuntimeIngestion.approval.test.ts
+// verify runtime event to activities approval details behavior
+
 import {
   EventId,
   ProviderDriverKind,

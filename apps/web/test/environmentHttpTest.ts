@@ -1,3 +1,6 @@
+// apps/web/test/environmentHttpTest.ts
+// verify environment http test behavior
+
 import * as NodeHttpServer from '@effect/platform-node/NodeHttpServer'
 import {
   AuthSessionId,

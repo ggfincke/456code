@@ -1,3 +1,6 @@
+// tests/packages/shared/semver.test.ts
+// verify semver helpers behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

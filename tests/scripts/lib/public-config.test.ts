@@ -1,3 +1,6 @@
+// tests/scripts/lib/public-config.test.ts
+// verify load repo env behavior
+
 // @effect-diagnostics nodeBuiltinImport:off - Tests exercise root env file precedence directly.
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'

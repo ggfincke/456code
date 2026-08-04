@@ -1,3 +1,6 @@
+// apps/mobile/src/features/diffs/nativeReviewDiffHighlighter.ts
+// resolve native review diff highlighter
+
 import { createHighlighterCore, type HighlighterCore } from '@shikijs/core'
 import { createJavaScriptRegexEngine } from '@shikijs/engine-javascript'
 import bashLanguage from '@shikijs/langs/bash'

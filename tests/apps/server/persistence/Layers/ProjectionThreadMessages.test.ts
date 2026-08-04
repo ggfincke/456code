@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/Layers/ProjectionThreadMessages.test.ts
+// verify projection thread messages behavior
+
 import { MessageId, ThreadId } from '@t3tools/contracts'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

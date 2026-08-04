@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/changedFilesPresentation.test.ts
+// verify changed files presentation behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

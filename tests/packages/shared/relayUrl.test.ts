@@ -1,3 +1,6 @@
+// tests/packages/shared/relayUrl.test.ts
+// verify normalize secure relay url behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { isSecureRelayUrl, normalizeSecureRelayUrl } from '../../../packages/shared/src/relayUrl.ts'

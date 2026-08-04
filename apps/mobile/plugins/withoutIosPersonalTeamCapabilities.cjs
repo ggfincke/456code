@@ -1,3 +1,6 @@
+// apps/mobile/plugins/withoutIosPersonalTeamCapabilities.cjs
+// configure ios personal team capabilities in Expo projects
+
 const { withEntitlementsPlist } = require('expo/config-plugins')
 
 module.exports = function withoutIosPersonalTeamCapabilities(config)

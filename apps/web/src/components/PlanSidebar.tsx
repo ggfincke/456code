@@ -1,3 +1,6 @@
+// apps/web/src/components/PlanSidebar.tsx
+// render plan sidebar
+
 import { memo, useState, useCallback } from 'react'
 import {
   isAtomCommandInterrupted,

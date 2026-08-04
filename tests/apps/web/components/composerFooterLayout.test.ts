@@ -1,3 +1,6 @@
+// tests/apps/web/components/composerFooterLayout.test.ts
+// verify should use compact composer footer behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

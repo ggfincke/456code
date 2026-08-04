@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/ReviewSheet.tsx
+// render review sheet
+
 import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import type { MenuAction } from '@react-native-menu/menu'
 import { useNavigation, type StaticScreenProps } from '@react-navigation/native'
@@ -166,7 +169,7 @@ const ReviewFileNavigatorRow = memo(function ReviewFileNavigatorRow(props: {
 })
 {
   const { file, selected, onSelectFile } = props
-  // Tapping the selected file again returns to the all-files diff.
+  // tapping the selected file again returns to the all-files diff.
   const handlePress = useCallback(() =>
   {
     onSelectFile(selected ? null : file.id)
@@ -288,7 +291,7 @@ function ReviewFileNavigator({
       contentContainerStyle={{
         paddingHorizontal: 8,
         paddingBottom: 8,
-        // The nested native header is translucent; start the list below it so
+        // the nested native header is translucent; start the list below it so
         // the scroll-edge effect can sample the content (same treatment as
         // FileTreeBrowser in the Files pane).
         paddingTop: Platform.OS === 'ios' ? insets.top + 44 + 8 : 8,
@@ -367,7 +370,7 @@ export function ReviewSheet(props: ReviewSheetProps)
   const isEnvironmentReady = environment.presentation?.connection.phase === 'connected'
   const { draftMessage } = useThreadDraftForThread({ environmentId, threadId })
   const reviewCache = useReviewCacheForThread({ environmentId, threadId })
-  /* ─── Git actions for the toolbar menu (commit/push without leaving review) ── */
+  // ─── Git actions for the toolbar menu (commit/push without leaving review) ──
   const { selectedThread } = useThreadSelection()
   const { selectedThreadCwd } = useSelectedThreadWorktree()
   const gitState = useSelectedThreadGitState()
@@ -380,11 +383,11 @@ export function ReviewSheet(props: ReviewSheetProps)
         })
       : null,
   )
-  // The selection-based git hooks only apply when this review belongs to the
+  // the selection-based git hooks only apply when this review belongs to the
   // selected thread (it always does when reached from the thread's toolbar).
   const gitMenuAvailable = selectedThread !== null && String(selectedThread.id) === String(threadId)
   const selectedTheme = colorScheme === 'dark' ? 'dark' : 'light'
-  // With a solid (non-overlay) header the content lays out below the header
+  // with a solid (non-overlay) header the content lays out below the header
   // natively, so no manual top inset is needed. (Android renders its own
   // in-flow AndroidScreenHeader, so it needs no inset either.)
   const topContentInset = 0
@@ -414,7 +417,7 @@ export function ReviewSheet(props: ReviewSheetProps)
   const NativeReviewDiffView = resolveNativeReviewDiffView()!
   const nativeReviewDiffViewRef = useRef<NativeReviewDiffViewHandle>(null)
   const showcasedReviewDrawRef = useRef<string | null>(null)
-  // Native pull-to-refresh on the diff surface (replaces the old Refresh menu item).
+  // native pull-to-refresh on the diff surface (replaces the old Refresh menu item).
   const [isPullRefreshing, setIsPullRefreshing] = useState(false)
   const handlePullToRefresh = useCallback(async () =>
   {
@@ -512,7 +515,7 @@ export function ReviewSheet(props: ReviewSheetProps)
       <ReviewFileNavigator
         ref={reviewFileNavigatorRef}
         files={nativeReviewDiffData.files}
-        // The workspace inspector column spans the full window height, so the
+        // the workspace inspector column spans the full window height, so the
         // pane clears the status bar itself.
         headerInset={insets.top}
         sectionId={selectedSection?.id ?? null}
@@ -583,7 +586,7 @@ export function ReviewSheet(props: ReviewSheetProps)
       })
     }
 
-    // The Android native diff surface has no pull-to-refresh, so refresh
+    // the Android native diff surface has no pull-to-refresh, so refresh
     // stays a menu action there (iOS refreshes via pull-to-refresh instead).
     actions.push({
       id: 'refresh',
@@ -633,7 +636,7 @@ export function ReviewSheet(props: ReviewSheetProps)
     .filter((part): part is string => Boolean(part))
     .join(' · ')
 
-  // The changed-files navigator lives in the workspace inspector column —
+  // the changed-files navigator lives in the workspace inspector column —
   // the single right-hand pane per route — instead of an in-screen panel.
   const showChangedFilesPane =
     !showConnectionNotice && selectedSection !== null && parsedDiff.kind === 'files'
@@ -676,15 +679,15 @@ export function ReviewSheet(props: ReviewSheetProps)
     .join(' · ')
   const headerTitleText = selectedSection?.title ?? 'Review changes'
 
+  // android draws its own in-flow header with `AndroidScreenHeader`
   return (
     <>
       <NativeStackScreenOptions
         options={
           isAndroid
-            ? // Android draws its own in-flow header (AndroidScreenHeader below).
-              { headerShown: false }
+            ? { headerShown: false }
             : {
-                // Static header config lives in Stack.tsx (SOLID_HEADER_OPTIONS — the native
+                // static header config lives in Stack.tsx (SOLID_HEADER_OPTIONS — the native
                 // diff scrolls internally, nothing for glass to sample). Only dynamic values
                 // here.
                 headerTintColor: headerIcon,

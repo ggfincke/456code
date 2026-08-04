@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/assets.test.ts
+// verify resolve asset url behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import { EnvironmentId } from '@t3tools/contracts'
 import * as Layer from 'effect/Layer'

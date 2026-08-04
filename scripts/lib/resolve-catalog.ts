@@ -1,3 +1,6 @@
+// scripts/lib/resolve-catalog.ts
+// resolve catalog
+
 import * as Schema from 'effect/Schema'
 
 export class CatalogDependencyResolutionError extends Schema.TaggedErrorClass<CatalogDependencyResolutionError>()(
@@ -16,12 +19,10 @@ export class CatalogDependencyResolutionError extends Schema.TaggedErrorClass<Ca
   }
 }
 
-/**
- * Resolve `catalog:` dependency specs using the workspace catalog.
- *
- * Pure function: returns a new record with every `catalog:…` value replaced by
- * the concrete version string found in `catalog`. Throws on missing entries.
- */
+// resolve `catalog:` dependency specs using the workspace catalog.
+//
+// pure function: returns a new record with every `catalog:…` value replaced by
+// the concrete version string found in `catalog`. Throws on missing entries.
 export function resolveCatalogDependencies(
   dependencies: Record<string, string>,
   catalog: Record<string, string>,

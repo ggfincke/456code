@@ -1,3 +1,6 @@
+// apps/web/src/projectScripts.ts
+// build project script
+
 import {
   MAX_SCRIPT_ID_LENGTH,
   SCRIPT_RUN_COMMAND_PATTERN,
@@ -87,7 +90,7 @@ export function nextProjectScriptId(name: string, existingIds: Iterable<string>)
     suffix += 1
   }
 
-  // This last-resort fallback only triggers after exhausting thousands of suffixes.
+  // this last-resort fallback only triggers after exhausting thousands of suffixes.
   return `${baseId}-${Date.now()}`.slice(0, MAX_SCRIPT_ID_LENGTH)
 }
 

@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/gitActions.ts
+// manage git action icon name state
+
 import type {
   GitRunStackedActionInput,
   GitRunStackedActionResult,

@@ -1,3 +1,6 @@
+// apps/mobile/app.config.ts
+// configure Expo application metadata
+
 import type { ExpoConfig } from 'expo/config'
 
 import { BRAND_ASSET_PATHS } from '../../scripts/lib/brand-assets.ts'
@@ -115,7 +118,7 @@ const widgetsPlugin: NonNullable<ExpoConfig['plugins']>[number] = [
     bundleIdentifier: `${iosBundleIdentifier}.widgets`,
     groupIdentifier: `group.${iosBundleIdentifier}`,
     enablePushNotifications: true,
-    // Agent activity can update many times an hour; without the
+    // agent activity can update many times an hour; without the
     // frequent-updates entitlement iOS throttles the update budget sooner.
     frequentUpdates: true,
     widgets: [
@@ -133,7 +136,7 @@ const sharingPlugin: NonNullable<ExpoConfig['plugins']>[number] = [
   'expo-sharing',
   {
     ios: {
-      // Personal Teams cannot sign App Groups or extension targets. Keep the
+      // personal Teams cannot sign App Groups or extension targets. Keep the
       // reduced-capability local build usable while release builds expose the
       // real system share target.
       enabled: !isIosPersonalTeamBuild,
@@ -153,7 +156,7 @@ const sharingPlugin: NonNullable<ExpoConfig['plugins']>[number] = [
   },
 ]
 
-// These aliases match the fonts' PostScript names on iOS. Register the same
+// these aliases match the fonts' PostScript names on iOS. Register the same
 // names on Android so React Native and the native composer use one set of
 // family names without waiting for runtime font loading.
 
@@ -164,9 +167,9 @@ const config: ExpoConfig = {
   scheme: variant.scheme,
   version: '0.1.0',
   runtimeVersion: {
-    // Fingerprint (not appVersion) so an OTA only reaches binaries whose native
+    // fingerprint (not appVersion) so an OTA only reaches binaries whose native
     // project — native deps, config plugins, AND patches/ — matches the update.
-    // With appVersion, every 0.1.0 build shares a runtime version, so a JS update
+    // with appVersion, every 0.1.0 build shares a runtime version, so a JS update
     // could land on a binary missing the native changes it needs and crash.
     policy: process.env.MOBILE_VERSION_POLICY ?? 'fingerprint',
   },
@@ -183,9 +186,9 @@ const config: ExpoConfig = {
     icon: variant.assets.iosIcon,
     supportsTablet: true,
     bundleIdentifier: iosBundleIdentifier,
-    // Pin code signing to the T3 Tools team so non-interactive `expo run:ios`
+    // pin code signing to the T3 Tools team so non-interactive `expo run:ios`
     // does not fall back to a personal team (which cannot sign app groups,
-    // Sign in with Apple, or push notification entitlements).
+    // sign in with Apple, or push notification entitlements).
     appleTeamId: 'ARK85ZXQ4Z',
     infoPlist: {
       NSAppTransportSecurity: {
@@ -204,7 +207,7 @@ const config: ExpoConfig = {
       foregroundImage: variant.assets.androidAdaptiveForeground,
       monochromeImage: variant.assets.androidMonochromeIcon,
     },
-    // Opts into OnBackInvokedCallback-based back dispatch (Android 13+).
+    // opts into OnBackInvokedCallback-based back dispatch (Android 13+).
     // JS back handling survives it via react-native's Android 16 shim plus
     // withAndroidPredictiveBackCompat on Android 13-15.
     predictiveBackGestureEnabled: true,
@@ -258,7 +261,7 @@ const config: ExpoConfig = {
     [
       'expo-quick-actions',
       {
-        // Adaptive launcher-shortcut icon; referenced by resource name from
+        // adaptive launcher-shortcut icon; referenced by resource name from
         // the shortcut items set in src/features/shortcuts.
         androidIcons: {
           shortcut_icon: {
@@ -303,7 +306,7 @@ const config: ExpoConfig = {
       },
     ],
     './plugins/withIosCocoaPodsUuidCache.cjs',
-    // Must be listed BEFORE expo-widgets: same-type mods run last-registered-
+    // must be listed BEFORE expo-widgets: same-type mods run last-registered-
     // first, so registering earlier makes this plugin's mods run AFTER
     // expo-widgets' — its dangerous mod wipes ios/ExpoWidgetsTarget/ (which
     // would delete the asset catalog) and its xcodeproj mod creates the widget
@@ -327,10 +330,10 @@ const config: ExpoConfig = {
       publishableKey: repoEnv.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY ?? null,
       jwtTemplate: repoEnv.EXPO_PUBLIC_CLERK_JWT_TEMPLATE ?? null,
     },
-    // Native Google sign-in credentials. @clerk/expo reads these from `extra`
+    // native Google sign-in credentials. @clerk/expo reads these from `extra`
     // under their exact env-var names (not nested), and its config plugin reads
     // the iOS URL scheme at prebuild to register it in Info.plist.
-    // Unset values must be omitted (not null): the public manifest serializes
+    // unset values must be omitted (not null): the public manifest serializes
     // null to {}, which is truthy and would defeat Clerk's fallback checks.
     EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_WEB_CLIENT_ID,
     EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID: repoEnv.EXPO_PUBLIC_CLERK_GOOGLE_IOS_CLIENT_ID,

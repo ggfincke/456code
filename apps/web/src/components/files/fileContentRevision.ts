@@ -1,3 +1,6 @@
+// apps/web/src/components/files/fileContentRevision.ts
+// expose file content revision
+
 export function fileContentRevision(contents: string): string
 {
   let hash = 2_166_136_261

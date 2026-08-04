@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/terminal/terminalLaunchContext.test.ts
+// verify resolve preferred thread worktree path behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 

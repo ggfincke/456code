@@ -1,3 +1,6 @@
+// tests/packages/shared/schemaYaml.test.ts
+// verify schema yaml helpers behavior
+
 import * as Schema from 'effect/Schema'
 import { describe, expect, it } from 'vite-plus/test'
 

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/layout/workspace-sidebar-toolbar.tsx
+// render workspace sidebar toolbar
+
 import { NativeHeaderToolbar } from '../../native/StackHeader'
 import type { ReactNode } from 'react'
 import { Platform } from 'react-native'

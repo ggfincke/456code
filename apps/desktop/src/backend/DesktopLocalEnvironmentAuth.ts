@@ -1,3 +1,6 @@
+// apps/desktop/src/backend/DesktopLocalEnvironmentAuth.ts
+// handle desktop authentication
+
 import { bootstrapRemoteBearerSession } from '@t3tools/client-runtime/authorization'
 import { PRIMARY_LOCAL_ENVIRONMENT_ID } from '@t3tools/contracts'
 import * as Context from 'effect/Context'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewPerf.ts
+// determine whether review perf enabled
+
 interface ReviewPerformanceLike
 {
   readonly now?: () => number

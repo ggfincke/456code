@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/composerSlashMenuItems.test.ts
+// verify build composer slash menu items behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import { ProviderDriverKind, type ServerProviderSkill } from '@t3tools/contracts'
 

@@ -1,3 +1,6 @@
+// apps/mobile/src/native/StackHeader.tsx
+// render stack header
+
 import { useNavigation, type ParamListBase } from '@react-navigation/native'
 import type {
   NativeStackHeaderItem,
@@ -78,7 +81,7 @@ function optionsSignature(value: unknown, seen = new WeakSet<object>()): string
     case 'undefined':
       return 'undefined'
     case 'function':
-      // Header factories are frequently recreated inline. Their source is
+      // header factories are frequently recreated inline. Their source is
       // stable across equivalent renders, while a reference comparison would
       // make navigation.setOptions re-enter the navigator indefinitely.
       return `function:${Function.prototype.toString.call(value)}`
@@ -95,7 +98,7 @@ function optionsSignature(value: unknown, seen = new WeakSet<object>()): string
       {
         return `[${value.map((entry) => optionsSignature(entry, seen)).join(',')}]`
       }
-      // React refs carry mutable native instances that must not make static
+      // react refs carry mutable native instances that must not make static
       // screen options appear different after every render.
       if ('current' in object) return '[ref]'
       return `{${Object.keys(value as Record<string, unknown>)
@@ -156,12 +159,10 @@ function stabilizeOptionFunctions(
 
 export function NativeStackScreenOptions(props: {
   readonly options?: AppNativeStackNavigationOptions
-  /**
-   * Causes dynamic native header factories to be reapplied when their closed-over
-   * menu content changes. Factory functions are intentionally stabilized, so
-   * their source alone cannot capture a menu that was initially empty while
-   * asynchronous data was loading.
-   */
+  // causes dynamic native header factories to be reapplied when their closed-over
+  // menu content changes. Factory functions are intentionally stabilized, so
+  // their source alone cannot capture a menu that was initially empty while
+  // asynchronous data was loading.
   readonly optionsVersion?: unknown
   readonly listeners?: Record<string, (event: never) => void>
   readonly name?: string
@@ -188,7 +189,7 @@ export function NativeStackScreenOptions(props: {
       return
     }
     const signature = optionsSignature([stableOptions, props.optionsVersion])
-    // Avoid re-entering navigation state when semantically equal options are
+    // avoid re-entering navigation state when semantically equal options are
     // reapplied every layout (common when callers pass unstable object literals).
     if (lastAppliedOptionsSignatureRef.current === signature)
     {

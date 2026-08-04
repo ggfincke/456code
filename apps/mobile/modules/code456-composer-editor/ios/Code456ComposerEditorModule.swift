@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-composer-editor/ios/Code456ComposerEditorModule.swift
+// registers the iOS composer editor module
 import ExpoModulesCore
 
 public class Code456ComposerEditorModule: Module {

@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/radio-group.tsx
+// render reusable radio group UI primitives
+
 'use client'
 
 import { Radio as RadioPrimitive } from '@base-ui/react/radio'

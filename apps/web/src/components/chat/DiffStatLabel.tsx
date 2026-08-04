@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/DiffStatLabel.tsx
+// render diff stat label
+
 import { memo } from 'react'
 import { cn } from '~/lib/utils'
 

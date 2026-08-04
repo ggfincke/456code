@@ -1,3 +1,6 @@
+// tests/apps/web/lib/projectPaths.test.ts
+// verify project paths behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

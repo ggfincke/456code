@@ -1,3 +1,6 @@
+// tests/apps/server/checkpointing/Diffs.test.ts
+// verify parse turn diff files from unified diff behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { parseTurnDiffFilesFromUnifiedDiff } from '../../../../apps/server/src/checkpointing/Diffs.ts'

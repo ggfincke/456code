@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/ChatHeader.test.ts
+// verify should show open in picker behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

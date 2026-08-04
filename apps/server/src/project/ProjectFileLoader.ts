@@ -1,13 +1,12 @@
-/**
- * ProjectFileLoader - Effect service that loads the checked-in `456code.json`
- * project file from a workspace root.
- *
- * Loading is best-effort: a missing file resolves to `Option.none`, and
- * unreadable or invalid files are logged and treated as absent so callers
- * can fall back to their defaults.
- *
- * @module ProjectFileLoader
- */
+// apps/server/src/project/ProjectFileLoader.ts
+// project file from a workspace root
+
+//
+// loading is best-effort: a missing file resolves to `Option.none`, and
+// unreadable or invalid files are logged and treated as absent so callers
+// can fall back to their defaults.
+//
+// @module ProjectFileLoader
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -41,12 +40,10 @@ export class ProjectFileLoadError extends Schema.TaggedErrorClass<ProjectFileLoa
 export class ProjectFileLoader extends Context.Service<
   ProjectFileLoader,
   {
-    /**
-     * Load and decode `456code.json` at the workspace root.
-     *
-     * Never fails: missing, unreadable, or invalid files resolve to
-     * `Option.none` (invalid files are logged as warnings).
-     */
+    // load and decode `456code.json` at the workspace root.
+    //
+    // never fails: missing, unreadable, or invalid files resolve to
+    // `Option.none` (invalid files are logged as warnings).
     readonly load: (workspaceRoot: string) => Effect.Effect<Option.Option<ProjectFile>>
   }
 >()('456code/project/ProjectFileLoader')

@@ -1,3 +1,6 @@
+// tests/apps/web/components/settings/ConnectionsSettings.logic.test.ts
+// verify apply wsl enable selection behavior
+
 import type { DesktopWslState } from '@t3tools/contracts'
 import { describe, expect, it, vi } from 'vite-plus/test'
 import { applyWslEnableSelection } from '../../../../../apps/web/src/components/settings/ConnectionsSettings.logic'

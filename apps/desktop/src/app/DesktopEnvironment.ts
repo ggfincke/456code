@@ -1,3 +1,6 @@
+// apps/desktop/src/app/DesktopEnvironment.ts
+// create desktop environment input
+
 import type {
   DesktopAppBranding,
   DesktopAppStageLabel,

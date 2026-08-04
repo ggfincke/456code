@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/AddProviderInstanceDialog.tsx
+// render add provider instance dialog
+
 'use client'
 
 import { Radio as RadioPrimitive } from '@base-ui/react/radio'
@@ -45,13 +48,11 @@ const PROVIDER_ACCENT_SWATCHES = [
   '#0891b2',
 ] as const
 
-/**
- * Normalize a user-provided label into a slug suffix for the instance id.
- * The full id is formed by prefixing the driver slug — e.g. label "Work" on
- * driver "codex" becomes `codex_work`. Output is trimmed to 48 chars so the
- * final composed id stays under the 64-char slug cap enforced by
- * `ProviderInstanceId` in `@t3tools/contracts`.
- */
+// normalize a user-provided label into a slug suffix for the instance id.
+// the full id is formed by prefixing the driver slug — e.g. label "Work" on
+// driver "codex" becomes `codex_work`. Output is trimmed to 48 chars so the
+// final composed id stays under the 64-char slug cap enforced by
+// `ProviderInstanceId` in `@t3tools/contracts`.
 function slugifyLabel(value: string): string
 {
   return value
@@ -102,11 +103,9 @@ const COMING_SOON_DRIVER_OPTIONS: readonly ComingSoonDriverOption[] = [
   },
 ]
 
-/**
- * Validate an instance id against the same slug rules the server applies in
- * `ProviderInstanceId` (see `packages/contracts/src/providerInstance.ts`).
- * Returns a user-facing error string, or `null` if valid.
- */
+// validate an instance id against the same slug rules the server applies in
+// `ProviderInstanceId` (see `packages/contracts/src/providerInstance.ts`).
+// returns a user-facing error string, or `null` if valid.
 function validateInstanceId(id: string, existing: ReadonlySet<string>): string | null
 {
   if (id.length === 0) return 'Instance ID is required.'
@@ -135,10 +134,10 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
   const [label, setLabel] = useState('')
   const [accentColor, setAccentColor] = useState<string>('')
   const [instanceIdOverride, setInstanceIdOverride] = useState<string | null>(null)
-  // Driver-specific config drafts keyed by driver so toggling between drivers
+  // driver-specific config drafts keyed by driver so toggling between drivers
   // during the same dialog session does not lose in-progress input.
   const [configByDriver, setConfigByDriver] = useState<Record<string, Record<string, unknown>>>({})
-  // Errors are suppressed until the user has tried to submit once. After that
+  // errors are suppressed until the user has tried to submit once. After that
   // they update live so fixing the problem clears the message in place.
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false)
 

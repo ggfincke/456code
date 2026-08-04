@@ -1,3 +1,6 @@
+// packages/client-runtime/src/rpc/protocol.ts
+// create ws rpc protocol client
+
 import { WsRpcGroup } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import { RpcClient } from 'effect/unstable/rpc'

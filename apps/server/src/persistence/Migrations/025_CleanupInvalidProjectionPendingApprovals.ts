@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/025_CleanupInvalidProjectionPendingApprovals.ts
+// apply persistence migration 025 cleanup invalid projection pending approvals
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

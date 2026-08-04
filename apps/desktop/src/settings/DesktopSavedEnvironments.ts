@@ -1,3 +1,6 @@
+// apps/desktop/src/settings/DesktopSavedEnvironments.ts
+// define desktop saved environments write error
+
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from '@t3tools/contracts'
 import { fromLenientJson } from '@t3tools/shared/schemaJson'
 import * as Context from 'effect/Context'

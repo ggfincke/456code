@@ -1,3 +1,6 @@
+// tests/apps/server/terminal/PtyAdapter.test.ts
+// verify pty spawn error behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Schema from 'effect/Schema'
 

@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/externalLinkContextMenu.ts
+// resolve external web link host
+
 import type { ContextMenuItem } from '@t3tools/contracts'
 
 export type ExternalLinkContextMenuAction = 'open-in-preview' | 'open-external' | 'copy-link'

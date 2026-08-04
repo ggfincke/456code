@@ -1,3 +1,6 @@
+// tests/apps/server/project/RepositoryIdentityResolver.test.ts
+// verify repository identity resolver behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { expect, it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'

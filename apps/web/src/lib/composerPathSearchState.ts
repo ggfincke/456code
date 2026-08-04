@@ -1,3 +1,6 @@
+// apps/web/src/lib/composerPathSearchState.ts
+// manage composer path search through a React hook
+
 import {
   type ComposerPathSearchState,
   type ComposerPathSearchTarget,

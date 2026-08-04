@@ -1,3 +1,6 @@
+// tests/packages/shared/sourceControl.test.ts
+// verify source control presentation behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

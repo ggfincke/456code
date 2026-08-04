@@ -1,3 +1,6 @@
+// apps/web/src/filePathDisplay.ts
+// format workspace relative path
+
 import { splitPathAndPosition } from './terminal-links'
 
 function normalizePathSeparators(path: string): string

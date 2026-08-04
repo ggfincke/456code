@@ -1,3 +1,6 @@
+// tests/packages/effect-acp/errors.test.ts
+// verify effect acp errors behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'

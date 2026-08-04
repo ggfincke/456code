@@ -1,3 +1,6 @@
+// apps/web/src/lib/chatThreadActions.ts
+// resolve new draft start from origin
+
 import { scopeProjectRef } from '@t3tools/client-runtime/environment'
 import type { EnvironmentId, ProjectId, ScopedProjectRef } from '@t3tools/contracts'
 import type { DraftThreadEnvMode } from '../composerDraftStore'
@@ -55,7 +58,7 @@ export function resolveThreadActionProjectRef(
   return context.defaultProjectRef
 }
 
-// New threads inherit only the *project* from the current context. Branch,
+// new threads inherit only the *project* from the current context. Branch,
 // worktree, and env mode always come from the user's configured defaults —
 // carrying them over from the viewed thread meant "new thread" silently
 // reused checkouts and branches. Explicit affordances (branch toolbar's

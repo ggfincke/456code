@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/diffs/nativeReviewDiffHighlighter.test.ts
+// verify highlight native review diff visible rows behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import type { NativeReviewDiffRow } from '../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface'

@@ -1,3 +1,6 @@
+// tests/apps/server/auth/EnvironmentAuthAdmin.test.ts
+// verify environment auth admin behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

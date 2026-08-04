@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/032_AuthPairingProofKeyThumbprint.ts
+// apply persistence migration 032 auth pairing proof key thumbprint
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

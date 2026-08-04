@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/appearance/AppearancePreferencesProvider.tsx
+// provide appearance preferences context
+
 import { createContext, use, useCallback, useEffect, useMemo, type ReactNode } from 'react'
 
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
@@ -17,24 +20,22 @@ import { cacheTerminalFontSize } from '../../terminal/terminalUiState'
 
 interface AppearancePreferencesContextValue
 {
-  /** Effective values with base-size derivation applied. Use this for rendering. */
+  // effective values with base-size derivation applied. Use this for rendering.
   readonly appearance: ResolvedAppearance
   readonly isReady: boolean
   readonly setBaseFontSize: (value: number) => void
-  /** Pass null to clear the override and follow the base font size. */
+  // pass null to clear the override and follow the base font size.
   readonly setTerminalFontSize: (value: number | null) => void
-  /** Pass null to clear the override and follow the base font size. */
+  // pass null to clear the override and follow the base font size.
   readonly setCodeFontSize: (value: number | null) => void
   readonly setCodeWordBreak: (value: boolean) => void
 }
 
 const AppearancePreferencesContext = createContext<AppearancePreferencesContextValue | null>(null)
 
-/**
- * Injects the scaled `--text-*` variables into Uniwind so every
- * className-based text size (`text-sm`, `text-base`, ...) re-resolves live.
- * Updates the current theme last so the active stylesheet settles correctly.
- */
+// injects the scaled `--text-*` variables into Uniwind so every
+// className-based text size (`text-sm`, `text-base`, ...) re-resolves live.
+// updates the current theme last so the active stylesheet settles correctly.
 function applyTextScaleVariables(baseFontSize: number)
 {
   const variables = resolveTextScaleVariables(baseFontSize)

@@ -1,3 +1,6 @@
+// tests/packages/shared/relayClient.test.ts
+// verify relay client behavior
+
 import { sha256 } from '@noble/hashes/sha2'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { describe, expect, it } from '@effect/vitest'

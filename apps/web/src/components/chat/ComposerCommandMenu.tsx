@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerCommandMenu.tsx
+// render composer command menu
+
 import {
   type ProjectEntry,
   type ProviderDriverKind,

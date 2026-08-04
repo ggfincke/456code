@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/providerDriverMeta.ts
+// resolve driver option
+
 import {
   ClaudeSettings,
   CodexSettings,
@@ -25,13 +28,11 @@ export interface ProviderClientDefinition
   readonly label: string
   readonly icon: Icon
   readonly settingsSchema: ProviderSettingsSchema
-  /**
-   * Optional short label rendered as a `variant="warning"` badge next to
-   * the instance title. Used to flag drivers that still ship under an
-   * early-access or preview gate — the flag is a property of the driver
-   * kind (not a specific instance), so every instance of that driver —
-   * built-in default or custom — advertises the same marker.
-   */
+  // optional short label rendered as a `variant="warning"` badge next to
+  // the instance title. Used to flag drivers that still ship under an
+  // early-access or preview gate — the flag is a property of the driver
+  // kind (not a specific instance), so every instance of that driver —
+  // built-in default or custom — advertises the same marker.
   readonly badgeLabel?: string
 }
 
@@ -80,11 +81,9 @@ export const DRIVER_OPTIONS = PROVIDER_CLIENT_DEFINITIONS
 export const DRIVER_OPTION_BY_VALUE = PROVIDER_CLIENT_DEFINITION_BY_VALUE
 export type DriverOption = ProviderClientDefinition
 
-/**
- * Look up the driver metadata for an instance's `driver` field. Accepts
- * Returns `undefined` for fork / unknown drivers so callers can decide how
- * to render them — typically by falling back to a generic card.
- */
+// look up the driver metadata for an instance's `driver` field. Accepts
+// returns `undefined` for fork / unknown drivers so callers can decide how
+// to render them — typically by falling back to a generic card.
 export function getDriverOption(driver: ProviderDriverKind | undefined): DriverOption | undefined
 {
   if (driver === undefined) return undefined

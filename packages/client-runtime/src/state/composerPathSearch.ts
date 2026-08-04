@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/composerPathSearch.ts
+// manage composer path search entry state
+
 import type { EnvironmentId } from '@t3tools/contracts'
 
 export interface ComposerPathSearchEntry

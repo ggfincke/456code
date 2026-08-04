@@ -63,7 +63,7 @@ import { useThreadOutboxDrain } from './state/use-thread-outbox-drain'
 
 const HEADER_SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version)
 
-// Matches --color-sheet in global.css (light/dark). DynamicColorIOS lets the header
+// matches --color-sheet in global.css (light/dark). DynamicColorIOS lets the header
 // background stay STATIC config while still adapting to appearance changes.
 const SHEET_BACKGROUND_COLOR =
   Platform.OS === 'ios'
@@ -74,7 +74,7 @@ type AppScreenOptions = NativeStackNavigationOptions & {
   readonly unstable_navigationItemStyle?: 'editor'
 }
 
-// Shared header presets. Screens only override genuinely dynamic values (titles,
+// shared header presets. Screens only override genuinely dynamic values (titles,
 // subtitles, toolbar items, search callbacks) via NativeStackScreenOptions.
 //
 // GLASS: transparent header over the screen's primary scroll view on supported
@@ -105,18 +105,17 @@ const SOLID_HEADER_OPTIONS: AppScreenOptions = {
   headerLargeTitle: false,
   headerShadowVisible: false,
   headerShown: true,
+  // native-stack types this as string, but native accepts every `ColorValue`
   headerStyle:
     SHEET_BACKGROUND_COLOR !== undefined
-      ? // native-stack types this as `string`, but the native side accepts any
-        // ColorValue including DynamicColorIOS.
-        { backgroundColor: SHEET_BACKGROUND_COLOR as unknown as string }
+      ? { backgroundColor: SHEET_BACKGROUND_COLOR as unknown as string }
       : undefined,
   headerTitleStyle: { fontSize: 18, fontWeight: '800' },
   headerTransparent: false,
   unstable_navigationItemStyle: Platform.OS === 'ios' ? 'editor' : undefined,
 }
 
-// Solid header variant for screens inside sheets (centered title, no editor style).
+// solid header variant for screens inside sheets (centered title, no editor style).
 const SHEET_SOLID_HEADER_OPTIONS: AppScreenOptions = {
   ...SOLID_HEADER_OPTIONS,
   unstable_navigationItemStyle: undefined,
@@ -126,7 +125,7 @@ const SettingsSheetStack = createNativeStackNavigator({
   initialRouteName: 'Settings',
   screenOptions: {
     ...GLASS_HEADER_OPTIONS,
-    // Sheets read better with the iOS-default centered title (no editor style).
+    // sheets read better with the iOS-default centered title (no editor style).
     unstable_navigationItemStyle: undefined,
   },
   screens: {
@@ -189,21 +188,21 @@ const SettingsSheetStack = createNativeStackNavigator({
   },
 })
 
-// Thread routes live FLAT in the root stack (not in a nested navigator). A nested
+// thread routes live FLAT in the root stack (not in a nested navigator). A nested
 // stack means a second UINavigationController with its own UINavigationBar, which
 // breaks iOS 26's shared-header morphing between Home and Thread (each pair inside
 // one bar morphs; across two bars the whole screen slides). Flat linking paths keep
 // the same deep-link URLs the nested config produced.
 const THREAD_LINKING_PREFIX = 'threads/:environmentId/:threadId'
 
-// New-task / add-project flow: nested navigator inside the formSheet (Settings-sheet
+// new-task / add-project flow: nested navigator inside the formSheet (Settings-sheet
 // pattern — a plain formSheet screen cannot render a stack header; the header and
 // in-sheet pushes come from this nested stack).
 const NewTaskSheetStack = createNativeStackNavigator({
   initialRouteName: 'NewTask',
   screenOptions: {
     ...GLASS_HEADER_OPTIONS,
-    // Sheets read better with the iOS-default centered title (no editor style).
+    // sheets read better with the iOS-default centered title (no editor style).
     unstable_navigationItemStyle: undefined,
   },
   screens: {
@@ -217,7 +216,7 @@ const NewTaskSheetStack = createNativeStackNavigator({
     NewTaskDraft: createNativeStackScreen({
       screen: NewTaskDraftRouteScreen,
       linking: 'draft',
-      // The draft composer has no scroll view for glass to sample; a solid
+      // the draft composer has no scroll view for glass to sample; a solid
       // header also lays the content out below the bar (no manual inset).
       options: SHEET_SOLID_HEADER_OPTIONS,
     }),
@@ -243,7 +242,7 @@ const NewTaskSheetStack = createNativeStackNavigator({
   },
 })
 
-// Routes presented as sheets/overlays ON TOP of the workspace. They must not
+// routes presented as sheets/overlays ON TOP of the workspace. They must not
 // influence the adaptive workspace layout: opening Settings over Home should
 // not flip the sidebar in or change the active thread.
 const WORKSPACE_OVERLAY_ROUTES = new Set([
@@ -259,10 +258,8 @@ const WORKSPACE_OVERLAY_ROUTES = new Set([
   'ThreadReviewComment',
 ])
 
-/**
- * Pathname of the topmost NON-overlay route — the screen the workspace is
- * actually "on", regardless of any sheets floating above it.
- */
+// pathname of the topmost NON-overlay route — the screen the workspace is
+// actually "on", regardless of any sheets floating above it.
 function workspacePathFromState(state: NavigationState): string
 {
   const routes = state.routes.filter((route) => !WORKSPACE_OVERLAY_ROUTES.has(route.name))
@@ -292,7 +289,7 @@ function RootStackLayout(props: {
   useAgentNotificationNavigation()
   // present cloud-relay onboarding after an in-session sign-in
   useConnectOnboardingNavigation()
-  // Launcher app shortcuts: routes shortcut taps and tracks opened threads.
+  // launcher app shortcuts: routes shortcut taps and tracks opened threads.
   useAppShortcuts(props.state)
   useEffect(() =>
   {
@@ -311,7 +308,7 @@ function RootStackLayout(props: {
       params: { incomingShareId: transition.shareIdToPresent },
     })
   }, [navigation, pendingShare, props.state])
-  // Full pathname (sheets included) for keyboard-command scoping; the
+  // full pathname (sheets included) for keyboard-command scoping; the
   // workspace layout only reacts to the underlying non-overlay route.
   const path = getPathFromState(props.state, navigationPathConfig)
   const pathname = path.startsWith('/') ? path : `/${path}`
@@ -406,7 +403,7 @@ export const RootStack = createNativeStackNavigator({
       screen: ReviewCommentComposerSheet,
       linking: `${THREAD_LINKING_PREFIX}/review-comment`,
       options: {
-        // Android cannot host the keyboard-driven comment composer inside a
+        // android cannot host the keyboard-driven comment composer inside a
         // formSheet; use a full-screen modal there instead.
         presentation: Platform.OS === 'android' ? 'fullScreenModal' : 'formSheet',
         sheetAllowedDetents: Platform.OS === 'android' ? undefined : [0.55, 0.92],
@@ -472,7 +469,7 @@ export const RootStack = createNativeStackNavigator({
       options: {
         gestureEnabled: true,
         headerShown: false,
-        // Android pushes settings as a regular full page with an in-screen
+        // android pushes settings as a regular full page with an in-screen
         // back header; iOS keeps the detented form sheet.
         ...(Platform.OS === 'android'
           ? { presentation: 'card' as const }
@@ -487,7 +484,7 @@ export const RootStack = createNativeStackNavigator({
       screen: ConnectOnboardingRouteScreen,
       linking: 'connect-onboarding',
       options: {
-        // A root-level Android formSheet does not host the native stack bar;
+        // a root-level Android formSheet does not host the native stack bar;
         // the route renders an embedded AndroidSheetHeader instead.
         ...(Platform.OS === 'android' ? { headerShown: false } : SHEET_SOLID_HEADER_OPTIONS),
         title: 'Set up cloud access',
@@ -502,7 +499,7 @@ export const RootStack = createNativeStackNavigator({
       linking: 'connections',
       options: {
         title: 'Environments',
-        // Android: full page; the screen renders its own AndroidScreenHeader,
+        // android: full page; the screen renders its own AndroidScreenHeader,
         // so the native bar stays hidden. iOS keeps the sheet.
         ...(Platform.OS === 'android'
           ? { presentation: 'card' as const, headerShown: false }
@@ -525,14 +522,14 @@ export const RootStack = createNativeStackNavigator({
     NewTaskSheet: createNativeStackScreen({
       screen: NewTaskSheetStack,
       linking: 'new',
-      // The whole new-task flow (choose project → draft → add project) shares
+      // the whole new-task flow (choose project -> draft -> add project) shares
       // draft state via NewTaskFlowProvider. The expo-router era mounted it in
       // app/new/_layout.tsx; this layout wrapper is the native-stack equivalent.
       layout: ({ children }) => <NewTaskFlowProvider>{children}</NewTaskFlowProvider>,
       options: {
         gestureEnabled: true,
         headerShown: false,
-        // Android pushes the flow as a regular full page — the draft should
+        // android pushes the flow as a regular full page — the draft should
         // read like a thread that just doesn't exist yet; iOS keeps the sheet.
         ...(Platform.OS === 'android'
           ? { presentation: 'card' as const }

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/thread-inspector-content-stack.tsx
+// render thread inspector content stack
+
 import { useEffect, useState, type ComponentType, type ReactNode } from 'react'
 import { View } from 'react-native'
 
@@ -61,7 +64,7 @@ export function ThreadInspectorContentStack(props: {
       return
     }
 
-    // The file tree is expensive to detach because UIKit rebuilds its focus
+    // the file tree is expensive to detach because UIKit rebuilds its focus
     // graph. Keep both chat inspectors alive after the opening animation so a
     // later Files/Git switch only changes visibility.
     const alternateMode = props.mode === 'files' ? 'git' : 'files'

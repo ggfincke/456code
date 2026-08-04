@@ -1,11 +1,10 @@
-/**
- * Snooze preset resolution for the sidebar snooze menu. Pure functions so
- * the preset math (evening/tomorrow/next-week boundaries) is unit-testable
- * without a DOM.
- *
- * Presets deliberately skew short: agent-thread rhythms are hours (a CI
- * run, a teammate review, the next work session), not days.
- */
+// apps/web/src/components/Sidebar.snooze.ts
+// the preset math (evening/tomorrow/next-week boundaries) is unit-testable
+
+// without a DOM.
+//
+// presets deliberately skew short: agent-thread rhythms are hours (a CI
+// run, a teammate review, the next work session), not days.
 import { parseTimestampDate } from '../timestampFormat'
 
 type SnoozePresetId = 'hour' | 'evening' | 'tomorrow' | 'next-week'
@@ -14,10 +13,10 @@ export interface SnoozePreset
 {
   readonly id: SnoozePresetId
   readonly label: string
-  /** Menu-row time column. Complements the label instead of repeating it:
-      "Tomorrow" pairs with "9:00 AM", not "tomorrow 9:00 AM". */
+  // menu-row time column. Complements the label instead of repeating it:
+  // "Tomorrow" pairs with "9:00 AM", not "tomorrow 9:00 AM".
   readonly whenLabel: string
-  /** ISO wake time. */
+  // ISO wake time.
   readonly snoozedUntil: string
 }
 
@@ -38,7 +37,7 @@ function atHour(base: Date, hour: number): Date
   return next
 }
 
-// Calendar-day advance instead of adding DAY_MS: fixed millisecond offsets
+// calendar-day advance instead of adding DAY_MS: fixed millisecond offsets
 // land on the wrong local day across DST transitions (a spring-forward day
 // is 23 hours, so 23:30 + 24h skips the whole next day).
 function addDays(base: Date, days: number): Date
@@ -48,11 +47,9 @@ function addDays(base: Date, days: number): Date
   return next
 }
 
-/**
- * Presets for "snooze until", computed against local time. "This evening"
- * only appears while it is still meaningfully before evening; after that
- * the list starts at "Tomorrow".
- */
+// presets for "snooze until", computed against local time. "This evening"
+// only appears while it is still meaningfully before evening; after that
+// the list starts at "Tomorrow".
 export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset>
 {
   const inAnHour = new Date(now.getTime() + HOUR_MS)
@@ -66,7 +63,7 @@ export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset>
   ]
 
   const evening = atHour(now, EVENING_HOUR)
-  // Suppress the evening preset once it is within an hour (or past): it
+  // suppress the evening preset once it is within an hour (or past): it
   // would duplicate "In 1 hour" or point at the past.
   if (evening.getTime() - now.getTime() > HOUR_MS)
   {
@@ -86,7 +83,7 @@ export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset>
     snoozedUntil: tomorrow.toISOString(),
   })
 
-  // Next Monday 9:00 (a week out when today is Monday).
+  // next Monday 9:00 (a week out when today is Monday).
   const daysUntilMonday = (1 - now.getDay() + 7) % 7 || 7
   const nextWeek = atHour(addDays(now, daysUntilMonday), MORNING_HOUR)
   presets.push({
@@ -99,10 +96,8 @@ export function resolveSnoozePresets(now: Date): ReadonlyArray<SnoozePreset>
   return presets
 }
 
-/**
- * Compact "wakes in" label for snoozed rows: "2h", "18h", "3d". Minutes
- * round up so a snooze never reads "0m" while still hidden.
- */
+// compact "wakes in" label for snoozed rows: "2h", "18h", "3d". Minutes
+// round up so a snooze never reads "0m" while still hidden.
 export function snoozeWakeLabel(snoozedUntil: string, now: Date): string
 {
   const wake = parseTimestampDate(snoozedUntil)
@@ -114,10 +109,8 @@ export function snoozeWakeLabel(snoozedUntil: string, now: Date): string
   return `${Math.ceil(remainingMs / DAY_MS)}d`
 }
 
-/**
- * Human wake time for menus and toasts: "tomorrow 9:00", "Mon 9:00",
- * "17:30" (today).
- */
+// human wake time for menus and toasts: "tomorrow 9:00", "Mon 9:00",
+// "17:30" (today).
 export function snoozeWakeDescription(snoozedUntil: string, now: Date): string
 {
   const wake = parseTimestampDate(snoozedUntil)

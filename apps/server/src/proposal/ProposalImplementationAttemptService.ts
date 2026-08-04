@@ -1,5 +1,6 @@
 // apps/server/src/proposal/ProposalImplementationAttemptService.ts
 // records and classifies exact proposal implementation attempts
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeCrypto from 'node:crypto'

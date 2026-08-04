@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/pairingUrls.ts
+// resolve desktop pairing url
+
 import { buildHostedPairingUrl } from '../../hostedPairing'
 import { setPairingTokenOnUrl } from '../../pairingUrl'
 

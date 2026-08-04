@@ -1,3 +1,6 @@
+// packages/shared/src/projectScripts.ts
+// expose project script cwd
+
 import type { ProjectScript } from '@t3tools/contracts'
 
 interface ProjectScriptRuntimeEnvInput

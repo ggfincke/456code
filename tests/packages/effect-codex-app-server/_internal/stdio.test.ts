@@ -1,3 +1,6 @@
+// tests/packages/effect-codex-app-server/_internal/stdio.test.ts
+// verify codex app server child process termination behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as PlatformError from 'effect/PlatformError'

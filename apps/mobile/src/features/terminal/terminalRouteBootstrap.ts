@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/terminalRouteBootstrap.ts
+// resolve terminal route bootstrap
+
 export function resolveTerminalRouteBootstrap(input: {
   readonly hasThread: boolean
   readonly hasWorkspaceRoot: boolean
@@ -6,7 +9,7 @@ export function resolveTerminalRouteBootstrap(input: {
   readonly currentTerminalId: string
   readonly runningTerminalId: string | null
   readonly currentTerminalStatus: 'starting' | 'running' | 'exited' | 'error' | 'closed'
-  /** True once the attach stream has populated scrollback (`buffer` non-empty), not merely metadata. */
+  // true once the attach stream has populated scrollback (`buffer` non-empty), not merely metadata.
   readonly hasCurrentTerminalHydration: boolean
 }):
   | { readonly kind: 'idle' }

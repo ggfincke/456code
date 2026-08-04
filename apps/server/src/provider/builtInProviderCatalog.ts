@@ -1,15 +1,16 @@
+// apps/server/src/provider/builtInProviderCatalog.ts
+// define provider snapshot source
+
 import type { ProviderDriverKind, ProviderInstanceId, ServerProvider } from '@t3tools/contracts'
 import type * as Stream from 'effect/Stream'
 import type { ServerProviderShape } from './Services/ServerProvider.ts'
 
 export type ProviderSnapshotSource = {
-  /**
-   * Routing key — uniquely identifies this instance in the aggregated
-   * snapshot list. Two different snapshot sources may share the same
-   * driver kind (multiple instances of the same driver).
-   */
+  // routing key — uniquely identifies this instance in the aggregated
+  // snapshot list. Two different snapshot sources may share the same
+  // driver kind (multiple instances of the same driver).
   readonly instanceId: ProviderInstanceId
-  /** Driver implementation kind. */
+  // driver implementation kind.
   readonly driverKind: ProviderDriverKind
   readonly getSnapshot: ServerProviderShape['getSnapshot']
   readonly refresh: ServerProviderShape['refresh']

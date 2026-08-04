@@ -1,3 +1,6 @@
+// packages/client-runtime/src/platform/storageDocument.ts
+// expose stored connection credential
+
 import * as Schema from 'effect/Schema'
 
 import {

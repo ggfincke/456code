@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/ClerkSettingsSheetDetent.tsx
+// provide clerk settings sheet detent context
+
 import {
   createContext,
   type PropsWithChildren,

@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-composer-editor/android/src/main/java/expo/modules/code456composereditor/Code456ComposerEditorModule.kt
+// registers the Android composer editor module
 package expo.modules.code456composereditor
 
 import expo.modules.kotlin.modules.Module

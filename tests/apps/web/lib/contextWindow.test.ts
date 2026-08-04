@@ -1,3 +1,6 @@
+// tests/apps/web/lib/contextWindow.test.ts
+// verify context window behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import { EventId, type OrchestrationThreadActivity, TurnId } from '@t3tools/contracts'
 

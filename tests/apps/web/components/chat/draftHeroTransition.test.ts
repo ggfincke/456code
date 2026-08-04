@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/draftHeroTransition.test.ts
+// verify wait for draft hero transition behavior
+
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import {

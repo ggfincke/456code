@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/PreviewAutomationHosts.tsx
+// render preview automation hosts
+
 'use client'
 
 import { RegistryContext, useAtomSet, useAtomValue } from '@effect/atom-react'
@@ -208,8 +211,8 @@ const waitForRenderedViewport = async (
     }
     catch
     {
-      // Registration and navigation can transiently replace the guest while
-      // React applies the server snapshot. Retry until the operation deadline.
+      // registration and navigation can transiently replace the guest while
+      // react applies the server snapshot. Retry until the operation deadline.
     }
     await new Promise<void>((resolve) => window.setTimeout(resolve, 50))
   }

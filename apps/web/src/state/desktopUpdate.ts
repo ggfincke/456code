@@ -1,3 +1,6 @@
+// apps/web/src/state/desktopUpdate.ts
+// manage desktop update state read error state
+
 import { useAtomValue } from '@effect/atom-react'
 import type { DesktopBridge, DesktopUpdateState } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'

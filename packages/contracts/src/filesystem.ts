@@ -1,3 +1,6 @@
+// packages/contracts/src/filesystem.ts
+// define filesystem contracts
+
 import * as Schema from 'effect/Schema'
 import { TrimmedNonEmptyString } from './baseSchemas.ts'
 
@@ -47,7 +50,7 @@ export class FilesystemBrowseError extends Schema.TaggedErrorClass<FilesystemBro
   },
 )
 {
-  // Structured diagnostics stay optional for rolling compatibility with legacy message-only
+  // structured diagnostics stay optional for rolling compatibility with legacy message-only
   // payloads, while new call sites must provide the request context and failure classification.
   // @effect-diagnostics-next-line overriddenSchemaConstructor:off
   constructor(props: {

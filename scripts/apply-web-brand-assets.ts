@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// scripts/apply-web-brand-assets.ts
+// run the apply web brand assets repository workflow
 
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'

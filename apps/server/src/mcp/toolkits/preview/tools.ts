@@ -1,3 +1,6 @@
+// apps/server/src/mcp/toolkits/preview/tools.ts
+// expose preview status tool
+
 import {
   PreviewAutomationClickInput,
   PreviewAutomationError,

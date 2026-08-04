@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/errors.ts
+// define connection errors
+
 import type { EnvironmentId } from '@t3tools/contracts'
 import type { RelayProtectedError } from '@t3tools/contracts/relay'
 import type { ManagedRelayClientError } from '../relay/managedRelay.ts'
@@ -143,7 +146,7 @@ export function mapRemoteEnvironmentError(
         traceId: error.traceId,
       })
     case 'EnvironmentResourceNotFoundError':
-      // Not expected during connection authorization, but the shared request
+      // not expected during connection authorization, but the shared request
       // error type now includes it (used by resource fetches like the thread
       // snapshot). Treat it as a configuration issue with the endpoint.
       return new ConnectionBlockedError({

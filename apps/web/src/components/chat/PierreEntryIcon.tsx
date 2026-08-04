@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/PierreEntryIcon.tsx
+// render pierre entry icon
+
 import { FileIcon, FolderIcon } from 'lucide-react'
 import { memo, useInsertionEffect, useMemo } from 'react'
 

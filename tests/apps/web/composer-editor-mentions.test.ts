@@ -1,3 +1,6 @@
+// tests/apps/web/composer-editor-mentions.test.ts
+// verify split prompt into composer segments behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/modelOptions.ts
+// build model options
+
 import type { ModelCapabilities, ModelSelection, ServerConfig } from '@t3tools/contracts'
 import {
   buildProviderOptionSelectionsFromDescriptors,

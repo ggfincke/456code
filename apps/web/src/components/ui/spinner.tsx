@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/spinner.tsx
+// render reusable spinner UI primitives
+
 import { Loader2Icon } from 'lucide-react'
 import { cn } from '~/lib/utils'
 

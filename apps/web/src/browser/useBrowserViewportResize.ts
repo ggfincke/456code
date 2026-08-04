@@ -1,3 +1,6 @@
+// apps/web/src/browser/useBrowserViewportResize.ts
+// manage browser viewport resize through a React hook
+
 'use client'
 
 import type { PreviewViewportSetting, PreviewViewportSize } from '@t3tools/contracts'
@@ -204,7 +207,7 @@ export function useBrowserViewportResize(options: {
     }
     catch
     {
-      // Window listeners below keep the drag functional when capture is unavailable.
+      // window listeners below keep the drag functional when capture is unavailable.
     }
 
     const sourceChanged = () => sourceViewportKeyRef.current !== sourceViewportKey
@@ -245,7 +248,7 @@ export function useBrowserViewportResize(options: {
       }
       catch
       {
-        // The browser may already have released capture on pointerup.
+        // the browser may already have released capture on pointerup.
       }
     }
     function finish(upEvent: PointerEvent)

@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/PreviewLocalServerCard.tsx
+// render preview local server card
+
 import { BrowserMockup } from './BrowserMockup'
 import type { PreviewableServer } from './useDiscoveredLocalServers'
 

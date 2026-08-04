@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/composerMenuHighlight.ts
+// resolve composer menu active item id
+
 export function resolveComposerMenuActiveItemId(input: {
   items: ReadonlyArray<{ id: string }>
   highlightedItemId: string | null

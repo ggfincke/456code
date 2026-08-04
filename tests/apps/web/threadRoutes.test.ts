@@ -1,3 +1,6 @@
+// tests/apps/web/threadRoutes.test.ts
+// verify thread routes behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import { scopeThreadRef } from '@t3tools/client-runtime/environment'
 import { ThreadId } from '@t3tools/contracts'

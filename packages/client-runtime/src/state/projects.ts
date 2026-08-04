@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/projects.ts
+// manage has trailing path separator state
+
 import {
   isExplicitRelativePath,
   isUncPath,

@@ -1,3 +1,6 @@
+// apps/web/src/state/environments.ts
+// manage environment presentation state
+
 import { useAtomValue } from '@effect/atom-react'
 import {
   connectionCatalogDisplayUrl,

@@ -1,3 +1,6 @@
+// apps/web/src/components/files/FileBrowserPanel.tsx
+// render file browser panel
+
 import type {
   ContextMenuItem as TreeContextMenuItem,
   ContextMenuOpenContext as TreeContextMenuOpenContext,
@@ -63,7 +66,7 @@ export default function FileBrowserPanel({
   const treePaths = useMemo(() => entries.map(treePath), [entries])
   const previousTreePathsRef = useRef<readonly string[]>([])
 
-  // The tree renders rows in shadow DOM and its anchor rect is unreliable, so
+  // the tree renders rows in shadow DOM and its anchor rect is unreliable, so
   // capture the right-click position ourselves; contextmenu is a composed
   // event, so a capture-phase listener sees it with viewport coordinates.
   const contextMenuPointerRef = useRef<{ x: number; y: number; at: number } | null>(null)
@@ -174,7 +177,7 @@ export default function FileBrowserPanel({
         },
       },
     },
-    // Rows only need to be draggable so entries can be dropped into the chat
+    // rows only need to be draggable so entries can be dropped into the chat
     // composer; rearranging files inside the tree stays off.
     dragAndDrop: { canDrop: () => false },
     density: 'compact',
@@ -185,7 +188,7 @@ export default function FileBrowserPanel({
     onSelectionChange: (selectedPaths) =>
     {
       dragMention.handleSelectionChange(selectedPaths)
-      // Starting a drag selects the dragged row; that selection is a side
+      // starting a drag selects the dragged row; that selection is a side
       // effect of the gesture, not a request to open the file.
       if (dragMention.isDragInProgress())
       {
@@ -215,11 +218,11 @@ export default function FileBrowserPanel({
     [entries],
   )
 
-  // Tag tree drags with the composer mention payload. The row is read from
+  // tag tree drags with the composer mention payload. The row is read from
   // the composed event path (the tree's shadow root is open), so this does
   // not depend on running after the tree's own dragstart handler; the drag
   // data store is writable for every dragstart listener in the dispatch.
-  // The capture phase runs before the tree's own dragstart handler selects
+  // the capture phase runs before the tree's own dragstart handler selects
   // the dragged row, so the drag flag is up before that selection emits.
   const panelRef = useRef<HTMLDivElement | null>(null)
   useEffect(() =>

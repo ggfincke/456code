@@ -1,3 +1,6 @@
+// packages/effect-acp/src/_internal/shared.ts
+// decode ext request registration
+
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import { RpcClientError } from 'effect/unstable/rpc'

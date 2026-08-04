@@ -1,3 +1,6 @@
+// apps/mobile/src/components/EmptyState.tsx
+// render empty state
+
 import { Pressable, View } from 'react-native'
 
 import { AppText as Text } from './AppText'

@@ -1,3 +1,6 @@
+// apps/server/src/provider/acp/GrokAcpSupport.ts
+// share server grok acp support
+
 import { type GrokSettings, ProviderDriverKind } from '@t3tools/contracts'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'

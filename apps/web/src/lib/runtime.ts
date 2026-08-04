@@ -1,3 +1,6 @@
+// apps/web/src/lib/runtime.ts
+// coordinate remote http runtime
+
 import * as ManagedRuntime from 'effect/ManagedRuntime'
 import type * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

@@ -1,11 +1,10 @@
-/**
- * CheckpointDiffQuery - Query interface for computed checkpoint diffs.
- *
- * Provides read-only diff operations across checkpoint snapshots used by
- * orchestration APIs.
- *
- * @module CheckpointDiffQuery
- */
+// apps/server/src/checkpointing/CheckpointDiffQuery.ts
+// implement checkpoint diff query
+
+// provides read-only diff operations across checkpoint snapshots used by
+// orchestration APIs.
+//
+// @module CheckpointDiffQuery
 import {
   type CheckpointRef,
   OrchestrationGetTurnDiffResult,
@@ -37,20 +36,16 @@ import * as CheckpointStore from './CheckpointStore.ts'
 export class CheckpointDiffQuery extends Context.Service<
   CheckpointDiffQuery,
   {
-    /**
-     * Read the patch diff for a single turn checkpoint transition.
-     *
-     * Verifies checkpoint availability in both projection state and filesystem.
-     */
+    // read the patch diff for a single turn checkpoint transition.
+    //
+    // verifies checkpoint availability in both projection state and filesystem.
     readonly getTurnDiff: (
       input: OrchestrationGetTurnDiffInput,
     ) => Effect.Effect<OrchestrationGetTurnDiffResultType, CheckpointServiceError>
 
-    /**
-     * Read the full patch diff across a thread range of checkpoints.
-     *
-     * Uses turn-diff semantics with `fromTurnCount = 0`.
-     */
+    // read the full patch diff across a thread range of checkpoints.
+    //
+    // uses turn-diff semantics with `fromTurnCount = 0`.
     readonly getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Effect.Effect<OrchestrationGetFullThreadDiffResult, CheckpointServiceError>

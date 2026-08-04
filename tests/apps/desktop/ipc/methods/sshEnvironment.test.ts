@@ -1,3 +1,6 @@
+// tests/apps/desktop/ipc/methods/sshEnvironment.test.ts
+// verify ssh environment ipc behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import { SshHttpBridgeError } from '@t3tools/ssh/errors'
 import * as Cause from 'effect/Cause'

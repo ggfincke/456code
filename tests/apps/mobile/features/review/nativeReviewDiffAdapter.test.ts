@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/nativeReviewDiffAdapter.test.ts
+// verify get cached native review diff data behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

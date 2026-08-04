@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/scripts/sync-pierre-file-icons.mjs
+// synchronize pierre file icons
+
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'

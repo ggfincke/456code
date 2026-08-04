@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/pairing.ts
+// build pairing url
+
 import { readHostedPairingRequest } from '@t3tools/shared/remote'
 import * as Schema from 'effect/Schema'
 
@@ -88,7 +91,7 @@ export function extractPairingUrlFromQrPayload(payload: string): string
   }
   catch
   {
-    // Treat non-URL payloads as raw pairing-url text so the normal input validation can decide.
+    // treat non-URL payloads as raw pairing-url text so the normal input validation can decide.
   }
 
   return trimmed

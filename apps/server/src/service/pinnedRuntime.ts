@@ -1,3 +1,6 @@
+// apps/server/src/service/pinnedRuntime.ts
+// define pinned runtime paths
+
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -7,16 +10,14 @@ import * as Semaphore from 'effect/Semaphore'
 
 import * as ProcessRunner from '../processRunner.ts'
 
-/**
- * A pinned runtime is an exact `456code@<version>` npm-installed into
- * <baseDir>/runtime/versions/<version>. The boot service points its systemd
- * unit here — never `npx 456code`, whose cache is ephemeral and whose registry
- * fetch at boot would make startup depend on the network.
- */
+// a pinned runtime is an exact `456code@<version>` npm-installed into
+// <baseDir>/runtime/versions/<version>. The boot service points its systemd
+// unit here — never `npx 456code`, whose cache is ephemeral and whose registry
+// fetch at boot would make startup depend on the network.
 
 const PINNED_RUNTIME_DIR = 'runtime'
 const PINNED_RUNTIME_INSTALL_TIMEOUT = Duration.minutes(10)
-// Boot-service setup can be constructed in separate layers. Serialize the
+// boot-service setup can be constructed in separate layers. Serialize the
 // complete check/install/sentinel transaction across all callers in this
 // process.
 const pinnedRuntimeInstallLock = Semaphore.makeUnsafe(1)
@@ -61,13 +62,11 @@ export class PinnedRuntimeInstallError extends Schema.TaggedErrorClass<PinnedRun
   }
 }
 
-/**
- * Installs `456code@<version>` into the pinned runtime directory unless a complete
- * install is already there, and returns its paths. The sentinel is written
- * only after npm exits 0; checking the entry file alone is not enough — npm
- * extracts files before running native builds (node-pty), so a killed
- * install leaves a plausible-looking but broken tree behind.
- */
+// installs `456code@<version>` into the pinned runtime directory unless a complete
+// install is already there, and returns its paths. The sentinel is written
+// only after npm exits 0; checking the entry file alone is not enough — npm
+// extracts files before running native builds (node-pty), so a killed
+// install leaves a plausible-looking but broken tree behind.
 export const ensurePinnedRuntimeInstalled = Effect.fn('service.pinned_runtime.ensure_installed')(
   function* (input: {
     readonly baseDir: string
@@ -121,7 +120,7 @@ export const ensurePinnedRuntimeInstalled = Effect.fn('service.pinned_runtime.en
               '--no-audit',
               `456code@${input.version}`,
             ],
-            // Native deps (node-pty) can compile from source on slow boxes; the
+            // native deps (node-pty) can compile from source on slow boxes; the
             // ProcessRunner default of 60s would kill a healthy install.
             timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
           })

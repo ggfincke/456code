@@ -1,3 +1,6 @@
+// apps/web/src/rpc/transportError.ts
+// define rpc errors
+
 export {
   isTransportConnectionErrorMessage,
   sanitizeThreadErrorMessage,

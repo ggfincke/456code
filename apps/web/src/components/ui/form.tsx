@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/form.tsx
+// render reusable form UI primitives
+
 'use client'
 
 import { Form as FormPrimitive } from '@base-ui/react/form'

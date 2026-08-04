@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/terminalSession.ts
+// manage terminal session state
+
 import type {
   EnvironmentId,
   TerminalAttachStreamEvent,

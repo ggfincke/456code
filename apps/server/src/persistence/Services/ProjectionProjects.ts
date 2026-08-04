@@ -1,11 +1,10 @@
-/**
- * ProjectionProjectRepository - Projection repository interface for projects.
- *
- * Owns persistence operations for project rows in the orchestration projection
- * read model.
- *
- * @module ProjectionProjectRepository
- */
+// apps/server/src/persistence/Services/ProjectionProjects.ts
+// define projection projects service contract
+
+// owns persistence operations for project rows in the orchestration projection
+// read model.
+//
+// @module ProjectionProjectRepository
 import { IsoDateTime, ModelSelection, ProjectId, ProjectScript } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
@@ -41,30 +40,22 @@ export type DeleteProjectionProjectInput = typeof DeleteProjectionProjectInput.T
  */
 export interface ProjectionProjectRepositoryShape
 {
-  /**
-   * Insert or replace a projected project row.
-   *
-   * Upserts by `projectId` and persists scripts through JSON encoding.
-   */
+  // insert or replace a projected project row.
+  //
+  // upserts by `projectId` and persists scripts through JSON encoding.
   readonly upsert: (row: ProjectionProject) => Effect.Effect<void, ProjectionRepositoryError>
 
-  /**
-   * Read a projected project row by id.
-   */
+  // read a projected project row by id.
   readonly getById: (
     input: GetProjectionProjectInput,
   ) => Effect.Effect<Option.Option<ProjectionProject>, ProjectionRepositoryError>
 
-  /**
-   * List all projected project rows.
-   *
-   * Returned in deterministic creation order.
-   */
+  // list all projected project rows.
+  //
+  // returned in deterministic creation order.
   readonly listAll: () => Effect.Effect<ReadonlyArray<ProjectionProject>, ProjectionRepositoryError>
 
-  /**
-   * Soft-delete a projected project row by id.
-   */
+  // soft-delete a projected project row by id.
   readonly deleteById: (
     input: DeleteProjectionProjectInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>

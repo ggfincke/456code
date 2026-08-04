@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/PreviewPanel.tsx
+// render preview panel
+
 'use client'
 
 import type { ScopedThreadRef } from '@t3tools/contracts'

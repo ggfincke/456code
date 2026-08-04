@@ -1,3 +1,6 @@
+// apps/server/src/vcs/VcsStatusBroadcaster.ts
+// expose remote refresh failure diagnostics
+
 import * as Cause from 'effect/Cause'
 import * as Context from 'effect/Context'
 import * as Duration from 'effect/Duration'

@@ -1,3 +1,6 @@
+// tests/packages/shared/KeyedCoalescingWorker.test.ts
+// verify make keyed coalescing worker behavior
+
 import { it } from '@effect/vitest'
 import { describe, expect } from 'vite-plus/test'
 import * as Deferred from 'effect/Deferred'

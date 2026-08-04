@@ -1,3 +1,5 @@
+// apps/server/src/sourceControl/SourceControlDiscovery.ts
+// discovers source control providers for repository workspaces
 import {
   type SourceControlDiscoveryResult,
   type VcsDiscoveryItem,

@@ -65,7 +65,7 @@ import { SwipeableScrollGateProvider, useSwipeableScrollGate } from './thread-sw
 import { WorkspaceConnectionStatus } from './WorkspaceConnectionStatus'
 import { shouldShowWorkspaceConnectionStatus } from './workspace-connection-status'
 
-/* ─── Types ──────────────────────────────────────────────────────────── */
+// ─── Types ────────────────────────────────────────────────────────────
 
 interface HomeScreenProps
 {
@@ -93,7 +93,7 @@ interface HomeScreenProps
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void
   readonly onDeleteThread: (thread: EnvironmentThreadShell) => void
-  /** Resolves true iff the settle was dispatched and succeeded. */
+  // resolves true iff the settle was dispatched and succeeded.
   readonly onSettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void
@@ -101,15 +101,13 @@ interface HomeScreenProps
   readonly onNewThreadInProject: (project: EnvironmentProject) => void
 }
 
-/* ─── Layout constants ───────────────────────────────────────────────── */
+// ─── Layout constants ─────────────────────────────────────────────────
 
 const ESTIMATED_THREAD_ROW_HEIGHT = 72
-/**
- * Top spacing between the list and the Android custom header. The Android
- * header (AndroidHomeHeader) is rendered in-flow above this screen and
- * already consumes the top safe-area inset, so the list only needs breathing
- * room here.
- */
+// top spacing between the list and the Android custom header. The Android
+// header (AndroidHomeHeader) is rendered in-flow above this screen and
+// already consumes the top safe-area inset, so the list only needs breathing
+// room here.
 
 function deriveEmptyState(props: {
   readonly catalogState: WorkspaceState
@@ -185,7 +183,7 @@ function HomeTopContentSpacer()
   return <View className="h-4" />
 }
 
-/* ─── Main screen ────────────────────────────────────────────────────── */
+// ─── Main screen ──────────────────────────────────────────────────────
 
 export function HomeScreen(props: HomeScreenProps)
 {
@@ -447,9 +445,9 @@ export function HomeScreen(props: HomeScreenProps)
           ),
     [v2ScopedProjectGroup],
   )
-  // Thread List v2 (beta): one flat list in creation order, no grouping.
-  // Settled threads collapse into a recency tail below the card block.
-  // Settled threads stay in the live shell stream (settled ≠ archived), so
+  // thread List v2 (beta): one flat list in creation order, no grouping.
+  // settled threads collapse into a recency tail below the card block.
+  // settled threads stay in the live shell stream (settled ≠ archived), so
   // the partition works directly off live shells — no snapshot merging or
   // optimistic holds.
   // PR states stream in per-row (rows own the VCS subscriptions); a merged or
@@ -486,7 +484,7 @@ export function HomeScreen(props: HomeScreenProps)
   )
   const handleDeleteThread = props.onDeleteThread
   const handleUnsettleThread = props.onUnsettleThread
-  // The settled tail renders in pages; expansion resets when the filter
+  // the settled tail renders in pages; expansion resets when the filter
   // context changes so environment/search flips never inherit a deep page.
   const [settledVisibleCount, setSettledVisibleCount] = useState(
     THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
@@ -506,21 +504,21 @@ export function HomeScreen(props: HomeScreenProps)
   // boundary is actually crossed while the app stays open (mirrors web);
   // without a clock dependency the partition memoizes a frozen "now".
   const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16))
-  // Snooze wake times are second-precise; a counter bumped exactly at the
+  // snooze wake times are second-precise; a counter bumped exactly at the
   // next wake boundary re-runs the partition with a fresh clock so a woken
   // thread reappears immediately instead of on the next minute tick.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0)
   useEffect(() =>
   {
     if (!threadListV2Enabled) return
-    // Refresh immediately on enable: the mount-time value can be hours old
+    // refresh immediately on enable: the mount-time value can be hours old
     // by the time the beta is switched on, which would misclassify the
     // inactivity auto-settle boundary until the first tick.
     setNowMinute(new Date().toISOString().slice(0, 16))
     const id = setInterval(() => setNowMinute(new Date().toISOString().slice(0, 16)), 60_000)
     return () => clearInterval(id)
   }, [threadListV2Enabled])
-  // Threads on servers without the settlement capability never classify as
+  // threads on servers without the settlement capability never classify as
   // settled (the user could neither un-settle nor pin them).
   const serverConfigs = useAtomValue(environmentServerConfigsAtom)
   const settlementEnvironmentIds = useMemo(() =>
@@ -551,7 +549,7 @@ export function HomeScreen(props: HomeScreenProps)
   {
     if (!threadListV2Enabled)
       return { items: [], hiddenSettledCount: 0, snoozedCount: 0, nextSnoozeWakeAt: null }
-    // Settled threads are live shells; archived threads keep their original
+    // settled threads are live shells; archived threads keep their original
     // "hidden from lists" meaning.
     return buildThreadListV2Items({
       threads: props.threads.filter((thread) => thread.archivedAt === null),
@@ -578,7 +576,7 @@ export function HomeScreen(props: HomeScreenProps)
     threadListV2Enabled,
     v2ScopedProjectGroup,
   ])
-  // Re-partition the moment the earliest snooze expires (clamped to the
+  // re-partition the moment the earliest snooze expires (clamped to the
   // signed-32-bit setTimeout range; far-future wakes re-arm at the clamp).
   const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt
   useEffect(() =>
@@ -695,7 +693,7 @@ export function HomeScreen(props: HomeScreenProps)
               isFirst={item.isFirst}
               groupKey={item.group.key}
               onGroupAction={updateGroupDisplay}
-              // Aggregated groups (same repo across machines) have no single
+              // aggregated groups (same repo across machines) have no single
               // target project, and `pending-project:` groups hold a placeholder
               // built from queued-task metadata rather than a real project shell,
               // so the quick new-thread button is single-real-project only.
@@ -772,8 +770,8 @@ export function HomeScreen(props: HomeScreenProps)
 
   const keyExtractor = useCallback((item: HomeListItem) => item.key, [])
 
-  /* Empty states */
-  // The signal must ignore the search/environment filters: an active query
+  // empty states
+  // the signal must ignore the search/environment filters: an active query
   // that matches nothing needs the in-list "No results" state, not the
   // full-page "No threads yet". Settled threads are unarchived live shells,
   // so the v1 check already covers v2.
@@ -869,7 +867,7 @@ export function HomeScreen(props: HomeScreenProps)
         )) &&
       (v2SearchQuery.length === 0 || pendingTask.title.toLocaleLowerCase().includes(v2SearchQuery)),
   )
-  // Project scoping lives in the header filter menu (no inline chip row on
+  // project scoping lives in the header filter menu (no inline chip row on
   // mobile — the menu is the one filter surface).
   const v2ListHeader = (
     <>
@@ -907,7 +905,7 @@ export function HomeScreen(props: HomeScreenProps)
       <EmptyState title="No threads yet" detail="Create a task to start a new coding session." />
     )
   ) : null
-  // Self-contained: v1's listEmpty keys off projectGroups, which ignores the
+  // self-contained: v1's listEmpty keys off projectGroups, which ignores the
   // v2 project scope, so it can be null (results elsewhere) while this list
   // is empty. Search outranks the scope — "No results" names the actionable
   // fact when a query is active. Snoozed threads outrank the rest: "No
@@ -918,7 +916,7 @@ export function HomeScreen(props: HomeScreenProps)
   const v2ListEmpty =
     v2PendingTasks.length > 0 ? null : hasSearchQuery ? (
       v2SnoozedCount > 0 ? (
-        // The snoozed threads already passed this search filter: "No
+        // the snoozed threads already passed this search filter: "No
         // results" would claim nothing matched when matches are merely
         // parked.
         <EmptyState
@@ -1022,7 +1020,7 @@ export function HomeScreen(props: HomeScreenProps)
           recycleItems
           scrollEventThrottle={16}
           contentContainerStyle={{
-            // Android reserves room for the floating new-task FAB
+            // android reserves room for the floating new-task FAB
             // (56 button + 16 gap + bottom inset).
             paddingBottom:
               Platform.OS === 'ios'

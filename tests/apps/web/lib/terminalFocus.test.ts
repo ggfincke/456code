@@ -1,3 +1,6 @@
+// tests/apps/web/lib/terminalFocus.test.ts
+// verify is terminal focused behavior
+
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 
 import {

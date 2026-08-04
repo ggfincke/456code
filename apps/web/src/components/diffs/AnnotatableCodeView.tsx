@@ -1,3 +1,6 @@
+// apps/web/src/components/diffs/AnnotatableCodeView.tsx
+// render annotatable code view
+
 import type {
   AnnotationSide,
   CodeViewDiffItem,

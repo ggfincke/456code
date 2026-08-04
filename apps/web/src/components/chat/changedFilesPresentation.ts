@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/changedFilesPresentation.ts
+// expose changed files auto expand file limit
+
 import { type TurnDiffFileChange } from '../../types'
 import { summarizeTurnDiffStats } from '../../lib/turnDiffTree'
 

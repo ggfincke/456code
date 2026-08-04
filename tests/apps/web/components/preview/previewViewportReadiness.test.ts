@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/previewViewportReadiness.test.ts
+// verify is preview viewport ready behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { browserViewportSettingKey } from '~/browser/browserViewportLayout'

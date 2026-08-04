@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/files/workspace-file-image-cache.test.ts
+// verify workspace file image atom behavior
+
 import { AtomRegistry } from 'effect/unstable/reactivity'
 import * as AsyncResult from 'effect/unstable/reactivity/AsyncResult'
 import { describe, expect, it, vi } from 'vite-plus/test'

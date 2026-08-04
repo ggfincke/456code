@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/openTerminalLinkInPreview.ts
+// open terminal link in preview
+
 import type { LocalApi, ScopedThreadRef } from '@t3tools/contracts'
 import { isAtomCommandInterrupted } from '@t3tools/client-runtime/state/runtime'
 import { isPreviewableUrl } from '@t3tools/shared/preview'

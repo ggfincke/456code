@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewWordDiffs.test.ts
+// verify compute word alt diff ranges behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

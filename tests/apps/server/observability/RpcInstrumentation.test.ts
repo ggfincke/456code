@@ -1,3 +1,6 @@
+// tests/apps/server/observability/RpcInstrumentation.test.ts
+// verify rpc instrumentation behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import { WS_METHODS } from '@t3tools/contracts'
 import * as Duration from 'effect/Duration'

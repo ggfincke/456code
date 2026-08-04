@@ -1,3 +1,6 @@
+// apps/web/src/state/server.ts
+// manage server environment state
+
 import {
   DEFAULT_SERVER_SETTINGS,
   type EditorId,

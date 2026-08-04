@@ -1,3 +1,6 @@
+// apps/mobile/src/persistence/mobile-secure-storage.ts
+// persist mobile secure storage data
+
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewFileVisibility.ts
+// resolve default review expanded file ids
+
 import { useCallback, useMemo } from 'react'
 
 import { updateReviewExpandedFileIds, updateReviewViewedFileIds } from './reviewState'

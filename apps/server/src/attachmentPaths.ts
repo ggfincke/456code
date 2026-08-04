@@ -1,3 +1,6 @@
+// apps/server/src/attachmentPaths.ts
+// normalize attachment relative path
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from 'node:path'
 

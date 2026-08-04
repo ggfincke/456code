@@ -193,7 +193,7 @@ import {
 } from './cartographer.ts'
 
 export const WS_METHODS = {
-  // Project registry methods
+  // project registry methods
   projectsList: 'projects.list',
   projectsAdd: 'projects.add',
   projectsRemove: 'projects.remove',
@@ -203,7 +203,7 @@ export const WS_METHODS = {
   projectsSearchEntries: 'projects.searchEntries',
   projectsWriteFile: 'projects.writeFile',
 
-  // Immutable proposal and architecture preview methods
+  // immutable proposal and architecture preview methods
   proposalsList: 'proposals.list',
   proposalsGet: 'proposals.get',
   proposalsDiff: 'proposals.diff',
@@ -216,10 +216,10 @@ export const WS_METHODS = {
   cartographerIssueEmbed: 'cartographer.issueEmbed',
   cartographerCloseEmbed: 'cartographer.closeEmbed',
 
-  // Shell methods
+  // shell methods
   shellOpenInEditor: 'shell.openInEditor',
 
-  // Filesystem methods
+  // filesystem methods
   filesystemBrowse: 'filesystem.browse',
   assetsCreateUrl: 'assets.createUrl',
 
@@ -233,15 +233,15 @@ export const WS_METHODS = {
   vcsSwitchRef: 'vcs.switchRef',
   vcsInit: 'vcs.init',
 
-  // Git workflow methods
+  // git workflow methods
   gitRunStackedAction: 'git.runStackedAction',
   gitResolvePullRequest: 'git.resolvePullRequest',
   gitPreparePullRequestThread: 'git.preparePullRequestThread',
 
-  // Review methods
+  // review methods
   reviewGetDiffPreview: 'review.getDiffPreview',
 
-  // Terminal methods
+  // terminal methods
   terminalOpen: 'terminal.open',
   terminalAttach: 'terminal.attach',
   terminalWrite: 'terminal.write',
@@ -250,7 +250,7 @@ export const WS_METHODS = {
   terminalRestart: 'terminal.restart',
   terminalClose: 'terminal.close',
 
-  // Preview methods
+  // preview methods
   previewOpen: 'preview.open',
   previewNavigate: 'preview.navigate',
   previewResize: 'preview.resize',
@@ -262,7 +262,7 @@ export const WS_METHODS = {
   previewAutomationRespond: 'previewAutomation.respond',
   previewAutomationFocusHost: 'previewAutomation.focusHost',
 
-  // Server meta
+  // server meta
   serverProbe: 'server.probe',
   serverGetConfig: 'server.getConfig',
   serverRefreshProviders: 'server.refreshProviders',
@@ -278,11 +278,11 @@ export const WS_METHODS = {
   serverGetProcessResourceHistory: 'server.getProcessResourceHistory',
   serverSignalProcess: 'server.signalProcess',
 
-  // Cloud environment methods
+  // cloud environment methods
   cloudGetRelayClientStatus: 'cloud.getRelayClientStatus',
   cloudInstallRelayClient: 'cloud.installRelayClient',
 
-  // Workers (worker-broker) methods
+  // workers (worker-broker) methods
   workersList: 'workers.list',
   workersReadiness: 'workers.readiness',
   workersListRuns: 'workers.listRuns',
@@ -291,12 +291,12 @@ export const WS_METHODS = {
   workersSubscribe: 'workers.subscribe',
   workersSubscribeActivity: 'workers.subscribeActivity',
 
-  // Source control methods
+  // source control methods
   sourceControlLookupRepository: 'sourceControl.lookupRepository',
   sourceControlCloneRepository: 'sourceControl.cloneRepository',
   sourceControlPublishRepository: 'sourceControl.publishRepository',
 
-  // Streaming subscriptions
+  // streaming subscriptions
   subscribeVcsStatus: 'subscribeVcsStatus',
   subscribeTerminalEvents: 'subscribeTerminalEvents',
   subscribeTerminalMetadata: 'subscribeTerminalMetadata',
@@ -333,12 +333,10 @@ export const WsServerGetConfigRpc = Rpc.make(WS_METHODS.serverGetConfig, {
 
 export const WsServerRefreshProvidersRpc = Rpc.make(WS_METHODS.serverRefreshProviders, {
   payload: Schema.Struct({
-    /**
-     * When supplied, only refresh this specific provider instance. When
-     * omitted, refresh all configured instances — the legacy `refresh()`
-     * behaviour retained for transports that still dispatch untargeted
-     * refreshes.
-     */
+    // when supplied, only refresh this specific provider instance. When
+    // omitted, refresh all configured instances — the legacy `refresh()`
+    // behaviour retained for transports that still dispatch untargeted
+    // refreshes.
     instanceId: Schema.optional(ProviderInstanceId),
   }),
   success: ServerProviderUpdatedPayload,
@@ -630,11 +628,9 @@ export const WsVcsInitRpc = Rpc.make(WS_METHODS.vcsInit, {
   error: Schema.Union([VcsError, EnvironmentAuthorizationError]),
 })
 
-/**
- * Ephemeral live diff preview for compact/mobile surfaces.
- * Not the persisted T3 Review model. Future review sessions should use
- * review.open* + review.getSnapshot.
- */
+// ephemeral live diff preview for compact/mobile surfaces.
+// not the persisted T3 Review model. Future review sessions should use
+// review.open* + review.getSnapshot.
 export const WsReviewGetDiffPreviewRpc = Rpc.make(WS_METHODS.reviewGetDiffPreview, {
   payload: ReviewDiffPreviewInput,
   success: ReviewDiffPreviewResult,

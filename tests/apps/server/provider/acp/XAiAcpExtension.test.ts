@@ -1,3 +1,6 @@
+// tests/apps/server/provider/acp/XAiAcpExtension.test.ts
+// verify x ai acp extension behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from 'node:path'
 import * as NodeURL from 'node:url'

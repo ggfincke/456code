@@ -1,3 +1,6 @@
+// apps/web/src/browser/browserRecording.ts
+// define browser recording unavailable error
+
 import type {
   DesktopPreviewRecordingArtifact,
   DesktopPreviewRecordingFrame,
@@ -451,9 +454,9 @@ const finalizeBrowserRecording = async (
 
   if (result._tag === 'Failure' && isStartupWaitTimeout(result.error))
   {
-    // Do not clear `active` yet. The renderer-side start promise can still
+    // do not clear `active` yet. The renderer-side start promise can still
     // resolve later, and its cancellation path will call `stopScreencast`.
-    // Keeping the slot reserved prevents a newer recording for this tab from
+    // keeping the slot reserved prevents a newer recording for this tab from
     // being started and then accidentally stopped by the older late cleanup.
     throw result.error
   }

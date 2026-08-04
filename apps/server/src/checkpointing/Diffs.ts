@@ -1,3 +1,6 @@
+// apps/server/src/checkpointing/Diffs.ts
+// parse turn diff files from unified diff
+
 import { parsePatchFiles } from '@pierre/diffs/utils/parsePatchFiles'
 
 export interface TurnDiffFileSummary

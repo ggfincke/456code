@@ -1,3 +1,6 @@
+// tests/apps/desktop/electron/ElectronShell.test.ts
+// verify electron shell behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import { beforeEach, vi } from 'vite-plus/test'

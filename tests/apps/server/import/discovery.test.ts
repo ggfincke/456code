@@ -1,5 +1,6 @@
 // tests/apps/server/import/discovery.test.ts
 // verifies lightweight session catalogs across file and acp source layouts
+
 // @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectFailure:off
 
 import * as NodeFSP from 'node:fs/promises'

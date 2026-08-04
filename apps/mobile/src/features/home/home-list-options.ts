@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/home-list-options.ts
+// resolve project grouping mode
+
 import type {
   EnvironmentId,
   SidebarProjectGroupingMode,
@@ -77,7 +80,7 @@ interface HomeListOptionsContextValue
 
 const HomeListOptionsContext = createContext<HomeListOptionsContextValue | null>(null)
 
-/** Keeps list preferences stable while the app moves between compact and split shells. */
+// keeps list preferences stable while the app moves between compact and split shells.
 export function HomeListOptionsProvider({
   children,
   projectGroupingMode,

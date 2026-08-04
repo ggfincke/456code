@@ -1,15 +1,16 @@
+// apps/mobile/src/lib/layout.ts
+// derive mobile split-layout thresholds
+
 function clamp(value: number, min: number, max: number): number
 {
   return Math.min(Math.max(value, min), max)
 }
 
-/**
- * Use available space, not device or orientation labels, to choose the shell.
- *
- * The height floor deliberately keeps every current iPhone in the compact shell
- * when it rotates to landscape, while still allowing iPad and foldable-sized
- * windows to adopt the persistent sidebar as they resize.
- */
+// use available space, not device or orientation labels, to choose the shell.
+//
+// the height floor deliberately keeps every current iPhone in the compact shell
+// when it rotates to landscape, while still allowing iPad and foldable-sized
+// windows to adopt the persistent sidebar as they resize.
 export const SPLIT_LAYOUT_MIN_WIDTH = 720
 export const SPLIT_LAYOUT_MIN_HEIGHT = 600
 
@@ -188,7 +189,7 @@ export function deriveFileInspectorPaneLayout(input: {
   }
 }
 
-/** Keep a user-selected sidebar width useful as a window is resized. */
+// keep a user-selected sidebar width useful as a window is resized.
 export function constrainPrimarySidebarWidth(
   preferredWidth: number,
   viewportWidth = Number.POSITIVE_INFINITY,
@@ -205,10 +206,8 @@ export function constrainPrimarySidebarWidth(
   )
 }
 
-/**
- * Keep an auxiliary pane within native-feeling bounds without squeezing its
- * neighboring content below a usable reading/editor width.
- */
+// keep an auxiliary pane within native-feeling bounds without squeezing its
+// neighboring content below a usable reading/editor width.
 export function constrainAuxiliaryPaneWidth(input: {
   readonly preferredWidth: number
   readonly availableWidth: number

@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/ComposerPreviewAnnotationCards.test.tsx
+// verify composer preview annotation cards behavior
+
 import type { PreviewAnnotationPayload } from '@t3tools/contracts'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it, vi } from 'vite-plus/test'

@@ -1,3 +1,6 @@
+// apps/web/src/AppRoot.tsx
+// render app root
+
 import { RouterProvider } from '@tanstack/react-router'
 
 import { ElectronBrowserHost } from './browser/ElectronBrowserHost'
@@ -5,11 +8,9 @@ import { PreviewAutomationHosts } from './components/preview/PreviewAutomationHo
 import { AppAtomRegistryProvider } from './rpc/atomRegistry'
 import type { AppRouter } from './router'
 
-/**
- * Owns renderer-wide providers. The Electron browser host intentionally sits
- * outside the router so its webviews survive route transitions, but it must
- * share the same atom registry as routed UI.
- */
+// owns renderer-wide providers. The Electron browser host intentionally sits
+// outside the router so its webviews survive route transitions, but it must
+// share the same atom registry as routed UI.
 export function AppRoot({ router }: { readonly router: AppRouter })
 {
   return (

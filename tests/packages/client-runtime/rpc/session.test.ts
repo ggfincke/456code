@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/rpc/session.test.ts
+// verify rpc session factory behavior
+
 import {
   DEFAULT_SERVER_SETTINGS,
   EnvironmentId,

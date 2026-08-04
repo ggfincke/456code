@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPendingElementContexts.tsx
+// render composer pending element contexts
+
 import { MousePointerClick, X } from 'lucide-react'
 
 import {

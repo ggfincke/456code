@@ -1,3 +1,6 @@
+// apps/web/src/lib/openPullRequestLink.ts
+// open pull request link
+
 import type { LocalApi } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 import { type MouseEvent, useCallback } from 'react'
@@ -22,7 +25,7 @@ export class PullRequestLinkOpenError extends Schema.TaggedErrorClass<PullReques
     }
     catch
     {
-      // Keep malformed URLs out of diagnostics while preserving the open failure below.
+      // keep malformed URLs out of diagnostics while preserving the open failure below.
     }
     return new PullRequestLinkOpenError({ targetOrigin, cause })
   }
@@ -50,13 +53,11 @@ export async function openPullRequestLink(
   }
 }
 
-/**
- * Returns a click handler that opens a pull request URL in the system browser.
- *
- * Stops event propagation/default so activating the link does not also trigger
- * an enclosing row or trigger (e.g. opening the branch dropdown), and surfaces a
- * toast when the local API is unavailable or the open fails.
- */
+// returns a click handler that opens a pull request URL in the system browser.
+//
+// stops event propagation/default so activating the link does not also trigger
+// an enclosing row or trigger (e.g. opening the branch dropdown), and surfaces a
+// toast when the local API is unavailable or the open fails.
 export function useOpenPrLink()
 {
   return useCallback((event: MouseEvent<HTMLElement>, prUrl: string) =>

@@ -1,3 +1,6 @@
+// tests/apps/web/pierre-icons.test.ts
+// verify pierre file icons behavior
+
 import { assert, describe, it } from 'vite-plus/test'
 
 import {

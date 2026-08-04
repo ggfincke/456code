@@ -1,3 +1,6 @@
+// tests/apps/server/cliAuthFormat.test.ts
+// verify cli auth format behavior
+
 import { expect, it } from '@effect/vitest'
 import * as DateTime from 'effect/DateTime'
 

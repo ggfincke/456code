@@ -1,3 +1,6 @@
+// tests/apps/server/service/bootService.test.ts
+// verify boot service behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'
@@ -75,7 +78,7 @@ const makeTestContext = Effect.fn('test.makeTestContext')(function* ()
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
   const root = yield* fs.makeTempDirectoryScoped({ prefix: 't3-boot-service-test-' })
-  // A real file for the stable-entry cases so status can confirm the entry
+  // a real file for the stable-entry cases so status can confirm the entry
   // point exists.
   const stableEntry = path.join(root, 'bin.mjs')
   yield* fs.writeFileString(stableEntry, '#!/usr/bin/env node\n')
@@ -221,7 +224,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
 
       const plan = yield* service.install
 
-      // A stable entry point is reused directly — no npm install.
+      // a stable entry point is reused directly — no npm install.
       assert.equal(plan.t3EntryPath, dirs.stableEntry)
       assert.deepEqual(
         commands.map((entry) => [entry.command, ...entry.args].join(' ')),
@@ -278,7 +281,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
         command: 'npm',
         args: ['install', '--prefix', runtimeDir, '--no-fund', '--no-audit', '456code@0.0.27'],
       })
-      // Success is recorded via a sentinel so interrupted installs re-run.
+      // success is recorded via a sentinel so interrupted installs re-run.
       assert.isTrue(yield* fs.exists(path.join(runtimeDir, '.install-complete')))
     }),
   )
@@ -347,7 +350,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
       const error = yield* service.install.pipe(Effect.flip)
       assert.isTrue(isCommandError(error))
       const runtimeDir = path.join(dirs.baseDir, 'runtime', 'versions', '0.0.27')
-      // The half-installed tree must not be reused by the next attempt.
+      // the half-installed tree must not be reused by the next attempt.
       assert.isFalse(yield* fs.exists(runtimeDir))
       assert.isFalse(yield* fs.exists(path.join(runtimeDir, '.install-complete')))
     }),
@@ -394,7 +397,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
       yield* service.install
       assert.isTrue((yield* service.status).current)
 
-      // The pinned runtime (or global bin) was deleted to reclaim space; the
+      // the pinned runtime (or global bin) was deleted to reclaim space; the
       // unit still matches byte-for-byte but would crashloop at boot.
       yield* fs.remove(dirs.stableEntry)
       const status = yield* service.status
@@ -448,7 +451,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
 
       const error = yield* service.install.pipe(Effect.flip)
       assert.isTrue(isCommandError(error))
-      // A leftover unit would make status report "installed" even though
+      // a leftover unit would make status report "installed" even though
       // linger never happened.
       assert.isFalse(
         yield* fs.exists(path.join(dirs.home, '.config', 'systemd', 'user', '456code.service')),

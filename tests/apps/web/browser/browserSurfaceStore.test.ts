@@ -1,3 +1,6 @@
+// tests/apps/web/browser/browserSurfaceStore.test.ts
+// verify browser surface store behavior
+
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 
 import {

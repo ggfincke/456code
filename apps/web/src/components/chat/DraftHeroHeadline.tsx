@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/DraftHeroHeadline.tsx
+// render draft hero headline
+
 import type { ScopedProjectRef } from '@t3tools/contracts'
 import { scopedProjectKey, scopeProjectRef } from '@t3tools/client-runtime/environment'
 import { FolderPlusIcon } from 'lucide-react'

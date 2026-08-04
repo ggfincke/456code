@@ -1,3 +1,6 @@
+// apps/server/src/persistence/AuthSessions.ts
+// expose auth session client metadata record
+
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

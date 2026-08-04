@@ -1,3 +1,6 @@
+// apps/mobile/src/state/assets.ts
+// manage asset environment state
+
 import { useAtomValue } from '@effect/atom-react'
 import { createAssetEnvironmentAtoms, resolveAssetUrl } from '@t3tools/client-runtime/state/assets'
 import type { AssetResource, EnvironmentId } from '@t3tools/contracts'

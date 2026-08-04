@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/terminalPreferences.ts
+// normalize terminal font size
+
 export const DEFAULT_TERMINAL_FONT_SIZE = 10.5
 export const TERMINAL_FONT_SIZE_STEP = 0.5
 export const MIN_TERMINAL_FONT_SIZE = 6

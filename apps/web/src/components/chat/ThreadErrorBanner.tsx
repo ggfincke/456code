@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ThreadErrorBanner.tsx
+// render thread error banner
+
 import { memo } from 'react'
 import { Alert, AlertAction, AlertDescription } from '../ui/alert'
 import { Button } from '../ui/button'

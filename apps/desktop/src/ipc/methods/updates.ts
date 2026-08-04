@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/methods/updates.ts
+// manage get update state
+
 import {
   DesktopUpdateActionResultSchema,
   DesktopUpdateChannelSchema,

@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/usePreviewBridge.ts
+// manage preview bridge through a React hook
+
 'use client'
 
 import type {
@@ -15,10 +18,8 @@ import { useAtomCommand } from '~/state/use-atom-command'
 
 import { previewBridge } from './previewBridge'
 
-/**
- * Mirrors low-latency desktop state into the store and reflects navigation
- * events back to the server. Webview lifetime is owned by ElectronBrowserHost.
- */
+// mirrors low-latency desktop state into the store and reflects navigation
+// events back to the server. Webview lifetime is owned by ElectronBrowserHost.
 export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: string }): void
 {
   const { threadRef, tabId } = input
@@ -26,7 +27,7 @@ export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: str
   const reportStatus = useAtomCommand(previewEnvironment.reportStatus, 'preview status report')
   const bridge = previewBridge
 
-  // One bridge subscription does both jobs (mirror state + forward to
+  // one bridge subscription does both jobs (mirror state + forward to
   // server) so the desktop bridge keeps a single listener entry per tab.
   const lastReportedUrl = useRef<string | null>(null)
   const lastReportedKind = useRef<DesktopPreviewTabState['navStatus']['kind'] | null>(null)
@@ -88,16 +89,14 @@ function projectDesktopState(state: DesktopPreviewTabState): DesktopPreviewOverl
   }
 }
 
-/**
- * Decide whether a state change warrants an RPC to the server, and shape
- * the report payload.
- *
- * - Idle never reports — the tab is post-close or pre-load and the server
- *   already knows the canonical state from `open` / `closed`.
- * - We dedupe on (kind, url): consecutive Loading→Loading→Loading for the
- *   same URL collapses to a single RPC, ditto Success.
- * - LoadFailed always reports (the server uses it to emit `failed`).
- */
+// decide whether a state change warrants an RPC to the server, and shape
+// the report payload.
+//
+// - Idle never reports — the tab is post-close or pre-load and the server
+//   already knows the canonical state from `open` / `closed`.
+// - We dedupe on (kind, url): consecutive Loading->Loading->Loading for the
+//   same URL collapses to a single RPC, ditto Success.
+// - LoadFailed always reports (the server uses it to emit `failed`).
 function buildReportInput(args: {
   readonly threadId: ThreadId
   readonly tabId: string
@@ -114,7 +113,7 @@ function buildReportInput(args: {
   const status = state.navStatus
   if (status.kind === 'Idle') return null
 
-  // Skip if we've already reported the same kind+url. LoadFailed always
+  // skip if we've already reported the same kind+url. LoadFailed always
   // reports (rapid duplicate failures are unusual and worth surfacing).
   const sameAsLast =
     status.kind !== 'LoadFailed' &&

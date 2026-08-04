@@ -1,3 +1,6 @@
+// apps/desktop/src/backend/tailscaleEndpointProvider.ts
+// resolve tailscale advertised endpoints
+
 import { createAdvertisedEndpoint } from '@t3tools/shared/advertisedEndpoint'
 import type { AdvertisedEndpoint, AdvertisedEndpointProvider } from '@t3tools/contracts'
 import {

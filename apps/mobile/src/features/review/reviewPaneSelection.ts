@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewPaneSelection.ts
+// resolve selected review file id
+
 export interface ReviewPaneFileSelection
 {
   readonly sectionId: string | null

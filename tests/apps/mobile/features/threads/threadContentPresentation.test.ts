@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/threads/threadContentPresentation.test.ts
+// verify thread content presentation behavior
+
 import { describe, expect, it } from '@effect/vitest'
 
 import { projectThreadContentPresentation } from '../../../../../apps/mobile/src/features/threads/threadContentPresentation'

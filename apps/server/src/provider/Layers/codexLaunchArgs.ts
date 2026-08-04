@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/codexLaunchArgs.ts
+// assemble codex launch args Effect layer
+
 import { tokenizeCliArgs } from '@t3tools/shared/cliArgs'
 
 export const T3CODE_CODEX_LAUNCH_ARGS_ENV = 'T3CODE_CODEX_LAUNCH_ARGS'

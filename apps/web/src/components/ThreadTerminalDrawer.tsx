@@ -997,9 +997,9 @@ interface ThreadTerminalDrawerProps
   onHeightChange: (height: number) => void
   onAddTerminalContext: (selection: TerminalContextSelection) => void
   keybindings: ResolvedKeybindingsConfig
-  /** Prefer server-provided tab titles when present (e.g. active subprocess name). */
+  // prefer server-provided tab titles when present (e.g. active subprocess name).
   terminalLabelsById?: ReadonlyMap<string, string>
-  /** Prefer per-session launch locations when the server already knows a terminal. */
+  // prefer per-session launch locations when the server already knows a terminal.
   terminalLaunchLocationsById?: ReadonlyMap<string, TerminalLaunchLocation>
 }
 

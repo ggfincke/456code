@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/serialized-async-queue.test.ts
+// verify serialized async queue behavior
+
 import { describe, expect, it } from '@effect/vitest'
 
 import { SerializedAsyncQueue } from '../../../../apps/mobile/src/lib/serialized-async-queue'

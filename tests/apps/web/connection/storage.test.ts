@@ -1,3 +1,6 @@
+// tests/apps/web/connection/storage.test.ts
+// verify make catalog store behavior
+
 import { ConnectionTransientError } from '@t3tools/client-runtime/connection'
 import { ConnectionCatalogDocument } from '@t3tools/client-runtime/platform'
 import { describe, expect, it } from '@effect/vitest'

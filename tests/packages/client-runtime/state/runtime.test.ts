@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/runtime.test.ts
+// verify settle async result behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import { EnvironmentId } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'

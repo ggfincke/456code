@@ -1,3 +1,6 @@
+// tests/apps/server/auth/PairingGrantStore.test.ts
+// verify pairing grant store behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { expect, it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'
@@ -180,7 +183,7 @@ it.layer(NodeServices.layer)('PairingGrantStore.layer', (it) =>
     {
       const bootstrapCredentials = yield* PairingGrantStore.PairingGrantStore
 
-      // The desktop-bootstrap grant lives for 24h. Within that window
+      // the desktop-bootstrap grant lives for 24h. Within that window
       // it stays reusable.
       yield* TestClock.adjust(Duration.hours(12))
       const stillValid = yield* bootstrapCredentials.consume('desktop-bootstrap-token')

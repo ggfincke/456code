@@ -1,3 +1,6 @@
+// apps/mobile/src/components/AppText.tsx
+// render app text
+
 import {
   Text as RNText,
   TextInput as RNTextInput,
@@ -9,10 +12,8 @@ import { cn } from '../lib/cn'
 
 export type AppTextProps = RNTextProps & { readonly className?: string }
 
-/**
- * Thin wrapper around RN Text with default font-family and foreground color.
- * Uses Uniwind className — no manual style parsing.
- */
+// thin wrapper around RN Text with default font-family and foreground color.
+// uses Uniwind className — no manual style parsing.
 export function AppText({ className, ...props }: AppTextProps)
 {
   return <RNText className={cn('font-sans text-foreground', className)} {...props} />
@@ -23,10 +24,8 @@ export type AppTextInputProps = Omit<RNTextInputProps, 'placeholderTextColor'> &
   readonly ref?: React.Ref<RNTextInput>
 }
 
-/**
- * Thin wrapper around RN TextInput with default input styling.
- * Uses Uniwind className — no manual style parsing.
- */
+// thin wrapper around RN TextInput with default input styling.
+// uses Uniwind className — no manual style parsing.
 export function AppTextInput({ className, ref, ...props }: AppTextInputProps)
 {
   return (

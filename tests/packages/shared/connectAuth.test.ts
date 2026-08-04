@@ -1,3 +1,6 @@
+// tests/packages/shared/connectAuth.test.ts
+// verify connect auth behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

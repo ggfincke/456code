@@ -1,3 +1,6 @@
+// apps/web/src/routes/settings.general.tsx
+// render the settings general route
+
 import { createFileRoute } from '@tanstack/react-router'
 
 import { GeneralSettingsPanel } from '../components/settings/SettingsPanels'

@@ -1,3 +1,6 @@
+// tests/apps/server/processRunner.test.ts
+// verify run process behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import * as Deferred from 'effect/Deferred'
 import * as Duration from 'effect/Duration'
@@ -22,7 +25,7 @@ type ChildProcessCommand = {
   }
 }
 
-// Accesses private properties of ChildProcessCommand for testing purposes
+// accesses private properties of ChildProcessCommand for testing purposes
 function asChildProcessCommand(command: unknown): ChildProcessCommand
 {
   return command as ChildProcessCommand

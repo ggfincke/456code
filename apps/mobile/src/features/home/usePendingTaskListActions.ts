@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/usePendingTaskListActions.ts
+// manage pending task list actions through a React hook
+
 import { useNavigation } from '@react-navigation/native'
 import { useCallback } from 'react'
 import { Alert } from 'react-native'
@@ -40,7 +43,7 @@ export function usePendingTaskListActions(): {
           style: 'destructive',
           onPress: () =>
           {
-            // Release the edit lock only after removal succeeds, and only if
+            // release the edit lock only after removal succeeds, and only if
             // it is held for THIS task — clearing it up front (or for another
             // task) would let the drain deliver a mid-edit payload.
             void removeThreadOutboxMessage(pendingTask.message)

@@ -1,3 +1,6 @@
+// tests/apps/server/provider/Drivers/ClaudeSkills.test.ts
+// verify claude skills behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -108,13 +111,13 @@ it.layer(NodeServices.layer)('discoverClaudeSkills', (it) =>
 
       yield* writeSkill(skillsDir, 'no-frontmatter', '# Just a heading\n')
       yield* writeSkill(skillsDir, 'broken-yaml', '---\nname: [unclosed\n---\n')
-      // A stray file (not a directory with SKILL.md) must be skipped.
+      // a stray file (not a directory with SKILL.md) must be skipped.
       yield* fs.makeDirectory(skillsDir, { recursive: true })
       yield* fs.writeFileString(path.join(skillsDir, 'README.md'), 'not a skill')
 
       const skills = yield* discoverClaudeSkills({ homePath: configDir }, undefined)
 
-      // A skill with no frontmatter falls back to its directory name; a skill
+      // a skill with no frontmatter falls back to its directory name; a skill
       // whose frontmatter fails to parse is skipped entirely (Claude Code
       // won't load it either).
       assert.deepEqual(
@@ -148,7 +151,7 @@ it.layer(NodeServices.layer)('discoverClaudeSkills', (it) =>
         ['env-skill'],
       )
 
-      // An explicit homePath wins over the environment variable, matching
+      // an explicit homePath wins over the environment variable, matching
       // makeClaudeEnvironment which overwrites CLAUDE_CONFIG_DIR for the CLI.
       const explicitHome = path.join(tempDir, 'explicit-home')
       yield* writeSkill(
@@ -175,7 +178,7 @@ it.layer(NodeServices.layer)('discoverClaudeSkills', (it) =>
       const workspace = path.join(tempDir, 'workspace')
       yield* fs.makeDirectory(workspace, { recursive: true })
 
-      // The spawned CLI resolves a relative CLAUDE_CONFIG_DIR against its own
+      // the spawned CLI resolves a relative CLAUDE_CONFIG_DIR against its own
       // cwd (the workspace), so discovery must do the same.
       yield* writeSkill(
         path.join(workspace, 'relative-config', 'skills'),

@@ -1,3 +1,6 @@
+// oxlint-plugin-456code/rules/no-manual-effect-runtime-in-tests.ts
+// implement repository no manual effect runtime in tests
+
 import { defineRule } from '@oxlint/plugins'
 import * as Option from 'effect/Option'
 
@@ -19,7 +22,7 @@ const EFFECT_RUNTIME_METHODS = new Set([
   'runSyncWith',
 ])
 
-// Existing manual runners are tracked as debt. The rule permits no net-new
+// existing manual runners are tracked as debt. The rule permits no net-new
 // occurrences in these files, while unlisted test files must have zero.
 const LEGACY_BASELINE = new Map<string, number>([
   ['tests/apps/mobile/features/agent-awareness/liveActivityPreferences.test.ts', 1],

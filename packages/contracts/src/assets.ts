@@ -1,3 +1,6 @@
+// packages/contracts/src/assets.ts
+// define assets contracts
+
 import * as Schema from 'effect/Schema'
 
 import { ThreadId, TrimmedNonEmptyString } from './baseSchemas.ts'

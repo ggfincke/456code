@@ -1,3 +1,6 @@
+// tests/apps/desktop/preview/PlaywrightInjectedRuntime.test.ts
+// verify playwright injected runtime behavior
+
 import { it as effectIt } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import { describe, expect } from 'vite-plus/test'

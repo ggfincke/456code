@@ -1,3 +1,6 @@
+// tests/packages/shared/remote.test.ts
+// verify remote remote behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

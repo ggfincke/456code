@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/010_ProjectionThreadsRuntimeMode.ts
+// apply persistence migration 010 projection threads runtime mode
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

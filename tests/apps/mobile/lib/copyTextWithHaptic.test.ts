@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/copyTextWithHaptic.test.ts
+// verify copy text with haptic behavior
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const mocks = vi.hoisted(() => ({

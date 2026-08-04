@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/021_AuthSessionClientMetadata.ts
+// apply persistence migration 021 auth session client metadata
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

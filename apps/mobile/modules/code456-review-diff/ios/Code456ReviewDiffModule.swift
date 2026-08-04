@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-review-diff/ios/Code456ReviewDiffModule.swift
+// registers the iOS review diff module
 import ExpoModulesCore
 
 public class Code456ReviewDiffModule: Module {
@@ -75,7 +77,7 @@ public class Code456ReviewDiffModule: Module {
         view.scrollToTop(animated: animated)
       }
 
-      // Large, frequently changing JSON values cannot be regular Fabric props. Expo's
+      // large, frequently changing JSON values cannot be regular Fabric props. Expo's
       // prop adapter compares strings on the main thread before invoking a setter, which
       // makes a syntax-token patch capable of blocking a frame by itself.
       AsyncFunction("setRowsJson") { (view: Code456ReviewDiffView, rowsJson: String) in

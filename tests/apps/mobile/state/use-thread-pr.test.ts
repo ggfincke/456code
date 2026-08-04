@@ -1,3 +1,6 @@
+// tests/apps/mobile/state/use-thread-pr.test.ts
+// verify present thread pr behavior
+
 import type { VcsStatusResult } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

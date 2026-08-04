@@ -1,3 +1,6 @@
+// tests/apps/web/filePathDisplay.test.ts
+// verify format workspace relative path behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { formatWorkspaceRelativePath } from '../../../apps/web/src/filePathDisplay'

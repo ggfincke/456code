@@ -15,11 +15,9 @@ type InlineCodePathAstNode = {
 
 const LINK_NODE_TYPES = new Set(['link', 'linkReference', 'image', 'imageReference'])
 
-/**
- * Rewrites `path/to/file.md` spans into anchors carrying `dataFilePathChip`, so
- * the chat markdown `a` renderer can render them as file chips that open the
- * preview. Code inside a link keeps the link's own destination and is skipped.
- */
+// rewrites `path/to/file.md` spans into anchors carrying `dataFilePathChip`, so
+// the chat markdown `a` renderer can render them as file chips that open the
+// preview. Code inside a link keeps the link's own destination and is skipped.
 export function remarkLinkInlineCodePaths()
 {
   return (tree: InlineCodePathAstNode) =>

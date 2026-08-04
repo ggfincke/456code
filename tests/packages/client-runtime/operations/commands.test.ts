@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/operations/commands.test.ts
+// verify environment commands behavior
+
 import {
   CommandId,
   EnvironmentId,

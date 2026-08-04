@@ -373,10 +373,13 @@ export function mapCodexModelCapabilities(
 
 const toDisplayName = (model: CodexSchema.V2ModelListResponse__Model): string =>
 {
-  // Capitalize 'gpt' to 'GPT-' and capitalize any letter following a dash
-  return model.displayName
-    .replace(/^gpt/i, 'GPT') // Handle start with 'gpt' or 'GPT'
-    .replace(/-([a-z])/g, (_, c) => '-' + c.toUpperCase())
+  // capitalize 'gpt' to 'GPT-' and capitalize any letter following a dash
+  return (
+    model.displayName
+      // handle start with 'gpt' or 'GPT'
+      .replace(/^gpt/i, 'GPT')
+      .replace(/-([a-z])/g, (_, c) => '-' + c.toUpperCase())
+  )
 }
 
 function parseCodexModelListResponse(
@@ -392,10 +395,8 @@ function parseCodexModelListResponse(
   }))
 }
 
-/**
- * Prefer our own default-model ranking when one of the preferred slugs is in
- * the live catalog; otherwise keep whatever Codex itself flagged as default.
- */
+// prefer our own default-model ranking when one of the preferred slugs is in
+// the live catalog; otherwise keep whatever Codex itself flagged as default.
 export function applyPreferredCodexDefaultModel(
   models: ReadonlyArray<ServerProviderModel>,
 ): ReadonlyArray<ServerProviderModel>
@@ -541,7 +542,7 @@ const probeCodexAppServerProvider = Effect.fn('probeCodexAppServerProvider')(fun
   // `~` is not shell-expanded when env vars are set via `child_process.spawn`,
   // so `CODEX_HOME=~/.codex_work` would reach codex verbatim and trip
   // "CODEX_HOME points to '~/.codex_work', but that path does not exist".
-  // Expand here for parity with `CodexTextGeneration`/`CodexSessionRuntime`.
+  // expand here for parity with `CodexTextGeneration`/`CodexSessionRuntime`.
   const resolvedHomePath = input.homePath ? expandHomePath(input.homePath) : undefined
   const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const environment = {
@@ -592,7 +593,7 @@ const probeCodexAppServerProvider = Effect.fn('probeCodexAppServerProvider')(fun
   })
   yield* client.notify('initialized', undefined)
 
-  // Extract the version string after the first '/' in userAgent, up to the next space or the end
+  // extract the version string after the first '/' in userAgent, up to the next space or the end
   const versionMatch = initialize.userAgent.match(/\/([^\s]+)/)
   const version = versionMatch ? versionMatch[1] : undefined
 
@@ -852,11 +853,5 @@ export const checkCodexProviderStatus = Effect.fn('checkCodexProviderStatus')(fu
   })
 })
 
-// NOTE: the singleton `CodexProviderLive` Layer has been removed as part of
-// the per-instance-driver refactor. `CodexDriver.create()` builds a managed
-// snapshot per instance (each with its own `CodexSettings`) and hands the
-// resulting `ServerProviderShape` back as `ProviderInstance.snapshot`.
-//
-// The `makePendingCodexProvider` and `checkCodexProviderStatus` helpers are
-// re-exported for use by `CodexDriver`.
+// expose the pending provider factory to the per-instance Codex driver
 export { makePendingCodexProvider }

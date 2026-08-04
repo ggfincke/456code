@@ -1,3 +1,6 @@
+// apps/web/src/lib/terminalUiStateCleanup.ts
+// collect active terminal ui thread keys
+
 interface TerminalUiRetentionThread
 {
   key: string

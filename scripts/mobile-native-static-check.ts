@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// scripts/mobile-native-static-check.ts
+// run the mobile native static check repository workflow
 
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'

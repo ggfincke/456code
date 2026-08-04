@@ -1,3 +1,6 @@
+// apps/mobile/src/persistence/layer.ts
+// assemble mobile persistence Effect layers
+
 import * as Layer from 'effect/Layer'
 
 import * as EnvironmentCacheStore from '../connection/environment-cache-store'

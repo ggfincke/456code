@@ -1,3 +1,6 @@
+// tests/apps/desktop/ipc/DesktopIpc.test.ts
+// verify desktop ipc behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'

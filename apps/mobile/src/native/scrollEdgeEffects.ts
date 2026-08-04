@@ -1,5 +1,6 @@
-// Pure helpers for native header scroll-edge effects. Kept free of
+// apps/mobile/src/native/scrollEdgeEffects.ts
 // react-native / react-navigation imports so they stay unit-testable in node
+
 // (those packages ship untranspiled Flow syntax).
 
 export type NativeTopScrollEdgeEffect = 'automatic' | 'soft'
@@ -20,7 +21,7 @@ export function nativeTopScrollEdgeEffect(
     return 'automatic'
   }
 
-  // The standalone RNS/Mail spike that matched Messages/GitHub used UIKit's
+  // the standalone RNS/Mail spike that matched Messages/GitHub used UIKit's
   // automatic scroll-edge behavior. Forcing `soft` on iOS 27 makes production
   // look like a local overlay instead of sampling the app content edge-to-edge.
   return 'automatic'

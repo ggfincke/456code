@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/layer.ts
+// assemble client connection Effect layers
+
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Stream from 'effect/Stream'

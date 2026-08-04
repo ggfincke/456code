@@ -1,20 +1,19 @@
 // apps/server/src/provider/testUtils/providerAdapterRegistryMock.ts
 // builds provider adapter registry mocks for focused server tests
-/**
- * Test helpers for constructing a `ProviderAdapterRegistryShape` mock from a
- * kind-keyed adapter map.
- *
- * Tests historically assembled a `registry` object with only `getByProvider`
- * + `listProviders` populated. Slice D grew the shape with `getByInstance`
- * and `listInstances`; this helper fills both in from a single kind-keyed
- * input so individual fixtures can stay concise.
- *
- * Non-default instance ids (e.g. `codex_personal`) are not addressable via
- * the shim returned here — the legacy test fixtures only ever had
- * single-instance-per-driver data anyway.
- *
- * @module provider/testUtils/providerAdapterRegistryMock
- */
+
+// test helpers for constructing a `ProviderAdapterRegistryShape` mock from a
+// kind-keyed adapter map.
+//
+// tests historically assembled a `registry` object with only `getByProvider`
+// + `listProviders` populated. Slice D grew the shape with `getByInstance`
+// and `listInstances`; this helper fills both in from a single kind-keyed
+// input so individual fixtures can stay concise.
+//
+// non-default instance ids (e.g. `codex_personal`) are not addressable via
+// the shim returned here — the legacy test fixtures only ever had
+// single-instance-per-driver data anyway.
+//
+// @module provider/testUtils/providerAdapterRegistryMock
 import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
@@ -34,12 +33,10 @@ export type KindAdapterMap = Partial<
   Record<ProviderDriverKind, ProviderAdapterShape<ProviderAdapterError>>
 >
 
-/**
- * Build a `ProviderAdapterRegistryShape` from a kind-keyed adapter map.
- * Every adapter present in the map is addressable via both the legacy
- * `getByProvider(kind)` path and the new `getByInstance(id)` path (where
- * `id = defaultInstanceIdForDriver(kind)`).
- */
+// build a `ProviderAdapterRegistryShape` from a kind-keyed adapter map.
+// every adapter present in the map is addressable via both the legacy
+// `getByProvider(kind)` path and the new `getByInstance(id)` path (where
+// `id = defaultInstanceIdForDriver(kind)`).
 export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapterRegistryShape =>
 {
   const byInstanceId = new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>()
@@ -87,7 +84,7 @@ export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapt
           ),
         ),
       ),
-    // Static test fixtures don't reload; an empty stream is enough to
+    // static test fixtures don't reload; an empty stream is enough to
     // satisfy the shape. Tests exercising hot-reload build their own
     // stream via the real `ProviderInstanceRegistry`.
     streamChanges: Stream.empty,

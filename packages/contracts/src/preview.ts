@@ -1,13 +1,12 @@
-/**
- * Preview - Schemas for the in-app browser preview surface.
- *
- * The preview is desktop-only (Chromium <webview>); the server tracks per-thread
- * tab metadata so it survives client reconnects and multi-window. The desktop
- * renderer mediates: it owns the actual <webview> and reports navigation back to
- * the server via these RPCs, the server fans events to all subscribers.
- *
- * @module Preview
- */
+// packages/contracts/src/preview.ts
+// define preview contracts
+
+// the preview is desktop-only (Chromium <webview>); the server tracks per-thread
+// tab metadata so it survives client reconnects and multi-window. The desktop
+// renderer mediates: it owns the actual <webview> and reports navigation back to
+// the server via these RPCs, the server fans events to all subscribers.
+//
+// @module Preview
 import { Schema } from 'effect'
 import { ThreadId, TrimmedNonEmptyString } from './baseSchemas.ts'
 
@@ -40,11 +39,9 @@ export const PreviewViewportSize = Schema.Struct({
 }).check(viewportAreaFilter)
 export type PreviewViewportSize = typeof PreviewViewportSize.Type
 
-/**
- * The page's measured viewport can be smaller than the minimum selectable
- * fixed size while fill mode follows a narrow panel. Keep measurement
- * validation separate from the stricter user-selectable size constraints.
- */
+// the page's measured viewport can be smaller than the minimum selectable
+// fixed size while fill mode follows a narrow panel. Keep measurement
+// validation separate from the stricter user-selectable size constraints.
 export const PreviewRenderedViewportSize = Schema.Struct({
   width: Schema.Int.check(Schema.isGreaterThan(0)),
   height: Schema.Int.check(Schema.isGreaterThan(0)),
@@ -74,11 +71,9 @@ export const PREVIEW_VIEWPORT_PRESET_IDS = [
 export const PreviewViewportPresetId = Schema.Literals(PREVIEW_VIEWPORT_PRESET_IDS)
 export type PreviewViewportPresetId = typeof PreviewViewportPresetId.Type
 
-/**
- * Preset IDs shipped before the Chrome-compatible catalog. Existing sessions
- * can still reconnect with these values, but new resize requests only expose
- * PREVIEW_VIEWPORT_PRESET_IDS.
- */
+// preset IDs shipped before the Chrome-compatible catalog. Existing sessions
+// can still reconnect with these values, but new resize requests only expose
+// PREVIEW_VIEWPORT_PRESET_IDS.
 const LEGACY_PREVIEW_VIEWPORT_PRESET_IDS = [
   'desktop-1920x1080',
   'desktop-1440x900',
@@ -136,7 +131,7 @@ export const PreviewSessionSnapshot = Schema.Struct({
   navStatus: PreviewNavStatus,
   canGoBack: Schema.Boolean,
   canGoForward: Schema.Boolean,
-  /** Missing snapshots from older servers are treated as fill-panel mode. */
+  // missing snapshots from older servers are treated as fill-panel mode.
   viewport: Schema.optional(PreviewViewportSetting),
   updatedAt: Schema.String,
 })
@@ -144,7 +139,7 @@ export type PreviewSessionSnapshot = typeof PreviewSessionSnapshot.Type
 
 export const PreviewOpenInput = Schema.Struct({
   threadId: ThreadId,
-  /** Omit to create an empty (Idle) tab the user can type into. */
+  // omit to create an empty (Idle) tab the user can type into.
   url: Schema.optional(Url),
 })
 export type PreviewOpenInput = typeof PreviewOpenInput.Type
@@ -242,10 +237,8 @@ export const PreviewEvent = Schema.Union([
 ])
 export type PreviewEvent = typeof PreviewEvent.Type
 
-/**
- * A localhost server detected by the port scanner. Used to populate the
- * "Local" recommendations in the empty-state of the preview panel.
- */
+// a localhost server detected by the port scanner. Used to populate the
+// "Local" recommendations in the empty-state of the preview panel.
 export const DiscoveredLocalServer = Schema.Struct({
   host: TrimmedNonEmptyString,
   port: Schema.Int.check(Schema.isGreaterThan(0)).check(Schema.isLessThan(65536)),

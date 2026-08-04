@@ -1,3 +1,6 @@
+// apps/web/src/browser/browserPointerStore.ts
+// manage browser pointer store through a React hook
+
 import type { DesktopPreviewPointerEvent } from '@t3tools/contracts'
 import { create } from 'zustand'
 

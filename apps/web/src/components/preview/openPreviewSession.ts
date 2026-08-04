@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/openPreviewSession.ts
+// open preview session
+
 import type {
   EnvironmentId,
   PreviewOpenInput,

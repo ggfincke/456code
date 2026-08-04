@@ -1,3 +1,6 @@
+// apps/web/src/editorPreferences.ts
+// define preferred editor environment required error
+
 import { EDITORS, EditorId, EnvironmentId } from '@t3tools/contracts'
 import {
   mapAtomCommandResult,

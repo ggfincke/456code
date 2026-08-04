@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/threadSnapshotHttp.ts
+// manage fetch environment thread snapshot state
+
 import type { OrchestrationThreadDetailSnapshot, ThreadId } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import * as Context from 'effect/Context'
@@ -16,16 +19,14 @@ import {
 } from '../rpc/http.ts'
 import { buildEnvironmentAuthHeaders, withEnvironmentCredentials } from './environmentHttpAuth.ts'
 
-// Bounded so a pathologically slow endpoint cannot block the (cheaper) socket
+// bounded so a pathologically slow endpoint cannot block the (cheaper) socket
 // fallback for long. The cached thread renders while this runs, so the wait only
 // delays the transition to live data on the first open, not the initial paint.
 const DEFAULT_THREAD_SNAPSHOT_TIMEOUT_MS = 6_000
 
-/**
- * Load a thread's detail snapshot over HTTP instead of embedding it in the
- * WebSocket subscription's first frame. The response is gzip-compressible by
- * the transport and keeps the (potentially multi-KB) snapshot off the socket.
- */
+// load a thread's detail snapshot over HTTP instead of embedding it in the
+// WebSocket subscription's first frame. The response is gzip-compressible by
+// the transport and keeps the (potentially multi-KB) snapshot off the socket.
 export const fetchEnvironmentThreadSnapshot = Effect.fn(
   'clientRuntime.state.fetchEnvironmentThreadSnapshot',
 )(function* (input: {
@@ -87,7 +88,7 @@ export const threadSnapshotLoaderLayer: Layer.Layer<
   Effect.gen(function* ()
   {
     const httpClient = yield* HttpClient.HttpClient
-    // Resolve the DPoP signer optionally: it is only needed for relay/DPoP
+    // resolve the DPoP signer optionally: it is only needed for relay/DPoP
     // connections, so the loader must not hard-require it (bearer/primary
     // connections work without one).
     const signer = yield* Effect.serviceOption(ManagedRelayDpopSigner)
@@ -96,7 +97,7 @@ export const threadSnapshotLoaderLayer: Layer.Layer<
         fetchEnvironmentThreadSnapshot({ prepared, threadId, signer }).pipe(
           Effect.map(Option.some<OrchestrationThreadDetailSnapshot>),
           Effect.provideService(HttpClient.HttpClient, httpClient),
-          // A genuinely missing thread (404) is expected — the socket
+          // a genuinely missing thread (404) is expected — the socket
           // subscription is the source of truth for thread existence and will
           // surface the deletion — so don't treat it as an error worth warning
           // about; just defer to the socket path.

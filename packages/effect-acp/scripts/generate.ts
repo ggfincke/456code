@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// packages/effect-acp/scripts/generate.ts
+// run the generate repository workflow
 
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'

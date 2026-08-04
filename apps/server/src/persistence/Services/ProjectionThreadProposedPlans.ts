@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Services/ProjectionThreadProposedPlans.ts
+// define projection thread proposed plans service contract
+
 import {
   IsoDateTime,
   OrchestrationProposedPlanId,

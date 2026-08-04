@@ -1,13 +1,11 @@
 // apps/desktop/src/preview/Manager.ts
 // owns desktop preview tabs, automation, picking, and recording lifecycles
 
-/**
- * Desktop side of the in-app browser preview.
- *
- * Hosts per-tab Chromium WebContents references (the actual <webview>
- * elements live in the renderer; we only attach listeners and forward state
- * here). Single layer-scoped browser session partition.
- */
+// desktop side of the in-app browser preview.
+//
+// hosts per-tab Chromium WebContents references (the actual <webview>
+// elements live in the renderer; we only attach listeners and forward state
+// here). Single layer-scoped browser session partition.
 import type {
   DesktopPreviewAnnotationTheme,
   DesktopPreviewColorScheme,
@@ -94,7 +92,7 @@ export interface PreviewTabState
   updatedAt: string
 }
 
-/** Discrete zoom levels mirroring Chrome's preset list. */
+// discrete zoom levels mirroring Chrome's preset list.
 const ZOOM_LEVELS: ReadonlyArray<number> = [
   0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0,
 ]
@@ -367,13 +365,13 @@ const APP_FORWARDED_SHORTCUTS: ReadonlyArray<{
   shift: boolean
   control: boolean
 }> = Object.freeze([
-  // mod+shift+J → preview.toggle
+  // mod+shift+J -> preview.toggle
   { key: 'j', meta: true, shift: true, control: false },
-  // mod+K → command palette
+  // mod+K -> command palette
   { key: 'k', meta: true, shift: false, control: false },
-  // mod+, → settings (macOS convention)
+  // mod+, -> settings (macOS convention)
   { key: ',', meta: true, shift: false, control: false },
-  // mod+W → close tab/panel
+  // mod+W -> close tab/panel
   { key: 'w', meta: true, shift: false, control: false },
 ])
 
@@ -1021,7 +1019,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           return result
         },
       )
-      // Cleanup commands must still run after human input invalidates the action's
+      // cleanup commands must still run after human input invalidates the action's
       // control epoch. Otherwise a partially dispatched input can leave Chromium
       // with a held key or focus emulation enabled for subsequent actions.
       const sendCleanup: SendCommand = Effect.fn('PreviewManager.sendCleanupCommand')(
@@ -1266,7 +1264,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       {
         const current = tabs.get(tabId)
         if (!current) return [Option.none<PreviewTabState>(), tabs] as const
-        // Electron emits did-stop-loading after did-fail-load. At that point the
+        // electron emits did-stop-loading after did-fail-load. At that point the
         // failed guest is no longer "loading", but it has not successfully
         // navigated anywhere. Keep the failure until a new load actually starts.
         const navStatus =
@@ -1888,7 +1886,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     yield* update(tabId, { zoomFactor: next })
   })
 
-  // Emulated media lives on the CDP debugger session, not the WebContents, so
+  // emulated media lives on the CDP debugger session, not the WebContents, so
   // it is lost whenever the session detaches (webview swap, DevTools
   // open/close) and must be re-applied after every (re)attach.
   const applyColorScheme = Effect.fn('PreviewManager.applyColorScheme')(function* (
@@ -1903,7 +1901,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         features: [
           {
             name: 'prefers-color-scheme',
-            // An empty value clears the override so the page follows the OS.
+            // an empty value clears the override so the page follows the OS.
             value: colorScheme === 'system' ? '' : colorScheme,
           },
         ],
@@ -1911,7 +1909,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     )
   })
 
-  // Re-establish the control session after a detach, restoring any
+  // re-establish the control session after a detach, restoring any
   // color-scheme override the tab carries. The scheme is read after the
   // session attaches so a concurrent setColorScheme is not overwritten with
   // a stale snapshot.
@@ -1938,12 +1936,12 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     }
     if (tab.colorScheme !== colorScheme)
     {
-      // Record the choice even when the CDP call below can't run yet (no
+      // record the choice even when the CDP call below can't run yet (no
       // webview, DevTools holding the debugger) — it is re-applied on the
       // next control-session (re)attach.
       yield* update(tabId, { colorScheme })
     }
-    // Re-read after the update: registerWebview may have swapped the guest
+    // re-read after the update: registerWebview may have swapped the guest
     // in the meantime and the override must land on the current one.
     const webContentsId = (yield* SynchronizedRef.get(tabsRef)).get(tabId)?.webContentsId
     if (webContentsId == null) return
@@ -2574,7 +2572,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       }
     })
 
-    // Focus the guest WebContents itself, not its containing BrowserWindow. This
+    // focus the guest WebContents itself, not its containing BrowserWindow. This
     // activates native keyboard behavior for hidden/background previews without
     // changing which thread is mounted in the UI. Restore the previous renderer
     // after dispatch so automation never leaves the app's input focus behind.

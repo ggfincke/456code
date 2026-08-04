@@ -1,3 +1,6 @@
+// apps/web/vercel.ts
+// configure Vercel routing for the web application
+
 import { matchers, routes, type Transform, type VercelConfig } from '@vercel/config/v1'
 
 const ROUTER_HOST = 'app.t3.codes'

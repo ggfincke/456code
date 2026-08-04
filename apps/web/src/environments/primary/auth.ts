@@ -1,3 +1,6 @@
+// apps/web/src/environments/primary/auth.ts
+// handle web authentication
+
 import type {
   AuthBrowserSessionResult,
   AuthClientMetadata,
@@ -193,7 +196,7 @@ export function takePairingTokenFromUrl(): string | null
 
 function getDesktopBootstrapCredential(): string | null
 {
-  // Both backends share the same bootstrap token (DesktopBackendConfiguration
+  // both backends share the same bootstrap token (DesktopBackendConfiguration
   // mints one tokenRef and feeds it to both resolvers), so picking the
   // primary entry is fine even when the WSL backend is also registered.
   const bootstraps = window.desktopBridge?.getLocalEnvironmentBootstraps() ?? []
@@ -621,7 +624,7 @@ export async function resolveInitialServerAuthGateState(): Promise<ServerAuthGat
     })
 }
 
-// Used by the WSL backend swap: invalidate the cached authenticated state
+// used by the WSL backend swap: invalidate the cached authenticated state
 // (the new backend signs sessions with a different key) and re-bootstrap
 // against the desktop bootstrap credential so the next WS reconnect doesn't
 // hit 401 and start a reauth loop in the renderer.

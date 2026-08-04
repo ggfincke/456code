@@ -1,3 +1,6 @@
+// tests/packages/ssh/command.test.ts
+// verify ssh command behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Duration from 'effect/Duration'

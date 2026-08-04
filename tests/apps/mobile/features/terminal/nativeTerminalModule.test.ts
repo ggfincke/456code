@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/terminal/nativeTerminalModule.test.ts
+// verify resolve native terminal surface view behavior
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const expoMocks = vi.hoisted(() => ({

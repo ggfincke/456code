@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/appearance/sections/TerminalAppearanceSection.tsx
+// render terminal appearance section
+
 import { useCallback } from 'react'
 
 import {

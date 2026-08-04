@@ -1,5 +1,6 @@
 // tests/apps/server/provider/Layers/ClaudeAdapter.test.ts
 // verifies Claude adapter lifecycle, event mapping, and failure behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'
@@ -49,7 +50,7 @@ import {
 import { ORCHESTRATE_MODE_INSTRUCTIONS } from '../../../../../apps/server/src/provider/CollaborationModeInstructions.ts'
 const decodeClaudeSettings = Schema.decodeSync(ClaudeSettings)
 
-// Test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
+// test-local service tag so the rest of the file can keep using `yield* ClaudeAdapter`.
 class ClaudeAdapter extends Context.Service<ClaudeAdapter, ClaudeAdapterShape>()(
   '@t3tools/tests/apps/server/provider/Layers/ClaudeAdapter.test/ClaudeAdapter',
 )
@@ -945,7 +946,7 @@ describe('ClaudeAdapterLive', () =>
         attachments: [],
       })
 
-      // Steer: a second sendTurn while the turn is still running continues
+      // steer: a second sendTurn while the turn is still running continues
       // the same turn — the message is queued into the live agent loop.
       const steeredTurn = yield* adapter.sendTurn({
         threadId: session.threadId,
@@ -978,7 +979,7 @@ describe('ClaudeAdapterLive', () =>
       const turnStartedEvents = runtimeEvents.filter((event) => event.type === 'turn.started')
       const turnCompletedEvents = runtimeEvents.filter((event) => event.type === 'turn.completed')
 
-      // One turn boundary for the whole run: the steer produced no
+      // one turn boundary for the whole run: the steer produced no
       // turn.completed/turn.started pair.
       assert.equal(turnStartedEvents.length, 1)
       assert.equal(String(turnStartedEvents[0]?.turnId), String(turn.turnId))
@@ -1610,8 +1611,8 @@ describe('ClaudeAdapterLive', () =>
 
   it.effect('stopSession does not throw into the SDK prompt consumer', () =>
   {
-    // The SDK consumes user messages via `for await (... of prompt)`.
-    // Stopping a session must end that loop cleanly — not throw an error.
+    // the SDK consumes user messages via `for await (... of prompt)`.
+    // stopping a session must end that loop cleanly — not throw an error.
     //
     // FakeClaudeQuery.close() masks this by resolving pending iterators
     // before the shutdown propagates. Override it to match real SDK behavior
@@ -1632,7 +1633,7 @@ describe('ClaudeAdapterLive', () =>
         return yield* makeClaudeAdapter(claudeConfig, {
           createQuery: (input) =>
           {
-            // Simulate the SDK consuming the prompt iterable
+            // simulate the SDK consuming the prompt iterable
             ;(async () =>
             {
               try
@@ -1783,7 +1784,7 @@ describe('ClaudeAdapterLive', () =>
         runtimeMode: 'full-access',
       })
 
-      // Undeclared wire-only roster snapshot + every typed UX-internal
+      // undeclared wire-only roster snapshot + every typed UX-internal
       // subtype and top-level type consumed silently: none may surface as
       // unknown-subtype warnings.
       for (const message of [
@@ -1822,7 +1823,7 @@ describe('ClaudeAdapterLive', () =>
       {
         harness.query.emit(message as unknown as SDKMessage)
       }
-      // High-priority notifications DO surface as a warning row.
+      // high-priority notifications DO surface as a warning row.
       harness.query.emit({
         type: 'system',
         subtype: 'notification',
@@ -1863,7 +1864,7 @@ describe('ClaudeAdapterLive', () =>
       yield* Effect.yieldNow
 
       const warnings = runtimeEvents.filter((event) => event.type === 'runtime.warning')
-      // Exactly one warning: the high-priority notification. Nothing else.
+      // exactly one warning: the high-priority notification. Nothing else.
       assert.deepEqual(
         warnings.map((event) => event.payload.message),
         ['context window nearly full'],
@@ -3644,7 +3645,7 @@ describe('ClaudeAdapterLive', () =>
           runtimeMode,
         })
 
-        // First turn in plan mode
+        // first turn in plan mode
         yield* adapter.sendTurn({
           threadId: session.threadId,
           input: 'plan this',
@@ -3652,7 +3653,7 @@ describe('ClaudeAdapterLive', () =>
           attachments: [],
         })
 
-        // Complete the turn so we can send another
+        // complete the turn so we can send another
         const turnCompletedFiber = yield* Stream.filter(
           adapter.streamEvents,
           (event) => event.type === 'turn.completed',
@@ -3669,7 +3670,7 @@ describe('ClaudeAdapterLive', () =>
 
         yield* Fiber.join(turnCompletedFiber)
 
-        // Second turn back to default
+        // second turn back to default
         yield* adapter.sendTurn({
           threadId: session.threadId,
           input: 'now do it',
@@ -3931,14 +3932,14 @@ describe('ClaudeAdapterLive', () =>
     {
       const adapter = yield* ClaudeAdapter
 
-      // Start session in approval-required mode so canUseTool fires.
+      // start session in approval-required mode so canUseTool fires.
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
         provider: ProviderDriverKind.make('claudeAgent'),
         runtimeMode: 'approval-required',
       })
 
-      // Drain the session startup events (started, configured, state.changed).
+      // drain the session startup events (started, configured, state.changed).
       yield* Stream.take(adapter.streamEvents, 3).pipe(Stream.runDrain)
 
       yield* adapter.sendTurn({
@@ -3976,7 +3977,7 @@ describe('ClaudeAdapterLive', () =>
         return
       }
 
-      // Simulate Claude calling AskUserQuestion with structured questions.
+      // simulate Claude calling AskUserQuestion with structured questions.
       const askInput = {
         questions: [
           {
@@ -3997,7 +3998,7 @@ describe('ClaudeAdapterLive', () =>
         requestId: 'req-ask-1',
       })
 
-      // The adapter should emit a user-input.requested event.
+      // the adapter should emit a user-input.requested event.
       const requestedEvent = yield* Stream.runHead(adapter.streamEvents)
       assert.equal(requestedEvent._tag, 'Some')
       if (requestedEvent._tag !== 'Some')
@@ -4013,19 +4014,19 @@ describe('ClaudeAdapterLive', () =>
       assert.equal(typeof requestId, 'string')
       assert.equal(requestedEvent.value.payload.questions.length, 1)
       assert.equal(requestedEvent.value.payload.questions[0]?.question, 'Which framework?')
-      // Regression for #2388: `id` must equal the full question text so the
+      // regression for #2388: `id` must equal the full question text so the
       // UI's draft-answer key matches what the SDK looks up downstream.
       assert.equal(requestedEvent.value.payload.questions[0]?.id, 'Which framework?')
       assert.deepEqual(requestedEvent.value.providerRefs, {
         providerItemId: ProviderItemId.make('tool-ask-1'),
       })
 
-      // Respond with the user's answers.
+      // respond with the user's answers.
       yield* adapter.respondToUserInput(session.threadId, ApprovalRequestId.make(requestId!), {
         'Which framework?': 'React',
       })
 
-      // The adapter should emit a user-input.resolved event.
+      // the adapter should emit a user-input.resolved event.
       const resolvedEvent = yield* Stream.runHead(adapter.streamEvents)
       assert.equal(resolvedEvent._tag, 'Some')
       if (resolvedEvent._tag !== 'Some')
@@ -4044,16 +4045,16 @@ describe('ClaudeAdapterLive', () =>
         providerItemId: ProviderItemId.make('tool-ask-1'),
       })
 
-      // The canUseTool promise should resolve with the answers in SDK format.
+      // the canUseTool promise should resolve with the answers in SDK format.
       const permissionResult = yield* Effect.promise(() => permissionPromise)
       assert.equal((permissionResult as PermissionResult).behavior, 'allow')
       const updatedInput = (permissionResult as { updatedInput: Record<string, unknown> })
         .updatedInput
       assert.deepEqual(updatedInput.answers, { 'Which framework?': 'React' })
-      // Original questions should be passed through.
+      // original questions should be passed through.
       assert.deepEqual(updatedInput.questions, askInput.questions)
 
-      // Compatibility check for #2388: the answers shape we hand to the SDK
+      // compatibility check for #2388: the answers shape we hand to the SDK
       // must produce a non-empty rendered tool_result on BOTH SDK iteration
       // patterns we have seen, so we don't regress the issue and we don't
       // break users still on the older Claude CLI.
@@ -4062,14 +4063,14 @@ describe('ClaudeAdapterLive', () =>
         readonly question: string
       }>
 
-      // Claude CLI 2.1.119 — key-agnostic Object.entries iteration. Any key
+      // claude CLI 2.1.119 — key-agnostic Object.entries iteration. Any key
       // works here, but it must at least round-trip into a non-empty string.
       const v119Rendered = Object.entries(sdkAnswers)
         .map(([key, value]) => `"${key}"="${String(value)}"`)
         .join(', ')
       assert.equal(v119Rendered, '"Which framework?"="React"')
 
-      // Claude CLI 2.1.121 — lookup by full question text. This is the path
+      // claude CLI 2.1.121 — lookup by full question text. This is the path
       // that regressed in #2388 when the answers were keyed by `header`.
       const v121Rendered = sdkQuestions
         .map(({ question }) =>
@@ -4094,7 +4095,7 @@ describe('ClaudeAdapterLive', () =>
     {
       const adapter = yield* ClaudeAdapter
 
-      // In full-access mode, regular tools are auto-approved.
+      // in full-access mode, regular tools are auto-approved.
       // AskUserQuestion should still go through the user-input flow.
       const session = yield* adapter.startSession({
         threadId: THREAD_ID,
@@ -4132,7 +4133,7 @@ describe('ClaudeAdapterLive', () =>
         requestId: 'req-ask-2',
       })
 
-      // Should still get user-input.requested even in full-access mode.
+      // should still get user-input.requested even in full-access mode.
       const requestedEvent = yield* Stream.runHead(adapter.streamEvents)
       assert.equal(requestedEvent._tag, 'Some')
       if (requestedEvent._tag !== 'Some' || requestedEvent.value.type !== 'user-input.requested')
@@ -4146,7 +4147,7 @@ describe('ClaudeAdapterLive', () =>
         'Deploy to which env?': 'Staging',
       })
 
-      // Drain the resolved event.
+      // drain the resolved event.
       yield* Stream.runHead(adapter.streamEvents)
 
       const permissionResult = yield* Effect.promise(() => permissionPromise)

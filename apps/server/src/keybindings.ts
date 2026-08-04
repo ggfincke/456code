@@ -1,11 +1,10 @@
-/**
- * Keybindings - Keybinding configuration service definitions.
- *
- * Owns parsing, validation, merge, and persistence of user keybinding
- * configuration consumed by the server runtime.
- *
- * @module Keybindings
- */
+// apps/server/src/keybindings.ts
+// expose resolved keybinding from config
+
+// owns parsing, validation, merge, and persistence of user keybinding
+// configuration consumed by the server runtime.
+//
+// @module Keybindings
 import {
   KeybindingRule,
   KeybindingsConfig,
@@ -240,7 +239,7 @@ function mergeWithDefaultKeybindings(custom: ResolvedKeybindingsConfig): Resolve
     return merged
   }
 
-  // Keep the latest rules when the config exceeds max size; later rules have higher precedence.
+  // keep the latest rules when the config exceeds max size; later rules have higher precedence.
   return merged.slice(-MAX_KEYBINDINGS_COUNT)
 }
 
@@ -250,56 +249,40 @@ function mergeWithDefaultKeybindings(custom: ResolvedKeybindingsConfig): Resolve
 export class Keybindings extends Context.Service<
   Keybindings,
   {
-    /**
-     * Start the keybindings runtime and attach file watching.
-     *
-     * Safe to call multiple times. The first successful call establishes the
-     * runtime; later calls await the same startup.
-     */
+    // start the keybindings runtime and attach file watching.
+    //
+    // safe to call multiple times. The first successful call establishes the
+    // runtime; later calls await the same startup.
     readonly start: Effect.Effect<void, KeybindingsConfigError>
 
-    /**
-     * Await keybindings runtime readiness.
-     *
-     * Readiness means the config directory exists, the watcher is attached, the
-     * startup sync has completed, and the current snapshot has been loaded.
-     */
+    // await keybindings runtime readiness.
+    //
+    // readiness means the config directory exists, the watcher is attached, the
+    // startup sync has completed, and the current snapshot has been loaded.
     readonly ready: Effect.Effect<void, KeybindingsConfigError>
 
-    /**
-     * Ensure the on-disk keybindings file exists and includes all default
-     * commands so newly-added defaults are backfilled on startup.
-     */
+    // ensure the on-disk keybindings file exists and includes all default
+    // commands so newly-added defaults are backfilled on startup.
     readonly syncDefaultKeybindingsOnStartup: Effect.Effect<void, KeybindingsConfigError>
 
-    /**
-     * Load runtime keybindings state along with non-fatal configuration issues.
-     */
+    // load runtime keybindings state along with non-fatal configuration issues.
     readonly loadConfigState: Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>
 
-    /**
-     * Read the latest keybindings snapshot from cache/disk.
-     */
+    // read the latest keybindings snapshot from cache/disk.
     readonly getSnapshot: Effect.Effect<KeybindingsConfigState, KeybindingsConfigError>
 
-    /**
-     * Stream of keybindings config change events.
-     */
+    // stream of keybindings config change events.
     readonly streamChanges: Stream.Stream<KeybindingsChangeEvent>
 
-    /**
-     * Upsert a keybinding rule and persist the resulting configuration.
-     *
-     * Writes config atomically and enforces the max rule count by truncating
-     * oldest entries when needed.
-     */
+    // upsert a keybinding rule and persist the resulting configuration.
+    //
+    // writes config atomically and enforces the max rule count by truncating
+    // oldest entries when needed.
     readonly upsertKeybindingRule: (
       input: ServerUpsertKeybindingInput,
     ) => Effect.Effect<ResolvedKeybindingsConfig, KeybindingsConfigError>
 
-    /**
-     * Remove a single persisted keybinding rule by exact key/command/when match.
-     */
+    // remove a single persisted keybinding rule by exact key/command/when match.
     readonly removeKeybindingRule: (
       input: ServerRemoveKeybindingInput,
     ) => Effect.Effect<ResolvedKeybindingsConfig, KeybindingsConfigError>
@@ -627,8 +610,8 @@ const make = Effect.gen(function* ()
 
     const revalidateAndEmitSafely = revalidateAndEmit.pipe(Effect.ignoreCause({ log: true }))
 
-    // Debounce watch events so the file is fully written before we read it.
-    // Editors emit multiple events per save (truncate, write, rename) and
+    // debounce watch events so the file is fully written before we read it.
+    // editors emit multiple events per save (truncate, write, rename) and
     // `fs.watch` can fire before the content has been flushed to disk.
     const debouncedKeybindingsEvents = fs.watch(keybindingsConfigDir).pipe(
       Stream.filter((event) =>

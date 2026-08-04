@@ -1,3 +1,6 @@
+// tests/apps/mobile/state/preferences.test.ts
+// verify mobile preferences state behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

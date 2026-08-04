@@ -1,3 +1,6 @@
+// apps/server/src/startupAccess.ts
+// issue headless serve access info
+
 import * as NodeOS from 'node:os'
 
 import { QrCode } from '@t3tools/shared/qrCode'

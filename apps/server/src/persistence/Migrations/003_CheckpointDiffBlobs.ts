@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/003_CheckpointDiffBlobs.ts
+// apply persistence migration 003 checkpoint diff blobs
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/methods/connectionCatalog.ts
+// resolve connection catalog
+
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'

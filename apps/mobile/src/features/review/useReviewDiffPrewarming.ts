@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/useReviewDiffPrewarming.ts
+// manage prewarm review diff section through a React hook
+
 import { useEffect } from 'react'
 
 import { getCachedNativeReviewDiffData } from './nativeReviewDiffAdapter'
@@ -54,7 +57,7 @@ export function prewarmReviewDiffSection(input: {
   getCachedNativeReviewDiffData({ parsedDiff, comments: [] })
 }
 
-/** Warms one cached section per idle period, after navigation animations finish. */
+// warms one cached section per idle period, after navigation animations finish.
 export function useReviewDiffPrewarming(input: {
   readonly threadKey: string | null
   readonly sections: ReadonlyArray<ReviewSectionItem>

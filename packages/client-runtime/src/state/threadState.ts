@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/threadState.ts
+// manage thread state
+
 import type { OrchestrationThread } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 

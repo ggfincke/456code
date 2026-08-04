@@ -1,3 +1,6 @@
+// apps/web/src/cloud/dpop.ts
+// read stored browser dpop key
+
 import {
   computeDpopAccessTokenHash,
   computeDpopJwkThumbprint,

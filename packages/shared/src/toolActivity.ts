@@ -1,3 +1,6 @@
+// packages/shared/src/toolActivity.ts
+// derive tool activity presentation
+
 import type { ToolLifecycleItemType } from '@t3tools/contracts'
 
 function asRecord(value: unknown): Record<string, unknown> | undefined

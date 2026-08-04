@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/providerIconUtils.ts
+// provide provider icon by integration
+
 import { ProviderDriverKind } from '@t3tools/contracts'
 import { ClaudeAI, CursorIcon, GrokIcon, Icon, OpenAI, OpenCodeIcon } from '../Icons'
 import { PROVIDER_OPTIONS } from '../../session-logic'

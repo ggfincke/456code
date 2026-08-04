@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/ProviderAccentColorPicker.tsx
+// render provider accent color picker
+
 'use client'
 
 import { PipetteIcon, XIcon } from 'lucide-react'

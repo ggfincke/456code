@@ -1,3 +1,6 @@
+// apps/web/src/historyBootstrap.ts
+// build bootstrap input
+
 import type { ChatMessage } from './types'
 
 export interface BootstrapInputResult
@@ -103,7 +106,7 @@ export function buildBootstrapInput(
     }
   }
 
-  // Include a contiguous suffix from newest to oldest, then reverse to chronological.
+  // include a contiguous suffix from newest to oldest, then reverse to chronological.
   let includedNewestFirst: string[] = []
   for (const block of newestFirstBlocks)
   {

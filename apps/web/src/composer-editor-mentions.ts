@@ -1,3 +1,6 @@
+// apps/web/src/composer-editor-mentions.ts
+// define composer prompt segment
+
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,

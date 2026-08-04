@@ -1,3 +1,6 @@
+// apps/web/src/components/AnimatedHeight.tsx
+// render animated height
+
 'use client'
 
 import { type ReactNode, useEffect, useLayoutEffect, useRef, useState } from 'react'

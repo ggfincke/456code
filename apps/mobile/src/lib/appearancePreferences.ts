@@ -100,14 +100,14 @@ export function normalizeCodeWordBreak(value: boolean | null | undefined): boole
   return value === true
 }
 
-/** Terminal size derived from base: 10.5pt at base 16, snapped to 0.5pt steps. */
+// terminal size derived from base: 10.5pt at base 16, snapped to 0.5pt steps.
 export function deriveTerminalFontSize(baseFontSize: number): number
 {
   const scale = normalizeBaseFontSize(baseFontSize) / DEFAULT_BASE_FONT_SIZE
   return normalizeTerminalFontSize(Math.round(DEFAULT_TERMINAL_FONT_SIZE * scale * 2) / 2)
 }
 
-/** Code/diff size derived from base: 12pt at base 16. */
+// code/diff size derived from base: 12pt at base 16.
 export function deriveCodeFontSize(baseFontSize: number): number
 {
   const scale = normalizeBaseFontSize(baseFontSize) / DEFAULT_BASE_FONT_SIZE
@@ -117,7 +117,7 @@ export function deriveCodeFontSize(baseFontSize: number): number
 interface StoredAppearancePreferences
 {
   readonly baseFontSize?: number | null | undefined
-  /** Legacy key from before base font size existed; migrated to baseFontSize. */
+  // legacy key from before base font size existed; migrated to baseFontSize.
   readonly markdownFontSize?: number | null | undefined
   readonly terminalFontSize?: number | null | undefined
   readonly codeFontSize?: number | null | undefined
@@ -191,10 +191,8 @@ export function resolveMarkdownFontSizes(baseFontSize: number): ResolvedMarkdown
   }
 }
 
-/**
- * Maps the Uniwind `--text-*` theme variables (see global.css) to the
- * MOBILE_TYPOGRAPHY roles they were authored from. Keep in sync with both.
- */
+// maps the Uniwind `--text-*` theme variables (see global.css) to the
+// MOBILE_TYPOGRAPHY roles they were authored from. Keep in sync with both.
 const TEXT_SCALE_VARIABLE_ROLES = {
   '--text-3xs': MOBILE_TYPOGRAPHY.micro,
   '--text-2xs': MOBILE_TYPOGRAPHY.caption,
@@ -207,11 +205,9 @@ const TEXT_SCALE_VARIABLE_ROLES = {
   '--text-3xl': MOBILE_TYPOGRAPHY.display,
 } as const
 
-/**
- * Scaled values for every `--text-*` size and line-height variable, ready to
- * pass to `Uniwind.updateCSSVariables`. All className-based text (`text-sm`,
- * `text-base`, ...) re-resolves live when these are injected.
- */
+// scaled values for every `--text-*` size and line-height variable, ready to
+// pass to `Uniwind.updateCSSVariables`. All className-based text (`text-sm`,
+// `text-base`, ...) re-resolves live when these are injected.
 export function resolveTextScaleVariables(baseFontSize: number): Record<string, number>
 {
   const scale = normalizeBaseFontSize(baseFontSize) / DEFAULT_BASE_FONT_SIZE

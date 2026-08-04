@@ -1,3 +1,6 @@
+// tests/apps/web/lib/baseRefChoices.test.ts
+// verify build base ref choices behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { VcsRef } from '@t3tools/contracts'
 import {

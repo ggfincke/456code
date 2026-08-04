@@ -1,3 +1,6 @@
+// apps/web/src/components/composerInlineChip.ts
+// expose chat inline chip class name
+
 const INLINE_CHIP_CLASS_NAME =
   'inline-flex max-w-full items-center gap-1 rounded-md border border-border/70 bg-accent/40 px-1.5 py-px font-medium text-[12px] leading-[1.1] text-foreground align-middle'
 

@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/SkillInlineText.tsx
+// render skill inline text
+
 import { Children, cloneElement, isValidElement, type ReactNode } from 'react'
 import type { ServerProviderSkill } from '@t3tools/contracts'
 

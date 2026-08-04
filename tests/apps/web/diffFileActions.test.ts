@@ -1,3 +1,6 @@
+// tests/apps/web/diffFileActions.test.ts
+// verify open diff file primary action behavior
+
 import { scopeThreadRef } from '@t3tools/client-runtime/environment'
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'

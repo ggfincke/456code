@@ -1,3 +1,6 @@
+// apps/server/src/cli/service.ts
+// format service status
+
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -27,7 +30,7 @@ export type ServiceReconcileResult =
       readonly plan: BootService.BootServicePlan
     }
 
-/** Install, update, or repair the service using the CLI version running this command. */
+// install, update, or repair the service using the CLI version running this command.
 export const reconcileService = Effect.fn('cli.service.reconcile')(function* ()
 {
   const service = yield* BootService.BootService

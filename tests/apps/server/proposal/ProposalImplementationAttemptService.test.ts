@@ -1,5 +1,6 @@
 // tests/apps/server/proposal/ProposalImplementationAttemptService.test.ts
 // verifies exact proposal implementation classification and durable idempotency
+
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off
 
 import * as NodeCrypto from 'node:crypto'

@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/fileExplorerLabel.ts
+// expose reveal in file explorer label
+
 export function revealInFileExplorerLabel(platform: string): string
 {
   const normalized = platform.toLowerCase()

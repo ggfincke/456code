@@ -100,7 +100,7 @@ describe('environment shell synchronization', () =>
         clearVcsRefs: () => Effect.void,
         clear: () => Effect.void,
       })
-      // Cold cache with no HTTP snapshot available → falls back to the
+      // cold cache with no HTTP snapshot available -> falls back to the
       // socket-embedded snapshot.
       const snapshotLoader = ShellSnapshotLoader.of({
         load: () => Effect.succeed(Option.none()),
@@ -230,7 +230,7 @@ describe('environment shell synchronization', () =>
         Effect.provideService(ShellSnapshotLoader, snapshotLoader),
       )
 
-      // Wait until the subscription is established from the warm cache.
+      // wait until the subscription is established from the warm cache.
       yield* SubscriptionRef.changes(capturedAfterSequence).pipe(
         Stream.filter((value) => value !== undefined),
         Stream.runHead,

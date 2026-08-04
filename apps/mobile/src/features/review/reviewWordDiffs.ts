@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewWordDiffs.ts
+// compute word alt diff ranges
+
 import { diffWordsWithSpace } from 'diff'
 
 import type { ReviewHighlightedToken } from './shikiReviewHighlighter'

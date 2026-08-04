@@ -1,3 +1,6 @@
+// apps/desktop/src/electron/ElectronProtocol.ts
+// resolve desktop scheme
+
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -27,9 +30,9 @@ export function getDesktopUrl(isDevelopment: boolean): string
   return `${getDesktopOrigin(isDevelopment)}/`
 }
 
-// Chromium only treats a custom scheme as a real (standard, secure) origin once it is
+// chromium only treats a custom scheme as a real (standard, secure) origin once it is
 // registered as privileged, and Electron requires that before the app ready event.
-// Without it the renderer's own bundle is opaque-origin, so `'self'` in the desktop CSP
+// without it the renderer's own bundle is opaque-origin, so `'self'` in the desktop CSP
 // matches nothing and every script and stylesheet is blocked -> a permanently blank shell.
 // `@clerk/electron` used to perform this registration; it has to be explicit now.
 export function registerDesktopSchemePrivileges(): void
@@ -97,7 +100,7 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
 {
   const scriptSources = ["'self'", "'unsafe-inline'"]
 
-  // The renderer connects directly to user-configured environments. Those
+  // the renderer connects directly to user-configured environments. Those
   // origins are not known when this response policy is created, so restrict
   // connections by the network schemes the client supports instead of by host.
   const connectSources = ["'self'", 'http:', 'https:', 'ws:', 'wss:']

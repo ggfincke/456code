@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/MessagesTimeline.logic.test.ts
+// verify compute message duration start behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import {
   computeStableMessagesTimelineRows,
@@ -531,7 +534,7 @@ describe('deriveMessagesTimelineRows', () =>
     )
     expect(foldRow?.turnId).toBe('turn-1')
     expect(foldRow?.expanded).toBe(false)
-    // User message boundary (00:00:00) → terminal message updatedAt (00:00:22).
+    // user message boundary (00:00:00) -> terminal message updatedAt (00:00:22).
     expect(foldRow?.label).toBe('Worked for 22s')
     expect(collapsedRows.map((row) => row.id)).toEqual([
       'user-entry',
@@ -562,10 +565,10 @@ describe('deriveMessagesTimelineRows', () =>
 
   it('derives a sane duration for a steer-superseded turn with one instant commentary message', () =>
   {
-    // A steer ends the previous turn early: its only message completes the
+    // a steer ends the previous turn early: its only message completes the
     // instant it is created, and trailing work entries land after it. The
     // fold duration must span from the user message that started the turn to
-    // the last entry, not message createdAt → message updatedAt (~0ms).
+    // the last entry, not message createdAt -> message updatedAt (~0ms).
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [
         {
@@ -653,7 +656,7 @@ describe('deriveMessagesTimelineRows', () =>
       (row): row is Extract<(typeof rows)[number], { kind: 'turn-fold' }> =>
         row.kind === 'turn-fold',
     )
-    // User message (00:00:00) → trailing work entry (00:00:12).
+    // user message (00:00:00) -> trailing work entry (00:00:12).
     expect(foldRow?.turnId).toBe('turn-1')
     expect(foldRow?.label).toBe('Worked for 12s')
   })
@@ -699,7 +702,7 @@ describe('deriveMessagesTimelineRows', () =>
 
   it('keeps the previous turn folded while a newly sent message awaits its turn', () =>
   {
-    // Right after send, isWorking is true but latestTurn still points at the
+    // right after send, isWorking is true but latestTurn still points at the
     // previous, settled turn — it must stay folded through that window.
     const rows = deriveMessagesTimelineRows({
       timelineEntries: [

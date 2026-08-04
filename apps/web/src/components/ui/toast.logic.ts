@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/toast.logic.ts
+// render reusable toast UI primitives
+
 import type { ScopedThreadRef, ThreadId } from '@t3tools/contracts'
 
 export function shouldHideCollapsedToastContent(
@@ -5,7 +8,7 @@ export function shouldHideCollapsedToastContent(
   visibleToastCount: number,
 ): boolean
 {
-  // Keep the front-most toast readable even if Base UI marks it as "behind"
+  // keep the front-most toast readable even if Base UI marks it as "behind"
   // due to toasts hidden by thread filtering.
   if (visibleToastCount <= 1) return false
   return visibleToastIndex > 0
@@ -34,7 +37,7 @@ export function buildVisibleToastLayout<TToast extends object>(
   items: VisibleToastLayoutItem<TToast & ToastWithLayoutProps>[]
 }
 {
-  // Two parallel cursors:
+  // two parallel cursors:
   //   - `full*`  advances on every toast, so an ending toast keeps the slot it
   //     occupied before dismissal and its data-ending-style exit transform
   //     originates from the correct position (critical for dismissing a
@@ -79,7 +82,7 @@ export function buildVisibleToastLayout<TToast extends object>(
     },
   )
 
-  // Frontmost height should reflect the first non-ending (live) toast so the
+  // frontmost height should reflect the first non-ending (live) toast so the
   // stack sizes to what's actually staying on screen.
   const frontmostLiveToast = visibleToasts.find((toast) => toast.transitionStatus !== 'ending')
 

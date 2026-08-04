@@ -1,3 +1,6 @@
+// tests/apps/mobile/connection/migration.test.ts
+// verify migrate legacy connection catalog behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import { EnvironmentId } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'

@@ -1,3 +1,6 @@
+// apps/desktop/scripts/build-preview-annotation-css.mjs
+// build preview annotation css
+
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeModule from 'node:module'
 import * as NodePath from 'node:path'

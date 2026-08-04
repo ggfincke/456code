@@ -1,3 +1,6 @@
+// apps/web/src/components/files/fileTreeDragMention.ts
+// create file tree drag mention controller
+
 import {
   COMPOSER_MENTION_DRAG_TYPE,
   composerMentionFromTreePath,
@@ -16,19 +19,17 @@ export interface FileTreeDragStartEvent
 
 export interface FileTreeDragMentionHost
 {
-  /** Drop the tree's gesture-applied selection of the dragged row. */
+  // drop the tree's gesture-applied selection of the dragged row.
   deselect(treePath: string): void
 }
 
 export interface FileTreeDragMentionController
 {
-  /**
-   * True from the moment a row drag starts until it ends. The tree selects
-   * the dragged row as part of the gesture; selection changes made while
-   * this is set are gesture side effects, not requests to open a file.
-   */
+  // true from the moment a row drag starts until it ends. The tree selects
+  // the dragged row as part of the gesture; selection changes made while
+  // this is set are gesture side effects, not requests to open a file.
   isDragInProgress(): boolean
-  /** Mirror of the tree's current selection, needed for multi-row drags. */
+  // mirror of the tree's current selection, needed for multi-row drags.
   handleSelectionChange(selectedPaths: ReadonlyArray<string>): void
   handleDragStart(event: FileTreeDragStartEvent): void
   handleDragEnd(): void
@@ -44,12 +45,10 @@ const itemPathOf = (node: unknown): string | null =>
   return typeof element.getAttribute === 'function' ? element.getAttribute('data-item-path') : null
 }
 
-/**
- * Tags file-tree drags with the composer mention payload and keeps the drag
- * from acting like a click: while the drag runs, selection changes are
- * suppressed, and when it ends the dragged rows are deselected so nothing is
- * left highlighted and a later click on them still fires a selection change.
- */
+// tags file-tree drags with the composer mention payload and keeps the drag
+// from acting like a click: while the drag runs, selection changes are
+// suppressed, and when it ends the dragged rows are deselected so nothing is
+// left highlighted and a later click on them still fires a selection change.
 export function createFileTreeDragMentionController(
   host: FileTreeDragMentionHost,
 ): FileTreeDragMentionController
@@ -68,7 +67,7 @@ export function createFileTreeDragMentionController(
       {
         return
       }
-      // Only drags that originate on a tree row are mentions; a text/plain
+      // only drags that originate on a tree row are mentions; a text/plain
       // fallback would also tag drags of selected text from the panel chrome.
       let itemPath: string | null = null
       for (const node of event.composedPath())
@@ -83,7 +82,7 @@ export function createFileTreeDragMentionController(
       {
         return
       }
-      // Same rule the tree applies to the drag itself: dragging a row that is
+      // same rule the tree applies to the drag itself: dragging a row that is
       // part of the current selection drags the whole selection.
       const dragged = selection.includes(itemPath) ? selection : [itemPath]
       const mentions = dragged

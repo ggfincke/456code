@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/Migrations/025_CleanupInvalidProjectionPendingApprovals.test.ts
+// verify 025 cleanup invalid projection pending approvals behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

@@ -1,3 +1,6 @@
+// packages/shared/src/path.ts
+// determine whether windows drive path
+
 export function isWindowsDrivePath(value: string): boolean
 {
   return /^[a-zA-Z]:([/\\]|$)/.test(value)

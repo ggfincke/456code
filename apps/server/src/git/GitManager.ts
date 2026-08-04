@@ -1001,7 +1001,7 @@ export const make = Effect.gen(function* ()
         prLookupEpochByCwd.set(cacheKey, prLookupEpoch(cacheKey) + 1)
       }),
     )
-  // Cache keys are NUL-joined [cwd, branch, upstreamRef, epoch] — none of the
+  // cache keys are NUL-joined [cwd, branch, upstreamRef, epoch] — none of the
   // segments can contain a NUL byte, and refs are never empty, so "" decodes
   // back to a null upstreamRef.
   const prLookupCacheKey = (cwd: string, details: { branch: string; upstreamRef: string | null }) =>
@@ -1027,7 +1027,7 @@ export const make = Effect.gen(function* ()
       timeToLive: (exit) => (Exit.isSuccess(exit) ? PR_LOOKUP_CACHE_TTL : PR_LOOKUP_FAILURE_TTL),
     },
   )
-  // A transient lookup failure (rate limit, network blip) must not clear an
+  // a transient lookup failure (rate limit, network blip) must not clear an
   // already-known PR badge, so the last successful answer per branch sticks
   // around as the fallback. Keep the resolved head context with it so a
   // branch retargeted to another remote/fork cannot inherit the old badge.
@@ -1067,18 +1067,18 @@ export const make = Effect.gen(function* ()
       return null
     }
 
-    // The normalized URL catches both remote-alias changes and an existing
+    // the normalized URL catches both remote-alias changes and an existing
     // alias being repointed. Both sides must be resolved before treating a
     // mismatch as real: `readConfigValueNullable` swallows any git-config
     // read failure into `null`, so a transient failure to resolve the
-    // *current* remote URL must read as "unknown", not as "no remote" — the
+    // current remote URL must read as "unknown", not as "no remote" — the
     // latter would otherwise drop an already-known PR badge on every hiccup.
     if (lastKnown.headRemoteUrlKey !== null && current.headRemoteUrlKey !== null)
     {
       return lastKnown.headRemoteUrlKey === current.headRemoteUrlKey ? lastKnown.pr : null
     }
 
-    // If the remote URL can't be compared, fall back to the remote identity
+    // if the remote URL can't be compared, fall back to the remote identity
     // encoded by tracked branches — same "both sides known" requirement, for
     // the same reason. A null-to-non-null transition (upstream/remoteName)
     // is allowed because that is the expected first-push case.
@@ -1098,15 +1098,15 @@ export const make = Effect.gen(function* ()
     details: { branch: string; upstreamRef: string | null; isDefaultBranch: boolean },
   )
   {
-    // Keyed by (cwd, branch) only: the upstream ref changing (e.g. a first
+    // keyed by (cwd, branch) only: the upstream ref changing (e.g. a first
     // `push -u`) must not orphan the fallback value for the same branch.
     const branchKey = `${cwd}\u0000${details.branch}`
     return yield* Cache.get(prLookupCache, prLookupCacheKey(cwd, details)).pipe(
       Effect.map(({ latest, headContext }) =>
       {
         if (!latest) return { pr: null, headContext }
-        // On the default branch, only surface open PRs.
-        // Merged/closed matches are usually reverse-merge history, not the thread's PR context.
+        // on the default branch, only surface open PRs.
+        // merged/closed matches are usually reverse-merge history, not the thread's PR context.
         if (details.isDefaultBranch && latest.state !== 'open')
         {
           return { pr: null, headContext }
@@ -1542,7 +1542,7 @@ export const make = Effect.gen(function* ()
       cwd: string
       branch: string | null
       commitMessage?: string
-      /** When true, also produce a semantic feature branch name. */
+      // when true, also produce a semantic feature branch name.
       includeBranch?: boolean
       filePaths?: readonly string[]
       settings: SourceControlTextGenerationSettings
@@ -1878,7 +1878,7 @@ export const make = Effect.gen(function* ()
     {
       yield* invalidateLocalStatusResultCache(cwd)
       yield* invalidateRemoteStatusResultCache(cwd)
-      // Full invalidation is the explicit-freshness path (git actions, user
+      // full invalidation is the explicit-freshness path (git actions, user
       // refresh); it also bypasses the slow PR-lookup cache. The periodic
       // status poll only invalidates local/remote and keeps the PR cache warm.
       yield* bumpPrLookupEpoch(cwd)

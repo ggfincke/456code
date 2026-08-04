@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/cloud/cloudEnvironmentPresentation.test.ts
+// verify available cloud environment presentation behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import type { RelayEnvironmentStatusResponse } from '@t3tools/contracts/relay'
 import { describe, expect, it } from 'vite-plus/test'

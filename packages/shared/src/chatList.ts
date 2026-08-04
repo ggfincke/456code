@@ -1,3 +1,6 @@
+// packages/shared/src/chatList.ts
+// resolve chat list anchored end space
+
 export const CHAT_LIST_ANCHOR_OFFSET = 16
 
 export interface ChatListAnchoredEndSpace

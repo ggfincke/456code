@@ -1,3 +1,6 @@
+// apps/web/src/rpc/atomRegistry.ts
+// register app atom implementations
+
 import { RegistryContext } from '@effect/atom-react'
 import { AtomRegistry } from 'effect/unstable/reactivity'
 import { createElement } from 'react'

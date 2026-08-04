@@ -1,3 +1,6 @@
+// apps/web/src/environments/primary/desktopAuth.ts
+// handle web authentication
+
 let desktopBearerTokenPromise: Promise<string> | null = null
 
 export function readDesktopPrimaryBearerToken(): Promise<string | null>

@@ -52,7 +52,7 @@ type AppUpdateYmlConfig = typeof AppUpdateYmlConfig.Type
 
 const UpdateInfo = Schema.Struct({
   version: Schema.String,
-  // Left unvalidated on purpose: a malformed release-notes payload must never
+  // left unvalidated on purpose: a malformed release-notes payload must never
   // fail the decode and block the update state transition. The shape is
   // validated defensively in normalizeDesktopUpdateReleaseNotes.
   releaseNotes: Schema.optional(Schema.Unknown),
@@ -531,7 +531,7 @@ export const make = Effect.gen(function* ()
 
     return yield* Effect.gen(function* ()
     {
-      // Stop every backend in the pool, not just the primary. With
+      // stop every backend in the pool, not just the primary. With
       // parallel WSL + Windows backends, leaving the WSL instance up
       // means quitAndInstall's app.quit() exits before the pool's
       // scope cascade has a chance to run its stop finalizer, so the

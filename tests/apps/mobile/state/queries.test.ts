@@ -1,3 +1,6 @@
+// tests/apps/mobile/state/queries.test.ts
+// verify app queries behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 

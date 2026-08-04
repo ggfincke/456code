@@ -1,2 +1,4 @@
-/** @deprecated Compatibility alias for the excluded orchestration integration harness. */
+// apps/server/src/persistence/Layers/ProviderSessionRuntime.ts
+// assemble provider session runtime Effect layer
+
 export { layer as ProviderSessionRuntimeRepositoryLive } from '../ProviderSessionRuntime.ts'

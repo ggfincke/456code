@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/modelPickerSearch.test.ts
+// verify build model picker search text behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

@@ -59,21 +59,17 @@ import * as Option from 'effect/Option'
 
 const PROVIDER = ProviderDriverKind.make('opencode')
 
-/**
- * Version tag stamped into the OpenCode resume cursor. Bump if the cursor
- * shape changes so stale-shaped cursors written by older builds are ignored
- * rather than misread (mirrors GROK_RESUME_VERSION / CURSOR_RESUME_VERSION).
- */
+// version tag stamped into the OpenCode resume cursor. Bump if the cursor
+// shape changes so stale-shaped cursors written by older builds are ignored
+// rather than misread (mirrors GROK_RESUME_VERSION / CURSOR_RESUME_VERSION).
 const OPENCODE_RESUME_VERSION = 1 as const
 
-/**
- * Decode a persisted resume cursor into the upstream `ses_…` id. Anything
- * that isn't a current-version cursor with a non-empty id means "no resume"
- * rather than an error. Imported cursors can require that id to keep existing;
- * ordinary adapter-generated cursors retain the recoverable fresh fallback.
- * Re-adopting the session id IS the resume mechanism — OpenCode scopes a
- * conversation's history by session id.
- */
+// decode a persisted resume cursor into the upstream `ses_…` id. Anything
+// that isn't a current-version cursor with a non-empty id means "no resume"
+// rather than an error. Imported cursors can require that id to keep existing;
+// ordinary adapter-generated cursors retain the recoverable fresh fallback.
+// re-adopting the session id IS the resume mechanism — OpenCode scopes a
+// conversation's history by session id.
 function parseOpenCodeResume(
   raw: unknown,
 ): { readonly sessionId: string; readonly requireExisting: boolean } | undefined
@@ -101,17 +97,15 @@ function parseOpenCodeResume(
   }
 }
 
-/**
- * Whether an error definitively reports a missing session. Only a confirmed
- * miss may silently start a fresh session; any other failure (the SDK client
- * is `throwOnError: true`, so `session.get` rejects on every non-2xx) must
- * propagate, or a transient blip resets a live thread to an empty one — the
- * #3604 silent context loss. Decides on structured signals only, never free
- * text: a numeric 404 or the exact `NotFoundError` name, found via a bounded walk
- * over `cause`/`body`/`error`/`data`. An explicit non-404 status seals its
- * subtree so a wrapped "NotFound" name can't reclassify a real failure.
- * Exported for unit testing.
- */
+// whether an error definitively reports a missing session. Only a confirmed
+// miss may silently start a fresh session; any other failure (the SDK client
+// is `throwOnError: true`, so `session.get` rejects on every non-2xx) must
+// propagate, or a transient blip resets a live thread to an empty one — the
+// #3604 silent context loss. Decides on structured signals only, never free
+// text: a numeric 404 or the exact `NotFoundError` name, found via a bounded walk
+// over `cause`/`body`/`error`/`data`. An explicit non-404 status seals its
+// subtree so a wrapped "NotFound" name can't reclassify a real failure.
+// exported for unit testing.
 export function isOpenCodeNotFound(cause: unknown): boolean
 {
   const seen = new Set<unknown>()
@@ -160,16 +154,14 @@ export function isOpenCodeNotFound(cause: unknown): boolean
   return false
 }
 
-/**
- * Whether two directory spellings name the same location. Raw string
- * equality misreads a trailing slash, `.`/`..` segment, or symlinked cwd
- * (macOS `/tmp` → `/private/tmp`) as a cwd change, needlessly forking the
- * session on every resume. Lexically equal paths short-circuit; otherwise
- * both sides go through `realPath`, each falling back to its lexical form
- * on failure (deleted directory, external-server path) — so the probe can
- * only widen matches, never split them. Takes the services as arguments so
- * adapter methods stay service-free. Exported for unit testing.
- */
+// whether two directory spellings name the same location. Raw string
+// equality misreads a trailing slash, `.`/`..` segment, or symlinked cwd
+// (macOS `/tmp` -> `/private/tmp`) as a cwd change, needlessly forking the
+// session on every resume. Lexically equal paths short-circuit; otherwise
+// both sides go through `realPath`, each falling back to its lexical form
+// on failure (deleted directory, external-server path) — so the probe can
+// only widen matches, never split them. Takes the services as arguments so
+// adapter methods stay service-free. Exported for unit testing.
 export function isSameOpenCodeDirectory(
   fileSystem: FileSystem.FileSystem,
   path: Path.Path,
@@ -257,20 +249,16 @@ interface OpenCodeSessionContext
   activeTurnId: TurnId | undefined
   activeAgent: string | undefined
   activeVariant: string | undefined
-  /**
-   * One-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
-   * The session lifecycle is owned by `sessionScope`; this Ref exists only
-   * so concurrent callers can race the transition safely via `getAndSet`.
-   */
+  // one-shot guard flipped by `stopOpenCodeContext` / `emitUnexpectedExit`.
+  // the session lifecycle is owned by `sessionScope`; this Ref exists only
+  // so concurrent callers can race the transition safely via `getAndSet`.
   readonly stopped: Ref.Ref<boolean>
-  /**
-   * Sole lifecycle handle for the session. Closing this scope:
-   *   - aborts the `AbortController` registered as a finalizer
-   *     (cancels the in-flight `event.subscribe` fetch),
-   *   - interrupts the event-pump and server-exit fibers forked
-   *     via `Effect.forkIn(sessionScope)`,
-   *   - tears down the OpenCode server process for scope-owned servers.
-   */
+  // sole lifecycle handle for the session. Closing this scope:
+  //   - aborts the `AbortController` registered as a finalizer
+  //     (cancels the in-flight `event.subscribe` fetch),
+  //   - interrupts the event-pump and server-exit fibers forked
+  //     via `Effect.forkIn(sessionScope)`,
+  //   - tears down the OpenCode server process for scope-owned servers.
   readonly sessionScope: Scope.Closeable
 }
 
@@ -284,12 +272,10 @@ export interface OpenCodeAdapterLiveOptions
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-/**
- * Map a tagged OpenCodeRuntimeError produced by {@link runOpenCodeSdk} into
- * the adapter-boundary `ProviderAdapterRequestError`. SDK-method-level call
- * sites pipe through this in `Effect.mapError` so they never build the error
- * shape by hand.
- */
+// map a tagged OpenCodeRuntimeError produced by {@link runOpenCodeSdk} into
+// the adapter-boundary `ProviderAdapterRequestError`. SDK-method-level call
+// sites pipe through this in `Effect.mapError` so they never build the error
+// shape by hand.
 const toRequestError = (cause: OpenCodeRuntimeError): ProviderAdapterRequestError =>
   new ProviderAdapterRequestError({
     provider: PROVIDER,
@@ -298,12 +284,10 @@ const toRequestError = (cause: OpenCodeRuntimeError): ProviderAdapterRequestErro
     cause: cause.cause,
   })
 
-/**
- * Map a `Cause.squash`-ed failure into a `ProviderAdapterProcessError`. The
- * typed cause is usually an `OpenCodeRuntimeError` (from {@link runOpenCodeSdk}),
- * in which case we preserve its `detail`; otherwise we fall back to
- * {@link openCodeRuntimeErrorDetail} for unknown causes (defects, etc.).
- */
+// map a `Cause.squash`-ed failure into a `ProviderAdapterProcessError`. The
+// typed cause is usually an `OpenCodeRuntimeError` (from {@link runOpenCodeSdk}),
+// in which case we preserve its `detail`; otherwise we fall back to
+// {@link openCodeRuntimeErrorDetail} for unknown causes (defects, etc.).
 const toProcessError = (threadId: ThreadId, cause: unknown): ProviderAdapterProcessError =>
   new ProviderAdapterProcessError({
     provider: PROVIDER,
@@ -620,20 +604,20 @@ const stopOpenCodeContext = Effect.fn('stopOpenCodeContext')(function* (
   context: OpenCodeSessionContext,
 )
 {
-  // Race-safe one-shot: first caller flips the flag, everyone else no-ops.
+  // race-safe one-shot: first caller flips the flag, everyone else no-ops.
   if (yield* Ref.getAndSet(context.stopped, true))
   {
     return false
   }
 
-  // Best-effort remote abort. The scope close below tears down the local
+  // best-effort remote abort. The scope close below tears down the local
   // handles (event-pump fiber, server-exit fiber, event-subscribe fetch),
   // but we still want to tell OpenCode that this session is done.
   yield* runOpenCodeSdk('session.abort', () =>
     context.client.session.abort({ sessionID: context.openCodeSessionId }),
   ).pipe(Effect.ignore({ log: true }))
 
-  // Closing the session scope interrupts every fiber forked into it and
+  // closing the session scope interrupts every fiber forked into it and
   // runs each finalizer we registered — the `AbortController.abort()` call,
   // the child-process termination, etc.
   yield* Scope.close(context.sessionScope, Exit.void)
@@ -662,7 +646,7 @@ export function makeOpenCodeAdapter(
             stream: 'native',
           })
         : undefined)
-    // Only close loggers we created. If the caller passed one in via
+    // only close loggers we created. If the caller passed one in via
     // `options.nativeEventLogger`, they own its lifecycle.
     const managedNativeEventLogger =
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined
@@ -707,7 +691,7 @@ export function makeOpenCodeAdapter(
     const withThreadLock = <A, E, R>(threadId: ThreadId, effect: Effect.Effect<A, E, R>) =>
       threadLocks.withPermit(threadId, effect)
 
-    // Layer-level finalizer: when the adapter layer shuts down, stop every
+    // layer-level finalizer: when the adapter layer shuts down, stop every
     // session. Each session's `Scope.close` tears down its spawned OpenCode
     // server (via the `ChildProcessSpawner` finalizer installed in
     // `startOpenCodeServerProcess`) and interrupts the forked event/exit
@@ -726,7 +710,7 @@ export function makeOpenCodeAdapter(
           (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
           { concurrency: 'unbounded', discard: true },
         )
-        // Close the logger AFTER session teardown so any final lifecycle
+        // close the logger AFTER session teardown so any final lifecycle
         // events emitted during shutdown still get written. `close` flushes
         // the `Logger.batched` window and closes each per-thread
         // `RotatingFileSink` handle owned by the logger's internal scope.
@@ -759,7 +743,7 @@ export function makeOpenCodeAdapter(
       message: string,
     )
     {
-      // Atomic one-shot: two fibers can race here (the event-pump on stream
+      // atomic one-shot: two fibers can race here (the event-pump on stream
       // failure and the server-exit watcher). `getAndSet` flips the flag in
       // a single step so the loser observes `true` and returns; a plain
       // `Ref.get` would let both racers slip past and emit duplicates.
@@ -769,7 +753,7 @@ export function makeOpenCodeAdapter(
       }
       const turnId = context.activeTurnId
       sessions.delete(context.session.threadId)
-      // Emit lifecycle events BEFORE tearing down the scope. Both call sites
+      // emit lifecycle events BEFORE tearing down the scope. Both call sites
       // run this inside a fiber forked via `Effect.forkIn(context.sessionScope)`;
       // closing that scope triggers the fiber-interrupt finalizer, so any
       // subsequent yield point would unwind and silently drop these emits.
@@ -796,7 +780,7 @@ export function makeOpenCodeAdapter(
           exitKind: 'error',
         },
       }).pipe(Effect.ignore)
-      // Inline the teardown that `stopOpenCodeContext` would do; we can't
+      // inline the teardown that `stopOpenCodeContext` would do; we can't
       // delegate to it because our `getAndSet` above already flipped the
       // one-shot guard, so the call would no-op.
       yield* runOpenCodeSdk('session.abort', () =>
@@ -805,7 +789,7 @@ export function makeOpenCodeAdapter(
       yield* Scope.close(context.sessionScope, Exit.void)
     })
 
-    /** Emit content.delta and item.completed events for an assistant text part. */
+    // emit content.delta and item.completed events for an assistant text part.
     const emitAssistantTextDelta = Effect.fn('emitAssistantTextDelta')(function* (
       context: OpenCodeSessionContext,
       part: Part,
@@ -1247,7 +1231,7 @@ export function makeOpenCodeAdapter(
 
     const startEventPump = Effect.fn('startEventPump')(function* (context: OpenCodeSessionContext)
     {
-      // One AbortController per session scope. The finalizer fires when
+      // one AbortController per session scope. The finalizer fires when
       // the scope closes (explicit stop, unexpected exit, or layer
       // shutdown) and cancels the in-flight `event.subscribe` fetch so
       // the async iterable unwinds cleanly.
@@ -1257,7 +1241,7 @@ export function makeOpenCodeAdapter(
         Effect.sync(() => eventsAbortController.abort()),
       )
 
-      // Fibers forked into `context.sessionScope` are interrupted
+      // fibers forked into `context.sessionScope` are interrupted
       // automatically when the scope closes — no bookkeeping required.
       yield* Effect.flatMap(
         runOpenCodeSdk('event.subscribe', () =>
@@ -1280,7 +1264,7 @@ export function makeOpenCodeAdapter(
         Effect.flatMap((exit) =>
           Effect.gen(function* ()
           {
-            // Expected paths: caller aborted the fetch or the session
+            // expected paths: caller aborted the fetch or the session
             // has already been marked stopped. Treat as a clean exit.
             if (eventsAbortController.signal.aborted || (yield* Ref.get(context.stopped)))
             {
@@ -1366,7 +1350,7 @@ export function makeOpenCodeAdapter(
           const startedExit = yield* Effect.exit(
             Effect.gen(function* ()
             {
-              // The runtime binds the server's lifetime to the Scope.Scope
+              // the runtime binds the server's lifetime to the Scope.Scope
               // we provide below — closing `sessionScope` kills the child
               // process automatically. No manual `server.close()` needed.
               const server = yield* openCodeRuntime.connectToOpenCodeServer({
@@ -1396,7 +1380,7 @@ export function makeOpenCodeAdapter(
                   }),
                 )
               }
-              // Resume: re-adopt the session named by the durable cursor —
+              // resume: re-adopt the session named by the durable cursor —
               // OpenCode scopes history by session id. An ordinary cursor
               // recovers a confirmed not-found by starting fresh; an imported
               // requireExisting cursor fails instead. Transport/auth/server
@@ -1446,7 +1430,7 @@ export function makeOpenCodeAdapter(
                     )
                   : undefined
 
-                // Reuse in place only when the session still matches the
+                // reuse in place only when the session still matches the
                 // requested cwd; on a cwd change it is forked below instead.
                 const reusable =
                   adopted &&
@@ -1456,7 +1440,7 @@ export function makeOpenCodeAdapter(
 
                 if (reusable)
                 {
-                  // Resume skips `session.create`, so re-assert the ruleset —
+                  // resume skips `session.create`, so re-assert the ruleset —
                   // a runtime-mode change would otherwise leave the session on
                   // its original permissions.
                   yield* runOpenCodeSdk('session.update', () =>
@@ -1468,7 +1452,7 @@ export function makeOpenCodeAdapter(
                   return reusable
                 }
 
-                // The session lives under a different cwd (e.g. the thread
+                // the session lives under a different cwd (e.g. the thread
                 // moved into a git worktree). Fork it into the requested
                 // directory instead of minting an empty one — the fork carries
                 // the full history, so the follow-up keeps its context (#3604).
@@ -1601,7 +1585,7 @@ export function makeOpenCodeAdapter(
     const sendTurn: OpenCodeAdapterShape['sendTurn'] = Effect.fn('sendTurn')(function* (input)
     {
       const context = yield* ensureSessionContext(sessions, input.threadId)
-      // A sendTurn while a turn is active is a steer: OpenCode queues the
+      // a sendTurn while a turn is active is a steer: OpenCode queues the
       // prompt into the busy session and the work continues as one turn, so
       // the active turn id is reused instead of opening a new turn.
       const steeringTurnId = context.activeTurnId
@@ -1685,7 +1669,7 @@ export function makeOpenCodeAdapter(
         }),
       ).pipe(
         Effect.mapError(toRequestError),
-        // On failure of a fresh turn: clear active-turn state, flip the
+        // on failure of a fresh turn: clear active-turn state, flip the
         // session back to ready with lastError set, emit turn.aborted, then
         // let the typed error propagate. We don't need to rebuild the error
         // here — `toRequestError` already produced the right shape. A failed
@@ -1724,7 +1708,7 @@ export function makeOpenCodeAdapter(
       return {
         threadId: input.threadId,
         turnId,
-        // Re-surface the durable cursor on every turn so the persisted binding
+        // re-surface the durable cursor on every turn so the persisted binding
         // is refreshed alongside last-seen/runtime state (mirrors Grok/Codex).
         ...(context.session.resumeCursor !== undefined
           ? { resumeCursor: context.session.resumeCursor }

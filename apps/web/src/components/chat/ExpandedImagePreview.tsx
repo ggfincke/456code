@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ExpandedImagePreview.tsx
+// render expanded image preview
+
 export interface ExpandedImageItem
 {
   src: string

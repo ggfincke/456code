@@ -1,3 +1,6 @@
+// tests/apps/web/components/ComposerPromptEditor.test.ts
+// verify register composer inline token paste behavior
+
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import {
   $createParagraphNode,

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// scripts/sync-reference-repos.ts
+// synchronize reference repos
 
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'

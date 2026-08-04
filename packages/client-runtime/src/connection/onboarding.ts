@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/onboarding.ts
+// define pairing connection input
+
 import type { DesktopSshEnvironmentTarget, EnvironmentId } from '@t3tools/contracts'
 import { resolveRemotePairingTarget } from '@t3tools/shared/remote'
 import * as Context from 'effect/Context'

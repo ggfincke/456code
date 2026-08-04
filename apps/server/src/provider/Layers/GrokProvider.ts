@@ -1,3 +1,6 @@
+// apps/server/src/provider/Layers/GrokProvider.ts
+// assemble grok provider Effect layer
+
 import {
   type GrokSettings,
   type ModelCapabilities,

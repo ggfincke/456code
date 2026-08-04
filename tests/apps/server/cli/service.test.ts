@@ -1,3 +1,6 @@
+// tests/apps/server/cli/service.test.ts
+// verify service behavior
+
 import { assert, it } from '@effect/vitest'
 
 import { formatServiceStatus } from '../../../../apps/server/src/cli/service.ts'

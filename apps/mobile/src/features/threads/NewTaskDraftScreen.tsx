@@ -73,9 +73,9 @@ export function NewTaskDraftScreen(props: {
     readonly environmentId?: string
     readonly projectId?: string
   }
-  /** Queued outbox message id when editing an existing pending task. */
+  // queued outbox message id when editing an existing pending task.
   readonly pendingTaskId?: string
-  /** Durable native share inbox item to merge into this project draft. */
+  // durable native share inbox item to merge into this project draft.
   readonly incomingShareId?: string
 })
 {
@@ -173,7 +173,7 @@ export function NewTaskDraftScreen(props: {
       setIsReturningToProjectPicker(false)
       return
     }
-    // Let usePreventRemove commit its disabled state before replacing this
+    // let usePreventRemove commit its disabled state before replacing this
     // route, otherwise the transfer guard can swallow the fallback action.
     const frame = requestAnimationFrame(() =>
     {
@@ -212,7 +212,7 @@ export function NewTaskDraftScreen(props: {
     {
       return
     }
-    // Attempt each pending task once: after it is delivered or deleted the
+    // attempt each pending task once: after it is delivered or deleted the
     // editing session legitimately ends, and re-running must not navigate.
     if (attemptedPendingTaskIdRef.current === props.pendingTaskId)
     {
@@ -221,7 +221,7 @@ export function NewTaskDraftScreen(props: {
     attemptedPendingTaskIdRef.current = props.pendingTaskId
     if (!beginEditingPendingTask(props.pendingTaskId))
     {
-      // The queued task no longer exists (sent or deleted before opening).
+      // the queued task no longer exists (sent or deleted before opening).
       navigation.dispatch(StackActions.replace('NewTask'))
     }
   }, [beginEditingPendingTask, editingPendingTask?.messageId, navigation, props.pendingTaskId])
@@ -231,7 +231,7 @@ export function NewTaskDraftScreen(props: {
     if (!props.pendingTaskId) return
     return () =>
     {
-      // Allow a later navigation for the same pending task to re-hydrate it.
+      // allow a later navigation for the same pending task to re-hydrate it.
       attemptedPendingTaskIdRef.current = null
       cancelEditingPendingTask()
     }
@@ -244,13 +244,13 @@ export function NewTaskDraftScreen(props: {
   const sheetFadeOpaque = colorScheme === 'dark' ? 'rgba(14,14,14,0.98)' : 'rgba(242,242,247,0.98)'
   const sheetFadeTransparent = colorScheme === 'dark' ? 'rgba(14,14,14,0)' : 'rgba(242,242,247,0)'
 
-  // A new navigation to this mounted screen delivers a fresh initialProjectRef
+  // a new navigation to this mounted screen delivers a fresh initialProjectRef
   // reference — treat it as a new request and let it apply again.
   const lastInitialProjectRefRef = useRef(props.initialProjectRef)
 
   useEffect(() =>
   {
-    // Pending-task editing owns project selection (and must not fall through
+    // pending-task editing owns project selection (and must not fall through
     // to the replace("NewTask") fallback while its hydration is in flight).
     if (props.pendingTaskId)
     {
@@ -273,7 +273,7 @@ export function NewTaskDraftScreen(props: {
 
       if (directProject)
       {
-        // Apply the route's project once. Re-applying on every change would
+        // apply the route's project once. Re-applying on every change would
         // instantly revert environment/project switches made in the picker.
         const directProjectKey = `${directProject.environmentId}:${directProject.id}`
         if (appliedInitialProjectKeyRef.current === directProjectKey)
@@ -294,7 +294,7 @@ export function NewTaskDraftScreen(props: {
 
       if (projects.length > 0)
       {
-        // Never fall through to the flow provider's temporary first-project
+        // never fall through to the flow provider's temporary first-project
         // default. Return to the picker with the share id intact so the user
         // can choose an available destination.
         setIsReturningToProjectPicker(true)
@@ -427,7 +427,7 @@ export function NewTaskDraftScreen(props: {
         latestIncomingShareIdRef.current !== shareId
       )
       {
-        // The durable reservation makes an interrupted transfer resume only
+        // the durable reservation makes an interrupted transfer resume only
         // in this project instead of copying into a second project draft.
         return
       }
@@ -470,7 +470,7 @@ export function NewTaskDraftScreen(props: {
                   {
                     return
                   }
-                  // Latch synchronously before restoring the draft. The
+                  // latch synchronously before restoring the draft. The
                   // restore publishes atom state and can re-run the import
                   // effect before React commits the cancelling state update.
                   cancellingShareImportKeyRef.current = importKey
@@ -541,7 +541,7 @@ export function NewTaskDraftScreen(props: {
       {
         if (startedShareImportKeyRef.current === importKey)
         {
-          // Every terminal path, including an invalidated operation, must
+          // every terminal path, including an invalidated operation, must
           // release the synchronous start latch so this transfer can retry.
           startedShareImportKeyRef.current = null
         }
@@ -570,7 +570,7 @@ export function NewTaskDraftScreen(props: {
 
   useEffect(() =>
   {
-    // Android starts with the collapsed composer pill (like an open thread)
+    // android starts with the collapsed composer pill (like an open thread)
     // and only expands/focuses when tapped.
     if (!selectedProject || Platform.OS === 'android')
     {
@@ -920,7 +920,7 @@ export function NewTaskDraftScreen(props: {
 
     if (!environmentConnected)
     {
-      // Offline: park the task in the outbox; the drain sends it when the
+      // offline: park the task in the outbox; the drain sends it when the
       // environment reconnects. Editing an existing pending task re-queues it
       // under its original identifiers.
       const metadata = editingPendingTask
@@ -966,7 +966,7 @@ export function NewTaskDraftScreen(props: {
     }
 
     flow.setSubmitting(true)
-    // Arm the lock-screen card before the async thread creation: backgrounding
+    // arm the lock-screen card before the async thread creation: backgrounding
     // the app right after tapping submit would otherwise reject the foreground
     // -only Activity start. If creation fails, the token registration's replay
     // finds no work and ends the card within seconds.
@@ -1053,7 +1053,7 @@ export function NewTaskDraftScreen(props: {
 
   const isAndroid = Platform.OS === 'android'
   const isDarkMode = colorScheme === 'dark'
-  // Android expansion follows native editor focus so relayout cannot race
+  // android expansion follows native editor focus so relayout cannot race
   // the touch gesture that opens the keyboard.
   const isExpanded = !isAndroid || isComposerFocused
   const canStart =
@@ -1079,7 +1079,7 @@ export function NewTaskDraftScreen(props: {
       onBlur={() => setIsComposerFocused(false)}
       onPasteImages={(uris) => void handleNativePasteImages(uris)}
       placeholder={`Describe a coding task in ${selectedProject.title}`}
-      // Same collapsed centering as ThreadComposer: native vertical gravity
+      // same collapsed centering as ThreadComposer: native vertical gravity
       // in a pill-height box.
       singleLineCentered={!isExpanded}
       contentInsetVertical={isAndroid ? 0 : undefined}
@@ -1168,9 +1168,9 @@ export function NewTaskDraftScreen(props: {
 
   if (isAndroid)
   {
-    // The draft is a thread that doesn't exist yet, so it mirrors the thread
+    // the draft is a thread that doesn't exist yet, so it mirrors the thread
     // page: in-screen header, empty feed canvas above, and the same floating
-    // composer chrome as ThreadComposer (collapsed pill → expanded card).
+    // composer chrome as ThreadComposer (collapsed pill -> expanded card).
     return (
       <View className="flex-1 bg-screen">
         <NativeStackScreenOptions options={{ headerShown: false }} />

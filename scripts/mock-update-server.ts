@@ -1,3 +1,6 @@
+// scripts/mock-update-server.ts
+// provide a mock update server
+
 // @effect-diagnostics-next-line nodeBuiltinImport:off - NodeHttpServer.layer takes `NodeHttp.createServer` as arg
 import * as NodeHttp from 'node:http'
 

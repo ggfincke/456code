@@ -1,3 +1,6 @@
+// apps/server/src/codexModelOptions.ts
+// resolve codex service tier option value
+
 import type { ModelSelection } from '@t3tools/contracts'
 import {
   getModelSelectionBooleanOptionValue,

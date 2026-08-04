@@ -1,3 +1,6 @@
+// apps/web/src/rpc/requestLatencyState.ts
+// manage request latency state
+
 import { useAtomValue } from '@effect/atom-react'
 import { ORCHESTRATION_WS_METHODS, WS_METHODS } from '@t3tools/contracts'
 import { Atom } from 'effect/unstable/reactivity'

@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/TerminalContextInlineChip.tsx
+// render terminal context inline chip
+
 import { TerminalIcon } from 'lucide-react'
 
 import { cn } from '~/lib/utils'

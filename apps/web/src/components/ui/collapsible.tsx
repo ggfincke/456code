@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/collapsible.tsx
+// render reusable collapsible UI primitives
+
 'use client'
 
 import { Collapsible as CollapsiblePrimitive } from '@base-ui/react/collapsible'

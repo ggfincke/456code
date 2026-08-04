@@ -1,3 +1,6 @@
+// tests/apps/web/state/desktopSshHosts.test.ts
+// verify desktop ssh hosts state behavior
+
 import type { DesktopDiscoveredSshHost } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AtomRegistry } from 'effect/unstable/reactivity'

@@ -1,3 +1,6 @@
+// apps/mobile/src/native/SelectableMarkdownText.ios.tsx
+// render selectable markdown text ios
+
 import {
   SelectableMarkdownText as NativeSelectableMarkdownText,
   type SelectableMarkdownTextProps,

@@ -1,3 +1,6 @@
+// apps/web/src/lib/checkpointDiffState.ts
+// manage checkpoint diff through a React hook
+
 import {
   type CheckpointDiffState,
   type CheckpointDiffTarget,

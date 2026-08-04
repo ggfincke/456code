@@ -1,3 +1,6 @@
+// apps/server/src/service/bootService.ts
+// determine whether ephemeral cache entry
+
 import * as Context from 'effect/Context'
 import * as Config from 'effect/Config'
 import * as DateTime from 'effect/DateTime'
@@ -18,12 +21,10 @@ import {
 import * as ProcessRunner from '../processRunner.ts'
 import { ensurePinnedRuntimeInstalled, pinnedRuntimePaths } from './pinnedRuntime.ts'
 
-/**
- * Installs 456code as a per-user boot service. Linux-only for now: systemd
- * user unit + loginctl enable-linger. The service runs a stable or pinned
- * runtime — never an ephemeral `npx 456code` cache whose eviction could break
- * startup.
- */
+// installs 456code as a per-user boot service. Linux-only for now: systemd
+// user unit + loginctl enable-linger. The service runs a stable or pinned
+// runtime — never an ephemeral `npx 456code` cache whose eviction could break
+// startup.
 
 const BOOT_SERVICE_NAME = '456code'
 
@@ -31,38 +32,35 @@ export const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`
 export const BOOT_SERVICE_UNIT_ENV = 'CODE456_BOOT_SERVICE_UNIT'
 
 const EPHEMERAL_CACHE_SEGMENTS = [
-  '/_npx/', // npx
+  // npx
+  '/_npx/',
   '\\_npx\\',
-  '/pnpm/dlx/', // pnpm dlx (~/.cache/pnpm/dlx and $PNPM_HOME/.pnpm/dlx)
+  // pnpm dlx (~/.cache/pnpm/dlx and $PNPM_HOME/.pnpm/dlx)
+  '/pnpm/dlx/',
   '/.pnpm/dlx/',
-  '/.bun/install/cache/', // bunx
+  // bunx
+  '/.bun/install/cache/',
 ]
 
-/**
- * `npx 456code` (and pnpm dlx / bunx) run out of ephemeral package-manager
- * caches that can be evicted at any time — a boot service must never point
- * there. Global installs, repo checkouts, and the pinned runtime below are
- * all stable.
- */
+// `npx 456code` (and pnpm dlx / bunx) run out of ephemeral package-manager
+// caches that can be evicted at any time — a boot service must never point
+// there. Global installs, repo checkouts, and the pinned runtime below are
+// all stable.
 export function isEphemeralCacheEntry(entryPath: string): boolean
 {
   return EPHEMERAL_CACHE_SEGMENTS.some((segment) => entryPath.includes(segment))
 }
 
-/**
- * systemd expands `%` specifiers in most directive values, including the
- * `append:` file paths, which take the rest of the line literally and must
- * NOT be quoted.
- */
+// systemd expands `%` specifiers in most directive values, including the
+// `append:` file paths, which take the rest of the line literally and must
+// NOT be quoted.
 export function escapeSystemdSpecifiers(value: string): string
 {
   return value.replaceAll('%', '%%')
 }
 
-/**
- * systemd word-splits ExecStart and Environment values and expands `%`
- * specifiers, so paths with spaces or percents must be quoted and escaped.
- */
+// systemd word-splits ExecStart and Environment values and expands `%`
+// specifiers, so paths with spaces or percents must be quoted and escaped.
 export function quoteSystemdValue(value: string): string
 {
   const escaped = escapeSystemdSpecifiers(value)
@@ -73,30 +71,28 @@ export function quoteSystemdValue(value: string): string
 
 export interface BootServicePlan
 {
-  /** Absolute path of the node binary running this CLI. */
+  // absolute path of the node binary running this CLI.
   readonly nodePath: string
-  /** Absolute path of the pinned 456code entry point the unit will run. */
+  // absolute path of the pinned 456code entry point the unit will run.
   readonly t3EntryPath: string
   readonly baseDir: string
   readonly logPath: string
   readonly unitPath: string
 }
 
-/**
- * Pure so it is testable byte-for-byte. systemd user units run with a
- * minimal environment: every path must be absolute, and the service must
- * not rely on PATH, nvm shims, or shell profiles. Failures land in
- * `logPath` because `systemctl --user` failures are otherwise invisible.
- */
+// pure so it is testable byte-for-byte. systemd user units run with a
+// minimal environment: every path must be absolute, and the service must
+// not rely on PATH, nvm shims, or shell profiles. Failures land in
+// `logPath` because `systemctl --user` failures are otherwise invisible.
 export function renderBootServiceUnit(plan: BootServicePlan): string
 {
-  // No After=network-online.target: it does not exist in the systemd *user*
+  // no After=network-online.target: it does not exist in the systemd *user*
   // manager, so ordering on it is silently ignored. The server retries its
   // relay connection, and Restart=always covers early-boot failures.
   return [
     '[Unit]',
     'Description=456code server',
-    // Give up after 5 crashes in 5 minutes so a persistently broken install
+    // give up after 5 crashes in 5 minutes so a persistently broken install
     // (deleted runtime, broken workspace) stops instead of restarting every
     // 5s forever and growing the unrotated append log without bound.
     'StartLimitIntervalSec=300',
@@ -167,7 +163,7 @@ export interface BootServiceStatus
 {
   readonly supported: boolean
   readonly installed: boolean
-  /** False when the installed unit no longer matches what install would write. */
+  // false when the installed unit no longer matches what install would write.
   readonly current: boolean
   readonly unitPath: string
   readonly logPath: string
@@ -176,12 +172,10 @@ export interface BootServiceStatus
 export class BootService extends Context.Service<
   BootService,
   {
-    /** Installs the pinned runtime + unit, enables linger, starts the service. */
+    // installs the pinned runtime + unit, enables linger, starts the service.
     readonly install: Effect.Effect<BootServicePlan, BootServiceError>
-    /**
-     * Stops and removes the unit; leaves the pinned runtime for reuse.
-     * Returns whether a unit was actually removed.
-     */
+    // stops and removes the unit; leaves the pinned runtime for reuse.
+    // returns whether a unit was actually removed.
     readonly uninstall: Effect.Effect<boolean, BootServiceError>
     readonly status: Effect.Effect<BootServiceStatus, BootServiceError>
   }
@@ -205,7 +199,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
   const hostArguments = yield* HostProcessArguments
   const host = input.host ?? {
     execPath: hostExecPath,
-    // When running the packed CLI this is dist/bin.mjs; when stable (global
+    // when running the packed CLI this is dist/bin.mjs; when stable (global
     // install, repo checkout) the boot service runs this same artifact.
     cliEntryPath: hostArguments[1] ?? '',
   }
@@ -260,13 +254,11 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     )
   })
 
-  /**
-   * Ensures plannedEntryPath exists before the unit points at it. A stable
-   * install (global bin, repo checkout) is used as-is; an ephemeral cache
-   * entry is replaced by `npm install --prefix`-ing the exact running
-   * version into <baseDir>/runtime/versions/<v>. A real install (not a copy
-   * of bin.mjs) because 456code ships native deps like node-pty.
-   */
+  // ensures plannedEntryPath exists before the unit points at it. A stable
+  // install (global bin, repo checkout) is used as-is; an ephemeral cache
+  // entry is replaced by `npm install --prefix`-ing the exact running
+  // version into <baseDir>/runtime/versions/<v>. A real install (not a copy
+  // of bin.mjs) because 456code ships native deps like node-pty.
   const ensurePinnedRuntime = Effect.gen(function* ()
   {
     if (!isEphemeralCacheEntry(host.cliEntryPath))
@@ -304,7 +296,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     )
   })
 
-  // Where the unit will point: derivable without touching the network, so
+  // where the unit will point: derivable without touching the network, so
   // status can compare units purely; install materializes it first.
   const plannedEntryPath = isEphemeralCacheEntry(host.cliEntryPath)
     ? runtimePaths.entryPath
@@ -340,7 +332,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
       Effect.mapError((cause) => new BootServiceInstallError({ cause })),
     )
 
-    // If any activation step fails, remove the unit again: a leftover file
+    // if any activation step fails, remove the unit again: a leftover file
     // would make service status report it as installed even though it was
     // never enabled or lingered.
     yield* Effect.gen(function* ()
@@ -359,7 +351,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
         'restart',
         BOOT_SERVICE_UNIT_FILE,
       ])
-      // Linger keeps the user manager (and this service) running without an
+      // linger keeps the user manager (and this service) running without an
       // open session — the whole point on a box reached over SSH. No
       // username argument: loginctl defaults to the calling user, which is
       // always right, while $USER can be stale (su without -l) or unset.
@@ -369,7 +361,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     return plan
   }).pipe(Effect.withSpan('service.boot_service.install'))
 
-  // If activation fails partway (e.g. enable succeeds but restart/linger
+  // if activation fails partway (e.g. enable succeeds but restart/linger
   // fails), leave nothing behind: disable removes the enable symlink, remove
   // deletes the file, daemon-reload clears the stale definition — otherwise a
   // dangling wants/ symlink logs "Failed to load unit" at every boot and the
@@ -440,7 +432,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
       return { supported: true, installed: false, current: false, unitPath, logPath }
     }
     const unit = yield* fs.readFileString(unitPath)
-    // A unit is current only if it matches what install would write now (an
+    // a unit is current only if it matches what install would write now (an
     // older CLI wrote a different runtime/node path) AND the entry point it
     // references still exists (a pinned runtime under ~/.456code can be deleted to
     // reclaim space). Either mismatch makes connect offer a repair.

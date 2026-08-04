@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/terminalBufferReplay.ts
+// resolve terminal buffer replay key
+
 import { terminalDebugLog } from './terminalDebugLog'
 
 export const TERMINAL_BUFFER_REPLAY_STABILITY_DELAY_MS = 180
@@ -16,7 +19,7 @@ export function getTerminalSurfaceReplayBuffer(input: {
   readonly readyReplayKey: string | null
 }): string
 {
-  // Pass live buffer whenever ready key is unset or matches. Only return "" when ready key is
+  // pass live buffer whenever ready key is unset or matches. Only return "" when ready key is
   // stale vs current replay key (e.g. mid font-size transition).
   if (input.readyReplayKey !== null && input.readyReplayKey !== input.replayKey)
   {

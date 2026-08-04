@@ -1,3 +1,6 @@
+// apps/mobile/src/features/diffs/nativeReviewDiffTypes.ts
+// define native review diff contracts
+
 export type NativeReviewDiffLanguage =
   'bash' | 'diff' | 'javascript' | 'json' | 'jsx' | 'tsx' | 'typescript' | 'yaml'
 

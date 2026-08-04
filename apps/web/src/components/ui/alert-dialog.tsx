@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/alert-dialog.tsx
+// render reusable alert dialog UI primitives
+
 'use client'
 
 import { AlertDialog as AlertDialogPrimitive } from '@base-ui/react/alert-dialog'

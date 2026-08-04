@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/openExternalUrl.test.ts
+// verify try open external url behavior
+
 import { Linking } from 'react-native'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 

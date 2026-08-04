@@ -1,3 +1,6 @@
+// apps/mobile/src/persistence/mobile-storage.ts
+// persist mobile storage data
+
 import { EnvironmentId } from '@t3tools/contracts'
 import * as Arr from 'effect/Array'
 import * as Context from 'effect/Context'
@@ -246,7 +249,7 @@ export const make = Effect.fn('MobileStorage.make')(function* ()
     }),
   )
 
-  // Threads most recently opened on this device, newest first — the source
+  // threads most recently opened on this device, newest first — the source
   // for the launcher's dynamic "recent thread" app shortcuts.
   const loadRecentThreadShortcuts = readJson<{
     readonly threads?: ReadonlyArray<RecentThreadShortcut>

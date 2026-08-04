@@ -1,3 +1,6 @@
+// tests/apps/server/project/ProjectFaviconResolver.test.ts
+// verify resolve path behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it, describe, expect } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

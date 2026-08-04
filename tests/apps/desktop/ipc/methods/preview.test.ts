@@ -1,3 +1,6 @@
+// tests/apps/desktop/ipc/methods/preview.test.ts
+// verify preview ipc methods behavior
+
 import { it as effectIt } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'

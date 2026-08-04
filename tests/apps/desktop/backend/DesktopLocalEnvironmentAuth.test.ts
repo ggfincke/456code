@@ -1,3 +1,6 @@
+// tests/apps/desktop/backend/DesktopLocalEnvironmentAuth.test.ts
+// verify desktop local environment auth behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

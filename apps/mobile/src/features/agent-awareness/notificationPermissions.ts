@@ -1,3 +1,6 @@
+// apps/mobile/src/features/agent-awareness/notificationPermissions.ts
+// define notification permission result
+
 import * as Notifications from 'expo-notifications'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'

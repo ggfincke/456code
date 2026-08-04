@@ -1,3 +1,6 @@
+// packages/client-runtime/src/authorization/index.ts
+// handle client runtime authentication
+
 export * from './remote.ts'
 export {
   type AuthorizedRemoteEnvironment,

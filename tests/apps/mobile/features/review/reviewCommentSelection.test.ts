@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewCommentSelection.test.ts
+// verify review comment serialization behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

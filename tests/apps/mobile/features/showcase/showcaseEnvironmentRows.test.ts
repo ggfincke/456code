@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/showcase/showcaseEnvironmentRows.test.ts
+// verify showcase environment rows behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { assert, it } from '@effect/vitest'
 

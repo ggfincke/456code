@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/homeThreadList.ts
+// build home project scopes
+
 import {
   deriveLogicalProjectKey,
   derivePhysicalProjectKey,
@@ -197,12 +200,10 @@ export function sortHomeProjectScopes(input: {
   )
 }
 
-/**
- * Default home view only surfaces threads active within this window, to keep the
- * screen compact while keeping recent work visible.
- */
+// default home view only surfaces threads active within this window, to keep the
+// screen compact while keeping recent work visible.
 const RECENT_THREAD_WINDOW_MS = 5 * 24 * 60 * 60 * 1000
-/** Fallback when a project has no threads inside the recency window. */
+// fallback when a project has no threads inside the recency window.
 const RECENT_THREAD_FALLBACK_COUNT = 3
 
 export interface HomeThreadGroup
@@ -212,18 +213,16 @@ export interface HomeThreadGroup
   readonly representative: EnvironmentProject
   readonly projects: ReadonlyArray<EnvironmentProject>
   readonly pendingTasks: ReadonlyArray<PendingNewTask>
-  /** Full sorted thread history for the group (revealed when expanded / searching). */
+  // full sorted thread history for the group (revealed when expanded / searching).
   readonly threads: ReadonlyArray<EnvironmentThreadShell>
-  /** Subset shown by default: threads from the last few days, or the most recent few. */
+  // subset shown by default: threads from the last few days, or the most recent few.
   readonly recentThreads: ReadonlyArray<EnvironmentThreadShell>
-  /**
-   * Where a quick "new thread in this project" should land. For aggregated
-   * groups (same repo on several machines) this is the member that owns the
-   * group's most recent thread — the machine the user last worked on — rather
-   * than the arbitrary first member; the draft's computer picker covers
-   * switching from there. Null only for synthetic pending-project groups,
-   * whose single "project" is a placeholder built from queued-task metadata.
-   */
+  // where a quick "new thread in this project" should land. For aggregated
+  // groups (same repo on several machines) this is the member that owns the
+  // group's most recent thread — the machine the user last worked on — rather
+  // than the arbitrary first member; the draft's computer picker covers
+  // switching from there. Null only for synthetic pending-project groups,
+  // whose single "project" is a placeholder built from queued-task metadata.
   readonly newThreadTarget: EnvironmentProject | null
 }
 
@@ -248,12 +247,10 @@ function groupSortTimestamp(group: HomeThreadGroup, sortOrder: HomeProjectSortOr
   }, latestThread)
 }
 
-/**
- * Trims a group's threads to recent activity for the default home view.
- * `sortedThreads` must already be ordered newest-first for `threadSortOrder`.
- * Keeps threads within {@link RECENT_THREAD_WINDOW_MS}; when none qualify, keeps
- * the most recent {@link RECENT_THREAD_FALLBACK_COUNT} so a project never vanishes.
- */
+// trims a group's threads to recent activity for the default home view.
+// `sortedThreads` must already be ordered newest-first for `threadSortOrder`.
+// keeps threads within {@link RECENT_THREAD_WINDOW_MS}; when none qualify, keeps
+// the most recent {@link RECENT_THREAD_FALLBACK_COUNT} so a project never vanishes.
 function selectRecentThreads(
   sortedThreads: ReadonlyArray<EnvironmentThreadShell>,
   threadSortOrder: SidebarThreadSortOrder,
@@ -276,7 +273,7 @@ export function buildHomeThreadGroups(input: {
   readonly projectSortOrder: HomeProjectSortOrder
   readonly threadSortOrder: SidebarThreadSortOrder
   readonly projectGroupingMode: SidebarProjectGroupingMode
-  /** Current time used for the recency window; defaults to now. Injectable for tests. */
+  // current time used for the recency window; defaults to now. Injectable for tests.
   readonly now?: number
 }): ReadonlyArray<HomeThreadGroup>
 {
@@ -315,8 +312,8 @@ export function buildHomeThreadGroups(input: {
     let groupKey = groupKeyByProjectKey.get(physicalKey)
     if (!groupKey)
     {
-      // The project shell is not loaded (environment offline / project gone).
-      // A queued task must stay visible and deletable regardless, so build a
+      // the project shell is not loaded (environment offline / project gone).
+      // a queued task must stay visible and deletable regardless, so build a
       // standalone group from the metadata snapshotted at enqueue time.
       groupKey = `pending-project:${physicalKey}`
       groupKeyByProjectKey.set(physicalKey, groupKey)
@@ -394,14 +391,14 @@ export function buildHomeThreadGroups(input: {
     }
 
     const sortedThreads = sortThreads(matchingThreads, input.threadSortOrder)
-    // An active search should reach the full history, so the recency window
+    // an active search should reach the full history, so the recency window
     // only trims the default (no-query) view.
     const recentThreads =
       query.length === 0
         ? selectRecentThreads(sortedThreads, input.threadSortOrder, now)
         : sortedThreads
 
-    // A stale project id still resolves to the canonical member with the same
+    // a stale project id still resolves to the canonical member with the same
     // environment/path, so quick creation follows the machine with the newest activity.
     const lastActiveProject = Arr.head(sortedThreads).pipe(
       Option.flatMap((thread) =>

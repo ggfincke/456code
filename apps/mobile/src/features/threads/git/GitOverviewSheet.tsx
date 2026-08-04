@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/git/GitOverviewSheet.tsx
+// render git overview sheet
+
 import {
   type GitActionRequestInput,
   buildMenuItems,
@@ -184,8 +187,8 @@ export function GitOverviewSheet(props: GitOverviewSheetProps)
     [environmentId, openExistingPr, navigation, runActionWithPrompt, threadId],
   )
 
-  // Status facts live on the relevant rows instead of crowding the header
-  // subtitle: files changed → Commit, ahead → Push, PR → View PR, behind → Pull.
+  // status facts live on the relevant rows instead of crowding the header
+  // subtitle: files changed -> Commit, ahead -> Push, PR -> View PR, behind -> Pull.
   const rowStatusDetail = useCallback(
     (item: (typeof menuItems)[number]): string | undefined =>
     {
@@ -215,7 +218,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps)
 
   const behindCount = gitStatus.data?.behindCount ?? 0
 
-  // Deterministic pull-to-refresh state. Tying RefreshControl to the query's
+  // deterministic pull-to-refresh state. Tying RefreshControl to the query's
   // isPending flag left the spinner stuck (the status query reports pending
   // during quiet background refreshes too).
   const [isPullRefreshing, setIsPullRefreshing] = useState(false)
@@ -347,7 +350,7 @@ export function GitOverviewSheet(props: GitOverviewSheetProps)
 
   if (Platform.OS === 'ios')
   {
-    // Compact form sheet: a plain screen presented as formSheet never renders a
+    // compact form sheet: a plain screen presented as formSheet never renders a
     // stack header, so — like the Settings sheet — the header must come from a
     // nested native stack INSIDE the sheet. This reuses the exact structure of the
     // inspector branch below: branch as the title, status summary as the native

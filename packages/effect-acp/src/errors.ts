@@ -1,3 +1,6 @@
+// packages/effect-acp/src/errors.ts
+// define effect acp errors
+
 import * as Schema from 'effect/Schema'
 import type * as SchemaIssue from 'effect/SchemaIssue'
 

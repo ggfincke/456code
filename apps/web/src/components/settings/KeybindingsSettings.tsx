@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/KeybindingsSettings.tsx
+// render keybindings settings
+
 import {
   ChevronDownIcon,
   CircleXIcon,

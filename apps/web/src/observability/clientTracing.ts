@@ -1,3 +1,6 @@
+// apps/web/src/observability/clientTracing.ts
+// define client tracing config
+
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as ManagedRuntime from 'effect/ManagedRuntime'

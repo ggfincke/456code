@@ -1,3 +1,6 @@
+// apps/web/src/components/BranchToolbarEnvironmentSelector.tsx
+// render branch toolbar environment selector
+
 import type { EnvironmentId } from '@t3tools/contracts'
 import { CloudIcon, MonitorIcon } from 'lucide-react'
 import { memo, useMemo } from 'react'
@@ -18,7 +21,7 @@ interface BranchToolbarEnvironmentSelectorProps
   envLocked: boolean
   environmentId: EnvironmentId
   availableEnvironments: readonly EnvironmentOption[]
-  // Absent when there is only one environment to show: the indicator still
+  // absent when there is only one environment to show: the indicator still
   // renders (as a static label) so remote projects are always identifiable.
   onEnvironmentChange?: (environmentId: EnvironmentId) => void
 }

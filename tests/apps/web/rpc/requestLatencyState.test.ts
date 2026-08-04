@@ -1,3 +1,6 @@
+// tests/apps/web/rpc/requestLatencyState.test.ts
+// verify request latency state behavior
+
 import { ORCHESTRATION_WS_METHODS, WS_METHODS } from '@t3tools/contracts'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 

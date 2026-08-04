@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/sidebarState.ts
+// render reusable sidebar state UI primitives
+
 export type ResponsiveSidebarState = 'expanded' | 'collapsed'
 
 export function resolveSidebarState(input: {

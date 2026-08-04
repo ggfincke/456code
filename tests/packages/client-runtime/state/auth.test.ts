@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/auth.test.ts
+// verify apply auth access stream event behavior
+
 import { AuthSessionId } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
 import * as DateTime from 'effect/DateTime'

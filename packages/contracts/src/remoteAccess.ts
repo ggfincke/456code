@@ -1,3 +1,6 @@
+// packages/contracts/src/remoteAccess.ts
+// define remote access contracts
+
 import * as Schema from 'effect/Schema'
 
 import { TrimmedNonEmptyString } from './baseSchemas.ts'

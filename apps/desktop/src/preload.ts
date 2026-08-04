@@ -1,3 +1,6 @@
+// apps/desktop/src/preload.ts
+// expose desktop IPC APIs to renderer processes
+
 import type {
   DesktopBridge,
   DesktopPreviewPointerEvent,

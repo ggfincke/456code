@@ -1,3 +1,6 @@
+// apps/mobile/src/components/CopyTextButton.tsx
+// render copy text button
+
 import { SymbolView } from '../components/AppSymbol'
 import { memo, useEffect, useRef, useState } from 'react'
 import { Pressable, type ColorValue } from 'react-native'

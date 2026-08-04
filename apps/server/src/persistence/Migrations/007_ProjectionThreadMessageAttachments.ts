@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/007_ProjectionThreadMessageAttachments.ts
+// apply persistence migration 007 projection thread message attachments
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

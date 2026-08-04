@@ -1,3 +1,6 @@
+// apps/web/src/main.tsx
+// mount the web application
+
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { createHashHistory, createBrowserHistory } from '@tanstack/react-router'
@@ -16,7 +19,7 @@ import {
 } from './lib/windowControlsOverlay'
 import { AppRoot } from './AppRoot'
 
-// Electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
+// electron loads the app from a file-backed shell, so hash history avoids path resolution issues.
 const history = isElectron ? createHashHistory() : createBrowserHistory()
 
 const router = getRouter(history)

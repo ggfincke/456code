@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/Code456MarkdownTextNativeComponent.ts
+// implement mobile code456 markdown text native component
+
 import codegenNativeComponent from 'react-native/Libraries/Utilities/codegenNativeComponent'
 import type { ViewProps } from 'react-native'
 import type {
@@ -37,20 +40,18 @@ interface NativeProps extends ViewProps
   ellipsizeMode?: WithDefault<EllipsizeMode, 'tail'>
   selectable?: boolean
   onTextLayout?: BubblingEventHandler<TextLayoutEvent>
-  /**
-   * Callback fired when the text selection changes.
-   *
-   * @example
-   * ```tsx
-   * <MarkdownTextPrimitive
-   *   onSelectionChange={(event) => {
-   *     console.log('Selection:', event.nativeEvent.start, event.nativeEvent.end);
-   *   }}
-   * >
-   *   Selectable text
-   * </MarkdownTextPrimitive>
-   * ```
-   */
+  // callback fired when the text selection changes.
+  //
+  // @example
+  // ```tsx
+  // <MarkdownTextPrimitive
+  //   onSelectionChange={(event) => {
+  //     console.log('Selection:', event.nativeEvent.start, event.nativeEvent.end);
+  //   }}
+  // >
+  //   selectable text
+  // </MarkdownTextPrimitive>
+  // ```
   onSelectionChange?: BubblingEventHandler<SelectionChangeEvent>
 }
 

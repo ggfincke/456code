@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/review.ts
+// manage create review environment atoms state
+
 import { WS_METHODS } from '@t3tools/contracts'
 import { Atom } from 'effect/unstable/reactivity'
 

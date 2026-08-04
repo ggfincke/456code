@@ -1,3 +1,6 @@
+// apps/web/src/components/RightPanelSheet.tsx
+// render right panel sheet
+
 import { type ReactNode } from 'react'
 
 import { RIGHT_PANEL_SHEET_CLASS_NAME } from '../rightPanelLayout'

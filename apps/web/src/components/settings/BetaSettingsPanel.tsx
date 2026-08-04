@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/BetaSettingsPanel.tsx
+// render beta settings panel
+
 import { useEffect, useState } from 'react'
 
 import { useClientSettings, useUpdateClientSettings } from '../../hooks/useSettings'
@@ -17,7 +20,7 @@ function AutoSettleDaysInput({
   onCommit: (days: number) => void
 })
 {
-  // Local draft so the field can be emptied mid-edit; the setting only moves
+  // local draft so the field can be emptied mid-edit; the setting only moves
   // on valid input and snaps back to the persisted value on blur.
   const [draft, setDraft] = useState(String(value))
   useEffect(() =>
@@ -35,7 +38,7 @@ function AutoSettleDaysInput({
       onChange={(event) =>
       {
         setDraft(event.target.value)
-        // Number(), not parseInt: "3.5" must be rejected (not truncated to a
+        // number(), not parseInt: "3.5" must be rejected (not truncated to a
         // committed 3 while the field shows 3.5) — commit only when the
         // persisted value matches the displayed one.
         const parsed = Number(event.target.value)

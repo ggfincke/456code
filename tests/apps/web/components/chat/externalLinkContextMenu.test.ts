@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/externalLinkContextMenu.test.ts
+// verify external chat link context menu behavior
+
 import { describe, expect, it, vi } from 'vite-plus/test'
 
 import {

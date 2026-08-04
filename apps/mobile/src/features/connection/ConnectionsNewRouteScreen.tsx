@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/ConnectionsNewRouteScreen.tsx
+// render the connections new route screen route
+
 import { CameraView, useCameraPermissions } from 'expo-camera'
 import { NativeHeaderToolbar, NativeStackScreenOptions } from '../../native/StackHeader'
 import { StackActions, useNavigation, type StaticScreenProps } from '@react-navigation/native'
@@ -162,7 +165,7 @@ export function ConnectionsNewRouteScreen({
     <View collapsable={false} className="flex-1 bg-sheet">
       <NativeStackScreenOptions
         options={{
-          // Android renders its own in-screen header below instead of the native bar.
+          // android renders its own in-screen header below instead of the native bar.
           ...(Platform.OS === 'android' ? { headerShown: false } : null),
           title: showScanner ? 'Scan QR Code' : 'Add Environment',
         }}

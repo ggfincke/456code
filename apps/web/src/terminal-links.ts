@@ -1,3 +1,6 @@
+// apps/web/src/terminal-links.ts
+// define terminal link kind
+
 import { isMacPlatform } from './lib/utils'
 
 export type TerminalLinkKind = 'url' | 'path'

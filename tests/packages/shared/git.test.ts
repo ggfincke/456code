@@ -1,3 +1,6 @@
+// tests/packages/shared/git.test.ts
+// verify normalize git remote url behavior
+
 import type { VcsStatusRemoteResult, VcsStatusResult } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

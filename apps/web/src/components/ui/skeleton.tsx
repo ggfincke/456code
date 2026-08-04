@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/skeleton.tsx
+// render reusable skeleton UI primitives
+
 import { cn } from '~/lib/utils'
 
 function Skeleton({ className, ...props }: React.ComponentProps<'div'>)

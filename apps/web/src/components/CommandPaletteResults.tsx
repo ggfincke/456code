@@ -1,3 +1,6 @@
+// apps/web/src/components/CommandPaletteResults.tsx
+// render command palette results
+
 import { type ResolvedKeybindingsConfig } from '@t3tools/contracts'
 import { ChevronRightIcon } from 'lucide-react'
 import { shortcutLabelForCommand } from '../keybindings'

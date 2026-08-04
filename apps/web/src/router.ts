@@ -1,3 +1,6 @@
+// apps/web/src/router.ts
+// configure the web application router
+
 import { createRouter, RouterHistory } from '@tanstack/react-router'
 
 import { routeTree } from './routeTree.gen'

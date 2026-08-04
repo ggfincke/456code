@@ -1,5 +1,6 @@
 // tests/apps/server/import/sourceCatalog.test.ts
 // verifies configured transcript roots, provider compatibility, and canonical containment
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFSP from 'node:fs/promises'

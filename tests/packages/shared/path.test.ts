@@ -1,3 +1,6 @@
+// tests/packages/shared/path.test.ts
+// verify path helpers behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import {
   isExplicitRelativePath,

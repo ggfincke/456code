@@ -1,3 +1,6 @@
+// tests/apps/web/components/settings/pairingUrls.test.ts
+// verify settings pairing url helpers behavior
+
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import {

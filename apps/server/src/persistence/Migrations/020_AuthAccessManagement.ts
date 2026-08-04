@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/020_AuthAccessManagement.ts
+// apply persistence migration 020 auth access management
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

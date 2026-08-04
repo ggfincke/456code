@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-terminal-session.ts
+// manage attached terminal session through a React hook
+
 import {
   combineTerminalSessionState,
   EMPTY_TERMINAL_BUFFER_STATE,

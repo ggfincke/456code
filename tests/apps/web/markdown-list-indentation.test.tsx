@@ -1,3 +1,6 @@
+// tests/apps/web/markdown-list-indentation.test.tsx
+// verify remark normalize list item indentation behavior
+
 import { renderToStaticMarkup } from 'react-dom/server'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'

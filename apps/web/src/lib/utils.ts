@@ -1,3 +1,6 @@
+// apps/web/src/lib/utils.ts
+// merge conditional web class names
+
 import { CommandId, MessageId, ProjectId, ThreadId } from '@t3tools/contracts'
 import { type CxOptions, cx } from 'class-variance-authority'
 import * as Encoding from 'effect/Encoding'

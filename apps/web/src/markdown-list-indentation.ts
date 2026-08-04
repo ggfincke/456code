@@ -1,3 +1,6 @@
+// apps/web/src/markdown-list-indentation.ts
+// remark normalize list item indentation
+
 interface MarkdownPosition
 {
   readonly start?: {
@@ -66,9 +69,9 @@ function isSameLineOverIndentedCode(
 
 function parseRecoveredMarkdown(value: string, parser: MarkdownParser): RecoveredMarkdown
 {
-  // A text prefix forces block-looking input into a paragraph while preserving
+  // a text prefix forces block-looking input into a paragraph while preserving
   // the processor's configured inline extensions (for example, GFM syntax).
-  // Later root children are kept as blocks so blank-line-separated content is
+  // later root children are kept as blocks so blank-line-separated content is
   // never discarded.
   const source = `${INLINE_PARSE_PREFIX}${value}`
   const document = parser.parse(source) as MarkdownAstNode
@@ -115,14 +118,12 @@ function blocksFromIndentedCode(node: MarkdownAstNode, parser: MarkdownParser): 
   }
 }
 
-/**
- * CommonMark treats four or more spaces after a list marker as an indented
- * code block. In chat output, excessive spacing is commonly accidental
- * alignment such as `-       text`, which otherwise produces a full code card
- * for every bullet. Only normalize blocks that retain excess indentation and
- * start on the marker's own line; explicit fences and conventional indented
- * blocks remain code.
- */
+// CommonMark treats four or more spaces after a list marker as an indented
+// code block. In chat output, excessive spacing is commonly accidental
+// alignment such as `-       text`, which otherwise produces a full code card
+// for every bullet. Only normalize blocks that retain excess indentation and
+// start on the marker's own line; explicit fences and conventional indented
+// blocks remain code.
 function attachListItemIndentationNormalizer(this: MarkdownParser)
 {
   return (tree: MarkdownAstNode, file: MarkdownFile) =>

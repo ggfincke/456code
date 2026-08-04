@@ -1,3 +1,6 @@
+// apps/mobile/src/state/workspaceModel.ts
+// manage workspace environment state
+
 import { type EnvironmentShellSummary } from '@t3tools/client-runtime/state/shell'
 import { type NetworkStatus } from '@t3tools/client-runtime/connection'
 import { type EnvironmentConnectionPhase } from '@t3tools/client-runtime/connection'

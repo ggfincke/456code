@@ -1,3 +1,6 @@
+// tests/apps/server/mcp/toolkits/preview/tools.test.ts
+// verify tools behavior
+
 import { expect, it } from '@effect/vitest'
 import { Tool } from 'effect/unstable/ai'
 

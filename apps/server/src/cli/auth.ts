@@ -1,3 +1,6 @@
+// apps/server/src/cli/auth.ts
+// handle server authentication
+
 import {
   AuthAdministrativeScopes,
   AuthSessionId,

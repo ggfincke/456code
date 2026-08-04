@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/useLoadingProgress.ts
+// manage loading progress through a React hook
+
 import { useEffect, useRef, useState } from 'react'
 
 const TICK_INTERVAL_MS = 120
@@ -7,15 +10,13 @@ const ASYMPTOTE_PERCENT = 90
 const APPROACH_FACTOR = 0.08
 const MIN_INCREMENT = 0.5
 
-/**
- * Indeterminate progress simulator for the preview chrome's loading bar.
- * Animates 0 → 90% asymptotically while `loading` is true, snaps to 100%
- * on release, then resets after a short pause.
- *
- * Uses a ref to thread the latest progress through interval ticks without
- * needing `loading` to retrigger the effect, which sidesteps the stale-
- * closure pitfalls of reading `progress` directly.
- */
+// indeterminate progress simulator for the preview chrome's loading bar.
+// animates 0 -> 90% asymptotically while `loading` is true, snaps to 100%
+// on release, then resets after a short pause.
+//
+// uses a ref to thread the latest progress through interval ticks without
+// needing `loading` to retrigger the effect, which sidesteps the stale-
+// closure pitfalls of reading `progress` directly.
 export function useLoadingProgress(loading: boolean): number
 {
   const [progress, setProgress] = useState(0)

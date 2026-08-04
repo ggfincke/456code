@@ -1,3 +1,6 @@
+// tests/oxlint-plugin-456code/rules/no-manual-effect-runtime-in-tests.test.ts
+// verify 456code/no manual effect runtime in tests behavior
+
 import { assert, describe } from '@effect/vitest'
 
 import { createOxlintRuleHarness } from '../../../oxlint-plugin-456code/test/utils.ts'
@@ -18,7 +21,7 @@ describe('456code/no-manual-effect-runtime-in-tests', () =>
     `,
   )
 
-  // Representative Effect.run* surfaces; full method list is owned by the lint rule itself.
+  // representative Effect.run* surfaces; full method list is owned by the lint rule itself.
   for (const method of ['runPromise', 'runSync', 'runFork'] as const)
   {
     rule.invalid(

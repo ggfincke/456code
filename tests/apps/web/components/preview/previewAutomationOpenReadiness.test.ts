@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/previewAutomationOpenReadiness.test.ts
+// verify preview automation open readiness behavior
+
 import type { PreviewAutomationOpenInput, PreviewSessionSnapshot } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

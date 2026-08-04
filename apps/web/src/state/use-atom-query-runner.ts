@@ -1,3 +1,6 @@
+// apps/web/src/state/use-atom-query-runner.ts
+// manage atom query runner through a React hook
+
 import { RegistryContext } from '@effect/atom-react'
 import {
   executeAtomQuery,

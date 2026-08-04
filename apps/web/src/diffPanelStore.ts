@@ -1,3 +1,6 @@
+// apps/web/src/diffPanelStore.ts
+// manage diff panel state
+
 import { scopedThreadKey } from '@t3tools/client-runtime/environment'
 import type { ScopedThreadRef, TurnId } from '@t3tools/contracts'
 import { create } from 'zustand'

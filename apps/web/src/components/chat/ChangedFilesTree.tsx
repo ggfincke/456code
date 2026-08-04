@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ChangedFilesTree.tsx
+// render changed files tree
+
 import { type TurnId } from '@t3tools/contracts'
 import { memo, useCallback, useMemo, useState } from 'react'
 import { type TurnDiffFileChange } from '../../types'

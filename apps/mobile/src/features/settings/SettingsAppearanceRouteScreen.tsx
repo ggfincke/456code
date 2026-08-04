@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/SettingsAppearanceRouteScreen.tsx
+// render the settings appearance route screen route
+
 import { ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 

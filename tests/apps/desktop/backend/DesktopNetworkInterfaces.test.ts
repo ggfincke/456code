@@ -1,3 +1,6 @@
+// tests/apps/desktop/backend/DesktopNetworkInterfaces.test.ts
+// verify desktop network interfaces behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Cause from 'effect/Cause'

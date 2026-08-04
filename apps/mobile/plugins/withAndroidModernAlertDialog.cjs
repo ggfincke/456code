@@ -1,3 +1,6 @@
+// apps/mobile/plugins/withAndroidModernAlertDialog.cjs
+// configure android modern alert dialog in Expo projects
+
 const fs = require('node:fs')
 const path = require('node:path')
 const {
@@ -8,7 +11,7 @@ const {
   withDangerousMod,
 } = require('expo/config-plugins')
 
-// React Native's Alert renders an AppCompat AlertDialog on Android, which
+// react Native's Alert renders an AppCompat AlertDialog on Android, which
 // inherits the dated framework dialog chrome (square gray panel, teal
 // all-caps buttons) from the app theme. These resources restyle it with the
 // app's uniwind tokens from global.css: --color-card panel, --color-foreground
@@ -32,10 +35,14 @@ const DIALOG_BACKGROUND_DRAWABLE = `<?xml version="1.0" encoding="utf-8"?>
 
 const COLORS = {
   light: {
-    background: '#FFFFFF', // --color-card
-    text: '#262626', // --color-foreground
-    secondaryText: '#525252', // --color-foreground-secondary
-    buttonText: '#262626', // --color-primary
+    // --color-card
+    background: '#FFFFFF',
+    // --color-foreground
+    text: '#262626',
+    // --color-foreground-secondary
+    secondaryText: '#525252',
+    // --color-primary
+    buttonText: '#262626',
   },
   night: {
     background: '#171717',
@@ -69,7 +76,7 @@ function withAlertDialogStyles(config)
     const appTheme = resources.style.find((style) => style.$?.name === 'AppTheme')
     if (appTheme)
     {
-      // React Native's dialog module builds an androidx.appcompat AlertDialog,
+      // react Native's dialog module builds an androidx.appcompat AlertDialog,
       // which resolves its theme from the AppCompat attr; the framework attr is
       // set too for any native code that inflates a platform AlertDialog.
       assignStyleItem(appTheme, 'alertDialogTheme', '@style/AppAlertDialog')
@@ -87,13 +94,13 @@ function withAlertDialogStyles(config)
         $: { name: 'AppAlertDialog', parent: 'ThemeOverlay.AppCompat.Dialog.Alert' },
         item: [
           { _: '@drawable/alert_dialog_background', $: { name: 'android:windowBackground' } },
-          // The message body resolves textColorPrimary in AppCompat's alert
+          // the message body resolves textColorPrimary in AppCompat's alert
           // layout; pointing it at the secondary token dims the message
           // relative to the title, which keeps full-strength text via the
           // explicit color in AppAlertDialog.Title.
           { _: '@color/alert_dialog_secondary_text', $: { name: 'android:textColorPrimary' } },
           { _: '@color/alert_dialog_secondary_text', $: { name: 'android:textColorSecondary' } },
-          // Theme-level fontFamily is the lowest-priority fallback in attribute
+          // theme-level fontFamily is the lowest-priority fallback in attribute
           // resolution, so it reaches every text view in the dialog that does
           // not carry its own fontFamily (the message body in particular).
           { _: '@font/xml_dm_sans_regular', $: { name: 'android:fontFamily' } },
@@ -120,7 +127,7 @@ function withAlertDialogStyles(config)
           parent: 'Widget.AppCompat.Button.ButtonBar.AlertDialog',
         },
         item: [
-          // The AppCompat button appearance hardcodes sans-serif-medium, so
+          // the AppCompat button appearance hardcodes sans-serif-medium, so
           // the font must be set here rather than relying on the theme
           // fallback.
           { _: '@font/dm_sans_500medium', $: { name: 'android:fontFamily' } },

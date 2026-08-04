@@ -1,3 +1,6 @@
+// apps/web/src/browser/BrowserSurfaceSlot.tsx
+// render browser surface slot
+
 'use client'
 
 import { useLayoutEffect, useRef } from 'react'

@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/sharing/incoming-share-presentation.test.ts
+// verify incoming share presentation behavior
+
 import { describe, expect, it } from '@effect/vitest'
 
 import {

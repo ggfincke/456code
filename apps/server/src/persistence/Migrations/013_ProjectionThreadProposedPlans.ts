@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/013_ProjectionThreadProposedPlans.ts
+// apply persistence migration 013 projection thread proposed plans
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

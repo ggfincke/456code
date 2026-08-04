@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/NativeMarkdownBlock.ios.tsx
+// render native markdown block ios
+
 import { useEffect, useState } from 'react'
 import { Image, ScrollView, Text, useColorScheme, View } from 'react-native'
 import type { MarkdownNode } from 'react-native-nitro-markdown/headless'
@@ -27,7 +30,7 @@ function nodeKey(node: MarkdownNode, index: number): string
   return `${node.type}:${node.beg ?? index}:${node.end ?? index}`
 }
 
-/** Code inside markdown scales with the base text size (12pt at the default 15pt body). */
+// code inside markdown scales with the base text size (12pt at the default 15pt body).
 function codeBlockFontSize(textStyle: NativeMarkdownTextStyle): number
 {
   return Math.max(10, Math.round(textStyle.fontSize * 0.8))

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/CloudAuthProvider.tsx
+// render cloud auth provider
+
 import { ClerkProvider, useAuth } from '@clerk/expo'
 import { tokenCache } from '@clerk/expo/token-cache'
 import { ManagedRelay, setManagedRelaySession } from '@t3tools/client-runtime/relay'
@@ -74,8 +77,8 @@ function CloudAuthBridge(props: { readonly children: ReactNode })
     const nextAccount = isSignedIn && userId ? userId : null
     observedAccountRef.current = nextAccount
 
-    // Every sign-in or account switch that completes during this session (a
-    // cold start observes undefined → account and must not re-prompt) requests
+    // every sign-in or account switch that completes during this session (a
+    // cold start observes undefined -> account and must not re-prompt) requests
     // the cloud onboarding sheet — account transitions clear the
     // connected environments, so each new session starts with no devices to
     // reach. The request itself is issued after the cleanup transition inside
@@ -184,7 +187,7 @@ function CloudAuthBridge(props: { readonly children: ReactNode })
     () => () =>
     {
       previousTokenProviderRef.current = null
-      // Unmounting is not a sign-out: the user is usually still signed in, so
+      // unmounting is not a sign-out: the user is usually still signed in, so
       // detach the provider without ending lock-screen activities or wiping the
       // persisted registration (a remount reuses both).
       releaseAgentAwarenessRelayTokenProvider()

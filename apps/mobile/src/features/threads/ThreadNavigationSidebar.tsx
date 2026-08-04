@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ThreadNavigationSidebar.tsx
+// render thread navigation sidebar
+
 import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
 import type {
   EnvironmentProject,
@@ -71,9 +74,9 @@ import {
   type ThreadListV2Item,
 } from './threadListV2'
 
-/** The sidebar list serves both lists: v1 grouped items or, when the Thread
-    List v2 beta is on, queued offline tasks, flat v2 rows, and a settled
-    "Show more" pager. */
+// the sidebar list serves both lists: v1 grouped items or, when the Thread
+// list v2 beta is on, queued offline tasks, flat v2 rows, and a settled
+// "Show more" pager.
 type SidebarListItem =
   | HomeListItem
   | {
@@ -85,10 +88,8 @@ type SidebarListItem =
   | { readonly type: 'v2-thread'; readonly key: string; readonly item: ThreadListV2Item }
   | { readonly type: 'v2-show-more'; readonly key: string; readonly hiddenCount: number }
 
-/**
- * Shared capsule behind the sidebar header buttons — a native liquid-glass
- * surface on iOS 26+, a tinted pill everywhere else.
- */
+// shared capsule behind the sidebar header buttons — a native liquid-glass
+// surface on iOS 26+, a tinted pill everywhere else.
 function SidebarHeaderButtonGroup(props: {
   readonly children: ReactNode
   readonly colorScheme: 'light' | 'dark'
@@ -144,15 +145,13 @@ interface ThreadNavigationSidebarProps
   readonly searchQuery: string
 }
 
-/**
- * iPad/large-width sidebar column.
- *
- * On iOS the pane is hosted inside its own navigation-inert single-screen
- * native stack (SidebarNavigationShell) so the header is a real
- * UINavigationBar: large title, native bar-button items, and a
- * UISearchController search field — the same chrome a UISplitViewController
- * column gets. Other platforms keep the custom header chrome.
- */
+// iPad/large-width sidebar column.
+//
+// on iOS the pane is hosted inside its own navigation-inert single-screen
+// native stack (SidebarNavigationShell) so the header is a real
+// UINavigationBar: large title, native bar-button items, and a
+// UISearchController search field — the same chrome a UISplitViewController
+// column gets. Other platforms keep the custom header chrome.
 export function ThreadNavigationSidebar(props: ThreadNavigationSidebarProps)
 {
   if (Platform.OS !== 'ios')
@@ -369,7 +368,7 @@ function ThreadNavigationSidebarPane(
     return map
   }, [projects])
 
-  // Thread List v2 (beta) support — same model as the compact Home list
+  // thread List v2 (beta) support — same model as the compact Home list
   // (HomeScreen.tsx): flat creation-order card block + settled recency tail.
   // PR states stream in per-row; merged/closed PRs auto-settle their thread
   // on the next partition.
@@ -396,7 +395,7 @@ function ThreadNavigationSidebarPane(
     },
     [],
   )
-  // The settled tail renders in pages; expansion resets when the filter
+  // the settled tail renders in pages; expansion resets when the filter
   // context changes so environment/search flips never inherit a deep page.
   const [settledVisibleCount, setSettledVisibleCount] = useState(
     THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
@@ -416,21 +415,21 @@ function ThreadNavigationSidebarPane(
   // crossed while the pane stays open; without a clock dependency the
   // partition memoizes a frozen "now".
   const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16))
-  // Snooze wake times are second-precise; a counter bumped exactly at the
+  // snooze wake times are second-precise; a counter bumped exactly at the
   // next wake boundary re-runs the partition with a fresh clock so a woken
   // thread reappears immediately instead of on the next minute tick.
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0)
   useEffect(() =>
   {
     if (!threadListV2Enabled) return
-    // Refresh immediately on enable: the mount-time value can be hours old
+    // refresh immediately on enable: the mount-time value can be hours old
     // by the time the beta is switched on, which would misclassify the
     // inactivity auto-settle boundary until the first tick.
     setNowMinute(new Date().toISOString().slice(0, 16))
     const id = setInterval(() => setNowMinute(new Date().toISOString().slice(0, 16)), 60_000)
     return () => clearInterval(id)
   }, [threadListV2Enabled])
-  // Threads on servers without the settlement capability never classify as
+  // threads on servers without the settlement capability never classify as
   // settled (the user could neither un-settle nor pin them).
   const serverConfigs = useAtomValue(environmentServerConfigsAtom)
   const settlementEnvironmentIds = useMemo(() =>
@@ -486,7 +485,7 @@ function ThreadNavigationSidebarPane(
     threads,
     selectedProjectScope,
   ])
-  // Re-partition the moment the earliest snooze expires (clamped to the
+  // re-partition the moment the earliest snooze expires (clamped to the
   // signed-32-bit setTimeout range; far-future wakes re-arm at the clamp).
   const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt
   useEffect(() =>
@@ -504,7 +503,7 @@ function ThreadNavigationSidebarPane(
   const listItems = useMemo<readonly SidebarListItem[]>(() =>
   {
     if (!threadListV2Enabled) return listLayout.items
-    // Queued offline tasks render above the thread rows (mirrors the
+    // queued offline tasks render above the thread rows (mirrors the
     // compact Home v2 list): they are not thread shells, so the v2 item
     // builder never sees them, but they must stay visible and deletable
     // while their environment is offline. Same environment scope and
@@ -689,7 +688,7 @@ function ThreadNavigationSidebarPane(
   const headerFadeColor = String(backgroundColor)
   const headerWashOpacity = SIDEBAR_HEADER_WASH_OPACITY[colorScheme]
   const [measuredHeaderHeight, setMeasuredHeaderHeight] = useState<number | null>(null)
-  // The sticky header (title row, search field, optional connection status)
+  // the sticky header (title row, search field, optional connection status)
   // is measured so the list inset always matches its real height — no
   // hardcoded per-variant constants.
   const stickyHeaderHeight = measuredHeaderHeight ?? insets.top + SIDEBAR_STICKY_HEADER_HEIGHT
@@ -891,7 +890,7 @@ function ThreadNavigationSidebarPane(
               isFirst={item.isFirst}
               groupKey={item.group.key}
               onGroupAction={updateGroupDisplay}
-              // Same gating as the compact Home list: aggregated groups have no
+              // same gating as the compact Home list: aggregated groups have no
               // single target project, and pending-project groups hold a
               // placeholder shell rather than a real project.
               newThreadTarget={item.group.newThreadTarget}
@@ -1026,15 +1025,14 @@ function ThreadNavigationSidebarPane(
   // "No threads yet" over an inbox that is merely all-snoozed reads as
   // data loss; name the snoozed threads instead.
   const snoozedCount = threadListV2Layout.snoozedCount
+  // snoozed matches passed the search filter, so do not report them as nonexistent
   const listEmpty = (
     <Text className="px-2 py-4 text-sm text-foreground-muted">
       {catalogState.isLoadingConnections
         ? 'Loading threads…'
         : props.searchQuery.trim().length > 0
           ? snoozedCount > 0
-            ? // Snoozed matches passed this same search filter — "No
-              // matching threads" would misreport them as nonexistent.
-              snoozedCount === 1
+            ? snoozedCount === 1
               ? '1 matching thread snoozed'
               : 'All matching threads snoozed'
             : 'No matching threads'
@@ -1059,7 +1057,7 @@ function ThreadNavigationSidebarPane(
               ref: searchBarRef,
               autoCapitalize: 'none',
               hideNavigationBar: false,
-              // Keep the search bar pinned under the title — UIKit's default
+              // keep the search bar pinned under the title — UIKit's default
               // hidesSearchBarWhenScrolling collapses it on scroll.
               hideWhenScrolling: false,
               obscureBackground: false,

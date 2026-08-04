@@ -18,10 +18,10 @@ export interface CommitMessageGenerationInput
   branch: string | null
   stagedSummary: string
   stagedPatch: string
-  /** When true, the model also returns a semantic branch name for the change. */
+  // when true, the model also returns a semantic branch name for the change.
   includeBranch?: boolean
   policy?: TextGenerationPolicy | undefined
-  /** What model and provider to use for generation. */
+  // what model and provider to use for generation.
   modelSelection: ModelSelection
 }
 
@@ -29,7 +29,7 @@ export interface CommitMessageGenerationResult
 {
   subject: string
   body: string
-  /** Only present when `includeBranch` was set on the input. */
+  // only present when `includeBranch` was set on the input.
   branch?: string | undefined
 }
 
@@ -43,7 +43,7 @@ export interface PrContentGenerationInput
   diffPatch: string
   changeRequestTemplate?: string | undefined
   policy?: TextGenerationPolicy | undefined
-  /** What model and provider to use for generation. */
+  // what model and provider to use for generation.
   modelSelection: ModelSelection
 }
 
@@ -58,7 +58,7 @@ export interface BranchNameGenerationInput
   cwd: string
   message: string
   attachments?: ReadonlyArray<ChatAttachment> | undefined
-  /** What model and provider to use for generation. */
+  // what model and provider to use for generation.
   modelSelection: ModelSelection
 }
 
@@ -72,7 +72,7 @@ export interface ThreadTitleGenerationInput
   cwd: string
   message: string
   attachments?: ReadonlyArray<ChatAttachment> | undefined
-  /** What model and provider to use for generation. */
+  // what model and provider to use for generation.
   modelSelection: ModelSelection
 }
 
@@ -95,30 +95,22 @@ export interface TextGenerationService
 export class TextGeneration extends Context.Service<
   TextGeneration,
   {
-    /**
-     * Generate a commit message from staged change context.
-     */
+    // generate a commit message from staged change context.
     readonly generateCommitMessage: (
       input: CommitMessageGenerationInput,
     ) => Effect.Effect<CommitMessageGenerationResult, TextGenerationError>
 
-    /**
-     * Generate change request title/body from branch and diff context.
-     */
+    // generate change request title/body from branch and diff context.
     readonly generatePrContent: (
       input: PrContentGenerationInput,
     ) => Effect.Effect<PrContentGenerationResult, TextGenerationError>
 
-    /**
-     * Generate a concise branch name from a user message.
-     */
+    // generate a concise branch name from a user message.
     readonly generateBranchName: (
       input: BranchNameGenerationInput,
     ) => Effect.Effect<BranchNameGenerationResult, TextGenerationError>
 
-    /**
-     * Generate a concise thread title from a user's first message.
-     */
+    // generate a concise thread title from a user's first message.
     readonly generateThreadTitle: (
       input: ThreadTitleGenerationInput,
     ) => Effect.Effect<ThreadTitleGenerationResult, TextGenerationError>
@@ -126,7 +118,7 @@ export class TextGeneration extends Context.Service<
 >()('456code/textGeneration/TextGeneration')
 {}
 
-/** @deprecated Use `TextGeneration["Service"]`. */
+// @deprecated Use `TextGeneration["Service"]`.
 export type TextGenerationShape = TextGeneration['Service']
 
 type TextGenerationOp =

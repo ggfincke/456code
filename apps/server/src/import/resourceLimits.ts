@@ -1,5 +1,6 @@
 // apps/server/src/import/resourceLimits.ts
 // enforces shared import byte, file, traversal, and candidate budgets
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFS from 'node:fs'

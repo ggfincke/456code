@@ -115,12 +115,10 @@ export const commitVcsRefsRefresh = Effect.fn('CachedVcsRefsState.commitRefresh'
   )
 })
 
-/**
- * Retains the last unfiltered branch-list response for the new-task picker.
- * Filtered or paginated lists intentionally stay live-only: treating a
- * partial result as a complete offline list would make branch selection
- * misleading.
- */
+// retains the last unfiltered branch-list response for the new-task picker.
+// filtered or paginated lists intentionally stay live-only: treating a
+// partial result as a complete offline list would make branch selection
+// misleading.
 export const makeCachedVcsRefsChanges = Effect.fn('CachedVcsRefsState.makeChanges')(function* (
   input: VcsListRefsInput,
   expectedRevision?: number,

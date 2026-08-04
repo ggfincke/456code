@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-selected-thread-worktree.ts
+// manage selected thread worktree through a React hook
+
 import { useMemo } from 'react'
 
 import { useSelectedThreadDetail } from './use-thread-detail'

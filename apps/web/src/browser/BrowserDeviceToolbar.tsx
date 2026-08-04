@@ -1,3 +1,6 @@
+// apps/web/src/browser/BrowserDeviceToolbar.tsx
+// render browser device toolbar
+
 'use client'
 
 import {

@@ -1,3 +1,6 @@
+// apps/web/src/providerUpdateDismissal.ts
+// determine whether provider update notification dismissed
+
 import { useCallback, useMemo } from 'react'
 import * as Schema from 'effect/Schema'
 

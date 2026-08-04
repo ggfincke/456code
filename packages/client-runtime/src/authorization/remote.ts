@@ -1,3 +1,6 @@
+// packages/client-runtime/src/authorization/remote.ts
+// define remote environment auth error
+
 import {
   AuthAccessTokenType,
   type AuthClientPresentationMetadata,

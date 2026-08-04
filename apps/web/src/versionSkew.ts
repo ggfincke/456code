@@ -1,3 +1,6 @@
+// apps/web/src/versionSkew.ts
+// resolve version mismatch
+
 import type { EnvironmentId, ServerConfig, ServerSelfUpdateCapability } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 
@@ -54,8 +57,8 @@ export function resolveServerConfigVersionMismatch(
   return resolveVersionMismatch(serverConfig?.environment.serverVersion)
 }
 
-/** The update path the connected server offers, or null when it only
-    supports a manual relaunch (older servers, dev checkouts, Windows). */
+// the update path the connected server offers, or null when it only
+// supports a manual relaunch (older servers, dev checkouts, Windows).
 export function resolveServerSelfUpdateCapability(
   serverConfig: Pick<ServerConfig, 'environment'> | null | undefined,
 ): ServerSelfUpdateCapability | null
@@ -63,14 +66,14 @@ export function resolveServerSelfUpdateCapability(
   return serverConfig?.environment.capabilities.serverSelfUpdate ?? null
 }
 
-/** The command to hand users whose server cannot update itself. */
+// the command to hand users whose server cannot update itself.
 export function manualServerUpdateCommand(targetVersion: string): string
 {
   return `npx 456code@${targetVersion}`
 }
 
-/** One sentence telling the user how to resolve version skew for a server,
-    matched to the update path it offers. */
+// one sentence telling the user how to resolve version skew for a server,
+// matched to the update path it offers.
 export function serverUpdateGuidance(
   capability: ServerSelfUpdateCapability | null,
   serverLabel: string,

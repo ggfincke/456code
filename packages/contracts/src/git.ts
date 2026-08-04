@@ -9,7 +9,7 @@ import { VcsDriverKind } from './vcs.ts'
 const TrimmedNonEmptyStringSchema = TrimmedNonEmptyString
 const GIT_LIST_BRANCHES_MAX_LIMIT = 200
 
-// Domain Types
+// domain Types
 
 export const GitStackedAction = Schema.Literals([
   'commit',

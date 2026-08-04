@@ -1,11 +1,10 @@
-/**
- * ProjectionThreadSessionRepository - Repository interface for thread sessions.
- *
- * Owns persistence operations for projected provider-session linkage and
- * runtime status for each thread.
- *
- * @module ProjectionThreadSessionRepository
- */
+// apps/server/src/persistence/Services/ProjectionThreadSessions.ts
+// define projection thread sessions service contract
+
+// owns persistence operations for projected provider-session linkage and
+// runtime status for each thread.
+//
+// @module ProjectionThreadSessionRepository
 import {
   RuntimeMode,
   IsoDateTime,
@@ -48,23 +47,17 @@ export type DeleteProjectionThreadSessionInput = typeof DeleteProjectionThreadSe
  */
 export interface ProjectionThreadSessionRepositoryShape
 {
-  /**
-   * Insert or replace a projected thread-session row.
-   *
-   * Upserts by `threadId`.
-   */
+  // insert or replace a projected thread-session row.
+  //
+  // upserts by `threadId`.
   readonly upsert: (row: ProjectionThreadSession) => Effect.Effect<void, ProjectionRepositoryError>
 
-  /**
-   * Read projected thread-session state by thread id.
-   */
+  // read projected thread-session state by thread id.
   readonly getByThreadId: (
     input: GetProjectionThreadSessionInput,
   ) => Effect.Effect<Option.Option<ProjectionThreadSession>, ProjectionRepositoryError>
 
-  /**
-   * Delete projected thread-session state by thread id.
-   */
+  // delete projected thread-session state by thread id.
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadSessionInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>

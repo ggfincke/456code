@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/channels.ts
+// expose pick folder channel
+
 export const PICK_FOLDER_CHANNEL = 'desktop:pick-folder'
 export const CONFIRM_CHANNEL = 'desktop:confirm'
 export const SET_THEME_CHANNEL = 'desktop:set-theme'

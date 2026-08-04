@@ -1,3 +1,6 @@
+// apps/web/src/browser/previewWebviewConfigState.ts
+// manage preview webview config state
+
 import { useAtomValue } from '@effect/atom-react'
 import type {
   DesktopPreviewBridge,

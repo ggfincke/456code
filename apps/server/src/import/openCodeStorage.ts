@@ -1,5 +1,6 @@
 // apps/server/src/import/openCodeStorage.ts
 // discovers and loads deterministic opencode transcript storage bundles
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeCrypto from 'node:crypto'

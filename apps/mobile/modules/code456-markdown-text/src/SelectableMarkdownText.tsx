@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/SelectableMarkdownText.tsx
+// render selectable markdown text
+
 import type { SelectableMarkdownTextProps } from './SelectableMarkdownText.types'
 
 export type {

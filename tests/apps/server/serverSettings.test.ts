@@ -217,7 +217,7 @@ it.layer(NodeServices.layer)('server settings', (it) =>
     {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService
 
-      // Start with Claude text generation selection
+      // start with Claude text generation selection
       yield* serverSettings.updateSettings({
         textGenerationModelSelection: {
           instanceId: ProviderInstanceId.make('claudeAgent'),
@@ -230,7 +230,7 @@ it.layer(NodeServices.layer)('server settings', (it) =>
         },
       })
 
-      // Switch to Codex — the stale Claude "effort" in options must not
+      // switch to Codex — the stale Claude "effort" in options must not
       // cause the update to lose the selected model.
       const next = yield* serverSettings.updateSettings({
         textGenerationModelSelection: {

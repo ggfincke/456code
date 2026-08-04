@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+// apps/server/scripts/cli.ts
+// run the cli repository workflow
+
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
@@ -148,9 +151,7 @@ const applyDevelopmentIconOverrides = Effect.fn('applyDevelopmentIconOverrides')
   yield* Effect.log('[cli] Applied development icon overrides to dist/client')
 })
 
-// ---------------------------------------------------------------------------
 // build subcommand
-// ---------------------------------------------------------------------------
 
 const buildCmd = Command.make(
   'build',
@@ -191,9 +192,7 @@ const buildCmd = Command.make(
     }),
 ).pipe(Command.withDescription('Build the server package (tsdown + bundle web client).'))
 
-// ---------------------------------------------------------------------------
 // publish subcommand
-// ---------------------------------------------------------------------------
 
 interface PublishCommandConfig
 {
@@ -241,7 +240,7 @@ const publishCmd = Command.make(
       const serverDir = path.join(repoRoot, 'apps/server')
       const packageJsonPath = path.join(serverDir, 'package.json')
 
-      // Assert build assets exist
+      // assert build assets exist
       for (const relPath of ['dist/bin.mjs', 'dist/client/index.html'])
       {
         const abs = path.join(serverDir, relPath)
@@ -252,7 +251,7 @@ const publishCmd = Command.make(
       }
 
       yield* Effect.acquireUseRelease(
-        // Acquire: resolve publish metadata and read every original before mutation.
+        // acquire: resolve publish metadata and read every original before mutation.
         Effect.gen(function* ()
         {
           const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version)
@@ -285,7 +284,7 @@ const publishCmd = Command.make(
             icons: yield* preparePublishIcons(repoRoot, serverDir, version),
           }
         }),
-        // Use: pnpm publish from the workspace root so pnpm-only workspace
+        // use: pnpm publish from the workspace root so pnpm-only workspace
         // config, including override selectors, is interpreted correctly.
         (resource) =>
           Effect.gen(function* ()
@@ -310,7 +309,7 @@ const publishCmd = Command.make(
               }),
             )
           }),
-        // Release: restore every file even if applying overrides or publishing fails.
+        // release: restore every file even if applying overrides or publishing fails.
         (resource) =>
           Effect.gen(function* ()
           {
@@ -325,9 +324,7 @@ const publishCmd = Command.make(
     }),
 ).pipe(Command.withDescription('Publish the server package to npm.'))
 
-// ---------------------------------------------------------------------------
 // root command
-// ---------------------------------------------------------------------------
 
 const cli = Command.make('cli').pipe(
   Command.withDescription('T3 server build & publish CLI.'),

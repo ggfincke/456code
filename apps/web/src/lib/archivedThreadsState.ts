@@ -1,3 +1,6 @@
+// apps/web/src/lib/archivedThreadsState.ts
+// manage archived threads state
+
 import { useAtomValue } from '@effect/atom-react'
 import {
   type ArchivedSnapshotEntry,

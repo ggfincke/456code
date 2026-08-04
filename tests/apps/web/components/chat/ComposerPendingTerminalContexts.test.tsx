@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/ComposerPendingTerminalContexts.test.tsx
+// verify composer pending terminal context chip behavior
+
 import { ThreadId } from '@t3tools/contracts'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vite-plus/test'

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/agent-awareness/notificationNavigation.ts
+// manage agent notification navigation through a React hook
+
 import { useEffect, useRef } from 'react'
 import * as Notifications from 'expo-notifications'
 import { useLinkTo } from '@react-navigation/native'

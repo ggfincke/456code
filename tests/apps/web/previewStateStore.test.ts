@@ -1,3 +1,6 @@
+// tests/apps/web/previewStateStore.test.ts
+// verify preview state store (single tab) behavior
+
 import { scopedThreadKey, scopeThreadRef } from '@t3tools/client-runtime/environment'
 import { type EnvironmentId, type PreviewSessionSnapshot, ThreadId } from '@t3tools/contracts'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'

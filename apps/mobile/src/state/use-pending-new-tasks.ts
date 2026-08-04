@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-pending-new-tasks.ts
+// manage pending new task through a React hook
+
 import { useMemo } from 'react'
 
 import { deriveThreadTitleFromPrompt } from '../lib/projectThreadStartTurn'

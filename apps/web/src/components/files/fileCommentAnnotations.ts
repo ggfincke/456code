@@ -1,3 +1,6 @@
+// apps/web/src/components/files/fileCommentAnnotations.ts
+// define file comment annotation entry
+
 import type { LineAnnotation, SelectedLineRange } from '@pierre/diffs'
 
 export interface FileCommentAnnotationEntry

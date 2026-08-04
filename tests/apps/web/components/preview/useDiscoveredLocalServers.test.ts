@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/useDiscoveredLocalServers.test.ts
+// verify merge servers behavior
+
 import type { DiscoveredLocalServer } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

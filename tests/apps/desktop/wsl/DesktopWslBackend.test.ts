@@ -1,3 +1,6 @@
+// tests/apps/desktop/wsl/DesktopWslBackend.test.ts
+// verify desktop wsl backend behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'

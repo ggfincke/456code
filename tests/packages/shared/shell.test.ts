@@ -1,3 +1,6 @@
+// tests/packages/shared/shell.test.ts
+// verify extract path from shell output behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it as effectIt } from '@effect/vitest'
 import { HostProcessEnvironment, HostProcessPlatform } from '@t3tools/shared/hostProcess'

@@ -1,3 +1,6 @@
+// apps/web/src/environments/primary/target.ts
+// determine whether loopback hostname
+
 import { PRIMARY_LOCAL_ENVIRONMENT_ID, type DesktopEnvironmentBootstrap } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 
@@ -84,7 +87,7 @@ const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', '::1', 'localhost'])
 
 function getDesktopLocalEnvironmentBootstrap(): DesktopEnvironmentBootstrap | null
 {
-  // The primary (Windows-native) backend keeps the "primary" id. The
+  // the primary (Windows-native) backend keeps the "primary" id. The
   // plural list may include a second WSL entry; the primary-target
   // resolver only cares about the primary, so just find it.
   const bootstraps = window.desktopBridge?.getLocalEnvironmentBootstraps() ?? []

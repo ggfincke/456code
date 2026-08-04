@@ -242,9 +242,9 @@ export function readThreadShell(ref: ScopedThreadRef): EnvironmentThreadShell | 
   return appAtomRegistry.get(environmentThreadShells.threadShellAtom(ref))
 }
 
-/** Whether the environment's server understands thread.settle/unsettle.
-    False for pre-settlement servers (capability defaults false on decode),
-    so clients under version skew fall back instead of erroring. */
+// whether the environment's server understands thread.settle/unsettle.
+// false for pre-settlement servers (capability defaults false on decode),
+// so clients under version skew fall back instead of erroring.
 export function readEnvironmentSupportsSettlement(environmentId: EnvironmentId): boolean
 {
   return (
@@ -253,8 +253,8 @@ export function readEnvironmentSupportsSettlement(environmentId: EnvironmentId):
   )
 }
 
-/** Whether the environment's server understands thread.snooze/unsnooze.
-    Same version-skew contract as settlement. */
+// whether the environment's server understands thread.snooze/unsnooze.
+// same version-skew contract as settlement.
 export function readEnvironmentSupportsSnooze(environmentId: EnvironmentId): boolean
 {
   return (

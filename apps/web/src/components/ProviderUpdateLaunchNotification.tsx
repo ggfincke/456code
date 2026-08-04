@@ -1,3 +1,6 @@
+// apps/web/src/components/ProviderUpdateLaunchNotification.tsx
+// render provider update launch notification
+
 import { useNavigate } from '@tanstack/react-router'
 import { DownloadIcon } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -16,13 +19,11 @@ import {
 import { ProviderUpdatePrimaryNotification } from './ProviderUpdatePrimaryNotification'
 import { stackedThreadToast, toastManager } from './ui/toast'
 
-/**
- * True when a desktop-local secondary backend (the parallel WSL backend) is
- * present alongside the primary. Local secondaries connect over loopback with a
- * `local:<backendInstanceId>` bearer connection id; everything else (SSH, relay,
- * remote) is ignored. Gating on this keeps non-WSL users on the unchanged
- * single-prompt flow.
- */
+// true when a desktop-local secondary backend (the parallel WSL backend) is
+// present alongside the primary. Local secondaries connect over loopback with a
+// `local:<backendInstanceId>` bearer connection id; everything else (SSH, relay,
+// remote) is ignored. Gating on this keeps non-WSL users on the unchanged
+// single-prompt flow.
 function useHasLocalSecondaryEnvironment(): boolean
 {
   const { environments } = useEnvironments()
@@ -33,11 +34,9 @@ function useHasLocalSecondaryEnvironment(): boolean
   )
 }
 
-/**
- * The provider update popover. With a WSL backend present it splits the update
- * trigger per environment; without one (the common case) it falls back to the
- * single-prompt flow so non-WSL users see no change.
- */
+// the provider update popover. With a WSL backend present it splits the update
+// trigger per environment; without one (the common case) it falls back to the
+// single-prompt flow so non-WSL users see no change.
 export function ProviderUpdateLaunchNotification()
 {
   const hasLocalSecondary = useHasLocalSecondaryEnvironment()
@@ -52,7 +51,7 @@ export function ProviderUpdateLaunchNotification()
 const seenProviderUpdateNotificationKeys = new Set<string>()
 type ProviderUpdateToastId = ReturnType<typeof toastManager.add>
 
-// While a local backend (e.g. WSL) is still connecting, defer the popover so it
+// while a local backend (e.g. WSL) is still connecting, defer the popover so it
 // reflects every environment. Cap the wait so a stuck or failed backend can't
 // suppress the primary's updates indefinitely.
 const SETTLING_GRACE_MS = 30_000
@@ -69,12 +68,12 @@ function ProviderUpdateEnvironmentsNotification()
     readonly key: string
   } | null>(null)
   const notificationKeyRef = useRef<string | null>(null)
-  // Whether the user has triggered an update from the current toast. Until they
+  // whether the user has triggered an update from the current toast. Until they
   // do, the prompt is replaced when the available updates change; afterward it
   // is kept so in-progress rows are not torn down.
   const hasInteractedRef = useRef(false)
 
-  // Close our prompt if this flow unmounts (e.g. the WSL backend is disabled
+  // close our prompt if this flow unmounts (e.g. the WSL backend is disabled
   // and we fall back to the single-prompt flow).
   useEffect(() =>
   {
@@ -95,14 +94,14 @@ function ProviderUpdateEnvironmentsNotification()
     notificationKeyRef.current = notificationKey
   }, [notificationKey])
 
-  // Title summarizes the distinct providers on offer across all environments;
+  // title summarizes the distinct providers on offer across all environments;
   // the per-environment detail lives in the popover body.
   const candidateUnion = useMemo(
     () => collectProviderUpdateCandidates(updateGroups.flatMap((group) => group.candidates)),
     [updateGroups],
   )
 
-  // Defer while any local backend is still connecting, up to the grace period.
+  // defer while any local backend is still connecting, up to the grace period.
   const [settleGraceElapsed, setSettleGraceElapsed] = useState(false)
   useEffect(() =>
   {
@@ -129,14 +128,14 @@ function ProviderUpdateEnvironmentsNotification()
 
   useEffect(() =>
   {
-    // Whether a fresh prompt can actually be shown for the current update set.
+    // whether a fresh prompt can actually be shown for the current update set.
     const canShowPrompt =
       notificationKey !== null &&
       !isGated &&
       !dismissedNotificationKeys.has(notificationKey) &&
       !seenProviderUpdateNotificationKeys.has(notificationKey)
 
-    // Close a prompt the user hasn't acted on yet when the available updates
+    // close a prompt the user hasn't acted on yet when the available updates
     // change: when they clear entirely (key null) so the toast doesn't linger,
     // and when a fresh set is ready to replace it. Keep it only while a backend
     // is re-settling (updates still exist, just gated) — and once an update is
@@ -163,7 +162,7 @@ function ProviderUpdateEnvironmentsNotification()
 
     const dismissPrompt = () =>
     {
-      // Dismiss whatever set is still on offer at close time, so the popover
+      // dismiss whatever set is still on offer at close time, so the popover
       // does not re-pop for updates the user just declined.
       const liveKey = notificationKeyRef.current
       if (liveKey)

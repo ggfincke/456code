@@ -1,3 +1,6 @@
+// apps/web/src/components/files/LocalCommentAnnotation.tsx
+// render local comment annotation
+
 import { MessageCircle, Trash2 } from 'lucide-react'
 import { useState } from 'react'
 

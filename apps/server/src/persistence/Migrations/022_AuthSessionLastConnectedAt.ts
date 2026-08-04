@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/022_AuthSessionLastConnectedAt.ts
+// apply persistence migration 022 auth session last connected at
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

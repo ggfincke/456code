@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/usePreviewSession.ts
+// manage preview session through a React hook
+
 'use client'
 
 import { useAtomValue } from '@effect/atom-react'

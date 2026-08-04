@@ -1,3 +1,6 @@
+// apps/mobile/src/components/GlassSafeAreaView.tsx
+// render glass safe area view
+
 import type { ReactNode } from 'react'
 import { View, type StyleProp, type ViewStyle } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'

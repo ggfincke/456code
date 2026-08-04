@@ -1,3 +1,6 @@
+// apps/server/src/workspace/WorkspaceEntries.ts
+// define workspace entries windows path unsupported error
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeOS from 'node:os'

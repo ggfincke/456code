@@ -1,3 +1,6 @@
+// apps/mobile/src/features/keyboard/HardwareKeyboardCommandProvider.tsx
+// provide hardware keyboard command context
+
 import { StackActions, useNavigation } from '@react-navigation/native'
 import { useCallback, useMemo, useSyncExternalStore, type PropsWithChildren } from 'react'
 

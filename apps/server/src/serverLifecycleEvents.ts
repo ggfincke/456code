@@ -1,3 +1,6 @@
+// apps/server/src/serverLifecycleEvents.ts
+// implement server lifecycle events
+
 import type { ServerLifecycleStreamEvent } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'

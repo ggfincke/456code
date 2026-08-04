@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/managedRelayLayer.ts
+// assemble managed relay Effect layer
+
 import { ManagedRelay } from '@t3tools/client-runtime/relay'
 import { RelayMobileClientId } from '@t3tools/contracts/relay'
 import * as Crypto from 'effect/Crypto'

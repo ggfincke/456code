@@ -1,3 +1,6 @@
+// apps/web/src/components/SplashScreen.tsx
+// render splash screen
+
 export function SplashScreen()
 {
   return (

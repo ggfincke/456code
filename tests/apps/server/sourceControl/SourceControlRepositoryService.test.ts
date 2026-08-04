@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/SourceControlRepositoryService.test.ts
+// verifies source control repository clone and publish workflows
 import * as NodePath from '@effect/platform-node/NodePath'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'

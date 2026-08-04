@@ -1,3 +1,6 @@
+// apps/web/src/pendingUserInput.ts
+// resolve pending user input answer
+
 import type { UserInputQuestion } from '@t3tools/contracts'
 
 export interface PendingUserInputDraftAnswer

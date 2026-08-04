@@ -1,3 +1,6 @@
+// apps/web/src/routes/_chat.index.tsx
+// render the chat index route
+
 import { scopeProjectRef } from '@t3tools/client-runtime/environment'
 import { createFileRoute, Link } from '@tanstack/react-router'
 import { LinkIcon, PlusIcon, RotateCcwIcon } from 'lucide-react'
@@ -32,11 +35,9 @@ function ChatIndexRouteView()
   return <IndexDraftLanding />
 }
 
-/**
- * Landing on the index route drops straight into a draft thread for the most
- * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
- */
+// landing on the index route drops straight into a draft thread for the most
+// recently active project, so the first screen is a prompt instead of a dead
+// end. Falls back to an add-project hero when no project exists yet.
 function IndexDraftLanding()
 {
   const projects = useProjects()

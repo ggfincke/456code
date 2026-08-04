@@ -1,4 +1,5 @@
-// This file mostly exists because we want dev mode to say "456code (Dev)" instead of "electron"
+// apps/desktop/scripts/electron-launcher.mjs
+// run the electron launcher repository workflow
 
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
@@ -352,7 +353,7 @@ function buildMacLauncher(electronBinaryPath)
   {
     if (isDevelopment)
     {
-      // The launcher also handles protocol activations outside the dev runner,
+      // the launcher also handles protocol activations outside the dev runner,
       // so refresh its fallback environment on every launch. Never let a value
       // captured by an older parent app override the live dev-runner environment.
       writeDevelopmentLauncherScript(launcherBinaryPath, runtimeElectronBinaryPath)
@@ -378,10 +379,10 @@ function buildMacLauncher(electronBinaryPath)
   patchHelperBundleInfoPlists(targetAppBundlePath)
   if (isDevelopment)
   {
-    // Keep Electron's native executable inside the branded bundle. Launching the
+    // keep Electron's native executable inside the branded bundle. Launching the
     // node_modules copy makes macOS associate the process (and Dock label) with
     // Electron.app even though this bundle's Info.plist has the 456code name.
-    // Its conventional executable name also keeps Electron's default-app runtime
+    // its conventional executable name also keeps Electron's default-app runtime
     // in development mode instead of making app.isPackaged report true.
     writeDevelopmentLauncherScript(launcherBinaryPath, runtimeElectronBinaryPath)
   }

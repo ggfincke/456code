@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/session.test.ts
+// verify environment session state behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'

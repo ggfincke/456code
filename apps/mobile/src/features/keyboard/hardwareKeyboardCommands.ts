@@ -1,3 +1,6 @@
+// apps/mobile/src/features/keyboard/hardwareKeyboardCommands.ts
+// define hardware keyboard commands
+
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { useEffect } from 'react'
 
@@ -10,10 +13,8 @@ const handlers = new Map<HardwareKeyboardCommand, Set<CommandHandler>>()
 const registrationListeners = new Set<() => void>()
 let registrationVersion = 0
 
-/**
- * Registers a context-specific hardware-keyboard action. The most recently mounted handler gets
- * the first chance to consume the command, allowing focused screens to override app defaults.
- */
+// registers a context-specific hardware-keyboard action. The most recently mounted handler gets
+// the first chance to consume the command, allowing focused screens to override app defaults.
 export function useHardwareKeyboardCommand(
   command: HardwareKeyboardCommand,
   handler: CommandHandler,

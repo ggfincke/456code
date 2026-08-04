@@ -1,3 +1,6 @@
+// apps/desktop/src/app/DesktopShutdown.ts
+// implement desktop shutdown
+
 import * as Context from 'effect/Context'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'

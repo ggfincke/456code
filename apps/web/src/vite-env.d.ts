@@ -1,5 +1,7 @@
-/// <reference types="vite-plus/client" />
+// apps/web/src/vite-env.d.ts
+// declare web ambient types
 
+/// <reference types="vite-plus/client" />
 import type { DesktopBridge, LocalApi } from '@t3tools/contracts'
 
 interface ImportMetaEnv

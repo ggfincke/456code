@@ -1,3 +1,6 @@
+// apps/server/src/observability/BrowserTraceCollector.ts
+// implement browser trace collector
+
 import type { TraceRecord, TraceSink } from '@t3tools/shared/observability'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'

@@ -1,3 +1,6 @@
+// apps/server/src/bootstrap.ts
+// read bootstrap envelope
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodeNet from 'node:net'
@@ -252,7 +255,7 @@ const makeDirectBootstrapStream = (fd: number): NodeStream.Readable =>
   }
 }
 
-// Stdin pipes inherited across the wsl.exe boundary report EACCES when we try
+// stdin pipes inherited across the wsl.exe boundary report EACCES when we try
 // to re-open them via /proc/self/fd/0 — fall back to reading the fd directly
 // in that case, the same way we already do for ENXIO/EINVAL/EPERM.
 const isBootstrapFdPathDuplicationError = Predicate.compose(

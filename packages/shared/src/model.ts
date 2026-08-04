@@ -1,3 +1,6 @@
+// packages/shared/src/model.ts
+// create model capabilities
+
 import {
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
@@ -287,7 +290,7 @@ export function normalizeModelSlug(
   return typeof aliased === 'string' ? aliased : trimmed
 }
 
-/** Custom model identifiers are provider-owned, so only trim them; never expand aliases. */
+// custom model identifiers are provider-owned, so only trim them; never expand aliases.
 export function normalizeCustomModelSlug(model: string | null | undefined): string | null
 {
   if (typeof model !== 'string')
@@ -355,7 +358,7 @@ export function resolveModelSlugForProvider(
   return resolveModelSlug(model, provider)
 }
 
-/** Trim a string, returning null for empty/missing values. */
+// trim a string, returning null for empty/missing values.
 export function trimOrNull<T extends string>(value: T | null | undefined): T | null
 {
   if (typeof value !== 'string') return null
@@ -384,14 +387,12 @@ export function createModelSelection(
   return selections.length > 0 ? { ...base, options: selections } : base
 }
 
-/**
- * Returns the effort value if it is a prompt-injected value according to
- * any select descriptor in the given capabilities, or null otherwise.
- *
- * Unlike a single `find`, this checks every descriptor so that the
- * correct descriptor's `promptInjectedValues` list is consulted even when
- * multiple select descriptors exist.
- */
+// returns the effort value if it is a prompt-injected value according to
+// any select descriptor in the given capabilities, or null otherwise.
+//
+// unlike a single `find`, this checks every descriptor so that the
+// correct descriptor's `promptInjectedValues` list is consulted even when
+// multiple select descriptors exist.
 export function resolvePromptInjectedEffort(
   caps: ModelCapabilities,
   rawEffort: string | null | undefined,

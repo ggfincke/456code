@@ -18,7 +18,7 @@ export function getProjectFaviconCacheKey(
   }
   catch
   {
-    // Keep the full value as a safe fallback for malformed URLs.
+    // keep the full value as a safe fallback for malformed URLs.
   }
 
   return JSON.stringify([environmentId, workspaceRoot, revision])

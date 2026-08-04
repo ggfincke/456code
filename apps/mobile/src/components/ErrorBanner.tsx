@@ -1,3 +1,6 @@
+// apps/mobile/src/components/ErrorBanner.tsx
+// render error banner
+
 import { View } from 'react-native'
 
 import { AppText as Text } from './AppText'

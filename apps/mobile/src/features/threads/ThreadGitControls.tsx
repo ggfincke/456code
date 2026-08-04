@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ThreadGitControls.tsx
+// render thread git controls
+
 import {
   EnvironmentId,
   type GitRunStackedActionResult,
@@ -86,7 +89,7 @@ type ThreadGitHeaderActionItems = {
 type QuickActionIcon =
   'arrow.down.circle' | 'arrow.up.right.circle' | 'checkmark.circle' | 'arrow.up.circle'
 
-/** The subset of git-control wiring the standalone git menu needs. */
+// the subset of git-control wiring the standalone git menu needs.
 export type ThreadGitMenuProps = {
   readonly environmentId: EnvironmentId | string
   readonly threadId: ThreadId | string
@@ -528,11 +531,9 @@ export function ThreadGitControls(props: ThreadGitControlsProps)
   )
 }
 
-/**
- * The standalone git actions menu (branch status, quick commit/push action,
- * review, more). Rendered inside a NativeHeaderToolbar by both the thread
- * chat header and the review screen's toolbar.
- */
+// the standalone git actions menu (branch status, quick commit/push action,
+// review, more). Rendered inside a NativeHeaderToolbar by both the thread
+// chat header and the review screen's toolbar.
 export function ThreadGitMenu(props: ThreadGitMenuProps)
 {
   const model = useThreadGitControlModel(props)

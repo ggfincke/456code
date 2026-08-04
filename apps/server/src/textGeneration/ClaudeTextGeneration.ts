@@ -40,10 +40,8 @@ import { makeClaudeEnvironment } from '../provider/Drivers/ClaudeHome.ts'
 
 const CLAUDE_TIMEOUT_MS = 180_000
 
-/**
- * Schema for the wrapper JSON returned by `claude -p --output-format json`.
- * We only care about `structured_output`.
- */
+// schema for the wrapper JSON returned by `claude -p --output-format json`.
+// we only care about `structured_output`.
 const ClaudeOutputEnvelope = Schema.Struct({
   structured_output: Schema.Unknown,
 })
@@ -92,10 +90,8 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
       ),
     )
 
-  /**
-   * Spawn the Claude CLI with structured JSON output and return the parsed,
-   * schema-validated result.
-   */
+  // spawn the Claude CLI with structured JSON output and return the parsed,
+  // schema-validated result.
   const runClaudeJson = Effect.fn('runClaudeJson')(function* <S extends Schema.Top>({
     operation,
     cwd,
@@ -253,9 +249,7 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
     )
   })
 
-  // ---------------------------------------------------------------------------
   // TextGeneration service methods
-  // ---------------------------------------------------------------------------
 
   const generateCommitMessage: TextGeneration.TextGeneration['Service']['generateCommitMessage'] =
     Effect.fn('ClaudeTextGeneration.generateCommitMessage')(function* (input)

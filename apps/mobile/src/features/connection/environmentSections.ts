@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/environmentSections.ts
+// define environment sections input
+
 import type { RelayClientEnvironmentRecord } from '@t3tools/contracts/relay'
 import type { ConnectedEnvironmentSummary } from '../../state/remote-runtime-types'
 

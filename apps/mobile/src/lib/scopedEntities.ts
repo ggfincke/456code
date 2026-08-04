@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/scopedEntities.ts
+// expose scoped project key
+
 import { ApprovalRequestId, EnvironmentId, ProjectId, ThreadId } from '@t3tools/contracts'
 
 export function scopedProjectKey(environmentId: EnvironmentId, projectId: ProjectId): string

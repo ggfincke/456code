@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/timelineScrollAnchoring.test.tsx
+// verify timeline scroll anchoring behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import {
   getAnchoredTurnMetrics,

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/layout/WorkspaceEmptyDetail.tsx
+// render workspace empty detail
+
 import { SymbolView } from '../../components/AppSymbol'
 import { Pressable, View } from 'react-native'
 

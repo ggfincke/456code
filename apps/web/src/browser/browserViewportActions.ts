@@ -1,3 +1,6 @@
+// apps/web/src/browser/browserViewportActions.ts
+// expose browser viewport commit timeout ms
+
 import type { PreviewViewportSetting } from '@t3tools/contracts'
 
 type BrowserViewportHandler = (setting: PreviewViewportSetting) => Promise<void>
@@ -61,8 +64,8 @@ export function commitBrowserViewportChange(
         : Promise.reject(new Error(`No visible browser viewport handler for tab ${tabId}`))
       return { operation }
     })
-  // The queue follows the real handler lifetime, not the caller-facing timeout.
-  // A slow commit therefore cannot time out, release the queue, and overwrite a
+  // the queue follows the real handler lifetime, not the caller-facing timeout.
+  // a slow commit therefore cannot time out, release the queue, and overwrite a
   // newer viewport after that newer request has already completed.
   const execution = started.then(({ operation }) => operation)
   const result = started.then(({ operation }) => runHandlerWithTimeout(tabId, operation))

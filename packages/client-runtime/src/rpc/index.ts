@@ -1,3 +1,6 @@
+// packages/client-runtime/src/rpc/index.ts
+// expose rpc session
+
 export * from './client.ts'
 export * from './http.ts'
 export * from './protocol.ts'

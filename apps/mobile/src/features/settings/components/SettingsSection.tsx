@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/components/SettingsSection.tsx
+// render settings section
+
 import type { ReactNode } from 'react'
 import { View } from 'react-native'
 
@@ -6,7 +9,7 @@ import { AppText as Text } from '../../../components/AppText'
 export function SettingsSection(props: {
   readonly title: string
   readonly children: ReactNode
-  /** Force the grouped card background; Android otherwise lists options flat. */
+  // force the grouped card background; Android otherwise lists options flat.
   readonly card?: boolean
 })
 {

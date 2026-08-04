@@ -1,3 +1,6 @@
+// tests/apps/web/markdown-links.test.ts
+// verify rewrite markdown file uri href behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

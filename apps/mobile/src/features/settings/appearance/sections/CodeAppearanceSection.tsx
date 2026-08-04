@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/appearance/sections/CodeAppearanceSection.tsx
+// render code appearance section
+
 import { useCallback } from 'react'
 
 import {

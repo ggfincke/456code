@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/kbd.tsx
+// render reusable kbd UI primitives
+
 import type * as React from 'react'
 
 import { cn } from '~/lib/utils'

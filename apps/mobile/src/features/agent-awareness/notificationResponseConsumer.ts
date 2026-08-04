@@ -1,3 +1,6 @@
+// apps/mobile/src/features/agent-awareness/notificationResponseConsumer.ts
+// define notification navigation error
+
 import type { NotificationResponse } from 'expo-notifications'
 import * as Schema from 'effect/Schema'
 

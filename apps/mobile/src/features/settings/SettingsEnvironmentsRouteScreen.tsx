@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/SettingsEnvironmentsRouteScreen.tsx
+// render the settings environments route screen route
+
 import { NativeHeaderToolbar, NativeStackScreenOptions } from '../../native/StackHeader'
 import { useNavigation } from '@react-navigation/native'
 import { SymbolView } from '../../components/AppSymbol'

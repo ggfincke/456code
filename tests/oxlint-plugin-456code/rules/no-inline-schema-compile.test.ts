@@ -1,3 +1,6 @@
+// tests/oxlint-plugin-456code/rules/no-inline-schema-compile.test.ts
+// verify 456code/no inline schema compile behavior
+
 import { assert, describe } from '@effect/vitest'
 
 import { createOxlintRuleHarness } from '../../../oxlint-plugin-456code/test/utils.ts'

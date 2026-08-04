@@ -1,3 +1,6 @@
+// packages/client-runtime/src/environment/endpoint.ts
+// expose environment endpoint url
+
 export * from '@t3tools/shared/advertisedEndpoint'
 
 export const environmentEndpointUrl = (httpBaseUrl: string, pathname: string): string =>

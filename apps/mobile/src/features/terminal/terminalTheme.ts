@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/terminalTheme.ts
+// resolve pierre terminal theme
+
 export type TerminalAppearanceScheme = 'light' | 'dark'
 
 export interface TerminalTheme
@@ -12,7 +15,7 @@ export interface TerminalTheme
 }
 
 const PIERRE_LIGHT_THEME: TerminalTheme = {
-  // Pierre terminal palette with the app's shared screen background.
+  // pierre terminal palette with the app's shared screen background.
   background: '#f2f2f7',
   foreground: '#6C6C71',
   mutedForeground: '#8E8E95',
@@ -40,7 +43,7 @@ const PIERRE_LIGHT_THEME: TerminalTheme = {
 }
 
 const PIERRE_DARK_THEME: TerminalTheme = {
-  // Pierre terminal palette with the app's shared screen background.
+  // pierre terminal palette with the app's shared screen background.
   background: '#0a0a0a',
   foreground: '#adadb1',
   mutedForeground: '#8E8E95',

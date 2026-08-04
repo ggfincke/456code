@@ -1,3 +1,6 @@
+// apps/web/src/markdown-links.ts
+// normalize markdown link destination
+
 import { formatWorkspaceRelativePath } from './filePathDisplay'
 import { resolvePathLinkTarget, splitPathAndPosition } from './terminal-links'
 
@@ -83,7 +86,7 @@ function parseFileUrlHref(
     const rawPath = parsed.pathname
     if (rawPath.length === 0) return null
 
-    // Browser URL parser encodes "C:/foo" as "/C:/foo" for file URLs.
+    // browser URL parser encodes "C:/foo" as "/C:/foo" for file URLs.
     const normalizedPath = normalizeWindowsDrivePath(rawPath)
 
     return {
@@ -214,11 +217,9 @@ const INLINE_CODE_PATH_PATTERN = /^(?:~\/|\.{1,2}\/|\/)?[A-Za-z0-9._@+-]+(?:\/[A
 const INLINE_CODE_BASENAME_PATTERN = /^.+\.[A-Za-z][A-Za-z0-9_-]{0,11}$/
 const MAX_INLINE_CODE_PATH_LENGTH = 320
 
-/**
- * Inline code only reads as a file path when it is unmistakable: a directory
- * separator plus a real file extension. Keeps `node.type`, `failure_class`, and
- * version-ish spans rendering as plain code.
- */
+// inline code only reads as a file path when it is unmistakable: a directory
+// separator plus a real file extension. Keeps `node.type`, `failure_class`, and
+// version-ish spans rendering as plain code.
 export function looksLikeInlineCodeFilePath(value: string): boolean
 {
   const trimmed = value.trim()

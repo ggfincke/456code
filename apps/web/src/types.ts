@@ -1,3 +1,6 @@
+// apps/web/src/types.ts
+// define session phase
+
 import type {
   ChatImageAttachment as ContractChatImageAttachment,
   OrchestrationCheckpointFile,

@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/presentation.ts
+// define environment connection phase
+
 import type { ServerConfig } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 

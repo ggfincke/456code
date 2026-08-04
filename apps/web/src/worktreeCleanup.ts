@@ -1,3 +1,6 @@
+// apps/web/src/worktreeCleanup.ts
+// resolve orphaned worktree path for thread
+
 import type { ThreadShell } from './types'
 
 function normalizeWorktreePath(path: string | null): string | null

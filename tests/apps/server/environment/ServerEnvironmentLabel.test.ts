@@ -1,3 +1,6 @@
+// tests/apps/server/environment/ServerEnvironmentLabel.test.ts
+// verify resolve server environment label behavior
+
 import { afterEach, describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'

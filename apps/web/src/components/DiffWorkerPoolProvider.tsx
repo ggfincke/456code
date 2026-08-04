@@ -1,3 +1,6 @@
+// apps/web/src/components/DiffWorkerPoolProvider.tsx
+// render diff worker pool provider
+
 import { WorkerPoolContextProvider, useWorkerPool } from '@pierre/diffs/react'
 import DiffsWorker from '@pierre/diffs/worker/worker.js?worker'
 import * as Schema from 'effect/Schema'

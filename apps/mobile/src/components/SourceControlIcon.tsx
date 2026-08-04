@@ -1,3 +1,6 @@
+// apps/mobile/src/components/SourceControlIcon.tsx
+// render source control icon
+
 import Svg, { Defs, LinearGradient, Path, Stop } from 'react-native-svg'
 
 export type SourceControlIconKind = 'github' | 'gitlab' | 'bitbucket' | 'azure-devops'

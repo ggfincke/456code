@@ -1,3 +1,6 @@
+// packages/effect-codex-app-server/test/fixtures/codex-app-server-mock-peer.ts
+// verify codex app server mock peer behavior
+
 import * as NodeOS from 'node:os'
 
 let nextServerRequestId = 10_000

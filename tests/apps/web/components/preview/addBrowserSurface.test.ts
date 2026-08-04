@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/addBrowserSurface.test.ts
+// verify add browser surface behavior
+
 import type { PreviewOpenInput, PreviewSessionSnapshot, ScopedThreadRef } from '@t3tools/contracts'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'

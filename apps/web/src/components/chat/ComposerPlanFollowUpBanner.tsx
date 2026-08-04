@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPlanFollowUpBanner.tsx
+// render composer plan follow up banner
+
 import { memo } from 'react'
 import { Badge } from '../ui/badge'
 

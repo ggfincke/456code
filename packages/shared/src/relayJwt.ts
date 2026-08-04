@@ -1,3 +1,6 @@
+// packages/shared/src/relayJwt.ts
+// normalize relay issuer
+
 import { decodeJwt, importPKCS8, importSPKI, jwtVerify, SignJWT, type JWTPayload } from 'jose'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'

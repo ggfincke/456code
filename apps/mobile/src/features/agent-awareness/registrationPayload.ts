@@ -1,9 +1,12 @@
+// apps/mobile/src/features/agent-awareness/registrationPayload.ts
+// resolve aps environment
+
 import type { RelayDeviceRegistrationRequest } from '@t3tools/contracts/relay'
 
 import type { Preferences } from '../../persistence/mobile-preferences'
 import { supportsAgentAwarenessPush } from './capabilities'
 
-// Development builds are Xcode-signed and receive sandbox APNs tokens;
+// development builds are Xcode-signed and receive sandbox APNs tokens;
 // preview and production builds are distribution-signed and use production
 // APNs. The relay routes each device's pushes accordingly.
 export function resolveApsEnvironment(appVariant: unknown): 'sandbox' | 'production'

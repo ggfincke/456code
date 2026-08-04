@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/openTerminalLinkInPreview.test.ts
+// verify open terminal link in preview behavior
+
 import type { LocalApi, PreviewSessionSnapshot, ScopedThreadRef } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'

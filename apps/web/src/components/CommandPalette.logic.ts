@@ -1,3 +1,6 @@
+// apps/web/src/components/CommandPalette.logic.ts
+// derive command palette presentation behavior
+
 import {
   type KeybindingCommand,
   type FilesystemBrowseEntry,
@@ -25,9 +28,9 @@ export interface CommandPaletteItem
   readonly timestamp?: string
   readonly icon: ReactNode
   readonly disabled?: boolean
-  /** Optional content rendered inline before the title text. */
+  // optional content rendered inline before the title text.
   readonly titleLeadingContent?: ReactNode
-  /** Optional content rendered inline after the title text (before the timestamp). */
+  // optional content rendered inline after the title text (before the timestamp).
   readonly titleTrailingContent?: ReactNode
   readonly shortcutCommand?: KeybindingCommand
 }
@@ -154,9 +157,9 @@ export function buildThreadActionItems<TThread extends BuildThreadActionItemsThr
   projectTitleById: ReadonlyMap<Project['id'], string>
   sortOrder: SidebarThreadSortOrder
   icon: ReactNode
-  /** Optional content rendered inline before the title text per-thread. */
+  // optional content rendered inline before the title text per-thread.
   renderLeadingContent?: (thread: TThread) => ReactNode
-  /** Optional content rendered inline after the title text per-thread. */
+  // optional content rendered inline after the title text per-thread.
   renderTrailingContent?: (thread: TThread) => ReactNode
   runThread: (thread: Pick<SidebarThreadSummary, 'environmentId' | 'id'>) => Promise<void>
   limit?: number

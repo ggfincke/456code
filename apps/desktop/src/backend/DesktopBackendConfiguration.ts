@@ -1,3 +1,6 @@
+// apps/desktop/src/backend/DesktopBackendConfiguration.ts
+// derive desktop backend launch configuration
+
 import * as NodeOS from 'node:os'
 
 import { parsePersistedServerObservabilitySettings } from '@t3tools/shared/serverSettings'
@@ -37,7 +40,7 @@ export class DesktopBackendObservabilitySettingsReadError extends Schema.TaggedE
 export class DesktopBackendConfiguration extends Context.Service<
   DesktopBackendConfiguration,
   {
-    // Build the Windows-native primary backend's start config. Reads the
+    // build the Windows-native primary backend's start config. Reads the
     // primary's port/host/exposure from DesktopServerExposure. Can fail
     // with PlatformError because bootstrap token generation now uses
     // crypto.randomBytes under the hood (post Effect 4 migration).
@@ -45,7 +48,7 @@ export class DesktopBackendConfiguration extends Context.Service<
       DesktopBackendManager.DesktopBackendStartConfig,
       PlatformError.PlatformError
     >
-    // Build a WSL backend start config for the given distro on the given
+    // build a WSL backend start config for the given distro on the given
     // port. The WSL backend is always loopback-only (the primary owns LAN
     // exposure when the user opts in), so this takes the port directly and
     // hardcodes 127.0.0.1. Distro=null means "WSL default distro" and is
@@ -57,7 +60,7 @@ export class DesktopBackendConfiguration extends Context.Service<
       DesktopBackendManager.DesktopBackendStartConfig,
       PlatformError.PlatformError
     >
-    // The renderer-facing label for the primary instance, derived from the
+    // the renderer-facing label for the primary instance, derived from the
     // same decision resolvePrimary makes (including the WSL-availability
     // fall-back to Windows), so the env switcher can't show "WSL" for a
     // backend that actually resolved to Windows.
@@ -90,7 +93,7 @@ const DESKTOP_BACKEND_ENV_NAMES = [
   'T3CODE_TAILSCALE_SERVE_PORT',
 ] as const
 
-// Sensitive env vars that the WSL backend needs but Windows process.env won't
+// sensitive env vars that the WSL backend needs but Windows process.env won't
 // forward across the wsl.exe boundary without WSLENV. The dev-server URL is
 // handled separately via a `--dev-url` CLI flag because WSLENV translation of
 // URL-shaped values (colons / slashes) is unreliable.
@@ -114,7 +117,7 @@ const mergeWslEnv = (
 {
   const existing = existingWslEnv?.trim() ?? ''
 
-  // Names already declared, so we don't forward a duplicate. We parse the
+  // names already declared, so we don't forward a duplicate. We parse the
   // existing value only for this membership test — the string itself is
   // preserved verbatim below rather than re-serialized.
   const seenNames = new Set(
@@ -126,7 +129,7 @@ const mergeWslEnv = (
 
   const additions = forwardedEnvNames.filter((name) => !seenNames.has(name))
 
-  // Preserve the user's WSLENV exactly as Windows handed it to us — empty
+  // preserve the user's WSLENV exactly as Windows handed it to us — empty
   // "::" segments and duplicate entries are harmless no-ops to WSL and not
   // ours to normalize — and only append the secrets we need to forward
   // across the wsl.exe boundary.
@@ -186,7 +189,7 @@ interface WslPreflightSuccess
   readonly _tag: 'Ready'
   readonly runningDistro: string
   readonly linuxEntryPath: string
-  // Absolute path to the node binary the preflight validated after the shared
+  // absolute path to the node binary the preflight validated after the shared
   // remote resolver repaired PATH. The launch must use this exact path so it
   // doesn't fall through to a different/old node than the one node-pty was
   // built against.
@@ -200,7 +203,7 @@ interface WslPreflightFailure
 {
   readonly _tag: 'Failed'
   readonly reason: string
-  // Fatal: the WSL distro is misconfigured (no node, wrong version, missing
+  // fatal: the WSL distro is misconfigured (no node, wrong version, missing
   // build tools) and retrying won't help — surface it and (wsl-only) fall back
   // to Windows. Non-fatal: transient (WSL not ready yet, wslpath while it
   // boots), with a bounded window for self-healing before fallback.
@@ -311,7 +314,7 @@ const runWslPreflight = Effect.fn('desktop.backendConfiguration.wslPreflight')(f
   } as const
 })
 
-// True when the given IPv4 belongs to a Windows-side network
+// true when the given IPv4 belongs to a Windows-side network
 // interface. In WSL2 mirrored mode the distro's eth0 IP equals the
 // host's, which is the signature we use to detect that mode and
 // switch the renderer URL to loopback.
@@ -380,7 +383,7 @@ const resolvePrimaryStartConfig = Effect.fn('desktop.backendConfiguration.resolv
         ...backendChildEnvPatch(),
         ELECTRON_RUN_AS_NODE: '1',
       },
-      // Primary wants process.env (PATH, dev-runner's T3CODE_HOME, etc.).
+      // primary wants process.env (PATH, dev-runner's T3CODE_HOME, etc.).
       extendEnv: true,
       bootstrap,
       bootstrapDelivery: 'fd3',
@@ -407,7 +410,7 @@ const resolveWslStartConfig = Effect.fn('desktop.backendConfiguration.resolveWsl
   const environment = yield* DesktopEnvironment.DesktopEnvironment
   const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment
 
-  // Bind to 0.0.0.0 inside WSL so the backend is reachable both via
+  // bind to 0.0.0.0 inside WSL so the backend is reachable both via
   // WSL2's automatic localhost forwarding (wslhost: Windows 127.0.0.1
   // -> WSL 127.0.0.1) AND via the distro's eth0 IP directly from
   // Windows. wslhost forwarding is unreliable on some Windows hosts:
@@ -415,7 +418,7 @@ const resolveWslStartConfig = Effect.fn('desktop.backendConfiguration.resolveWsl
   // fetch both saw "Failed to fetch" when the backend only bound to
   // 127.0.0.1 inside WSL. Binding to 0.0.0.0 plus advertising the
   // WSL IP as the renderer-visible URL avoids that dependency.
-  // Security-wise this is acceptable for the local-only WSL backend:
+  // security-wise this is acceptable for the local-only WSL backend:
   // the network it exposes on is the WSL-vEthernet network, not the
   // LAN; the primary owns LAN exposure when the user opts in.
   const wslBindHost = '0.0.0.0'
@@ -424,7 +427,7 @@ const resolveWslStartConfig = Effect.fn('desktop.backendConfiguration.resolveWsl
     mode: 'desktop' as const,
     noBrowser: true,
     port: input.port,
-    // Omit t3Home so the Linux backend uses its own home dir instead of
+    // omit t3Home so the Linux backend uses its own home dir instead of
     // the Windows-side baseDir (which would be a /mnt/c path and share
     // the SQLite file with the primary).
     host: wslBindHost,
@@ -438,7 +441,7 @@ const resolveWslStartConfig = Effect.fn('desktop.backendConfiguration.resolveWsl
     ...buildObservabilityFragment(input.observabilitySettings),
   }
 
-  // In packaged builds environment.appRoot is .../resources/app.asar — an
+  // in packaged builds environment.appRoot is .../resources/app.asar — an
   // archive FILE. The Windows primary reads its entry through
   // ELECTRON_RUN_AS_NODE (asar-aware), but the WSL backend launches plain
   // `wsl.exe -- node`, which can't read inside an asar. electron-builder unpacks
@@ -454,23 +457,23 @@ const resolveWslStartConfig = Effect.fn('desktop.backendConfiguration.resolveWsl
     distro: input.distro,
     windowsEntryPath: wslEntryPath,
     windowsRepoRoot: wslAppRoot,
-    // Packaged builds ship a prebuilt Linux node-pty (built on Linux in CI and
+    // packaged builds ship a prebuilt Linux node-pty (built on Linux in CI and
     // attached to the Windows artifact — see build-desktop-artifact.ts), so the
     // WSL backend never needs a compiler, node-gyp, or network on first launch.
-    // Compiling from source is a dev-only convenience: a checkout has no shipped
+    // compiling from source is a dev-only convenience: a checkout has no shipped
     // prebuilt, and developers have the toolchain. In packaged builds we instead
     // surface a clear diagnostic if the prebuilt can't load (unsupported
     // arch/distro), rather than silently dropping into a fragile runtime build.
     allowBuild: !environment.isPackaged,
   })
 
-  // Every operation after preflight uses the same concrete distro. In
+  // every operation after preflight uses the same concrete distro. In
   // default-tracking mode this closes the race where the system default
   // changes between probing and spawning the backend.
   const runningDistro = preflight._tag === 'Ready' ? preflight.runningDistro : null
   const distroForConfig = runningDistro ?? input.distro
 
-  // Resolve the selected distro's IPv4 address. In mirrored mode the distro
+  // resolve the selected distro's IPv4 address. In mirrored mode the distro
   // reports a host interface, so use loopback instead; a failed probe also
   // falls back to loopback and preserves the previous behavior.
   const distroIp = yield* wslEnvironment.getDistroIp(distroForConfig)
@@ -496,7 +499,7 @@ const resolveWslStartConfig = Effect.fn('desktop.backendConfiguration.resolveWsl
     }
   }
 
-  // Build an explicit copy of process.env minus T3CODE_HOME (dev-runner
+  // build an explicit copy of process.env minus T3CODE_HOME (dev-runner
   // exports the Windows-side base dir for the primary; if it leaks into
   // the WSL backend the Linux side ends up sharing C:\Users\...\.456code via
   // /mnt/c, which means both backends read/write the same database and
@@ -529,7 +532,7 @@ const resolveWslStartConfig = Effect.fn('desktop.backendConfiguration.resolveWsl
     ...(runningDistro !== null ? { runningDistro } : {}),
   }
 
-  // Forward the dev-server URL as an explicit CLI flag so the WSL backend's
+  // forward the dev-server URL as an explicit CLI flag so the WSL backend's
   // config resolution lands in dev/ instead of userdata/. Inheriting through
   // WSLENV is unreliable in practice (URL-shaped values with colons /
   // slashes get translated unpredictably depending on flags), and the
@@ -554,7 +557,7 @@ const resolveWslStartConfig = Effect.fn('desktop.backendConfiguration.resolveWsl
     } satisfies DesktopBackendManager.DesktopBackendStartConfig
   }
 
-  // The WSL server spawns commands its providers reference by name — `npm`/`npx`
+  // the WSL server spawns commands its providers reference by name — `npm`/`npx`
   // for provider updates, and the installed CLIs themselves (e.g. `codex`). Those
   // live in the resolved Node's bin dir, which `wsl.exe -- node` does NOT put on
   // the process PATH, so `npm install -g ...` fails with NotFound. Pass the
@@ -613,7 +616,7 @@ export const make = Effect.gen(function* ()
     }),
   )
 
-  // Both resolvers share the same bootstrap token: the renderer holds a
+  // both resolvers share the same bootstrap token: the renderer holds a
   // single token and uses it against whichever backend it's currently
   // talking to. Observability settings get re-read each resolve so a
   // hot-swap of the server-settings file is picked up on the next
@@ -631,7 +634,7 @@ export const make = Effect.gen(function* ()
   const buildWslPrimaryConfig = Effect.gen(function* ()
   {
     // wsl-only mode pipes the WSL backend through the same port the
-    // Windows primary would normally take. That way the renderer
+    // windows primary would normally take. That way the renderer
     // still loads from the local-only endpoint advertised by
     // DesktopServerExposure, and primary-aware code paths (cookie
     // auth, the env switcher's "primary" id) keep working without
@@ -660,18 +663,18 @@ export const make = Effect.gen(function* ()
     )
   })
 
-  // Single source of truth for what the primary actually runs as. Both
+  // single source of truth for what the primary actually runs as. Both
   // the start-config dispatch and the renderer-facing label derive from
   // this, so they can't disagree — e.g. the label reading "WSL" while the
   // config silently fell back to Windows because WSL is unavailable.
-  // Dispatch happens at resolve time so toggling wsl-only between restarts
+  // dispatch happens at resolve time so toggling wsl-only between restarts
   // is picked up on the next start cycle (the pool's primary instance is
   // created once at layer init, but configResolve fires on each restart).
   const describePrimary = Effect.gen(function* ()
   {
     const persistedSettings = yield* settings.get
     const wslRequested = persistedSettings.wslOnly && persistedSettings.wslBackendEnabled
-    // Only honor wsl-only when WSL is actually usable. If the user
+    // only honor wsl-only when WSL is actually usable. If the user
     // persisted wsl-only but WSL has since become unavailable (wsl.exe
     // removed, no distro), fall back to the Windows primary instead of
     // looping forever on preflight failures: the Connections backend

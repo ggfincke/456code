@@ -1,11 +1,10 @@
-/**
- * ProjectionThreadMessageRepository - Projection repository interface for messages.
- *
- * Owns persistence operations for projected thread messages rendered in the
- * orchestration read model.
- *
- * @module ProjectionThreadMessageRepository
- */
+// apps/server/src/persistence/Services/ProjectionThreadMessages.ts
+// define projection thread messages service contract
+
+// owns persistence operations for projected thread messages rendered in the
+// orchestration read model.
+//
+// @module ProjectionThreadMessageRepository
 import {
   ChatAttachment,
   MessageId,
@@ -54,34 +53,26 @@ export type DeleteProjectionThreadMessagesInput = typeof DeleteProjectionThreadM
  */
 export interface ProjectionThreadMessageRepositoryShape
 {
-  /**
-   * Insert or replace a projected thread message row.
-   *
-   * Upserts by `messageId`.
-   */
+  // insert or replace a projected thread message row.
+  //
+  // upserts by `messageId`.
   readonly upsert: (
     message: ProjectionThreadMessage,
   ) => Effect.Effect<void, ProjectionRepositoryError>
 
-  /**
-   * Read a projected thread message by id.
-   */
+  // read a projected thread message by id.
   readonly getByMessageId: (
     input: GetProjectionThreadMessageInput,
   ) => Effect.Effect<Option.Option<ProjectionThreadMessage>, ProjectionRepositoryError>
 
-  /**
-   * List projected thread messages for a thread.
-   *
-   * Returned in ascending creation order.
-   */
+  // list projected thread messages for a thread.
+  //
+  // returned in ascending creation order.
   readonly listByThreadId: (
     input: ListProjectionThreadMessagesInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionThreadMessage>, ProjectionRepositoryError>
 
-  /**
-   * Delete projected thread messages by thread.
-   */
+  // delete projected thread messages by thread.
   readonly deleteByThreadId: (
     input: DeleteProjectionThreadMessagesInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>

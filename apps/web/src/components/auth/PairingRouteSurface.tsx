@@ -1,3 +1,6 @@
+// apps/web/src/components/auth/PairingRouteSurface.tsx
+// render pairing route surface
+
 import type { AuthSessionState } from '@t3tools/contracts'
 import { squashAtomCommandFailure } from '@t3tools/client-runtime/state/runtime'
 import React, { startTransition, useEffect, useRef, useState, useCallback } from 'react'

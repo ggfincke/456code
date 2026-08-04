@@ -1,3 +1,6 @@
+// apps/web/src/uiStateStore.ts
+// manage ui state state
+
 import { Debouncer } from '@tanstack/react-pacer'
 import { create } from 'zustand'
 import { normalizeProjectPathForComparison } from './lib/projectPaths'
@@ -255,7 +258,7 @@ export function persistState(state: UiState): void
   }
   catch
   {
-    // Ignore quota/storage errors to avoid breaking chat UX.
+    // ignore quota/storage errors to avoid breaking chat UX.
   }
 }
 

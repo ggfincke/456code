@@ -1,3 +1,6 @@
+// tests/apps/server/preview/PortScanner.test.ts
+// verify port scanner behavior
+
 import * as NodeNet from 'node:net'
 
 import { it as effectIt } from '@effect/vitest'
@@ -94,11 +97,9 @@ const commonDevServer = Effect.acquireRelease(
   ({ server }) => closeServer(server),
 )
 
-/**
- * Integration tests against a real TCP listener. We provide the Windows host
- * platform so the tests exercise the TCP-probe fallback without depending on
- * `lsof` being installed.
- */
+// integration tests against a real TCP listener. We provide the Windows host
+// platform so the tests exercise the TCP-probe fallback without depending on
+// `lsof` being installed.
 effectIt.layer(TestPortDiscoveryLive)('PortDiscovery integration (TCP probe fallback)', (it) =>
 {
   it.effect(

@@ -1,3 +1,6 @@
+// apps/web/src/proposedPlan.ts
+// expose proposed plan title
+
 export function proposedPlanTitle(planMarkdown: string): string | null
 {
   const heading = planMarkdown.match(/^\s{0,3}#{1,6}\s+(.+)$/m)?.[1]?.trim()

@@ -1,3 +1,6 @@
+// apps/server/src/diagnostics/TraceDiagnostics.ts
+// define trace diagnostics options
+
 import type {
   ServerTraceDiagnosticsErrorKind,
   ServerTraceDiagnosticsFailureSummary,

@@ -1,5 +1,6 @@
 // apps/server/src/cartographer/CartographerHttp.ts
 // exchanges embed tickets and proxies authenticated cartographer responses
+
 // @effect-diagnostics globalFetchInEffect:off - fetch preserves the upstream status and bounded binary body without a transport adapter
 
 import * as Effect from 'effect/Effect'

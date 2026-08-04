@@ -1,3 +1,6 @@
+// tests/apps/server/telemetry/AnalyticsService.test.ts
+// verify analytics service behavior
+
 import * as NodeHttpServer from '@effect/platform-node/NodeHttpServer'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'

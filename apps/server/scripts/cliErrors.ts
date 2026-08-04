@@ -1,3 +1,6 @@
+// apps/server/scripts/cliErrors.ts
+// run the cli errors repository workflow
+
 import * as Schema from 'effect/Schema'
 
 export class ServerCliCommandExitError extends Schema.TaggedErrorClass<ServerCliCommandExitError>()(

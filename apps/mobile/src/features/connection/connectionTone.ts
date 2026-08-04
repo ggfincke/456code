@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/connectionTone.ts
+// expose connection tone
+
 import type { StatusTone } from '../../components/StatusPill'
 import type { RemoteClientConnectionState } from '../../lib/connection'
 

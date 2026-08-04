@@ -1,6 +1,9 @@
+// apps/mobile/scripts/wire-widget-asset-catalog.cjs
+// wire widget asset catalog
+
 'use strict'
 
-// One-off: apply the widget asset-catalog wiring to the already-generated
+// one-off: apply the widget asset-catalog wiring to the already-generated
 // ios/ project so the current build compiles ExpoWidgetsTarget/Assets.xcassets
 // without a full `expo prebuild`. The durable equivalent lives in
 // plugins/withWidgetLogoAsset.cjs and runs on prebuild.

@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/KeybindingsSettings.logic.ts
+// derive keybindings settings presentation behavior
+
 import {
   type KeybindingCommand,
   type KeybindingShortcut,

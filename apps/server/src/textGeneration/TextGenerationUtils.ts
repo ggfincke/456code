@@ -1,9 +1,12 @@
+// apps/server/src/textGeneration/TextGenerationUtils.ts
+// share server text generation utils
+
 import { TextGenerationError } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 
 const isTextGenerationError = Schema.is(TextGenerationError)
 
-/** Convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present. */
+// convert an Effect Schema to a flat JSON Schema object, inlining `$defs` when present.
 export function toJsonSchemaObject(schema: Schema.Top): unknown
 {
   const document = Schema.toJsonSchemaDocument(schema)
@@ -14,7 +17,7 @@ export function toJsonSchemaObject(schema: Schema.Top): unknown
   return document.schema
 }
 
-/** Truncate a text section to `maxChars`, appending a `[truncated]` marker when needed. */
+// truncate a text section to `maxChars`, appending a `[truncated]` marker when needed.
 export function limitSection(value: string, maxChars: number): string
 {
   if (value.length <= maxChars) return value
@@ -22,7 +25,7 @@ export function limitSection(value: string, maxChars: number): string
   return `${truncated}\n\n[truncated]`
 }
 
-/** Normalise a raw commit subject to imperative-mood, ≤72 chars, no trailing period. */
+// normalise a raw commit subject to imperative-mood, ≤72 chars, no trailing period.
 export function sanitizeCommitSubject(raw: string): string
 {
   const singleLine = raw.trim().split(/\r?\n/g)[0]?.trim() ?? ''
@@ -39,7 +42,7 @@ export function sanitizeCommitSubject(raw: string): string
   return withoutTrailingPeriod.slice(0, 72).trimEnd()
 }
 
-/** Normalise a raw PR title to a single line with a sensible fallback. */
+// normalise a raw PR title to a single line with a sensible fallback.
 export function sanitizePrTitle(raw: string): string
 {
   const singleLine = raw.trim().split(/\r?\n/g)[0]?.trim() ?? ''
@@ -50,7 +53,7 @@ export function sanitizePrTitle(raw: string): string
   return 'Update project changes'
 }
 
-/** Normalise a raw thread title to a compact single-line sidebar-safe label. */
+// normalise a raw thread title to a compact single-line sidebar-safe label.
 export function sanitizeThreadTitle(raw: string): string
 {
   const normalized = raw
@@ -74,18 +77,16 @@ export function sanitizeThreadTitle(raw: string): string
   return `${normalized.slice(0, 47).trimEnd()}...`
 }
 
-/** CLI name to human-readable label, e.g. "codex" → "Codex CLI (`codex`)" */
+// CLI name to human-readable label, e.g. "codex" -> "Codex CLI (`codex`)"
 function cliLabel(cliName: string): string
 {
   const capitalized = cliName.charAt(0).toUpperCase() + cliName.slice(1)
   return `${capitalized} CLI (\`${cliName}\`)`
 }
 
-/**
- * Normalize an unknown error from a CLI text generation process into a
- * typed `TextGenerationError`. Parameterized by CLI name so both Codex
- * and Claude (and future providers) can share the same logic.
- */
+// normalize an unknown error from a CLI text generation process into a
+// typed `TextGenerationError`. Parameterized by CLI name so both Codex
+// and Claude (and future providers) can share the same logic.
 export function normalizeCliError(
   cliName: string,
   operation: string,

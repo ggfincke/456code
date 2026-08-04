@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/methods/preview.ts
+// install preview event forwarding
+
 import {
   DesktopPreviewAnnotationThemeInputSchema,
   DesktopPreviewArtifactInputSchema,

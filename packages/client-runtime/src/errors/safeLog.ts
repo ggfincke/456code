@@ -1,3 +1,6 @@
+// packages/client-runtime/src/errors/safeLog.ts
+// define safe error log attributes
+
 const SAFE_ERROR_LABEL =
   /^(?:Error|EvalError|RangeError|ReferenceError|SyntaxError|TypeError|URIError|AggregateError|DOMException|[A-Za-z][A-Za-z0-9]*(?:Error|Failure))$/
 const SAFE_TRACE_ID = /^[A-Za-z0-9._:-]{1,128}$/

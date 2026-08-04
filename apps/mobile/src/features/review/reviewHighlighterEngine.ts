@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewHighlighterEngine.ts
+// resolve review highlighter engine preference
+
 export type ReviewHighlighterEnginePreference = 'javascript' | 'native'
 export type ReviewHighlighterEngine = 'javascript' | 'native'
 

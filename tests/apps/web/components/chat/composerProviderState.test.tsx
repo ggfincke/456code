@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/composerProviderState.test.tsx
+// verify get composer provider state behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import {
   ProviderDriverKind,
@@ -12,7 +15,7 @@ import {
   renderProviderTraitsPicker,
 } from '../../../../../apps/web/src/components/chat/composerProviderState'
 
-// Everything in composerProviderState is now data-driven by the model's
+// everything in composerProviderState is now data-driven by the model's
 // optionDescriptors, so these tests use a single synthetic provider/model and
 // vary only the descriptor shape per scenario.
 

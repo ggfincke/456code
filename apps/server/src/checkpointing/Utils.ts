@@ -1,3 +1,6 @@
+// apps/server/src/checkpointing/Utils.ts
+// expose checkpoint refs prefix
+
 import * as Encoding from 'effect/Encoding'
 import { CheckpointRef, ProjectId, type ThreadId } from '@t3tools/contracts'
 

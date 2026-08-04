@@ -1,3 +1,6 @@
+// apps/server/src/provider/opencodeRuntime.ts
+// open code runtime error detail
+
 import * as NodeURL from 'node:url'
 
 import type { ChatAttachment, ProviderApprovalDecision, RuntimeMode } from '@t3tools/contracts'
@@ -120,12 +123,10 @@ export interface ParsedOpenCodeModelSlug
 
 export interface OpenCodeRuntimeShape
 {
-  /**
-   * Spawns a local OpenCode server process. Its lifetime is bound to the caller's
-   * `Scope.Scope` — the child is killed automatically when that scope closes.
-   * Consumers that want a long-lived server must create and hold a scope explicitly
-   * (see {@link Scope.make}) and close it when done.
-   */
+  // spawns a local OpenCode server process. Its lifetime is bound to the caller's
+  // `Scope.Scope` — the child is killed automatically when that scope closes.
+  // consumers that want a long-lived server must create and hold a scope explicitly
+  // (see {@link Scope.make}) and close it when done.
   readonly startOpenCodeServerProcess: (input: {
     readonly binaryPath: string
     readonly environment?: NodeJS.ProcessEnv
@@ -133,11 +134,9 @@ export interface OpenCodeRuntimeShape
     readonly hostname?: string
     readonly timeoutMs?: number
   }) => Effect.Effect<OpenCodeServerProcess, OpenCodeRuntimeError, Scope.Scope>
-  /**
-   * Returns a handle to either an externally-managed OpenCode server (when
-   * `serverUrl` is provided — no lifetime is attached to the caller's scope) or a
-   * freshly spawned local server whose lifetime is bound to the caller's scope.
-   */
+  // returns a handle to either an externally-managed OpenCode server (when
+  // `serverUrl` is provided — no lifetime is attached to the caller's scope) or a
+  // freshly spawned local server whose lifetime is bound to the caller's scope.
   readonly connectToOpenCodeServer: (input: {
     readonly binaryPath: string
     readonly serverUrl?: string | null
@@ -182,12 +181,12 @@ function parseServerUrlFromOutput(output: string): string | null
 const SLUG_LINE_RE = /^(\S+\/\S+)\s*$/
 const AGENT_HEADER_RE = /^(.+)\s+\((\S+)\)\s*$/
 
-// Agents that are always hidden in OpenCode but the CLI "agent list" command
+// agents that are always hidden in OpenCode but the CLI "agent list" command
 // does not expose the hidden flag. Keep in sync with OpenCode agent
 // definitions (in the OpenCode repo: packages/opencode/src/agent/agent.ts).
 const KNOWN_HIDDEN_AGENTS = new Set(['compaction', 'summary', 'title'])
 
-/** @internal */
+// @internal
 export function parseModelsCliOutput(stdout: string): {
   readonly providers: ReadonlyMap<
     string,
@@ -230,7 +229,7 @@ export function parseModelsCliOutput(stdout: string): {
         }
         catch
         {
-          // Skip unparseable model JSON
+          // skip unparseable model JSON
         }
       }
     }
@@ -256,7 +255,7 @@ export function parseModelsCliOutput(stdout: string): {
   return { providers, connected: [...providers.keys()] }
 }
 
-/** @internal */
+// @internal
 export function parseAgentListCliOutput(stdout: string): ReadonlyArray<Agent>
 {
   const agents: Array<Agent> = []
@@ -284,7 +283,7 @@ export function parseAgentListCliOutput(stdout: string): ReadonlyArray<Agent>
         }
         catch
         {
-          // Skip unparseable agent
+          // skip unparseable agent
         }
       }
     }
@@ -490,7 +489,7 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
   const startOpenCodeServerProcess: OpenCodeRuntimeShape['startOpenCodeServerProcess'] = (input) =>
     Effect.gen(function* ()
     {
-      // Bind this server's lifetime to the caller's scope. When the caller's
+      // bind this server's lifetime to the caller's scope. When the caller's
       // scope closes, the spawned child is killed and all associated fibers
       // are interrupted automatically — no `close()` method needed.
       const runtimeScope = yield* Scope.Scope
@@ -547,7 +546,7 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
               }
               catch
                 {
-                // The direct child may already have exited after starting the
+                // the direct child may already have exited after starting the
                 // server; the process group kill is best-effort cleanup for
                 // any serve process left in that group.
               }
@@ -618,7 +617,7 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
         Deferred.await(readyDeferred).pipe(Effect.timeoutOption(timeoutMs)),
       )
 
-      // Startup-time fibers are no longer needed once ready has resolved (either
+      // startup-time fibers are no longer needed once ready has resolved (either
       // way). The exit fiber is only interrupted on failure; on success it keeps
       // the caller's `exitCode` effect observable until the scope closes.
       yield* Fiber.interrupt(stdoutFiber).pipe(Effect.ignore)
@@ -659,7 +658,7 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
     const serverUrl = input.serverUrl?.trim()
     if (serverUrl)
     {
-      // We don't own externally-configured servers — no scope interaction.
+      // we don't own externally-configured servers — no scope interaction.
       return Effect.succeed({
         url: serverUrl,
         exitCode: null,
@@ -738,12 +737,12 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
           Effect.exit,
         )
 
-      // First attempt — run both in parallel
+      // first attempt — run both in parallel
       let [modelsResult, agentsResult] = yield* Effect.all([runModelsCli(), runAgentsCli()], {
         concurrency: 'unbounded',
       })
 
-      // Retry once after 1s on transient failures (e.g. SQLite "database is locked")
+      // retry once after 1s on transient failures (e.g. SQLite "database is locked")
       const needsModelsRetry = modelsResult._tag === 'Failure' || modelsResult.value.code !== 0
       const needsAgentsRetry = agentsResult._tag === 'Failure' || agentsResult.value.code !== 0
       if (needsModelsRetry || needsAgentsRetry)
@@ -790,7 +789,7 @@ const makeOpenCodeRuntime = Effect.gen(function* ()
         }),
       )
 
-      // Agent metadata enriches model capabilities but is not required for an
+      // agent metadata enriches model capabilities but is not required for an
       // authoritative model inventory, so it may still degrade to an empty list.
       let agents: ReadonlyArray<Agent> = []
       if (agentsResult._tag === 'Success' && agentsResult.value.code === 0)

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/showcase/nativeShowcaseScene.ts
+// resolve native showcase pairing urls
+
 import { requireOptionalNativeModule } from 'expo'
 
 export const SHOWCASE_SCENES = ['threads', 'thread', 'terminal', 'review', 'environments'] as const
@@ -46,7 +49,7 @@ export function getNativeShowcasePairingUrls(): ReadonlyArray<string>
     }
     catch
     {
-      // Older runners pass a single URL rather than a JSON array.
+      // older runners pass a single URL rather than a JSON array.
     }
     return [raw]
   }
@@ -77,7 +80,7 @@ export function prepareNativeShowcaseCapture(): void
   }
   catch
   {
-    // The harness still works when a development build predates this helper.
+    // the harness still works when a development build predates this helper.
   }
 }
 
@@ -89,6 +92,6 @@ export function markNativeShowcaseReady(scene: ShowcaseScene): void
   }
   catch
   {
-    // The readiness marker is capture-runner metadata, never app functionality.
+    // the readiness marker is capture-runner metadata, never app functionality.
   }
 }

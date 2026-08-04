@@ -1,3 +1,6 @@
+// apps/web/src/components/ConnectionStatusDot.tsx
+// render connection status dot
+
 import { cn } from '~/lib/utils'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '~/components/ui/tooltip'
 

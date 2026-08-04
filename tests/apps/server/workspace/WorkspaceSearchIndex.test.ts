@@ -1,3 +1,6 @@
+// tests/apps/server/workspace/WorkspaceSearchIndex.test.ts
+// verify workspace search index behavior
+
 import { FileFinder } from '@ff-labs/fff-node'
 import { afterEach, expect, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'

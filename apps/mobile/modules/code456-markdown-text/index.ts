@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/index.ts
+// expose markdown file icon source
+
 export { markdownFileIconSource } from './src/markdownFileIcons'
 export {
   resolveMarkdownFileIcon,

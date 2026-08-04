@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/ZoomIndicator.tsx
+// render zoom indicator
+
 import { useEffect, useRef, useState } from 'react'
 
 import { cn } from '~/lib/utils'
@@ -7,16 +10,14 @@ const ZOOM_EPSILON = 0.001
 
 interface Props
 {
-  /** Current zoom factor (1.0 = 100%); changes drive the transient indicator. */
+  // current zoom factor (1.0 = 100%); changes drive the transient indicator.
   zoomFactor: number
 }
 
-/**
- * Floating "X%" pill that surfaces in the top-right of the webview area
- * whenever the zoom factor changes, then fades out after a short pause.
- *
- * Suppressed for the first render's value so we don't flash 100% on mount.
- */
+// floating "X%" pill that surfaces in the top-right of the webview area
+// whenever the zoom factor changes, then fades out after a short pause.
+//
+// suppressed for the first render's value so we don't flash 100% on mount.
 export function ZoomIndicator({ zoomFactor }: Props)
 {
   const [visible, setVisible] = useState(false)

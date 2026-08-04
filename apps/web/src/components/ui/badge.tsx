@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/badge.tsx
+// render reusable badge UI primitives
+
 'use client'
 
 import { mergeProps } from '@base-ui/react/merge-props'

@@ -1,3 +1,6 @@
+// apps/web/src/vite-plus-browser-matchers.d.ts
+// declare web ambient types
+
 import type { ExpectPollOptions } from 'vite-plus/test'
 import type { Locator } from 'vite-plus/test/browser'
 

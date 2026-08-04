@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/CloudEnvironmentRows.tsx
+// render cloud environment rows
+
 import { useAuth } from '@clerk/expo'
 import { SymbolView } from '../../components/AppSymbol'
 import {
@@ -24,22 +27,18 @@ import { availableCloudEnvironmentPresentation } from '../cloud/cloudEnvironment
 import { ConnectionStatusDot } from './ConnectionStatusDot'
 import { type RelayEnvironmentView, useConnectionController } from './useConnectionController'
 
-/**
- * Cloud-relay section: every environment published to the signed-in account,
- * with connect switches, availability status, refresh, and loading/error
- * states. Shared between the Settings environments screen and the cloud
- * onboarding sheet.
- */
+// cloud-relay section: every environment published to the signed-in account,
+// with connect switches, availability status, refresh, and loading/error
+// states. Shared between the Settings environments screen and the cloud
+// onboarding sheet.
 export function CloudEnvironmentRows(props: {
   readonly connectedCloudEnvironments: ReadonlyArray<ConnectedEnvironmentSummary>
   readonly onReconnectEnvironment: (environmentId: EnvironmentId) => void
   readonly showcaseAvailableEnvironments?: ReadonlyArray<RelayEnvironmentView>
   readonly showcaseSignedIn?: boolean
-  /**
-   * Hide the cloud section title + refresh button for hosts that
-   * provide their own chrome (the onboarding sheet's native header and
-   * pull-to-refresh).
-   */
+  // hide the cloud section title + refresh button for hosts that
+  // provide their own chrome (the onboarding sheet's native header and
+  // pull-to-refresh).
   readonly showHeader?: boolean
 })
 {

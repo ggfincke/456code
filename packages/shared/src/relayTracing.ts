@@ -1,3 +1,6 @@
+// packages/shared/src/relayTracing.ts
+// create relay client tracing layer
+
 import * as Cause from 'effect/Cause'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -137,7 +140,7 @@ function nonInterferingTracer(delegate: Tracer.Tracer): Tracer.Tracer
         }
         catch
         {
-          // Telemetry is best-effort and must never change application behavior.
+          // telemetry is best-effort and must never change application behavior.
         }
       }
       return span

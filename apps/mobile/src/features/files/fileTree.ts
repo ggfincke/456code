@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/fileTree.ts
+// build file tree
+
 import type { ProjectEntry } from '@t3tools/contracts'
 import { normalizeSearchQuery, scoreQueryMatch } from '@t3tools/shared/searchRanking'
 

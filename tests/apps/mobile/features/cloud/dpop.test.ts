@@ -1,5 +1,7 @@
-/// <reference types="node" />
+// tests/apps/mobile/features/cloud/dpop.test.ts
+// verify mobile d po p behavior
 
+/// <reference types="node" />
 import * as NodeCrypto from 'node:crypto'
 
 import { vi } from 'vite-plus/test'

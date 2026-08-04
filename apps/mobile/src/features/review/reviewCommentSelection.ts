@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/reviewCommentSelection.ts
+// define review comment target
+
 import { useSyncExternalStore } from 'react'
 
 import type { ReviewRenderableLineRow } from './reviewModel'

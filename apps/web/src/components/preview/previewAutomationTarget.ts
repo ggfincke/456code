@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/previewAutomationTarget.ts
+// determine whether preview automation session sync
+
 import type { PreviewSessionSnapshot } from '@t3tools/contracts'
 
 interface PreviewAutomationSessionIndex

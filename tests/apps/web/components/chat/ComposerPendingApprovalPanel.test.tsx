@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/ComposerPendingApprovalPanel.test.tsx
+// verify composer pending approval panel behavior
+
 import { ApprovalRequestId } from '@t3tools/contracts'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vite-plus/test'

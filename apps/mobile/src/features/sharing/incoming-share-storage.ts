@@ -1,3 +1,6 @@
+// apps/mobile/src/features/sharing/incoming-share-storage.ts
+// persist incoming share storage data
+
 import * as Schema from 'effect/Schema'
 
 import { decodeIncomingShareDraft, type IncomingShareDraft } from './incoming-share-model'

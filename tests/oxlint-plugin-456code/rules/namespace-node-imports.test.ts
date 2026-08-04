@@ -1,3 +1,6 @@
+// tests/oxlint-plugin-456code/rules/namespace-node-imports.test.ts
+// verify 456code/namespace node imports behavior
+
 import { assert, describe } from '@effect/vitest'
 
 import { createOxlintRuleHarness } from '../../../oxlint-plugin-456code/test/utils.ts'

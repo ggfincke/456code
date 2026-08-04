@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPendingReviewComments.tsx
+// render composer pending review comments
+
 import { MessageCircle, X } from 'lucide-react'
 
 import {

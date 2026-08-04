@@ -1,3 +1,6 @@
+// tests/apps/server/bootstrap.test.ts
+// verify bootstrap behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'
@@ -99,9 +102,9 @@ it.layer(NodeServices.layer)('readBootstrapEnvelope', (it) =>
         `${yield* encodeTestEnvelopeSchema({ mode: 'desktop' })}\n`,
       )
 
-      // Open without acquireRelease: the direct-stream fallback uses autoClose: true,
+      // open without acquireRelease: the direct-stream fallback uses autoClose: true,
       // so the stream owns the fd lifecycle and closes it asynchronously on end.
-      // Attempting to also close it synchronously in a finalizer races with the
+      // attempting to also close it synchronously in a finalizer races with the
       // stream's async close and produces an uncaught EBADF.
       const fd = NodeFS.openSync(filePath, 'r')
 

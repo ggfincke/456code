@@ -1,3 +1,6 @@
+// apps/mobile/src/components/ControlPill.tsx
+// render control pill
+
 import { MenuView } from '@react-native-menu/menu'
 import * as Haptics from 'expo-haptics'
 import {
@@ -84,7 +87,7 @@ export function ControlPill(props: {
 }
 
 // iOS renders the native UIMenu (standard checkmark for `state: "on"`);
-// Android renders the token-styled AndroidAnchoredMenu, since the native
+// android renders the token-styled AndroidAnchoredMenu, since the native
 // AppCompat popup can't be themed past its stock animation, metrics, and
 // submenu chrome.
 export function ControlPillMenu(
@@ -98,7 +101,7 @@ export function ControlPillMenu(
 
   if (Platform.OS === 'android')
   {
-    // Long-press menus keep their child interactive: the child element gets
+    // long-press menus keep their child interactive: the child element gets
     // an injected onLongPress (mirroring the iOS context-menu interaction)
     // so its own tap handling still works.
     if (props.shouldOpenOnLongPress && isValidElement(props.children))

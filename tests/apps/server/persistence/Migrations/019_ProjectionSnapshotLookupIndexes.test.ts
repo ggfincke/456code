@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/Migrations/019_ProjectionSnapshotLookupIndexes.test.ts
+// verify 019 projection snapshot lookup indexes behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

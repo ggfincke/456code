@@ -1,3 +1,6 @@
+// tests/apps/web/state/desktopWslState.test.ts
+// verify desktop wsl state behavior
+
 import type { DesktopWslState } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import * as AsyncResult from 'effect/unstable/reactivity/AsyncResult'

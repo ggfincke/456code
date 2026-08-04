@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/connection/onboarding.test.ts
+// verify connection onboarding behavior
+
 import { AuthStandardClientScopes, EnvironmentId } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

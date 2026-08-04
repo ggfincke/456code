@@ -1,3 +1,6 @@
+// tests/apps/web/components/ui/toast.logic.test.ts
+// verify should hide collapsed toast content behavior
+
 import type { ScopedThreadRef } from '@t3tools/contracts'
 import type { ServerConfigStreamEvent } from '@t3tools/contracts'
 import { assert, describe, expect, it } from 'vite-plus/test'
@@ -90,9 +93,9 @@ describe('buildVisibleToastLayout', () =>
         offsetY,
       })),
       [
-        // Ending toast stays at its front slot; data-ending-style drives its exit
+        // ending toast stays at its front slot; data-ending-style drives its exit
         { id: 'a', visibleIndex: 0, offsetY: 0 },
-        // Live toasts get fresh indices starting at 0 so they move up in sync
+        // live toasts get fresh indices starting at 0 so they move up in sync
         { id: 'b', visibleIndex: 0, offsetY: 0 },
         { id: 'c', visibleIndex: 1, offsetY: 72 },
       ],
@@ -118,12 +121,12 @@ describe('buildVisibleToastLayout', () =>
         offsetY,
       })),
       [
-        // Front live toast — unaffected
+        // front live toast — unaffected
         { id: 'a', visibleIndex: 0, offsetY: 0 },
-        // Ending toast keeps its pre-dismissal slot so its horizontal exit
+        // ending toast keeps its pre-dismissal slot so its horizontal exit
         // originates from where the user saw it (not from Y=0).
         { id: 'b', visibleIndex: 1, offsetY: 48 },
-        // Live toast behind "b" slides forward into the vacated slot.
+        // live toast behind "b" slides forward into the vacated slot.
         { id: 'c', visibleIndex: 1, offsetY: 48 },
       ],
     )

@@ -1,3 +1,6 @@
+// tests/packages/shared/relayAuth.test.ts
+// verify clerk relay auth behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

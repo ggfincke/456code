@@ -1,9 +1,8 @@
-/**
- * Single Zustand store for terminal UI state keyed by scoped thread identity.
- *
- * Terminal UI transition helpers are intentionally private to keep the public
- * API constrained to store actions/selectors.
- */
+// apps/web/src/terminalUiStateStore.ts
+// manage terminal ui state state
+
+// terminal UI transition helpers are intentionally private to keep the public
+// API constrained to store actions/selectors.
 
 import { parseScopedThreadKey, scopedThreadKey } from '@t3tools/client-runtime/environment'
 import { type ScopedThreadRef } from '@t3tools/contracts'
@@ -27,7 +26,7 @@ interface ThreadTerminalUiState
   activeTerminalGroupId: string
 }
 
-// Keep the old storage key so existing drawer layout preferences migrate.
+// keep the old storage key so existing drawer layout preferences migrate.
 const TERMINAL_UI_STATE_STORAGE_KEY = '456code:terminal-state:v1'
 
 interface PersistedTerminalUiStateStoreState
@@ -640,7 +639,7 @@ function removeRecordEntry<T>(record: Record<string, T>, key: string): Record<st
 interface TerminalUiStateStoreState
 {
   terminalUiStateByThreadKey: Record<string, ThreadTerminalUiState>
-  /** Closed ids hidden from stale server metadata until that id is explicitly opened again. */
+  // closed ids hidden from stale server metadata until that id is explicitly opened again.
   suppressedTerminalIdsByThreadKey: Record<string, string[]>
   setTerminalOpen: (threadRef: ScopedThreadRef, open: boolean) => void
   setTerminalHeight: (threadRef: ScopedThreadRef, height: number) => void

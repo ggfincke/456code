@@ -1,3 +1,6 @@
+// apps/desktop/src/app/DesktopConnectionCatalogStore.ts
+// manage desktop connection catalog state
+
 import {
   BearerConnectionCredential,
   BearerConnectionProfile,

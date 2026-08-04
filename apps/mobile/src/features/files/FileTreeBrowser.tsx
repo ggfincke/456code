@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/FileTreeBrowser.tsx
+// render file tree browser
+
 import type { ProjectEntry } from '@t3tools/contracts'
 import { SymbolView } from '../../components/AppSymbol'
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -131,7 +134,7 @@ export function FileTreeBrowser(props: {
     readonly selectedPathAtPress: string | null
   } | null>(null)
   const insets = useSafeAreaInsets()
-  // Native transparent-header height ≈ safe-area top + nav bar (~44). Matches the
+  // native transparent-header height ≈ safe-area top + nav bar (~44). Matches the
   // observed adjustedContentInset bottom (~102) seen in the native trace.
   const headerInset = NATIVE_LIQUID_GLASS_SUPPORTED ? insets.top + 44 : 0
   const iconColor = String(useThemeColor('--color-icon-muted'))

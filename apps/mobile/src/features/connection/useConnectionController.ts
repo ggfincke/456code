@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/useConnectionController.ts
+// manage relay environment view through a React hook
+
 import { useAtomValue } from '@effect/atom-react'
 import {
   RelayConnectionRegistration,

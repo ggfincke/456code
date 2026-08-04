@@ -1,3 +1,6 @@
+// tests/apps/server/auth/ServerSecretStore.test.ts
+// verify server secret store behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'

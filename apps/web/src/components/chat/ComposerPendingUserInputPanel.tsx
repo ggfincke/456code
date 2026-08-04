@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx
+// render composer pending user input panel
+
 import { type ApprovalRequestId } from '@t3tools/contracts'
 import { memo, useEffect, useEffectEvent, useRef, useState } from 'react'
 import { type PendingUserInput } from '../../session-logic'
@@ -152,7 +155,7 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
     autoAdvanceTimerRef.current = { questionId, timeoutId }
   })
 
-  // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
+  // keyboard shortcut: number keys 1-9 select corresponding options when focus is
   // outside editable fields. Multi-select prompts toggle options in place; single-
   // select prompts keep the existing auto-advance behavior.
   useEffect(() =>

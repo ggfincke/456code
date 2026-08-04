@@ -1,3 +1,6 @@
+// apps/web/src/reviewCommentContext.ts
+// parse review comment message segments
+
 import type { FileDiffMetadata, SelectedLineRange, SelectionSide } from '@pierre/diffs'
 import * as Schema from 'effect/Schema'
 

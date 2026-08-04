@@ -1176,7 +1176,7 @@ export default function GitActionsControl({
   )
   const changeRequestTerminology = sourceControlPresentation.terminology
   const SourceControlIcon = sourceControlPresentation.Icon
-  // Default to true while loading so we don't flash init controls.
+  // default to true while loading so we don't flash init controls.
   const isRepo = gitStatus?.isRepo ?? true
   const hasPrimaryRemote = gitStatus?.hasPrimaryRemote ?? false
   const gitStatusForActions = gitStatus
@@ -1486,11 +1486,11 @@ export default function GitActionsControl({
             progress.lastOutputLine = null
             break
           case 'action_finished':
-            // Let the resolved mutation update the toast so we keep the
+            // let the resolved mutation update the toast so we keep the
             // elapsed description visible until the final success state renders.
             return
           case 'action_failed':
-            // Let the settled mutation publish the error toast to avoid a
+            // let the settled mutation publish the error toast to avoid a
             // transient intermediate state before the final failure message.
             return
         }

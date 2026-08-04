@@ -1,3 +1,6 @@
+// apps/web/src/state/vcs.ts
+// manage vcs environment state
+
 import {
   createVcsActionManager,
   createVcsEnvironmentAtoms,

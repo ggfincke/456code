@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewAvailability.test.ts
+// verify resolve review availability behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { resolveReviewAvailability } from '../../../../../apps/mobile/src/features/review/reviewAvailability'

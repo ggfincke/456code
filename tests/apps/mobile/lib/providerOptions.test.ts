@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/providerOptions.test.ts
+// verify mobile provider options behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import type { ModelCapabilities } from '@t3tools/contracts'

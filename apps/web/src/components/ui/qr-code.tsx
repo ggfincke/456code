@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/qr-code.tsx
+// render reusable qr code UI primitives
+
 import { memo } from 'react'
 import { QrCode } from '@t3tools/shared/qrCode'
 

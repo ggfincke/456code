@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/repositoryGroups.ts
+// define repository project group
+
 import * as Order from 'effect/Order'
 import * as Arr from 'effect/Array'
 import type { RepositoryIdentity } from '@t3tools/contracts'

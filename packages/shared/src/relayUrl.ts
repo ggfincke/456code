@@ -1,3 +1,6 @@
+// packages/shared/src/relayUrl.ts
+// normalize secure relay url
+
 export function normalizeSecureRelayUrl(value: string): string | null
 {
   try

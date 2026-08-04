@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/authClientMetadata.ts
+// expose auth client metadata
+
 import type { AuthClientPresentationMetadata } from '@t3tools/contracts'
 import { Platform } from 'react-native'
 

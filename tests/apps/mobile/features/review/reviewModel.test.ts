@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewModel.test.ts
+// verify build review section items behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

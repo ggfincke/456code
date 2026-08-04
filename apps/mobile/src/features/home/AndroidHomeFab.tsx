@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/AndroidHomeFab.tsx
+// render android home fab
+
 import type { ReactNode } from 'react'
 import { Platform, Pressable, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -5,10 +8,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { SymbolView } from '../../components/AppSymbol'
 import { useThemeColor } from '../../lib/useThemeColor'
 
-/**
- * Android-only wrapper that overlays a bottom-right new-task FAB on the home
- * screen. Other platforms render children unchanged.
- */
+// android-only wrapper that overlays a bottom-right new-task FAB on the home
+// screen. Other platforms render children unchanged.
 export function AndroidHomeFabLayout(props: {
   readonly onStartNewTask: () => void
   readonly children: ReactNode

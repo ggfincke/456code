@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/markdownFileIcons.ts
+// provide mobile markdown file icons
+
 import type { ImageSourcePropType } from 'react-native'
 
 import type { MarkdownFileIcon } from './markdownLinks'

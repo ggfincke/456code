@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/draftHeroTransition.ts
+// expose draft hero transition animation id
+
 export const DRAFT_HERO_TRANSITION_ANIMATION_ID = 't3-draft-hero-transition'
 export const DRAFT_HERO_TRANSITION_DURATION_MS = 180
 export const DRAFT_HERO_TRANSITION_EASING = 'cubic-bezier(0.4, 0, 0.2, 1)'
@@ -37,7 +40,7 @@ export async function waitForDraftHeroTransition(): Promise<void>
       }
       catch
       {
-        // A cancelled transition is already safe to hand off.
+        // a cancelled transition is already safe to hand off.
       }
     }),
   ])

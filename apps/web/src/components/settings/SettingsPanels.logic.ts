@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/SettingsPanels.logic.ts
+// derive settings panels presentation behavior
+
 import type {
   ProviderDriverKind,
   ProviderInstanceConfig,
@@ -47,7 +50,7 @@ export function rememberEnabledProjectGroupingMode(mode: SidebarProjectGroupingM
   }
   catch
   {
-    // Storage can be unavailable in restricted browser contexts.
+    // storage can be unavailable in restricted browser contexts.
   }
 }
 

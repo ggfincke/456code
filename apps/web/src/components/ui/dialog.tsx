@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/dialog.tsx
+// render reusable dialog UI primitives
+
 'use client'
 
 import { Dialog as DialogPrimitive } from '@base-ui/react/dialog'

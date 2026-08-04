@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/presentation.ts
+// manage create environment presentation atoms state
+
 import type { EnvironmentId, ServerConfig } from '@t3tools/contracts'
 import * as Option from 'effect/Option'
 import { AsyncResult, Atom } from 'effect/unstable/reactivity'
@@ -30,7 +33,7 @@ export function createEnvironmentPresentationAtoms<E>(input: {
   readonly stateAtom: (
     environmentId: EnvironmentId,
   ) => Atom.Atom<AsyncResult.AsyncResult<SupervisorConnectionState, E>>
-  /** Authoritative live server config, including streamed provider/settings updates. */
+  // authoritative live server config, including streamed provider/settings updates.
   readonly serverConfigValueAtom: (environmentId: EnvironmentId) => Atom.Atom<ServerConfig | null>
 })
 {

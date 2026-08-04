@@ -1,3 +1,6 @@
+// packages/contracts/src/review.ts
+// define review contracts
+
 import * as Schema from 'effect/Schema'
 import { TrimmedNonEmptyString } from './baseSchemas.ts'
 import { GitCommandError } from './git.ts'

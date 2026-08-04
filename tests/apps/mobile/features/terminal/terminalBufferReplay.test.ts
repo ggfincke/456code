@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/terminal/terminalBufferReplay.test.ts
+// verify terminal buffer replay behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

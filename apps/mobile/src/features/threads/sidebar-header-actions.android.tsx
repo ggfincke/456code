@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/sidebar-header-actions.android.tsx
+// render sidebar header actions android
+
 import { View } from 'react-native'
 
 import { HeaderButton } from '../../native/HeaderButton.android'

@@ -1,3 +1,6 @@
+// apps/web/src/pierre-icons.ts
+// provide web pierre icons
+
 import {
   createFileTreeIconResolver,
   getBuiltInSpriteSheet,

@@ -1,3 +1,6 @@
+// tests/apps/desktop/backend/DesktopServerExposure.test.ts
+// verify desktop server exposure behavior
+
 import * as NodeFileSystem from '@effect/platform-node/NodeFileSystem'
 import * as NodeHttpClient from '@effect/platform-node/NodeHttpClient'
 import * as NodeServices from '@effect/platform-node/NodeServices'
@@ -347,7 +350,7 @@ describe('DesktopServerExposure', () =>
         // mode stays at default "local-only", tailscaleServeEnabled stays false.
 
         const endpoints = yield* serverExposure.getAdvertisedEndpoints
-        // Only the loopback endpoint; no tailscale spawn means the dieOnSpawnLayer
+        // only the loopback endpoint; no tailscale spawn means the dieOnSpawnLayer
         // would have crashed the test if the gate was missing.
         assert.deepEqual(
           endpoints.map((endpoint) => endpoint.httpBaseUrl),

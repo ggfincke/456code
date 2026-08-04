@@ -1,3 +1,6 @@
+// apps/web/src/components/NoActiveThreadState.tsx
+// render no active thread state
+
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from './ui/empty'
 import { SidebarInset } from './ui/sidebar'
 import { isElectron } from '../env'

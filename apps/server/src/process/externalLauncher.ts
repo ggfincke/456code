@@ -1,11 +1,10 @@
-/**
- * ExternalLauncher - external application launch service interface.
- *
- * Owns process launch helpers for browser URLs and workspace paths
- * in configured editor integrations.
- *
- * @module ExternalLauncher
- */
+// apps/server/src/process/externalLauncher.ts
+// implement external launcher
+
+// owns process launch helpers for browser URLs and workspace paths
+// in configured editor integrations.
+//
+// @module ExternalLauncher
 import {
   EDITORS,
   ExternalLauncherError,
@@ -30,9 +29,7 @@ import * as Path from 'effect/Path'
 import * as ChildProcess from 'effect/unstable/process/ChildProcess'
 import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 
-// ==============================
-// Definitions
-// ==============================
+// definitions
 
 export {
   ExternalLauncherError,
@@ -336,21 +333,17 @@ export class ExternalLauncher extends Context.Service<
   ExternalLauncher,
   {
     readonly resolveAvailableEditors: () => Effect.Effect<ReadonlyArray<EditorId>>
-    /** Launch a URL target in the default browser. */
+    // launch a URL target in the default browser.
     readonly launchBrowser: (target: string) => Effect.Effect<void, ExternalLauncherError>
-    /**
-     * Launch a workspace path in a selected editor integration.
-     *
-     * Launches the editor as a detached process so server startup is not blocked.
-     */
+    // launch a workspace path in a selected editor integration.
+    //
+    // launches the editor as a detached process so server startup is not blocked.
     readonly launchEditor: (input: LaunchEditorInput) => Effect.Effect<void, ExternalLauncherError>
   }
 >()('456code/process/externalLauncher')
 {}
 
-// ==============================
-// Implementations
-// ==============================
+// implementations
 
 const resolveEditorLaunch = Effect.fn('resolveEditorLaunch')(function* (
   input: LaunchEditorInput,

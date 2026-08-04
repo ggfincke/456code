@@ -1,3 +1,6 @@
+// apps/web/src/components/DiffPanelShell.tsx
+// render diff panel shell
+
 import type { ReactNode } from 'react'
 
 import { isElectron } from '~/env'

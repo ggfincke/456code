@@ -1,3 +1,6 @@
+// tests/packages/effect-codex-app-server/client.test.ts
+// verify client behavior
+
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'

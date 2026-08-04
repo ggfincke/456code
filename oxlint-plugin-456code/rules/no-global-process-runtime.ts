@@ -1,3 +1,6 @@
+// oxlint-plugin-456code/rules/no-global-process-runtime.ts
+// coordinate no global process runtime
+
 import { defineRule } from '@oxlint/plugins'
 import * as Option from 'effect/Option'
 

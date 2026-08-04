@@ -1,3 +1,6 @@
+// tests/apps/web/wslPaths.test.ts
+// verify resolve wsl project selection behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

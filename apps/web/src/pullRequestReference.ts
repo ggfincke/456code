@@ -1,3 +1,6 @@
+// apps/web/src/pullRequestReference.ts
+// parse pull request reference
+
 const GITHUB_PULL_REQUEST_URL_PATTERN =
   /^https:\/\/github\.com\/[^/\s]+\/[^/\s]+\/pull\/(\d+)(?:[/?#].*)?$/i
 const GITLAB_MERGE_REQUEST_URL_PATTERN =

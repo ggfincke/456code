@@ -1,3 +1,6 @@
+// apps/web/src/hooks/useTurnDiffSummaries.ts
+// manage turn diff summaries through a React hook
+
 import { useMemo } from 'react'
 import { inferCheckpointTurnCountByTurnId } from '../session-logic'
 import type { Thread, TurnDiffSummary } from '../types'

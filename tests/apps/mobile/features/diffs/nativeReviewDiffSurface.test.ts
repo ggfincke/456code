@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/diffs/nativeReviewDiffSurface.test.ts
+// verify resolve native review diff view behavior
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const expoMocks = vi.hoisted(() => ({

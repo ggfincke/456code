@@ -1,3 +1,6 @@
+// apps/web/src/portDiscoveryState.ts
+// manage discovered ports through a React hook
+
 import type { DiscoveredLocalServer, EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { useMemo } from 'react'
 

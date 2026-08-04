@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/git/GitBranchesSheet.tsx
+// render git branches sheet
+
 import { sanitizeFeatureBranchName } from '@t3tools/shared/git'
 import { useNavigation, type StaticScreenProps } from '@react-navigation/native'
 import { useState } from 'react'

@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/cloud/CloudAuthProvider.test.ts
+// verify cloud auth provider relay account isolation behavior
+
 import { managedRelaySessionAtom } from '@t3tools/client-runtime/relay'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 

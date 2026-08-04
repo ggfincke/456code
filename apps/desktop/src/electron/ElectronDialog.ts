@@ -1,3 +1,6 @@
+// apps/desktop/src/electron/ElectronDialog.ts
+// define electron dialog pick folder error
+
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

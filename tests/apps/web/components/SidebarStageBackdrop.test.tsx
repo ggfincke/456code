@@ -1,3 +1,6 @@
+// tests/apps/web/components/SidebarStageBackdrop.test.tsx
+// verify sidebar stage backdrop behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import { renderToStaticMarkup } from 'react-dom/server'
 

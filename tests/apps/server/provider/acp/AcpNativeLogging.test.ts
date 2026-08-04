@@ -1,3 +1,6 @@
+// tests/apps/server/provider/acp/AcpNativeLogging.test.ts
+// verify acp native logging behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { ProviderDriverKind, ThreadId } from '@t3tools/contracts'
 import { assert, it } from '@effect/vitest'

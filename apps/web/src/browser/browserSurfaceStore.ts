@@ -1,3 +1,6 @@
+// apps/web/src/browser/browserSurfaceStore.ts
+// manage browser surface state
+
 import { create } from 'zustand'
 
 export interface BrowserSurfaceRect

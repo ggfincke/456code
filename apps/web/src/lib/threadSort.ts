@@ -1,3 +1,6 @@
+// apps/web/src/lib/threadSort.ts
+// resolve latest thread for project
+
 export {
   getLatestThreadForProject,
   getThreadSortTimestamp,

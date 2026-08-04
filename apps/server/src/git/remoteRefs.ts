@@ -1,3 +1,6 @@
+// apps/server/src/git/remoteRefs.ts
+// parse remote names in git order
+
 export function parseRemoteNamesInGitOrder(stdout: string): ReadonlyArray<string>
 {
   const remoteNames: Array<string> = []

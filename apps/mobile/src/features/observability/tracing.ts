@@ -1,3 +1,6 @@
+// apps/mobile/src/features/observability/tracing.ts
+// resolve tracing config
+
 import Constants from 'expo-constants'
 import { makeRelayClientTracingLayer } from '@t3tools/shared/relayTracing'
 

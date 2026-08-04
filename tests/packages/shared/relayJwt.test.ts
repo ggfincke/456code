@@ -1,3 +1,6 @@
+// tests/packages/shared/relayJwt.test.ts
+// verify relay jwt behavior
+
 import * as NodeCrypto from 'node:crypto'
 
 import { describe, expect, it } from '@effect/vitest'

@@ -1,10 +1,9 @@
-/**
- * Converts a DOM selection inside rendered chat markdown back into markdown
- * source so highlight-and-copy keeps formatting (links, emphasis, lists,
- * fences, tables) instead of flattening to plain text. The `text/plain`
- * clipboard flavor carries the markdown; `text/html` carries a sanitized
- * copy of the rendered fragment for rich-paste targets.
- */
+// apps/web/src/markdown-clipboard.ts
+// source so highlight-and-copy keeps formatting (links, emphasis, lists,
+
+// fences, tables) instead of flattening to plain text. The `text/plain`
+// clipboard flavor carries the markdown; `text/html` carries a sanitized
+// copy of the rendered fragment for rich-paste targets.
 
 const SKIPPED_TAGS = new Set(['BUTTON', 'INPUT', 'SCRIPT', 'STYLE', 'TEMPLATE'])
 const SKIPPED_CLASS_NAMES = ['select-none', 'sr-only']
@@ -31,7 +30,7 @@ function isSkippedElement(element: Element): boolean
   return SKIPPED_CLASS_NAMES.some((className) => element.classList.contains(className))
 }
 
-/** Hoists surrounding whitespace outside the markers: "` bold `" → " **bold** ". */
+// hoists surrounding whitespace outside the markers: "` bold `" -> " **bold** ".
 function wrapInlineMarker(content: string, marker: string): string
 {
   const match = /^(\s*)([\s\S]*?)(\s*)$/.exec(content)
@@ -121,7 +120,7 @@ function serializeListItem(item: Element, ordered: boolean, index: number): stri
   let content = serializeChildren(item)
     .replace(/\n{3,}/g, '\n\n')
     .trim()
-  // Tight list items (no paragraph children) keep nested lists on adjacent lines.
+  // tight list items (no paragraph children) keep nested lists on adjacent lines.
   if (!item.querySelector(':scope > p'))
   {
     content = content.replace(/\n{2,}/g, '\n')
@@ -194,7 +193,7 @@ function serializeNode(node: Node): string
   if (node.nodeType === Node.TEXT_NODE)
   {
     const text = node.textContent ?? ''
-    // Inter-block formatting whitespace from the renderer collapses to a
+    // inter-block formatting whitespace from the renderer collapses to a
     // newline; real inline whitespace passes through untouched.
     if (text.includes('\n') && text.trim().length === 0) return '\n'
     return text
@@ -264,7 +263,7 @@ function serializeNode(node: Node): string
   }
 }
 
-/** Collapses serializer spacing artifacts without touching fenced code content. */
+// collapses serializer spacing artifacts without touching fenced code content.
 function tidyMarkdown(markdown: string): string
 {
   return markdown

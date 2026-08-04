@@ -126,7 +126,7 @@ interface MakeInstanceInput
   >
 }
 
-// Helper that constructs a primary backend instance using the factory
+// helper that constructs a primary backend instance using the factory
 // directly. The factory's deps (FileSystem, ChildProcessSpawner,
 // HttpClient, DesktopBackendOutputLogFactory) are provided per-test via
 // a scoped layer; tests yield the returned Effect inside `Effect.scoped`
@@ -588,7 +588,7 @@ describe('DesktopBackendManager', () =>
         yield* instance.start
         assert.deepEqual(failures, [])
 
-        // Five fatal attempts with exponential backoff (500ms, 1s, 2s, 4s) reach
+        // five fatal attempts with exponential backoff (500ms, 1s, 2s, 4s) reach
         // the cap, at which point the failure is surfaced exactly once.
         yield* TestClock.adjust(Duration.millis(500))
         yield* TestClock.adjust(Duration.seconds(1))
@@ -596,7 +596,7 @@ describe('DesktopBackendManager', () =>
         yield* TestClock.adjust(Duration.seconds(4))
         assert.deepEqual(failures, ['Node.js not found'])
 
-        // Past the cap the loop stops and nothing else is surfaced.
+        // past the cap the loop stops and nothing else is surfaced.
         yield* TestClock.adjust(Duration.seconds(8))
         yield* TestClock.adjust(Duration.seconds(30))
         assert.deepEqual(failures, ['Node.js not found'])
@@ -689,7 +689,7 @@ describe('DesktopBackendManager', () =>
         })
 
         yield* instance.start
-        // Well beyond the fatal cap's worth of time: a transient failure must
+        // well beyond the fatal cap's worth of time: a transient failure must
         // keep retrying (self-heal) and never surface.
         yield* TestClock.adjust(Duration.minutes(2))
         assert.deepEqual(failures, [])

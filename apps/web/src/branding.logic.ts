@@ -1,3 +1,6 @@
+// apps/web/src/branding.logic.ts
+// derive branding presentation behavior
+
 const NIGHTLY_SERVER_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/
 
 export function formatAppDisplayName(input: {

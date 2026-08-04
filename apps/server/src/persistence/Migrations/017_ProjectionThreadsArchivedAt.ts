@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/017_ProjectionThreadsArchivedAt.ts
+// apply persistence migration 017 projection threads archived at
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

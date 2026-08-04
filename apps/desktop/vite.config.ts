@@ -1,3 +1,6 @@
+// apps/desktop/vite.config.ts
+// configure desktop Vite+ behavior
+
 import { defineConfig } from 'vite-plus'
 
 import { loadRepoEnv } from '../../scripts/lib/public-config.ts'
@@ -60,7 +63,7 @@ export default defineConfig({
       define: publicConfigDefine,
       entry: ['src/preload.ts'],
       deps: {
-        // Sandboxed Electron preloads cannot reliably resolve package imports
+        // sandboxed Electron preloads cannot reliably resolve package imports
         // from inside the packaged ASAR. Bundle Clerk's preload bridge into the
         // preload artifact instead of leaving a runtime require() behind.
         alwaysBundle: (id) => id === '@clerk/electron' || id.startsWith('@clerk/electron/'),

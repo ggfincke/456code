@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/SettingsAuthRouteScreen.tsx
+// render the settings auth route screen route
+
 import { useAuth } from '@clerk/expo'
 import { AuthView, UserProfileView } from '@clerk/expo/native'
 import { StackActions, useNavigation } from '@react-navigation/native'

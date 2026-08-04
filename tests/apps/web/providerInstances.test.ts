@@ -1,3 +1,6 @@
+// tests/apps/web/providerInstances.test.ts
+// verify is provider instance picker ready behavior
+
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 import {

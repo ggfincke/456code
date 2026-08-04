@@ -1,3 +1,6 @@
+// apps/web/src/components/ProjectScriptsControl.tsx
+// render project scripts control
+
 import type {
   ProjectFileScript,
   ProjectScript,
@@ -103,9 +106,9 @@ export interface NewProjectScriptInput
   icon: ProjectScriptIcon
   runOnWorktreeCreate: boolean
   keybinding: string | null
-  /** Optional URL to open in the in-app preview when this script runs. */
+  // optional URL to open in the in-app preview when this script runs.
   previewUrl: string | null
-  /** When true, automatically open the preview panel pointed at `previewUrl`. */
+  // when true, automatically open the preview panel pointed at `previewUrl`.
   autoOpenPreview: boolean
 }
 
@@ -116,7 +119,7 @@ const NO_FILE_SCRIPTS: ReadonlyArray<ProjectFileScript> = []
 interface ProjectScriptsControlProps
 {
   scripts: ReadonlyArray<ProjectScript>
-  /** Scripts declared in the project's checked-in 456code.json, offered for import. */
+  // scripts declared in the project's checked-in 456code.json, offered for import.
   fileScripts?: ReadonlyArray<ProjectFileScript>
   keybindings: ResolvedKeybindingsConfig
   preferredScriptId?: string | null
@@ -308,7 +311,7 @@ export default function ProjectScriptsControl({
     const result = await onAddScript(payload)
     if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
     {
-      // Surface the failure through the regular add dialog, prefilled so the
+      // surface the failure through the regular add dialog, prefilled so the
       // user can adjust and retry.
       const error = squashAtomCommandFailure(result)
       setEditingScriptId(null)

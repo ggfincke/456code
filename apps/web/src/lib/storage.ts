@@ -1,3 +1,6 @@
+// apps/web/src/lib/storage.ts
+// persist storage data
+
 import { Debouncer } from '@tanstack/react-pacer'
 
 export interface StateStorage<R = unknown>

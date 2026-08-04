@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/userMessageTerminalContexts.test.ts
+// verify user message terminal contexts behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

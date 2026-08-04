@@ -1,5 +1,5 @@
-// Tiny event bus allowing components to programmatically open the command palette
-// without owning its React state.
+// apps/web/src/commandPaletteBus.ts
+// without owning its React state
 const COMMAND_PALETTE_OPEN_EVENT = '456code:open-command-palette'
 
 export interface CommandPaletteOpenDetail
@@ -24,7 +24,7 @@ export function onOpenCommandPalette(
   return () => window.removeEventListener(COMMAND_PALETTE_OPEN_EVENT, handler)
 }
 
-/** Read at event time so consumers do not subscribe to transient dialog state. */
+// read at event time so consumers do not subscribe to transient dialog state.
 export function isCommandPaletteOpen(): boolean
 {
   return (

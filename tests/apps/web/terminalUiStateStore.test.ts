@@ -1,3 +1,6 @@
+// tests/apps/web/terminalUiStateStore.test.ts
+// verify terminal ui state store actions behavior
+
 import { scopeThreadRef, scopedThreadKey } from '@t3tools/client-runtime/environment'
 import { ThreadId } from '@t3tools/contracts'
 import { beforeEach, describe, expect, it } from 'vite-plus/test'

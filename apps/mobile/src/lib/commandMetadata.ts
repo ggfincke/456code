@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/commandMetadata.ts
+// create turn command metadata
+
 import { uuidv4 } from './uuid'
 
 export interface TurnCommandMetadata

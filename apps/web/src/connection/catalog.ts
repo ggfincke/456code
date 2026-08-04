@@ -1,3 +1,6 @@
+// apps/web/src/connection/catalog.ts
+// expose environment catalog
+
 import { createEnvironmentCatalogAtoms } from '@t3tools/client-runtime/state/connections'
 
 import { connectionAtomRuntime } from './runtime'

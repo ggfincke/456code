@@ -198,12 +198,10 @@ function getOpenCodeTextResponse(parts: ReadonlyArray<unknown> | undefined): str
 interface SharedOpenCodeTextGenerationServerState
 {
   server: OpenCodeRuntime.OpenCodeServerProcess | null
-  /**
-   * The scope that owns the shared server's lifetime. Closing this scope
-   * terminates the OpenCode child process and interrupts any fibers the
-   * runtime forked during startup. We don't hold a `close()` function on
-   * the server handle anymore — the scope is the only lifecycle handle.
-   */
+  // the scope that owns the shared server's lifetime. Closing this scope
+  // terminates the OpenCode child process and interrupts any fibers the
+  // runtime forked during startup. We don't hold a `close()` function on
+  // the server handle anymore — the scope is the only lifecycle handle.
   serverScope: Scope.Closeable | null
   binaryPath: string | null
   activeRequests: number
@@ -313,11 +311,11 @@ export const makeOpenCodeTextGeneration = Effect.fn('makeOpenCodeTextGeneration'
           }
         }
 
-        // Create a fresh scope that owns this shared server. The runtime
+        // create a fresh scope that owns this shared server. The runtime
         // will attach its child-process and fiber finalizers to this scope;
         // closing it kills the server and interrupts those fibers.
         //
-        // The `Scope.make` / spawn / record-or-close transitions run inside
+        // the `Scope.make` / spawn / record-or-close transitions run inside
         // `uninterruptibleMask` so an interrupt arriving between any two
         // steps can't orphan the scope (and the child process attached to
         // it) before we either close it on failure or hand ownership to
@@ -382,7 +380,7 @@ export const makeOpenCodeTextGeneration = Effect.fn('makeOpenCodeTextGeneration'
       }),
     )
 
-  // Module-level finalizer: on layer shutdown, cancel the idle close fiber
+  // module-level finalizer: on layer shutdown, cancel the idle close fiber
   // and close the shared server scope. Consumers therefore cannot leak
   // the shared OpenCode server by forgetting to call anything.
   yield* Effect.addFinalizer(() =>

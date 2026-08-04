@@ -1,11 +1,10 @@
-/**
- * ProjectFaviconResolver - Effect service contract for project icon discovery.
- *
- * Resolves a representative favicon or app icon file for a workspace by
- * checking common file locations and project source metadata.
- *
- * @module ProjectFaviconResolver
- */
+// apps/server/src/project/ProjectFaviconResolver.ts
+// define project favicon resolution error
+
+// resolves a representative favicon or app icon file for a workspace by
+// checking common file locations and project source metadata.
+//
+// @module ProjectFaviconResolver
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -18,7 +17,7 @@ import * as Schema from 'effect/Schema'
 import * as WorkspacePaths from '../workspace/WorkspacePaths.ts'
 import * as ProjectFileLoader from './ProjectFileLoader.ts'
 
-// Well-known favicon paths checked in order.
+// well-known favicon paths checked in order.
 const FAVICON_CANDIDATES = [
   'favicon.svg',
   'favicon.ico',
@@ -43,7 +42,7 @@ const FAVICON_CANDIDATES = [
   '.idea/icon.svg',
 ] as const
 
-// Files that may contain a <link rel="icon"> or icon metadata declaration.
+// files that may contain a <link rel="icon"> or icon metadata declaration.
 const ICON_SOURCE_FILES = [
   'index.html',
   'public/index.html',
@@ -54,7 +53,7 @@ const ICON_SOURCE_FILES = [
   'src/index.html',
 ] as const
 
-// Matches <link ...> tags or object-like icon metadata where rel/href can appear in any order.
+// matches <link ...> tags or object-like icon metadata where rel/href can appear in any order.
 const LINK_ICON_HTML_RE =
   /<link\b(?=[^>]*\brel=["'](?:icon|shortcut icon)["'])(?=[^>]*\bhref=["']([^"'?]+))[^>]*>/i
 const LINK_ICON_OBJ_RE =
@@ -86,11 +85,9 @@ export class ProjectFaviconResolutionError extends Schema.TaggedErrorClass<Proje
 export class ProjectFaviconResolver extends Context.Service<
   ProjectFaviconResolver,
   {
-    /**
-     * Resolve a favicon or icon file path for the provided workspace root.
-     *
-     * Returns `null` when no candidate icon file can be found.
-     */
+    // resolve a favicon or icon file path for the provided workspace root.
+    //
+    // returns `null` when no candidate icon file can be found.
     readonly resolvePath: (
       cwd: string,
     ) => Effect.Effect<string | null, ProjectFaviconResolutionError>
@@ -190,7 +187,7 @@ export const make = Effect.gen(function* ()
           }),
       ),
     )
-    // A 456code.json iconPath takes precedence over the well-known locations.
+    // a 456code.json iconPath takes precedence over the well-known locations.
     const projectFile = yield* projectFileLoader.load(projectCwd)
     if (Option.isSome(projectFile) && projectFile.value.iconPath !== undefined)
     {

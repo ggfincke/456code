@@ -1,3 +1,6 @@
+// packages/contracts/src/relay.ts
+// define relay contracts
+
 import * as Context from 'effect/Context'
 import * as Schema from 'effect/Schema'
 import * as HttpApi from 'effect/unstable/httpapi/HttpApi'
@@ -905,7 +908,7 @@ export const RelayAgentActivitySnapshotResponse = Schema.Struct({
 })
 export type RelayAgentActivitySnapshotResponse = typeof RelayAgentActivitySnapshotResponse.Type
 
-// Lets the app decide whether arming a Live Activity is worthwhile before
+// lets the app decide whether arming a Live Activity is worthwhile before
 // creating one (no empty lock-screen card when nothing is running) and seed
 // the card with the real aggregate instead of a placeholder.
 export const RelayAgentActivitySnapshotEndpoint = HttpApiEndpoint.get(

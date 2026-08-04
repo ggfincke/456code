@@ -1,3 +1,6 @@
+// apps/web/src/timestampFormat.ts
+// resolve timestamp format options
+
 import { type TimestampFormat } from '@t3tools/contracts/settings'
 
 export function getTimestampFormatOptions(
@@ -76,10 +79,8 @@ function ordinalSuffix(day: number): string
   }
 }
 
-/**
- * Long-form tooltip label, e.g. `12:04, 4th June`.
- * Renders the wall-clock time without seconds followed by the ordinal day and month name.
- */
+// long-form tooltip label, e.g. `12:04, 4th June`.
+// renders the wall-clock time without seconds followed by the ordinal day and month name.
 export function formatChatTimestampTooltip(
   isoDate: string,
   timestampFormat: TimestampFormat,
@@ -101,11 +102,9 @@ export function formatShortTimestamp(isoDate: string, timestampFormat: Timestamp
   return getTimestampFormatter(timestampFormat, false).format(date)
 }
 
-/**
- * Format a relative time string from an ISO date.
- * Returns `{ value: "20s", suffix: "ago" }` or `{ value: "just now", suffix: null }`
- * so callers can style the numeric portion independently.
- */
+// format a relative time string from an ISO date.
+// returns `{ value: "20s", suffix: "ago" }` or `{ value: "just now", suffix: null }`
+// so callers can style the numeric portion independently.
 type RelativeTimeParts = { value: string; suffix: string | null }
 export type RelativeTimeState =
   | { status: 'missing' }
@@ -143,10 +142,8 @@ export function getRelativeTimeState(isoDate: string | null): RelativeTimeState
   return { status: 'relative', ...relative }
 }
 
-/**
- * Relative elapsed duration since an ISO instant, without an "ago" suffix.
- * Useful for labels like "Connected for 3m".
- */
+// relative elapsed duration since an ISO instant, without an "ago" suffix.
+// useful for labels like "Connected for 3m".
 export function formatElapsedDurationLabel(isoDate: string, nowMs: number = Date.now()): string
 {
   const date = parseTimestampDate(isoDate)
@@ -168,9 +165,7 @@ export function formatElapsedDurationLabel(isoDate: string, nowMs: number = Date
   return `${days}d`
 }
 
-/**
- * Relative time until an ISO instant (e.g. expiry). Mirrors {@link formatRelativeTime} but for future times.
- */
+// relative time until an ISO instant (e.g. expiry). Mirrors {@link formatRelativeTime} but for future times.
 export function formatRelativeTimeUntil(isoDate: string): RelativeTimeParts | null
 {
   const date = parseTimestampDate(isoDate)
@@ -195,10 +190,8 @@ export function formatRelativeTimeUntilLabel(isoDate: string): string
   return relative.suffix ? `${relative.value} ${relative.suffix}` : relative.value
 }
 
-/**
- * Countdown for a future instant (e.g. link expiry): "Expires in 4m 12s", with second precision under one hour.
- * Pass `nowMs` when a parent tick drives re-renders so the diff matches that snapshot.
- */
+// countdown for a future instant (e.g. link expiry): "Expires in 4m 12s", with second precision under one hour.
+// pass `nowMs` when a parent tick drives re-renders so the diff matches that snapshot.
 export function formatExpiresInLabel(isoDate: string, nowMs: number = Date.now()): string
 {
   const date = parseTimestampDate(isoDate)

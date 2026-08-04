@@ -1,3 +1,6 @@
+// packages/shared/src/composerInlineTokens.ts
+// collect composer inline tokens
+
 export type ComposerInlineToken =
   | {
       readonly type: 'mention'
@@ -24,7 +27,7 @@ const MENTION_TOKEN_REGEX = /(^|\s)@(?:"((?:\\.|[^"\\])*)"|([^\s@"]+))(?=\s)/g
 const FILE_LINK_TOKEN_REGEX = /(^|\s)\[((?:\\.|[^\]\\])*)\]\(([^)\s]+)\)(?=\s)/g
 const URI_SCHEME_REGEX = /^[A-Za-z][A-Za-z0-9+.-]*:/
 const WINDOWS_DRIVE_PATH_REGEX = /^[A-Za-z]:[\\/]/
-// Autocomplete emits canonical file links, so ambiguous bare @scope/package text stays a package.
+// autocomplete emits canonical file links, so ambiguous bare @scope/package text stays a package.
 const SCOPED_PACKAGE_REFERENCE_REGEX = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(?:\/[^\s@"]+)*$/
 
 function collectMentionTokens(text: string): ComposerInlineToken[]
@@ -44,7 +47,7 @@ function collectMentionTokens(text: string): ComposerInlineToken[]
     }
     catch
     {
-      // Preserve malformed source rather than dropping a user-authored token.
+      // preserve malformed source rather than dropping a user-authored token.
     }
     const separatorIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
     const basename = separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path

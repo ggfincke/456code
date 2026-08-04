@@ -1,3 +1,6 @@
+// packages/contracts/src/project.ts
+// define project contracts
+
 import * as Schema from 'effect/Schema'
 import { NonNegativeInt, PositiveInt, TrimmedNonEmptyString } from './baseSchemas.ts'
 
@@ -77,7 +80,7 @@ export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSe
   },
 )
 {
-  // The structured fields are optional on the wire so newer peers can decode legacy message-only
+  // the structured fields are optional on the wire so newer peers can decode legacy message-only
   // failures. New application code must provide them through this constructor.
   // @effect-diagnostics-next-line overriddenSchemaConstructor:off
   constructor(

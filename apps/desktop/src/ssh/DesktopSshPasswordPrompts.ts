@@ -1,3 +1,6 @@
+// apps/desktop/src/ssh/DesktopSshPasswordPrompts.ts
+// define desktop ssh prompt request id generation error
+
 import type { DesktopSshPasswordPromptRequest } from '@t3tools/contracts'
 import { DesktopSshPasswordPromptResolutionInputSchema } from '@t3tools/contracts'
 import type { SshPasswordRequest } from '@t3tools/ssh/auth'

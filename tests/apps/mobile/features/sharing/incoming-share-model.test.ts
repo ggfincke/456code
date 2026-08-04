@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/sharing/incoming-share-model.test.ts
+// verify incoming native shares behavior
+
 import { describe, expect, it, vi } from '@effect/vitest'
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,

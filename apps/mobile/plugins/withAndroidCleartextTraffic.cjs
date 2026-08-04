@@ -1,3 +1,6 @@
+// apps/mobile/plugins/withAndroidCleartextTraffic.cjs
+// configure android cleartext traffic in Expo projects
+
 const { withAndroidManifest } = require('expo/config-plugins')
 
 module.exports = function withAndroidCleartextTraffic(config)

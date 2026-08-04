@@ -1,3 +1,6 @@
+// apps/mobile/src/state/thread-outbox-storage.ts
+// manage thread outbox storage error state
+
 import { EnvironmentId, MessageId, ThreadId } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 

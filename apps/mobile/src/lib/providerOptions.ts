@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/providerOptions.ts
+// resolve provider option descriptors
+
 import type {
   ModelCapabilities,
   ProviderOptionDescriptor,

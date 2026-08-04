@@ -1,3 +1,6 @@
+// apps/mobile/src/state/projects.ts
+// manage project environment state
+
 import { createEnvironmentProjectAtoms } from '@t3tools/client-runtime/state/projects'
 import { createProjectEnvironmentAtoms } from '@t3tools/client-runtime/state/projects'
 

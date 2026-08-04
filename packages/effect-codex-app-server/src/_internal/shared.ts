@@ -1,3 +1,6 @@
+// packages/effect-codex-app-server/src/_internal/shared.ts
+// expose json rpc id
+
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 

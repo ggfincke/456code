@@ -1,3 +1,6 @@
+// tests/apps/server/provider/Layers/GrokProvider.test.ts
+// verify build initial grok provider snapshot behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

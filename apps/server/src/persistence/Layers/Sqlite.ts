@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Layers/Sqlite.ts
+// assemble sqlite Effect layer
+
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as FileSystem from 'effect/FileSystem'

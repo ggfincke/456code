@@ -1,3 +1,6 @@
+// tests/apps/desktop/updates/updateMachine.test.ts
+// verify update machine behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

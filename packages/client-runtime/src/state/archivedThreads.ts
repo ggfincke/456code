@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/archivedThreads.ts
+// manage archived snapshot entry state
+
 import { EnvironmentId, type OrchestrationShellSnapshot } from '@t3tools/contracts'
 import * as Arr from 'effect/Array'
 import { pipe } from 'effect/Function'

@@ -1,3 +1,6 @@
+// tests/apps/web/browser/browserRecording.test.ts
+// verify browser recording behavior
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const { events, onFrame, registrySet, save, startScreencast, stopScreencast, surfaceState } =

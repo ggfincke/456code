@@ -1,3 +1,6 @@
+// tests/apps/web/browser/desktopTabLifetime.test.ts
+// verify desktop tab lifetime behavior
+
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const { closeTab, createTab } = vi.hoisted(() => ({

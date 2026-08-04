@@ -1,3 +1,6 @@
+// apps/web/src/wslPaths.ts
+// parse wsl unc path
+
 export interface WslUncPath
 {
   readonly distro: string

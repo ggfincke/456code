@@ -1,3 +1,6 @@
+// apps/mobile/src/features/projects/AddProjectRepositoryRoute.tsx
+// render the add project repository route route
+
 import type { StaticScreenProps } from '@react-navigation/native'
 import { NativeStackScreenOptions } from '../../native/StackHeader'
 import { addProjectRemoteSourceLabel } from '@t3tools/client-runtime/operations/projects'

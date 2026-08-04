@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/table.tsx
+// render reusable table UI primitives
+
 import * as React from 'react'
 
 import { cn } from '~/lib/utils'

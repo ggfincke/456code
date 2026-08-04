@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/PreviewUnreachable.tsx
+// render preview unreachable
+
 import { useState } from 'react'
 
 import { Button } from '~/components/ui/button'
@@ -7,14 +10,14 @@ import { describePreviewError } from './errorCodeMessages'
 interface Props
 {
   url: string
-  /** Chromium net error code, e.g. -105. */
+  // chromium net error code, e.g. -105.
   code: number
-  /** Stringified Chromium error, e.g. "ERR_NAME_NOT_RESOLVED". */
+  // stringified Chromium error, e.g. "ERR_NAME_NOT_RESOLVED".
   description: string
   onReload: () => void
 }
 
-/** Theme-aware tailwind port of Chromium's "This site can't be reached" page. */
+// theme-aware tailwind port of Chromium's "This site can't be reached" page.
 export function PreviewUnreachable({ url, code, description, onReload }: Props)
 {
   const [showDetails, setShowDetails] = useState(false)

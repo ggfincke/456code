@@ -1,3 +1,6 @@
+// tests/apps/server/preview/Manager.test.ts
+// verify manager behavior
+
 import { it } from '@effect/vitest'
 import { type PreviewEvent, ThreadId } from '@t3tools/contracts'
 import { PreviewUrlNormalizationError } from '@t3tools/shared/preview'
@@ -10,23 +13,19 @@ const DRAIN_LIMIT = 100
 
 interface EventCollector
 {
-  /** Drain everything published since the last call (or since subscribe). */
+  // drain everything published since the last call (or since subscribe).
   readonly drain: Effect.Effect<ReadonlyArray<PreviewEvent>>
 }
 
-/**
- * Each `it.effect` shares the live PreviewManager layer across the whole
- * `it.layer` block, so tests that assert per-thread counts must use a unique
- * thread id to avoid bleeding state from earlier tests.
- */
+// each `it.effect` shares the live PreviewManager layer across the whole
+// `it.layer` block, so tests that assert per-thread counts must use a unique
+// thread id to avoid bleeding state from earlier tests.
 let nextThreadId = 0
 const freshThreadId = () => ThreadId.make(`thread-${++nextThreadId}`)
 
-/**
- * Subscribe to the manager's event stream BEFORE the test publishes. We
- * use `subscribeEvents` (synchronous PubSub.subscribe under the hood) so
- * no event can land between subscribe and the consumer drain.
- */
+// subscribe to the manager's event stream BEFORE the test publishes. We
+// use `subscribeEvents` (synchronous PubSub.subscribe under the hood) so
+// no event can land between subscribe and the consumer drain.
 const collectEvents = Effect.gen(function* ()
 {
   const manager = yield* PreviewManager.PreviewManager

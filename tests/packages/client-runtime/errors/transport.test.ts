@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/errors/transport.test.ts
+// verify is transport connection error message behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

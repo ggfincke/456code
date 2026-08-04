@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/files/source-file-document.test.ts
+// verify prepare source file document behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { prepareSourceFileDocument } from '../../../../../apps/mobile/src/features/files/source-file-document'

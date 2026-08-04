@@ -1,3 +1,6 @@
+// apps/web/src/environments/primary/index.ts
+// resolve primary known environment
+
 export {
   getPrimaryKnownEnvironment,
   readPrimaryEnvironmentDescriptor,

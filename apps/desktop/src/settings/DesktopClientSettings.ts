@@ -1,3 +1,6 @@
+// apps/desktop/src/settings/DesktopClientSettings.ts
+// define desktop client settings write error
+
 import { ClientSettingsSchema, type ClientSettings } from '@t3tools/contracts'
 import { fromLenientJson } from '@t3tools/shared/schemaJson'
 import * as Context from 'effect/Context'

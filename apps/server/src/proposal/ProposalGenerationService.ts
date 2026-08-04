@@ -1,5 +1,6 @@
 // apps/server/src/proposal/ProposalGenerationService.ts
 // runs bounded exact cartographer analysis for retained proposal trees
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeCrypto from 'node:crypto'

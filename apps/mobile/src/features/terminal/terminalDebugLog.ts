@@ -1,9 +1,8 @@
-/**
- * Debug logging for the mobile terminal pipeline. Prefix: `[code456-terminal]`.
- *
- * Enabled when `__DEV__` is true, or set `globalThis.__CODE456_TERMINAL_DEBUG__ = true` in a JS
- * debugger / Metro console to trace release/TestFlight builds.
- */
+// apps/mobile/src/features/terminal/terminalDebugLog.ts
+// determine whether terminal debug enabled
+
+// enabled when `__DEV__` is true, or set `globalThis.__CODE456_TERMINAL_DEBUG__ = true` in a JS
+// debugger / Metro console to trace release/TestFlight builds.
 export function isTerminalDebugEnabled(): boolean
 {
   return (

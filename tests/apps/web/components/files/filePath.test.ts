@@ -1,3 +1,6 @@
+// tests/apps/web/components/files/filePath.test.ts
+// verify file breadcrumbs behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { fileBreadcrumbs } from '../../../../../apps/web/src/components/files/filePath'

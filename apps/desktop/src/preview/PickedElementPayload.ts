@@ -1,15 +1,14 @@
-/**
- * Strict structural validator for `PickedElementPayload` messages received
- * from the in-page picker preload (`apps/desktop/src/preview/PickPreload.ts`)
- * via `wc.ipc`. Lives in its own electron-free module so the validator is
- * trivially unit-testable.
- *
- * Validation must be tight: downstream `normalizeElementContextSelection`
- * calls `.trim()` on incoming strings, so a malformed payload (preload bug,
- * future schema mismatch, malicious page that intercepts the preload's IPC
- * channel via prototype pollution) would otherwise throw deep in the
- * renderer and the chip silently never appears.
- */
+// apps/desktop/src/preview/PickedElementPayload.ts
+// from the in-page picker preload (`apps/desktop/src/preview/PickPreload.ts`)
+
+// via `wc.ipc`. Lives in its own electron-free module so the validator is
+// trivially unit-testable.
+//
+// validation must be tight: downstream `normalizeElementContextSelection`
+// calls `.trim()` on incoming strings, so a malformed payload (preload bug,
+// future schema mismatch, malicious page that intercepts the preload's IPC
+// channel via prototype pollution) would otherwise throw deep in the
+// renderer and the chip silently never appears.
 import type { PickedElementPayload, PreviewAnnotationPayload } from '@t3tools/contracts'
 
 function isStringOrNull(value: unknown): value is string | null

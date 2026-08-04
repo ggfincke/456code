@@ -1,3 +1,6 @@
+// packages/client-runtime/src/environment/scoped.ts
+// expose scope project ref
+
 import {
   EnvironmentId,
   ProjectId,

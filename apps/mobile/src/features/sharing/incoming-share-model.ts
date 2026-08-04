@@ -1,3 +1,6 @@
+// apps/mobile/src/features/sharing/incoming-share-model.ts
+// decode incoming share draft
+
 import {
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
@@ -119,7 +122,7 @@ async function releaseOwnedFiles(
     }
     catch
     {
-      // Temporary-file cleanup is best-effort and must never discard content
+      // temporary-file cleanup is best-effort and must never discard content
       // that was successfully converted into a durable composer attachment.
     }
   }
@@ -137,7 +140,7 @@ function fallbackName(uri: string, index: number, mimeType: string): string
   }
   catch
   {
-    // Fall through to a deterministic attachment name.
+    // fall through to a deterministic attachment name.
   }
   const extension = mimeType.split('/')[1]?.replace(/[^a-z0-9.+-]/gi, '') || 'png'
   return `shared-image-${index + 1}.${extension}`
@@ -221,7 +224,7 @@ export async function buildIncomingShareDraft(input: {
         mimeType,
         sizeBytes,
         dataUrl,
-        // The share provider's file is temporary. A data-backed preview keeps
+        // the share provider's file is temporary. A data-backed preview keeps
         // the composer valid after its source file and App Group entry are gone.
         previewUri: dataUrl,
       })

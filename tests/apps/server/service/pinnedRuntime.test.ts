@@ -1,3 +1,6 @@
+// tests/apps/server/service/pinnedRuntime.test.ts
+// verify pinned runtime behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as Deferred from 'effect/Deferred'

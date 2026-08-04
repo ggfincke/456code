@@ -1,3 +1,6 @@
+// tests/oxlint-plugin-456code/rules/no-global-process-runtime.test.ts
+// verify 456code/no global process runtime behavior
+
 import { assert, describe } from '@effect/vitest'
 
 import { createOxlintRuleHarness } from '../../../oxlint-plugin-456code/test/utils.ts'

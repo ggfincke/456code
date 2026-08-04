@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/git/gitSheetComponents.tsx
+// render git sheet components
+
 import { SymbolView } from '../../../components/AppSymbol'
 import type { ComponentProps } from 'react'
 import { Pressable, View } from 'react-native'
@@ -5,7 +8,7 @@ import { useThemeColor } from '../../../lib/useThemeColor'
 import { AppText as Text } from '../../../components/AppText'
 import { cn } from '../../../lib/cn'
 
-/* ─── Shared sheet components ──────────────────────────────────────── */
+// ─── Shared sheet components ────────────────────────────────────────
 
 export function SheetActionButton(props: {
   readonly icon: ComponentProps<typeof SymbolView>['name']
@@ -97,7 +100,7 @@ export function SheetListRow(props: {
   )
 }
 
-/* ─── Shared utilities ──────────────────────────────────────────────── */
+// ─── Shared utilities ────────────────────────────────────────────────
 
 export function menuItemIconName(
   icon: 'commit' | 'push' | 'pr',

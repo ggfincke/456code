@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/number-field.tsx
+// render reusable number field UI primitives
+
 'use client'
 
 import { NumberField as NumberFieldPrimitive } from '@base-ui/react/number-field'

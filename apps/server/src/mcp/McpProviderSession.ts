@@ -1,3 +1,6 @@
+// apps/server/src/mcp/McpProviderSession.ts
+// define mcp provider session config
+
 import type { EnvironmentId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
 
 export interface McpProviderSessionConfig

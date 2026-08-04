@@ -1,3 +1,6 @@
+// apps/web/src/environments/primary/httpClient.ts
+// implement primary environment http client
+
 import { makeEnvironmentHttpApiClient } from '@t3tools/client-runtime/rpc'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'

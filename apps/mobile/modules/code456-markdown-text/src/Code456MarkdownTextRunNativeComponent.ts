@@ -1,3 +1,6 @@
+// apps/mobile/modules/code456-markdown-text/src/Code456MarkdownTextRunNativeComponent.ts
+// define native font weight
+
 import type { ColorValue, ViewProps } from 'react-native'
 import type {
   BubblingEventHandler,

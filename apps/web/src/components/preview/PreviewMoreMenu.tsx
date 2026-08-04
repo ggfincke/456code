@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/PreviewMoreMenu.tsx
+// render preview more menu
+
 'use client'
 
 import type { DesktopPreviewColorScheme } from '@t3tools/contracts'
@@ -31,29 +34,25 @@ const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
 
 interface Props
 {
-  /** Active preview tab id. Tab-targeting actions are disabled without it. */
+  // active preview tab id. Tab-targeting actions are disabled without it.
   tabId: string | null
-  /**
-   * True only after the desktop bridge has registered a `webContentsId` for
-   * the active tab. Tab-targeting actions throw on the desktop side until
-   * then; we disable those items so the menu doesn't fire silent no-ops.
-   */
+  // true only after the desktop bridge has registered a `webContentsId` for
+  // the active tab. Tab-targeting actions throw on the desktop side until
+  // then; we disable those items so the menu doesn't fire silent no-ops.
   hasWebContents: boolean
-  /** Current zoom factor as a number (1.0 = 100%). */
+  // current zoom factor as a number (1.0 = 100%).
   zoomFactor: number
-  /** Emulated `prefers-color-scheme` for the guest page. */
+  // emulated `prefers-color-scheme` for the guest page.
   colorScheme: DesktopPreviewColorScheme
-  /** Fixed viewport modes expose the device toolbar and resize rails. */
+  // fixed viewport modes expose the device toolbar and resize rails.
   deviceToolbarVisible: boolean
-  /** Switches between fill-panel mode and a fixed responsive viewport. */
+  // switches between fill-panel mode and a fixed responsive viewport.
   onToggleDeviceToolbar: () => void
 }
 
-/**
- * Three-dot menu in the chrome row. Wires Hard reload, DevTools, zoom
- * controls, and storage-clearing actions. Only mounted by `PreviewView`
- * when the desktop bridge is present, so we can call it unconditionally.
- */
+// three-dot menu in the chrome row. Wires Hard reload, DevTools, zoom
+// controls, and storage-clearing actions. Only mounted by `PreviewView`
+// when the desktop bridge is present, so we can call it unconditionally.
 export function PreviewMoreMenu({
   tabId,
   hasWebContents,

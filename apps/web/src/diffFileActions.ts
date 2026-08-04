@@ -1,3 +1,6 @@
+// apps/web/src/diffFileActions.ts
+// open diff file primary action
+
 import type { ScopedThreadRef } from '@t3tools/contracts'
 
 import { useRightPanelStore } from './rightPanelStore'

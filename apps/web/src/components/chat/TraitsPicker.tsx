@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/TraitsPicker.tsx
+// render traits picker
+
 import {
   type ProviderDriverKind,
   type ProviderInstanceId,
@@ -123,13 +126,13 @@ function getSelectedTraits(
   const thinkingDescriptor =
     booleanDescriptors.find((descriptor) => descriptor.id === 'thinking') ?? null
 
-  // Prompt-controlled effort (e.g. ultrathink in prompt text)
+  // prompt-controlled effort (e.g. ultrathink in prompt text)
   const ultrathinkPromptControlled =
     allowPromptInjectedEffort &&
     (primarySelectDescriptor?.promptInjectedValues?.length ?? 0) > 0 &&
     isClaudeUltrathinkPrompt(prompt)
 
-  // Check if "ultrathink" appears in the body text (not just our prefix)
+  // check if "ultrathink" appears in the body text (not just our prefix)
   const ultrathinkInBodyText =
     ultrathinkPromptControlled && isClaudeUltrathinkPrompt(prompt.replace(/^Ultrathink:\s*/i, ''))
   const effort =
@@ -397,13 +400,11 @@ export const TraitsMenuContent = memo(function TraitsMenuContentImpl({
   )
 })
 
-/**
- * Build the traits trigger's text label plus whether the fast-mode bolt should
- * render. Fast mode is a lightning bolt when on and nothing at all when off —
- * "Normal" is the near-universal case and isn't worth the horizontal space. The
- * one exception is when fast mode is the only trait, where a bare bolt (or bare
- * chevron) would leave the trigger unreadable.
- */
+// build the traits trigger's text label plus whether the fast-mode bolt should
+// render. Fast mode is a lightning bolt when on and nothing at all when off —
+// "Normal" is the near-universal case and isn't worth the horizontal space. The
+// one exception is when fast mode is the only trait, where a bare bolt (or bare
+// chevron) would leave the trigger unreadable.
 export function buildTraitsTriggerDisplay(input: {
   descriptors: ReadonlyArray<ProviderOptionDescriptor>
   primarySelectDescriptorId: string | null
@@ -432,7 +433,7 @@ export function buildTraitsTriggerDisplay(input: {
     }
   }
 
-  // Only fall back to text when fast mode is genuinely the sole trait. Keying
+  // only fall back to text when fast mode is genuinely the sole trait. Keying
   // off an empty label list alone would also catch descriptors that resolved to
   // no label at all, printing a bogus "Normal" for a model without fast mode.
   if (labels.length === 0 && hasFastMode)

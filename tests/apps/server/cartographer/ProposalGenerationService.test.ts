@@ -1,5 +1,6 @@
 // tests/apps/server/cartographer/ProposalGenerationService.test.ts
 // verifies exact bounded proposal-tree analysis and visible lifecycle freshness
+
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off
 
 import * as NodeChildProcess from 'node:child_process'

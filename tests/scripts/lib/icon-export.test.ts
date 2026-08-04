@@ -1,3 +1,6 @@
+// tests/scripts/lib/icon-export.test.ts
+// verify icon export behavior
+
 import { assert, describe, it } from '@effect/vitest'
 
 import { encodePngIco, readPngDimensions } from '../../../scripts/lib/icon-export.ts'

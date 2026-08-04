@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/019_ProjectionSnapshotLookupIndexes.ts
+// apply persistence migration 019 projection snapshot lookup indexes
+
 import * as Effect from 'effect/Effect'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 

@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/separator.tsx
+// render reusable separator UI primitives
+
 import { Separator as SeparatorPrimitive } from '@base-ui/react/separator'
 
 import { cn } from '~/lib/utils'

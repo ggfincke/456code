@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/appearance/useAppearanceCodeSurface.ts
+// manage appearance code surface through a React hook
+
 import { useMemo } from 'react'
 
 import {

@@ -1,6 +1,9 @@
+// apps/mobile/plugins/withWidgetLogoAsset.cjs
+// configure widget logo asset in Expo projects
+
 'use strict'
 
-// Ships the branded app mark to the Live Activity / widget extension.
+// ships the branded app mark to the Live Activity / widget extension.
 //
 // expo-widgets generates ExpoWidgetsTarget without a Resources build phase and
 // has no asset support, so this plugin (a) writes an SVG template image set into

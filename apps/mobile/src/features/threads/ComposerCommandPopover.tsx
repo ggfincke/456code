@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/ComposerCommandPopover.tsx
+// render composer command popover
+
 import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
 import type { ComposerTriggerKind } from '@t3tools/shared/composerTrigger'
 import type { ServerProviderSkill, ServerProviderSlashCommand } from '@t3tools/contracts'

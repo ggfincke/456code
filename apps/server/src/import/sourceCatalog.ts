@@ -1,5 +1,6 @@
 // apps/server/src/import/sourceCatalog.ts
 // resolves configured transcript roots and validates client-selected source files
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFSP from 'node:fs/promises'

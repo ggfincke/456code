@@ -1,3 +1,6 @@
+// tests/apps/web/hooks/useLocalStorage.test.ts
+// verify local storage errors behavior
+
 import * as Schema from 'effect/Schema'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 

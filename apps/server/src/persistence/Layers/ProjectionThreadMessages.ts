@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Layers/ProjectionThreadMessages.ts
+// assemble projection thread messages Effect layer
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 import * as Effect from 'effect/Effect'

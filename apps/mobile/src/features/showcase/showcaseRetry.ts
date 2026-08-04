@@ -1,3 +1,6 @@
+// apps/mobile/src/features/showcase/showcaseRetry.ts
+// define showcase retry options
+
 export interface ShowcaseRetryOptions
 {
   readonly isCancelled: () => boolean
@@ -39,7 +42,7 @@ async function runAttemptWithTimeout(
   }
 }
 
-/** Retry transient showcase setup work until it succeeds or the owning effect unmounts. */
+// retry transient showcase setup work until it succeeds or the owning effect unmounts.
 export async function retryShowcaseOperation(
   operation: () => Promise<boolean>,
   options: ShowcaseRetryOptions,

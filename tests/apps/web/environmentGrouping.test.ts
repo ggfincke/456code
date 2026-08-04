@@ -1,3 +1,6 @@
+// tests/apps/web/environmentGrouping.test.ts
+// verify environment grouping behavior
+
 import { EnvironmentId, ProjectId, ProviderInstanceId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

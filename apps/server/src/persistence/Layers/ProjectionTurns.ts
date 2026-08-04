@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Layers/ProjectionTurns.ts
+// assemble projection turns Effect layer
+
 import { OrchestrationCheckpointFile } from '@t3tools/contracts'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'

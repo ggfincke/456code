@@ -1,3 +1,6 @@
+// apps/mobile/src/features/showcase/showcasePendingTasks.ts
+// build showcase pending tasks
+
 import type { EnvironmentProject } from '@t3tools/client-runtime/state/shell'
 import {
   CommandId,

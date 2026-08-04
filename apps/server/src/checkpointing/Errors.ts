@@ -1,3 +1,6 @@
+// apps/server/src/checkpointing/Errors.ts
+// define checkpointing errors
+
 import { NonNegativeInt, ThreadId, type VcsError } from '@t3tools/contracts'
 import * as Schema from 'effect/Schema'
 

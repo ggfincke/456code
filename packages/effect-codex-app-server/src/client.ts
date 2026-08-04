@@ -1,3 +1,6 @@
+// packages/effect-codex-app-server/src/client.ts
+// define codex app server client options
+
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

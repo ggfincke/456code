@@ -1,3 +1,6 @@
+// apps/web/src/components/BranchToolbarEnvModeSelector.tsx
+// render branch toolbar env mode selector
+
 import { FolderGit2Icon, FolderGitIcon, FolderIcon, HistoryIcon } from 'lucide-react'
 import { memo, useMemo } from 'react'
 

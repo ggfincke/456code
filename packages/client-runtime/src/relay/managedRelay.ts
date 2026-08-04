@@ -1,3 +1,6 @@
+// packages/client-runtime/src/relay/managedRelay.ts
+// define managed relay dpop proof input
+
 import {
   RelayAccessTokenType,
   RelayApi,
@@ -124,7 +127,7 @@ export class ManagedRelayRequestTimeoutError extends Schema.TaggedErrorClass<Man
   {
     activity: ManagedRelayRequestActivity,
     timeoutMs: Schema.Number,
-    // The CLIENT span's trace id. A timed-out request has no server response
+    // the CLIENT span's trace id. A timed-out request has no server response
     // to take an id from, but the client span was exported, so carrying its id
     // makes the failure searchable instead of logging `traceId: null`.
     traceId: Schema.NullOr(Schema.String),

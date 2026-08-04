@@ -1,3 +1,6 @@
+// tests/apps/web/browser/previewWebviewConfigState.test.ts
+// verify load preview webview config behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import { EnvironmentId } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'

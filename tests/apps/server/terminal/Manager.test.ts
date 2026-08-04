@@ -1,3 +1,6 @@
+// tests/apps/server/terminal/Manager.test.ts
+// verify manager behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import {
@@ -1397,7 +1400,7 @@ it.layer(
       expect(spawnInput.env.PORT).toBeUndefined()
       expect(spawnInput.env.T3CODE_PORT).toBeUndefined()
       expect(spawnInput.env.VITE_DEV_SERVER_URL).toBeUndefined()
-      // Arbitrary host env vars must pass through — terminals inherit the
+      // arbitrary host env vars must pass through — terminals inherit the
       // user's environment apart from the explicit blocklist.
       expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe('keep-me')
     }),
@@ -1434,7 +1437,7 @@ it.layer(
       // mount segments that the runtime prepended.
       expect(spawnInput.env.PATH).toBe('/usr/local/bin:/usr/bin:/bin')
       expect(spawnInput.env.LD_LIBRARY_PATH).toBe('/home/user/.local/lib')
-      // Unrelated host vars still pass through untouched.
+      // unrelated host vars still pass through untouched.
       expect(spawnInput.env.TEST_TERMINAL_KEEP).toBe('keep-me')
     }),
   )
@@ -1446,7 +1449,7 @@ it.layer(
         env: {
           PATH: '/usr/local/bin:/usr/bin:/bin',
           LD_LIBRARY_PATH: '/home/user/.local/lib',
-          // Without APPIMAGE/APPDIR set, OWD is an ordinary variable and must
+          // without APPIMAGE/APPDIR set, OWD is an ordinary variable and must
           // not be stripped — only an AppImage launch gives it special meaning.
           OWD: '/home/user/keep-this',
         },

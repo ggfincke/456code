@@ -1,10 +1,9 @@
-/**
- * Per-thread preview UI state.
- *
- * Each thread owns an independent atom. Most consumers read exactly one
- * thread; the desktop browser host uses the aggregate session atom because it
- * is the one place that must enumerate every live preview tab.
- */
+// apps/web/src/previewStateStore.ts
+// manage preview state state
+
+// each thread owns an independent atom. Most consumers read exactly one
+// thread; the desktop browser host uses the aggregate session atom because it
+// is the one place that must enumerate every live preview tab.
 import { useAtomValue } from '@effect/atom-react'
 import { scopedThreadKey } from '@t3tools/client-runtime/environment'
 import {
@@ -32,7 +31,7 @@ export interface ThreadPreviewState
 {
   snapshot: PreviewSessionSnapshot | null
   sessions: Record<string, PreviewSessionSnapshot>
-  /** Tabs intentionally closed by this client. Stale list snapshots must not resurrect them. */
+  // tabs intentionally closed by this client. Stale list snapshots must not resurrect them.
   suppressedTabIds: ReadonlySet<string>
   activeTabId: string | null
   desktopOverlay: DesktopPreviewOverlay | null
@@ -61,7 +60,7 @@ export const previewStateAtom = Atom.family((threadKey: string) =>
   ),
 )
 
-// Only the Electron browser host needs a cross-thread view. Keep that index
+// only the Electron browser host needs a cross-thread view. Keep that index
 // separate so thread-local readers never subscribe to unrelated previews.
 interface ActivePreviewThreadIndex
 {
@@ -280,12 +279,10 @@ export function applyPreviewServerSnapshot(
   })
 }
 
-/**
- * Merge a server mutation without changing which tab the user is viewing.
- *
- * Commands such as resize can target background tabs. Their response is
- * authoritative for that tab, but it is not a request to focus the tab.
- */
+// merge a server mutation without changing which tab the user is viewing.
+//
+// commands such as resize can target background tabs. Their response is
+// authoritative for that tab, but it is not a request to focus the tab.
 export function updatePreviewServerSnapshot(
   ref: ScopedThreadRef,
   snapshot: PreviewSessionSnapshot,
@@ -311,11 +308,9 @@ export function updatePreviewServerSnapshot(
   })
 }
 
-/**
- * Replace the local session index from an authoritative preview.list result.
- * Missing tabs are removed while the current active tab is preserved whenever
- * it still exists in the server result.
- */
+// replace the local session index from an authoritative preview.list result.
+// missing tabs are removed while the current active tab is preserved whenever
+// it still exists in the server result.
 export function reconcilePreviewServerSessions(
   ref: ScopedThreadRef,
   snapshots: ReadonlyArray<PreviewSessionSnapshot>,

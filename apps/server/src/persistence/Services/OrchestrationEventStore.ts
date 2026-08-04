@@ -1,14 +1,13 @@
-/**
- * OrchestrationEventStore - Event store interface for orchestration events.
- *
- * Owns durable append/replay access to the orchestration event stream. It does
- * not reduce events into read models or apply command validation rules.
- *
- * Uses Effect `Context.Service` for dependency injection and exposes typed
- * persistence/decode errors for event append and replay operations.
- *
- * @module OrchestrationEventStore
- */
+// apps/server/src/persistence/Services/OrchestrationEventStore.ts
+// manage orchestration event state
+
+// owns durable append/replay access to the orchestration event stream. It does
+// not reduce events into read models or apply command validation rules.
+//
+// uses Effect `Context.Service` for dependency injection and exposes typed
+// persistence/decode errors for event append and replay operations.
+//
+// @module OrchestrationEventStore
 import { OrchestrationEvent } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
@@ -21,37 +20,31 @@ import type { OrchestrationEventStoreError } from '../Errors.ts'
  */
 export interface OrchestrationEventStoreShape
 {
-  /**
-   * Persist a new orchestration event.
-   *
-   * @param event - Event payload without sequence (assigned by storage).
-   * @returns Effect containing the stored event with assigned sequence.
-   *
-   * Actor kind is inferred from command/metadata before persistence.
-   */
+  // persist a new orchestration event.
+  //
+  // @param event - Event payload without sequence (assigned by storage).
+  // @returns Effect containing the stored event with assigned sequence.
+  //
+  // actor kind is inferred from command/metadata before persistence.
   readonly append: (
     event: Omit<OrchestrationEvent, 'sequence'>,
   ) => Effect.Effect<OrchestrationEvent, OrchestrationEventStoreError>
 
-  /**
-   * Replay events after the provided sequence.
-   *
-   * @param sequenceExclusive - Sequence cursor (exclusive).
-   * @param limit - Maximum number of events to emit.
-   * @returns Stream containing ordered events.
-   *
-   * Reads in fixed-size pages and normalizes non-integer/negative limits.
-   */
+  // replay events after the provided sequence.
+  //
+  // @param sequenceExclusive - Sequence cursor (exclusive).
+  // @param limit - Maximum number of events to emit.
+  // @returns Stream containing ordered events.
+  //
+  // reads in fixed-size pages and normalizes non-integer/negative limits.
   readonly readFromSequence: (
     sequenceExclusive: number,
     limit?: number,
   ) => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>
 
-  /**
-   * Read all events from the beginning of the stream.
-   *
-   * @returns Stream containing all stored events.
-   */
+  // read all events from the beginning of the stream.
+  //
+  // @returns Stream containing all stored events.
   readonly readAll: () => Stream.Stream<OrchestrationEvent, OrchestrationEventStoreError>
 }
 

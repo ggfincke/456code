@@ -1,3 +1,6 @@
+// apps/mobile/src/connection/catalog-store.ts
+// manage catalog state
+
 import {
   ConnectionCatalogDocument,
   type ConnectionCatalogDocument as ConnectionCatalogDocumentType,

@@ -1,11 +1,10 @@
-/**
- * PtyAdapter - Terminal PTY adapter service contract.
- *
- * Defines the process primitives required by terminal session management
- * without binding to a specific PTY implementation.
- *
- * @module PtyAdapter
- */
+// apps/server/src/terminal/PtyAdapter.ts
+// define pty spawn error
+
+// defines the process primitives required by terminal session management
+// without binding to a specific PTY implementation.
+//
+// @module PtyAdapter
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
@@ -63,9 +62,7 @@ export interface PtySpawnInput
 export class PtyAdapter extends Context.Service<
   PtyAdapter,
   {
-    /**
-     * Spawn a PTY process for a terminal session.
-     */
+    // spawn a PTY process for a terminal session.
     readonly spawn: (input: PtySpawnInput) => Effect.Effect<PtyProcess, PtySpawnError>
   }
 >()('456code/terminal/PtyAdapter')

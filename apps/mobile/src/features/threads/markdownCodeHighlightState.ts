@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/markdownCodeHighlightState.ts
+// manage markdown code highlight state
+
 import { useAtomValue } from '@effect/atom-react'
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'

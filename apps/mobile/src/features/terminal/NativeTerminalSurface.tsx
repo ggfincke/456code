@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/NativeTerminalSurface.tsx
+// render native terminal surface
+
 import { memo, useCallback, useEffect, useRef } from 'react'
 import {
   Pressable,
@@ -156,7 +159,7 @@ const FallbackTerminalSurface = memo(function FallbackTerminalSurface(props: Ter
             const text = event.nativeEvent.text
             if (text.length > 0)
             {
-              // Terminal Enter is CR. LF is Ctrl+J and raw-mode TUIs can treat it as J.
+              // terminal Enter is CR. LF is Ctrl+J and raw-mode TUIs can treat it as J.
               props.onInput(`${text}\r`)
             }
           }}

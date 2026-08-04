@@ -1,3 +1,6 @@
+// apps/web/src/routes/_chat.draft.$draftId.tsx
+// render the chat draft $draft id route
+
 import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import ChatView from '../components/ChatView'

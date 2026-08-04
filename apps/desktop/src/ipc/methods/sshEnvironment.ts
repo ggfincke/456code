@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/methods/sshEnvironment.ts
+// define desktop ssh environment request error
+
 import {
   bootstrapRemoteBearerSession,
   fetchRemoteSessionState,

@@ -1,3 +1,6 @@
+// tests/apps/server/provider/acp/AcpCoreRuntimeEvents.test.ts
+// verify acp core runtime events behavior
+
 import { ProviderDriverKind, RuntimeRequestId, TurnId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/ProviderSettingsForm.tsx
+// render provider settings form
+
 'use client'
 
 import { useMemo, type ReactNode } from 'react'

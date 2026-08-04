@@ -1,3 +1,6 @@
+// apps/mobile/src/features/diffs/nativeReviewDiffSurface.ts
+// determine whether native review diff draw event
+
 import {
   createElement,
   useEffect,
@@ -240,7 +243,7 @@ function useNativeReviewDiffPayload(
       })
     }
 
-    // Fabric attaches the React ref before Expo registers the native tag used by
+    // fabric attaches the React ref before Expo registers the native tag used by
     // view functions. Starting on the next frame avoids racing that registration.
     frame = requestAnimationFrame(dispatch)
 

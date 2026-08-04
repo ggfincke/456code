@@ -1,3 +1,6 @@
+// apps/web/src/composer-logic.ts
+// determine whether submit composer on enter
+
 import { splitPromptIntoComposerSegments } from './composer-editor-mentions'
 import { INLINE_TERMINAL_CONTEXT_PLACEHOLDER } from './lib/terminalContext'
 

@@ -1,3 +1,6 @@
+// apps/mobile/src/persistence/mobile-preferences.ts
+// define preferences
+
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -24,11 +27,9 @@ export interface Preferences
   readonly connectOnboardingOptOutAccounts?: ReadonlyArray<string>
   readonly collapsedProjectGroups?: readonly string[]
   readonly projectGroupingEnabled?: boolean
-  /**
-   * Device-local mirror of the web beta's `sidebarV2Enabled`. Mobile has no
-   * client-settings sync, so the flat v2 thread list is opted into per
-   * device.
-   */
+  // device-local mirror of the web beta's `sidebarV2Enabled`. Mobile has no
+  // client-settings sync, so the flat v2 thread list is opted into per
+  // device.
   readonly threadListV2Enabled?: boolean
 }
 

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/review/diffParser.ts
+// parse unified diff
+
 export type ParsedDiffLineType = 'context' | 'add' | 'delete' | 'meta' | 'hunk'
 
 export interface ParsedDiffLine

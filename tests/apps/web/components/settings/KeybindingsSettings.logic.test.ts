@@ -1,3 +1,6 @@
+// tests/apps/web/components/settings/KeybindingsSettings.logic.test.ts
+// verify keybindings settings behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { ResolvedKeybindingsConfig } from '@t3tools/contracts'
 

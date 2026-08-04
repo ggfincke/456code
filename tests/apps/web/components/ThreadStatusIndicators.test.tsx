@@ -1,3 +1,6 @@
+// tests/apps/web/components/ThreadStatusIndicators.test.tsx
+// verify thread worktree indicator behavior
+
 import { ThreadId } from '@t3tools/contracts'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vite-plus/test'

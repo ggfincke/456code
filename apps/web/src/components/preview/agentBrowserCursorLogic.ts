@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/agentBrowserCursorLogic.ts
+// define browser controller
+
 export type BrowserController = 'human' | 'agent' | 'none'
 
 export function agentBrowserCursorOpacity(active: boolean, controller: BrowserController): number

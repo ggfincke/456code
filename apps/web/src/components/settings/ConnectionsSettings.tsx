@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/ConnectionsSettings.tsx
+// render connections settings
+
 import {
   ChevronDownIcon,
   ChevronsLeftRightEllipsisIcon,
@@ -135,7 +138,7 @@ const DEFAULT_TAILSCALE_SERVE_PORT = 443
 const EMPTY_ADVERTISED_ENDPOINTS: ReadonlyArray<AdvertisedEndpoint> = []
 const EMPTY_DISCOVERED_SSH_HOSTS: ReadonlyArray<DesktopDiscoveredSshHost> = []
 
-// Sentinels for the consolidated WSL backend picker. The colon is
+// sentinels for the consolidated WSL backend picker. The colon is
 // rejected by DISTRO_NAME_PATTERN (validated on the desktop side) so
 // neither can collide with a real distro name.
 const BACKEND_VALUE_DEFAULT_WSL = 'backend:default-wsl'
@@ -502,7 +505,7 @@ function endpointDefaultPreferenceKey(endpoint: AdvertisedEndpoint): string
   }
   catch
   {
-    // Keep the stored preference stable even if a custom endpoint is malformed.
+    // keep the stored preference stable even if a custom endpoint is malformed.
   }
 
   return `${endpoint.provider.id}:${endpoint.reachability}:${scheme}:${endpoint.label}`
@@ -1468,7 +1471,7 @@ function SavedBackendListRow({
     (value): value is string => value !== null,
   )
 
-  // The WSL backend is a desktop-managed local backend (it surfaces as a bearer
+  // the WSL backend is a desktop-managed local backend (it surfaces as a bearer
   // environment whose connection id is prefixed "local:"), not a remote
   // environment you connect to or remove here — its lifecycle is driven by the
   // WSL on/off + distro picker on this page.
@@ -1728,7 +1731,7 @@ export function ConnectionsSettings()
   const [isUpdatingTailscaleServe, setIsUpdatingTailscaleServe] = useState(false)
   const [isUpdatingWslBackend, setIsUpdatingWslBackend] = useState(false)
   const [desktopWslMutationError, setDesktopWslMutationError] = useState<string | null>(null)
-  // Pending WSL setting change waiting on user confirmation. Set when
+  // pending WSL setting change waiting on user confirmation. Set when
   // the user tries a destructive change (disable, switch distro,
   // toggle wsl-only) while the WSL backend has saved-env state on this
   // machine. Confirming applies the change; cancelling drops it
@@ -1742,7 +1745,7 @@ export function ConnectionsSettings()
     // only honoured when the WSL backend is enabled).
     | { readonly kind: 'disable'; readonly wasWslOnly: boolean }
     | { readonly kind: 'distro'; readonly nextDistro: string | null }
-    // Asked at enable time so the user picks the mode upfront instead
+    // asked at enable time so the user picks the mode upfront instead
     // of being dropped into "both backends" and having to discover the
     // wsl-only switch separately. Resolved through enable-mode action
     // buttons on the dialog rather than a single Confirm.
@@ -2559,7 +2562,7 @@ export function ConnectionsSettings()
           )
         })
       : null
-  // Apply a setting change immediately. The orchestrator reconciles the
+  // apply a setting change immediately. The orchestrator reconciles the
   // pool in the background and the primary backend is untouched, so we
   // don't gate this behind a confirmation dialog. After the desktop
   // side persists the change and nudges its orchestrator, we trigger
@@ -2575,7 +2578,7 @@ export function ConnectionsSettings()
       {
         await apply()
         refreshDesktopWslState()
-        // The connection platform source polls the desktop bootstrap list and
+        // the connection platform source polls the desktop bootstrap list and
         // reconciles the environment catalog automatically, so toggling the WSL
         // backend on/off or switching distros is picked up here without an
         // explicit renderer reconcile.
@@ -2601,7 +2604,7 @@ export function ConnectionsSettings()
     [desktopBridge],
   )
 
-  // Reload the keep-alive WSL state atom. Clearing the mutation error before
+  // reload the keep-alive WSL state atom. Clearing the mutation error before
   // refresh lets the atom-owned load error become the visible retry state.
   const loadWslState = useCallback(() =>
   {
@@ -2609,11 +2612,11 @@ export function ConnectionsSettings()
     refreshDesktopWslState()
   }, [])
 
-  // True when a desktop-local WSL backend is currently registered as an
+  // true when a desktop-local WSL backend is currently registered as an
   // environment on this machine. We use this as a proxy for "the user has work
   // that lives on the WSL side": if WSL has connected in a way that registered
   // the env, disabling or switching distros could disrupt open threads/projects.
-  // If WSL never connected (fresh install, toggled on then immediately off,
+  // if WSL never connected (fresh install, toggled on then immediately off,
   // etc.) there's no local environment, so we skip the confirmation dialog.
   const hasWslRegistrationToLose = useMemo(() =>
   {
@@ -2622,7 +2625,7 @@ export function ConnectionsSettings()
     )
   }, [environments])
 
-  // Single picker for "WSL backend off" vs "running on distro X". The
+  // single picker for "WSL backend off" vs "running on distro X". The
   // dropdown maps "Off" to disable and any distro entry to enable +
   // run on that distro. Splitting these into a separate switch and
   // dropdown was confusing — they're the same decision.
@@ -2634,13 +2637,13 @@ export function ConnectionsSettings()
         desktopWslState.distros.find((distro) => distro.isDefault)?.name ?? null
       if (value === BACKEND_VALUE_WSL_OFF)
       {
-        // Match the recovery row's visibility (`enabled || wslOnly`): when WSL
+        // match the recovery row's visibility (`enabled || wslOnly`): when WSL
         // went unavailable while wsl-only was persisted, `enabled` can be false
         // while `wslOnly` is true, and the "Switch to Windows" button must
         // still clear that state instead of silently no-op'ing.
         if (!desktopWslState.enabled && !desktopWslState.wslOnly) return
         const wasWslOnly = desktopWslState.wslOnly
-        // Confirm when there's WSL state to lose, OR when wsl-only is
+        // confirm when there's WSL state to lose, OR when wsl-only is
         // on (turning the only running backend off needs to switch
         // back to Windows and restart — always consequential).
         if (hasWslRegistrationToLose || wasWslOnly)
@@ -2655,18 +2658,18 @@ export function ConnectionsSettings()
       const resolvedNext = nextDistro ?? defaultDistroName
       if (!desktopWslState.enabled)
       {
-        // Was off, user picked a distro: ask whether to run both
+        // was off, user picked a distro: ask whether to run both
         // backends or only WSL. We always ask here so the user picks
         // the mode upfront instead of having to discover the wsl-only
         // switch afterwards.
         setPendingWslChange({ kind: 'enable', nextDistro })
         return
       }
-      // Already enabled — treat as a distro switch. Skip the change if
+      // already enabled — treat as a distro switch. Skip the change if
       // the user re-picked the row that's already selected.
       const resolvedCurrent = desktopWslState.distro ?? defaultDistroName
       if (resolvedCurrent === resolvedNext) return
-      // Confirm when there's WSL registration to lose, OR in wsl-only mode:
+      // confirm when there's WSL registration to lose, OR in wsl-only mode:
       // there the primary IS the WSL backend, so a distro change relaunches
       // the app (the IPC handler does this) rather than swapping a secondary,
       // and the user should see that coming.
@@ -2680,7 +2683,7 @@ export function ConnectionsSettings()
     [applyWslSettingChange, desktopBridge, desktopWslState, hasWslRegistrationToLose],
   )
 
-  // Dispatched from the enable modal's two action buttons.
+  // dispatched from the enable modal's two action buttons.
   const handleConfirmEnableWsl = useCallback(
     (mode: 'both' | 'wsl-only') =>
     {
@@ -2709,7 +2712,7 @@ export function ConnectionsSettings()
       // the setting immediately but doesn't tear down or restart
       // anything itself; the renderer warns the user to expect a
       // restart and (in a follow-up) can trigger it automatically.
-      // Always prompt — even enabling is consequential here.
+      // always prompt — even enabling is consequential here.
       setPendingWslChange({ kind: 'wsl-only', nextValue: enabled })
     },
     [desktopBridge, desktopWslState],
@@ -2719,7 +2722,7 @@ export function ConnectionsSettings()
   {
     if (!desktopBridge || !pendingWslChange) return
     const change = pendingWslChange
-    // The enable kind resolves through handleConfirmEnableWsl, not
+    // the enable kind resolves through handleConfirmEnableWsl, not
     // this single Confirm path.
     if (change.kind === 'enable') return
     setPendingWslChange(null)
@@ -2730,7 +2733,7 @@ export function ConnectionsSettings()
         const next = await desktopBridge.setWslBackendEnabled(false)
         if (change.wasWslOnly)
         {
-          // Clearing wsl-only relaunches onto the Windows backend.
+          // clearing wsl-only relaunches onto the Windows backend.
           return await desktopBridge.setWslOnly(false)
         }
         return next
@@ -2749,7 +2752,7 @@ export function ConnectionsSettings()
   {
     if (!desktopWslState)
     {
-      // A load failed: keep a recovery row (with retry) visible instead of
+      // a load failed: keep a recovery row (with retry) visible instead of
       // silently hiding the section. The error persists across an in-flight
       // retry so the row doesn't flicker away, and the button reflects the
       // loading state. With no error we simply haven't loaded yet (or WSL
@@ -2807,7 +2810,7 @@ export function ConnectionsSettings()
         />
       )
     }
-    // Distro is null when the user wants the WSL default. Map it to the
+    // distro is null when the user wants the WSL default. Map it to the
     // real default's name so the Select highlights a real option; fall
     // back to the sentinel only when no distros are listed yet (the
     // dropdown then renders a single placeholder that matches).

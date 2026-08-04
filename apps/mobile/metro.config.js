@@ -1,3 +1,6 @@
+// apps/mobile/metro.config.js
+// configure mobile Metro bundling
+
 const fs = require('node:fs')
 const path = require('node:path')
 const { getDefaultConfig } = require('expo/metro-config')

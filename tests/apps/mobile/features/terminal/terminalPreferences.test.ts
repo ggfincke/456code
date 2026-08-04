@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/terminal/terminalPreferences.test.ts
+// verify normalize terminal font size behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

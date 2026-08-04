@@ -1,3 +1,6 @@
+// tests/apps/web/reviewCommentContext.test.ts
+// verify review comment context parsing behavior
+
 import { parsePatchFiles } from '@pierre/diffs/utils/parsePatchFiles'
 import { describe, expect, it } from 'vite-plus/test'
 

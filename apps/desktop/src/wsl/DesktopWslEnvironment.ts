@@ -1,3 +1,6 @@
+// apps/desktop/src/wsl/DesktopWslEnvironment.ts
+// ensure wsl node pty options
+
 import * as Context from 'effect/Context'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
@@ -62,7 +65,7 @@ export class DesktopWslEnvironment extends Context.Service<
   DesktopWslEnvironment,
   {
     readonly isAvailable: Effect.Effect<boolean>
-    // Best-effort enumeration for renderer UX. Backend health checks must use
+    // best-effort enumeration for renderer UX. Backend health checks must use
     // probeDistros so a transient command failure is not mistaken for a
     // successful empty installation.
     readonly listDistros: Effect.Effect<readonly WslDistro[]>
@@ -72,13 +75,13 @@ export class DesktopWslEnvironment extends Context.Service<
       distro: string | null,
       windowsPath: string,
     ) => Effect.Effect<Option.Option<string>>
-    // Resolves the user's Linux home dir inside the chosen distro (e.g.
+    // resolves the user's Linux home dir inside the chosen distro (e.g.
     // "/home/josh"). Used by the folder picker to expand `~` correctly.
     readonly getUserHome: (distro: string | null) => Effect.Effect<Option.Option<string>>
-    // Resolves the WSL distro's IPv4 address on the WSL vEthernet adapter
+    // resolves the WSL distro's IPv4 address on the WSL vEthernet adapter
     // (e.g. "172.x.x.x"). The orchestrator uses this for the WSL backend's
     // httpBaseUrl so the renderer can reach it without relying on wslhost's
-    // localhost→WSL automatic forwarding, which is flaky in practice
+    // localhost->WSL automatic forwarding, which is flaky in practice
     // (the backend can be listening for 30+ seconds before wslhost starts
     // forwarding 127.0.0.1:port to WSL-side localhost).
     readonly getDistroIp: (distro: string | null) => Effect.Effect<Option.Option<string>>
@@ -142,7 +145,7 @@ export const formatWslShellTransportFailureReason = (
   }
 }
 
-// Reuse the SSH remote resolver so WSL and SSH discover version-managed Node
+// reuse the SSH remote resolver so WSL and SSH discover version-managed Node
 // the same way. Passing the engine range lets the resolver fall through to
 // version managers like nvm when a system node exists but is too old.
 export const buildWslNodeEnvPreamble = (
@@ -199,7 +202,7 @@ const runWslShell = (
         } satisfies ShellResult
       }
       const handle = spawnResult.handle
-      // Drain stdout and stderr concurrently so neither pipe buffer can fill
+      // drain stdout and stderr concurrently so neither pipe buffer can fill
       // and stall the child (node-gyp rebuild emits large output on both).
       const [stdoutBytes, stderrBytes, exitCode] = yield* Effect.all(
         [Stream.runCollect(handle.stdout), Stream.runCollect(handle.stderr), handle.exitCode],
@@ -323,7 +326,7 @@ export const parseToolchainReport = (stdout: string): ToolchainReport =>
   return { missingTools, nodeVersion }
 }
 
-// Pulls the absolute node path the WSL distro resolved after the shared remote
+// pulls the absolute node path the WSL distro resolved after the shared remote
 // resolver repaired PATH. Returns null when no node was found, which the caller
 // turns into an actionable "install Node" message instead of a confusing
 // node-pty error.
@@ -349,7 +352,7 @@ export const parseNodeVersion = (stdout: string): string | null =>
   return version ?? null
 }
 
-// Captures the login-shell PATH after the shared resolver has loaded version
+// captures the login-shell PATH after the shared resolver has loaded version
 // managers. Preserve the value byte-for-byte apart from a Windows-style CR so
 // paths containing spaces or apostrophes can be forwarded as one env argv.
 export const parseResolvedPath = (stdout: string): string | null =>
@@ -452,7 +455,7 @@ const ensureNodePtyImpl = (
       } as const
     }
 
-    // No node at all, even after the shared resolver repaired PATH. Surface
+    // no node at all, even after the shared resolver repaired PATH. Surface
     // the specific, actionable toolchain message rather than a confusing
     // node-pty error, and don't try to build.
     if (nodePath === null)
@@ -491,10 +494,10 @@ const ensureNodePtyImpl = (
       } as const
     }
 
-    // Server dependencies (e.g. "effect") couldn't be resolved on the WSL
+    // server dependencies (e.g. "effect") couldn't be resolved on the WSL
     // filesystem — a packaging regression, since the server bundle needs its
     // node_modules unpacked from the asar. Fatal so wsl-only mode falls back to
-    // Windows and dual mode surfaces the reason inline, instead of the server
+    // windows and dual mode surfaces the reason inline, instead of the server
     // crash-looping on ERR_MODULE_NOT_FOUND once it actually launches.
     if (probe.exitCode === 3)
     {
@@ -561,7 +564,7 @@ const ensureNodePtyImpl = (
 
     if (options.allowBuild !== true)
     {
-      // Packaged builds ship a prebuilt Linux node-pty, so no compiler, node-gyp,
+      // packaged builds ship a prebuilt Linux node-pty, so no compiler, node-gyp,
       // or network is needed — and we must not nag the user to install build
       // tools they don't need. Still surface a missing/too-old Node (both the
       // prebuilt and the server require a compatible Node); otherwise reaching
@@ -583,9 +586,9 @@ const ensureNodePtyImpl = (
       } as const
     }
 
-    // Dev only: no prebuilt is bundled in a checkout, so compile node-pty from
+    // dev only: no prebuilt is bundled in a checkout, so compile node-pty from
     // source. Run the toolchain check first so a missing compiler or out-of-range
-    // Node surfaces a specific, actionable message instead of an opaque node-gyp
+    // node surfaces a specific, actionable message instead of an opaque node-gyp
     // failure. Developers have the toolchain; end users never reach this path.
     const missingReason = formatMissingToolsReason(report, options.nodeEngineRange?.trim() || null)
     if (missingReason !== null)
@@ -870,10 +873,10 @@ export const layer = Layer.effect(
     ): Effect.Effect<A, E> =>
       effect.pipe(Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner))
 
-    // Probe wsl.exe once at layer init and cache the result, exposing
+    // probe wsl.exe once at layer init and cache the result, exposing
     // `isAvailable` as a resolved value rather than a re-running effect.
     // WSL availability is effectively static for the process lifetime — the
-    // Windows feature isn't added/removed mid-session, and backend mode
+    // windows feature isn't added/removed mid-session, and backend mode
     // changes already require an app restart — so the cached boolean stays
     // accurate. Crucially this keeps `isAvailable` synchronously resolvable:
     // it's read inside the sync IPC handler getLocalEnvironmentBootstraps
@@ -893,7 +896,7 @@ export const layer = Layer.effect(
         Effect.withSpan('desktop.wsl.windowsToWslPath'),
       )
 
-    // Cache user-home results per distro key — folder picker can be opened
+    // cache user-home results per distro key — folder picker can be opened
     // many times in a session and the value is stable for the life of the
     // distro. Negative results aren't cached so a transient wsl.exe failure
     // doesn't permanently disable tilde expansion.

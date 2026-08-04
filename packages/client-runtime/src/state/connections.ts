@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/connections.ts
+// manage environment catalog state
+
 import type { EnvironmentId as EnvironmentIdType } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'

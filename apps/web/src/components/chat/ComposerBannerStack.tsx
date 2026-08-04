@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerBannerStack.tsx
+// render composer banner stack
+
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { XIcon } from 'lucide-react'
 

@@ -1,3 +1,6 @@
+// apps/web/src/components/SidebarStageBackdrop.tsx
+// render sidebar stage backdrop
+
 import { useAtomValue } from '@effect/atom-react'
 import { useId } from 'react'
 
@@ -7,7 +10,7 @@ import { primaryServerConfigAtom } from '../state/server'
 
 export type SidebarStageBackdropVariant = 'nightly' | 'dev' | 'alpha'
 
-// A wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
+// a wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
 // more horizontal canvas instead of zooming the scene.
 const STAGE_BACKDROP_VIEW_BOX = '0 0 8192 96'
 
@@ -35,10 +38,10 @@ export function useSidebarStageBackdropVariant(): SidebarStageBackdropVariant | 
   )
 }
 
-/** Stage-channel header art; palettes mirror the per-channel app icons in `assets/`. */
+// stage-channel header art; palettes mirror the per-channel app icons in `assets/`.
 export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdropVariant })
 {
-  // The nightly and dev art are atmospheric and read fine under the default fade. The wave is a
+  // the nightly and dev art are atmospheric and read fine under the default fade. The wave is a
   // solid band on fincke.dev, and that fade desaturates it to grey, so it opts into a later one.
   const fadeClassName = variant === 'alpha' ? ' sidebar-stage-backdrop-solid' : ''
 
@@ -196,19 +199,19 @@ function NightlySkyArt({ compact = false }: { compact?: boolean })
   )
 }
 
-// Alpha art is the fincke.dev hero wave, taken as-is from that site's DecorativeWave component:
+// alpha art is the fincke.dev hero wave, taken as-is from that site's DecorativeWave component:
 // the same two ribbon paths, the same gradient geometry, and the same `preserveAspectRatio="none"`
 // stretch. Because the drawing stretches to fill rather than tiling, sidebar resizing widens the
 // ribbons instead of repeating them -- so there is no seam to hide and no generated waveform.
-// Both windows frame the drawing's opening S -- x=0 to ~470, where the front ribbon's top edge
+// both windows frame the drawing's opening S -- x=0 to ~470, where the front ribbon's top edge
 // falls from y=0 to y=72.5 with a horizontal tangent at each end. That gives the flat entry,
 // smooth descent, and flat run-out the wave is recognized by. Later stretches of the drawing are
 // either a crest (x=960) or a shallow tail, and reading either as "the wave" gets the shape wrong.
-// Height sets ribbon weight: each ribbon is ~30 units, so 150 over the 80px band puts them at
+// height sets ribbon weight: each ribbon is ~30 units, so 150 over the 80px band puts them at
 // ~16px. The art crosses the wordmark at this framing, which is why the brand renders in white.
 const FINCKE_WAVE_FIELD = { x: 0, y: -26, width: 470, height: 150 } as const
 
-// Same opening S, cropped tighter for the ~40px composer button, which has no text to clear.
+// same opening S, cropped tighter for the ~40px composer button, which has no text to clear.
 const FINCKE_WAVE_BUTTON_FIELD = { x: 40, y: -20, width: 420, height: 142 } as const
 
 type FinckeWaveField = typeof FINCKE_WAVE_FIELD | typeof FINCKE_WAVE_BUTTON_FIELD

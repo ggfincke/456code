@@ -1277,7 +1277,7 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
 
   const statusRemoteRefreshCache = yield* Cache.makeWith(refreshStatusRemoteCacheEntry, {
     capacity: STATUS_UPSTREAM_REFRESH_CACHE_CAPACITY,
-    // A failed background fetch is intentionally cached and exponentially
+    // a failed background fetch is intentionally cached and exponentially
     // backed off. Status reads swallow this failure and use the last fetched
     // refs, so repeated thread mounts cannot turn a slow or unavailable remote
     // into a repository-wide Git subprocess storm.
@@ -2616,13 +2616,10 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
     {
       const generation = currentListRefsGeneration(gitCommonDir)
       const currentEpoch = listRefsEpochByCommonDir.get(gitCommonDir)
+      // the refresh cache owns the full Git scan so slow repositories stay singleflight
       const snapshot =
         refresh || currentEpoch === undefined
-          ? // The refresh cache owns the complete snapshot read, rather than only the
-            // epoch bump. Slow repositories therefore remain singleflight for the
-            // entire Git scan even when more refresh requests arrive after the
-            // coalescing TTL would otherwise have elapsed.
-            yield* Cache.get(
+          ? yield* Cache.get(
               listRefsRefreshSnapshotCache,
               new GitRefsRefreshCacheKey({ gitCommonDir, generation }),
             )
@@ -2693,7 +2690,7 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
       const combinedBranches = input.includeMatchingRemoteRefs
         ? [...localBranches, ...snapshot.remoteBranches]
         : dedupeRemoteBranchesWithLocalMatches([...localBranches, ...snapshot.remoteBranches])
-      // Keep current/default refs on the first page even when the default
+      // keep current/default refs on the first page even when the default
       // only exists as origin/<default> (remote refs sort after all locals).
       const allBranches = combinedBranches.toSorted((left, right) =>
       {

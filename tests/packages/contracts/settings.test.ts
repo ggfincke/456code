@@ -111,7 +111,7 @@ describe('ServerSettings.providerInstances (slice-2 invariant)', () =>
   {
     const decoded = decodeServerSettings({})
     expect(decoded.providerInstances).toEqual({})
-    // Legacy `providers` struct is still hydrated with its per-driver defaults
+    // legacy `providers` struct is still hydrated with its per-driver defaults
     // so existing call sites keep working through the migration.
     expect(decoded.providers.codex.enabled).toBe(true)
   })
@@ -182,7 +182,7 @@ describe('ServerSettingsPatch.providerInstances', () =>
     expect(replacement.providerInstances?.[ProviderInstanceId.make('codex_personal')]?.driver).toBe(
       'codex',
     )
-    // Fork/unknown drivers must survive whole-map replacement patches opaquely.
+    // fork/unknown drivers must survive whole-map replacement patches opaquely.
     expect(replacement.providerInstances?.[ProviderInstanceId.make('ollama_local')]?.driver).toBe(
       'ollama',
     )

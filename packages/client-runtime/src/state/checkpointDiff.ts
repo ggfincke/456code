@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/checkpointDiff.ts
+// manage checkpoint diff result state
+
 import type {
   EnvironmentId,
   OrchestrationGetFullThreadDiffResult,

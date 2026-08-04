@@ -1,3 +1,6 @@
+// apps/web/src/clientPersistenceStorage.ts
+// persist client persistence storage data
+
 import { ClientSettingsSchema, type ClientSettings } from '@t3tools/contracts'
 
 import { getLocalStorageItem, setLocalStorageItem } from './hooks/useLocalStorage'

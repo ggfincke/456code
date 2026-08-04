@@ -1,3 +1,6 @@
+// packages/shared/src/httpObservability.ts
+// expose http header redaction layer
+
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Headers from 'effect/unstable/http/Headers'

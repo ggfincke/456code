@@ -1,3 +1,6 @@
+// tests/apps/server/vcs/VcsStatusBroadcaster.test.ts
+// verify vcs status broadcaster behavior
+
 import { assert, it, describe } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Cause from 'effect/Cause'

@@ -1,3 +1,6 @@
+// tests/apps/web/terminal-links.test.ts
+// verify extract terminal links behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

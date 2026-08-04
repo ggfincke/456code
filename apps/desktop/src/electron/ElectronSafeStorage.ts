@@ -1,3 +1,6 @@
+// apps/desktop/src/electron/ElectronSafeStorage.ts
+// persist electron safe storage data
+
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

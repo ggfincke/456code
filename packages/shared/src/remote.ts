@@ -1,3 +1,6 @@
+// packages/shared/src/remote.ts
+// read hash params
+
 import * as Schema from 'effect/Schema'
 
 const PAIRING_TOKEN_PARAM = 'token'

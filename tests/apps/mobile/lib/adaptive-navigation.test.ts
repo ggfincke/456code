@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/adaptive-navigation.test.ts
+// verify is base thread route behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

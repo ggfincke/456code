@@ -1,3 +1,6 @@
+// apps/web/src/components/ComposerPromptEditor.tsx
+// render composer prompt editor
+
 import { LexicalComposer, type InitialConfigType } from '@lexical/react/LexicalComposer'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
@@ -1339,12 +1342,10 @@ function ComposerInlineTokenBackspacePlugin()
   return null
 }
 
-/**
- * Chips render as non-editable decorators, so the browser never paints the
- * native text selection over them; without help, a selection spanning chips
- * is only visible in the slivers between them. Mirror the selection onto the
- * chips with a data attribute the stylesheet turns into a highlight overlay.
- */
+// chips render as non-editable decorators, so the browser never paints the
+// native text selection over them; without help, a selection spanning chips
+// is only visible in the slivers between them. Mirror the selection onto the
+// chips with a data attribute the stylesheet turns into a highlight overlay.
 function ComposerChipSelectionPlugin()
 {
   const [editor] = useLexicalComposerContext()
@@ -1352,7 +1353,7 @@ function ComposerChipSelectionPlugin()
   useEffect(() =>
   {
     let selectedKeys = new Set<string>()
-    // Lexical keeps the range selection on blur without emitting an update,
+    // lexical keeps the range selection on blur without emitting an update,
     // so focus is tracked separately; while blurred the native highlight is
     // gone and the mirrored one has to go with it.
     let hasFocus = editor.getRootElement() === document.activeElement

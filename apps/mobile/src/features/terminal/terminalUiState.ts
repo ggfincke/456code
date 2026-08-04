@@ -1,3 +1,6 @@
+// apps/mobile/src/features/terminal/terminalUiState.ts
+// manage terminal ui state
+
 import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 
 import { DEFAULT_TERMINAL_FONT_SIZE, normalizeTerminalFontSize } from './terminalPreferences'

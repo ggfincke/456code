@@ -1,10 +1,11 @@
+// apps/web/src/components/preview/previewActionBus.ts
+// define preview action
+
 'use client'
 
-/**
- * Typed window-event bus for preview-panel actions. Lets the global
- * keybinding handler in `routes/_chat.tsx` reach `ChatView`'s URL-aware
- * arbitration without prop drilling or shared refs.
- */
+// typed window-event bus for preview-panel actions. Lets the global
+// keybinding handler in `routes/_chat.tsx` reach `ChatView`'s URL-aware
+// arbitration without prop drilling or shared refs.
 export type PreviewAction =
   'toggle-panel' | 'refresh' | 'focus-url' | 'zoom-in' | 'zoom-out' | 'reset-zoom'
 

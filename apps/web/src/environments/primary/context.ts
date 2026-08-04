@@ -1,3 +1,6 @@
+// apps/web/src/environments/primary/context.ts
+// read primary environment descriptor
+
 import {
   attachEnvironmentDescriptor,
   createKnownEnvironment,

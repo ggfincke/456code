@@ -110,7 +110,7 @@ const MobileRunContextSelector = memo(function MobileRunContextSelector({
   const isLocked = envLocked || envModeLocked
   const EnvironmentIcon = activeEnvironment?.isPrimary ? MonitorIcon : CloudIcon
   const icon = showEnvironmentIndicator ? (
-    // Button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
+    // button's base styles apply `-mx-0.5` to descendant SVGs, which eats 4px
     // out of whatever gap we set. mx-0! cancels that so gap-0.5 reads as 2px.
     <span className="inline-flex shrink-0 items-center gap-0.5">
       <EnvironmentIcon className="size-3 shrink-0 mx-0!" />
@@ -291,7 +291,7 @@ export const BranchToolbar = memo(function BranchToolbar({
   const onUsePreviousWorktree = useCallback(() =>
   {
     if (!previousWorktreeSeed || !activeProjectRef) return
-    // Same shape the branch selector writes when picking a branch that
+    // same shape the branch selector writes when picking a branch that
     // already lives in a worktree: point the draft at the existing tree.
     setDraftThreadContext(draftId ?? threadRef, {
       branch: previousWorktreeSeed.branch,

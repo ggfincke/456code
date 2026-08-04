@@ -167,9 +167,7 @@ export const make = Effect.gen(function* ()
   })
 })
 
-/**
- * ServerEnvironment is acquired from persisted filesystem and host-process
- * state. It intentionally has no fallback Layer.succeed value: callers must
- * provide the external platform services and a ServerConfig.
- */
+// ServerEnvironment is acquired from persisted filesystem and host-process
+// state. It intentionally has no fallback Layer.succeed value: callers must
+// provide the external platform services and a ServerConfig.
 export const layer = Layer.effect(ServerEnvironment, make).pipe(Layer.provide(ProcessRunner.layer))

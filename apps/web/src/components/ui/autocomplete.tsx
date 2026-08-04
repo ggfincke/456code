@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/autocomplete.tsx
+// render reusable autocomplete UI primitives
+
 'use client'
 
 import { Autocomplete as AutocompletePrimitive } from '@base-ui/react/autocomplete'

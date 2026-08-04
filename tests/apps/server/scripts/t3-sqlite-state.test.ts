@@ -1,3 +1,6 @@
+// tests/apps/server/scripts/t3-sqlite-state.test.ts
+// verify t3 sqlite state behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

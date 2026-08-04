@@ -1,3 +1,6 @@
+// tests/apps/desktop/settings/DesktopSavedEnvironments.test.ts
+// verify desktop saved environments behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import { EnvironmentId, type PersistedSavedEnvironmentRecord } from '@t3tools/contracts'

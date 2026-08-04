@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/appearance/useScaledTextRole.ts
+// manage scaled text role through a React hook
+
 import { useCSSVariable } from 'uniwind'
 
 import { MOBILE_TYPOGRAPHY } from '../../../lib/typography'
@@ -20,12 +23,10 @@ export interface ScaledTextRole
   readonly lineHeight: number
 }
 
-/**
- * Reads a typography role's current size from the Uniwind `--text-*` CSS
- * variables (scaled at runtime with the base font size). Use for style-prop
- * consumers that can't express their size as a `text-*` className. Reactive:
- * re-renders when the appearance provider re-injects the variables.
- */
+// reads a typography role's current size from the Uniwind `--text-*` CSS
+// variables (scaled at runtime with the base font size). Use for style-prop
+// consumers that can't express their size as a `text-*` className. Reactive:
+// re-renders when the appearance provider re-injects the variables.
 export function useScaledTextRole(role: keyof typeof MOBILE_TYPOGRAPHY): ScaledTextRole
 {
   const variable = TEXT_ROLE_VARIABLES[role]

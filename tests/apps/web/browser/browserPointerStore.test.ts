@@ -1,3 +1,6 @@
+// tests/apps/web/browser/browserPointerStore.test.ts
+// verify browser pointer store behavior
+
 import { beforeEach, describe, expect, it } from 'vite-plus/test'
 
 import { useBrowserPointerStore } from '../../../../apps/web/src/browser/browserPointerStore'

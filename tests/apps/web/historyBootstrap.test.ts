@@ -1,3 +1,6 @@
+// tests/apps/web/historyBootstrap.test.ts
+// verify build bootstrap input behavior
+
 import { MessageId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

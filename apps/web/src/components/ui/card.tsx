@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/card.tsx
+// render reusable card UI primitives
+
 'use client'
 
 import { mergeProps } from '@base-ui/react/merge-props'

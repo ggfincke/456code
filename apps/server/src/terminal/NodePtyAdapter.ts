@@ -1,3 +1,6 @@
+// apps/server/src/terminal/NodePtyAdapter.ts
+// define node pty module load error
+
 import * as NodeModule from 'node:module'
 
 import * as Effect from 'effect/Effect'
@@ -70,7 +73,7 @@ const ensureNodePtySpawnHelperExecutable = Effect.fn(function* ()
     return
   }
 
-  // Best-effort: avoid FileSystem.stat in packaged mode where some fs metadata can be missing.
+  // best-effort: avoid FileSystem.stat in packaged mode where some fs metadata can be missing.
   yield* fs.chmod(helperPath, 0o755).pipe(Effect.orElseSucceed(() => undefined))
 })
 

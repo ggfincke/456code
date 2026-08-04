@@ -1,3 +1,6 @@
+// tests/apps/desktop/preview/BrowserSession.test.ts
+// verify browser session behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Crypto from 'effect/Crypto'

@@ -1,3 +1,6 @@
+// apps/web/src/browser/HostedBrowserWebview.tsx
+// render hosted browser webview
+
 'use client'
 
 import type { PreviewViewportSetting, ScopedThreadRef } from '@t3tools/contracts'
@@ -101,7 +104,7 @@ export function HostedBrowserWebview(props: {
       {
         try
         {
-          // The main-process tab and the DOM webview are created by separate
+          // the main-process tab and the DOM webview are created by separate
           // effects. Wait for the former so registration cannot race and fail
           // with PreviewTabNotFoundError on a fast about:blank attachment.
           await lease.ready

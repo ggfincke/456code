@@ -1,3 +1,6 @@
+// apps/web/src/components/composerInlineTokenPaste.ts
+// register composer inline token paste
+
 import { collectComposerInlineTokens } from '@t3tools/shared/composerInlineTokens'
 import {
   $createLineBreakNode,
@@ -39,7 +42,7 @@ export function registerComposerInlineTokenPaste(
       {
         return false
       }
-      // Token grammar requires trailing whitespace; a virtual newline lets a
+      // token grammar requires trailing whitespace; a virtual newline lets a
       // mention at the very end of the pasted text still parse.
       const mentions = collectComposerInlineTokens(`${text}\n`).filter(
         (token) => token.type === 'mention' && token.end <= text.length,
@@ -49,7 +52,7 @@ export function registerComposerInlineTokenPaste(
         return false
       }
 
-      // Lexical command listeners already run inside an editor update. Starting
+      // lexical command listeners already run inside an editor update. Starting
       // a nested update here queues the mention insertion until after this
       // listener returns, which lets the plain-text paste handler run as well.
       const selection = $getSelection()
@@ -110,7 +113,7 @@ export function registerComposerInlineTokenPaste(
       }
       else
       {
-        // Keep the serialized prompt valid: mention tokens need trailing
+        // keep the serialized prompt valid: mention tokens need trailing
         // whitespace, so a paste ending in a mention gets the same
         // trailing space the autocomplete inserts.
         nodes.push($createTextNode(' '))

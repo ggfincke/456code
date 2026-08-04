@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/appearance/components/FontSizeSliderRow.tsx
+// render font size slider row
+
 import * as Haptics from 'expo-haptics'
 import { SymbolView } from '../../../../components/AppSymbol'
 import { useCallback, useEffect, useMemo, useRef } from 'react'

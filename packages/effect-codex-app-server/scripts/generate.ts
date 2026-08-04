@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// packages/effect-codex-app-server/scripts/generate.ts
+// run the generate repository workflow
 
 import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 import * as NodeServices from '@effect/platform-node/NodeServices'
@@ -407,7 +409,7 @@ function resolveResponseTypeName(
     }
     catch
     {
-      // Fall through to method-based lookup.
+      // fall through to method-based lookup.
     }
   }
 

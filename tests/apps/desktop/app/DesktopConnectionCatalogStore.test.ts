@@ -1,3 +1,6 @@
+// tests/apps/desktop/app/DesktopConnectionCatalogStore.test.ts
+// verify desktop connection catalog store behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import { ConnectionCatalogDocument } from '@t3tools/client-runtime/platform'

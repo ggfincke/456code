@@ -1,3 +1,6 @@
+// apps/server/scripts/cursor-acp-model-mismatch-probe.ts
+// run the cursor acp model mismatch probe repository workflow
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from 'node:child_process'
 import * as NodeProcess from 'node:process'

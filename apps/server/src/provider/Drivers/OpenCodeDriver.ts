@@ -1,19 +1,18 @@
 // apps/server/src/provider/Drivers/OpenCodeDriver.ts
 // creates isolated OpenCode instances bound to local storage or external servers
-/**
- * OpenCodeDriver — `ProviderDriver` for the OpenCode runtime.
- *
- * Mirrors the Codex / Claude drivers: a plain value whose `create()`
- * bundles `snapshot` / `adapter` / `textGeneration` closures over the
- * per-instance `OpenCodeSettings`.
- *
- * Two instances with different `serverUrl`s therefore talk to independent
- * OpenCode servers; when no `serverUrl` is set, the adapter + text-generation
- * shares spin up their own scoped child processes, and those child
- * processes are released when the registry scope closes.
- *
- * @module provider/Drivers/OpenCodeDriver
- */
+
+// OpenCodeDriver — `ProviderDriver` for the OpenCode runtime.
+//
+// mirrors the Codex / Claude drivers: a plain value whose `create()`
+// bundles `snapshot` / `adapter` / `textGeneration` closures over the
+// per-instance `OpenCodeSettings`.
+//
+// two instances with different `serverUrl`s therefore talk to independent
+// OpenCode servers; when no `serverUrl` is set, the adapter + text-generation
+// shares spin up their own scoped child processes, and those child
+// processes are released when the registry scope closes.
+//
+// @module provider/Drivers/OpenCodeDriver
 import { OpenCodeSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
 import * as Duration from 'effect/Duration'
 import * as Crypto from 'effect/Crypto'

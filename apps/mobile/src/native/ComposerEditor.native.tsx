@@ -1,3 +1,6 @@
+// apps/mobile/src/native/ComposerEditor.native.tsx
+// render composer editor native
+
 import { collectComposerInlineTokens } from '@t3tools/shared/composerInlineTokens'
 import { requireNativeView } from 'expo'
 import {

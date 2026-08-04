@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/ThreadFilesRouteScreen.tsx
+// render the thread files route screen route
+
 import { NativeHeaderToolbar, NativeStackScreenOptions } from '../../native/StackHeader'
 import { StackActions, useNavigation, type StaticScreenProps } from '@react-navigation/native'
 import { useCallback, useEffect, useRef, useState } from 'react'
@@ -397,7 +400,7 @@ export function ThreadFilesTreeScreen(props: ThreadFilesRouteScreenProps)
           headerShown: !isAndroid,
           unstable_headerSubtitle:
             Platform.OS === 'ios' && projectName.length > 0 ? projectName : undefined,
-          // No refresh button: the list already supports pull-to-refresh.
+          // no refresh button: the list already supports pull-to-refresh.
           unstable_headerToolbarItems: usesCompactMailToolbar
             ? () => [
                 createNativeMailSearchToolbarItem({
@@ -565,12 +568,12 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps)
       ) : undefined,
     [cwd, environmentId, fileInspector.supported, handleSelectFile, projectName, relativePath],
   )
-  // The workspace inspector column spans the full window height. On iOS the
+  // the workspace inspector column spans the full window height. On iOS the
   // pane brings its own nested native header; elsewhere it pads itself below
   // the top inset.
   const safeAreaInsets = useSafeAreaInsets()
   const inspectorHeaderInset = Platform.OS === 'ios' ? 0 : safeAreaInsets.top
-  // Hand the file navigator to the workspace so it renders beside the
+  // hand the file navigator to the workspace so it renders beside the
   // navigator, outside this screen's native header.
   const renderWorkspaceInspector = useCallback(
     () => renderInspector(inspectorHeaderInset),
@@ -606,7 +609,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps)
       <View className="flex-1 bg-sheet">
         <NativeStackScreenOptions
           options={{
-            // Static header config lives in Stack.tsx (SOLID_HEADER_OPTIONS: solid
+            // static header config lives in Stack.tsx (SOLID_HEADER_OPTIONS: solid
             // sheet-colored header — this route's content scrolls internally, so
             // there is nothing for glass to sample). Only dynamic values here.
             headerTintColor: iconColor,

@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/shell.test.ts
+// verify environment shell projections behavior
+
 import type { ServerConfig } from '@t3tools/contracts'
 import { EnvironmentId } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'

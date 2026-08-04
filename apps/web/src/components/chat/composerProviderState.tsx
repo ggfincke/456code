@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/composerProviderState.tsx
+// render composer provider state
+
 import {
   type ProviderDriverKind,
   type ProviderInstanceId,

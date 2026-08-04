@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/review-section-menu.test.ts
+// verify build review section menu behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import type {

@@ -1,3 +1,6 @@
+// tests/apps/server/integration/providerService.integration.test.ts
+// verify provider service integration behavior
+
 import type { ProviderRuntimeEvent } from '@t3tools/contracts'
 import { ProviderDriverKind, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
 import { DEFAULT_SERVER_SETTINGS } from '@t3tools/contracts/settings'

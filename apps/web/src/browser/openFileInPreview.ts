@@ -1,3 +1,6 @@
+// apps/web/src/browser/openFileInPreview.ts
+// open url in preview
+
 import type {
   AssetCreateUrlResult,
   AssetResource,

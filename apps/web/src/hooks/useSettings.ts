@@ -192,11 +192,9 @@ function splitPatch(patch: UnifiedSettingsPatch): {
 
 // ── Hooks ────────────────────────────────────────────────────────────
 
-/**
- * Non-hook accessor for the current merged client settings snapshot.
- * Used by non-React code paths (e.g. runtime services) that need the latest
- * settings without subscribing.
- */
+// non-hook accessor for the current merged client settings snapshot.
+// used by non-React code paths (e.g. runtime services) that need the latest
+// settings without subscribing.
 export function getClientSettings(): ClientSettings
 {
   return getClientSettingsSnapshot()
@@ -251,7 +249,7 @@ export function useClientSettings<T = ClientSettings>(
   return useMemo(() => (selector ? selector(settings) : (settings as T)), [selector, settings])
 }
 
-/** Read current settings for one environment, merged with client-local preferences. */
+// read current settings for one environment, merged with client-local preferences.
 export function useEnvironmentSettings<T = UnifiedSettings>(
   environmentId: EnvironmentId,
   selector?: (settings: UnifiedSettings) => T,
@@ -261,7 +259,7 @@ export function useEnvironmentSettings<T = UnifiedSettings>(
   return useMergedSettings(serverSettings ?? DEFAULT_SERVER_SETTINGS, selector)
 }
 
-/** Primary-only settings access for the settings UI and other explicitly global surfaces. */
+// primary-only settings access for the settings UI and other explicitly global surfaces.
 export function usePrimarySettings<T = UnifiedSettings>(
   selector?: (settings: UnifiedSettings) => T,
 ): T
@@ -269,12 +267,10 @@ export function usePrimarySettings<T = UnifiedSettings>(
   return useMergedSettings(useAtomValue(primaryServerSettingsAtom), selector)
 }
 
-/**
- * Returns an updater that routes each key to the correct backing store.
- *
- * Server keys are optimistically patched in atom-backed server state, then
- * persisted via RPC. Client keys go through client persistence.
- */
+// returns an updater that routes each key to the correct backing store.
+//
+// server keys are optimistically patched in atom-backed server state, then
+// persisted via RPC. Client keys go through client persistence.
 function useUpdateSettingsTarget(environmentId: EnvironmentId | null)
 {
   const persistServerSettings = useAtomCommand(

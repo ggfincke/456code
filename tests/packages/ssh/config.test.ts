@@ -1,3 +1,6 @@
+// tests/packages/ssh/config.test.ts
+// verify ssh config behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

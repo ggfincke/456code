@@ -1,3 +1,6 @@
+// apps/mobile/src/features/settings/SettingsClientStorageRouteScreen.tsx
+// render the settings client storage route screen route
+
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { SymbolView } from 'expo-symbols'

@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/previewEmptyStateLogic.ts
+// manage should show preview empty state
+
 import type { PreviewSessionSnapshot, ProjectScript } from '@t3tools/contracts'
 
 export function shouldShowPreviewEmptyState(snapshot: PreviewSessionSnapshot | null): boolean

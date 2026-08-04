@@ -1,3 +1,6 @@
+// tests/apps/web/connection/desktopLocal.test.ts
+// verify desktop local connection identity behavior
+
 import { BearerConnectionTarget, PrimaryConnectionTarget } from '@t3tools/client-runtime/connection'
 import { EnvironmentId, PRIMARY_LOCAL_ENVIRONMENT_ID } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'

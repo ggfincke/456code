@@ -1,3 +1,6 @@
+// apps/mobile/plugins/withIosCocoaPodsUuidCache.cjs
+// configure ios cocoa pods uuid cache in Expo projects
+
 const fs = require('node:fs')
 const path = require('node:path')
 

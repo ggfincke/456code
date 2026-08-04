@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/button.tsx
+// render reusable button UI primitives
+
 'use client'
 
 import { mergeProps } from '@base-ui/react/merge-props'

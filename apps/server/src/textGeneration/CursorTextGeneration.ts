@@ -33,10 +33,8 @@ const CURSOR_TIMEOUT_MS = 180_000
 
 const isTextGenerationError = Schema.is(TextGenerationError)
 
-/**
- * Build a Cursor text-generation closure bound to a specific `CursorSettings`
- * payload. See `makeCodexAdapter` for the overall per-instance rationale.
- */
+// build a Cursor text-generation closure bound to a specific `CursorSettings`
+// payload. See `makeCodexAdapter` for the overall per-instance rationale.
 export const makeCursorTextGeneration = Effect.fn('makeCursorTextGeneration')(function* (
   cursorSettings: CursorSettings,
   environment?: NodeJS.ProcessEnv,

@@ -1,3 +1,6 @@
+// packages/effect-acp/test/fixtures/acp-mock-peer.ts
+// verify acp mock peer behavior
+
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 

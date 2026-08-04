@@ -1,3 +1,6 @@
+// tests/apps/server/project/ProjectSetupScriptRunner.test.ts
+// verify project setup script runner behavior
+
 import { describe, expect, it, vi } from '@effect/vitest'
 import { type OrchestrationProject, ProjectId } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'

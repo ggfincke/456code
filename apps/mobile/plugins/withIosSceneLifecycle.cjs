@@ -1,3 +1,6 @@
+// apps/mobile/plugins/withIosSceneLifecycle.cjs
+// configure ios scene lifecycle in Expo projects
+
 const { withAppDelegate, withInfoPlist } = require('expo/config-plugins')
 
 const SCENE_DELEGATE = `

@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/shellCommands.ts
+// manage create shell environment atoms state
+
 import { WS_METHODS } from '@t3tools/contracts'
 import { Atom } from 'effect/unstable/reactivity'
 

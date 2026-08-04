@@ -1,3 +1,6 @@
+// apps/web/src/lib/windowControlsOverlay.ts
+// synchronize document window controls overlay class
+
 import { isWindowsPlatform } from './utils'
 
 const WCO_CLASS_NAME = 'wco'

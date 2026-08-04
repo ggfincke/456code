@@ -1,3 +1,6 @@
+// tests/apps/web/components/preview/previewAutomationRequestConsumer.test.ts
+// verify preview automation request consumer behavior
+
 import {
   EnvironmentId,
   type PreviewAutomationRequest,

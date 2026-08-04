@@ -21,11 +21,9 @@ const PUBLISHABLE_T3_VERSION_PATTERN = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/u
 const DEFAULT_SSH_COMMAND_TIMEOUT_MS = 60_000
 const MAX_SSH_ERROR_OUTPUT_LENGTH = 4_000
 
-/**
- * ssh is a real executable everywhere (`ssh.exe` on Windows), so it is always
- * spawned directly — cmd.exe shell mode would re-tokenize arguments such as
- * identity-file paths containing spaces.
- */
+// ssh is a real executable everywhere (`ssh.exe` on Windows), so it is always
+// spawned directly — cmd.exe shell mode would re-tokenize arguments such as
+// identity-file paths containing spaces.
 const sshCommandForPlatform = (platform: NodeJS.Platform): string =>
   platform === 'win32' ? 'ssh.exe' : 'ssh'
 

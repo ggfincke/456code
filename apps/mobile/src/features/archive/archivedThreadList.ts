@@ -1,3 +1,6 @@
+// apps/mobile/src/features/archive/archivedThreadList.ts
+// build archived thread groups
+
 import type { ArchivedSnapshotEntry } from '@t3tools/client-runtime/state/threads'
 import {
   scopeProject,

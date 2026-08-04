@@ -1,3 +1,6 @@
+// tests/apps/web/components/chat/composerSlashCommandSearch.test.ts
+// verify search slash command items behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import { ProviderDriverKind } from '@t3tools/contracts'
 

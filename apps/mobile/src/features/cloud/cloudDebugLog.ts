@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/cloudDebugLog.ts
+// determine whether cloud debug enabled
+
 export function isCloudDebugEnabled(): boolean
 {
   return (

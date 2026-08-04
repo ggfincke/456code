@@ -1,3 +1,6 @@
+// tests/packages/tailscale/tailscale.test.ts
+// verify tailscale tailscale behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'

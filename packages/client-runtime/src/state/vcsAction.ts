@@ -534,7 +534,7 @@ export function createVcsActionManager<R, E>(
                   }
                   catch
                   {
-                    // Presentation callbacks must not fail the source-control operation.
+                    // presentation callbacks must not fail the source-control operation.
                   }
                 }
               }),

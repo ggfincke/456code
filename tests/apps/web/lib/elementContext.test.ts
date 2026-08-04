@@ -1,3 +1,6 @@
+// tests/apps/web/lib/elementContext.test.ts
+// verify normalize element context selection behavior
+
 import type { PickedElementPayload } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
@@ -118,7 +121,7 @@ describe('normalizeElementContextSelection', () =>
     expect(result).not.toBeNull()
     expect(result!.htmlPreview.length).toBeLessThanOrEqual(4000)
     expect(result!.styles.length).toBeLessThanOrEqual(4000)
-    // Truncated values should end with the ellipsis sentinel
+    // truncated values should end with the ellipsis sentinel
     expect(result!.htmlPreview.endsWith('…')).toBe(true)
     expect(result!.styles.endsWith('…')).toBe(true)
   })

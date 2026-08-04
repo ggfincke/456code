@@ -1,3 +1,6 @@
+// tests/apps/web/components/ProviderUpdateLaunchNotification.logic.test.ts
+// verify provider update launch notification logic behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import {
   type EnvironmentId,
@@ -1044,7 +1047,7 @@ describe('provider update launch notification logic', () =>
 
     it('treats running/initial as non-terminal so they are not persisted', () =>
     {
-      // The per-environment update row uses this to decide what to store. A
+      // the per-environment update row uses this to decide what to store. A
       // "running"/"initial" snapshot never re-polls, so persisting it would pin
       // the row's spinner forever once pending clears (see the
       // resolveEnvironmentUpdateRowStatus "keeps a non-terminal result on
@@ -1112,7 +1115,7 @@ describe('provider update launch notification logic', () =>
 
     it('falls through a non-terminal result to live server state', () =>
     {
-      // The dispatch snapshot is still "running", but server state already
+      // the dispatch snapshot is still "running", but server state already
       // reports success — the row must not stay pinned on "Updating…".
       expect(
         resolveEnvironmentUpdateRowStatus({
@@ -1140,7 +1143,7 @@ describe('provider update launch notification logic', () =>
 
     it('keeps a non-terminal result on loading even after pending clears', () =>
     {
-      // The dispatch returned an incomplete ("running") snapshot and pending was
+      // the dispatch returned an incomplete ("running") snapshot and pending was
       // cleared in finally — the row must not revert to the idle Update button.
       expect(
         resolveEnvironmentUpdateRowStatus({

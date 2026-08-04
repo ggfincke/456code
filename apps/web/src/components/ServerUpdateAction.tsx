@@ -1,3 +1,6 @@
+// apps/web/src/components/ServerUpdateAction.tsx
+// render server update action
+
 import { useEffect, useRef, useState } from 'react'
 import type { EnvironmentId, ServerSelfUpdateCapability } from '@t3tools/contracts'
 import {
@@ -13,11 +16,9 @@ import { Button } from './ui/button'
 import { Spinner } from './ui/spinner'
 import { toastManager } from './ui/toast'
 
-/**
- * The npm install on the server side is capped at 10 minutes; expire the
- * spinner a bit beyond that so a dead transport never strands a disabled
- * button, while a legitimately slow install is never cut off.
- */
+// the npm install on the server side is capped at 10 minutes; expire the
+// spinner a bit beyond that so a dead transport never strands a disabled
+// button, while a legitimately slow install is never cut off.
 const UPDATE_PENDING_EXPIRY_MS = 12 * 60_000
 
 function updateFailureMessage(error: unknown): string
@@ -25,14 +26,12 @@ function updateFailureMessage(error: unknown): string
   return error instanceof Error ? error.message : 'Server update failed.'
 }
 
-/**
- * The call-to-action for a version-skewed server, matched to the update path
- * it advertises: a one-click install-and-restart for servers that can update
- * themselves, an update-the-desktop-app hint for desktop-managed backends
- * (running `npx 456code` there would start a second server, not update this one),
- * and copying the manual relaunch command for everything else — so the skew
- * warning always offers a way out.
- */
+// the call-to-action for a version-skewed server, matched to the update path
+// it advertises: a one-click install-and-restart for servers that can update
+// themselves, an update-the-desktop-app hint for desktop-managed backends
+// (running `npx 456code` there would start a second server, not update this one),
+// and copying the manual relaunch command for everything else — so the skew
+// warning always offers a way out.
 export function ServerUpdateAction({
   environmentId,
   serverLabel,
@@ -88,7 +87,7 @@ export function ServerUpdateAction({
 
   const handleUpdate = () =>
   {
-    // Synchronous re-entry guard: setPending is async, so a rapid
+    // synchronous re-entry guard: setPending is async, so a rapid
     // double-click would otherwise dispatch two updates.
     if (inFlightRef.current)
     {
@@ -140,9 +139,9 @@ export function ServerUpdateAction({
         if (!ownsAttempt()) return
         if (result._tag === 'Failure')
         {
-          // An interrupt may be the expected boot-service disconnect, but it
+          // an interrupt may be the expected boot-service disconnect, but it
           // can also be client-side cancellation before restart was accepted.
-          // Release the action quietly; version sync will remove it when a
+          // release the action quietly; version sync will remove it when a
           // successful replacement reconnects.
           if (isAtomCommandInterrupted(result))
           {
@@ -156,8 +155,8 @@ export function ServerUpdateAction({
           return
         }
         keepPendingForRestart()
-        // Installation can legitimately consume most of the request window.
-        // Give restart/reconnect a fresh full window after the server accepts
+        // installation can legitimately consume most of the request window.
+        // give restart/reconnect a fresh full window after the server accepts
         // the handoff instead of expiring based on the original click time.
         toastManager.add({
           type: 'success',
@@ -176,7 +175,7 @@ export function ServerUpdateAction({
       })
       .finally(() =>
       {
-        // A successful RPC only acknowledges that restart is scheduled. Keep
+        // a successful RPC only acknowledges that restart is scheduled. Keep
         // the action disabled until version sync unmounts it, or until the
         // safety expiry reports that reconnection never arrived.
         if (restartAccepted || !ownsAttempt() || expiryRef.current !== expiry) return

@@ -1,3 +1,6 @@
+// tests/apps/desktop/ipc/methods/wsl.test.ts
+// verify wsl ipc behavior
+
 import { DesktopWslStateSchema } from '@t3tools/contracts'
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'

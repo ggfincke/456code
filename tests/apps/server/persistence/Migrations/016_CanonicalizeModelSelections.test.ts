@@ -1,3 +1,6 @@
+// tests/apps/server/persistence/Migrations/016_CanonicalizeModelSelections.test.ts
+// verify 016 canonicalize model selections behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -17,7 +20,7 @@ layer('016_CanonicalizeModelSelections', (it) =>
       {
         const sql = yield* SqlClient.SqlClient
 
-        // Setup base state
+        // setup base state
         {
           yield* runMigrations({ toMigrationInclusive: 15 })
 
@@ -204,10 +207,10 @@ layer('016_CanonicalizeModelSelections', (it) =>
       `
         }
 
-        // Execute migration under test
+        // execute migration under test
         yield* runMigrations({ toMigrationInclusive: 16 })
 
-        // Assert expected state
+        // assert expected state
         {
           const projectRows = yield* sql<{
             readonly projectId: string

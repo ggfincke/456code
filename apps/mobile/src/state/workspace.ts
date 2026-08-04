@@ -1,3 +1,6 @@
+// apps/mobile/src/state/workspace.ts
+// manage workspace state through a React hook
+
 import { useAtomValue } from '@effect/atom-react'
 import { useMemo } from 'react'
 

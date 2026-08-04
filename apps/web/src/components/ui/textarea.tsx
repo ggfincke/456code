@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/textarea.tsx
+// render reusable textarea UI primitives
+
 'use client'
 
 import { Field as FieldPrimitive } from '@base-ui/react/field'

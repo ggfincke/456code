@@ -1,3 +1,6 @@
+// tests/apps/server/telemetry/Identify.test.ts
+// verify identify behavior
+
 import * as NodeCrypto from 'node:crypto'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'

@@ -1,3 +1,6 @@
+// apps/server/src/observability/RpcInstrumentation.ts
+// observe rpc effect
+
 import { WS_METHODS } from '@t3tools/contracts'
 import * as Clock from 'effect/Clock'
 import * as Duration from 'effect/Duration'

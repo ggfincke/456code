@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/input-group.tsx
+// render reusable input group UI primitives
+
 'use client'
 
 import { cva, type VariantProps } from 'class-variance-authority'

@@ -1,3 +1,6 @@
+// tests/apps/server/auth/EnvironmentAuth.test.ts
+// verify environment auth behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { AuthAdministrativeScopes } from '@t3tools/contracts'
 import { expect, it } from '@effect/vitest'

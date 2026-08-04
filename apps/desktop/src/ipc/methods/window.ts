@@ -1,3 +1,6 @@
+// apps/desktop/src/ipc/methods/window.ts
+// resolve app branding
+
 import {
   ContextMenuItemSchema,
   DesktopAppBrandingSchema,
@@ -81,7 +84,7 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
       const isPrimary = instance.id === PRIMARY_LOCAL_ENVIRONMENT_ID
       const config = yield* instance.currentConfig
       const snapshot = yield* instance.snapshot
-      // A secondary backend (e.g. a parallel WSL backend) that hasn't produced
+      // a secondary backend (e.g. a parallel WSL backend) that hasn't produced
       // a config yet (mid-registration, before its first start cycle) or that
       // is retrying a *transient* preflight failure (WSL VM still booting, a
       // not-yet-built linux server entry) is not listening on a port. We
@@ -92,7 +95,7 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
       // trigger.
       if (Option.isNone(config) || Option.isSome(config.value.preflightFailure))
       {
-        // Skip the primary (same-origin, no "connecting" affordance) and skip a
+        // skip the primary (same-origin, no "connecting" affordance) and skip a
         // secondary whose preflight failed *fatally* (no node, wrong version,
         // missing build tools): it has stopped retrying, so an indefinite
         // "Connecting…" would be misleading — its error is surfaced by the
@@ -132,7 +135,7 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
   }),
 })
 
-// Pull the distro selection out of a backend instance id like
+// pull the distro selection out of a backend instance id like
 // "wsl:ubuntu". Returns null for "wsl:default", which is the sentinel
 // for "track the user's WSL default distro" and maps to the
 // wslEnv-derived default at picker time.
@@ -168,7 +171,7 @@ export const pickFolder = DesktopIpc.makeIpcMethod({
     const environment = yield* DesktopEnvironment.DesktopEnvironment
     const appSettings = yield* DesktopAppSettings.DesktopAppSettings
     const wslEnvironment = yield* DesktopWslEnvironment.DesktopWslEnvironment
-    // Three picker modes:
+    // three picker modes:
     //   - targetEnvironmentId omitted: default to the primary picker. Keeps
     //     the historical behavior unchanged for users who never enabled the
     //     WSL backend, and is what unfamiliar callers should get out of the
@@ -187,7 +190,7 @@ export const pickFolder = DesktopIpc.makeIpcMethod({
       targetId !== PRIMARY_LOCAL_ENVIRONMENT_ID &&
       targetId.startsWith(DesktopWslBackend.WSL_INSTANCE_ID_PREFIX)
     const settings = yield* appSettings.get
-    // Fall back to the persisted wslDistro when the id is the
+    // fall back to the persisted wslDistro when the id is the
     // "wsl:default" sentinel; the orchestrator uses the same fallback
     // for the actual backend.
     const wslDistro = useWsl ? (wslDistroFromTarget ?? settings.wslDistro) : null

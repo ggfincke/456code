@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/001_OrchestrationEvents.ts
+// apply persistence migration 001 orchestration events
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

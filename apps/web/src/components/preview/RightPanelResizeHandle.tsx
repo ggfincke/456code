@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/RightPanelResizeHandle.tsx
+// render right panel resize handle
+
 import type { ResizableWidthHandlers } from '~/hooks/useResizableWidth'
 import { cn } from '~/lib/utils'
 
@@ -7,14 +10,12 @@ interface Props
   className?: string
 }
 
-/**
- * Hit target for resizing a right-anchored panel via its left edge.
- *
- * - Sits on top of the panel's border with a 4px overlap on each side so the
- *   user can grab a few pixels off the edge without aiming.
- * - Visual indicator is a 1px line that lights up on hover/active to mirror
- *   VS Code / Cursor.
- */
+// hit target for resizing a right-anchored panel via its left edge.
+//
+// - Sits on top of the panel's border with a 4px overlap on each side so the
+//   user can grab a few pixels off the edge without aiming.
+// - Visual indicator is a 1px line that lights up on hover/active to mirror
+//   VS Code / Cursor.
 export function RightPanelResizeHandle({ handlers, className }: Props)
 {
   return (

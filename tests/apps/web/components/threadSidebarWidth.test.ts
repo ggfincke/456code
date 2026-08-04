@@ -1,3 +1,6 @@
+// tests/apps/web/components/threadSidebarWidth.test.ts
+// verify thread sidebar width behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

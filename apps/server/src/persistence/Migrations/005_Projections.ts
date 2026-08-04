@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/005_Projections.ts
+// apply persistence migration 005 projections
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/PendingUserInputCard.tsx
+// render pending user input card
+
 import type { ApprovalRequestId } from '@t3tools/contracts'
 import { Pressable, View } from 'react-native'
 

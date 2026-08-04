@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/ProviderModelsSection.tsx
+// render provider models section
+
 'use client'
 
 import {
@@ -25,11 +28,9 @@ import { Button } from '../ui/button'
 import { Input } from '../ui/input'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 
-/**
- * Placeholder text for the "add a custom model" input, keyed by driver
- * kind. Mirrors the prior hardcoded switch in `SettingsPanels.tsx` so the
- * UX is unchanged — only the owning component has moved.
- */
+// placeholder text for the "add a custom model" input, keyed by driver
+// kind. Mirrors the prior hardcoded switch in `SettingsPanels.tsx` so the
+// UX is unchanged — only the owning component has moved.
 const CUSTOM_MODEL_PLACEHOLDER_BY_KIND: Partial<Record<ProviderDriverKind, string>> = {
   [ProviderDriverKind.make('codex')]: 'gpt-6.7-codex-ultra-preview',
   [ProviderDriverKind.make('claudeAgent')]: 'claude-sonnet-5',
@@ -39,52 +40,42 @@ const CUSTOM_MODEL_PLACEHOLDER_BY_KIND: Partial<Record<ProviderDriverKind, strin
 
 interface ProviderModelsSectionProps
 {
-  /** Identifier used to namespace input ids within the DOM. */
+  // identifier used to namespace input ids within the DOM.
   readonly instanceId: ProviderInstanceId
-  /**
-   * Driver kind for slug normalization + input placeholder. `null` when
-   * the section is rendered without enough provider metadata.
-   */
+  // driver kind for slug normalization + input placeholder. `null` when
+  // the section is rendered without enough provider metadata.
   readonly driverKind: ProviderDriverKind | null
-  /**
-   * The live model list to display. Includes both built-in (probe-reported)
-   * and custom entries, distinguished by `isCustom`.
-   */
+  // the live model list to display. Includes both built-in (probe-reported)
+  // and custom entries, distinguished by `isCustom`.
   readonly models: ReadonlyArray<ServerProviderModel>
-  /**
-   * The persisted custom-model slug list for this instance. Drives dedup,
-   * and is the array we hand back verbatim (with the new slug appended /
-   * removed) via `onChange`.
-   */
+  // the persisted custom-model slug list for this instance. Drives dedup,
+  // and is the array we hand back verbatim (with the new slug appended /
+  // removed) via `onChange`.
   readonly customModels: ReadonlyArray<string>
-  /** Server-returned model slugs hidden from the model picker. */
+  // server-returned model slugs hidden from the model picker.
   readonly hiddenModels: ReadonlyArray<string>
-  /** Model slugs favorited for this provider instance. */
+  // model slugs favorited for this provider instance.
   readonly favoriteModels: ReadonlyArray<string>
-  /** Explicit user-authored model ordering for this provider instance. */
+  // explicit user-authored model ordering for this provider instance.
   readonly modelOrder: ReadonlyArray<string>
-  /**
-   * Commit the new custom-model list. Caller is responsible for routing the
-   * write to the correct storage (legacy `settings.providers[kind]` vs.
-   * `providerInstances[id].config`).
-   */
+  // commit the new custom-model list. Caller is responsible for routing the
+  // write to the correct storage (legacy `settings.providers[kind]` vs.
+  // `providerInstances[id].config`).
   readonly onChange: (next: ReadonlyArray<string>) => void
   readonly onHiddenModelsChange: (next: ReadonlyArray<string>) => void
   readonly onFavoriteModelsChange: (next: ReadonlyArray<string>) => void
   readonly onModelOrderChange: (next: ReadonlyArray<string>) => void
 }
 
-/**
- * Shared "Models" section rendered on both the built-in default and custom
- * provider-instance cards. Owns its own input + error local state so two
- * cards on screen don't fight over the input value.
- *
- * Validation mirrors the pre-consolidation logic in `SettingsPanels`:
- *   - empty / whitespace → "Enter a model slug."
- *   - duplicate of a non-custom (probe-reported) slug → "already built in"
- *   - exceeds `MAX_CUSTOM_MODEL_LENGTH` → length error
- *   - duplicate of an already-saved custom slug → already-saved error
- */
+// shared "Models" section rendered on both the built-in default and custom
+// provider-instance cards. Owns its own input + error local state so two
+// cards on screen don't fight over the input value.
+//
+// validation mirrors the pre-consolidation logic in `SettingsPanels`:
+//   - empty / whitespace -> "Enter a model slug."
+//   - duplicate of a non-custom (probe-reported) slug -> "already built in"
+//   - exceeds `MAX_CUSTOM_MODEL_LENGTH` -> length error
+//   - duplicate of an already-saved custom slug -> already-saved error
 export function ProviderModelsSection({
   instanceId,
   driverKind,
@@ -141,7 +132,7 @@ export function ProviderModelsSection({
     setInput('')
     setError(null)
 
-    // Scroll the new row into view once the DOM reflects the commit.
+    // scroll the new row into view once the DOM reflects the commit.
     // `MutationObserver` handles the one-frame gap between `onChange` and
     // the `models` prop update; the `requestAnimationFrame` covers the
     // common case where the parent updates synchronously.

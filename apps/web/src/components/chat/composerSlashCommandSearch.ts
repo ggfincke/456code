@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/composerSlashCommandSearch.ts
+// search slash command items
+
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/workspace-file-image-cache.ts
+// create workspace file image atom family
+
 import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import { Atom } from 'effect/unstable/reactivity'

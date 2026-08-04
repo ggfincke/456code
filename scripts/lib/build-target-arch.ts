@@ -1,3 +1,6 @@
+// scripts/lib/build-target-arch.ts
+// build target arch
+
 import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Config from 'effect/Config'
 import * as Effect from 'effect/Effect'
@@ -37,7 +40,7 @@ const resolveHostProcessArch = Effect.fn('resolveHostProcessArch')(function* ()
   {
     if (platform !== 'win32') return 'x64'
 
-    // On Windows-on-Arm, x64 Node/Bun can run under emulation while the host
+    // on Windows-on-Arm, x64 Node/Bun can run under emulation while the host
     // still reports ARM64 via the processor environment variables.
     const env = yield* WindowsProcessorArchitectureConfig
     return (

@@ -1,3 +1,6 @@
+// tests/apps/server/provider/makeManagedServerProvider.test.ts
+// verify make managed server provider behavior
+
 import { describe, it, assert } from '@effect/vitest'
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from '@t3tools/contracts'
 import { createModelCapabilities } from '@t3tools/shared/model'

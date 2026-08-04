@@ -1,3 +1,6 @@
+// apps/server/src/git/Utils.ts
+// determine whether git repository
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'

@@ -1,3 +1,6 @@
+// packages/effect-codex-app-server/src/_internal/stdio.ts
+// create child stdio
+
 import * as Cause from 'effect/Cause'
 import * as Effect from 'effect/Effect'
 import * as Queue from 'effect/Queue'

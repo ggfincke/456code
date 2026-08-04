@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/nativeSourceFileAdapter.ts
+// create native source style
+
 import type {
   NativeReviewDiffRow,
   NativeReviewDiffStyle,

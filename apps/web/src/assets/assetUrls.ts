@@ -1,3 +1,6 @@
+// apps/web/src/assets/assetUrls.ts
+// manage asset url state
+
 import { useAtomValue } from '@effect/atom-react'
 import { resolveAssetUrl } from '@t3tools/client-runtime/state/assets'
 import type { AssetResource, EnvironmentId } from '@t3tools/contracts'

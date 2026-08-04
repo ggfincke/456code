@@ -1,3 +1,6 @@
+// apps/server/src/diagnostics/ProcessResourceMonitor.ts
+// collect monitored samples
+
 import {
   ServerProcessResourceHistoryFailureTag,
   type ServerProcessResourceHistoryBucket,

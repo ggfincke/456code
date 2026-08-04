@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/terminal/ThreadTerminalRouteScreen.test.ts
+// verify resolve terminal route bootstrap behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { resolveTerminalRouteBootstrap } from '../../../../../apps/mobile/src/features/terminal/terminalRouteBootstrap'

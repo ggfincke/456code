@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/AgentBrowserCursor.tsx
+// render agent browser cursor
+
 'use client'
 
 import type { DesktopPreviewPointerEvent } from '@t3tools/contracts'

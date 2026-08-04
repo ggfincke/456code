@@ -1,3 +1,6 @@
+// tests/apps/server/provider/Drivers/ClaudeExecutable.test.ts
+// verify resolve claude sdk executable path behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import { SpawnExecutableResolution } from '@t3tools/shared/shell'

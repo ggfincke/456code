@@ -1,3 +1,6 @@
+// packages/client-runtime/src/errors/errorTrace.ts
+// find error trace id
+
 import * as Cause from 'effect/Cause'
 
 const MAX_ERROR_TRACE_NODES = 128

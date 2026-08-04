@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/git/GitCommitSheet.tsx
+// render git commit sheet
+
 import { useNavigation, type StaticScreenProps } from '@react-navigation/native'
 import { useCallback, useState } from 'react'
 import { Platform, Pressable, ScrollView, View } from 'react-native'

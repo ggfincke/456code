@@ -1,3 +1,6 @@
+// apps/desktop/src/electron/ElectronTheme.ts
+// define electron theme set source error
+
 import { DesktopThemeSchema, type DesktopTheme } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'

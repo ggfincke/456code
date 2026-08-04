@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/terminal.ts
+// manage create terminal environment atoms state
+
 import { type TerminalSummary, WS_METHODS } from '@t3tools/contracts'
 import * as Stream from 'effect/Stream'
 import { Atom } from 'effect/unstable/reactivity'

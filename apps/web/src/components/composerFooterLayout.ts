@@ -1,3 +1,6 @@
+// apps/web/src/components/composerFooterLayout.ts
+// determine whether use compact composer footer
+
 export const COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX = 620
 export const COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX = 780
 export const COMPOSER_PRIMARY_ACTIONS_COMPACT_BREAKPOINT_PX =

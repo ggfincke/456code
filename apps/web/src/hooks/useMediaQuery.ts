@@ -1,3 +1,6 @@
+// apps/web/src/hooks/useMediaQuery.ts
+// manage media query input through a React hook
+
 import { useCallback, useSyncExternalStore } from 'react'
 
 const BREAKPOINTS = {
@@ -66,7 +69,7 @@ function getServerSnapshot(): boolean
 export type MediaQueryInput = {
   min?: Breakpoint | number
   max?: Breakpoint | number
-  /** Touch-like input (finger). Use "fine" for mouse/trackpad. */
+  // touch-like input (finger). Use "fine" for mouse/trackpad.
   pointer?: 'coarse' | 'fine'
 }
 

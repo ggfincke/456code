@@ -1,3 +1,5 @@
+// experiments/messages-glass-lab/MessagesGlassLab/ContentView.swift
+// prototypes glass message presentation
 import SwiftUI
 
 struct LabThread: Identifiable, Hashable {

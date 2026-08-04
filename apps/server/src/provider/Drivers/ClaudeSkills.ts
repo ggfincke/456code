@@ -1,17 +1,16 @@
 // apps/server/src/provider/Drivers/ClaudeSkills.ts
 // discovers Claude skills from the same config boundary as its runtime
-/**
- * ClaudeSkills — filesystem discovery of Claude Code skills for the `$` picker.
- *
- * Claude Code loads skills from `<config dir>/skills` (user scope) and
- * `<cwd>/.claude/skills` (project scope), one directory per skill with a
- * `SKILL.md` carrying YAML frontmatter. The Agent SDK init handshake surfaces
- * skills only as slash commands without their filesystem paths, so the
- * provider snapshot scans the same locations directly, mirroring how the
- * Codex app-server reports its skills.
- *
- * @module provider/Drivers/ClaudeSkills
- */
+
+// ClaudeSkills — filesystem discovery of Claude Code skills for the `$` picker.
+//
+// claude Code loads skills from `<config dir>/skills` (user scope) and
+// `<cwd>/.claude/skills` (project scope), one directory per skill with a
+// `SKILL.md` carrying YAML frontmatter. The Agent SDK init handshake surfaces
+// skills only as slash commands without their filesystem paths, so the
+// provider snapshot scans the same locations directly, mirroring how the
+// codex app-server reports its skills.
+//
+// @module provider/Drivers/ClaudeSkills
 import * as NodeOS from 'node:os'
 
 import type { ClaudeSettings, ServerProviderSkill } from '@t3tools/contracts'
@@ -63,12 +62,10 @@ function parseSkillFrontmatter(contents: string): SkillFrontmatter
   }
 }
 
-/**
- * Resolve the Claude config directory the CLI would use, matching the
- * precedence the spawned CLI sees: the instance's `homePath` (exported as
- * `CLAUDE_CONFIG_DIR` by `makeClaudeEnvironment`), then a `CLAUDE_CONFIG_DIR`
- * already present in the process environment, then `~/.claude`.
- */
+// resolve the Claude config directory the CLI would use, matching the
+// precedence the spawned CLI sees: the instance's `homePath` (exported as
+// `CLAUDE_CONFIG_DIR` by `makeClaudeEnvironment`), then a `CLAUDE_CONFIG_DIR`
+// already present in the process environment, then `~/.claude`.
 const resolveClaudeConfigDirPath = Effect.fn('resolveClaudeConfigDirPath')(function* (
   config: Pick<ClaudeSettings, 'homePath'>,
   environment: NodeJS.ProcessEnv,
@@ -82,7 +79,7 @@ const resolveClaudeConfigDirPath = Effect.fn('resolveClaudeConfigDirPath')(funct
     const expandedHomePath = expandHomePath(homePath)
     return cwd ? path.resolve(cwd, expandedHomePath) : path.resolve(expandedHomePath)
   }
-  // No tilde expansion here: the spawned CLI receives this env var verbatim
+  // no tilde expansion here: the spawned CLI receives this env var verbatim
   // (env vars are never shell-expanded), so a literal `~` must stay literal
   // for discovery to scan the same directory the runtime would. A relative
   // value is resolved against the workspace cwd — the subprocess's own cwd —
@@ -97,13 +94,11 @@ const resolveClaudeConfigDirPath = Effect.fn('resolveClaudeConfigDirPath')(funct
   return path.join(resolvedHome, '.claude')
 })
 
-/**
- * Enumerate Claude Code skills from the user config dir and the workspace.
- * Discovery is best-effort: unreadable roots and malformed skill entries are
- * skipped so a broken skill never degrades the provider snapshot. On name
- * collisions the project-scoped skill wins, matching Claude Code's
- * most-specific-wins resolution.
- */
+// enumerate Claude Code skills from the user config dir and the workspace.
+// discovery is best-effort: unreadable roots and malformed skill entries are
+// skipped so a broken skill never degrades the provider snapshot. On name
+// collisions the project-scoped skill wins, matching Claude Code's
+// most-specific-wins resolution.
 export const discoverClaudeSkills = Effect.fn('discoverClaudeSkills')(function* (
   config: Pick<ClaudeSettings, 'homePath'>,
   cwd?: string,
@@ -138,7 +133,7 @@ export const discoverClaudeSkills = Effect.fn('discoverClaudeSkills')(function* 
       }
 
       const frontmatter = parseSkillFrontmatter(contents)
-      // Malformed frontmatter means the skill won't load in Claude Code
+      // malformed frontmatter means the skill won't load in Claude Code
       // either — skip it rather than surfacing a broken entry under its
       // directory name.
       if (frontmatter.kind === 'malformed')

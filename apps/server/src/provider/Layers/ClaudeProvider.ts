@@ -121,7 +121,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: 'contextWindow',
           label: 'Context Window',
-          // Claude Code selects the 1M variant explicitly (`claude-opus-5[1m]`).
+          // claude Code selects the 1M variant explicitly (`claude-opus-5[1m]`).
           options: [
             { value: '200k', label: '200k' },
             { value: '1m', label: '1M', isDefault: true },
@@ -261,7 +261,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: 'contextWindow',
           label: 'Context Window',
-          // Sonnet is 200k-default in Claude Code (1M is opt-in there too).
+          // sonnet is 200k-default in Claude Code (1M is opt-in there too).
           options: [
             { value: '200k', label: '200k', isDefault: true },
             { value: '1m', label: '1M' },
@@ -291,7 +291,7 @@ const BUILT_IN_MODELS: ReadonlyArray<ServerProviderModel> = [
         buildSelectOptionDescriptor({
           id: 'contextWindow',
           label: 'Context Window',
-          // Sonnet is 200k-default in Claude Code (1M is opt-in there too).
+          // sonnet is 200k-default in Claude Code (1M is opt-in there too).
           options: [
             { value: '200k', label: '200k', isDefault: true },
             { value: '1m', label: '1M' },
@@ -408,16 +408,14 @@ export function resolveClaudeEffort(
   return typeof value === 'string' ? value : undefined
 }
 
-/**
- * Normalize a resolved Claude effort value into one suitable for the Claude
- * CLI's `--effort` flag.
- *
- * Mirrors the mapping used when invoking the Claude Agent SDK
- * ({@link getEffectiveClaudeAgentEffort} in ClaudeAdapter): `ultracode` is a
- * Claude Code setting that pairs with `xhigh`, `ultrathink` is filtered out
- * because it is a prompt-prefix mode, and older model compatibility mappings
- * are preserved for current Claude Code behavior.
- */
+// normalize a resolved Claude effort value into one suitable for the Claude
+// CLI's `--effort` flag.
+//
+// mirrors the mapping used when invoking the Claude Agent SDK
+// ({@link getEffectiveClaudeAgentEffort} in ClaudeAdapter): `ultracode` is a
+// claude Code setting that pairs with `xhigh`, `ultrathink` is filtered out
+// because it is a prompt-prefix mode, and older model compatibility mappings
+// are preserved for current Claude Code behavior.
 export function normalizeClaudeCliEffort(
   effort: string | null | undefined,
   model: string | null | undefined,
@@ -602,24 +600,22 @@ function apiProviderAuthMetadata(
 
 // ── SDK capability probe ────────────────────────────────────────────
 
-// Amazon Bedrock initializes far slower than first-party auth: the SDK boots the
-// Bedrock backend and runs the `awsAuthRefresh` credential hook before returning
+// amazon Bedrock initializes far slower than first-party auth: the SDK boots the
+// bedrock backend and runs the `awsAuthRefresh` credential hook before returning
 // account info. The previous 8s budget expired mid-init, so the probe returned
 // `undefined` and left the provider unverified and unselectable in the picker.
 const CAPABILITIES_PROBE_TIMEOUT_MS = 25_000
 const USAGE_PROBE_TIMEOUT_MS = 4_000
 
-/**
- * Keep workspace-scoped command discovery intact while isolating the periodic
- * health check from configured MCP servers.
- */
+// keep workspace-scoped command discovery intact while isolating the periodic
+// health check from configured MCP servers.
 export const CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES = [
   'user',
   'project',
   'local',
 ] as const satisfies ReadonlyArray<SettingSource>
 
-/** Build the exact SDK options used by the periodic Claude capability probe. */
+// build the exact SDK options used by the periodic Claude capability probe.
 export function buildClaudeCapabilitiesProbeQueryOptions(input: {
   readonly executablePath: string
   readonly abortController: AbortController
@@ -633,13 +629,13 @@ export function buildClaudeCapabilitiesProbeQueryOptions(input: {
     abortController: input.abortController,
     settingSources: [...CLAUDE_CAPABILITIES_PROBE_SETTING_SOURCES],
     allowedTools: [],
-    // Ignore MCP definitions from every filesystem setting source above. The
+    // ignore MCP definitions from every filesystem setting source above. The
     // SDK combines this empty explicit map with --strict-mcp-config.
     mcpServers: {},
     strictMcpConfig: true,
     env: {
       ...input.environment,
-      // Connected claude.ai MCP servers are discovered outside filesystem
+      // connected claude.ai MCP servers are discovered outside filesystem
       // config; disable them independently for this health check.
       ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
     },
@@ -659,11 +655,9 @@ type ClaudeCapabilitiesProbe = {
   readonly email: string | undefined
   readonly subscriptionType: string | undefined
   readonly tokenSource: string | undefined
-  /**
-   * Active API backend reported by the SDK's `AccountInfo`. Anthropic OAuth
-   * login only applies when `"firstParty"`; for Amazon Bedrock (`"bedrock"`)
-   * the subscription/token fields are absent and auth is external AWS creds.
-   */
+  // active API backend reported by the SDK's `AccountInfo`. Anthropic OAuth
+  // login only applies when `"firstParty"`; for Amazon Bedrock (`"bedrock"`)
+  // the subscription/token fields are absent and auth is external AWS creds.
   readonly apiProvider: string | undefined
   readonly planUsage?: ClaudePlanUsageProbe | undefined
   readonly slashCommands: ReadonlyArray<ServerProviderSlashCommand>
@@ -930,19 +924,17 @@ function waitForAbortSignal(signal: AbortSignal): Promise<void>
   })
 }
 
-/**
- * Probe account information by spawning a lightweight Claude Agent SDK
- * session and reading the initialization result.
- *
- * We pass a never-yielding AsyncIterable as the prompt so that no user
- * message is ever written to the subprocess stdin. This means the Claude
- * Code subprocess completes its local initialization IPC (returning
- * account info and slash commands) but never starts an API request to
- * Anthropic. We read the init data and then abort the subprocess.
- *
- * This is used as a fallback when `claude auth status` does not include
- * subscription type information.
- */
+// probe account information by spawning a lightweight Claude Agent SDK
+// session and reading the initialization result.
+//
+// we pass a never-yielding AsyncIterable as the prompt so that no user
+// message is ever written to the subprocess stdin. This means the Claude
+// code subprocess completes its local initialization IPC (returning
+// account info and slash commands) but never starts an API request to
+// Anthropic. We read the init data and then abort the subprocess.
+//
+// this is used as a fallback when `claude auth status` does not include
+// subscription type information.
 const probeClaudeCapabilities = (
   claudeSettings: ClaudeSettings,
   environment?: NodeJS.ProcessEnv,
@@ -960,8 +952,8 @@ const probeClaudeCapabilities = (
     const { account, init, query } = yield* Effect.tryPromise(async () =>
     {
       const q = claudeQuery({
-        // Never yield — we only need initialization data, not a conversation.
-        // This prevents any prompt from reaching the Anthropic API.
+        // never yield — we only need initialization data, not a conversation.
+        // this prevents any prompt from reaching the Anthropic API.
         // oxlint-disable-next-line require-yield
         prompt: (async function* (): AsyncGenerator<SDKUserMessage>
         {

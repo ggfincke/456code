@@ -1,3 +1,6 @@
+// apps/web/src/components/KeybindingsUpdateToast.logic.ts
+// derive keybindings update toast presentation behavior
+
 import type { ServerConfigStreamEvent } from '@t3tools/contracts'
 
 export const KEYBINDINGS_SUCCESS_TOAST_COOLDOWN_MS = 2_000

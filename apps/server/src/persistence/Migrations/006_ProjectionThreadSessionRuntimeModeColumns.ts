@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Migrations/006_ProjectionThreadSessionRuntimeModeColumns.ts
+// apply persistence migration 006 projection thread session runtime mode columns
+
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as Effect from 'effect/Effect'
 

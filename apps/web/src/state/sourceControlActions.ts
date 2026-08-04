@@ -1,3 +1,6 @@
+// apps/web/src/state/sourceControlActions.ts
+// manage source control action kind state
+
 import { useAtomValue } from '@effect/atom-react'
 import type {
   AtomCommandFailure,

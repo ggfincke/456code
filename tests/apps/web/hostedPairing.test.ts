@@ -1,3 +1,6 @@
+// tests/apps/web/hostedPairing.test.ts
+// verify hosted pairing behavior
+
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import {

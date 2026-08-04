@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/profileStore.ts
+// manage profile state
+
 import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'

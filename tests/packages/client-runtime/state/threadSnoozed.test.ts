@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/threadSnoozed.test.ts
+// verify effective snoozed behavior
+
 import { ThreadId } from '@t3tools/contracts'
 import { TurnId } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
@@ -108,7 +111,7 @@ describe('effectiveSnoozed', () =>
         makeShell({
           snoozedUntil: FUTURE_WAKE,
           sessionStatus: 'error',
-          // Snoozed AFTER the error's status edge.
+          // snoozed AFTER the error's status edge.
           snoozedAt: '2026-04-10T11:30:00.000Z',
         }),
         { now: NOW },
@@ -197,14 +200,14 @@ describe('canSnooze', () =>
 
   it('refuses a queued turn start — same invisible-pending-work rule as settle', () =>
   {
-    // Fresh user message, no turn has adopted it, within the grace window.
+    // fresh user message, no turn has adopted it, within the grace window.
     expect(
       canSnooze(
         { ...makeShell({}), latestUserMessageAt: '2026-04-10T11:59:30.000Z' },
         { now: NOW },
       ),
     ).toBe(false)
-    // Outside the grace window the message is stale data, not queued work.
+    // outside the grace window the message is stale data, not queued work.
     expect(
       canSnooze(
         { ...makeShell({}), latestUserMessageAt: '2026-04-10T11:00:00.000Z' },
@@ -248,7 +251,7 @@ describe('threadWokeAt', () =>
 
   it('keeps the early wake authoritative after the scheduled time passes', () =>
   {
-    // Woke early at 10:30 via run-completed; the scheduled wake (PAST_WAKE
+    // woke early at 10:30 via run-completed; the scheduled wake (PAST_WAKE
     // 10:00 relative to a later now) has ALSO passed. Reporting the
     // scheduled time would resurface a Woke pill the user already cleared
     // by visiting between the early wake and now.

@@ -1,3 +1,6 @@
+// apps/server/src/stream/collectUint8StreamText.ts
+// collect uint8 stream text
+
 import * as Effect from 'effect/Effect'
 import * as Stream from 'effect/Stream'
 
@@ -33,10 +36,8 @@ export const collectUint8StreamText = <E>(input: {
       }),
       (state, chunk): CollectState =>
       {
-        /*
-         * keep draining after truncation so the child process can exit normally.
-         * its a know issue that on windows killing after the output cap can force an expensive taskkill operation and hurt performance
-         */
+        // keep draining after truncation so the child process can exit normally.
+        // its a know issue that on windows killing after the output cap can force an expensive taskkill operation and hurt performance
         if (state.truncated)
         {
           return state

@@ -1,3 +1,6 @@
+// tests/apps/web/components/ProviderUpdateEnvironmentRows.test.tsx
+// verify provider update environment rows behavior
+
 import type { Dispatch, ReactElement, SetStateAction } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 import {

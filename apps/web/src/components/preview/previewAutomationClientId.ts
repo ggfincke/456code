@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/previewAutomationClientId.ts
+// create preview automation client id
+
 export function createPreviewAutomationClientId(): string
 {
   const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))

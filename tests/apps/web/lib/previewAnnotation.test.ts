@@ -1,3 +1,6 @@
+// tests/apps/web/lib/previewAnnotation.test.ts
+// verify preview annotations behavior
+
 import type { PreviewAnnotationPayload } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 

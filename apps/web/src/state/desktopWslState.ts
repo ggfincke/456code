@@ -1,3 +1,6 @@
+// apps/web/src/state/desktopWslState.ts
+// manage desktop wsl state
+
 import type { DesktopBridge, DesktopWslState } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'

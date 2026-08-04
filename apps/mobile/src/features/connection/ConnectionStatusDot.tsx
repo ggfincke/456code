@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/ConnectionStatusDot.tsx
+// render connection status dot
+
 import { useEffect } from 'react'
 import { View } from 'react-native'
 import Animated, {

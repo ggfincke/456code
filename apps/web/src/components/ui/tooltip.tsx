@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/tooltip.tsx
+// render reusable tooltip UI primitives
+
 import { Tooltip as TooltipPrimitive } from '@base-ui/react/tooltip'
 
 import { cn } from '~/lib/utils'

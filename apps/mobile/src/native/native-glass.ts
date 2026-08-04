@@ -1,3 +1,6 @@
+// apps/mobile/src/native/native-glass.ts
+// expose native liquid glass supported
+
 import { isLiquidGlassSupported } from '@callstack/liquid-glass'
 import { Platform } from 'react-native'
 

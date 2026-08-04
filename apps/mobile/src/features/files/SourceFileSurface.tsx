@@ -1,3 +1,6 @@
+// apps/mobile/src/features/files/SourceFileSurface.tsx
+// render source file surface
+
 import { useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import type { ComponentType } from 'react'
@@ -36,7 +39,7 @@ interface SourceFileSurfaceProps
   readonly contents: string
   readonly path: string
   readonly initialLine?: number | null
-  /** Enables native pull-to-refresh on the source surface. */
+  // enables native pull-to-refresh on the source surface.
   readonly onRefresh?: () => Promise<void> | void
 }
 

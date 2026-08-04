@@ -1,3 +1,6 @@
+// apps/web/src/orchestrationEventEffects.ts
+// derive orchestration batch effects
+
 import type { OrchestrationEvent, ThreadId } from '@t3tools/contracts'
 
 export interface OrchestrationBatchEffects

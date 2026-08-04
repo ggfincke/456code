@@ -1,3 +1,6 @@
+// tests/apps/desktop/window/DesktopApplicationMenu.test.ts
+// verify desktop application menu behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import * as Deferred from 'effect/Deferred'

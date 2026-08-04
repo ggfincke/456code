@@ -1,3 +1,6 @@
+// apps/mobile/src/components/GlassSurface.tsx
+// render glass surface
+
 import { GlassView, isGlassEffectAPIAvailable } from 'expo-glass-effect'
 import type { ReactNode } from 'react'
 import {

@@ -1,3 +1,5 @@
+// apps/server/src/sourceControl/SourceControlProviderDiscovery.ts
+// shares provider authentication and host discovery helpers
 import type {
   SourceControlProviderAuth,
   SourceControlProviderDiscoveryItem,

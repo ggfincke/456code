@@ -1,3 +1,6 @@
+// apps/server/src/telemetry/Identify.ts
+// resolve telemetry identifier for home
+
 import * as NodeOS from 'node:os'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
@@ -265,12 +268,10 @@ const upsertAnonymousId = Effect.gen(function* ()
   return anonymousId
 })
 
-/**
- * getTelemetryIdentifier - Users are "identified" by finding the first match of the following, then hashing the value.
- * 1. ~/.codex/auth.json tokens.account_id
- * 2. ~/.claude.json userID
- * 3. ~/.456code/telemetry/anonymous-id
- */
+// getTelemetryIdentifier - Users are "identified" by finding the first match of the following, then hashing the value.
+// 1. ~/.codex/auth.json tokens.account_id
+// 2. ~/.claude.json userID
+// 3. ~/.456code/telemetry/anonymous-id
 export const getTelemetryIdentifierForHome = Effect.fn('getTelemetryIdentifierForHome')(
   function* (homeDirectory: string)
   {

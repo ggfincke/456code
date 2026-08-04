@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/archivedThreads.test.ts
+// verify archived threads behavior
+
 import { EnvironmentId, type OrchestrationShellSnapshot } from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AsyncResult, Atom, AtomRegistry } from 'effect/unstable/reactivity'

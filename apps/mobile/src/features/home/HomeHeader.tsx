@@ -1,3 +1,6 @@
+// apps/mobile/src/features/home/HomeHeader.tsx
+// render home header
+
 import type { EnvironmentId, SidebarThreadSortOrder } from '@t3tools/contracts'
 import type { MenuAction } from '@react-native-menu/menu'
 import { useAtomValue } from '@effect/atom-react'
@@ -61,9 +64,9 @@ function checkedMenuState(checked: boolean)
   return checked ? ('on' as const) : undefined
 }
 
-/** Thread List v2 lays the list out in fixed creation order, so the
-    sort/group filter controls would be silently ignored — hide them and
-    key the "customized" icon state off the environment filter alone. */
+// thread List v2 lays the list out in fixed creation order, so the
+// sort/group filter controls would be silently ignored — hide them and
+// key the "customized" icon state off the environment filter alone.
 function useThreadListV2FilterGate()
 {
   const preferencesResult = useAtomValue(mobilePreferencesAtom)
@@ -324,7 +327,7 @@ function IosHomeHeader(props: HomeHeaderProps)
       <NativeStackScreenOptions
         optionsVersion={filterMenu.items}
         options={{
-          // Static header config (glass, title, fonts) lives in Stack.tsx
+          // static header config (glass, title, fonts) lives in Stack.tsx
           // (GLASS_HEADER_OPTIONS). Only dynamic values are set here.
           headerTintColor: iconColor,
           unstable_headerRightItems:

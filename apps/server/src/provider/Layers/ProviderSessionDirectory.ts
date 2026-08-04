@@ -77,7 +77,7 @@ function toRuntimeBinding(
         ({
           threadId: runtime.threadId,
           provider,
-          // Migration boundary only: rows written before the instance split
+          // migration boundary only: rows written before the instance split
           // have a null provider_instance_id. Promote them as they leave
           // persistence so hot routing code never has to infer an instance
           // from a driver kind.

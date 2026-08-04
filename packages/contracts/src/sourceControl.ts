@@ -1,3 +1,6 @@
+// packages/contracts/src/sourceControl.ts
+// define source control contracts
+
 import * as Schema from 'effect/Schema'
 import { PositiveInt, TrimmedNonEmptyString } from './baseSchemas.ts'
 import { VcsDriverKind } from './vcs.ts'

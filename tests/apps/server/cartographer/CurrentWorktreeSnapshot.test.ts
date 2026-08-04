@@ -1,5 +1,6 @@
 // tests/apps/server/cartographer/CurrentWorktreeSnapshot.test.ts
 // verifies exact isolated and cancellable current-worktree snapshots
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeChildProcess from 'node:child_process'

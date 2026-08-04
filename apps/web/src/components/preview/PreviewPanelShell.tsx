@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/PreviewPanelShell.tsx
+// render preview panel shell
+
 import { type ReactNode, useEffect, useState } from 'react'
 
 import { isElectron } from '~/env'
@@ -10,7 +13,7 @@ export type PreviewPanelMode = 'inline' | 'sheet' | 'sidebar' | 'embedded'
 
 const PREVIEW_PANEL_WIDTH_STORAGE_KEY = '456code:preview-panel-width'
 const PREVIEW_PANEL_MIN_WIDTH = 360
-/** Fraction of the viewport allowed, preserving the remaining space for chat. */
+// fraction of the viewport allowed, preserving the remaining space for chat.
 const PREVIEW_PANEL_MAX_WIDTH_FRACTION = 0.7
 const PREVIEW_PANEL_DEFAULT_WIDTH = 540
 
@@ -19,11 +22,9 @@ export function getPreviewPanelMaxWidth(viewportWidth: number): number
   return Math.floor(viewportWidth * PREVIEW_PANEL_MAX_WIDTH_FRACTION)
 }
 
-/**
- * Shell for the preview panel. In inline mode the panel is user-resizable
- * via a drag handle on the left edge; width persists per browser. In
- * sheet/sidebar modes the parent owns the size.
- */
+// shell for the preview panel. In inline mode the panel is user-resizable
+// via a drag handle on the left edge; width persists per browser. In
+// sheet/sidebar modes the parent owns the size.
 export function PreviewPanelShell(props: {
   mode: PreviewPanelMode
   maximized?: boolean
@@ -62,11 +63,9 @@ export function PreviewPanelShell(props: {
   )
 }
 
-/**
- * Track viewport width to derive a sensible upper bound for the panel.
- * Resize-aware so dragging the OS window narrower re-clamps the stored
- * width on the next render (the hook's clamp picks this up automatically).
- */
+// track viewport width to derive a sensible upper bound for the panel.
+// resize-aware so dragging the OS window narrower re-clamps the stored
+// width on the next render (the hook's clamp picks this up automatically).
 function useViewportClampedMaxWidth(): number
 {
   const [vw, setVw] = useState(() => (typeof window === 'undefined' ? 1280 : window.innerWidth))
@@ -76,7 +75,7 @@ function useViewportClampedMaxWidth(): number
     let frame = 0
     const onResize = () =>
     {
-      // Coalesce rapid resize events into one rAF tick.
+      // coalesce rapid resize events into one rAF tick.
       if (frame !== 0) return
       frame = window.requestAnimationFrame(() =>
       {

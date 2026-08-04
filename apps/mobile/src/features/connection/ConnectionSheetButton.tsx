@@ -1,3 +1,6 @@
+// apps/mobile/src/features/connection/ConnectionSheetButton.tsx
+// render connection sheet button
+
 import { SymbolView } from '../../components/AppSymbol'
 import { Platform, Pressable } from 'react-native'
 import { useThemeColor } from '../../lib/useThemeColor'

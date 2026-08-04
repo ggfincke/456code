@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/sidebar-filter-button.tsx
+// render sidebar filter button
+
 import { SymbolView } from '../../components/AppSymbol'
 import { Pressable, StyleSheet, useColorScheme } from 'react-native'
 
@@ -9,7 +12,7 @@ export type SidebarFilterButtonIcon =
 export function SidebarFilterButton(props: {
   readonly accessibilityLabel: string
   readonly icon: SidebarFilterButtonIcon
-  /** Rendered inside a shared capsule group — no own background/border. */
+  // rendered inside a shared capsule group — no own background/border.
   readonly grouped?: boolean
 })
 {

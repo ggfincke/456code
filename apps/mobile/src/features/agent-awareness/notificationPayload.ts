@@ -1,3 +1,6 @@
+// apps/mobile/src/features/agent-awareness/notificationPayload.ts
+// extract agent notification deep link
+
 function dataFromNotificationResponse(response: unknown): Record<string, unknown> | null
 {
   if (typeof response !== 'object' || response === null)

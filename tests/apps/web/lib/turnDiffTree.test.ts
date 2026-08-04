@@ -1,3 +1,6 @@
+// tests/apps/web/lib/turnDiffTree.test.ts
+// verify summarize turn diff stats behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {

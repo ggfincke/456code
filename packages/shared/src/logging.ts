@@ -1,3 +1,6 @@
+// packages/shared/src/logging.ts
+// define rotating file sink options
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodePath from 'node:path'

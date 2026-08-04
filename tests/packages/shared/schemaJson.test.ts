@@ -1,3 +1,6 @@
+// tests/packages/shared/schemaJson.test.ts
+// verify schema json helpers behavior
+
 import * as Cause from 'effect/Cause'
 import * as Exit from 'effect/Exit'
 import * as Result from 'effect/Result'

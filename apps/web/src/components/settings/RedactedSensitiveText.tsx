@@ -1,3 +1,6 @@
+// apps/web/src/components/settings/RedactedSensitiveText.tsx
+// render redacted sensitive text
+
 import { useMemo, useState } from 'react'
 
 import { cn } from '../../lib/utils'

@@ -1,3 +1,6 @@
+// tests/apps/mobile/state/workspaceModel.test.ts
+// verify mobile workspace projection behavior
+
 import type { EnvironmentShellSummary } from '@t3tools/client-runtime/state/shell'
 import { BearerConnectionProfile, BearerConnectionTarget } from '@t3tools/client-runtime/connection'
 import { EnvironmentId } from '@t3tools/contracts'

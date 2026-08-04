@@ -1,3 +1,6 @@
+// tests/packages/effect-acp/_internal/stdio.test.ts
+// verify acp child process termination behavior
+
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as PlatformError from 'effect/PlatformError'

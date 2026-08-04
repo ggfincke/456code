@@ -1,3 +1,6 @@
+// packages/client-runtime/src/relay/discovery.ts
+// define relay environment availability
+
 import type {
   RelayClientEnvironmentRecord,
   RelayEnvironmentStatusResponse,
@@ -248,7 +251,7 @@ export const make = Effect.fn('RelayEnvironmentDiscovery.make')(function* ()
         error: Option.none(),
       })
 
-      // Signed out is the idle state, not a failure: the proactive refresh on
+      // signed out is the idle state, not a failure: the proactive refresh on
       // credentials-changed also runs on sign-out and must settle back to a
       // clean empty list. Only the session-level "no credentials" error is
       // benign — relay-side auth failures (expired/invalid tokens) happen
@@ -369,7 +372,7 @@ export const make = Effect.fn('RelayEnvironmentDiscovery.make')(function* ()
             yield* Ref.set(activeAccountId, Option.none())
             yield* Ref.set(offlineReportFingerprints, new Map())
             yield* SubscriptionRef.set(state, EMPTY_RELAY_ENVIRONMENT_DISCOVERY_STATE)
-            // Refresh proactively — this wakeup fires when a session activates
+            // refresh proactively — this wakeup fires when a session activates
             // (sign-in or cold start), and the list should be populated before
             // any screen asks for it. A signed-out refresh settles back to the
             // clean empty state.

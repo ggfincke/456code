@@ -1,3 +1,6 @@
+// apps/server/src/provider/acp/CursorAcpSupport.ts
+// share server cursor acp support
+
 import { type CursorSettings, type ProviderOptionSelection } from '@t3tools/contracts'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'

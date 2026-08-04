@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/cloud/managedRelayTokenStore.test.ts
+// verify managed relay token store behavior
+
 import { expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Logger from 'effect/Logger'

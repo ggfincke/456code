@@ -1,3 +1,6 @@
+// apps/web/src/connection/runtime.ts
+// coordinate connection atom runtime
+
 import { Connection } from '@t3tools/client-runtime/connection'
 import { shellSnapshotLoaderLayer } from '@t3tools/client-runtime/state/shell'
 import { threadSnapshotLoaderLayer } from '@t3tools/client-runtime/state/threads'

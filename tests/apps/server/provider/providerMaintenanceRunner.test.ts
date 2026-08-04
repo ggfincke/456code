@@ -1,3 +1,6 @@
+// tests/apps/server/provider/providerMaintenanceRunner.test.ts
+// verify provider maintenance runner behavior
+
 import { describe, it, assert } from '@effect/vitest'
 import {
   ProviderDriverKind,
@@ -40,7 +43,7 @@ const CURSOR_INSTANCE_ID = ProviderInstanceId.make('cursor')
 const OPENCODE_INSTANCE_ID = ProviderInstanceId.make('opencode')
 const encoder = new TextEncoder()
 
-// Pin a non-win32 platform so `resolveSpawnCommand` is a no-op and the raw
+// pin a non-win32 platform so `resolveSpawnCommand` is a no-op and the raw
 // `{ command, args }` assertions below hold deterministically on any host
 // (including Windows). Windows-specific resolution is covered by the dedicated
 // win32 case at the end of this suite.
@@ -741,17 +744,17 @@ describe('providerMaintenanceRunner', () =>
 
       const result = yield* runner.updateProvider(CODEX_DRIVER)
 
-      // On win32, resolveSpawnCommand resolves `npm` to the `.cmd` shim and
+      // on win32, resolveSpawnCommand resolves `npm` to the `.cmd` shim and
       // routes the spawn through cmd.exe (shell: true), escaping every arg.
       assert.strictEqual(captured.length, 1)
       const call = captured[0]
       assert.ok(call, 'expected the spawner to be invoked once')
-      // The resolved command is the escaped `.cmd` path. Asserting the precise
+      // the resolved command is the escaped `.cmd` path. Asserting the precise
       // escaped string is brittle, so verify it carries the resolved shim and
       // that shell mode was used.
       assert.match(call.command, /npm\.cmd/i)
       assert.strictEqual(call.shell, true)
-      // Args are escaped for cmd.exe shell mode (each quoted) but still carry
+      // args are escaped for cmd.exe shell mode (each quoted) but still carry
       // the original install command (`install -g @openai/codex@latest`) in order.
       assert.strictEqual(call.args.length, 3)
       assert.match(call.args[0] ?? '', /install/)

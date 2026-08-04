@@ -1,3 +1,6 @@
+// apps/server/src/auth/http.ts
+// expose current environment trace id
+
 import {
   AuthAccessReadScope,
   AuthAccessWriteScope,

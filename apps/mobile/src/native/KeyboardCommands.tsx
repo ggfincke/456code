@@ -1,3 +1,6 @@
+// apps/mobile/src/native/KeyboardCommands.tsx
+// render keyboard commands
+
 import type { PropsWithChildren } from 'react'
 import { View } from 'react-native'
 

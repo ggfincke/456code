@@ -1,3 +1,6 @@
+// apps/web/src/components/ui/toggle-group.tsx
+// render reusable toggle group UI primitives
+
 'use client'
 
 import type { Toggle as TogglePrimitive } from '@base-ui/react/toggle'

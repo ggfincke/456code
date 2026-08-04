@@ -1,3 +1,6 @@
+// scripts/lib/update-manifest.ts
+// update manifest
+
 export interface UpdateManifestFile
 {
   readonly url: string

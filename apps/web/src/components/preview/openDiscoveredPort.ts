@@ -1,3 +1,6 @@
+// apps/web/src/components/preview/openDiscoveredPort.ts
+// open discovered port
+
 import type { DiscoveredLocalServer, ScopedThreadRef } from '@t3tools/contracts'
 import { mapAtomCommandResult, type AtomCommandResult } from '@t3tools/client-runtime/state/runtime'
 

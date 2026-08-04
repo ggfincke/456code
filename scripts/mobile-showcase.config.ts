@@ -1,3 +1,6 @@
+// scripts/mobile-showcase.config.ts
+// run the mobile showcase repository workflow
+
 import { SHOWCASE_SCENES, type ShowcaseScene } from './mobile-showcase-environment.ts'
 
 export { SHOWCASE_SCENES }
@@ -8,7 +11,7 @@ export type ShowcaseAppearance = 'light' | 'dark'
 export interface ShowcaseStoreAssetSpec
 {
   readonly store: 'apple' | 'google-play'
-  /** Device directory relative to ShowcaseConfig.outputDirectory. */
+  // device directory relative to ShowcaseConfig.outputDirectory.
   readonly directory: string
   readonly width: number
   readonly height: number
@@ -21,11 +24,11 @@ export interface ShowcaseIosDevice
 {
   readonly id: string
   readonly platform: 'ios'
-  /** Exact name from `xcrun simctl list devices available`. */
+  // exact name from `xcrun simctl list devices available`.
   readonly simulator: string
-  /** Device type used to create a disposable simulator when the named one is absent. */
+  // device type used to create a disposable simulator when the named one is absent.
   readonly simulatorDeviceType?: string
-  /** Appearance used when the CLI does not pass --appearance. */
+  // appearance used when the CLI does not pass --appearance.
   readonly appearance: ShowcaseAppearance
   readonly scenes: ReadonlyArray<ShowcaseScene>
   readonly storeAsset: ShowcaseStoreAssetSpec
@@ -35,14 +38,14 @@ export interface ShowcaseAndroidDevice
 {
   readonly id: string
   readonly platform: 'android'
-  /** Exact name from `emulator -list-avds`. */
+  // exact name from `emulator -list-avds`.
   readonly avd: string
-  /** Appearance used when the CLI does not pass --appearance. */
+  // appearance used when the CLI does not pass --appearance.
   readonly appearance: ShowcaseAppearance
-  /** Native ABI used by the AVD, from its config.ini `abi.type`. */
+  // native ABI used by the AVD, from its config.ini `abi.type`.
   readonly abi?: 'arm64-v8a' | 'x86_64' | 'x86' | 'armeabi-v7a'
   readonly scenes: ReadonlyArray<ShowcaseScene>
-  /** Optional capture viewport. Omit to use the AVD's native size and density. */
+  // optional capture viewport. Omit to use the AVD's native size and density.
   readonly viewport?: {
     readonly width: number
     readonly height: number
@@ -75,15 +78,13 @@ export function resolveShowcaseAndroidAbi(
   throw new Error(`Unsupported T3_SHOWCASE_ANDROID_ABI '${value}'. Use ${ANDROID_ABIS.join(', ')}.`)
 }
 
-/**
- * The defaults cover every App Store Connect and Google Play upload slot used
- * by the mobile app. Edit this matrix (or pass --device / --scene) without
- * changing the runner. Every target declares and validates its exact upload
- * dimensions so SDK or emulator changes cannot silently produce invalid files.
- */
+// the defaults cover every App Store Connect and Google Play upload slot used
+// by the mobile app. Edit this matrix (or pass --device / --scene) without
+// changing the runner. Every target declares and validates its exact upload
+// dimensions so SDK or emulator changes cannot silently produce invalid files.
 const config: ShowcaseConfig = {
   outputDirectory: 'artifacts/app-store/screenshots',
-  // Dedicated port so the harness cannot attach to a normal mobile dev server
+  // dedicated port so the harness cannot attach to a normal mobile dev server
   // (or a second worktree) and capture the wrong bundle.
   metroPort: 8199,
   settleDelayMs: 2_500,
@@ -140,8 +141,8 @@ const config: ShowcaseConfig = {
       id: 'pixel',
       platform: 'android',
       avd: 'Pixel_10_Pro',
-      // Apple Silicon uses ARM64 locally; CI overrides this with x86_64 so its
-      // Blacksmith Linux runner can use KVM acceleration.
+      // apple Silicon uses ARM64 locally; CI overrides this with x86_64 so its
+      // blacksmith Linux runner can use KVM acceleration.
       abi: resolveShowcaseAndroidAbi(process.env.T3_SHOWCASE_ANDROID_ABI),
       appearance: 'dark',
       viewport: {

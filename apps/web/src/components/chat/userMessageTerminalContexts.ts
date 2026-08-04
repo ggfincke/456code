@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/userMessageTerminalContexts.ts
+// build inline terminal context text
+
 import { formatInlineTerminalContextLabel as formatInlineTerminalContextSelectionLabel } from '~/lib/terminalContext'
 
 const TERMINAL_CONTEXT_HEADER_PATTERN = /^(.*?)\s+line(?:s)?\s+(\d+)(?:-(\d+))?$/i
