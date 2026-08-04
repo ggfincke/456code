@@ -15,6 +15,7 @@ import type {
   TurnId,
 } from '@t3tools/contracts'
 import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
+import { isAdjacentProviderSwitchActivity } from '@t3tools/shared/providerSwitchActivity'
 
 export type ThreadDetailReducerResult =
   | { readonly kind: 'updated'; readonly thread: OrchestrationThread }
@@ -32,15 +33,26 @@ const checkpointOrder = O.mapInput(
     cp.checkpointTurnCount ?? Number.MAX_SAFE_INTEGER,
 )
 
-/**
- * Apply a single orchestration event to an `OrchestrationThread`, returning
- * the updated thread, a deletion signal, or an "unchanged" marker when the
- * event doesn't affect this thread.
- *
- * This is a pure reducer operating on contract types. UI-specific mapping
- * (e.g. resolving attachment preview URLs, normalising model slugs, adding
- * scoped fields like `environmentId`) is the caller's responsibility.
- */
+function upsertThreadActivity(
+  activities: OrchestrationThread['activities'],
+  activity: OrchestrationThread['activities'][number],
+): ReadonlyArray<OrchestrationThread['activities'][number]>
+{
+  return pipe(
+    activities,
+    Arr.filter((entry) => entry.id !== activity.id),
+    Arr.append(activity),
+    Arr.sort(compareOrchestrationThreadActivities),
+  )
+}
+
+// apply a single orchestration event to an `OrchestrationThread`, returning
+// the updated thread, a deletion signal, or an "unchanged" marker when the
+// event doesn't affect this thread.
+//
+// this is a pure reducer operating on contract types. UI-specific mapping
+// (e.g. resolving attachment preview URLs, normalising model slugs, adding
+// scoped fields like `environmentId`) is the caller's responsibility.
 export function applyThreadDetailEvent(
   thread: OrchestrationThread,
   event: OrchestrationEvent,
@@ -69,6 +81,7 @@ export function applyThreadDetailEvent(
           worktreePath: event.payload.worktreePath,
           origin: event.payload.origin ?? null,
           latestTurn: null,
+          providerSwitch: null,
           createdAt: event.payload.createdAt,
           updatedAt: event.payload.updatedAt,
           archivedAt: null,
@@ -167,14 +180,146 @@ export function applyThreadDetailEvent(
         },
       }
 
+    case 'thread.provider-switch-requested':
+      return {
+        kind: 'updated',
+        thread: {
+          ...thread,
+          providerSwitch: {
+            phase: 'pending',
+            targetInstanceId: event.payload.targetModelSelection.instanceId,
+            targetModel: event.payload.targetModelSelection.model,
+            requestedAt: event.occurredAt,
+            requestId: event.eventId,
+            requestSequence: event.sequence,
+            sourceModelSelection: event.payload.sourceModelSelection ?? thread.modelSelection,
+          },
+          updatedAt: event.occurredAt,
+        },
+      }
+
+    case 'thread.provider-switch-progressed':
+      if (
+        thread.providerSwitch === null ||
+        (event.payload.requestId !== undefined &&
+          thread.providerSwitch.requestId !== event.payload.requestId)
+      )
+      {
+        return { kind: 'unchanged' }
+      }
+      return {
+        kind: 'updated',
+        thread: {
+          ...thread,
+          providerSwitch: {
+            ...thread.providerSwitch,
+            phase: event.payload.phase,
+          },
+          updatedAt: event.occurredAt,
+        },
+      }
+
+    case 'thread.provider-switch-failed':
+    {
+      if (
+        event.payload.requestId !== undefined &&
+        thread.providerSwitch?.requestId !== event.payload.requestId
+      )
+      {
+        return { kind: 'unchanged' }
+      }
+      const sourceModelSelection = event.payload.sourceModelSelection ?? thread.modelSelection
+      const targetModelSelection =
+        event.payload.targetModelSelection ??
+        (thread.providerSwitch === null
+          ? undefined
+          : {
+              instanceId: thread.providerSwitch.targetInstanceId,
+              model: thread.providerSwitch.targetModel,
+            })
+      const activity: OrchestrationThread['activities'][number] = {
+        id: event.eventId,
+        tone: 'error',
+        kind: 'provider.switch.failed',
+        summary: 'Provider switch failed',
+        payload: {
+          reasonCode: event.payload.reasonCode,
+          detail: event.payload.detail,
+          fromInstanceId: sourceModelSelection.instanceId,
+          fromModel: sourceModelSelection.model,
+          ...(targetModelSelection === undefined
+            ? {}
+            : {
+                toInstanceId: targetModelSelection.instanceId,
+                toModel: targetModelSelection.model,
+                retryTargetModelSelection: targetModelSelection,
+              }),
+        },
+        turnId: null,
+        sequence: event.sequence,
+        createdAt: event.occurredAt,
+      }
+      const hasHistoricalActivity =
+        event.payload.activityVersion === undefined &&
+        thread.activities.some((entry) => isAdjacentProviderSwitchActivity(entry, activity))
+      return {
+        kind: 'updated',
+        thread: {
+          ...thread,
+          providerSwitch: null,
+          activities: hasHistoricalActivity
+            ? thread.activities
+            : upsertThreadActivity(thread.activities, activity),
+          updatedAt: event.occurredAt,
+        },
+      }
+    }
+
     // payload carries no threadId; the caller matched this event to the
     // thread via the event's aggregate id
     case 'thread.provider-switched':
+    {
+      if (
+        event.payload.requestId !== undefined &&
+        thread.providerSwitch?.requestId !== event.payload.requestId
+      )
+      {
+        return { kind: 'unchanged' }
+      }
+      const sourceModelSelection = event.payload.sourceModelSelection ?? {
+        instanceId: event.payload.fromInstanceId,
+        model: event.payload.fromModel ?? null,
+      }
+      const activity: OrchestrationThread['activities'][number] = {
+        id: event.eventId,
+        tone: 'info',
+        kind: 'provider.switch.completed',
+        summary: `Switched from ${
+          sourceModelSelection.model ?? sourceModelSelection.instanceId ?? 'prior provider'
+        } to ${event.payload.modelSelection.model || event.payload.modelSelection.instanceId}`,
+        payload: {
+          fromInstanceId: sourceModelSelection.instanceId,
+          ...(sourceModelSelection.model === null ? {} : { fromModel: sourceModelSelection.model }),
+          toInstanceId: event.payload.modelSelection.instanceId,
+          toModel: event.payload.modelSelection.model,
+          targetModelSelection: event.payload.modelSelection,
+        },
+        turnId: null,
+        sequence: event.sequence,
+        createdAt: event.occurredAt,
+      }
+      const hasHistoricalActivity =
+        event.payload.activityVersion === undefined &&
+        thread.activities.some((entry) => isAdjacentProviderSwitchActivity(entry, activity))
       return {
         kind: 'updated',
         thread: {
           ...thread,
           modelSelection: event.payload.modelSelection,
+          providerSwitch: null,
+          activities: hasHistoricalActivity
+            ? thread.activities
+            : upsertThreadActivity(thread.activities, activity),
           pendingHandoff:
             event.payload.handoffText.trim().length > 0
               ? {
@@ -185,10 +330,11 @@ export function applyThreadDetailEvent(
                     : {}),
                   createdAt: event.occurredAt,
                 }
-              : null,
+              : thread.pendingHandoff,
           updatedAt: event.occurredAt,
         },
       }
+    }
 
     case 'thread.handoff-cleared':
       return {
@@ -298,7 +444,7 @@ export function applyThreadDetailEvent(
                 },
           )
         : Arr.append(thread.messages, message)
-      // Update latestTurn for assistant messages bound to a turn. A completed
+      // update latestTurn for assistant messages bound to a turn. A completed
       // assistant message only settles the turn once the session is no longer
       // running it — providers may emit several assistant messages per turn
       // (commentary between tool calls), and the turn must stay unsettled
@@ -338,7 +484,7 @@ export function applyThreadDetailEvent(
             }
           : thread.latestTurn
 
-      // Rebind checkpoint assistant message IDs for assistant messages.
+      // rebind checkpoint assistant message IDs for assistant messages.
       const checkpoints =
         event.payload.role === 'assistant' && event.payload.turnId !== null
           ? rebindCheckpointAssistantMessage(
@@ -363,7 +509,7 @@ export function applyThreadDetailEvent(
     // ── Session ─────────────────────────────────────────────────────
     case 'thread.session-set':
     {
-      // Leaving the "running" session status is the turn-end signal: settle a
+      // leaving the "running" session status is the turn-end signal: settle a
       // still-running latest turn so its duration reflects the whole turn.
       const settledTurnState = settledTurnStateForSessionStatus(event.payload.session.status)
       const latestTurn: OrchestrationLatestTurn | null =
@@ -391,7 +537,7 @@ export function applyThreadDetailEvent(
             ? {
                 ...thread.latestTurn,
                 state: settledTurnState,
-                // A running turn's completedAt can only hold a mid-turn
+                // a running turn's completedAt can only hold a mid-turn
                 // placeholder checkpoint timestamp — the session leaving
                 // "running" is the authoritative turn end.
                 completedAt: event.payload.session.updatedAt,
@@ -458,7 +604,7 @@ export function applyThreadDetailEvent(
       }
 
       const existing = thread.checkpoints.find((entry) => entry.turnId === checkpoint.turnId)
-      // Don't overwrite a non-missing checkpoint with a missing one.
+      // don't overwrite a non-missing checkpoint with a missing one.
       if (existing && existing.status !== 'missing' && checkpoint.status === 'missing')
       {
         return { kind: 'unchanged' }
@@ -471,7 +617,7 @@ export function applyThreadDetailEvent(
         Arr.sort(checkpointOrder),
       )
 
-      // Mid-turn diff updates produce placeholder checkpoints; record the
+      // mid-turn diff updates produce placeholder checkpoints; record the
       // checkpoint, but don't settle a turn its session is still running.
       const diffTurnStillRunning =
         thread.session?.status === 'running' && thread.session.activeTurnId === event.payload.turnId
@@ -671,7 +817,7 @@ function retainMessagesAfterRevert(
   retainedTurnIds: ReadonlySet<string>,
 ): OrchestrationMessage[]
 {
-  // Keep messages that belong to a retained turn, plus system messages and
+  // keep messages that belong to a retained turn, plus system messages and
   // messages without a turn binding (pre-turn-0 user messages).
   return Arr.filter(messages, (message) =>
   {

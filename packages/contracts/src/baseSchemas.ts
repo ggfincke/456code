@@ -1,3 +1,6 @@
+// packages/contracts/src/baseSchemas.ts
+// define base schemas contracts
+
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import * as SchemaTransformation from 'effect/SchemaTransformation'
@@ -20,9 +23,7 @@ export const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximu
 export const IsoDateTime = Schema.String
 export type IsoDateTime = typeof IsoDateTime.Type
 
-/**
- * Construct a branded identifier. Enforces non-empty trimmed strings
- */
+// construct a branded identifier. Enforces non-empty trimmed strings
 const makeEntityId = <Brand extends string>(brand: Brand) =>
 {
   return TrimmedNonEmptyString.pipe(Schema.brand(brand))
@@ -57,5 +58,7 @@ export const RuntimeTaskId = makeEntityId('RuntimeTaskId')
 export type RuntimeTaskId = typeof RuntimeTaskId.Type
 export const ApprovalRequestId = makeEntityId('ApprovalRequestId')
 export type ApprovalRequestId = typeof ApprovalRequestId.Type
+export const ApprovalActionId = makeEntityId('ApprovalActionId')
+export type ApprovalActionId = typeof ApprovalActionId.Type
 export const CheckpointRef = makeEntityId('CheckpointRef')
 export type CheckpointRef = typeof CheckpointRef.Type

@@ -139,6 +139,16 @@ const makeHarness = Effect.fn('TestEnvironmentRegistry.makeHarness')(function* (
     readonly beforeRegistrationRemove?: (
       target: ConnectionTarget,
     ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>
+    readonly beforeCacheClear?: (
+      environmentId: EnvironmentId,
+    ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>
+    readonly beforeCleanupPrepare?: (
+      environmentId: EnvironmentId,
+    ) => Effect.Effect<void, Persistence.ConnectionPersistenceError>
+    readonly onCleanupRetry?: (
+      activeEnvironmentIds: ReadonlySet<EnvironmentId>,
+      lease: Persistence.EnvironmentOwnedDataCleanupLease,
+    ) => Effect.Effect<void>
   },
 )
 {
@@ -148,6 +158,8 @@ const makeHarness = Effect.fn('TestEnvironmentRegistry.makeHarness')(function* (
   const shellCache = yield* Ref.make(new Map([[TARGET.environmentId, CACHED_SNAPSHOT]]))
   const cacheClears = yield* Ref.make<ReadonlyArray<EnvironmentId>>([])
   const ownedDataClears = yield* Ref.make<ReadonlyArray<EnvironmentId>>([])
+  const cleanupEvents = yield* Ref.make<ReadonlyArray<string>>([])
+  const cleanupRetryActiveSets = yield* Ref.make<ReadonlyArray<ReadonlySet<EnvironmentId>>>([])
   const sessions = yield* Ref.make<ReadonlyArray<SessionControl>>([])
   const releasedSessions = yield* Ref.make(0)
   const storedProfiles = yield* Ref.make(
@@ -220,6 +232,7 @@ const makeHarness = Effect.fn('TestEnvironmentRegistry.makeHarness')(function* (
     remove: (target) =>
       Effect.gen(function* ()
       {
+        yield* Ref.update(cleanupEvents, (events) => [...events, `remove:${target.environmentId}`])
         yield* options?.beforeRegistrationRemove?.(target) ?? Effect.void
         yield* Ref.update(storedTargets, (current) =>
         {
@@ -272,20 +285,36 @@ const makeHarness = Effect.fn('TestEnvironmentRegistry.makeHarness')(function* (
     removeVcsRefs: () => Effect.void,
     clearVcsRefs: () => Effect.void,
     clear: (environmentId) =>
-      Ref.update(shellCache, (current) =>
+      Effect.gen(function* ()
       {
-        const next = new Map(current)
-        next.delete(environmentId)
-        return next
-      }).pipe(
-        Effect.andThen(
-          Ref.update(cacheClears, (environmentIds) => [...environmentIds, environmentId]),
-        ),
-      ),
+        yield* options?.beforeCacheClear?.(environmentId) ?? Effect.void
+        yield* Ref.update(shellCache, (current) =>
+        {
+          const next = new Map(current)
+          next.delete(environmentId)
+          return next
+        })
+        yield* Ref.update(cacheClears, (environmentIds) => [...environmentIds, environmentId])
+        yield* Ref.update(cleanupEvents, (events) => [...events, `cache-clear:${environmentId}`])
+      }),
   })
   const ownedDataCleanup = Persistence.EnvironmentOwnedDataCleanup.of({
+    prepare: (environmentId) =>
+      Ref.update(cleanupEvents, (events) => [...events, `prepare:${environmentId}`]).pipe(
+        Effect.andThen(options?.beforeCleanupPrepare?.(environmentId) ?? Effect.void),
+      ),
+    markComplete: (environmentId, resource) =>
+      Ref.update(cleanupEvents, (events) => [...events, `complete:${resource}:${environmentId}`]),
+    retry: (activeEnvironmentIds, lease) =>
+      Ref.update(cleanupRetryActiveSets, (sets) => [...sets, new Set(activeEnvironmentIds)]).pipe(
+        Effect.andThen(options?.onCleanupRetry?.(activeEnvironmentIds, lease) ?? Effect.void),
+      ),
     clear: (environmentId) =>
-      Ref.update(ownedDataClears, (environmentIds) => [...environmentIds, environmentId]),
+      Ref.update(ownedDataClears, (environmentIds) => [...environmentIds, environmentId]).pipe(
+        Effect.andThen(
+          Ref.update(cleanupEvents, (events) => [...events, `clear:${environmentId}`]),
+        ),
+      ),
   })
   const networkStatus = yield* SubscriptionRef.make<'unknown' | 'offline' | 'online'>('online')
   const connectivity = Connectivity.Connectivity.of({
@@ -418,6 +447,8 @@ const makeHarness = Effect.fn('TestEnvironmentRegistry.makeHarness')(function* (
     shellCache,
     cacheClears,
     ownedDataClears,
+    cleanupEvents,
+    cleanupRetryActiveSets,
     sessions,
     releasedSessions,
     storedProfiles,
@@ -772,6 +803,212 @@ describe('EnvironmentRegistry', () =>
         expect((yield* Ref.get(harness.storedTargets)).has(RELAY_TARGET.environmentId)).toBe(true)
         expect(yield* Ref.get(harness.cacheClears)).toEqual([])
         expect(yield* Ref.get(harness.ownedDataClears)).toEqual([])
+        expect(yield* Ref.get(harness.cleanupEvents)).toEqual([
+          `prepare:${RELAY_TARGET.environmentId}`,
+          `remove:${RELAY_TARGET.environmentId}`,
+        ])
+      }).pipe(Effect.provide(harness.layer), Effect.scoped)
+    }),
+  )
+
+  it.effect('prepares cleanup before catalog removal and marks cache only after success', () =>
+    Effect.gen(function* ()
+    {
+      const harness = yield* makeHarness([TARGET])
+
+      yield* Effect.gen(function* ()
+      {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry
+        yield* registry.remove(TARGET.environmentId)
+
+        const events = yield* Ref.get(harness.cleanupEvents)
+        expect(events.indexOf(`prepare:${TARGET.environmentId}`)).toBeLessThan(
+          events.indexOf(`remove:${TARGET.environmentId}`),
+        )
+        expect(events.indexOf(`cache-clear:${TARGET.environmentId}`)).toBeLessThan(
+          events.indexOf(`complete:cache:${TARGET.environmentId}`),
+        )
+      }).pipe(Effect.provide(harness.layer), Effect.scoped)
+    }),
+  )
+
+  it.effect('keeps the environment active when cleanup intent persistence fails', () =>
+    Effect.gen(function* ()
+    {
+      const harness = yield* makeHarness([TARGET], [], [], {
+        beforeCleanupPrepare: () =>
+          Effect.fail(
+            new Persistence.ConnectionPersistenceError({
+              operation: 'clear-environment',
+              message: 'Cleanup database unavailable.',
+            }),
+          ),
+      })
+
+      yield* Effect.gen(function* ()
+      {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry
+        const error = yield* Effect.flip(registry.remove(TARGET.environmentId))
+
+        expect(error._tag).toBe('ConnectionPersistenceError')
+        expect((yield* Ref.get(harness.storedTargets)).has(TARGET.environmentId)).toBe(true)
+        expect((yield* SubscriptionRef.get(registry.entries)).has(TARGET.environmentId)).toBe(true)
+        expect(yield* Ref.get(harness.cleanupEvents)).toEqual([`prepare:${TARGET.environmentId}`])
+      }).pipe(Effect.provide(harness.layer), Effect.scoped)
+    }),
+  )
+
+  it.effect('leaves cache cleanup pending when clearing fails', () =>
+    Effect.gen(function* ()
+    {
+      const harness = yield* makeHarness([TARGET], [], [], {
+        beforeCacheClear: () =>
+          Effect.fail(
+            new Persistence.ConnectionPersistenceError({
+              operation: 'clear-environment',
+              message: 'Cache unavailable.',
+            }),
+          ),
+      })
+
+      yield* Effect.gen(function* ()
+      {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry
+        yield* registry.remove(TARGET.environmentId)
+
+        expect(yield* Ref.get(harness.cacheClears)).toEqual([])
+        expect(yield* Ref.get(harness.cleanupEvents)).not.toContain(
+          `complete:cache:${TARGET.environmentId}`,
+        )
+        expect((yield* SubscriptionRef.get(registry.entries)).has(TARGET.environmentId)).toBe(false)
+      }).pipe(Effect.provide(harness.layer), Effect.scoped)
+    }),
+  )
+
+  it.effect('starts cleanup retry with the persisted active environment ids', () =>
+    Effect.gen(function* ()
+    {
+      const harness = yield* makeHarness([TARGET, SECOND_TARGET])
+
+      yield* Effect.gen(function* ()
+      {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry
+        yield* registry.start
+
+        const activeSets = yield* Ref.get(harness.cleanupRetryActiveSets)
+        expect(activeSets).toHaveLength(1)
+        expect(activeSets[0]).toEqual(new Set([TARGET.environmentId, SECOND_TARGET.environmentId]))
+      }).pipe(Effect.provide(harness.layer), Effect.scoped)
+    }),
+  )
+
+  it.effect(
+    'preserves new owned data when the same environment registers after retry selection',
+    () =>
+      Effect.gen(function* ()
+      {
+        const cleanupSelected = yield* Deferred.make<void>()
+        const continueCleanup = yield* Deferred.make<void>()
+        const ownedData = yield* Ref.make<ReadonlySet<EnvironmentId>>(new Set())
+        const harness = yield* makeHarness([], [], [], {
+          onCleanupRetry: (activeEnvironmentIds, lease) =>
+            Effect.gen(function* ()
+            {
+              expect(activeEnvironmentIds.has(RELAY_TARGET.environmentId)).toBe(false)
+              yield* Deferred.succeed(cleanupSelected, undefined)
+              yield* Deferred.await(continueCleanup)
+              yield* lease.run(
+                RELAY_TARGET.environmentId,
+                Ref.update(ownedData, (current) =>
+                {
+                  const next = new Set(current)
+                  next.delete(RELAY_TARGET.environmentId)
+                  return next
+                }),
+              )
+            }),
+        })
+
+        yield* Effect.gen(function* ()
+        {
+          const registry = yield* EnvironmentRegistry.EnvironmentRegistry
+          const retry = yield* Effect.forkChild(registry.start, { startImmediately: true })
+
+          yield* Deferred.await(cleanupSelected)
+          yield* registry.register(new RelayConnectionRegistration({ target: RELAY_TARGET }))
+          yield* Ref.update(ownedData, (current) =>
+            new Set(current).add(RELAY_TARGET.environmentId),
+          )
+          yield* Deferred.succeed(continueCleanup, undefined)
+          yield* Fiber.join(retry)
+
+          expect((yield* Ref.get(ownedData)).has(RELAY_TARGET.environmentId)).toBe(true)
+          expect(
+            (yield* SubscriptionRef.get(registry.entries)).has(RELAY_TARGET.environmentId),
+          ).toBe(true)
+        }).pipe(Effect.provide(harness.layer), Effect.scoped)
+      }),
+  )
+
+  it.effect('holds the cleanup lease until interrupted Promise deletion settles', () =>
+    Effect.gen(function* ()
+    {
+      const cleanupStarted = yield* Deferred.make<void>()
+      let ownedDataPresent = true
+      let settleDeletion: () => void = () => undefined
+      const deletion = new Promise<void>((resolve) =>
+      {
+        settleDeletion = () =>
+        {
+          ownedDataPresent = false
+          resolve()
+        }
+      })
+      const harness = yield* makeHarness([], [], [], {
+        onCleanupRetry: (_activeEnvironmentIds, lease) =>
+          lease.run(
+            RELAY_TARGET.environmentId,
+            Deferred.succeed(cleanupStarted, undefined).pipe(
+              Effect.andThen(Effect.promise(() => deletion)),
+            ),
+          ),
+      })
+
+      yield* Effect.gen(function* ()
+      {
+        const registry = yield* EnvironmentRegistry.EnvironmentRegistry
+        const retry = yield* Effect.forkChild(registry.start, { startImmediately: true })
+        yield* Deferred.await(cleanupStarted)
+
+        const interruption = yield* Effect.forkChild(Fiber.interrupt(retry), {
+          startImmediately: true,
+        })
+        const registration = yield* Effect.forkChild(
+          registry.register(new RelayConnectionRegistration({ target: RELAY_TARGET })).pipe(
+            Effect.andThen(
+              Effect.sync(() =>
+              {
+                ownedDataPresent = true
+              }),
+            ),
+          ),
+          { startImmediately: true },
+        )
+        yield* Effect.yieldNow
+        yield* Effect.yieldNow
+        const interruptionBeforeDeletionSettled = interruption.pollUnsafe()
+        const registrationBeforeDeletionSettled = registration.pollUnsafe()
+
+        settleDeletion()
+        yield* Fiber.join(interruption)
+        yield* Fiber.join(registration)
+
+        expect(interruptionBeforeDeletionSettled).toBeUndefined()
+        expect(registrationBeforeDeletionSettled).toBeUndefined()
+        expect(ownedDataPresent).toBe(true)
+        expect((yield* SubscriptionRef.get(registry.entries)).has(RELAY_TARGET.environmentId)).toBe(
+          true,
+        )
       }).pipe(Effect.provide(harness.layer), Effect.scoped)
     }),
   )

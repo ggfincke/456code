@@ -20,7 +20,6 @@ import {
   ModelSelection,
   OrchestrationCommand,
   OrchestrationEvent,
-  OrchestrationGetFullThreadDiffInput,
   OrchestrationGetTurnDiffInput,
   OrchestrationLatestTurn,
   ProjectCreatedPayload,
@@ -29,6 +28,7 @@ import {
   OrchestrationSession,
   OrchestrationThread,
   OrchestrationThreadShell,
+  UNKNOWN_ORCHESTRATION_EVENT_TYPE,
   ProjectCreateCommand,
   ThreadMetaUpdatedPayload,
   ThreadMessagesImportCommand,
@@ -44,7 +44,6 @@ import {
 } from '../../../packages/contracts/src/providerInstance.ts'
 
 const decodeTurnDiffInput = Schema.decodeUnknownEffect(OrchestrationGetTurnDiffInput)
-const decodeFullThreadDiffInput = Schema.decodeUnknownEffect(OrchestrationGetFullThreadDiffInput)
 const decodeThreadTurnDiff = Schema.decodeUnknownEffect(ThreadTurnDiff)
 const decodeProjectCreateCommand = Schema.decodeUnknownEffect(ProjectCreateCommand)
 const decodeProjectCreatedPayload = Schema.decodeUnknownEffect(ProjectCreatedPayload)
@@ -70,6 +69,7 @@ function getOptionValue(
 const decodeThreadCreatedPayload = Schema.decodeUnknownEffect(ThreadCreatedPayload)
 const decodeOrchestrationCommand = Schema.decodeUnknownEffect(OrchestrationCommand)
 const decodeOrchestrationEvent = Schema.decodeUnknownEffect(OrchestrationEvent)
+const encodeOrchestrationEvent = Schema.encodeEffect(OrchestrationEvent)
 const decodeThreadMetaUpdatedPayload = Schema.decodeUnknownEffect(ThreadMetaUpdatedPayload)
 const decodeThreadMessagesImportCommand = Schema.decodeUnknownEffect(ThreadMessagesImportCommand)
 const decodeThreadOrigin = Schema.decodeUnknownEffect(ThreadOrigin)
@@ -204,33 +204,10 @@ it.effect('parses turn diff input when fromTurnCount <= toTurnCount', () =>
       threadId: 'thread-1',
       fromTurnCount: 1,
       toTurnCount: 2,
+      ignoreWhitespace: true,
     })
     assert.strictEqual(parsed.fromTurnCount, 1)
     assert.strictEqual(parsed.toTurnCount, 2)
-  }),
-)
-
-it.effect('parses turn diff input with whitespace ignoring enabled', () =>
-  Effect.gen(function* ()
-  {
-    const parsed = yield* decodeTurnDiffInput({
-      threadId: 'thread-1',
-      fromTurnCount: 1,
-      toTurnCount: 2,
-      ignoreWhitespace: true,
-    })
-    assert.strictEqual(parsed.ignoreWhitespace, true)
-  }),
-)
-
-it.effect('parses full thread diff input with whitespace ignoring enabled', () =>
-  Effect.gen(function* ()
-  {
-    const parsed = yield* decodeFullThreadDiffInput({
-      threadId: 'thread-1',
-      toTurnCount: 2,
-      ignoreWhitespace: true,
-    })
     assert.strictEqual(parsed.ignoreWhitespace, true)
   }),
 )
@@ -654,43 +631,42 @@ it.effect('decodes thread.meta-updated payloads with explicit provider', () =>
   }),
 )
 
-it.effect('decodes thread archive and unarchive commands', () =>
+it.effect.each([
+  {
+    type: 'thread.archive' as const,
+    commandId: 'cmd-archive-1',
+    reason: undefined,
+  },
+  {
+    type: 'thread.unarchive' as const,
+    commandId: 'cmd-unarchive-1',
+    reason: undefined,
+  },
+  {
+    type: 'thread.settle' as const,
+    commandId: 'cmd-settle-1',
+    reason: undefined,
+  },
+  {
+    type: 'thread.unsettle' as const,
+    commandId: 'cmd-unsettle-1',
+    reason: 'user' as const,
+  },
+])('decodes $type command', ({ type, commandId, reason }) =>
   Effect.gen(function* ()
   {
-    const archive = yield* decodeOrchestrationCommand({
-      type: 'thread.archive',
-      commandId: 'cmd-archive-1',
-      threadId: 'thread-1',
-    })
-    const unarchive = yield* decodeOrchestrationCommand({
-      type: 'thread.unarchive',
-      commandId: 'cmd-unarchive-1',
-      threadId: 'thread-1',
-    })
-
-    assert.strictEqual(archive.type, 'thread.archive')
-    assert.strictEqual(unarchive.type, 'thread.unarchive')
+    const parsed = yield* decodeOrchestrationCommand(
+      reason === undefined
+        ? { type, commandId, threadId: 'thread-1' }
+        : { type, commandId, threadId: 'thread-1', reason },
+    )
+    assert.strictEqual(parsed.type, type)
   }),
 )
 
-it.effect('decodes thread settle and unsettle commands', () =>
+it.effect('rejects client-forged unsettle reason activity', () =>
   Effect.gen(function* ()
   {
-    const settle = yield* decodeOrchestrationCommand({
-      type: 'thread.settle',
-      commandId: 'cmd-settle-1',
-      threadId: 'thread-1',
-    })
-    const unsettle = yield* decodeOrchestrationCommand({
-      type: 'thread.unsettle',
-      commandId: 'cmd-unsettle-1',
-      threadId: 'thread-1',
-      reason: 'user',
-    })
-
-    assert.strictEqual(settle.type, 'thread.settle')
-    assert.strictEqual(unsettle.type, 'thread.unsettle')
-
     // "activity" is server-owned: it exists on the event, never on the
     // command, so a client cannot forge the neutral reset.
     const forged = yield* decodeOrchestrationCommand({
@@ -911,7 +887,7 @@ it.effect('normalizes legacy object-shaped modelSelection.options on decode', ()
         options: {
           effort: 'max',
           fastMode: true,
-          // Falsy/garbage entries are dropped, matching migration 026.
+          // falsy/garbage entries are dropped, matching migration 026.
           emptyStr: '   ',
           nullish: null,
           nested: { foo: 1 },
@@ -1148,14 +1124,14 @@ it.effect('preserves proposed plan implementation metadata when present', () =>
 // ── ModelSelection: instance-keyed wire shape + legacy decoder ────────
 //
 // `ModelSelection` is routing-keyed on `instanceId` — never a driver kind.
-// Persisted and in-flight payloads from pre-instance builds carry a
+// persisted and in-flight payloads from pre-instance builds carry a
 // `provider` field whose value was a driver kind; those payloads are migrated
 // at the wire boundary by
 // promoting `provider` to the default instance id for that driver
 // (built-in drivers use the driver kind slug as their default instance id, so
 // the migration is a 1:1 rename).
 //
-// These tests pin the rollback/fork tolerance invariant: legacy payloads
+// these tests pin the rollback/fork tolerance invariant: legacy payloads
 // decode cleanly for fork-provided drivers, and the decoded form uses
 // `instanceId` uniformly regardless of origin.
 
@@ -1236,10 +1212,52 @@ it.effect('ModelSelection rejects malformed instance ids', () =>
   {
     const result = yield* Effect.exit(
       decodeModelSelection({
-        instanceId: '1invalid', // must start with a letter
+        // must start with a letter
+        instanceId: '1invalid',
         model: 'x',
       }),
     )
     assert.strictEqual(result._tag, 'Failure')
+  }),
+)
+
+// wire-tolerance regression (mega-review 2026-08-02 P0): an event type added
+// by a newer server must degrade to the sentinel on old decoders instead of
+// failing the batch and killing the thread subscription
+it.effect('decodes unknown event types into the tolerance sentinel', () =>
+  Effect.gen(function* ()
+  {
+    const wire = {
+      sequence: 7,
+      eventId: 'event-future-1',
+      aggregateKind: 'thread',
+      aggregateId: 'thread-1',
+      type: 'thread.some-future-event',
+      occurredAt: '2026-01-01T00:00:00.000Z',
+      commandId: null,
+      causationEventId: null,
+      correlationId: null,
+      metadata: {},
+      payload: { anything: true },
+    }
+    const decoded = yield* decodeOrchestrationEvent(wire)
+    if (decoded.type !== UNKNOWN_ORCHESTRATION_EVENT_TYPE)
+    {
+      return assert.fail(`Expected the unknown-event sentinel, received ${decoded.type}.`)
+    }
+    assert.strictEqual(decoded.originalType, 'thread.some-future-event')
+
+    const encoded = (yield* encodeOrchestrationEvent(decoded)) as Record<string, unknown>
+    assert.strictEqual(encoded.type, 'thread.some-future-event')
+    assert.isUndefined(encoded.originalType)
+
+    // known types with malformed payloads must still fail loudly rather than
+    // degrade into the sentinel
+    const malformed = yield* decodeOrchestrationEvent({
+      ...wire,
+      type: 'thread.archived',
+      payload: { nope: true },
+    }).pipe(Effect.result)
+    assert.strictEqual(malformed._tag, 'Failure')
   }),
 )

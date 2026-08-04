@@ -1,3 +1,6 @@
+// tests/packages/client-runtime/state/threads-atoms.test.ts
+// verify create environment thread state atoms behavior
+
 import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
 import * as Layer from 'effect/Layer'
@@ -12,7 +15,7 @@ import {
 
 describe('createEnvironmentThreadStateAtoms', () =>
 {
-  it('retains thread state across short subscriber gaps', () =>
+  it('caches stateAtom by environment+thread', () =>
   {
     const runtime = Atom.runtime(Layer.empty) as unknown as Atom.AtomRuntime<
       EnvironmentRegistry | EnvironmentCacheStore | ThreadSnapshotLoader,

@@ -13,6 +13,7 @@ import {
   removeCatalogValue,
   removeConnectionFromCatalog,
   replaceCatalogValue,
+  THREAD_DETAIL_CACHE_SCHEMA_VERSION,
 } from '@t3tools/client-runtime/platform'
 import { TokenStore } from '@t3tools/client-runtime/authorization'
 import {
@@ -54,9 +55,11 @@ const StoredShellSnapshot = Schema.Struct({
 const StoredShellSnapshotJson = Schema.fromJsonString(StoredShellSnapshot)
 // v2 stores the snapshot sequence alongside the thread so a warm cache can
 // resume via `afterSequence` instead of re-downloading the full thread body.
-// Older v1 entries (no sequence) fail to decode and are treated as a cold cache.
+// entries from an older version (v1 has no sequence, v2 may hold a cursor that
+// advanced past activities the previous reducer dropped) fail to decode and are
+// treated as a cold cache.
 const StoredThreadSnapshot = Schema.Struct({
-  schemaVersion: Schema.Literal(2),
+  schemaVersion: Schema.Literal(THREAD_DETAIL_CACHE_SCHEMA_VERSION),
   environmentId: EnvironmentId,
   threadId: ThreadId,
   snapshot: OrchestrationThreadDetailSnapshot,
@@ -618,7 +621,7 @@ export const connectionStorageLayer = Layer.effectContext(
         Effect.gen(function* ()
         {
           const encoded = yield* encodeStoredThreadSnapshot({
-            schemaVersion: 2,
+            schemaVersion: THREAD_DETAIL_CACHE_SCHEMA_VERSION,
             environmentId,
             threadId: snapshot.thread.id,
             snapshot,

@@ -1,3 +1,6 @@
+// packages/contracts/src/provider.ts
+// define provider contracts
+
 import * as Schema from 'effect/Schema'
 import { TrimmedNonEmptyString } from './baseSchemas.ts'
 import {
@@ -27,7 +30,7 @@ const ProviderSessionStatus = Schema.Literals(['connecting', 'ready', 'running',
 
 export const ProviderSession = Schema.Struct({
   provider: ProviderDriverKind,
-  // Optional during the driver/instance migration. Once every producer
+  // optional during the driver/instance migration. Once every producer
   // populates it (post-slice-4), routing flips to instance-id-only and the
   // legacy `provider` field is removed.
   providerInstanceId: Schema.optional(ProviderInstanceId),
@@ -47,7 +50,7 @@ export type ProviderSession = typeof ProviderSession.Type
 export const ProviderSessionStartInput = Schema.Struct({
   threadId: ThreadId,
   provider: Schema.optional(ProviderDriverKind),
-  // See ProviderSession for the migration story.
+  // see ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),
   cwd: Schema.optional(TrimmedNonEmptyString),
   modelSelection: Schema.optional(ModelSelection),
@@ -86,6 +89,7 @@ export type ProviderInterruptTurnInput = typeof ProviderInterruptTurnInput.Type
 
 export const ProviderStopSessionInput = Schema.Struct({
   threadId: ThreadId,
+  expectedProviderInstanceId: Schema.optional(ProviderInstanceId),
 })
 export type ProviderStopSessionInput = typeof ProviderStopSessionInput.Type
 
@@ -109,7 +113,7 @@ export const ProviderEvent = Schema.Struct({
   id: EventId,
   kind: ProviderEventKind,
   provider: ProviderDriverKind,
-  // See ProviderSession for the migration story.
+  // see ProviderSession for the migration story.
   providerInstanceId: Schema.optional(ProviderInstanceId),
   threadId: ThreadId,
   createdAt: IsoDateTime,

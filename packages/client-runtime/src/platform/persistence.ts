@@ -17,6 +17,14 @@ import * as Schema from 'effect/Schema'
 import type { ConnectionRegistration } from '../connection/catalog.ts'
 import type { ConnectionTarget } from '../connection/model.ts'
 
+// version of the persisted thread-detail cache entry, including its resume
+// cursor. Bump it whenever a thread event's shape or the reducer that folds it
+// changes: an entry written by the previous client can carry a cursor that
+// advanced past activities that client dropped, and resuming from it would
+// silently skip them forever. A bumped version fails to decode, so those
+// entries are treated as a cold cache and refetched in full.
+export const THREAD_DETAIL_CACHE_SCHEMA_VERSION = 3
+
 export class ConnectionPersistenceError extends Schema.TaggedErrorClass<ConnectionPersistenceError>()(
   'ConnectionPersistenceError',
   {
@@ -83,10 +91,8 @@ export class EnvironmentCacheStore extends Context.Service<
       environmentId: EnvironmentId,
       threadId: ThreadId,
     ) => Effect.Effect<void, ConnectionPersistenceError>
-    /**
-     * The last complete server configuration. This deliberately includes provider
-     * metadata so offline task creation can still offer the models a user last saw.
-     */
+    // the last complete server configuration. This deliberately includes provider
+    // metadata so offline task creation can still offer the models a user last saw.
     readonly loadServerConfig: (
       environmentId: EnvironmentId,
     ) => Effect.Effect<Option.Option<ServerConfig>, ConnectionPersistenceError>
@@ -94,10 +100,8 @@ export class EnvironmentCacheStore extends Context.Service<
       environmentId: EnvironmentId,
       config: ServerConfig,
     ) => Effect.Effect<void, ConnectionPersistenceError>
-    /**
-     * The unfiltered branch list for a workspace. Query-specific lists are not
-     * cached because they are incomplete and unsafe to present as a full picker.
-     */
+    // the unfiltered branch list for a workspace. Query-specific lists are not
+    // cached because they are incomplete and unsafe to present as a full picker.
     readonly loadVcsRefs: (
       environmentId: EnvironmentId,
       cwd: string,
@@ -111,11 +115,9 @@ export class EnvironmentCacheStore extends Context.Service<
       environmentId: EnvironmentId,
       cwd: string,
     ) => Effect.Effect<void, ConnectionPersistenceError>
-    /**
-     * Removes every persisted branch-list snapshot for an environment. Git ref
-     * mutations are repository-wide, and linked worktrees may have cached the
-     * same refs under different working-directory keys.
-     */
+    // removes every persisted branch-list snapshot for an environment. Git ref
+    // mutations are repository-wide, and linked worktrees may have cached the
+    // same refs under different working-directory keys.
     readonly clearVcsRefs: (
       environmentId: EnvironmentId,
     ) => Effect.Effect<void, ConnectionPersistenceError>
@@ -126,11 +128,36 @@ export class EnvironmentCacheStore extends Context.Service<
 >()('@t3tools/client-runtime/platform/persistence/EnvironmentCacheStore')
 {}
 
+export const EnvironmentOwnedDataResource = Schema.Literals(['cache', 'outbox', 'drafts'])
+export type EnvironmentOwnedDataResource = typeof EnvironmentOwnedDataResource.Type
+
+export interface EnvironmentOwnedDataCleanupLease
+{
+  readonly run: <E, R>(
+    environmentId: EnvironmentId,
+    cleanup: Effect.Effect<void, E, R>,
+  ) => Effect.Effect<void, E, R>
+}
+
 export class EnvironmentOwnedDataCleanup extends Context.Reference<{
   readonly clear: (environmentId: EnvironmentId) => Effect.Effect<void>
+  readonly prepare?: (
+    environmentId: EnvironmentId,
+  ) => Effect.Effect<void, ConnectionPersistenceError>
+  readonly markComplete?: (
+    environmentId: EnvironmentId,
+    resource: EnvironmentOwnedDataResource,
+  ) => Effect.Effect<void>
+  readonly retry?: (
+    activeEnvironmentIds: ReadonlySet<EnvironmentId>,
+    lease: EnvironmentOwnedDataCleanupLease,
+  ) => Effect.Effect<void>
 }>('@t3tools/client-runtime/platform/persistence/EnvironmentOwnedDataCleanup', {
   defaultValue: () => ({
     clear: () => Effect.void,
+    prepare: () => Effect.void,
+    markComplete: () => Effect.void,
+    retry: () => Effect.void,
   }),
 })
 {}

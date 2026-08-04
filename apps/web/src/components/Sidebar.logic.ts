@@ -3,6 +3,7 @@
 
 import * as React from 'react'
 import type { ContextMenuItem } from '@t3tools/contracts'
+import { hasBlockingApprovalOutcome } from '@t3tools/client-runtime/state/thread-settled'
 import type { SidebarProjectSortOrder, SidebarThreadSortOrder } from '@t3tools/contracts/settings'
 import {
   getThreadSortTimestamp,
@@ -18,7 +19,7 @@ import { resolveServerBackedAppStageLabel } from '../branding.logic'
 
 export const THREAD_SELECTION_SAFE_SELECTOR = '[data-thread-item], [data-thread-selection-safe]'
 export const THREAD_JUMP_HINT_SHOW_DELAY_MS = 100
-// Visible sidebar rows are prewarmed into the thread-detail cache so opening a
+// visible sidebar rows are prewarmed into the thread-detail cache so opening a
 // nearby thread usually reuses an already-hot subscription.
 export const SIDEBAR_THREAD_PREWARM_LIMIT = 10
 type SidebarProject = {
@@ -131,6 +132,7 @@ const THREAD_STATUS_PRIORITY: Record<ThreadStatusPill['label'], number> = {
 type ThreadStatusInput = Pick<
   SidebarThreadSummary,
   | 'hasActionableProposedPlan'
+  | 'approvalOutcomes'
   | 'hasPendingApprovals'
   | 'hasPendingUserInput'
   | 'interactionMode'
@@ -266,7 +268,7 @@ export function shouldClearThreadSelectionOnMouseDown(target: HTMLElement | null
   return !target.closest(THREAD_SELECTION_SAFE_SELECTOR)
 }
 
-// A double-click dispatches two `click` events before `dblclick`: the first has
+// a double-click dispatches two `click` events before `dblclick`: the first has
 // `detail === 1`, the second `detail === 2`. The second click must not run the
 // row's single-click navigation, otherwise double-click-to-rename would also
 // navigate. `MouseEvent.detail` is 0 for synthetic/keyboard activations, which
@@ -448,22 +450,22 @@ export function resolveThreadRowClassName(input: {
 }
 
 // ── Sidebar v2 status model ─────────────────────────────────────────
-// Five visual states, three colors: color is reserved for "act now"
+// five visual states, three colors: color is reserved for "act now"
 // (approval), "in motion" (working), and "broken" (failed). Ready is the
 // unlabeled resting state — the agent stopped and is waiting on the user,
 // whether it finished, asked a question, or proposed a plan.
-// Unread completion is tracked separately: it describes whether a ready
+// unread completion is tracked separately: it describes whether a ready
 // thread needs attention, not what the thread is currently doing.
 export type SidebarV2Status = 'approval' | 'input' | 'working' | 'failed' | 'ready'
 
 type SidebarV2StatusInput = Pick<
   SidebarThreadSummary,
-  'hasPendingApprovals' | 'hasPendingUserInput' | 'session'
+  'approvalOutcomes' | 'hasPendingApprovals' | 'hasPendingUserInput' | 'session'
 >
 
 export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2Status
 {
-  if (thread.hasPendingApprovals)
+  if (thread.hasPendingApprovals || hasBlockingApprovalOutcome(thread))
   {
     return 'approval'
   }
@@ -482,17 +484,17 @@ export function resolveSidebarV2Status(thread: SidebarV2StatusInput): SidebarV2S
   return 'ready'
 }
 
-/** NaN-safe Date.parse for sort comparators: a malformed timestamp must not
-    poison the whole ordering, so it sinks to the epoch instead. */
+// NaN-safe Date.parse for sort comparators: a malformed timestamp must not
+// poison the whole ordering, so it sinks to the epoch instead.
 export function parseTimestampMs(isoDate: string): number
 {
   const parsed = Date.parse(isoDate)
   return Number.isNaN(parsed) ? 0 : parsed
 }
 
-/** First VALID timestamp wins: `a ?? b` falls through on null, but a present-
-    yet-malformed string must also fall through to the next candidate rather
-    than sink the row to the epoch. */
+// first VALID timestamp wins: `a ?? b` falls through on null, but a present-
+// yet-malformed string must also fall through to the next candidate rather
+// than sink the row to the epoch.
 export function firstValidTimestampMs(
   ...candidates: ReadonlyArray<string | null | undefined>
 ): number
@@ -506,8 +508,8 @@ export function firstValidTimestampMs(
   return 0
 }
 
-/** String twin of firstValidTimestampMs for callers that need the ISO string
-    (display labels, tick anchors) rather than epoch ms. */
+// string twin of firstValidTimestampMs for callers that need the ISO string
+// (display labels, tick anchors) rather than epoch ms.
 export function firstValidTimestamp(
   ...candidates: ReadonlyArray<string | null | undefined>
 ): string | null
@@ -540,11 +542,11 @@ type SettledTimestampInput = Pick<
   'settledAt' | 'latestUserMessageAt' | 'latestTurn' | 'updatedAt'
 >
 
-/** The timestamp a settled row sorts and labels by: settledAt when stamped
-    (explicit settles), otherwise last activity — the same candidates
-    threadLastActivityAt feeds the auto-settle window (user message plus all
-    latestTurn stamps), so a thread whose last activity was a turn completion
-    doesn't sort by an older message time. updatedAt is the final net. */
+// the timestamp a settled row sorts and labels by: settledAt when stamped
+// (explicit settles), otherwise last activity — the same candidates
+// threadLastActivityAt feeds the auto-settle window (user message plus all
+// latestTurn stamps), so a thread whose last activity was a turn completion
+// doesn't sort by an older message time. updatedAt is the final net.
 export function resolveSettledTimestamp(thread: SettledTimestampInput): string | null
 {
   const settledAt = firstValidTimestamp(thread.settledAt)
@@ -569,7 +571,7 @@ export function resolveSettledTimestamp(thread: SettledTimestampInput): string |
   return latest ?? firstValidTimestamp(thread.updatedAt)
 }
 
-// Settled rows are history, so they order by when the work ENDED, not when
+// settled rows are history, so they order by when the work ENDED, not when
 // the thread was created or last touched.
 export function sortSettledThreadsForSidebarV2<
   T extends SettledTimestampInput & { readonly id: string },
@@ -585,10 +587,10 @@ export function sortSettledThreadsForSidebarV2<
   )
 }
 
-/** The timestamp a working thread's elapsed label counts from: the running
-    turn's start (request time until adoption), falling back to the session's
-    last transition when the turn projection lags behind. Malformed
-    timestamps fall through to the next candidate, not just missing ones. */
+// the timestamp a working thread's elapsed label counts from: the running
+// turn's start (request time until adoption), falling back to the session's
+// last transition when the turn projection lags behind. Malformed
+// timestamps fall through to the next candidate, not just missing ones.
 export function resolveWorkingStartedAt(
   thread: Pick<SidebarThreadSummary, 'latestTurn' | 'session'>,
 ): string | null
@@ -616,7 +618,7 @@ export function resolveThreadStatusPill(input: {
 {
   const { thread } = input
 
-  if (thread.hasPendingApprovals)
+  if (thread.hasPendingApprovals || hasBlockingApprovalOutcome(thread))
   {
     return {
       label: 'Pending Approval',
@@ -896,11 +898,9 @@ export function sortLogicalProjectsForSidebar<
   )
 }
 
-/**
- * Sorts the cross-environment project collection used by landing surfaces.
- * Project ids are only unique within an environment, and archived threads
- * must not make a project appear recently active.
- */
+// sorts the cross-environment project collection used by landing surfaces.
+// project ids are only unique within an environment, and archived threads
+// must not make a project appear recently active.
 export function sortScopedProjectsForSidebar<
   TProject extends ScopedSidebarProject,
   TThread extends ScopedSidebarThread,

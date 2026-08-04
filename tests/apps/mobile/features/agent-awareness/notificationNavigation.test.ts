@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/agent-awareness/notificationNavigation.test.ts
+// verify consume last agent notification response behavior
+
 import type { NotificationResponse } from 'expo-notifications'
 import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
@@ -7,6 +10,7 @@ import {
   extractAgentNotificationDeepLink,
   routeAgentNotificationResponseOnce,
 } from '../../../../../apps/mobile/src/features/agent-awareness/notificationPayload'
+import { REJECTED_THREAD_DEEP_LINKS } from '../../lib/rejectedThreadDeepLinks'
 
 function responseWithData(data: Record<string, unknown>, identifier = 'notification-1')
 {
@@ -151,16 +155,10 @@ describe('extractAgentNotificationDeepLink', () =>
 
   it('ignores malformed or external links', () =>
   {
-    expect(
-      extractAgentNotificationDeepLink(responseWithData({ deepLink: 'https://example.com' })),
-    ).toBeNull()
-    expect(extractAgentNotificationDeepLink(responseWithData({ deepLink: '/settings' }))).toBeNull()
-    expect(
-      extractAgentNotificationDeepLink(responseWithData({ deepLink: '//example.com' })),
-    ).toBeNull()
-    expect(
-      extractAgentNotificationDeepLink(responseWithData({ deepLink: '/threads/env/thread?x=1' })),
-    ).toBeNull()
+    for (const deepLink of REJECTED_THREAD_DEEP_LINKS)
+    {
+      expect(extractAgentNotificationDeepLink(responseWithData({ deepLink }))).toBeNull()
+    }
     expect(extractAgentNotificationDeepLink({})).toBeNull()
   })
 })

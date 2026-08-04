@@ -1,8 +1,17 @@
-/// <reference types="node" />
+// tests/apps/mobile/features/agent-awareness/remoteRegistration.test.ts
+// verify make relay device registration request behavior
 
+/// <reference types="node" />
 import * as NodeCrypto from 'node:crypto'
 
 import { beforeEach, vi } from 'vite-plus/test'
+
+// expo's async-require setup reads `__DEV__` at import time.
+vi.hoisted(() =>
+{
+  vi.stubGlobal('__DEV__', false)
+})
+
 import { describe, expect, it } from '@effect/vitest'
 import Constants from 'expo-constants'
 import * as Effect from 'effect/Effect'
@@ -250,10 +259,11 @@ describe('makeRelayDeviceRegistrationRequest', () =>
     widgetMocks.getInstances.mockReturnValue([])
   })
 
-  it('preserves disabled Live Activity preferences in relay registrations', () =>
-  {
-    expect(
-      makeRelayDeviceRegistrationRequest({
+  it.each([
+    {
+      name: 'preserves disabled Live Activity preferences',
+      personalTeam: false,
+      input: {
         deviceId: 'device-1',
         label: "Julius's iPhone",
         iosMajorVersion: 18,
@@ -261,33 +271,30 @@ describe('makeRelayDeviceRegistrationRequest', () =>
         pushToken: 'apns-token',
         pushToStartToken: 'push-to-start-token',
         notificationsEnabled: true,
+        preferences: { liveActivitiesEnabled: false },
+      },
+      expected: {
+        deviceId: 'device-1',
+        label: "Julius's iPhone",
+        platform: 'ios',
+        iosMajorVersion: 18,
+        appVersion: '1.0.0',
+        pushToken: 'apns-token',
+        pushToStartToken: 'push-to-start-token',
         preferences: {
           liveActivitiesEnabled: false,
+          notificationsEnabled: true,
+          notifyOnApproval: true,
+          notifyOnInput: true,
+          notifyOnCompletion: true,
+          notifyOnFailure: true,
         },
-      }),
-    ).toEqual({
-      deviceId: 'device-1',
-      label: "Julius's iPhone",
-      platform: 'ios',
-      iosMajorVersion: 18,
-      appVersion: '1.0.0',
-      pushToken: 'apns-token',
-      pushToStartToken: 'push-to-start-token',
-      preferences: {
-        liveActivitiesEnabled: false,
-        notificationsEnabled: true,
-        notifyOnApproval: true,
-        notifyOnInput: true,
-        notifyOnCompletion: true,
-        notifyOnFailure: true,
       },
-    })
-  })
-
-  it("registers the app's APNs routing so the relay targets the right bundle", () =>
-  {
-    expect(
-      makeRelayDeviceRegistrationRequest({
+    },
+    {
+      name: "registers the app's APNs routing",
+      personalTeam: false,
+      input: {
         deviceId: 'device-1',
         label: "Julius's iPhone",
         iosMajorVersion: 18,
@@ -296,27 +303,16 @@ describe('makeRelayDeviceRegistrationRequest', () =>
         apsEnvironment: resolveApsEnvironment('preview'),
         notificationsEnabled: true,
         preferences: {},
-      }),
-    ).toMatchObject({
-      bundleId: 'com.ggfincke.code456.preview',
-      apsEnvironment: 'production',
-    })
-  })
-
-  it('routes development builds to the APNs sandbox', () =>
-  {
-    expect(resolveApsEnvironment('development')).toBe('sandbox')
-    expect(resolveApsEnvironment('preview')).toBe('production')
-    expect(resolveApsEnvironment('production')).toBe('production')
-    expect(resolveApsEnvironment(undefined)).toBe('production')
-  })
-
-  it('disables push features in Personal Team relay registrations', () =>
-  {
-    Constants.expoConfig!.extra = { iosPersonalTeamBuild: true }
-
-    expect(
-      makeRelayDeviceRegistrationRequest({
+      },
+      expected: {
+        bundleId: 'com.ggfincke.code456.preview',
+        apsEnvironment: 'production',
+      },
+    },
+    {
+      name: 'disables push features in Personal Team builds',
+      personalTeam: true,
+      input: {
         deviceId: 'device-1',
         label: "Julius's iPhone",
         iosMajorVersion: 18,
@@ -325,43 +321,59 @@ describe('makeRelayDeviceRegistrationRequest', () =>
         pushToStartToken: 'push-to-start-token',
         notificationsEnabled: true,
         preferences: {},
-      }).preferences,
-    ).toMatchObject({
-      liveActivitiesEnabled: false,
-      notificationsEnabled: false,
-    })
-  })
-
-  it('marks notification delivery disabled when APNs permission is unavailable', () =>
-  {
-    expect(
-      makeRelayDeviceRegistrationRequest({
+      },
+      expected: {
+        preferences: {
+          liveActivitiesEnabled: false,
+          notificationsEnabled: false,
+        },
+      },
+    },
+    {
+      name: 'marks notification delivery disabled without APNs permission',
+      personalTeam: false,
+      input: {
         deviceId: 'device-1',
         label: "Julius's iPhone",
         iosMajorVersion: 18,
         appVersion: '1.0.0',
         pushToStartToken: 'push-to-start-token',
         notificationsEnabled: false,
+        preferences: { liveActivitiesEnabled: true },
+      },
+      expected: {
+        deviceId: 'device-1',
+        label: "Julius's iPhone",
+        platform: 'ios',
+        iosMajorVersion: 18,
+        appVersion: '1.0.0',
+        pushToStartToken: 'push-to-start-token',
         preferences: {
           liveActivitiesEnabled: true,
+          notificationsEnabled: false,
+          notifyOnApproval: true,
+          notifyOnInput: true,
+          notifyOnCompletion: true,
+          notifyOnFailure: true,
         },
-      }),
-    ).toEqual({
-      deviceId: 'device-1',
-      label: "Julius's iPhone",
-      platform: 'ios',
-      iosMajorVersion: 18,
-      appVersion: '1.0.0',
-      pushToStartToken: 'push-to-start-token',
-      preferences: {
-        liveActivitiesEnabled: true,
-        notificationsEnabled: false,
-        notifyOnApproval: true,
-        notifyOnInput: true,
-        notifyOnCompletion: true,
-        notifyOnFailure: true,
       },
-    })
+    },
+  ])('$name in relay registrations', ({ personalTeam, input, expected }) =>
+  {
+    if (personalTeam)
+    {
+      Constants.expoConfig!.extra = { iosPersonalTeamBuild: true }
+    }
+
+    expect(makeRelayDeviceRegistrationRequest(input)).toMatchObject(expected)
+  })
+
+  it('routes development builds to the APNs sandbox', () =>
+  {
+    expect(resolveApsEnvironment('development')).toBe('sandbox')
+    expect(resolveApsEnvironment('preview')).toBe('production')
+    expect(resolveApsEnvironment('production')).toBe('production')
+    expect(resolveApsEnvironment(undefined)).toBe('production')
   })
 
   it('overrides persisted preferences for an in-flight registration', () =>
@@ -602,7 +614,7 @@ describe('makeRelayDeviceRegistrationRequest', () =>
 
     return Effect.gen(function* ()
     {
-      // Drive the registration directly so the assertion does not depend on the
+      // drive the registration directly so the assertion does not depend on the
       // background queue draining; refreshAgentAwarenessRegistration swallows the
       // error but must record the failed status so the settings toggles cannot
       // read as enabled.
@@ -642,7 +654,7 @@ describe('makeRelayDeviceRegistrationRequest', () =>
 
   it.effect('resets a pending status to unknown when relay config is missing', () =>
   {
-    // No relay url configured: registration can neither run nor ever succeed,
+    // no relay url configured: registration can neither run nor ever succeed,
     // so the status must not stick at "pending".
     setAgentAwarenessRelayTokenProvider(() => Promise.resolve('clerk-token-user-a'))
 
@@ -667,7 +679,7 @@ describe('makeRelayDeviceRegistrationRequest', () =>
       yield* runBackgroundOperations()
       expect(getAgentAwarenessRegistrationStatus()).toBe('registered')
 
-      // The relay still holds the accepted registration; a transient refresh
+      // the relay still holds the accepted registration; a transient refresh
       // failure must not flip the settings toggles off.
       vi.mocked(loadOrCreateAgentAwarenessDeviceId).mockRejectedValueOnce(
         new Error('transient failure'),
@@ -693,7 +705,7 @@ describe('makeRelayDeviceRegistrationRequest', () =>
       expect(saveAgentAwarenessRegistrationRecord).toHaveBeenCalledTimes(1)
       expect(registrationRecordStore.current).not.toBeNull()
 
-      // Second attempt with an identical payload must skip the relay entirely,
+      // second attempt with an identical payload must skip the relay entirely,
       // so no new registration record is written.
       vi.mocked(saveAgentAwarenessRegistrationRecord).mockClear()
       yield* refreshAgentAwarenessRegistration()
@@ -704,7 +716,7 @@ describe('makeRelayDeviceRegistrationRequest', () =>
 
   it.effect('dedupes rapid activity-token re-registrations within the replay window', () =>
   {
-    // Fetch counts are unreliable here (the module-level relay layer captures
+    // fetch counts are unreliable here (the module-level relay layer captures
     // the first test's fetch), so assert on the flow's own seams: a real
     // registration attempt loads the device id, a deduped one short-circuits
     // before it.
@@ -740,11 +752,11 @@ describe('makeRelayDeviceRegistrationRequest', () =>
 
     return Effect.gen(function* ()
     {
-      // Drains the sign-in refresh, which registers the activity token.
+      // drains the sign-in refresh, which registers the activity token.
       yield* runBackgroundOperations()
       expect(activity.getPushToken).toHaveBeenCalled()
 
-      // A burst refresh (foreground / connection update seconds later) must
+      // a burst refresh (foreground / connection update seconds later) must
       // dedupe: it reads the token but never proceeds to a registration
       // attempt (which would load the device id first).
       vi.mocked(loadOrCreateAgentAwarenessDeviceId).mockClear()

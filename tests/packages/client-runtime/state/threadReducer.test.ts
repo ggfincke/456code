@@ -4,6 +4,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
+  ApprovalRequestId,
   CheckpointRef,
   EventId,
   MessageId,
@@ -44,6 +45,7 @@ const baseThread: OrchestrationThread = {
   branch: null,
   worktreePath: null,
   latestTurn: null,
+  providerSwitch: null,
   createdAt: '2026-04-01T00:00:00.000Z',
   updatedAt: '2026-04-01T00:00:00.000Z',
   archivedAt: null,
@@ -122,6 +124,312 @@ describe('applyThreadDetailEvent', () =>
         expect(result.thread.origin).toEqual(importedOrigin)
         expect(result.thread.messages).toEqual([])
         expect(result.thread.session).toBeNull()
+      }
+    })
+  })
+
+  describe('provider switch lifecycle', () =>
+  {
+    it('clears a pending handoff when durable delivery evidence arrives live', () =>
+    {
+      const result = applyThreadDetailEvent(
+        {
+          ...baseThread,
+          pendingHandoff: {
+            text: 'Continue from this summary.',
+            fromInstanceId: ProviderInstanceId.make('codex'),
+            fromModel: 'gpt-5.4',
+            createdAt: '2026-04-01T01:00:00.000Z',
+          },
+        },
+        {
+          ...baseEventFields,
+          sequence: 1,
+          occurredAt: '2026-04-01T01:00:01.000Z',
+          aggregateKind: 'thread',
+          aggregateId: baseThread.id,
+          type: 'thread.activity-appended',
+          payload: {
+            threadId: baseThread.id,
+            activity: {
+              id: EventId.make('provider-handoff-delivered'),
+              tone: 'info',
+              kind: 'provider.handoff.delivered',
+              summary: 'Provider handoff delivered',
+              payload: {
+                type: 'provider.handoff.delivered',
+                handoffKey: 'handoff-key',
+                providerSessionIdentity: 'provider-session',
+              },
+              turnId: null,
+              createdAt: '2026-04-01T01:00:01.000Z',
+            },
+          },
+        },
+      )
+
+      expect(result.kind).toBe('updated')
+      if (result.kind === 'updated')
+      {
+        expect(result.thread.pendingHandoff).toBeNull()
+      }
+    })
+
+    it('rebinds the model after the full live switch sequence', () =>
+    {
+      const requestedAt = '2026-04-01T01:00:00.000Z'
+      const targetModelSelection = {
+        instanceId: ProviderInstanceId.make('claude'),
+        model: 'sonnet',
+      }
+      const requested = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 1,
+        occurredAt: requestedAt,
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-requested',
+        payload: {
+          threadId: baseThread.id,
+          targetModelSelection,
+          expectedCurrentInstanceId: baseThread.modelSelection.instanceId,
+        },
+      })
+      expect(requested.kind).toBe('updated')
+      if (requested.kind !== 'updated') return
+      expect(requested.thread.providerSwitch).toEqual({
+        phase: 'pending',
+        targetInstanceId: targetModelSelection.instanceId,
+        targetModel: targetModelSelection.model,
+        requestedAt,
+        requestId: EventId.make('event-1'),
+        requestSequence: 1,
+        sourceModelSelection: baseThread.modelSelection,
+      })
+
+      const compacting = applyThreadDetailEvent(requested.thread, {
+        ...baseEventFields,
+        sequence: 2,
+        occurredAt: '2026-04-01T01:00:01.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-progressed',
+        payload: { threadId: baseThread.id, phase: 'compacting' },
+      })
+      expect(compacting.kind).toBe('updated')
+      if (compacting.kind !== 'updated') return
+      expect(compacting.thread.providerSwitch).toEqual({
+        phase: 'compacting',
+        targetInstanceId: targetModelSelection.instanceId,
+        targetModel: targetModelSelection.model,
+        requestedAt,
+        requestId: EventId.make('event-1'),
+        requestSequence: 1,
+        sourceModelSelection: baseThread.modelSelection,
+      })
+
+      const finalizing = applyThreadDetailEvent(compacting.thread, {
+        ...baseEventFields,
+        sequence: 3,
+        occurredAt: '2026-04-01T01:00:02.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-progressed',
+        payload: { threadId: baseThread.id, phase: 'finalizing' },
+      })
+      expect(finalizing.kind).toBe('updated')
+      if (finalizing.kind !== 'updated') return
+      expect(finalizing.thread.providerSwitch).toEqual({
+        phase: 'finalizing',
+        targetInstanceId: targetModelSelection.instanceId,
+        targetModel: targetModelSelection.model,
+        requestedAt,
+        requestId: EventId.make('event-1'),
+        requestSequence: 1,
+        sourceModelSelection: baseThread.modelSelection,
+      })
+
+      const switched = applyThreadDetailEvent(finalizing.thread, {
+        ...baseEventFields,
+        sequence: 4,
+        occurredAt: '2026-04-01T01:00:03.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switched',
+        payload: {
+          modelSelection: targetModelSelection,
+          fromInstanceId: baseThread.modelSelection.instanceId,
+          fromModel: baseThread.modelSelection.model,
+          handoffText: 'Continue from this summary.',
+        },
+      })
+      expect(switched.kind).toBe('updated')
+      if (switched.kind === 'updated')
+      {
+        expect(switched.thread.providerSwitch).toBeNull()
+        expect(switched.thread.modelSelection).toEqual(targetModelSelection)
+        expect(switched.thread.activities).toContainEqual(
+          expect.objectContaining({
+            id: baseEventFields.eventId,
+            kind: 'provider.switch.completed',
+            payload: expect.objectContaining({ targetModelSelection }),
+          }),
+        )
+        const historicalPair = applyThreadDetailEvent(switched.thread, {
+          ...baseEventFields,
+          eventId: EventId.make('event-explicit-provider-switch-completed'),
+          sequence: 5,
+          occurredAt: '2026-04-01T01:00:04.000Z',
+          aggregateKind: 'thread',
+          aggregateId: baseThread.id,
+          causationEventId: null,
+          type: 'thread.activity-appended',
+          payload: {
+            threadId: baseThread.id,
+            activity: {
+              id: EventId.make('historical-provider-switch-completed'),
+              tone: 'info',
+              kind: 'provider.switch.completed',
+              summary: 'Provider switch completed',
+              payload: {
+                fromInstanceId: baseThread.modelSelection.instanceId,
+                fromModel: baseThread.modelSelection.model,
+                toInstanceId: targetModelSelection.instanceId,
+                toModel: targetModelSelection.model,
+              },
+              turnId: null,
+              sequence: 5,
+              createdAt: '2026-04-01T01:00:03.000Z',
+            },
+          },
+        })
+        expect(historicalPair.kind).toBe('updated')
+        if (historicalPair.kind === 'updated')
+        {
+          expect(historicalPair.thread.activities).toHaveLength(1)
+          expect(historicalPair.thread.activities[0]?.id).toBe(
+            'historical-provider-switch-completed',
+          )
+        }
+      }
+    })
+
+    it('clears a directly failed request without rebinding the model', () =>
+    {
+      const requested = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 1,
+        occurredAt: '2026-04-01T01:00:00.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-requested',
+        payload: {
+          threadId: baseThread.id,
+          targetModelSelection: {
+            instanceId: ProviderInstanceId.make('claude'),
+            model: 'sonnet',
+          },
+          expectedCurrentInstanceId: baseThread.modelSelection.instanceId,
+        },
+      })
+      expect(requested.kind).toBe('updated')
+      if (requested.kind !== 'updated') return
+
+      const failed = applyThreadDetailEvent(requested.thread, {
+        ...baseEventFields,
+        sequence: 2,
+        occurredAt: '2026-04-01T01:00:01.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-failed',
+        payload: {
+          threadId: baseThread.id,
+          reasonCode: 'target-unavailable',
+          detail: 'Target provider unavailable.',
+        },
+      })
+      expect(failed.kind).toBe('updated')
+      if (failed.kind === 'updated')
+      {
+        expect(failed.thread.providerSwitch).toBeNull()
+        expect(failed.thread.modelSelection).toEqual(baseThread.modelSelection)
+        expect(failed.thread.activities).toContainEqual(
+          expect.objectContaining({
+            id: baseEventFields.eventId,
+            kind: 'provider.switch.failed',
+          }),
+        )
+      }
+    })
+
+    it('sets, progresses, and clears provider switch state', () =>
+    {
+      const requestedAt = '2026-04-01T01:00:00.000Z'
+      const targetInstanceId = ProviderInstanceId.make('claude')
+      const requested = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 1,
+        occurredAt: requestedAt,
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-requested',
+        payload: {
+          threadId: baseThread.id,
+          targetModelSelection: { instanceId: targetInstanceId, model: 'sonnet' },
+          expectedCurrentInstanceId: baseThread.modelSelection.instanceId,
+        },
+      })
+      expect(requested.kind).toBe('updated')
+      if (requested.kind !== 'updated') return
+      expect(requested.thread.providerSwitch).toEqual({
+        phase: 'pending',
+        targetInstanceId,
+        targetModel: 'sonnet',
+        requestedAt,
+        requestId: EventId.make('event-1'),
+        requestSequence: 1,
+        sourceModelSelection: baseThread.modelSelection,
+      })
+
+      const progressed = applyThreadDetailEvent(requested.thread, {
+        ...baseEventFields,
+        sequence: 2,
+        occurredAt: '2026-04-01T01:00:01.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-progressed',
+        payload: { threadId: baseThread.id, phase: 'compacting' },
+      })
+      expect(progressed.kind).toBe('updated')
+      if (progressed.kind !== 'updated') return
+      expect(progressed.thread.providerSwitch).toEqual({
+        phase: 'compacting',
+        targetInstanceId,
+        targetModel: 'sonnet',
+        requestedAt,
+        requestId: EventId.make('event-1'),
+        requestSequence: 1,
+        sourceModelSelection: baseThread.modelSelection,
+      })
+
+      const failed = applyThreadDetailEvent(progressed.thread, {
+        ...baseEventFields,
+        sequence: 3,
+        occurredAt: '2026-04-01T01:00:02.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-failed',
+        payload: {
+          threadId: baseThread.id,
+          reasonCode: 'compaction-failed',
+          detail: 'Compaction failed.',
+        },
+      })
+      expect(failed.kind).toBe('updated')
+      if (failed.kind === 'updated')
+      {
+        expect(failed.thread.providerSwitch).toBeNull()
+        expect(failed.thread.modelSelection).toEqual(baseThread.modelSelection)
       }
     })
   })
@@ -280,7 +588,7 @@ describe('applyThreadDetailEvent', () =>
       {
         expect(result.thread.title).toBe('Updated Title')
         expect(result.thread.branch).toBe('feature/demo')
-        // Model selection should be unchanged since it wasn't in the payload
+        // model selection should be unchanged since it wasn't in the payload
         expect(result.thread.modelSelection).toEqual(baseThread.modelSelection)
       }
     })

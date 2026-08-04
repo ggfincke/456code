@@ -1,3 +1,6 @@
+// packages/client-runtime/src/connection/registry.ts
+// define environment not registered error
+
 import { EnvironmentId } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -78,6 +81,7 @@ export class EnvironmentRegistry extends Context.Service<
     readonly reconcilePlatform: (
       registrations: ReadonlyArray<PlatformConnectionRegistration>,
     ) => Effect.Effect<void>
+    readonly retryOwnedDataCleanup: Effect.Effect<void>
     readonly remove: (
       environmentId: EnvironmentId,
     ) => Effect.Effect<
@@ -178,6 +182,12 @@ export const make = Effect.gen(function* ()
   const leaseLocksGuard = yield* Semaphore.make(1)
   const started = yield* Ref.make(false)
 
+  const prepareOwnedDataCleanup = (environmentId: EnvironmentId) =>
+    ownedDataCleanup.prepare?.(environmentId) ?? Effect.void
+  const markOwnedDataCleanupComplete = (
+    environmentId: EnvironmentId,
+    resource: Persistence.EnvironmentOwnedDataResource,
+  ) => ownedDataCleanup.markComplete?.(environmentId, resource) ?? Effect.void
   const withLeaseLock = <A, E, R>(
     environmentId: EnvironmentId,
     effect: Effect.Effect<A, E, R>,
@@ -230,6 +240,34 @@ export const make = Effect.gen(function* ()
           }),
         ),
     ).pipe(Effect.withSpan('EnvironmentRegistry.withLeaseLock'))
+
+  const cleanupLease = {
+    run: <E, R>(
+      environmentId: EnvironmentId,
+      cleanup: Effect.Effect<void, E, R>,
+    ): Effect.Effect<void, E, R> =>
+      withLeaseLock(
+        environmentId,
+        SubscriptionRef.get(entries).pipe(
+          Effect.flatMap((current) =>
+          {
+            if (current.has(environmentId))
+            {
+              return Effect.void
+            }
+            // promise-backed deletion can outlive interruption, so the lease
+            // remains held until every destructive resource settles
+            return Effect.uninterruptible(cleanup)
+          }),
+        ),
+      ),
+  } satisfies Persistence.EnvironmentOwnedDataCleanupLease
+
+  const retryOwnedDataCleanup = Effect.gen(function* ()
+  {
+    const activeEnvironmentIds = new Set((yield* SubscriptionRef.get(entries)).keys())
+    yield* ownedDataCleanup.retry?.(activeEnvironmentIds, cleanupLease) ?? Effect.void
+  }).pipe(Effect.withSpan('EnvironmentRegistry.retryOwnedDataCleanup'))
 
   const getEntry = Effect.fn('EnvironmentRegistry.getEntry')(function* (
     environmentId: EnvironmentId,
@@ -373,6 +411,7 @@ export const make = Effect.gen(function* ()
     {
       return
     }
+    yield* retryOwnedDataCleanup
     yield* Effect.forEach(
       persistedTargets,
       (target) =>
@@ -457,7 +496,7 @@ export const make = Effect.gen(function* ()
             return next
           })
 
-          // Secondary desktop-local backends (e.g. a parallel WSL backend) live
+          // secondary desktop-local backends (e.g. a parallel WSL backend) live
           // on their own loopback origin, so they authenticate with a bearer
           // token instead of the primary's same-origin cookie. Stash it where
           // the resolver's bearer broker looks it up.
@@ -505,7 +544,7 @@ export const make = Effect.gen(function* ()
     },
   )
 
-  // Tear down a platform-managed environment that the host no longer reports
+  // tear down a platform-managed environment that the host no longer reports
   // (e.g. the user turned the parallel WSL backend off). Platform environments
   // bypass the user-facing `remove` guard since they are reconciled from the
   // bootstrap rather than removed by hand.
@@ -517,6 +556,15 @@ export const make = Effect.gen(function* ()
         Effect.gen(function* ()
         {
           const entry = (yield* SubscriptionRef.get(entries)).get(environmentId)
+          const preparation = yield* Effect.result(prepareOwnedDataCleanup(environmentId))
+          if (preparation._tag === 'Failure')
+          {
+            yield* Effect.logWarning(
+              'Could not persist cleanup intent for a platform environment; removal was skipped.',
+              { environmentId, cause: preparation.failure },
+            )
+            return
+          }
           yield* Ref.update(platformEnvironmentIds, (current) =>
           {
             const next = new Set(current)
@@ -544,6 +592,7 @@ export const make = Effect.gen(function* ()
           yield* Effect.all(
             [
               cache.clear(environmentId).pipe(
+                Effect.tap(() => markOwnedDataCleanupComplete(environmentId, 'cache')),
                 Effect.catch((error) =>
                   Effect.logWarning('Could not clear cached environment data after removal.', {
                     environmentId,
@@ -567,7 +616,7 @@ export const make = Effect.gen(function* ()
     yield* installPlatformRegistration(registration)
   })
 
-  // Reconcile the full set of platform-managed environments against what the
+  // reconcile the full set of platform-managed environments against what the
   // host currently reports: add/refresh the desired ones and tear down any
   // platform environment that disappeared (WSL toggled off, distro switched).
   const reconcilePlatform = Effect.fn('EnvironmentRegistry.reconcilePlatform')(function* (
@@ -605,6 +654,7 @@ export const make = Effect.gen(function* ()
             ? yield* profiles.get(target.connectionId)
             : Option.none()
 
+        yield* prepareOwnedDataCleanup(environmentId)
         yield* registrations.remove(target)
         yield* Ref.update(persistedTargetsByEnvironment, (current) =>
         {
@@ -622,6 +672,7 @@ export const make = Effect.gen(function* ()
         yield* Effect.all(
           [
             cache.clear(environmentId).pipe(
+              Effect.tap(() => markOwnedDataCleanupComplete(environmentId, 'cache')),
               Effect.catch((error) =>
                 Effect.logWarning('Could not clear cached environment data after removal.', {
                   environmentId,
@@ -718,6 +769,7 @@ export const make = Effect.gen(function* ()
     register,
     registerPlatform,
     reconcilePlatform,
+    retryOwnedDataCleanup,
     remove,
     removeRelayEnvironments,
     retryNow,

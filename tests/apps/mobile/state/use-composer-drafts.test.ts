@@ -1,9 +1,55 @@
+// tests/apps/mobile/state/use-composer-drafts.test.ts
+// verifies composer draft persistence and exact environment cleanup boundaries
+
 import { afterEach, describe, expect, it } from '@effect/vitest'
 import { EnvironmentId, ProviderInstanceId } from '@t3tools/contracts'
+import { vi } from 'vite-plus/test'
+
+const persistedDraftFile = vi.hoisted(() => ({
+  exists: false,
+  payload: '',
+  writes: [] as Array<string>,
+  writeError: null as Error | null,
+}))
+
+vi.mock('expo-file-system', () => ({
+  Paths: { document: '/documents' },
+  Directory: class
+  {
+    exists = true
+    create(): void
+    {}
+  },
+  File: class
+  {
+    get exists(): boolean
+    {
+      return persistedDraftFile.exists
+    }
+    create(): void
+    {
+      persistedDraftFile.exists = true
+    }
+    text(): Promise<string>
+    {
+      return Promise.resolve(persistedDraftFile.payload)
+    }
+    write(payload: string): void
+    {
+      if (persistedDraftFile.writeError !== null)
+      {
+        throw persistedDraftFile.writeError
+      }
+      persistedDraftFile.payload = payload
+      persistedDraftFile.writes.push(payload)
+    }
+  },
+}))
 
 import { appAtomRegistry } from '../../../../apps/mobile/src/state/atom-registry'
 import {
   clearComposerDraftContentState,
+  clearComposerDraftsEnvironment,
   composerDraftsAtom,
   decodePersistedComposerDrafts,
   type ComposerDraft,
@@ -21,6 +67,8 @@ const DRAFT: ComposerDraft = {
 afterEach(() =>
 {
   appAtomRegistry.set(composerDraftsAtom, {})
+  persistedDraftFile.writeError = null
+  persistedDraftFile.writes = []
 })
 
 describe('mobile composer drafts', () =>
@@ -247,5 +295,80 @@ describe('mobile composer drafts', () =>
       [`${retainedEnvironmentId}:thread-local`]: DRAFT,
       [`new-task:${retainedEnvironmentId}:project-local`]: DRAFT,
     })
+  })
+
+  it('does not remove prefix-colliding environment drafts', () =>
+  {
+    const environmentId = EnvironmentId.make('environment-1')
+
+    expect(
+      removeComposerDraftsForEnvironment(
+        {
+          'environment-1:thread-1': DRAFT,
+          'new-task:environment-1:project-1': DRAFT,
+          'environment-10:thread-1': DRAFT,
+          'new-task:environment-10:project-1': DRAFT,
+        },
+        environmentId,
+      ),
+    ).toEqual({
+      'environment-10:thread-1': DRAFT,
+      'new-task:environment-10:project-1': DRAFT,
+    })
+  })
+
+  it('surfaces the serialized document write failure during environment cleanup', async () =>
+  {
+    const environmentId = EnvironmentId.make('environment-1')
+    appAtomRegistry.set(composerDraftsAtom, {
+      'environment-1:thread-1': DRAFT,
+      'environment-10:thread-1': DRAFT,
+    })
+    persistedDraftFile.writeError = new Error('disk full')
+
+    await expect(clearComposerDraftsEnvironment(environmentId)).rejects.toMatchObject({
+      _tag: 'ComposerDraftPersistenceError',
+      operation: 'write',
+    })
+    expect(appAtomRegistry.get(composerDraftsAtom)).toEqual({
+      'environment-10:thread-1': DRAFT,
+    })
+  })
+
+  it('writes cleanup as a full document through the persistence queue', async () =>
+  {
+    const environmentId = EnvironmentId.make('environment-1')
+    appAtomRegistry.set(composerDraftsAtom, {
+      'environment-1:thread-1': DRAFT,
+      'environment-10:thread-1': DRAFT,
+    })
+
+    await clearComposerDraftsEnvironment(environmentId)
+
+    expect(persistedDraftFile.writes).toHaveLength(1)
+    expect(JSON.parse(persistedDraftFile.writes[0]!)).toEqual({
+      schemaVersion: 1,
+      drafts: { 'environment-10:thread-1': DRAFT },
+    })
+  })
+
+  it('orders concurrent environment cleanup documents through the shared queue', async () =>
+  {
+    const first = EnvironmentId.make('environment-1')
+    const tenth = EnvironmentId.make('environment-10')
+    appAtomRegistry.set(composerDraftsAtom, {
+      'environment-1:thread-1': DRAFT,
+      'environment-10:thread-1': DRAFT,
+    })
+
+    await Promise.all([
+      clearComposerDraftsEnvironment(first),
+      clearComposerDraftsEnvironment(tenth),
+    ])
+
+    expect(persistedDraftFile.writes.map((payload) => JSON.parse(payload).drafts)).toEqual([
+      { 'environment-10:thread-1': DRAFT },
+      {},
+    ])
   })
 })

@@ -43,6 +43,7 @@ export interface ProjectThreadAwarenessInput
     | 'session'
     | 'latestTurn'
     | 'updatedAt'
+    | 'approvalOutcomes'
     | 'hasPendingApprovals'
     | 'hasPendingUserInput'
   >
@@ -61,20 +62,21 @@ export function projectThreadAwareness(
 ): AgentAwarenessState | null
 {
   const { environmentId, project, thread } = input
-  const phase = resolveThreadAwarenessPhase(thread)
+  const approvalState = resolveApprovalAwarenessState(thread)
+  const phase = resolveThreadAwarenessPhase(thread, approvalState)
   if (!phase)
   {
     return null
   }
 
-  const detail = detailForPhase(phase, thread)
+  const detail = detailForPhase(phase, thread, approvalState)
   return {
     environmentId,
     threadId: thread.id,
     projectTitle: project.title,
     threadTitle: thread.title,
     phase,
-    headline: headlineForPhase(phase),
+    headline: headlineForPhase(phase, approvalState),
     ...(detail === undefined ? {} : { detail }),
     modelTitle: thread.modelSelection.model,
     updatedAt: thread.updatedAt,
@@ -82,11 +84,43 @@ export function projectThreadAwareness(
   }
 }
 
+type ApprovalAwarenessState =
+  | { readonly status: 'pending' }
+  | { readonly status: 'responding' }
+  | { readonly status: 'unknown'; readonly detail?: string }
+
+function resolveApprovalAwarenessState(
+  thread: ProjectThreadAwarenessInput['thread'],
+): ApprovalAwarenessState | null
+{
+  const unknown = thread.approvalOutcomes?.find((outcome) => outcome.status === 'unknown')
+  if (unknown)
+  {
+    return {
+      status: 'unknown',
+      ...(unknown.detail === undefined ? {} : { detail: unknown.detail }),
+    }
+  }
+  if (thread.approvalOutcomes?.some((outcome) => outcome.status === 'responding'))
+  {
+    return { status: 'responding' }
+  }
+  if (
+    thread.hasPendingApprovals ||
+    thread.approvalOutcomes?.some((outcome) => outcome.status === 'pending')
+  )
+  {
+    return { status: 'pending' }
+  }
+  return null
+}
+
 function resolveThreadAwarenessPhase(
   thread: ProjectThreadAwarenessInput['thread'],
+  approvalState: ApprovalAwarenessState | null,
 ): AgentAwarenessPhase | null
 {
-  if (thread.hasPendingApprovals)
+  if (approvalState !== null)
   {
     return 'waiting_for_approval'
   }
@@ -110,11 +144,11 @@ function resolveThreadAwarenessPhase(
   {
     return 'completed'
   }
-  // A turn that finished can still read as "interrupted" here: session
+  // a turn that finished can still read as "interrupted" here: session
   // teardown settles still-running turns by session status, and that write
   // can race the turn.completed one. completedAt survives the race — a turn
   // that has a completion timestamp finished, whatever the state column says.
-  // Without this, quick finish-then-teardown threads resolve to null
+  // without this, quick finish-then-teardown threads resolve to null
   // persistently and get tombstoned instead of published as completed.
   if (thread.latestTurn?.state === 'interrupted' && thread.latestTurn.completedAt !== null)
   {
@@ -129,7 +163,10 @@ function resolveThreadAwarenessPhase(
   return null
 }
 
-function headlineForPhase(phase: AgentAwarenessPhase): string
+function headlineForPhase(
+  phase: AgentAwarenessPhase,
+  approvalState: ApprovalAwarenessState | null,
+): string
 {
   switch (phase)
   {
@@ -138,7 +175,11 @@ function headlineForPhase(phase: AgentAwarenessPhase): string
     case 'running':
       return 'Agent is working'
     case 'waiting_for_approval':
-      return 'Approval needed'
+      return approvalState?.status === 'unknown'
+        ? 'Approval status unknown'
+        : approvalState?.status === 'responding'
+          ? 'Approval response pending'
+          : 'Approval needed'
     case 'waiting_for_input':
       return 'Waiting for input'
     case 'completed':
@@ -153,8 +194,18 @@ function headlineForPhase(phase: AgentAwarenessPhase): string
 function detailForPhase(
   phase: AgentAwarenessPhase,
   thread: ProjectThreadAwarenessInput['thread'],
+  approvalState: ApprovalAwarenessState | null,
 ): string | undefined
 {
+  if (phase === 'waiting_for_approval' && approvalState?.status === 'unknown')
+  {
+    const guidance = 'Refresh status or restart the turn to continue safely.'
+    return approvalState.detail ? `${approvalState.detail} ${guidance}` : guidance
+  }
+  if (phase === 'waiting_for_approval' && approvalState?.status === 'responding')
+  {
+    return 'Waiting for the provider to confirm the approval response.'
+  }
   if (phase === 'failed')
   {
     return thread.session?.lastError ?? undefined
