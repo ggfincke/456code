@@ -11,6 +11,7 @@ import {
   resolveThreadListV2Status,
   sortThreadsForListV2,
 } from '../../../../../../apps/mobile/src/features/threads/sidebar/threadListV2'
+import { canPinThread } from '../../../../../../apps/mobile/src/features/threads/thread-list-pinning'
 
 const environmentId = EnvironmentId.make('environment-1')
 
@@ -209,6 +210,91 @@ describe('buildThreadListV2Items', () =>
     // thread is BACK in the card block and the snoozed one is gone.
     expect(layout.items.map((item) => item.thread.id)).toEqual(['active', 'woken'])
     expect(layout.snoozedCount).toBe(1)
+  })
+
+  it('renders pinned threads first and exempts them from settlement', () =>
+  {
+    const layout = buildThreadListV2Items({
+      threads: [
+        makeThread({ id: ThreadId.make('active'), title: 'Active' }),
+        makeThread({
+          id: ThreadId.make('pinned-settled'),
+          title: 'Pinned while settled',
+          pinnedAt: '2026-06-01T12:00:00.000Z',
+          settledOverride: 'settled',
+          settledAt: '2026-06-01T12:00:00.000Z',
+        }),
+      ],
+      environmentId: null,
+      searchQuery: '',
+      now: NOW,
+    })
+
+    expect(layout.items.map((item) => item.thread.id)).toEqual(['pinned-settled', 'active'])
+    expect(layout.items.map((item) => item.pinned)).toEqual([true, false])
+    expect(layout.items.map((item) => item.variant)).toEqual(['card', 'card'])
+    expect(layout.hiddenSettledCount).toBe(0)
+  })
+
+  it('keeps imported history-only threads out of pin actions and the pinned block', () =>
+  {
+    const imported = makeThread({
+      id: ThreadId.make('imported-pinned'),
+      title: 'Imported history',
+      pinnedAt: '2026-06-01T12:00:00.000Z',
+      origin: {
+        kind: 'imported',
+        source: 'codex-cli',
+        sourcePath: '/tmp/session.jsonl',
+        contentHash: 'hash',
+        nativeSessionId: null,
+        providerInstanceId: null,
+        importedAt: '2026-06-01T11:00:00.000Z',
+      },
+    })
+
+    expect(canPinThread(imported, true)).toBe(false)
+    expect(
+      buildThreadListV2Items({
+        threads: [imported],
+        environmentId: null,
+        searchQuery: '',
+        now: NOW,
+      }).items.map((item) => ({ id: item.thread.id, pinned: item.pinned })),
+    ).toEqual([{ id: imported.id, pinned: false }])
+  })
+
+  it('hides a snoozed pinned thread and restores it to the pinned block after wake', () =>
+  {
+    const threads = [
+      makeThread({ id: ThreadId.make('active'), title: 'Active' }),
+      makeThread({
+        id: ThreadId.make('pinned-snoozed'),
+        title: 'Pinned and snoozed',
+        pinnedAt: '2026-06-01T12:00:00.000Z',
+        snoozedUntil: '2026-06-03T09:00:00.000Z',
+        snoozedAt: '2026-06-01T11:00:00.000Z',
+      }),
+    ]
+
+    const whileSnoozed = buildThreadListV2Items({
+      threads,
+      environmentId: null,
+      searchQuery: '',
+      now: NOW,
+    })
+    expect(whileSnoozed.items.map((item) => item.thread.id)).toEqual(['active'])
+    expect(whileSnoozed.snoozedCount).toBe(1)
+
+    const afterWake = buildThreadListV2Items({
+      threads,
+      environmentId: null,
+      searchQuery: '',
+      now: '2026-06-03T10:00:00.000Z',
+    })
+    expect(afterWake.items.map((item) => item.thread.id)).toEqual(['pinned-snoozed', 'active'])
+    expect(afterWake.items[0]?.pinned).toBe(true)
+    expect(afterWake.snoozedCount).toBe(0)
   })
 
   it('classifies snooze with the second-precise clock and reports the next wake', () =>

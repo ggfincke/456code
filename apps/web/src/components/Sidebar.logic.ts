@@ -58,6 +58,60 @@ export function isImportedShelfThread(
   return thread.origin !== null && thread.latestTurn === null
 }
 
+export function partitionLegacySidebarProjectThreads<
+  TThread extends Pick<SidebarThreadSummary, 'latestTurn' | 'origin'> & {
+    readonly pinnedAt?: SidebarThreadSummary['pinnedAt']
+  },
+>(
+  threads: readonly TThread[],
+): {
+  readonly pinnedThreads: readonly TThread[]
+  readonly regularThreads: readonly TThread[]
+}
+{
+  const pinnedThreads: TThread[] = []
+  const regularThreads: TThread[] = []
+  for (const thread of threads)
+  {
+    if (thread.pinnedAt != null && !isImportedShelfThread(thread)) pinnedThreads.push(thread)
+    else regularThreads.push(thread)
+  }
+  return { pinnedThreads, regularThreads }
+}
+
+const SIDEBAR_V2_CARD_ESTIMATED_SIZE = 83
+const SIDEBAR_V2_PINNED_DIVIDER_ESTIMATED_SIZE = 13
+const SIDEBAR_V2_SHELF_HEADER_ESTIMATED_SIZE = 60
+
+export function estimateSidebarV2HeaderSize(input: {
+  readonly activeThreadCount: number
+  readonly pinnedThreadCount: number
+  readonly hasImportedShelf: boolean
+}): number
+{
+  return (
+    (input.activeThreadCount + input.pinnedThreadCount) * SIDEBAR_V2_CARD_ESTIMATED_SIZE +
+    (input.pinnedThreadCount > 0 ? SIDEBAR_V2_PINNED_DIVIDER_ESTIMATED_SIZE : 0) +
+    (input.hasImportedShelf ? SIDEBAR_V2_SHELF_HEADER_ESTIMATED_SIZE : 0)
+  )
+}
+
+export type SidebarV2LifecycleSection = 'active' | 'pinned' | 'settled' | 'snoozed'
+
+// explicit snooze temporarily hides a pin; otherwise pinning keeps a thread
+// above the inbox before settlement is considered.
+export function resolveSidebarV2LifecycleSection(input: {
+  readonly snoozed: boolean
+  readonly pinned: boolean
+  readonly settled: boolean
+}): SidebarV2LifecycleSection
+{
+  if (input.snoozed) return 'snoozed'
+  if (input.pinned) return 'pinned'
+  if (input.settled) return 'settled'
+  return 'active'
+}
+
 export async function archiveSelectedThreadEntries<
   TEntry extends { readonly threadKey: string },
   TResult extends { readonly _tag: 'Success' | 'Failure' },

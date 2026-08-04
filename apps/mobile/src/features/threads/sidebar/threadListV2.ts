@@ -6,6 +6,7 @@ import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell
 import { activeThreadAnchorTimestampMs } from '@t3tools/client-runtime/state/thread-sort'
 import type { EnvironmentId, ProjectId } from '@t3tools/contracts'
 import { threadSearchMatchKey } from '@t3tools/client-runtime/state/thread-search'
+import { isImportedHistoryOnlyThread } from '../thread-list-pinning'
 
 // thread List v2 model, ported from the web sidebar v2
 // (apps/web/src/components/Sidebar.logic.ts + SidebarV2.tsx).
@@ -123,6 +124,8 @@ export interface ThreadListV2Item
 {
   readonly thread: EnvironmentThreadShell
   readonly variant: 'card' | 'slim'
+  // pinned-block row: renders the pin glyph and offers Unpin.
+  readonly pinned: boolean
   // first settled row after the card block draws the SETTLED divider.
   readonly showSettledDivider: boolean
   readonly isLast: boolean
@@ -186,6 +189,7 @@ export function buildThreadListV2Items(input: {
     ? new Set(input.projectRefs.map((ref) => `${ref.environmentId}:${ref.projectId}`))
     : null
 
+  const pinned: EnvironmentThreadShell[] = []
   const active: EnvironmentThreadShell[] = []
   const settled: EnvironmentThreadShell[] = []
   let snoozedCount = 0
@@ -211,9 +215,8 @@ export function buildThreadListV2Items(input: {
     const supportsSnooze = input.snoozeEnvironmentIds?.has(thread.environmentId) ?? true
     const changeRequestState =
       input.changeRequestStateByKey?.get(`${thread.environmentId}:${thread.id}`) ?? null
-    // visibility parity with web: a snoozed thread leaves the list until it
-    // wakes (or raises its hand — effectiveSnoozed refuses blocked/failed
-    // work). Snooze outranks settled classification, same as web.
+    // snooze outranks pinning: a hidden pinned thread keeps its pin and
+    // returns to the pinned block when it wakes.
     if (supportsSnooze && effectiveSnoozed(thread, { now: snoozeNow }))
     {
       snoozedCount += 1
@@ -225,6 +228,13 @@ export function buildThreadListV2Items(input: {
       {
         nextSnoozeWakeAt = thread.snoozedUntil
       }
+      continue
+    }
+    // pinning overrides settlement in this wave, including stale settled
+    // state that has not yet observed the server-side pin transition.
+    if (thread.pinnedAt != null && !isImportedHistoryOnlyThread(thread))
+    {
+      pinned.push(thread)
       continue
     }
     if (
@@ -256,15 +266,32 @@ export function buildThreadListV2Items(input: {
     orderedSettled.length > settledLimit ? orderedSettled.slice(0, settledLimit) : orderedSettled
 
   const items: ThreadListV2Item[] = []
+  for (const thread of sortThreadsForListV2(pinned))
+  {
+    items.push({
+      thread,
+      variant: 'card',
+      pinned: true,
+      showSettledDivider: false,
+      isLast: false,
+    })
+  }
   for (const thread of orderedActive)
   {
-    items.push({ thread, variant: 'card', showSettledDivider: false, isLast: false })
+    items.push({
+      thread,
+      variant: 'card',
+      pinned: false,
+      showSettledDivider: false,
+      isLast: false,
+    })
   }
   for (const [index, thread] of visibleSettled.entries())
   {
     items.push({
       thread,
       variant: 'slim',
+      pinned: false,
       showSettledDivider: index === 0,
       isLast: false,
     })

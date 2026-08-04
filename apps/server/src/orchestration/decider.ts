@@ -796,15 +796,12 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           updatedAt: alreadySettled ? thread.updatedAt : occurredAt,
         },
       } satisfies PlannedOrchestrationEvent
-      if (thread.snoozedUntil == null)
+      const lifecycleEvents: Array<PlannedOrchestrationEvent> = [settledEvent]
+      if (thread.snoozedUntil != null)
       {
-        return settledEvent
-      }
-      // settling is an immediate "done" action, so stale snooze state must
-      // not keep the row parked until its former wake time
-      return [
-        settledEvent,
-        {
+        // settling is an immediate "done" action, so stale snooze state must
+        // not keep the row parked until its former wake time
+        lifecycleEvents.push({
           ...(yield* withEventBase({
             aggregateKind: 'thread',
             aggregateId: command.threadId,
@@ -817,8 +814,27 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
             reason: 'user',
             updatedAt: occurredAt,
           },
-        } satisfies PlannedOrchestrationEvent,
-      ]
+        } satisfies PlannedOrchestrationEvent)
+      }
+      // settling is "I'm done with this": it clears a pin the same way it
+      // parks the thread, while retaining the fork's snooze reset above.
+      if (thread.pinnedAt != null)
+      {
+        lifecycleEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: 'thread',
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: 'thread.unpinned',
+          payload: {
+            threadId: command.threadId,
+            updatedAt: occurredAt,
+          },
+        } satisfies PlannedOrchestrationEvent)
+      }
+      return lifecycleEvents.length === 1 ? settledEvent : lifecycleEvents
     }
 
     case 'thread.unsettle':
@@ -947,6 +963,96 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           threadId: command.threadId,
           reason: command.reason,
           updatedAt: alreadyAwake ? thread.updatedAt : occurredAt,
+        },
+      }
+    }
+
+    case 'thread.pin':
+    {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      const occurredAt = yield* nowIso
+      // duplicate pins preserve projection ordering by retaining the original
+      // pin and update timestamps.
+      const existingPinnedAt = thread.pinnedAt ?? null
+      const pinnedEvent = {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.pinned',
+        payload: {
+          threadId: command.threadId,
+          pinnedAt: existingPinnedAt ?? occurredAt,
+          updatedAt: existingPinnedAt !== null ? thread.updatedAt : occurredAt,
+        },
+      } satisfies PlannedOrchestrationEvent
+      // pinning promotes the thread immediately, spending settled and snooze
+      // states instead of merely hiding them beneath the pin.
+      const promotionEvents: Array<PlannedOrchestrationEvent> = []
+      if (thread.settledOverride === 'settled')
+      {
+        promotionEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: 'thread',
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: 'thread.unsettled',
+          payload: {
+            threadId: command.threadId,
+            reason: 'user',
+            updatedAt: occurredAt,
+          },
+        } satisfies PlannedOrchestrationEvent)
+      }
+      if (thread.snoozedUntil != null)
+      {
+        promotionEvents.push({
+          ...(yield* withEventBase({
+            aggregateKind: 'thread',
+            aggregateId: command.threadId,
+            occurredAt,
+            commandId: command.commandId,
+          })),
+          type: 'thread.unsnoozed',
+          payload: {
+            threadId: command.threadId,
+            reason: 'user',
+            updatedAt: occurredAt,
+          },
+        } satisfies PlannedOrchestrationEvent)
+      }
+      return promotionEvents.length === 0 ? pinnedEvent : [pinnedEvent, ...promotionEvents]
+    }
+
+    case 'thread.unpin':
+    {
+      const thread = yield* requireThreadNotArchived({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      // duplicate unpins re-emit the null state without churning ordering.
+      const alreadyUnpinned = thread.pinnedAt == null
+      const occurredAt = yield* nowIso
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.unpinned',
+        payload: {
+          threadId: command.threadId,
+          updatedAt: alreadyUnpinned ? thread.updatedAt : occurredAt,
         },
       }
     }

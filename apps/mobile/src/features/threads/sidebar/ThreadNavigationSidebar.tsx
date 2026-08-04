@@ -57,6 +57,7 @@ import {
   ThreadListShowMoreRow,
 } from './thread-list-items'
 import { ThreadListV2Row } from './thread-list-v2-items'
+import { canPinThread } from '../thread-list-pinning'
 import { THREAD_LIST_V2_SETTLED_PAGE_COUNT, type ThreadListV2Item } from './threadListV2'
 import { useThreadListV2State } from './use-thread-list-v2-state'
 
@@ -130,8 +131,14 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
   const searchBarRef = useRef<SearchBarCommands>(null)
   const openSwipeableRef = useRef<SwipeableMethods | null>(null)
   const sidebarScrollGesture = useMemo(() => Gesture.Native(), [])
-  const { archiveThread, confirmDeleteThread, settleThread, unsettleThread } =
-    useThreadListActions()
+  const {
+    archiveThread,
+    confirmDeleteThread,
+    settleThread,
+    unsettleThread,
+    pinThread,
+    unpinThread,
+  } = useThreadListActions()
   const preferencesResult = useAtomValue(mobilePreferencesAtom)
   const threadListV2Enabled =
     AsyncResult.isSuccess(preferencesResult) && preferencesResult.value.threadListV2Enabled === true
@@ -317,6 +324,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
   const {
     handleChangeRequestState,
     layout: threadListV2Layout,
+    pinningEnvironmentIds,
     serverConfigs,
     settlementEnvironmentIds,
     showMoreSettled,
@@ -433,6 +441,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
           previous.key === item.key &&
           previous.item.thread === item.item.thread &&
           previous.item.variant === item.item.variant &&
+          previous.item.pinned === item.item.pinned &&
           previous.item.showSettledDivider === item.item.showSettledDivider
         )
       }
@@ -508,6 +517,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
               )}
               searchQuery={props.searchQuery}
               variant={item.item.variant}
+              pinned={item.item.pinned}
               showSettledDivider={item.item.showSettledDivider}
               project={projectByKey.get(scopeKey) ?? null}
               projectTitle={projectTitleByProjectKey.get(scopeKey)}
@@ -534,8 +544,14 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
               onDeleteThread={confirmDeleteThread}
               onArchiveThread={archiveThread}
               settlementSupported={settlementEnvironmentIds.has(thread.environmentId)}
+              pinningSupported={canPinThread(
+                thread,
+                pinningEnvironmentIds.has(thread.environmentId),
+              )}
               onSettleThread={settleThread}
               onUnsettleThread={unsettleThread}
+              onPinThread={pinThread}
+              onUnpinThread={unpinThread}
               onChangeRequestState={handleChangeRequestState}
               projectCwd={projectCwdByKey.get(scopeKey) ?? null}
               onSwipeableClose={handleSwipeableClose}
@@ -644,6 +660,8 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
       handleSwipeableWillOpen,
       matchesByKey,
       openPendingTask,
+      pinningEnvironmentIds,
+      pinThread,
       projectByKey,
       projectCwdByKey,
       projectTitleByProjectKey,
@@ -657,6 +675,7 @@ function ThreadNavigationSidebarPane(props: ThreadNavigationSidebarProps)
       settlementEnvironmentIds,
       showMoreSettled,
       sidebarScrollGesture,
+      unpinThread,
       unsettleThread,
       updateGroupDisplay,
     ],

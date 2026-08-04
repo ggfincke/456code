@@ -32,6 +32,7 @@ import {
   GitBranchIcon,
   EllipsisIcon,
   MessageSquareIcon,
+  PinIcon,
   PlusIcon,
   SearchIcon,
   ServerIcon,
@@ -106,6 +107,7 @@ import type { SidebarThreadSummary } from '../types'
 import { importSourceDisplayName, importSourceDriverKind } from '../lib/importSourcePresentation'
 import { cn } from '~/lib/utils'
 import {
+  estimateSidebarV2HeaderSize,
   formatWorkingDurationLabel,
   firstValidTimestampMs,
   hasUnseenCompletion,
@@ -114,6 +116,7 @@ import {
   orderItemsByPreferredIds,
   resolveAdjacentThreadId,
   resolveSettledTimestamp,
+  resolveSidebarV2LifecycleSection,
   resolveSidebarV2Status,
   resolveWorkingStartedAt,
   shouldNavigateAfterProjectRemoval,
@@ -183,9 +186,9 @@ const SIDEBAR_V2_MAINTAIN_VISIBLE_CONTENT_POSITION = { data: true, size: false }
 // stable fallback for threads whose environment has no resolved server config,
 // so row props never churn a fresh Map per render.
 const EMPTY_PROVIDER_ENTRIES: ReadonlyMap<string, ProviderInstanceEntry> = new Map()
-type SidebarV2ThreadSection = 'active' | 'imported' | 'snoozed' | 'settled'
+type SidebarV2ThreadSection = 'pinned' | 'active' | 'imported' | 'snoozed' | 'settled'
 
-type SidebarV2Shelf = Exclude<SidebarV2ThreadSection, 'active'>
+type SidebarV2Shelf = Exclude<SidebarV2ThreadSection, 'pinned' | 'active'>
 
 const PROJECT_GROUPING_MODE_LABELS: Record<SidebarProjectGroupingMode, string> = {
   repository: 'Group by repository',
@@ -549,6 +552,8 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
   settlementSupported: boolean
   // same contract for thread.snooze/unsnooze.
   snoozeSupported: boolean
+  // pinned cards keep their lifecycle quick actions; pin/unpin stays in the menu.
+  isPinned: boolean
   // compact wake countdown ("2h") for rows in the snoozed shelf.
   snoozeWakeLabelText: string | null
   // when a snooze ended (timer or early wake); drives the Woke pill until
@@ -1230,6 +1235,13 @@ const SidebarV2Row = memo(function SidebarV2Row(props: {
               ) : (
                 <span className="flex-1" />
               )}
+              {props.isPinned ? (
+                <PinIcon
+                  aria-label="Pinned"
+                  role="img"
+                  className="size-3 shrink-0 text-muted-foreground/65"
+                />
+              ) : null}
               <span className="group/v2-actions relative ml-auto flex h-5 min-w-8 shrink-0 items-center justify-end pl-1 text-xs">
                 {/* hidden status text must not intercept hover actions */}
                 <span
@@ -1383,6 +1395,8 @@ export default function SidebarV2()
     unsettleThread,
     snoozeThread,
     unsnoozeThread,
+    pinThread,
+    unpinThread,
     deleteThread,
   } = useThreadActions()
   const updateThreadMetadata = useAtomCommand(threadEnvironment.updateMetadata, {
@@ -1822,8 +1836,8 @@ export default function SidebarV2()
       serverConfigs,
     ],
   )
-  const { activeThreads, importedThreads, snoozedThreads, settledThreads, snoozeNow } =
-    useMemo(() =>
+  const threadSections = useMemo(
+    function partitionThreads()
     {
       const now = `${nowMinute}:00.000Z`
       // snooze classification uses a REAL clock, not the quantized minute:
@@ -1838,6 +1852,7 @@ export default function SidebarV2()
           (scopedProjectKeys === null ||
             scopedProjectKeys.has(`${thread.environmentId}:${thread.projectId}`)),
       )
+      const pinned: EnvironmentThreadShell[] = []
       const active: EnvironmentThreadShell[] = []
       const imported: EnvironmentThreadShell[] = []
       const snoozed: EnvironmentThreadShell[] = []
@@ -1877,22 +1892,27 @@ export default function SidebarV2()
             ? { state: snapshot.pr.state, updatedAt: snapshot.pr.updatedAt }
             : null
         const changeRequest = observedTerminalChangeRequest ?? cachedTerminalChangeRequest
-        // snooze outranks settled classification: an explicitly snoozed thread
-        // belongs to the shelf even if it would also auto-settle (the shelf's
-        // wake time is a stronger statement about when it matters again).
-        if (supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }))
+        const lifecycleSection = resolveSidebarV2LifecycleSection({
+          snoozed: supportsSnooze && effectiveSnoozed(thread, { now: preciseNow }),
+          pinned: thread.pinnedAt != null,
+          settled:
+            supportsSettlement &&
+            effectiveSettled(thread, {
+              now,
+              autoSettleAfterDays,
+              autoSettleOnMerge,
+              changeRequest,
+            }),
+        })
+        if (lifecycleSection === 'snoozed')
         {
           snoozed.push(thread)
         }
-        else if (
-          supportsSettlement &&
-          effectiveSettled(thread, {
-            now,
-            autoSettleAfterDays,
-            autoSettleOnMerge,
-            changeRequest,
-          })
-        )
+        else if (lifecycleSection === 'pinned')
+        {
+          pinned.push(thread)
+        }
+        else if (lifecycleSection === 'settled')
         {
           settled.push(thread)
         }
@@ -1902,6 +1922,7 @@ export default function SidebarV2()
         }
       }
       return {
+        pinnedThreads: sortThreadsForSidebarV2(pinned),
         activeThreads: sortThreadsForSidebarV2(active),
         importedThreads: imported.toSorted(
           (left, right) =>
@@ -1916,7 +1937,8 @@ export default function SidebarV2()
         settledThreads: sortSettledThreadsForSidebarV2(settled),
         snoozeNow: preciseNow,
       }
-    }, [
+    },
+    [
       autoSettleAfterDays,
       autoSettleOnMerge,
       changeRequestSnapshotByKey,
@@ -1926,7 +1948,16 @@ export default function SidebarV2()
       serverConfigs,
       snoozeWakeTick,
       threads,
-    ])
+    ],
+  )
+  const {
+    pinnedThreads,
+    activeThreads,
+    importedThreads,
+    snoozedThreads,
+    settledThreads,
+    snoozeNow,
+  } = threadSections
 
   // arm a timeout for the earliest upcoming wake so the shelf empties the
   // moment a snooze expires instead of on the next minute tick. Sorted
@@ -2031,12 +2062,19 @@ export default function SidebarV2()
 
   const orderedThreads = useMemo(
     () => [
+      ...pinnedThreads,
       ...activeThreads,
       ...visibleImportedThreads,
       ...visibleSnoozedThreads,
       ...renderedSettledThreads,
     ],
-    [activeThreads, visibleImportedThreads, visibleSnoozedThreads, renderedSettledThreads],
+    [
+      activeThreads,
+      pinnedThreads,
+      renderedSettledThreads,
+      visibleImportedThreads,
+      visibleSnoozedThreads,
+    ],
   )
   const orderedThreadKeys = useMemo(
     () =>
@@ -2295,6 +2333,48 @@ export default function SidebarV2()
       })()
     },
     [unsettleThread],
+  )
+  const attemptPin = useCallback(
+    (threadRef: ScopedThreadRef) =>
+    {
+      void (async () =>
+      {
+        const result = await pinThread(threadRef)
+        if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+        {
+          const error = squashAtomCommandFailure(result)
+          toastManager.add(
+            stackedThreadToast({
+              type: 'error',
+              title: 'Failed to pin thread',
+              description: error instanceof Error ? error.message : 'An error occurred.',
+            }),
+          )
+        }
+      })()
+    },
+    [pinThread],
+  )
+  const attemptUnpin = useCallback(
+    (threadRef: ScopedThreadRef) =>
+    {
+      void (async () =>
+      {
+        const result = await unpinThread(threadRef)
+        if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+        {
+          const error = squashAtomCommandFailure(result)
+          toastManager.add(
+            stackedThreadToast({
+              type: 'error',
+              title: 'Failed to unpin thread',
+              description: error instanceof Error ? error.message : 'An error occurred.',
+            }),
+          )
+        }
+      })()
+    },
+    [unpinThread],
   )
   const attemptUnsnooze = useCallback(
     (threadRef: ScopedThreadRef) =>
@@ -2564,8 +2644,12 @@ export default function SidebarV2()
         const supportsSnooze =
           !isImportedShelf &&
           serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true
+        const supportsPinning =
+          !isImportedShelf &&
+          serverConfigs.get(thread.environmentId)?.environment.capabilities.threadPinning === true
         const isSettled = settledThreadKeysRef.current.has(threadKey)
         const isSnoozed = snoozedThreadKeysRef.current.has(threadKey)
+        const isPinned = thread.pinnedAt != null
         // presets resolve at menu-open time (same as the popover).
         const snoozePresets = resolveSnoozePresets(new Date())
         const threadWorkspacePath =
@@ -2576,7 +2660,7 @@ export default function SidebarV2()
           api.contextMenu.show(
             buildThreadActionMenuItems({
               branch: thread.branch,
-              isPinned: false,
+              isPinned,
               isSettled,
               isSnoozed,
               canSnoozeNow: canSnooze(thread, { now: new Date().toISOString() }),
@@ -2586,7 +2670,7 @@ export default function SidebarV2()
               supports: {
                 settlement: supportsSettlement,
                 snooze: supportsSnooze,
-                pinning: false,
+                pinning: supportsPinning,
                 titleRegeneration: false,
               },
               snoozePresets,
@@ -2638,6 +2722,12 @@ export default function SidebarV2()
             return
           case 'unsnooze':
             attemptUnsnooze(threadRef)
+            return
+          case 'pin':
+            attemptPin(threadRef)
+            return
+          case 'unpin':
+            attemptUnpin(threadRef)
             return
           case 'rename':
             startThreadRename(threadRef, thread.title)
@@ -2718,8 +2808,10 @@ export default function SidebarV2()
       })()
     },
     [
+      attemptPin,
       attemptSettle,
       attemptSnooze,
+      attemptUnpin,
       attemptUnsettle,
       attemptUnsnooze,
       archiveThread,
@@ -2817,7 +2909,7 @@ export default function SidebarV2()
     (thread: EnvironmentThreadShell, section: SidebarV2ThreadSection) =>
     {
       const threadKey = scopedThreadKey(scopeThreadRef(thread.environmentId, thread.id))
-      const isCard = section === 'active'
+      const isCard = section === 'active' || section === 'pinned'
       const rowVariant = isCard ? 'card' : 'slim'
       return (
         <SidebarV2Row
@@ -2840,6 +2932,7 @@ export default function SidebarV2()
           snoozeSupported={
             serverConfigs.get(thread.environmentId)?.environment.capabilities.threadSnooze === true
           }
+          isPinned={section === 'pinned'}
           snoozeWakeLabelText={
             section === 'snoozed' && thread.snoozedUntil != null
               ? snoozeWakeLabel(thread.snoozedUntil, new Date())
@@ -2912,6 +3005,14 @@ export default function SidebarV2()
   const sidebarListHeader = useMemo(
     () => (
       <div role="presentation" className="flex flex-col gap-px">
+        {pinnedThreads.map((thread) => renderThreadRow(thread, 'pinned'))}
+        {pinnedThreads.length > 0 ? (
+          <div
+            aria-hidden
+            data-testid="sidebar-v2-pinned-divider"
+            className="mx-2.5 my-1.5 h-px bg-sidebar-border/60"
+          />
+        ) : null}
         {activeThreads.map((thread) => renderThreadRow(thread, 'active'))}
         {importedThreads.length > 0 ? (
           <SidebarV2ShelfHeader
@@ -2927,6 +3028,7 @@ export default function SidebarV2()
       activeThreads,
       importedShelfExpanded,
       importedThreads.length,
+      pinnedThreads,
       renderThreadRow,
       toggleImportedShelf,
     ],
@@ -2970,7 +3072,8 @@ export default function SidebarV2()
             </button>
           </div>
         ) : null}
-        {activeThreads.length +
+        {pinnedThreads.length +
+          activeThreads.length +
           importedThreads.length +
           snoozedThreads.length +
           settledThreads.length ===
@@ -3002,6 +3105,7 @@ export default function SidebarV2()
       hiddenSettledCount,
       importedThreads.length,
       openAddProjectCommandPalette,
+      pinnedThreads.length,
       projects.length,
       renderedSettledThreads,
       renderThreadRow,
@@ -3242,9 +3346,11 @@ export default function SidebarV2()
               renderItem={renderImportedThread}
               extraData={renderThreadRow}
               estimatedItemSize={48}
-              estimatedHeaderSize={
-                activeThreads.length * 83 + (importedThreads.length > 0 ? 60 : 0)
-              }
+              estimatedHeaderSize={estimateSidebarV2HeaderSize({
+                activeThreadCount: activeThreads.length,
+                pinnedThreadCount: pinnedThreads.length,
+                hasImportedShelf: importedThreads.length > 0,
+              })}
               drawDistance={480}
               recycleItems={false}
               maintainVisibleContentPosition={SIDEBAR_V2_MAINTAIN_VISIBLE_CONTENT_POSITION}

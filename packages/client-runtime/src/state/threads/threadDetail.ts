@@ -142,6 +142,7 @@ export function mergeEnvironmentThread(
     unsettledAt: shell.unsettledAt ?? null,
     snoozedUntil: shell.snoozedUntil,
     snoozedAt: shell.snoozedAt,
+    pinnedAt: shell.pinnedAt,
     session: shell.session,
     approvalOutcomes: mergeApprovalOutcomes(detail.approvalOutcomes, shell.approvalOutcomes),
   }

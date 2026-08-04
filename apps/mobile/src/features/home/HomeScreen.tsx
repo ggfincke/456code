@@ -39,6 +39,7 @@ import {
   ThreadListShowMoreRow,
 } from '../threads/thread-list-items'
 import { ThreadListV2Row } from '../threads/thread-list-v2-items'
+import { canPinThread } from '../threads/thread-list-pinning'
 import { THREAD_LIST_V2_SETTLED_PAGE_COUNT, type ThreadListV2Item } from '../threads/threadListV2'
 import { useThreadListV2State } from '../threads/use-thread-list-v2-state'
 import type { HomeListFilterMenuEnvironment } from './home-list-filter-menu'
@@ -92,6 +93,8 @@ interface HomeScreenProps
   // resolves true iff the settle was dispatched and succeeded.
   readonly onSettleThread: (thread: EnvironmentThreadShell) => Promise<boolean>
   readonly onUnsettleThread: (thread: EnvironmentThreadShell) => void
+  readonly onPinThread: (thread: EnvironmentThreadShell) => Promise<boolean>
+  readonly onUnpinThread: (thread: EnvironmentThreadShell) => Promise<boolean>
   readonly onSelectPendingTask: (pendingTask: PendingNewTask) => void
   readonly onDeletePendingTask: (pendingTask: PendingNewTask) => void
   readonly onNewThreadInProject: (project: EnvironmentProject) => void
@@ -450,9 +453,24 @@ export function HomeScreen(props: HomeScreenProps)
   )
   const handleDeleteThread = props.onDeleteThread
   const handleUnsettleThread = props.onUnsettleThread
+  const handlePinThread = useCallback(
+    (thread: EnvironmentThreadShell) =>
+    {
+      void props.onPinThread(thread)
+    },
+    [props.onPinThread],
+  )
+  const handleUnpinThread = useCallback(
+    (thread: EnvironmentThreadShell) =>
+    {
+      void props.onUnpinThread(thread)
+    },
+    [props.onUnpinThread],
+  )
   const {
     handleChangeRequestState,
     layout: threadListV2Layout,
+    pinningEnvironmentIds,
     serverConfigs,
     settlementEnvironmentIds,
     showMoreSettled,
@@ -480,6 +498,7 @@ export function HomeScreen(props: HomeScreenProps)
         )}
         searchQuery={props.searchQuery}
         variant={item.variant}
+        pinned={item.pinned}
         showSettledDivider={item.showSettledDivider}
         project={
           projectByKey.get(scopedProjectKey(item.thread.environmentId, item.thread.projectId)) ??
@@ -506,8 +525,14 @@ export function HomeScreen(props: HomeScreenProps)
         onDeleteThread={handleDeleteThread}
         onArchiveThread={props.onArchiveThread}
         settlementSupported={settlementEnvironmentIds.has(item.thread.environmentId)}
+        pinningSupported={canPinThread(
+          item.thread,
+          pinningEnvironmentIds.has(item.thread.environmentId),
+        )}
         onSettleThread={handleSettleThread}
         onUnsettleThread={handleUnsettleThread}
+        onPinThread={handlePinThread}
+        onUnpinThread={handleUnpinThread}
         onChangeRequestState={handleChangeRequestState}
         projectCwd={
           projectCwdByKey.get(scopedProjectKey(item.thread.environmentId, item.thread.projectId)) ??
@@ -520,10 +545,12 @@ export function HomeScreen(props: HomeScreenProps)
     [
       handleChangeRequestState,
       handleDeleteThread,
+      handlePinThread,
       handleSettleThread,
       handleSwipeableClose,
       handleSwipeableWillOpen,
       handleUnsettleThread,
+      handleUnpinThread,
       matchesByKey,
       projectByKey,
       projectCwdByKey,
@@ -531,6 +558,7 @@ export function HomeScreen(props: HomeScreenProps)
       props.onSelectThread,
       props.savedConnectionsById,
       props.searchQuery,
+      pinningEnvironmentIds,
       serverConfigs,
       settlementEnvironmentIds,
       v2ProjectTitleByProjectKey,

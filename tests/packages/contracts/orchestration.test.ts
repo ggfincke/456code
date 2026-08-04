@@ -825,10 +825,12 @@ it.effect('defaults settled fields when decoding historical thread data', () =>
     assert.strictEqual(thread.settledOverride, null)
     assert.strictEqual(thread.settledAt, null)
     assert.strictEqual(thread.unsettledAt, null)
+    assert.strictEqual(thread.pinnedAt, undefined)
     assert.strictEqual(thread.origin, null)
     assert.strictEqual(shell.settledOverride, null)
     assert.strictEqual(shell.settledAt, null)
     assert.strictEqual(shell.unsettledAt, null)
+    assert.strictEqual(shell.pinnedAt, undefined)
     assert.strictEqual(shell.origin, null)
 
     const explicitNullShell = yield* decodeOrchestrationThreadShell({
@@ -840,6 +842,59 @@ it.effect('defaults settled fields when decoding historical thread data', () =>
       hasActionableProposedPlan: false,
     })
     assert.strictEqual(explicitNullShell.unsettledAt, null)
+  }),
+)
+
+it.effect('decodes thread pin commands and lifecycle events', () =>
+  Effect.gen(function* ()
+  {
+    const pin = yield* decodeClientOrchestrationCommand({
+      type: 'thread.pin',
+      commandId: 'cmd-pin-1',
+      threadId: 'thread-1',
+    })
+    const unpin = yield* decodeClientOrchestrationCommand({
+      type: 'thread.unpin',
+      commandId: 'cmd-unpin-1',
+      threadId: 'thread-1',
+    })
+    const eventBase = {
+      aggregateKind: 'thread',
+      aggregateId: 'thread-1',
+      occurredAt: '2026-01-01T00:00:00.000Z',
+      causationEventId: null,
+      metadata: {},
+    } as const
+    const pinned = yield* decodeOrchestrationEvent({
+      ...eventBase,
+      sequence: 1,
+      eventId: 'event-pin-1',
+      type: 'thread.pinned',
+      commandId: 'cmd-pin-1',
+      correlationId: 'cmd-pin-1',
+      payload: {
+        threadId: 'thread-1',
+        pinnedAt: '2026-01-01T00:00:00.000Z',
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      },
+    })
+    const unpinned = yield* decodeOrchestrationEvent({
+      ...eventBase,
+      sequence: 2,
+      eventId: 'event-unpin-1',
+      type: 'thread.unpinned',
+      commandId: 'cmd-unpin-1',
+      correlationId: 'cmd-unpin-1',
+      payload: {
+        threadId: 'thread-1',
+        updatedAt: '2026-01-02T00:00:00.000Z',
+      },
+    })
+
+    assert.strictEqual(pin.type, 'thread.pin')
+    assert.strictEqual(unpin.type, 'thread.unpin')
+    assert.strictEqual(pinned.type, 'thread.pinned')
+    assert.strictEqual(unpinned.type, 'thread.unpinned')
   }),
 )
 

@@ -50,6 +50,9 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   // server understands thread.snooze / thread.unsnooze commands. Same
   // version-skew contract as threadSettlement.
   threadSnooze: Schema.optionalKey(Schema.Boolean),
+  // server understands thread.pin / thread.unpin commands. Same
+  // version-skew contract as threadSettlement.
+  threadPinning: Schema.optionalKey(Schema.Boolean),
   // the update path clients should offer for this server. Absent on
   // servers that must be relaunched manually (dev checkouts, Windows
   // foreground runs, pre-update servers).

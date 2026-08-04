@@ -6,6 +6,7 @@ import {
   archiveSelectedThreadEntries,
   buildMultiSelectThreadContextMenuItems,
   createThreadJumpHintVisibilityController,
+  estimateSidebarV2HeaderSize,
   getVisibleSidebarThreadIds,
   resolveAdjacentThreadId,
   getFallbackThreadIdAfterDelete,
@@ -15,7 +16,9 @@ import {
   isContextMenuPointerDown,
   isTrailingDoubleClick,
   orderItemsByPreferredIds,
+  partitionLegacySidebarProjectThreads,
   resolveProjectStatusIndicator,
+  resolveSidebarV2LifecycleSection,
   resolveSidebarV2Status,
   resolveThreadStatusPill,
   resolveWorkingStartedAt,
@@ -70,6 +73,70 @@ describe('sortThreadsForSidebarV2', () =>
     ])
 
     expect(sorted.map((thread) => thread.id)).toEqual(['a', 'b'])
+  })
+})
+
+describe('estimateSidebarV2HeaderSize', () =>
+{
+  it('includes pinned cards and their divider in the virtual list header estimate', () =>
+  {
+    expect(
+      estimateSidebarV2HeaderSize({
+        activeThreadCount: 2,
+        pinnedThreadCount: 0,
+        hasImportedShelf: true,
+      }),
+    ).toBe(226)
+    expect(
+      estimateSidebarV2HeaderSize({
+        activeThreadCount: 2,
+        pinnedThreadCount: 3,
+        hasImportedShelf: true,
+      }),
+    ).toBe(488)
+  })
+})
+
+describe('resolveSidebarV2LifecycleSection', () =>
+{
+  it('temporarily shelves a snoozed pinned thread', () =>
+  {
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: true,
+        pinned: true,
+        settled: true,
+      }),
+    ).toBe('snoozed')
+  })
+
+  it('keeps a pinned thread above settlement in the initial pinning model', () =>
+  {
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: false,
+        pinned: true,
+        settled: true,
+      }),
+    ).toBe('pinned')
+  })
+
+  it('falls through to settled and active sections', () =>
+  {
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: false,
+        pinned: false,
+        settled: true,
+      }),
+    ).toBe('settled')
+    expect(
+      resolveSidebarV2LifecycleSection({
+        snoozed: false,
+        pinned: false,
+        settled: false,
+      }),
+    ).toBe('active')
   })
 })
 
@@ -154,6 +221,44 @@ describe('isImportedShelfThread', () =>
   ])('%s', (_label, input, expected) =>
   {
     expect(isImportedShelfThread(input)).toBe(expected)
+  })
+})
+
+describe('partitionLegacySidebarProjectThreads', () =>
+{
+  it('places native pins first without pulling imported shelf threads into the pinned section', () =>
+  {
+    const importedOrigin = {
+      kind: 'imported',
+      source: 'codex-cli',
+      sourcePath: '/tmp/session.jsonl',
+      contentHash: 'hash',
+      nativeSessionId: null,
+      importedAt: '2026-07-25T12:00:00.000Z',
+    } as NonNullable<Thread['origin']>
+    const nativePinned = { id: 'native-pinned', latestTurn: null, origin: null, pinnedAt: 'now' }
+    const regular = { id: 'regular', latestTurn: null, origin: null, pinnedAt: null }
+    const legacyWithoutPinField = { id: 'legacy-without-pin-field', latestTurn: null, origin: null }
+    const importedPinned = {
+      id: 'imported-pinned',
+      latestTurn: null,
+      origin: importedOrigin,
+      pinnedAt: 'stale-pin',
+    }
+
+    const partition = partitionLegacySidebarProjectThreads([
+      regular,
+      legacyWithoutPinField,
+      importedPinned,
+      nativePinned,
+    ])
+
+    expect(partition.pinnedThreads.map((thread) => thread.id)).toEqual(['native-pinned'])
+    expect(partition.regularThreads.map((thread) => thread.id)).toEqual([
+      'regular',
+      'legacy-without-pin-field',
+      'imported-pinned',
+    ])
   })
 })
 

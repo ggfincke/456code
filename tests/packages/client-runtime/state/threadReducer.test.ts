@@ -53,6 +53,7 @@ const baseThread: OrchestrationThread = {
   settledOverride: null,
   settledAt: null,
   unsettledAt: null,
+  pinnedAt: null,
   deletedAt: null,
   messages: [],
   proposedPlans: [],
@@ -151,6 +152,7 @@ describe('applyThreadDetailEvent', () =>
         expect(result.thread.title).toBe('New Thread')
         expect(result.thread.branch).toBe('main')
         expect(result.thread.origin).toEqual(importedOrigin)
+        expect(result.thread.pinnedAt).toBeNull()
         expect(result.thread.messages).toEqual([])
         expect(result.thread.session).toBeNull()
       }
@@ -708,6 +710,53 @@ describe('applyThreadDetailEvent', () =>
       {
         expect(result.thread.settledOverride).toBeNull()
         expect(result.thread.unsettledAt).toBe(unsettledAt)
+      }
+    })
+  })
+
+  describe('thread.pinned / thread.unpinned', () =>
+  {
+    it('applies the pin lifecycle timestamps', () =>
+    {
+      const pinnedAt = '2026-04-01T06:00:00.000Z'
+      const pinned = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        sequence: 8,
+        occurredAt: pinnedAt,
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.pinned',
+        payload: {
+          threadId: baseThread.id,
+          pinnedAt,
+          updatedAt: pinnedAt,
+        },
+      })
+
+      expect(pinned.kind).toBe('updated')
+      if (pinned.kind !== 'updated') return
+      expect(pinned.thread.pinnedAt).toBe(pinnedAt)
+      expect(pinned.thread.updatedAt).toBe(pinnedAt)
+
+      const unpinnedAt = '2026-04-01T07:00:00.000Z'
+      const unpinned = applyThreadDetailEvent(pinned.thread, {
+        ...baseEventFields,
+        sequence: 9,
+        occurredAt: unpinnedAt,
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.unpinned',
+        payload: {
+          threadId: baseThread.id,
+          updatedAt: unpinnedAt,
+        },
+      })
+
+      expect(unpinned.kind).toBe('updated')
+      if (unpinned.kind === 'updated')
+      {
+        expect(unpinned.thread.pinnedAt).toBeNull()
+        expect(unpinned.thread.updatedAt).toBe(unpinnedAt)
       }
     })
   })
