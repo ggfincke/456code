@@ -31,6 +31,11 @@ jobs:
       - name: Check Prettier formatting
         run: node scripts/format-repository.ts --check --prettier-only
 
+      - name: Check comment style
+        run: |
+          node scripts/check-js-comments.ts apps packages scripts tests oxlint-plugin-456code vite.config.ts
+          python3 scripts/check_comment_style.py --check --headers apps packages scripts tests experiments .github .vite-hooks
+
       - name: Check directive preservation
         run: |
           git fetch --no-tags --depth=1 origin main
