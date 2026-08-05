@@ -1,11 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import type { NativeSyntheticEvent } from "react-native";
-import { useNavigation } from "@react-navigation/native";
-import * as Arr from "effect/Array";
-import { pipe } from "effect/Function";
-import * as Result from "effect/Result";
+// apps/mobile/src/features/review/useReviewCommentSelectionController.ts
+// manage review comment selection controller through a React hook
 
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import type { NativeSyntheticEvent } from 'react-native'
+import { useNavigation } from '@react-navigation/native'
+import * as Arr from 'effect/Array'
+import { pipe } from 'effect/Function'
+import * as Result from 'effect/Result'
+
+import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 import {
   buildReviewCommentTarget,
   clearReviewCommentTarget,
@@ -13,143 +16,159 @@ import {
   getSelectedReviewCommentLines,
   setReviewCommentTarget,
   useReviewCommentTarget,
-} from "./reviewCommentSelection";
-import type {
-  NativeReviewDiffData,
-  NativeReviewDiffCommentTarget,
-} from "./nativeReviewDiffAdapter";
-import type { ReviewSectionItem } from "./reviewModel";
+} from './reviewCommentSelection'
+import type { NativeReviewDiffData, NativeReviewDiffCommentTarget } from './nativeReviewDiffAdapter'
+import type { ReviewSectionItem } from './reviewModel'
 
-interface PendingNativeCommentSelection extends NativeReviewDiffCommentTarget {
-  readonly sectionId: string;
-  readonly sectionTitle: string;
-  readonly rowId: string;
+interface PendingNativeCommentSelection extends NativeReviewDiffCommentTarget
+{
+  readonly sectionId: string
+  readonly sectionTitle: string
+  readonly rowId: string
 }
 
 export function useReviewCommentSelectionController(input: {
-  readonly environmentId?: EnvironmentId;
-  readonly threadId?: ThreadId;
-  readonly selectedSection: ReviewSectionItem | null;
-  readonly nativeReviewDiffData: NativeReviewDiffData;
-}) {
-  const { environmentId, nativeReviewDiffData, selectedSection, threadId } = input;
-  const navigation = useNavigation();
-  const activeCommentTarget = useReviewCommentTarget();
+  readonly environmentId?: EnvironmentId
+  readonly threadId?: ThreadId
+  readonly selectedSection: ReviewSectionItem | null
+  readonly nativeReviewDiffData: NativeReviewDiffData
+})
+{
+  const { environmentId, nativeReviewDiffData, selectedSection, threadId } = input
+  const navigation = useNavigation()
+  const activeCommentTarget = useReviewCommentTarget()
   const [pendingNativeCommentSelection, setPendingNativeCommentSelection] =
-    useState<PendingNativeCommentSelection | null>(null);
+    useState<PendingNativeCommentSelection | null>(null)
 
-  const openReviewCommentSheet = useCallback(() => {
-    if (!environmentId || !threadId) {
-      return;
+  const openReviewCommentSheet = useCallback(() =>
+  {
+    if (!environmentId || !threadId)
+    {
+      return
     }
 
-    navigation.navigate("ThreadReviewComment", {
+    navigation.navigate('ThreadReviewComment', {
       environmentId,
       threadId,
-    });
-  }, [environmentId, navigation, threadId]);
+    })
+  }, [environmentId, navigation, threadId])
 
-  const selectedRowIds = useMemo(() => {
+  const selectedRowIds = useMemo(() =>
+  {
     if (
       activeCommentTarget &&
       activeCommentTarget.sectionTitle === selectedSection?.title &&
       activeCommentTarget.startIndex !== activeCommentTarget.endIndex
-    ) {
+    )
+    {
       return pipe(
         getSelectedReviewCommentLines(activeCommentTarget),
-        Arr.filterMap((line) => {
-          const rowId = nativeReviewDiffData.rowIdByCommentLineId.get(line.id);
-          return rowId ? Result.succeed(rowId) : Result.failVoid;
+        Arr.filterMap((line) =>
+        {
+          const rowId = nativeReviewDiffData.rowIdByCommentLineId.get(line.id)
+          return rowId ? Result.succeed(rowId) : Result.failVoid
         }),
-      );
+      )
     }
 
-    return pendingNativeCommentSelection ? [pendingNativeCommentSelection.rowId] : [];
+    return pendingNativeCommentSelection ? [pendingNativeCommentSelection.rowId] : []
   }, [
     activeCommentTarget,
     nativeReviewDiffData.rowIdByCommentLineId,
     pendingNativeCommentSelection,
     selectedSection?.title,
-  ]);
+  ])
 
-  const selectionAction = useMemo(() => {
+  const selectionAction = useMemo(() =>
+  {
     if (
       activeCommentTarget &&
       activeCommentTarget.sectionTitle === selectedSection?.title &&
       activeCommentTarget.startIndex !== activeCommentTarget.endIndex
-    ) {
+    )
+    {
       return {
         title: `Comment on ${formatReviewSelectedRangeLabel(activeCommentTarget)}`,
         onOpenComment: openReviewCommentSheet,
-      };
+      }
     }
 
     if (
       pendingNativeCommentSelection &&
       pendingNativeCommentSelection.sectionTitle === selectedSection?.title
-    ) {
+    )
+    {
       return {
-        title: "Select range end",
+        title: 'Select range end',
         onOpenComment: null,
-      };
+      }
     }
 
-    return null;
+    return null
   }, [
     activeCommentTarget,
     openReviewCommentSheet,
     pendingNativeCommentSelection,
     selectedSection?.title,
-  ]);
+  ])
 
-  useEffect(() => {
-    clearReviewCommentTarget();
-    setPendingNativeCommentSelection(null);
-  }, [selectedSection?.id]);
+  useEffect(() =>
+  {
+    clearReviewCommentTarget()
+    setPendingNativeCommentSelection(null)
+  }, [selectedSection?.id])
 
-  useEffect(() => {
-    if (activeCommentTarget === null) {
-      setPendingNativeCommentSelection(null);
+  useEffect(() =>
+  {
+    if (activeCommentTarget === null)
+    {
+      setPendingNativeCommentSelection(null)
     }
-  }, [activeCommentTarget]);
+  }, [activeCommentTarget])
 
   const onPressLine = useCallback(
     (
       event: NativeSyntheticEvent<{
-        readonly rowId?: string;
-        readonly gesture?: "tap" | "longPress";
+        readonly rowId?: string
+        readonly gesture?: 'tap' | 'longPress'
       }>,
-    ) => {
-      if (!selectedSection) {
-        return;
+    ) =>
+    {
+      if (!selectedSection)
+      {
+        return
       }
 
-      const { rowId, gesture } = event.nativeEvent;
-      if (!rowId) {
-        return;
+      const { rowId, gesture } = event.nativeEvent
+      if (!rowId)
+      {
+        return
       }
 
-      const target = nativeReviewDiffData.commentTargetsByRowId.get(rowId);
-      if (!target) {
-        return;
+      const target = nativeReviewDiffData.commentTargetsByRowId.get(rowId)
+      if (!target)
+      {
+        return
       }
 
-      if (gesture === "longPress") {
-        clearReviewCommentTarget();
+      if (gesture === 'longPress')
+      {
+        clearReviewCommentTarget()
         setPendingNativeCommentSelection({
           ...target,
           sectionId: selectedSection.id,
           sectionTitle: selectedSection.title,
           rowId,
-        });
-        return;
+        })
+        return
       }
 
       if (
         pendingNativeCommentSelection &&
         pendingNativeCommentSelection.sectionTitle === selectedSection.title &&
         pendingNativeCommentSelection.filePath === target.filePath
-      ) {
+      )
+      {
         setReviewCommentTarget(
           buildReviewCommentTarget(
             {
@@ -161,11 +180,11 @@ export function useReviewCommentSelectionController(input: {
             pendingNativeCommentSelection.lineIndex,
             target.lineIndex,
           ),
-        );
-        return;
+        )
+        return
       }
 
-      setPendingNativeCommentSelection(null);
+      setPendingNativeCommentSelection(null)
       setReviewCommentTarget({
         sectionTitle: selectedSection.title,
         sectionId: selectedSection.id,
@@ -173,8 +192,8 @@ export function useReviewCommentSelectionController(input: {
         lines: target.lines,
         startIndex: target.lineIndex,
         endIndex: target.lineIndex,
-      });
-      openReviewCommentSheet();
+      })
+      openReviewCommentSheet()
     },
     [
       nativeReviewDiffData.commentTargetsByRowId,
@@ -182,17 +201,18 @@ export function useReviewCommentSelectionController(input: {
       pendingNativeCommentSelection,
       selectedSection,
     ],
-  );
+  )
 
-  const clearSelection = useCallback(() => {
-    clearReviewCommentTarget();
-    setPendingNativeCommentSelection(null);
-  }, []);
+  const clearSelection = useCallback(() =>
+  {
+    clearReviewCommentTarget()
+    setPendingNativeCommentSelection(null)
+  }, [])
 
   return {
     selectedRowIds,
     selectionAction,
     onPressLine,
     clearSelection,
-  };
+  }
 }

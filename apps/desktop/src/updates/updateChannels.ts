@@ -1,11 +1,16 @@
-import type { DesktopUpdateChannel } from "@t3tools/contracts";
+// apps/desktop/src/updates/updateChannels.ts
+// determine whether nightly desktop version
 
-const NIGHTLY_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/;
+import type { DesktopUpdateChannel } from '@t3tools/contracts'
 
-export function isNightlyDesktopVersion(version: string): boolean {
-  return NIGHTLY_VERSION_PATTERN.test(version);
+const NIGHTLY_VERSION_PATTERN = /-nightly\.\d{8}\.\d+$/
+
+export function isNightlyDesktopVersion(version: string): boolean
+{
+  return NIGHTLY_VERSION_PATTERN.test(version)
 }
 
-export function resolveDefaultDesktopUpdateChannel(appVersion: string): DesktopUpdateChannel {
-  return isNightlyDesktopVersion(appVersion) ? "nightly" : "latest";
+export function resolveDefaultDesktopUpdateChannel(appVersion: string): DesktopUpdateChannel
+{
+  return isNightlyDesktopVersion(appVersion) ? 'nightly' : 'latest'
 }

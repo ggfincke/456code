@@ -1,37 +1,42 @@
-import { cn } from "~/lib/utils";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+// apps/web/src/components/ConnectionStatusDot.tsx
+// render connection status dot
+
+import { cn } from '~/lib/utils'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '~/components/ui/tooltip'
 
 type ConnectionStatusDotProps = {
-  tooltipText?: string | null;
-  dotClassName: string;
-  pingClassName?: string | null;
-};
+  tooltipText?: string | null
+  dotClassName: string
+  pingClassName?: string | null
+}
 
 export function ConnectionStatusDot({
   tooltipText,
   dotClassName,
   pingClassName,
-}: ConnectionStatusDotProps) {
+}: ConnectionStatusDotProps)
+{
   const dotContent = (
     <>
       {pingClassName ? (
         <span
           className={cn(
-            "absolute inline-flex h-full w-full animate-status-ping rounded-full",
+            'absolute inline-flex h-full w-full animate-status-ping rounded-full',
             pingClassName,
           )}
         />
       ) : null}
-      <span className={cn("relative inline-flex size-2 rounded-full", dotClassName)} />
+      <span className={cn('relative inline-flex size-2 rounded-full', dotClassName)} />
     </>
-  );
+  )
 
-  if (!tooltipText) {
+  if (!tooltipText)
+  {
     return (
       <span className="relative flex size-3 shrink-0 items-center justify-center">
         {dotContent}
       </span>
-    );
+    )
   }
 
   const dot = (
@@ -43,7 +48,7 @@ export function ConnectionStatusDot({
     >
       {dotContent}
     </button>
-  );
+  )
 
   return (
     <Tooltip>
@@ -52,5 +57,5 @@ export function ConnectionStatusDot({
         {tooltipText}
       </TooltipPopup>
     </Tooltip>
-  );
+  )
 }

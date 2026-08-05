@@ -1,44 +1,52 @@
-import * as Cause from "effect/Cause";
-import { describe, expect, it } from "vite-plus/test";
+// tests/packages/client-runtime/errors/errorTrace.test.ts
+// verify find error trace id behavior
 
-import { findErrorTraceId } from "../../../../packages/client-runtime/src/errors/errorTrace.ts";
+import * as Cause from 'effect/Cause'
+import { describe, expect, it } from 'vite-plus/test'
 
-describe("findErrorTraceId", () => {
-  it("finds trace metadata through wrapped typed errors", () => {
+import { findErrorTraceId } from '../../../../packages/client-runtime/src/errors/errorTrace.ts'
+
+describe('findErrorTraceId', () =>
+{
+  it('finds trace metadata through wrapped typed errors', () =>
+  {
     expect(
       findErrorTraceId({
         cause: {
           cause: {
-            _tag: "RelayInternalError",
-            traceId: "trace-relay",
+            _tag: 'RelayInternalError',
+            traceId: 'trace-relay',
           },
         },
       }),
-    ).toBe("trace-relay");
-  });
+    ).toBe('trace-relay')
+  })
 
-  it("terminates for cyclic causes", () => {
-    const error: { cause?: unknown } = {};
-    error.cause = error;
+  it('terminates for cyclic causes', () =>
+  {
+    const error: { cause?: unknown } = {}
+    error.cause = error
 
-    expect(findErrorTraceId(error)).toBeNull();
-  });
+    expect(findErrorTraceId(error)).toBeNull()
+  })
 
-  it("finds trace metadata in Effect cause branches", () => {
+  it('finds trace metadata in Effect cause branches', () =>
+  {
     const cause = Cause.fromReasons<unknown>([
-      Cause.makeFailReason(new Error("first failure")),
-      Cause.makeFailReason({ traceId: "trace-secondary" }),
-    ]);
+      Cause.makeFailReason(new Error('first failure')),
+      Cause.makeFailReason({ traceId: 'trace-secondary' }),
+    ])
 
-    expect(findErrorTraceId(cause)).toBe("trace-secondary");
-  });
+    expect(findErrorTraceId(cause)).toBe('trace-secondary')
+  })
 
-  it("finds trace metadata in aggregate error branches", () => {
+  it('finds trace metadata in aggregate error branches', () =>
+  {
     const error = new AggregateError(
-      [new Error("first failure"), { traceId: "trace-aggregate" }],
-      "request failed",
-    );
+      [new Error('first failure'), { traceId: 'trace-aggregate' }],
+      'request failed',
+    )
 
-    expect(findErrorTraceId(error)).toBe("trace-aggregate");
-  });
-});
+    expect(findErrorTraceId(error)).toBe('trace-aggregate')
+  })
+})

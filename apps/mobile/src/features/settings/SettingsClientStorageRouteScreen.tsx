@@ -1,73 +1,79 @@
-import { useAtomSet, useAtomValue } from "@effect/atom-react";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { SymbolView } from "expo-symbols";
-import { useMemo } from "react";
-import { ActivityIndicator, Alert, Pressable, ScrollView, View } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+// apps/mobile/src/features/settings/SettingsClientStorageRouteScreen.tsx
+// render the settings client storage route screen route
 
-import { AppText as Text } from "../../components/AppText";
-import { useThemeColor } from "../../lib/useThemeColor";
+import { useAtomSet, useAtomValue } from '@effect/atom-react'
+import { AsyncResult } from 'effect/unstable/reactivity'
+import { SymbolView } from 'expo-symbols'
+import { useMemo } from 'react'
+import { ActivityIndicator, Alert, Pressable, ScrollView, View } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+
+import { AppText as Text } from '../../components/AppText'
+import { useThemeColor } from '../../lib/useThemeColor'
 import {
   clearClientCacheAtom,
   clientCacheSummaryAtom,
   type EnvironmentClientCacheSummary,
-} from "../../state/client-cache-state";
-import { useSavedRemoteConnections } from "../../state/use-remote-environment-registry";
-import { SettingsSection } from "./components/SettingsSection";
+} from '../../state/client-cache-state'
+import { useSavedRemoteConnections } from '../../state/use-remote-environment-registry'
+import { SettingsSection } from './components/SettingsSection'
 
-export function SettingsClientStorageRouteScreen() {
-  const insets = useSafeAreaInsets();
-  const iconColor = useThemeColor("--color-icon");
-  const dangerForegroundColor = useThemeColor("--color-danger-foreground");
-  const summaryResult = useAtomValue(clientCacheSummaryAtom);
-  const clearResult = useAtomValue(clearClientCacheAtom);
-  const clearCache = useAtomSet(clearClientCacheAtom);
-  const { savedConnectionsById } = useSavedRemoteConnections();
-  const isClearing = clearResult.waiting;
-  const summary = AsyncResult.isSuccess(summaryResult) ? summaryResult.value : null;
+export function SettingsClientStorageRouteScreen()
+{
+  const insets = useSafeAreaInsets()
+  const iconColor = useThemeColor('--color-icon')
+  const dangerForegroundColor = useThemeColor('--color-danger-foreground')
+  const summaryResult = useAtomValue(clientCacheSummaryAtom)
+  const clearResult = useAtomValue(clearClientCacheAtom)
+  const clearCache = useAtomSet(clearClientCacheAtom)
+  const { savedConnectionsById } = useSavedRemoteConnections()
+  const isClearing = clearResult.waiting
+  const summary = AsyncResult.isSuccess(summaryResult) ? summaryResult.value : null
   const environmentSummaries = useMemo(
     () =>
-      [...(summary?.environments ?? [])].sort((left, right) => {
-        const leftLabel = savedConnectionsById[left.environmentId]?.environmentLabel ?? "";
-        const rightLabel = savedConnectionsById[right.environmentId]?.environmentLabel ?? "";
-        return leftLabel.localeCompare(rightLabel);
+      [...(summary?.environments ?? [])].sort((left, right) =>
+      {
+        const leftLabel = savedConnectionsById[left.environmentId]?.environmentLabel ?? ''
+        const rightLabel = savedConnectionsById[right.environmentId]?.environmentLabel ?? ''
+        return leftLabel.localeCompare(rightLabel)
       }),
     [savedConnectionsById, summary?.environments],
-  );
+  )
 
-  const confirmClearEnvironment = (environment: EnvironmentClientCacheSummary) => {
+  const confirmClearEnvironment = (environment: EnvironmentClientCacheSummary) =>
+  {
     const label =
-      savedConnectionsById[environment.environmentId]?.environmentLabel ??
-      environment.environmentId;
+      savedConnectionsById[environment.environmentId]?.environmentLabel ?? environment.environmentId
     Alert.alert(
       `Clear cache for ${label}?`,
-      "This removes offline threads, server metadata, and cached branches for this environment. The saved connection and credentials stay intact.",
+      'This removes offline threads, server metadata, and cached branches for this environment. The saved connection and credentials stay intact.',
       [
-        { text: "Cancel", style: "cancel" },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: "Clear Cache",
-          style: "destructive",
+          text: 'Clear Cache',
+          style: 'destructive',
           onPress: () =>
-            clearCache({ type: "environment", environmentId: environment.environmentId }),
+            clearCache({ type: 'environment', environmentId: environment.environmentId }),
         },
       ],
-    );
-  };
+    )
+  }
 
-  const confirmClearAll = () => {
+  const confirmClearAll = () =>
+  {
     Alert.alert(
-      "Clear all client caches?",
-      "This removes offline data for every environment. Connections, credentials, account data, and app preferences stay intact.",
+      'Clear all client caches?',
+      'This removes offline data for every environment. Connections, credentials, account data, and app preferences stay intact.',
       [
-        { text: "Cancel", style: "cancel" },
+        { text: 'Cancel', style: 'cancel' },
         {
-          text: "Clear All Caches",
-          style: "destructive",
-          onPress: () => clearCache({ type: "all" }),
+          text: 'Clear All Caches',
+          style: 'destructive',
+          onPress: () => clearCache({ type: 'all' }),
         },
       ],
-    );
-  };
+    )
+  }
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
@@ -147,7 +153,7 @@ export function SettingsClientStorageRouteScreen() {
                 weight="regular"
               />
               <Text className="flex-1 text-lg tabular-nums text-danger-foreground">
-                {summary ? `Clear ${formatBytes(summary.payloadBytes)}` : "Clear caches"}
+                {summary ? `Clear ${formatBytes(summary.payloadBytes)}` : 'Clear caches'}
               </Text>
               {isClearing ? <ActivityIndicator color={dangerForegroundColor} /> : null}
             </Pressable>
@@ -164,23 +170,24 @@ export function SettingsClientStorageRouteScreen() {
         </View>
       </ScrollView>
     </View>
-  );
+  )
 }
 
 function CacheEnvironmentRow(props: {
-  readonly environment: EnvironmentClientCacheSummary;
-  readonly environmentLabel: string;
-  readonly disabled: boolean;
-  readonly first: boolean;
-  readonly onClear: () => void;
-}) {
-  const iconColor = useThemeColor("--color-icon");
+  readonly environment: EnvironmentClientCacheSummary
+  readonly environmentLabel: string
+  readonly disabled: boolean
+  readonly first: boolean
+  readonly onClear: () => void
+})
+{
+  const iconColor = useThemeColor('--color-icon')
   return (
     <View
       className={
         props.first
-          ? "flex-row items-center gap-3 p-4"
-          : "border-t border-border flex-row items-center gap-3 p-4"
+          ? 'flex-row items-center gap-3 p-4'
+          : 'border-t border-border flex-row items-center gap-3 p-4'
       }
     >
       <SymbolView
@@ -205,11 +212,12 @@ function CacheEnvironmentRow(props: {
         </Text>
       </Pressable>
     </View>
-  );
+  )
 }
 
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+function formatBytes(bytes: number): string
+{
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`
 }

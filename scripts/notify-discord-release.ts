@@ -1,58 +1,62 @@
 #!/usr/bin/env node
+// scripts/notify-discord-release.ts
+// notify discord release
 
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as Config from "effect/Config";
-import * as DateTime from "effect/DateTime";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Logger from "effect/Logger";
-import * as Schema from "effect/Schema";
-import { Argument, Command, Flag } from "effect/unstable/cli";
+import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import * as Config from 'effect/Config'
+import * as DateTime from 'effect/DateTime'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Logger from 'effect/Logger'
+import * as Schema from 'effect/Schema'
+import { Argument, Command, Flag } from 'effect/unstable/cli'
 import {
   FetchHttpClient,
   HttpClient,
   HttpClientRequest,
   HttpClientResponse,
-} from "effect/unstable/http";
+} from 'effect/unstable/http'
 
-export type DiscordReleaseTarget = "prerelease" | "latest";
+export type DiscordReleaseTarget = 'prerelease' | 'latest'
 
-export interface DiscordReleaseAnnouncementOptions {
-  readonly target: DiscordReleaseTarget;
-  readonly roleId: string;
-  readonly releaseName: string;
-  readonly version: string;
-  readonly tag: string;
-  readonly releaseUrl: URL;
-  readonly timestamp: string;
+export interface DiscordReleaseAnnouncementOptions
+{
+  readonly target: DiscordReleaseTarget
+  readonly roleId: string
+  readonly releaseName: string
+  readonly version: string
+  readonly tag: string
+  readonly releaseUrl: URL
+  readonly timestamp: string
 }
 
-interface DiscordWebhookPayload {
-  readonly content: string;
+interface DiscordWebhookPayload
+{
+  readonly content: string
   readonly allowed_mentions: {
-    readonly roles: ReadonlyArray<string>;
-  };
+    readonly roles: ReadonlyArray<string>
+  }
   readonly embeds: ReadonlyArray<{
-    readonly title: string;
-    readonly url: string;
-    readonly description: string;
-    readonly color: number;
+    readonly title: string
+    readonly url: string
+    readonly description: string
+    readonly color: number
     readonly fields: ReadonlyArray<{
-      readonly name: string;
-      readonly value: string;
-      readonly inline: boolean;
-    }>;
-    readonly timestamp: string;
-  }>;
+      readonly name: string
+      readonly value: string
+      readonly inline: boolean
+    }>
+    readonly timestamp: string
+  }>
 }
 
-const DISCORD_RELEASE_TARGETS = ["prerelease", "latest"] as const;
-const DiscordRoleIdSchema = Schema.String.check(Schema.isPattern(/^\d+$/));
-const DiscordWebhookUrl = Config.url("DISCORD_WEBHOOK_URL");
+const DISCORD_RELEASE_TARGETS = ['prerelease', 'latest'] as const
+const DiscordRoleIdSchema = Schema.String.check(Schema.isPattern(/^\d+$/))
+const DiscordWebhookUrl = Config.url('DISCORD_WEBHOOK_URL')
 
 const discordReleaseErrorContext = {
-  target: Schema.Literals(["prerelease", "latest"]),
+  target: Schema.Literals(['prerelease', 'latest']),
   releaseName: Schema.String,
   version: Schema.String,
   tag: Schema.String,
@@ -63,65 +67,71 @@ const discordReleaseErrorContext = {
   embedCount: Schema.Number,
   allowedRoleMentionCount: Schema.Number,
   hasRoleMentionSyntax: Schema.Boolean,
-};
+}
 
 export class DiscordReleaseWebhookRequestError extends Schema.TaggedErrorClass<DiscordReleaseWebhookRequestError>()(
-  "DiscordReleaseWebhookRequestError",
+  'DiscordReleaseWebhookRequestError',
   {
     ...discordReleaseErrorContext,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to post Discord ${this.target} release announcement for "${this.tag}" to ${this.webhookOrigin}.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to post Discord ${this.target} release announcement for "${this.tag}" to ${this.webhookOrigin}.`
   }
 }
 
 export class DiscordReleaseWebhookResponseError extends Schema.TaggedErrorClass<DiscordReleaseWebhookResponseError>()(
-  "DiscordReleaseWebhookResponseError",
+  'DiscordReleaseWebhookResponseError',
   {
     ...discordReleaseErrorContext,
     status: Schema.Number,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Discord ${this.target} release webhook for "${this.tag}" returned status ${this.status}.`;
+)
+{
+  override get message(): string
+  {
+    return `Discord ${this.target} release webhook for "${this.tag}" returned status ${this.status}.`
   }
 }
 
 export const DiscordReleaseAnnouncementError = Schema.Union([
   DiscordReleaseWebhookRequestError,
   DiscordReleaseWebhookResponseError,
-]);
-export type DiscordReleaseAnnouncementError = typeof DiscordReleaseAnnouncementError.Type;
-export const isDiscordReleaseAnnouncementError = Schema.is(DiscordReleaseAnnouncementError);
+])
+export type DiscordReleaseAnnouncementError = typeof DiscordReleaseAnnouncementError.Type
+export const isDiscordReleaseAnnouncementError = Schema.is(DiscordReleaseAnnouncementError)
 
 const targetLabels = {
-  prerelease: "Prerelease",
-  latest: "Latest",
-} as const satisfies Record<DiscordReleaseTarget, string>;
+  prerelease: 'Prerelease',
+  latest: 'Latest',
+} as const satisfies Record<DiscordReleaseTarget, string>
 
 const targetColors = {
   prerelease: 0x5865f2,
   latest: 0x2ecc71,
-} as const satisfies Record<DiscordReleaseTarget, number>;
+} as const satisfies Record<DiscordReleaseTarget, number>
 
-function describeWebhookUrl(webhookUrl: URL) {
+function describeWebhookUrl(webhookUrl: URL)
+{
   return {
     configured: true,
     origin: webhookUrl.origin,
-    pathnameSegmentCount: webhookUrl.pathname.split("/").filter(Boolean).length,
-  } as const;
+    pathnameSegmentCount: webhookUrl.pathname.split('/').filter(Boolean).length,
+  } as const
 }
 
-function summarizePayload(payload: DiscordWebhookPayload) {
+function summarizePayload(payload: DiscordWebhookPayload)
+{
   return {
     contentLength: payload.content.length,
     embedCount: payload.embeds.length,
     allowedRoleMentionCount: payload.allowed_mentions.roles.length,
-    hasRoleMentionSyntax: payload.content.includes("<@&"),
-  } as const;
+    hasRoleMentionSyntax: payload.content.includes('<@&'),
+  } as const
 }
 
 export const buildDiscordReleaseAnnouncement = (
@@ -136,18 +146,18 @@ export const buildDiscordReleaseAnnouncement = (
       title: options.releaseName,
       url: options.releaseUrl.href,
       description:
-        options.target === "prerelease"
-          ? "A new 456code prerelease is available for nightly testers."
-          : "A new 456code latest release is available.",
+        options.target === 'prerelease'
+          ? 'A new 456code prerelease is available for nightly testers.'
+          : 'A new 456code latest release is available.',
       color: targetColors[options.target],
       fields: [
         {
-          name: "Version",
+          name: 'Version',
           value: options.version,
           inline: true,
         },
         {
-          name: "Tag",
+          name: 'Tag',
           value: options.tag,
           inline: true,
         },
@@ -155,26 +165,27 @@ export const buildDiscordReleaseAnnouncement = (
       timestamp: options.timestamp,
     },
   ],
-});
+})
 
-export const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
+export const postDiscordWebhook = Effect.fn('postDiscordWebhook')(function* (
   webhookUrl: URL,
   payload: DiscordWebhookPayload,
   announcement: DiscordReleaseAnnouncementOptions,
-) {
+)
+{
   const httpClient = (yield* HttpClient.HttpClient).pipe(
     HttpClient.retryTransient({
-      retryOn: "errors-and-responses",
+      retryOn: 'errors-and-responses',
       times: 3,
     }),
-  );
+  )
 
-  yield* Effect.logInfo("discord webhook request dispatching").pipe(
+  yield* Effect.logInfo('discord webhook request dispatching').pipe(
     Effect.annotateLogs({
       ...describeWebhookUrl(webhookUrl),
       ...summarizePayload(payload),
     }),
-  );
+  )
 
   const errorContext = {
     target: announcement.target,
@@ -183,9 +194,9 @@ export const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
     tag: announcement.tag,
     releaseUrl: announcement.releaseUrl.href,
     webhookOrigin: webhookUrl.origin,
-    webhookPathnameSegmentCount: webhookUrl.pathname.split("/").filter(Boolean).length,
+    webhookPathnameSegmentCount: webhookUrl.pathname.split('/').filter(Boolean).length,
     ...summarizePayload(payload),
-  } as const;
+  } as const
 
   const response = yield* HttpClientRequest.post(webhookUrl).pipe(
     HttpClientRequest.bodyJson(payload),
@@ -197,14 +208,14 @@ export const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
           cause,
         }),
     ),
-  );
+  )
 
-  yield* Effect.logInfo("discord webhook response received").pipe(
+  yield* Effect.logInfo('discord webhook response received').pipe(
     Effect.annotateLogs({
       status: response.status,
       ok: response.status >= 200 && response.status < 300,
     }),
-  );
+  )
 
   yield* HttpClientResponse.filterStatusOk(response).pipe(
     Effect.mapError(
@@ -215,39 +226,40 @@ export const postDiscordWebhook = Effect.fn("postDiscordWebhook")(function* (
           cause,
         }),
     ),
-  );
-});
+  )
+})
 
 export const notifyDiscordReleaseCommand = Command.make(
-  "notify-discord-release",
+  'notify-discord-release',
   {
-    target: Argument.choice("target", DISCORD_RELEASE_TARGETS).pipe(
-      Argument.withDescription("Discord announcement target: prerelease or latest."),
+    target: Argument.choice('target', DISCORD_RELEASE_TARGETS).pipe(
+      Argument.withDescription('Discord announcement target: prerelease or latest.'),
     ),
-    roleId: Flag.string("role-id").pipe(
+    roleId: Flag.string('role-id').pipe(
       Flag.withSchema(DiscordRoleIdSchema),
-      Flag.withDescription("Discord role ID to mention in the release announcement."),
+      Flag.withDescription('Discord role ID to mention in the release announcement.'),
     ),
-    releaseName: Flag.string("release-name").pipe(
+    releaseName: Flag.string('release-name').pipe(
       Flag.withSchema(Schema.NonEmptyString),
-      Flag.withDescription("Human-readable release name."),
+      Flag.withDescription('Human-readable release name.'),
     ),
-    releaseVersion: Flag.string("release-version").pipe(
+    releaseVersion: Flag.string('release-version').pipe(
       Flag.withSchema(Schema.NonEmptyString),
-      Flag.withDescription("Release version."),
+      Flag.withDescription('Release version.'),
     ),
-    tag: Flag.string("tag").pipe(
+    tag: Flag.string('tag').pipe(
       Flag.withSchema(Schema.NonEmptyString),
-      Flag.withDescription("Git tag for the release."),
+      Flag.withDescription('Git tag for the release.'),
     ),
-    releaseUrl: Flag.string("release-url").pipe(
+    releaseUrl: Flag.string('release-url').pipe(
       Flag.withSchema(Schema.URLFromString),
-      Flag.withDescription("Public GitHub release URL."),
+      Flag.withDescription('Public GitHub release URL.'),
     ),
   },
   ({ target, roleId, releaseName, releaseVersion, tag, releaseUrl }) =>
-    Effect.gen(function* () {
-      yield* Effect.logInfo("discord release announcement starting").pipe(
+    Effect.gen(function* ()
+    {
+      yield* Effect.logInfo('discord release announcement starting').pipe(
         Effect.annotateLogs({
           target,
           roleIdProvided: roleId.length > 0,
@@ -257,10 +269,10 @@ export const notifyDiscordReleaseCommand = Command.make(
           tag,
           releaseUrl,
         }),
-      );
+      )
 
-      const webhookUrl = yield* DiscordWebhookUrl;
-      const timestamp = DateTime.formatIso(yield* DateTime.now);
+      const webhookUrl = yield* DiscordWebhookUrl
+      const timestamp = DateTime.formatIso(yield* DateTime.now)
       const announcement = {
         target,
         roleId,
@@ -269,19 +281,20 @@ export const notifyDiscordReleaseCommand = Command.make(
         tag,
         releaseUrl,
         timestamp,
-      } satisfies DiscordReleaseAnnouncementOptions;
-      const payload = buildDiscordReleaseAnnouncement(announcement);
+      } satisfies DiscordReleaseAnnouncementOptions
+      const payload = buildDiscordReleaseAnnouncement(announcement)
 
-      yield* Effect.logInfo("discord release announcement payload built").pipe(
+      yield* Effect.logInfo('discord release announcement payload built').pipe(
         Effect.annotateLogs(summarizePayload(payload)),
-      );
-      yield* postDiscordWebhook(webhookUrl, payload, announcement);
-      yield* Effect.logInfo("discord release announcement completed");
+      )
+      yield* postDiscordWebhook(webhookUrl, payload, announcement)
+      yield* Effect.logInfo('discord release announcement completed')
     }),
-).pipe(Command.withDescription("Post a 456code release announcement to Discord."));
+).pipe(Command.withDescription('Post a 456code release announcement to Discord.'))
 
-if (import.meta.main) {
-  Command.run(notifyDiscordReleaseCommand, { version: "0.0.0" }).pipe(
+if (import.meta.main)
+{
+  Command.run(notifyDiscordReleaseCommand, { version: '0.0.0' }).pipe(
     Effect.provide(
       Layer.mergeAll(
         Logger.layer([Logger.consolePretty()]),
@@ -290,5 +303,5 @@ if (import.meta.main) {
       ),
     ),
     NodeRuntime.runMain,
-  );
+  )
 }

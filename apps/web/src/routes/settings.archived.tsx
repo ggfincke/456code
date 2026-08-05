@@ -1,7 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+// apps/web/src/routes/settings.archived.tsx
+// render the settings archived route
 
-import { ArchivedThreadsPanel } from "../components/settings/SettingsPanels";
+import { createFileRoute } from '@tanstack/react-router'
 
-export const Route = createFileRoute("/settings/archived")({
+import { ArchivedThreadsPanel } from '../components/settings/SettingsPanels'
+
+export const Route = createFileRoute('/settings/archived')({
   component: ArchivedThreadsPanel,
-});
+})

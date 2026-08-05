@@ -1,202 +1,234 @@
-import { useEffect, useState } from "react";
-import { Image, ScrollView, Text, useColorScheme, View } from "react-native";
-import type { MarkdownNode } from "react-native-nitro-markdown/headless";
+// apps/mobile/modules/code456-markdown-text/src/NativeMarkdownBlock.ios.tsx
+// render native markdown block ios
 
-import { CopyTextButton } from "./CopyTextButton";
-import { MarkdownTextPrimitive } from "./MarkdownTextPrimitive";
+import { useEffect, useState } from 'react'
+import { Image, ScrollView, Text, useColorScheme, View } from 'react-native'
+import type { MarkdownNode } from 'react-native-nitro-markdown/headless'
+
+import { CopyTextButton } from './CopyTextButton'
+import { MarkdownTextPrimitive } from './MarkdownTextPrimitive'
 import {
   nativeMarkdownDocumentRuns,
   nativeMarkdownListItemBlocks,
   nativeMarkdownTextRuns,
-} from "./nativeMarkdownText";
-import { NativeMarkdownSelectableText } from "./NativeMarkdownSelectableText.ios";
+} from './nativeMarkdownText'
+import { NativeMarkdownSelectableText } from './NativeMarkdownSelectableText.ios'
 import type {
   MarkdownCodeHighlighter,
   MarkdownHighlightedToken,
   NativeMarkdownTextStyle,
-} from "./SelectableMarkdownText.types";
+} from './SelectableMarkdownText.types'
 
-type HighlightedCode = ReadonlyArray<ReadonlyArray<MarkdownHighlightedToken>>;
+type HighlightedCode = ReadonlyArray<ReadonlyArray<MarkdownHighlightedToken>>
 
-const highlightedCodeCache = new Map<string, HighlightedCode>();
-const highlightedCodePromiseCache = new Map<string, Promise<HighlightedCode>>();
-const HIGHLIGHTED_CODE_CACHE_LIMIT = 64;
+const highlightedCodeCache = new Map<string, HighlightedCode>()
+const highlightedCodePromiseCache = new Map<string, Promise<HighlightedCode>>()
+const HIGHLIGHTED_CODE_CACHE_LIMIT = 64
 
-function nodeKey(node: MarkdownNode, index: number): string {
-  return `${node.type}:${node.beg ?? index}:${node.end ?? index}`;
+function nodeKey(node: MarkdownNode, index: number): string
+{
+  return `${node.type}:${node.beg ?? index}:${node.end ?? index}`
 }
 
-/** Code inside markdown scales with the base text size (12pt at the default 15pt body). */
-function codeBlockFontSize(textStyle: NativeMarkdownTextStyle): number {
-  return Math.max(10, Math.round(textStyle.fontSize * 0.8));
+// code inside markdown scales with the base text size (12pt at the default 15pt body).
+function codeBlockFontSize(textStyle: NativeMarkdownTextStyle): number
+{
+  return Math.max(10, Math.round(textStyle.fontSize * 0.8))
 }
 
-function codeBlockLineHeight(textStyle: NativeMarkdownTextStyle): number {
-  return codeBlockFontSize(textStyle) + 6;
+function codeBlockLineHeight(textStyle: NativeMarkdownTextStyle): number
+{
+  return codeBlockFontSize(textStyle) + 6
 }
 
-function nodeText(node: MarkdownNode): string {
-  if (node.content !== undefined) {
-    return node.content;
+function nodeText(node: MarkdownNode): string
+{
+  if (node.content !== undefined)
+  {
+    return node.content
   }
-  return (node.children ?? []).map(nodeText).join("");
+  return (node.children ?? []).map(nodeText).join('')
 }
 
-function documentFor(node: MarkdownNode): MarkdownNode {
-  return node.type === "document" ? node : { type: "document", children: [node] };
+function documentFor(node: MarkdownNode): MarkdownNode
+{
+  return node.type === 'document' ? node : { type: 'document', children: [node] }
 }
 
 function SelectableNode(props: {
-  readonly node: MarkdownNode;
-  readonly textStyle: NativeMarkdownTextStyle;
-  readonly onLinkPress?: (href: string) => void;
-}) {
+  readonly node: MarkdownNode
+  readonly textStyle: NativeMarkdownTextStyle
+  readonly onLinkPress?: (href: string) => void
+})
+{
   return (
     <NativeMarkdownSelectableText
       runs={nativeMarkdownDocumentRuns(documentFor(props.node))}
       textStyle={props.textStyle}
       onLinkPress={props.onLinkPress}
     />
-  );
+  )
 }
 
 function codeHighlightCacheKey(
   code: string,
   language: string | undefined,
-  theme: "light" | "dark",
-): string {
-  return `${theme}:${language ?? "text"}:${code}`;
+  theme: 'light' | 'dark',
+): string
+{
+  return `${theme}:${language ?? 'text'}:${code}`
 }
 
-function cacheHighlightedCode(key: string, tokens: HighlightedCode): void {
-  highlightedCodeCache.delete(key);
-  highlightedCodeCache.set(key, tokens);
+function cacheHighlightedCode(key: string, tokens: HighlightedCode): void
+{
+  highlightedCodeCache.delete(key)
+  highlightedCodeCache.set(key, tokens)
 
-  while (highlightedCodeCache.size > HIGHLIGHTED_CODE_CACHE_LIMIT) {
-    const oldestKey = highlightedCodeCache.keys().next().value;
-    if (oldestKey === undefined) {
-      break;
+  while (highlightedCodeCache.size > HIGHLIGHTED_CODE_CACHE_LIMIT)
+  {
+    const oldestKey = highlightedCodeCache.keys().next().value
+    if (oldestKey === undefined)
+    {
+      break
     }
-    highlightedCodeCache.delete(oldestKey);
+    highlightedCodeCache.delete(oldestKey)
   }
 }
 
 function loadHighlightedCode(
   code: string,
   language: string | undefined,
-  theme: "light" | "dark",
+  theme: 'light' | 'dark',
   highlightCode: MarkdownCodeHighlighter,
-): Promise<HighlightedCode> {
-  const key = codeHighlightCacheKey(code, language, theme);
-  const cached = highlightedCodeCache.get(key);
-  if (cached) {
-    return Promise.resolve(cached);
+): Promise<HighlightedCode>
+{
+  const key = codeHighlightCacheKey(code, language, theme)
+  const cached = highlightedCodeCache.get(key)
+  if (cached)
+  {
+    return Promise.resolve(cached)
   }
 
-  const pending = highlightedCodePromiseCache.get(key);
-  if (pending) {
-    return pending;
+  const pending = highlightedCodePromiseCache.get(key)
+  if (pending)
+  {
+    return pending
   }
 
   const promise = highlightCode({ code, language, theme })
-    .then((tokens) => {
-      cacheHighlightedCode(key, tokens);
-      highlightedCodePromiseCache.delete(key);
-      return tokens;
+    .then((tokens) =>
+    {
+      cacheHighlightedCode(key, tokens)
+      highlightedCodePromiseCache.delete(key)
+      return tokens
     })
-    .catch((error) => {
-      highlightedCodePromiseCache.delete(key);
-      throw error;
-    });
-  highlightedCodePromiseCache.set(key, promise);
-  return promise;
+    .catch((error) =>
+    {
+      highlightedCodePromiseCache.delete(key)
+      throw error
+    })
+  highlightedCodePromiseCache.set(key, promise)
+  return promise
 }
 
 function useHighlightedCode(
   code: string,
   language: string | undefined,
-  theme: "light" | "dark",
+  theme: 'light' | 'dark',
   highlightCode: MarkdownCodeHighlighter,
-): HighlightedCode | null {
-  const key = codeHighlightCacheKey(code, language, theme);
+): HighlightedCode | null
+{
+  const key = codeHighlightCacheKey(code, language, theme)
   const [highlighted, setHighlighted] = useState<{
-    readonly key: string;
-    readonly tokens: HighlightedCode | null;
+    readonly key: string
+    readonly tokens: HighlightedCode | null
   }>(() => ({
     key,
     tokens: highlightedCodeCache.get(key) ?? null,
-  }));
+  }))
 
-  useEffect(() => {
-    let active = true;
-    const cached = highlightedCodeCache.get(key);
-    if (cached) {
-      cacheHighlightedCode(key, cached);
-      setHighlighted({ key, tokens: cached });
-      return () => {
-        active = false;
-      };
+  useEffect(() =>
+  {
+    let active = true
+    const cached = highlightedCodeCache.get(key)
+    if (cached)
+    {
+      cacheHighlightedCode(key, cached)
+      setHighlighted({ key, tokens: cached })
+      return () =>
+      {
+        active = false
+      }
     }
 
     void loadHighlightedCode(code, language, theme, highlightCode)
-      .then((tokens) => {
-        if (active) {
-          setHighlighted({ key, tokens });
+      .then((tokens) =>
+      {
+        if (active)
+        {
+          setHighlighted({ key, tokens })
         }
       })
-      .catch(() => {
-        if (active) {
-          setHighlighted({ key, tokens: null });
+      .catch(() =>
+      {
+        if (active)
+        {
+          setHighlighted({ key, tokens: null })
         }
-      });
-    return () => {
-      active = false;
-    };
-  }, [code, highlightCode, key, language, theme]);
+      })
+    return () =>
+    {
+      active = false
+    }
+  }, [code, highlightCode, key, language, theme])
 
-  return highlighted.key === key ? highlighted.tokens : null;
+  return highlighted.key === key ? highlighted.tokens : null
 }
 
 function HighlightedCodeText(props: {
-  readonly content: string;
-  readonly highlighted: HighlightedCode | null;
-  readonly textStyle: NativeMarkdownTextStyle;
-}) {
-  if (!props.highlighted) {
+  readonly content: string
+  readonly highlighted: HighlightedCode | null
+  readonly textStyle: NativeMarkdownTextStyle
+})
+{
+  if (!props.highlighted)
+  {
     return (
       <MarkdownTextPrimitive
         uiTextView
         selectable
         style={{
           color: props.textStyle.codeColor,
-          fontFamily: "ui-monospace",
+          fontFamily: 'ui-monospace',
           fontSize: codeBlockFontSize(props.textStyle),
           lineHeight: codeBlockLineHeight(props.textStyle),
         }}
       >
         {props.content}
       </MarkdownTextPrimitive>
-    );
+    )
   }
-  const highlighted = props.highlighted;
-  let sourceOffset = 0;
-  const keyOccurrences = new Map<string, number>();
-  const keyedLines = highlighted.map((line) => {
-    const lineStart = sourceOffset;
-    const tokens = line.map((token) => {
-      const start = sourceOffset;
-      sourceOffset += token.content.length;
-      const signature = `${start}:${token.content}:${token.color ?? ""}:${token.fontStyle ?? ""}`;
-      const occurrence = keyOccurrences.get(signature) ?? 0;
-      keyOccurrences.set(signature, occurrence + 1);
-      return { key: `${signature}:${occurrence}`, token };
-    });
-    sourceOffset += 1;
+  const highlighted = props.highlighted
+  let sourceOffset = 0
+  const keyOccurrences = new Map<string, number>()
+  const keyedLines = highlighted.map((line) =>
+  {
+    const lineStart = sourceOffset
+    const tokens = line.map((token) =>
+    {
+      const start = sourceOffset
+      sourceOffset += token.content.length
+      const signature = `${start}:${token.content}:${token.color ?? ''}:${token.fontStyle ?? ''}`
+      const occurrence = keyOccurrences.get(signature) ?? 0
+      keyOccurrences.set(signature, occurrence + 1)
+      return { key: `${signature}:${occurrence}`, token }
+    })
+    sourceOffset += 1
     return {
-      key: `line:${lineStart}:${line.map((token) => token.content).join("")}`,
+      key: `line:${lineStart}:${line.map((token) => token.content).join('')}`,
       tokens,
-    };
-  });
+    }
+  })
 
   return (
     <MarkdownTextPrimitive
@@ -204,7 +236,7 @@ function HighlightedCodeText(props: {
       selectable
       style={{
         color: props.textStyle.codeColor,
-        fontFamily: "ui-monospace",
+        fontFamily: 'ui-monospace',
         fontSize: codeBlockFontSize(props.textStyle),
         lineHeight: codeBlockLineHeight(props.textStyle),
       }}
@@ -216,43 +248,44 @@ function HighlightedCodeText(props: {
               key={key}
               style={{
                 color: token.color ?? props.textStyle.codeColor,
-                fontFamily: "ui-monospace",
+                fontFamily: 'ui-monospace',
                 fontStyle:
-                  token.fontStyle !== null && (token.fontStyle & 1) === 1 ? "italic" : "normal",
-                fontWeight: token.fontStyle !== null && (token.fontStyle & 2) === 2 ? "700" : "400",
+                  token.fontStyle !== null && (token.fontStyle & 1) === 1 ? 'italic' : 'normal',
+                fontWeight: token.fontStyle !== null && (token.fontStyle & 2) === 2 ? '700' : '400',
               }}
             >
               {token.content}
             </MarkdownTextPrimitive>
           ))}
-          {lineIndex + 1 < keyedLines.length ? "\n" : ""}
+          {lineIndex + 1 < keyedLines.length ? '\n' : ''}
         </MarkdownTextPrimitive>
       ))}
     </MarkdownTextPrimitive>
-  );
+  )
 }
 
 function NativeCodeBlock(props: {
-  readonly node: MarkdownNode;
-  readonly textStyle: NativeMarkdownTextStyle;
-  readonly highlightCode: MarkdownCodeHighlighter;
-  readonly compact?: boolean;
-}) {
-  const content = nodeText(props.node).replace(/\n$/, "");
-  const colorScheme = useColorScheme();
-  const theme = colorScheme === "dark" ? "dark" : "light";
-  const highlighted = useHighlightedCode(content, props.node.language, theme, props.highlightCode);
-  const languageLabel = props.node.language?.toUpperCase() ?? "CODE";
+  readonly node: MarkdownNode
+  readonly textStyle: NativeMarkdownTextStyle
+  readonly highlightCode: MarkdownCodeHighlighter
+  readonly compact?: boolean
+})
+{
+  const content = nodeText(props.node).replace(/\n$/, '')
+  const colorScheme = useColorScheme()
+  const theme = colorScheme === 'dark' ? 'dark' : 'light'
+  const highlighted = useHighlightedCode(content, props.node.language, theme, props.highlightCode)
+  const languageLabel = props.node.language?.toUpperCase() ?? 'CODE'
   return (
     <View
       style={{
         backgroundColor: props.textStyle.codeBlockBackgroundColor,
         borderColor: props.textStyle.dividerColor,
-        borderCurve: "continuous",
+        borderCurve: 'continuous',
         borderRadius: 10,
         borderWidth: 1,
         marginVertical: props.compact ? 7 : 0,
-        overflow: "hidden",
+        overflow: 'hidden',
       }}
     >
       <View
@@ -262,9 +295,9 @@ function NativeCodeBlock(props: {
           borderBottomWidth: 1,
           paddingLeft: 14,
           paddingRight: 6,
-          flexDirection: "row",
-          alignItems: "center",
-          justifyContent: "space-between",
+          flexDirection: 'row',
+          alignItems: 'center',
+          justifyContent: 'space-between',
         }}
       >
         <Text
@@ -272,7 +305,7 @@ function NativeCodeBlock(props: {
           style={{
             flex: 1,
             color: props.textStyle.mutedColor,
-            fontFamily: "ui-monospace",
+            fontFamily: 'ui-monospace',
             fontSize: codeBlockFontSize(props.textStyle),
           }}
         >
@@ -302,47 +335,52 @@ function NativeCodeBlock(props: {
         />
       </ScrollView>
     </View>
-  );
+  )
 }
 
-function collectTableRows(node: MarkdownNode): MarkdownNode[] {
-  const rows: MarkdownNode[] = [];
-  const visit = (child: MarkdownNode) => {
-    if (child.type === "table_row") {
-      rows.push(child);
-      return;
+function collectTableRows(node: MarkdownNode): MarkdownNode[]
+{
+  const rows: MarkdownNode[] = []
+  const visit = (child: MarkdownNode) =>
+  {
+    if (child.type === 'table_row')
+    {
+      rows.push(child)
+      return
     }
-    for (const nested of child.children ?? []) {
-      visit(nested);
+    for (const nested of child.children ?? [])
+    {
+      visit(nested)
     }
-  };
-  visit(node);
-  return rows;
+  }
+  visit(node)
+  return rows
 }
 
 function NativeTable(props: {
-  readonly node: MarkdownNode;
-  readonly textStyle: NativeMarkdownTextStyle;
-  readonly onLinkPress?: (href: string) => void;
-}) {
-  const rows = collectTableRows(props.node);
+  readonly node: MarkdownNode
+  readonly textStyle: NativeMarkdownTextStyle
+  readonly onLinkPress?: (href: string) => void
+})
+{
+  const rows = collectTableRows(props.node)
   return (
     <ScrollView horizontal bounces={false} showsHorizontalScrollIndicator={false}>
       <View
         style={{
           borderColor: props.textStyle.dividerColor,
-          borderCurve: "continuous",
+          borderCurve: 'continuous',
           borderRadius: 8,
           borderWidth: 1,
-          overflow: "hidden",
+          overflow: 'hidden',
         }}
       >
         {rows.map((row, rowIndex) => (
           <View
             key={nodeKey(row, rowIndex)}
             style={{
-              flexDirection: "row",
-              backgroundColor: rowIndex === 0 ? props.textStyle.codeBackgroundColor : "transparent",
+              flexDirection: 'row',
+              backgroundColor: rowIndex === 0 ? props.textStyle.codeBackgroundColor : 'transparent',
               borderTopColor: props.textStyle.dividerColor,
               borderTopWidth: rowIndex === 0 ? 0 : 1,
             }}
@@ -371,23 +409,25 @@ function NativeTable(props: {
         ))}
       </View>
     </ScrollView>
-  );
+  )
 }
 
 function NativeMarkdownImage(props: {
-  readonly node: MarkdownNode;
-  readonly textStyle: NativeMarkdownTextStyle;
-  readonly onLinkPress?: (href: string) => void;
-}) {
-  const href = props.node.href;
-  if (!href) {
+  readonly node: MarkdownNode
+  readonly textStyle: NativeMarkdownTextStyle
+  readonly onLinkPress?: (href: string) => void
+})
+{
+  const href = props.node.href
+  if (!href)
+  {
     return (
       <SelectableNode
         node={props.node}
         textStyle={props.textStyle}
         onLinkPress={props.onLinkPress}
       />
-    );
+    )
   }
 
   return (
@@ -397,7 +437,7 @@ function NativeMarkdownImage(props: {
         resizeMode="contain"
         accessibilityLabel={props.node.alt ?? props.node.title}
         style={{
-          width: "100%",
+          width: '100%',
           aspectRatio: 16 / 9,
           backgroundColor: props.textStyle.codeBackgroundColor,
           borderRadius: 10,
@@ -417,41 +457,49 @@ function NativeMarkdownImage(props: {
         </Text>
       ) : null}
     </View>
-  );
+  )
 }
 
-function inlineGroups(nodes: ReadonlyArray<MarkdownNode>): MarkdownNode[] {
-  const groups: MarkdownNode[] = [];
-  let inline: MarkdownNode[] = [];
-  const flush = () => {
-    if (inline.length === 0) {
-      return;
+function inlineGroups(nodes: ReadonlyArray<MarkdownNode>): MarkdownNode[]
+{
+  const groups: MarkdownNode[] = []
+  let inline: MarkdownNode[] = []
+  const flush = () =>
+  {
+    if (inline.length === 0)
+    {
+      return
     }
-    groups.push({ type: "paragraph", children: inline });
-    inline = [];
-  };
+    groups.push({ type: 'paragraph', children: inline })
+    inline = []
+  }
 
-  for (const node of nodes) {
-    if (node.type === "image") {
-      flush();
-      groups.push(node);
-    } else {
-      inline.push(node);
+  for (const node of nodes)
+  {
+    if (node.type === 'image')
+    {
+      flush()
+      groups.push(node)
+    }
+    else
+    {
+      inline.push(node)
     }
   }
-  flush();
-  return groups;
+  flush()
+  return groups
 }
 
 function NativeMixedParagraph(props: {
-  readonly node: MarkdownNode;
-  readonly textStyle: NativeMarkdownTextStyle;
-  readonly onLinkPress?: (href: string) => void;
-}) {
+  readonly node: MarkdownNode
+  readonly textStyle: NativeMarkdownTextStyle
+  readonly onLinkPress?: (href: string) => void
+})
+{
   return (
     <View style={{ gap: 8 }}>
       {inlineGroups(props.node.children ?? []).map((child, index) =>
-        child.type === "image" ? (
+        child.type === 'image' ? (
           <NativeMarkdownImage
             key={nodeKey(child, index)}
             node={child}
@@ -468,52 +516,54 @@ function NativeMixedParagraph(props: {
         ),
       )}
     </View>
-  );
+  )
 }
 
 function NativeList(props: {
-  readonly node: MarkdownNode;
-  readonly textStyle: NativeMarkdownTextStyle;
-  readonly highlightCode: MarkdownCodeHighlighter;
-  readonly onLinkPress?: (href: string) => void;
-  readonly depth: number;
-}) {
-  const ordered = props.node.ordered ?? false;
-  const start = props.node.start ?? 1;
-  const nested = props.depth > 0;
+  readonly node: MarkdownNode
+  readonly textStyle: NativeMarkdownTextStyle
+  readonly highlightCode: MarkdownCodeHighlighter
+  readonly onLinkPress?: (href: string) => void
+  readonly depth: number
+})
+{
+  const ordered = props.node.ordered ?? false
+  const start = props.node.start ?? 1
+  const nested = props.depth > 0
   return (
     <View
       style={{
         gap: nested ? 3 : 5,
       }}
     >
-      {(props.node.children ?? []).map((item, index) => {
-        const taskMarker = item.type === "task_list_item";
+      {(props.node.children ?? []).map((item, index) =>
+      {
+        const taskMarker = item.type === 'task_list_item'
         const marker = taskMarker
           ? item.checked
-            ? "☑︎"
-            : "☐︎"
+            ? '☑︎'
+            : '☐︎'
           : ordered
             ? `${start + index}.`
             : props.depth % 3 === 1
-              ? "◦"
+              ? '◦'
               : props.depth % 3 === 2
-                ? "▪︎"
-                : "•";
-        const markerWidth = ordered ? 28 : taskMarker ? 20 : 18;
-        const markerOffset = taskMarker ? 3 : ordered ? 0 : 2;
+                ? '▪︎'
+                : '•'
+        const markerWidth = ordered ? 28 : taskMarker ? 20 : 18
+        const markerOffset = taskMarker ? 3 : ordered ? 0 : 2
         return (
           <View
             key={nodeKey(item, index)}
-            style={{ alignItems: "flex-start", flexDirection: "row" }}
+            style={{ alignItems: 'flex-start', flexDirection: 'row' }}
           >
             <View
               style={{
                 width: markerWidth,
                 height: props.textStyle.lineHeight,
                 marginRight: 6,
-                alignItems: ordered ? "flex-end" : "center",
-                justifyContent: "flex-start",
+                alignItems: ordered ? 'flex-end' : 'center',
+                justifyContent: 'flex-start',
               }}
             >
               <Text
@@ -522,7 +572,7 @@ function NativeList(props: {
                   fontFamily: props.textStyle.fontFamily,
                   fontSize: taskMarker ? 14 : props.textStyle.fontSize,
                   lineHeight: props.textStyle.lineHeight,
-                  fontVariant: ordered ? ["tabular-nums"] : undefined,
+                  fontVariant: ordered ? ['tabular-nums'] : undefined,
                   transform: [{ translateY: markerOffset }],
                 }}
               >
@@ -543,23 +593,25 @@ function NativeList(props: {
               ))}
             </View>
           </View>
-        );
+        )
       })}
     </View>
-  );
+  )
 }
 
 export function NativeMarkdownBlock(props: {
-  readonly node: MarkdownNode;
-  readonly textStyle: NativeMarkdownTextStyle;
-  readonly highlightCode: MarkdownCodeHighlighter;
-  readonly onLinkPress?: (href: string) => void;
-  readonly depth?: number;
-  readonly compact?: boolean;
-}) {
-  const depth = props.depth ?? 0;
-  switch (props.node.type) {
-    case "document":
+  readonly node: MarkdownNode
+  readonly textStyle: NativeMarkdownTextStyle
+  readonly highlightCode: MarkdownCodeHighlighter
+  readonly onLinkPress?: (href: string) => void
+  readonly depth?: number
+  readonly compact?: boolean
+})
+{
+  const depth = props.depth ?? 0
+  switch (props.node.type)
+  {
+    case 'document':
       return (
         <View style={{ gap: 8 }}>
           {(props.node.children ?? []).map((child, index) => (
@@ -573,8 +625,8 @@ export function NativeMarkdownBlock(props: {
             />
           ))}
         </View>
-      );
-    case "code_block":
+      )
+    case 'code_block':
       return (
         <NativeCodeBlock
           node={props.node}
@@ -582,24 +634,24 @@ export function NativeMarkdownBlock(props: {
           highlightCode={props.highlightCode}
           compact={props.compact}
         />
-      );
-    case "table":
+      )
+    case 'table':
       return (
         <NativeTable
           node={props.node}
           textStyle={props.textStyle}
           onLinkPress={props.onLinkPress}
         />
-      );
-    case "image":
+      )
+    case 'image':
       return (
         <NativeMarkdownImage
           node={props.node}
           textStyle={props.textStyle}
           onLinkPress={props.onLinkPress}
         />
-      );
-    case "horizontal_rule":
+      )
+    case 'horizontal_rule':
       return (
         <View
           style={{
@@ -607,8 +659,8 @@ export function NativeMarkdownBlock(props: {
             backgroundColor: props.textStyle.dividerColor,
           }}
         />
-      );
-    case "blockquote":
+      )
+    case 'blockquote':
       return (
         <View
           style={{
@@ -632,8 +684,8 @@ export function NativeMarkdownBlock(props: {
             />
           ))}
         </View>
-      );
-    case "list":
+      )
+    case 'list':
       return (
         <NativeList
           node={props.node}
@@ -642,9 +694,9 @@ export function NativeMarkdownBlock(props: {
           onLinkPress={props.onLinkPress}
           depth={depth}
         />
-      );
-    case "paragraph":
-      return (props.node.children ?? []).some((child) => child.type === "image") ? (
+      )
+    case 'paragraph':
+      return (props.node.children ?? []).some((child) => child.type === 'image') ? (
         <NativeMixedParagraph
           node={props.node}
           textStyle={props.textStyle}
@@ -656,19 +708,19 @@ export function NativeMarkdownBlock(props: {
           textStyle={props.textStyle}
           onLinkPress={props.onLinkPress}
         />
-      );
-    case "html_block":
-    case "math_block":
+      )
+    case 'html_block':
+    case 'math_block':
       return (
         <View
           style={{
             marginVertical: props.compact ? 2 : 0,
-            paddingHorizontal: props.node.type === "math_block" ? 10 : 0,
-            paddingVertical: props.node.type === "math_block" ? 8 : 0,
+            paddingHorizontal: props.node.type === 'math_block' ? 10 : 0,
+            paddingVertical: props.node.type === 'math_block' ? 8 : 0,
             backgroundColor:
-              props.node.type === "math_block"
+              props.node.type === 'math_block'
                 ? props.textStyle.codeBackgroundColor
-                : "transparent",
+                : 'transparent',
           }}
         >
           <SelectableNode
@@ -677,13 +729,13 @@ export function NativeMarkdownBlock(props: {
             onLinkPress={props.onLinkPress}
           />
         </View>
-      );
-    case "table_head":
-    case "table_body":
-    case "table_row":
-    case "table_cell":
-    case "list_item":
-    case "task_list_item":
+      )
+    case 'table_head':
+    case 'table_body':
+    case 'table_row':
+    case 'table_cell':
+    case 'list_item':
+    case 'task_list_item':
       return (
         <View style={{ gap: 4 }}>
           {(props.node.children ?? []).map((child, index) => (
@@ -698,7 +750,7 @@ export function NativeMarkdownBlock(props: {
             />
           ))}
         </View>
-      );
+      )
     default:
       return (
         <SelectableNode
@@ -706,6 +758,6 @@ export function NativeMarkdownBlock(props: {
           textStyle={props.textStyle}
           onLinkPress={props.onLinkPress}
         />
-      );
+      )
   }
 }

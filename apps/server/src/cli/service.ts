@@ -1,152 +1,167 @@
-import * as Console from "effect/Console";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import { Command, GlobalFlag } from "effect/unstable/cli";
+// apps/server/src/cli/service.ts
+// format service status
 
-import packageJson from "../../package.json" with { type: "json" };
-import * as BootService from "../service/bootService.ts";
-import type * as ServerConfig from "../config.ts";
-import * as ProcessRunner from "../processRunner.ts";
-import { projectLocationFlags, resolveCliAuthConfig } from "./config.ts";
+import * as Console from 'effect/Console'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import { Command, GlobalFlag } from 'effect/unstable/cli'
 
-export const bootServiceLayer = (config: ServerConfig.ServerConfig["Service"]) =>
+import packageJson from '../../package.json' with { type: 'json' }
+import * as BootService from '../service/bootService.ts'
+import type * as ServerConfig from '../config.ts'
+import * as ProcessRunner from '../processRunner.ts'
+import { projectLocationFlags, resolveCliAuthConfig } from './config.ts'
+
+export const bootServiceLayer = (config: ServerConfig.ServerConfig['Service']) =>
   BootService.layer({
     baseDir: config.baseDir,
     logsDir: config.logsDir,
     cliVersion: packageJson.version,
-  }).pipe(Layer.provide(ProcessRunner.layer));
+  }).pipe(Layer.provide(ProcessRunner.layer))
 
 export type ServiceReconcileResult =
   | {
-      readonly changed: false;
-      readonly status: BootService.BootServiceStatus;
+      readonly changed: false
+      readonly status: BootService.BootServiceStatus
     }
   | {
-      readonly changed: true;
-      readonly previouslyInstalled: boolean;
-      readonly plan: BootService.BootServicePlan;
-    };
+      readonly changed: true
+      readonly previouslyInstalled: boolean
+      readonly plan: BootService.BootServicePlan
+    }
 
-/** Install, update, or repair the service using the CLI version running this command. */
-export const reconcileService = Effect.fn("cli.service.reconcile")(function* () {
-  const service = yield* BootService.BootService;
-  const status = yield* service.status;
-  if (status.installed && status.current) {
-    return { changed: false, status } satisfies ServiceReconcileResult;
+// install, update, or repair the service using the CLI version running this command.
+export const reconcileService = Effect.fn('cli.service.reconcile')(function* ()
+{
+  const service = yield* BootService.BootService
+  const status = yield* service.status
+  if (status.installed && status.current)
+  {
+    return { changed: false, status } satisfies ServiceReconcileResult
   }
-  const plan = yield* service.install;
+  const plan = yield* service.install
   return {
     changed: true,
     previouslyInstalled: status.installed,
     plan,
-  } satisfies ServiceReconcileResult;
-});
+  } satisfies ServiceReconcileResult
+})
 
 export function formatServiceStatus(
   status: BootService.BootServiceStatus,
   cliVersion: string,
-): string {
-  if (!status.supported) {
-    return "456code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd";
+): string
+{
+  if (!status.supported)
+  {
+    return '456code service\n  Status: unavailable on this machine\n  Supported on: Linux with systemd'
   }
-  if (!status.installed) {
-    return "456code service\n  Status: not installed\n  Next: Run `456code service install`.";
+  if (!status.installed)
+  {
+    return '456code service\n  Status: not installed\n  Next: Run `456code service install`.'
   }
   return [
-    "456code service",
-    `  Status: ${status.current ? `installed · 456code@${cliVersion}` : "needs an update or repair"}`,
+    '456code service',
+    `  Status: ${status.current ? `installed · 456code@${cliVersion}` : 'needs an update or repair'}`,
     `  Unit: ${status.unitPath}`,
     `  Logs: ${status.logPath}`,
-    ...(status.current ? [] : ["  Next: Run `npx 456code@latest service update`."]),
-  ].join("\n");
+    ...(status.current ? [] : ['  Next: Run `npx 456code@latest service update`.']),
+  ].join('\n')
 }
 
-const runServiceCommand = Effect.fn("cli.service.run")(function* <A, E>(
-  flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]["baseDir"] },
+const runServiceCommand = Effect.fn('cli.service.run')(function* <A, E>(
+  flags: { readonly baseDir: Parameters<typeof resolveCliAuthConfig>[0]['baseDir'] },
   run: Effect.Effect<A, E, BootService.BootService>,
-) {
-  const logLevel = yield* GlobalFlag.LogLevel;
-  const config = yield* resolveCliAuthConfig(flags, logLevel);
-  return yield* run.pipe(Effect.provide(bootServiceLayer(config)));
-});
+)
+{
+  const logLevel = yield* GlobalFlag.LogLevel
+  const config = yield* resolveCliAuthConfig(flags, logLevel)
+  return yield* run.pipe(Effect.provide(bootServiceLayer(config)))
+})
 
-const serviceInstallCommand = Command.make("install", projectLocationFlags).pipe(
-  Command.withDescription("Install 456code as a background service for this user."),
+const serviceInstallCommand = Command.make('install', projectLocationFlags).pipe(
+  Command.withDescription('Install 456code as a background service for this user.'),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
-      Effect.gen(function* () {
-        const result = yield* reconcileService();
-        if (!result.changed) {
+      Effect.gen(function* ()
+      {
+        const result = yield* reconcileService()
+        if (!result.changed)
+        {
           yield* Console.log(
             `456code service is already installed with 456code@${packageJson.version}.`,
-          );
-          return;
+          )
+          return
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} 456code service with 456code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
-        );
+          `${result.previouslyInstalled ? 'Updated' : 'Installed'} 456code service with 456code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+        )
       }),
     ),
   ),
-);
+)
 
-const serviceUpdateCommand = Command.make("update", projectLocationFlags).pipe(
+const serviceUpdateCommand = Command.make('update', projectLocationFlags).pipe(
   Command.withDescription(
-    "Update or repair the background service using this CLI version. Use `npx 456code@latest service update` for the latest release.",
+    'Update or repair the background service using this CLI version. Use `npx 456code@latest service update` for the latest release.',
   ),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
-      Effect.gen(function* () {
-        const result = yield* reconcileService();
-        if (!result.changed) {
-          yield* Console.log(`456code service is already using 456code@${packageJson.version}.`);
-          return;
+      Effect.gen(function* ()
+      {
+        const result = yield* reconcileService()
+        if (!result.changed)
+        {
+          yield* Console.log(`456code service is already using 456code@${packageJson.version}.`)
+          return
         }
         yield* Console.log(
-          `${result.previouslyInstalled ? "Updated" : "Installed"} 456code service with 456code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
-        );
+          `${result.previouslyInstalled ? 'Updated' : 'Installed'} 456code service with 456code@${packageJson.version}.\nLogs: ${result.plan.logPath}`,
+        )
       }),
     ),
   ),
-);
+)
 
-const serviceUninstallCommand = Command.make("uninstall", projectLocationFlags).pipe(
-  Command.withDescription("Stop and remove the 456code background service."),
+const serviceUninstallCommand = Command.make('uninstall', projectLocationFlags).pipe(
+  Command.withDescription('Stop and remove the 456code background service.'),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
-      Effect.gen(function* () {
-        const service = yield* BootService.BootService;
-        const removed = yield* service.uninstall;
+      Effect.gen(function* ()
+      {
+        const service = yield* BootService.BootService
+        const removed = yield* service.uninstall
         yield* Console.log(
-          removed ? "Removed the 456code service." : "456code service is not installed.",
-        );
+          removed ? 'Removed the 456code service.' : '456code service is not installed.',
+        )
       }),
     ),
   ),
-);
+)
 
-const serviceStatusCommand = Command.make("status", projectLocationFlags).pipe(
-  Command.withDescription("Show whether the 456code background service is installed."),
+const serviceStatusCommand = Command.make('status', projectLocationFlags).pipe(
+  Command.withDescription('Show whether the 456code background service is installed.'),
   Command.withHandler((flags) =>
     runServiceCommand(
       flags,
-      Effect.gen(function* () {
-        const service = yield* BootService.BootService;
-        yield* Console.log(formatServiceStatus(yield* service.status, packageJson.version));
+      Effect.gen(function* ()
+      {
+        const service = yield* BootService.BootService
+        yield* Console.log(formatServiceStatus(yield* service.status, packageJson.version))
       }),
     ),
   ),
-);
+)
 
-export const serviceCommand = Command.make("service").pipe(
-  Command.withDescription("Manage the 456code background service."),
+export const serviceCommand = Command.make('service').pipe(
+  Command.withDescription('Manage the 456code background service.'),
   Command.withSubcommands([
     serviceInstallCommand,
     serviceUninstallCommand,
     serviceUpdateCommand,
     serviceStatusCommand,
   ]),
-);
+)

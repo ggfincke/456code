@@ -1,44 +1,53 @@
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Schema from "effect/Schema";
+// apps/desktop/src/electron/ElectronSafeStorage.ts
+// persist electron safe storage data
 
-import * as Electron from "electron";
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Schema from 'effect/Schema'
+
+import * as Electron from 'electron'
 
 const electronSafeStorageErrorFields = {
   cause: Schema.Defect(),
-};
+}
 
 export class ElectronSafeStorageAvailabilityError extends Schema.TaggedErrorClass<ElectronSafeStorageAvailabilityError>()(
-  "ElectronSafeStorageAvailabilityError",
+  'ElectronSafeStorageAvailabilityError',
   {
     ...electronSafeStorageErrorFields,
   },
-) {
-  override get message(): string {
-    return "Electron safe storage failed to check encryption availability.";
+)
+{
+  override get message(): string
+  {
+    return 'Electron safe storage failed to check encryption availability.'
   }
 }
 
 export class ElectronSafeStorageEncryptError extends Schema.TaggedErrorClass<ElectronSafeStorageEncryptError>()(
-  "ElectronSafeStorageEncryptError",
+  'ElectronSafeStorageEncryptError',
   {
     ...electronSafeStorageErrorFields,
   },
-) {
-  override get message(): string {
-    return "Electron safe storage failed to encrypt a string.";
+)
+{
+  override get message(): string
+  {
+    return 'Electron safe storage failed to encrypt a string.'
   }
 }
 
 export class ElectronSafeStorageDecryptError extends Schema.TaggedErrorClass<ElectronSafeStorageDecryptError>()(
-  "ElectronSafeStorageDecryptError",
+  'ElectronSafeStorageDecryptError',
   {
     ...electronSafeStorageErrorFields,
   },
-) {
-  override get message(): string {
-    return "Electron safe storage failed to decrypt a string.";
+)
+{
+  override get message(): string
+  {
+    return 'Electron safe storage failed to decrypt a string.'
   }
 }
 
@@ -46,22 +55,23 @@ export const ElectronSafeStorageError = Schema.Union([
   ElectronSafeStorageAvailabilityError,
   ElectronSafeStorageEncryptError,
   ElectronSafeStorageDecryptError,
-]);
-export type ElectronSafeStorageError = typeof ElectronSafeStorageError.Type;
-export const isElectronSafeStorageError = Schema.is(ElectronSafeStorageError);
+])
+export type ElectronSafeStorageError = typeof ElectronSafeStorageError.Type
+export const isElectronSafeStorageError = Schema.is(ElectronSafeStorageError)
 
 export class ElectronSafeStorage extends Context.Service<
   ElectronSafeStorage,
   {
-    readonly isEncryptionAvailable: Effect.Effect<boolean, ElectronSafeStorageAvailabilityError>;
+    readonly isEncryptionAvailable: Effect.Effect<boolean, ElectronSafeStorageAvailabilityError>
     readonly encryptString: (
       value: string,
-    ) => Effect.Effect<Uint8Array, ElectronSafeStorageEncryptError>;
+    ) => Effect.Effect<Uint8Array, ElectronSafeStorageEncryptError>
     readonly decryptString: (
       value: Uint8Array,
-    ) => Effect.Effect<string, ElectronSafeStorageDecryptError>;
+    ) => Effect.Effect<string, ElectronSafeStorageDecryptError>
   }
->()("@t3tools/desktop/electron/ElectronSafeStorage") {}
+>()('@t3tools/desktop/electron/ElectronSafeStorage')
+{}
 
 export const make = ElectronSafeStorage.of({
   isEncryptionAvailable: Effect.try({
@@ -78,6 +88,6 @@ export const make = ElectronSafeStorage.of({
       try: () => Electron.safeStorage.decryptString(Buffer.from(value)),
       catch: (cause) => new ElectronSafeStorageDecryptError({ cause }),
     }),
-});
+})
 
-export const layer = Layer.succeed(ElectronSafeStorage, make);
+export const layer = Layer.succeed(ElectronSafeStorage, make)

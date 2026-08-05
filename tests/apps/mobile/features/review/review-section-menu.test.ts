@@ -1,12 +1,16 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/mobile/features/review/review-section-menu.test.ts
+// verify build review section menu behavior
+
+import { describe, expect, it } from 'vite-plus/test'
 
 import type {
   ReviewSectionItem,
   ReviewSectionKind,
-} from "../../../../../apps/mobile/src/features/review/reviewModel";
-import { buildReviewSectionMenu } from "../../../../../apps/mobile/src/features/review/review-section-menu";
+} from '../../../../../apps/mobile/src/features/review/reviewModel'
+import { buildReviewSectionMenu } from '../../../../../apps/mobile/src/features/review/review-section-menu'
 
-function section(id: string, kind: ReviewSectionKind): ReviewSectionItem {
+function section(id: string, kind: ReviewSectionKind): ReviewSectionItem
+{
   return {
     id,
     kind,
@@ -14,30 +18,33 @@ function section(id: string, kind: ReviewSectionKind): ReviewSectionItem {
     subtitle: null,
     diff: null,
     isLoading: false,
-  };
+  }
 }
 
-describe("buildReviewSectionMenu", () => {
-  it("exposes git scopes and the latest turn at the top level", () => {
-    const turn28 = section("turn:28", "turn");
-    const turn27 = section("turn:27", "turn");
-    const workingTree = section("git:working-tree", "working-tree");
-    const branchChanges = section("git:branch-range", "branch-range");
+describe('buildReviewSectionMenu', () =>
+{
+  it('exposes git scopes and the latest turn at the top level', () =>
+  {
+    const turn28 = section('turn:28', 'turn')
+    const turn27 = section('turn:27', 'turn')
+    const workingTree = section('git:working-tree', 'working-tree')
+    const branchChanges = section('git:branch-range', 'branch-range')
 
     expect(buildReviewSectionMenu([turn28, turn27, workingTree, branchChanges])).toEqual({
       workingTree,
       branchChanges,
       latestTurn: turn28,
       turns: [turn28, turn27],
-    });
-  });
+    })
+  })
 
-  it("keeps unavailable scopes empty while data loads", () => {
+  it('keeps unavailable scopes empty while data loads', () =>
+  {
     expect(buildReviewSectionMenu([])).toEqual({
       workingTree: null,
       branchChanges: null,
       latestTurn: null,
       turns: [],
-    });
-  });
-});
+    })
+  })
+})

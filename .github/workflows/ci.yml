@@ -1,3 +1,6 @@
+# .github/workflows/ci.yml
+# verify pull requests and main-branch changes across supported surfaces
+
 name: CI
 
 on:
@@ -24,6 +27,14 @@ jobs:
 
       - name: Ensure Electron runtime is installed
         run: vp run --filter @t3tools/desktop ensure:electron
+
+      - name: Check Prettier formatting
+        run: node scripts/format-repository.ts --check --prettier-only
+
+      - name: Check directive preservation
+        run: |
+          git fetch --no-tags --depth=1 origin main
+          node scripts/check-directive-preservation.ts FETCH_HEAD
 
       - name: Check
         run: vp check

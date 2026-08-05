@@ -1,123 +1,141 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vite-plus/test";
+// tests/apps/mobile/features/diffs/nativeReviewDiffSurface.test.ts
+// verify resolve native review diff view behavior
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 const expoMocks = vi.hoisted(() => ({
   requireNativeView: vi.fn(),
-}));
-const nativeView = () => null;
-const originalExpo = globalThis.expo;
+}))
+const nativeView = () => null
+const originalExpo = globalThis.expo
 
-function setExpoViewConfigAvailable() {
+function setExpoViewConfigAvailable()
+{
   globalThis.expo = {
     getViewConfig: vi.fn().mockReturnValue({ validAttributes: {}, directEventTypes: {} }),
-  } as unknown as typeof globalThis.expo;
+  } as unknown as typeof globalThis.expo
 }
 
-vi.mock("expo", () => ({
+vi.mock('expo', () => ({
   requireNativeView: expoMocks.requireNativeView,
-}));
+}))
 
-describe("resolveNativeReviewDiffView", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.resetModules();
-    globalThis.expo = undefined as unknown as typeof globalThis.expo;
-  });
+describe('resolveNativeReviewDiffView', () =>
+{
+  beforeEach(() =>
+  {
+    vi.clearAllMocks()
+    vi.resetModules()
+    globalThis.expo = undefined as unknown as typeof globalThis.expo
+  })
 
-  afterEach(() => {
-    globalThis.expo = originalExpo;
-  });
+  afterEach(() =>
+  {
+    globalThis.expo = originalExpo
+  })
 
-  it("returns null when the native review diff view config is unavailable", async () => {
+  it('returns null when the native review diff view config is unavailable', async () =>
+  {
     const { resolveNativeReviewDiffView } =
-      await import("../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface");
-    expect(resolveNativeReviewDiffView()).toBeNull();
-    expect(expoMocks.requireNativeView).not.toHaveBeenCalled();
-  });
+      await import('../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface')
+    expect(resolveNativeReviewDiffView()).toBeNull()
+    expect(expoMocks.requireNativeView).not.toHaveBeenCalled()
+  })
 
-  it("returns the payload bridge when the native review diff view is installed", async () => {
-    setExpoViewConfigAvailable();
-    expoMocks.requireNativeView.mockReturnValue(nativeView);
+  it('returns the payload bridge when the native review diff view is installed', async () =>
+  {
+    setExpoViewConfigAvailable()
+    expoMocks.requireNativeView.mockReturnValue(nativeView)
     const { resolveNativeReviewDiffView } =
-      await import("../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface");
-    const resolvedView = resolveNativeReviewDiffView();
-    expect(resolvedView).not.toBeNull();
-    expect(resolvedView).not.toBe(nativeView);
-    expect(resolveNativeReviewDiffView()).toBe(resolvedView);
-    expect(expoMocks.requireNativeView).toHaveBeenCalledWith("Code456ReviewDiffSurface");
-  });
+      await import('../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface')
+    const resolvedView = resolveNativeReviewDiffView()
+    expect(resolvedView).not.toBeNull()
+    expect(resolvedView).not.toBe(nativeView)
+    expect(resolveNativeReviewDiffView()).toBe(resolvedView)
+    expect(expoMocks.requireNativeView).toHaveBeenCalledWith('Code456ReviewDiffSurface')
+  })
 
-  it("does not fall back to stale legacy native review diff view names", async () => {
+  it('does not fall back to stale legacy native review diff view names', async () =>
+  {
     globalThis.expo = {
-      getViewConfig: vi.fn().mockImplementation((moduleName: string) => {
-        if (moduleName === "Code456ReviewDiffView") {
-          return { validAttributes: {}, directEventTypes: {} };
+      getViewConfig: vi.fn().mockImplementation((moduleName: string) =>
+      {
+        if (moduleName === 'Code456ReviewDiffView')
+        {
+          return { validAttributes: {}, directEventTypes: {} }
         }
-        return null;
+        return null
       }),
-    } as unknown as typeof globalThis.expo;
-    expoMocks.requireNativeView.mockReturnValue(nativeView);
+    } as unknown as typeof globalThis.expo
+    expoMocks.requireNativeView.mockReturnValue(nativeView)
     const { resolveNativeReviewDiffView } =
-      await import("../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface");
-    expect(resolveNativeReviewDiffView()).toBeNull();
-    expect(expoMocks.requireNativeView).not.toHaveBeenCalled();
-  });
+      await import('../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface')
+    expect(resolveNativeReviewDiffView()).toBeNull()
+    expect(expoMocks.requireNativeView).not.toHaveBeenCalled()
+  })
 
-  it("returns null when the view manager cannot be required", async () => {
-    setExpoViewConfigAvailable();
-    const cause = new Error("boom");
-    expoMocks.requireNativeView.mockImplementation(() => {
-      throw cause;
-    });
-    const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
+  it('returns null when the view manager cannot be required', async () =>
+  {
+    setExpoViewConfigAvailable()
+    const cause = new Error('boom')
+    expoMocks.requireNativeView.mockImplementation(() =>
+    {
+      throw cause
+    })
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const { resolveNativeReviewDiffView } =
-      await import("../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface");
+      await import('../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface')
 
-    expect(resolveNativeReviewDiffView()).toBeNull();
-    expect(resolveNativeReviewDiffView()).toBeNull();
-    expect(expoMocks.requireNativeView).toHaveBeenCalledTimes(1);
+    expect(resolveNativeReviewDiffView()).toBeNull()
+    expect(resolveNativeReviewDiffView()).toBeNull()
+    expect(expoMocks.requireNativeView).toHaveBeenCalledTimes(1)
     expect(consoleError).toHaveBeenCalledWith(
       expect.objectContaining({
-        _tag: "NativeViewResolutionError",
-        nativeModuleName: "Code456ReviewDiffSurface",
+        _tag: 'NativeViewResolutionError',
+        nativeModuleName: 'Code456ReviewDiffSurface',
         cause,
       }),
-    );
-    expect(consoleError).toHaveBeenCalledTimes(1);
-  });
-});
+    )
+    expect(consoleError).toHaveBeenCalledTimes(1)
+  })
+})
 
-describe("isPendingNativeViewRegistration", () => {
-  it("recognizes registration races for the installed native view name", async () => {
+describe('isPendingNativeViewRegistration', () =>
+{
+  it('recognizes registration races for the installed native view name', async () =>
+  {
     const { isPendingNativeViewRegistration } =
-      await import("../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface");
+      await import('../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface')
 
     expect(
       isPendingNativeViewRegistration(
         new Error("Unable to find the 'Code456ReviewDiffSurface' view for this native tag"),
       ),
-    ).toBe(true);
+    ).toBe(true)
     expect(
       isPendingNativeViewRegistration(
         new Error("Unable to find the 'Code456ReviewDiffView' view for this native tag"),
       ),
-    ).toBe(false);
+    ).toBe(false)
     expect(
       isPendingNativeViewRegistration(
         new Error(
-          "Unable to find the class expo.modules.code456reviewdiff.Code456ReviewDiffView view with tag 1150",
+          'Unable to find the class expo.modules.code456reviewdiff.Code456ReviewDiffView view with tag 1150',
         ),
       ),
-    ).toBe(true);
-  });
-});
+    ).toBe(true)
+  })
+})
 
-describe("isNativeReviewDiffDrawEvent", () => {
-  it("accepts only native events emitted after diff rows draw", async () => {
+describe('isNativeReviewDiffDrawEvent', () =>
+{
+  it('accepts only native events emitted after diff rows draw', async () =>
+  {
     const { isNativeReviewDiffDrawEvent } =
-      await import("../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface");
+      await import('../../../../../apps/mobile/src/features/diffs/nativeReviewDiffSurface')
 
-    expect(isNativeReviewDiffDrawEvent({ message: "draw-metrics" })).toBe(true);
-    expect(isNativeReviewDiffDrawEvent({ message: "visible-range" })).toBe(true);
-    expect(isNativeReviewDiffDrawEvent({ message: "rows-decoded" })).toBe(false);
-  });
-});
+    expect(isNativeReviewDiffDrawEvent({ message: 'draw-metrics' })).toBe(true)
+    expect(isNativeReviewDiffDrawEvent({ message: 'visible-range' })).toBe(true)
+    expect(isNativeReviewDiffDrawEvent({ message: 'rows-decoded' })).toBe(false)
+  })
+})

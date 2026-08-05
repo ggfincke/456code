@@ -1,15 +1,18 @@
+// apps/web/src/components/chat/ComposerCommandMenu.tsx
+// render composer command menu
+
 import {
   type ProjectEntry,
   type ProviderDriverKind,
   type ServerProviderSkill,
   type ServerProviderSlashCommand,
-} from "@t3tools/contracts";
-import { BotIcon } from "lucide-react";
-import { memo, useLayoutEffect, useMemo, useRef } from "react";
+} from '@t3tools/contracts'
+import { BotIcon } from 'lucide-react'
+import { memo, useLayoutEffect, useMemo, useRef } from 'react'
 
-import { type ComposerSlashCommand, type ComposerTriggerKind } from "../../composer-logic";
-import { formatProviderSkillInstallSource } from "~/providerSkillPresentation";
-import { cn } from "~/lib/utils";
+import { type ComposerSlashCommand, type ComposerTriggerKind } from '../../composer-logic'
+import { formatProviderSkillInstallSource } from '~/providerSkillPresentation'
+import { cn } from '~/lib/utils'
 import {
   Command,
   CommandGroup,
@@ -17,49 +20,50 @@ import {
   CommandItem,
   CommandList,
   CommandSeparator,
-} from "../ui/command";
-import { PierreEntryIcon } from "./PierreEntryIcon";
+} from '../ui/command'
+import { PierreEntryIcon } from './PierreEntryIcon'
 
 export type ComposerCommandItem =
   | {
-      id: string;
-      type: "path";
-      path: string;
-      pathKind: ProjectEntry["kind"];
-      label: string;
-      description: string;
+      id: string
+      type: 'path'
+      path: string
+      pathKind: ProjectEntry['kind']
+      label: string
+      description: string
     }
   | {
-      id: string;
-      type: "slash-command";
-      command: ComposerSlashCommand;
-      label: string;
-      description: string;
+      id: string
+      type: 'slash-command'
+      command: ComposerSlashCommand
+      label: string
+      description: string
     }
   | {
-      id: string;
-      type: "provider-slash-command";
-      provider: ProviderDriverKind;
-      command: ServerProviderSlashCommand;
-      label: string;
-      description: string;
+      id: string
+      type: 'provider-slash-command'
+      provider: ProviderDriverKind
+      command: ServerProviderSlashCommand
+      label: string
+      description: string
     }
   | {
-      id: string;
-      type: "skill";
-      provider: ProviderDriverKind;
-      skill: ServerProviderSkill;
-      label: string;
-      description: string;
-    };
+      id: string
+      type: 'skill'
+      provider: ProviderDriverKind
+      skill: ServerProviderSkill
+      label: string
+      description: string
+    }
 
 type ComposerCommandGroup = {
-  id: string;
-  label: string | null;
-  items: ComposerCommandItem[];
-};
+  id: string
+  label: string | null
+  items: ComposerCommandItem[]
+}
 
-function SkillGlyph(props: { className?: string }) {
+function SkillGlyph(props: { className?: string })
+{
   return (
     <svg
       viewBox="0 0 24 24"
@@ -75,72 +79,81 @@ function SkillGlyph(props: { className?: string }) {
       <path d="m3.3 7 8.7 5 8.7-5" />
       <path d="M12 22V12" />
     </svg>
-  );
+  )
 }
 
 function groupCommandItems(
   items: ComposerCommandItem[],
   triggerKind: ComposerTriggerKind | null,
   groupSlashCommandSections: boolean,
-): ComposerCommandGroup[] {
-  if (triggerKind === "skill") {
-    return items.length > 0 ? [{ id: "skills", label: "Skills", items }] : [];
+): ComposerCommandGroup[]
+{
+  if (triggerKind === 'skill')
+  {
+    return items.length > 0 ? [{ id: 'skills', label: 'Skills', items }] : []
   }
-  if (triggerKind !== "slash-command" || !groupSlashCommandSections) {
-    return [{ id: "default", label: null, items }];
+  if (triggerKind !== 'slash-command' || !groupSlashCommandSections)
+  {
+    return [{ id: 'default', label: null, items }]
   }
 
-  const builtInItems = items.filter((item) => item.type === "slash-command");
-  const providerItems = items.filter((item) => item.type === "provider-slash-command");
-  const skillItems = items.filter((item) => item.type === "skill");
+  const builtInItems = items.filter((item) => item.type === 'slash-command')
+  const providerItems = items.filter((item) => item.type === 'provider-slash-command')
+  const skillItems = items.filter((item) => item.type === 'skill')
 
-  const groups: ComposerCommandGroup[] = [];
-  if (builtInItems.length > 0) {
-    groups.push({ id: "built-in", label: "Built-in", items: builtInItems });
+  const groups: ComposerCommandGroup[] = []
+  if (builtInItems.length > 0)
+  {
+    groups.push({ id: 'built-in', label: 'Built-in', items: builtInItems })
   }
-  if (providerItems.length > 0) {
-    groups.push({ id: "provider", label: "Provider", items: providerItems });
+  if (providerItems.length > 0)
+  {
+    groups.push({ id: 'provider', label: 'Provider', items: providerItems })
   }
-  if (skillItems.length > 0) {
-    groups.push({ id: "skills", label: "Skills", items: skillItems });
+  if (skillItems.length > 0)
+  {
+    groups.push({ id: 'skills', label: 'Skills', items: skillItems })
   }
-  return groups;
+  return groups
 }
 
 export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
-  items: ComposerCommandItem[];
-  resolvedTheme: "light" | "dark";
-  isLoading: boolean;
-  triggerKind: ComposerTriggerKind | null;
-  groupSlashCommandSections?: boolean;
-  emptyStateText?: string;
-  activeItemId: string | null;
-  onHighlightedItemChange: (itemId: string | null) => void;
-  onSelect: (item: ComposerCommandItem) => void;
-}) {
-  const listRef = useRef<HTMLDivElement>(null);
+  items: ComposerCommandItem[]
+  resolvedTheme: 'light' | 'dark'
+  isLoading: boolean
+  triggerKind: ComposerTriggerKind | null
+  groupSlashCommandSections?: boolean
+  emptyStateText?: string
+  activeItemId: string | null
+  onHighlightedItemChange: (itemId: string | null) => void
+  onSelect: (item: ComposerCommandItem) => void
+})
+{
+  const listRef = useRef<HTMLDivElement>(null)
   const groups = useMemo(
     () =>
       groupCommandItems(props.items, props.triggerKind, props.groupSlashCommandSections ?? true),
     [props.groupSlashCommandSections, props.items, props.triggerKind],
-  );
+  )
 
-  useLayoutEffect(() => {
-    if (!props.activeItemId || !listRef.current) return;
+  useLayoutEffect(() =>
+  {
+    if (!props.activeItemId || !listRef.current) return
     const el = listRef.current.querySelector<HTMLElement>(
       `[data-composer-item-id="${CSS.escape(props.activeItemId)}"]`,
-    );
-    el?.scrollIntoView({ block: "nearest" });
-  }, [props.activeItemId]);
+    )
+    el?.scrollIntoView({ block: 'nearest' })
+  }, [props.activeItemId])
 
   return (
     <Command
       autoHighlight={false}
       mode="none"
-      onItemHighlighted={(highlightedValue) => {
+      onItemHighlighted={(highlightedValue) =>
+      {
         props.onHighlightedItemChange(
-          typeof highlightedValue === "string" ? highlightedValue : null,
-        );
+          typeof highlightedValue === 'string' ? highlightedValue : null,
+        )
       }}
     >
       <div ref={listRef} className="dropdown-glass relative w-full overflow-hidden rounded-[20px]">
@@ -171,79 +184,83 @@ export const ComposerCommandMenu = memo(function ComposerCommandMenu(props: {
           </CommandList>
         ) : (
           <div className="px-5 py-3.5">
-            {props.triggerKind === "skill" ? (
+            {props.triggerKind === 'skill' ? (
               <CommandGroup>
                 <CommandGroupLabel className="px-0 pt-0 pb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground/55">
                   Skills
                 </CommandGroupLabel>
                 <p className="text-muted-foreground/70 text-xs">
                   {props.isLoading
-                    ? "Searching workspace skills..."
+                    ? 'Searching workspace skills...'
                     : (props.emptyStateText ??
-                      "No skills found. Try / to browse provider commands.")}
+                      'No skills found. Try / to browse provider commands.')}
                 </p>
               </CommandGroup>
             ) : (
               <p className="text-muted-foreground/70 text-xs">
                 {props.isLoading
-                  ? "Searching workspace files..."
+                  ? 'Searching workspace files...'
                   : (props.emptyStateText ??
-                    (props.triggerKind === "path"
-                      ? "No matching files or folders."
-                      : "No matching command."))}
+                    (props.triggerKind === 'path'
+                      ? 'No matching files or folders.'
+                      : 'No matching command.'))}
               </p>
             )}
           </div>
         )}
       </div>
     </Command>
-  );
-});
+  )
+})
 
 const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
-  item: ComposerCommandItem;
-  resolvedTheme: "light" | "dark";
-  isActive: boolean;
-  onHighlight: (itemId: string | null) => void;
-  onSelect: (item: ComposerCommandItem) => void;
-}) {
+  item: ComposerCommandItem
+  resolvedTheme: 'light' | 'dark'
+  isActive: boolean
+  onHighlight: (itemId: string | null) => void
+  onSelect: (item: ComposerCommandItem) => void
+})
+{
   const skillSourceLabel =
-    props.item.type === "skill" ? formatProviderSkillInstallSource(props.item.skill) : null;
+    props.item.type === 'skill' ? formatProviderSkillInstallSource(props.item.skill) : null
 
   return (
     <CommandItem
       value={props.item.id}
       data-composer-item-id={props.item.id}
       className={cn(
-        "cursor-pointer select-none gap-2 hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit",
-        props.isActive && "bg-accent! text-accent-foreground!",
+        'cursor-pointer select-none gap-2 hover:bg-transparent hover:text-inherit data-highlighted:bg-transparent data-highlighted:text-inherit',
+        props.isActive && 'bg-accent! text-accent-foreground!',
       )}
-      onMouseMove={() => {
-        if (!props.isActive) props.onHighlight(props.item.id);
+      onMouseMove={() =>
+      {
+        if (!props.isActive) props.onHighlight(props.item.id)
       }}
-      onMouseDown={(event) => {
-        event.preventDefault();
+      onMouseDown={(event) =>
+      {
+        event.preventDefault()
       }}
-      onClick={() => {
-        props.onSelect(props.item);
+      onClick={() =>
+      {
+        props.onSelect(props.item)
       }}
     >
-      {props.item.type === "path" ? (
+      {props.item.type === 'path' ? (
         <PierreEntryIcon
           pathValue={props.item.path}
           kind={props.item.pathKind}
           theme={props.resolvedTheme}
         />
       ) : null}
-      {props.item.type === "slash-command" ? (
+      {props.item.type === 'slash-command' ? (
         <BotIcon className="size-4 shrink-0 text-muted-foreground/80" />
       ) : null}
-      {props.item.type === "provider-slash-command" ? (
+      {props.item.type === 'provider-slash-command' ? (
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/80">
           <SkillGlyph className="size-3.5" />
         </span>
       ) : null}
-      {props.item.type === "skill" ? (
+      {props.item.type === 'skill' ? (
         <span className="inline-flex size-4 shrink-0 items-center justify-center text-muted-foreground/80">
           <SkillGlyph className="size-3.5" />
         </span>
@@ -258,5 +275,5 @@ const ComposerCommandMenuItem = memo(function ComposerCommandMenuItem(props: {
         <span className="shrink-0 pl-2 text-muted-foreground/70 text-xs">{skillSourceLabel}</span>
       ) : null}
     </CommandItem>
-  );
-});
+  )
+})

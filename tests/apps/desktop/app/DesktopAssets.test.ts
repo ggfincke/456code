@@ -1,57 +1,62 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as PlatformError from "effect/PlatformError";
+// tests/apps/desktop/app/DesktopAssets.test.ts
+// verify desktop assets behavior
 
-import * as DesktopAssets from "../../../../apps/desktop/src/app/DesktopAssets.ts";
-import * as DesktopConfig from "../../../../apps/desktop/src/app/DesktopConfig.ts";
-import * as DesktopEnvironment from "../../../../apps/desktop/src/app/DesktopEnvironment.ts";
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import { assert, describe, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as PlatformError from 'effect/PlatformError'
+
+import * as DesktopAssets from '../../../../apps/desktop/src/app/DesktopAssets.ts'
+import * as DesktopConfig from '../../../../apps/desktop/src/app/DesktopConfig.ts'
+import * as DesktopEnvironment from '../../../../apps/desktop/src/app/DesktopEnvironment.ts'
 
 const environmentLayer = DesktopEnvironment.layer({
-  dirname: "/repo/apps/desktop/dist-electron",
-  homeDirectory: "/Users/alice",
-  platform: "darwin",
-  processArch: "arm64",
-  appVersion: "1.2.3",
-  appPath: "/Applications/456code.app/Contents/Resources/app.asar",
+  dirname: '/repo/apps/desktop/dist-electron',
+  homeDirectory: '/Users/alice',
+  platform: 'darwin',
+  processArch: 'arm64',
+  appVersion: '1.2.3',
+  appPath: '/Applications/456code.app/Contents/Resources/app.asar',
   isPackaged: true,
-  resourcesPath: "/Applications/456code.app/Contents/Resources",
+  resourcesPath: '/Applications/456code.app/Contents/Resources',
   runningUnderArm64Translation: false,
-}).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))));
+}).pipe(Layer.provide(Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({}))))
 
-describe("DesktopAssets", () => {
-  it.effect("preserves the failed asset candidate and filesystem cause", () =>
-    Effect.gen(function* () {
-      const fileName = "custom.bin";
-      const candidatePath = "/repo/apps/desktop/resources/custom.bin";
+describe('DesktopAssets', () =>
+{
+  it.effect('preserves the failed asset candidate and filesystem cause', () =>
+    Effect.gen(function* ()
+    {
+      const fileName = 'custom.bin'
+      const candidatePath = '/repo/apps/desktop/resources/custom.bin'
       const cause = PlatformError.systemError({
-        _tag: "PermissionDenied",
-        module: "FileSystem",
-        method: "exists",
+        _tag: 'PermissionDenied',
+        module: 'FileSystem',
+        method: 'exists',
         pathOrDescriptor: candidatePath,
-        description: "private filesystem diagnostic",
-      });
+        description: 'private filesystem diagnostic',
+      })
       const fileSystemLayer = FileSystem.layerNoop({
         exists: (path) => (path === candidatePath ? Effect.fail(cause) : Effect.succeed(false)),
-      });
+      })
       const assetsLayer = DesktopAssets.layer.pipe(
         Layer.provide(Layer.merge(fileSystemLayer, environmentLayer)),
-      );
-      const assets = yield* DesktopAssets.DesktopAssets.pipe(Effect.provide(assetsLayer));
+      )
+      const assets = yield* DesktopAssets.DesktopAssets.pipe(Effect.provide(assetsLayer))
 
-      const error = yield* assets.resolveResourcePath(fileName).pipe(Effect.flip);
+      const error = yield* assets.resolveResourcePath(fileName).pipe(Effect.flip)
 
-      assert.instanceOf(error, DesktopAssets.DesktopAssetProbeError);
-      assert.equal(error.fileName, fileName);
-      assert.equal(error.candidatePath, candidatePath);
-      assert.strictEqual(error.cause, cause);
+      assert.instanceOf(error, DesktopAssets.DesktopAssetProbeError)
+      assert.equal(error.fileName, fileName)
+      assert.equal(error.candidatePath, candidatePath)
+      assert.strictEqual(error.cause, cause)
       assert.equal(
         error.message,
         `Failed to probe desktop asset "${fileName}" at ${candidatePath}.`,
-      );
-      assert.notInclude(error.message, "private filesystem diagnostic");
+      )
+      assert.notInclude(error.message, 'private filesystem diagnostic')
     }),
-  );
-});
+  )
+})

@@ -1,16 +1,16 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
-import { ClientSettingsSchema, type ClientSettings } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as PlatformError from "effect/PlatformError";
-import * as Schema from "effect/Schema";
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import { assert, describe, it } from '@effect/vitest'
+import { ClientSettingsSchema, type ClientSettings } from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as PlatformError from 'effect/PlatformError'
+import * as Schema from 'effect/Schema'
 
-import * as DesktopConfig from "../../../../apps/desktop/src/app/DesktopConfig.ts";
-import * as DesktopEnvironment from "../../../../apps/desktop/src/app/DesktopEnvironment.ts";
-import * as DesktopClientSettings from "../../../../apps/desktop/src/settings/DesktopClientSettings.ts";
+import * as DesktopConfig from '../../../../apps/desktop/src/app/DesktopConfig.ts'
+import * as DesktopEnvironment from '../../../../apps/desktop/src/app/DesktopEnvironment.ts'
+import * as DesktopClientSettings from '../../../../apps/desktop/src/settings/DesktopClientSettings.ts'
 
 const clientSettings: ClientSettings = {
   autoOpenPlanSidebar: false,
@@ -21,149 +21,158 @@ const clientSettings: ClientSettings = {
   favorites: [],
   glassOpacity: 80,
   providerModelPreferences: {},
-  providerUsageDisplayMode: "percent-left",
+  providerUsageDisplayMode: 'percent-left',
   sidebarAutoSettleAfterDays: 3,
-  sidebarProjectGroupingMode: "repository_path",
+  sidebarProjectGroupingMode: 'repository_path',
   sidebarProjectGroupingOverrides: {
-    "environment-1:/tmp/project-a": "separate",
+    'environment-1:/tmp/project-a': 'separate',
   },
-  sidebarProjectSortOrder: "manual",
-  sidebarThreadSortOrder: "created_at",
+  sidebarProjectSortOrder: 'manual',
+  sidebarThreadSortOrder: 'created_at',
   sidebarThreadPreviewCount: 6,
   sidebarV2Enabled: false,
-  timestampFormat: "24-hour",
+  timestampFormat: '24-hour',
   wordWrap: true,
-};
+}
 
-const decodeClientSettingsJson = Schema.decodeEffect(Schema.fromJsonString(ClientSettingsSchema));
+const decodeClientSettingsJson = Schema.decodeEffect(Schema.fromJsonString(ClientSettingsSchema))
 const decodeRecordJson = Schema.decodeEffect(
   Schema.fromJsonString(Schema.Record(Schema.String, Schema.Unknown)),
-);
-function makeLayer(baseDir: string) {
+)
+function makeLayer(baseDir: string)
+{
   const environmentLayer = DesktopEnvironment.layer({
-    dirname: "/repo/apps/desktop/src",
+    dirname: '/repo/apps/desktop/src',
     homeDirectory: baseDir,
-    platform: "darwin",
-    processArch: "x64",
-    appVersion: "1.2.3",
-    appPath: "/repo",
+    platform: 'darwin',
+    processArch: 'x64',
+    appVersion: '1.2.3',
+    appPath: '/repo',
     isPackaged: true,
-    resourcesPath: "/missing/resources",
+    resourcesPath: '/missing/resources',
     runningUnderArm64Translation: false,
   }).pipe(
     Layer.provide(
       Layer.mergeAll(NodeServices.layer, DesktopConfig.layerTest({ T3CODE_HOME: baseDir })),
     ),
-  );
+  )
 
   return DesktopClientSettings.layer.pipe(
     Layer.provideMerge(environmentLayer),
     Layer.provideMerge(NodeServices.layer),
-  );
+  )
 }
 
 const withClientSettings = <A, E, R>(
   effect: Effect.Effect<A, E, R | DesktopClientSettings.DesktopClientSettings>,
 ) =>
-  Effect.gen(function* () {
-    const fileSystem = yield* FileSystem.FileSystem;
+  Effect.gen(function* ()
+  {
+    const fileSystem = yield* FileSystem.FileSystem
     const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-      prefix: "t3-desktop-client-settings-test-",
-    });
-    return yield* effect.pipe(Effect.provide(makeLayer(baseDir)));
-  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped);
+      prefix: 't3-desktop-client-settings-test-',
+    })
+    return yield* effect.pipe(Effect.provide(makeLayer(baseDir)))
+  }).pipe(Effect.provide(NodeServices.layer), Effect.scoped)
 
-describe("DesktopClientSettings", () => {
-  it.effect("returns none when no client settings file exists", () =>
+describe('DesktopClientSettings', () =>
+{
+  it.effect('returns none when no client settings file exists', () =>
     withClientSettings(
-      Effect.gen(function* () {
-        const settings = yield* DesktopClientSettings.DesktopClientSettings;
-        assert.isTrue(Option.isNone(yield* settings.get));
+      Effect.gen(function* ()
+      {
+        const settings = yield* DesktopClientSettings.DesktopClientSettings
+        assert.isTrue(Option.isNone(yield* settings.get))
       }),
     ),
-  );
+  )
 
-  it.effect("persists and reloads client settings", () =>
+  it.effect('persists and reloads client settings', () =>
     withClientSettings(
-      Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment.DesktopEnvironment;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const settings = yield* DesktopClientSettings.DesktopClientSettings;
-        yield* settings.set(clientSettings);
+      Effect.gen(function* ()
+      {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment
+        const fileSystem = yield* FileSystem.FileSystem
+        const settings = yield* DesktopClientSettings.DesktopClientSettings
+        yield* settings.set(clientSettings)
 
-        assert.deepEqual(yield* settings.get, Option.some(clientSettings));
+        assert.deepEqual(yield* settings.get, Option.some(clientSettings))
         assert.deepEqual(
           yield* decodeClientSettingsJson(
             yield* fileSystem.readFileString(environment.clientSettingsPath),
           ),
           clientSettings,
-        );
+        )
         assert.isFalse(
           Object.hasOwn(
             yield* decodeRecordJson(
               yield* fileSystem.readFileString(environment.clientSettingsPath),
             ),
-            "settings",
+            'settings',
           ),
-        );
+        )
       }),
     ),
-  );
+  )
 
-  it.effect("reports the failed client settings write operation and path", () =>
+  it.effect('reports the failed client settings write operation and path', () =>
     withClientSettings(
-      Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment.DesktopEnvironment;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const settings = yield* DesktopClientSettings.DesktopClientSettings;
-        yield* fileSystem.makeDirectory(environment.clientSettingsPath, { recursive: true });
+      Effect.gen(function* ()
+      {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment
+        const fileSystem = yield* FileSystem.FileSystem
+        const settings = yield* DesktopClientSettings.DesktopClientSettings
+        yield* fileSystem.makeDirectory(environment.clientSettingsPath, { recursive: true })
 
-        const error = yield* settings.set(clientSettings).pipe(Effect.flip);
-        assert.instanceOf(error, DesktopClientSettings.DesktopClientSettingsWriteError);
-        assert.equal(error.operation, "replace-settings-file");
-        assert.equal(error.path, environment.clientSettingsPath);
-        assert.instanceOf(error.cause, PlatformError.PlatformError);
-        assert.isString(error.cause.stack);
+        const error = yield* settings.set(clientSettings).pipe(Effect.flip)
+        assert.instanceOf(error, DesktopClientSettings.DesktopClientSettingsWriteError)
+        assert.equal(error.operation, 'replace-settings-file')
+        assert.equal(error.path, environment.clientSettingsPath)
+        assert.instanceOf(error.cause, PlatformError.PlatformError)
+        assert.isString(error.cause.stack)
         assert.equal(
           error.message,
           `Desktop client settings write failed during replace-settings-file at ${environment.clientSettingsPath}.`,
-        );
-        assert.notInclude(error.message, error.cause.message);
+        )
+        assert.notInclude(error.message, error.cause.message)
       }),
     ),
-  );
+  )
 
-  it.effect("loads lenient direct client settings documents", () =>
+  it.effect('loads lenient direct client settings documents', () =>
     withClientSettings(
-      Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment.DesktopEnvironment;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const settings = yield* DesktopClientSettings.DesktopClientSettings;
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+      Effect.gen(function* ()
+      {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment
+        const fileSystem = yield* FileSystem.FileSystem
+        const settings = yield* DesktopClientSettings.DesktopClientSettings
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true })
         yield* fileSystem.writeFileString(
           environment.clientSettingsPath,
           `{
             // Matches server settings parsing.
             "timestampFormat": "24-hour",
           }\n`,
-        );
+        )
 
-        const persisted = yield* settings.get;
-        assert.isTrue(Option.isSome(persisted));
-        if (Option.isSome(persisted)) {
-          assert.equal(persisted.value.timestampFormat, "24-hour");
+        const persisted = yield* settings.get
+        assert.isTrue(Option.isSome(persisted))
+        if (Option.isSome(persisted))
+        {
+          assert.equal(persisted.value.timestampFormat, '24-hour')
         }
       }),
     ),
-  );
+  )
 
-  it.effect("loads legacy wrapped client settings documents", () =>
+  it.effect('loads legacy wrapped client settings documents', () =>
     withClientSettings(
-      Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment.DesktopEnvironment;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const settings = yield* DesktopClientSettings.DesktopClientSettings;
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
+      Effect.gen(function* ()
+      {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment
+        const fileSystem = yield* FileSystem.FileSystem
+        const settings = yield* DesktopClientSettings.DesktopClientSettings
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true })
         yield* fileSystem.writeFileString(
           environment.clientSettingsPath,
           `{
@@ -171,42 +180,45 @@ describe("DesktopClientSettings", () => {
               "timestampFormat": "12-hour"
             }
           }\n`,
-        );
+        )
 
-        const persisted = yield* settings.get;
-        assert.isTrue(Option.isSome(persisted));
-        if (Option.isSome(persisted)) {
-          assert.equal(persisted.value.timestampFormat, "12-hour");
+        const persisted = yield* settings.get
+        assert.isTrue(Option.isSome(persisted))
+        if (Option.isSome(persisted))
+        {
+          assert.equal(persisted.value.timestampFormat, '12-hour')
         }
       }),
     ),
-  );
+  )
 
-  it.effect("loads defaults from empty client settings documents", () =>
+  it.effect('loads defaults from empty client settings documents', () =>
     withClientSettings(
-      Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment.DesktopEnvironment;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const settings = yield* DesktopClientSettings.DesktopClientSettings;
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
-        yield* fileSystem.writeFileString(environment.clientSettingsPath, "{}\n");
+      Effect.gen(function* ()
+      {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment
+        const fileSystem = yield* FileSystem.FileSystem
+        const settings = yield* DesktopClientSettings.DesktopClientSettings
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true })
+        yield* fileSystem.writeFileString(environment.clientSettingsPath, '{}\n')
 
-        assert.deepEqual(yield* settings.get, Option.some(yield* decodeClientSettingsJson("{}")));
+        assert.deepEqual(yield* settings.get, Option.some(yield* decodeClientSettingsJson('{}')))
       }),
     ),
-  );
+  )
 
-  it.effect("treats malformed client settings documents as absent", () =>
+  it.effect('treats malformed client settings documents as absent', () =>
     withClientSettings(
-      Effect.gen(function* () {
-        const environment = yield* DesktopEnvironment.DesktopEnvironment;
-        const fileSystem = yield* FileSystem.FileSystem;
-        const settings = yield* DesktopClientSettings.DesktopClientSettings;
-        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true });
-        yield* fileSystem.writeFileString(environment.clientSettingsPath, "{not-json");
+      Effect.gen(function* ()
+      {
+        const environment = yield* DesktopEnvironment.DesktopEnvironment
+        const fileSystem = yield* FileSystem.FileSystem
+        const settings = yield* DesktopClientSettings.DesktopClientSettings
+        yield* fileSystem.makeDirectory(environment.stateDir, { recursive: true })
+        yield* fileSystem.writeFileString(environment.clientSettingsPath, '{not-json')
 
-        assert.isTrue(Option.isNone(yield* settings.get));
+        assert.isTrue(Option.isNone(yield* settings.get))
       }),
     ),
-  );
-});
+  )
+})

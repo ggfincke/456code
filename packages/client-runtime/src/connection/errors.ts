@@ -1,167 +1,180 @@
-import type { EnvironmentId } from "@t3tools/contracts";
-import type { RelayProtectedError } from "@t3tools/contracts/relay";
-import type { ManagedRelayClientError } from "../relay/managedRelay.ts";
-import type { RemoteEnvironmentAuthError } from "../authorization/remote.ts";
+// packages/client-runtime/src/connection/errors.ts
+// define connection errors
+
+import type { EnvironmentId } from '@t3tools/contracts'
+import type { RelayProtectedError } from '@t3tools/contracts/relay'
+import type { ManagedRelayClientError } from '../relay/managedRelay.ts'
+import type { RemoteEnvironmentAuthError } from '../authorization/remote.ts'
 import {
   ConnectionBlockedError,
   type ConnectionAttemptError,
   ConnectionTransientError,
-} from "./model.ts";
+} from './model.ts'
 
-export function profileMissingError(connectionId: string): ConnectionBlockedError {
+export function profileMissingError(connectionId: string): ConnectionBlockedError
+{
   return new ConnectionBlockedError({
-    reason: "configuration",
+    reason: 'configuration',
     detail: `Connection profile ${connectionId} is unavailable.`,
-  });
+  })
 }
 
-export function credentialMissingError(connectionId: string): ConnectionBlockedError {
+export function credentialMissingError(connectionId: string): ConnectionBlockedError
+{
   return new ConnectionBlockedError({
-    reason: "authentication",
+    reason: 'authentication',
     detail: `Connection credential ${connectionId} is unavailable.`,
-  });
+  })
 }
 
 export function environmentMismatchError(input: {
-  readonly expected: EnvironmentId;
-  readonly actual: EnvironmentId;
-}): ConnectionBlockedError {
+  readonly expected: EnvironmentId
+  readonly actual: EnvironmentId
+}): ConnectionBlockedError
+{
   return new ConnectionBlockedError({
-    reason: "configuration",
+    reason: 'configuration',
     detail: `Connected environment ${input.actual} does not match ${input.expected}.`,
-  });
+  })
 }
 
-function relayProtectedError(error: RelayProtectedError): ConnectionAttemptError {
-  switch (error._tag) {
-    case "RelayAuthInvalidError":
-    case "RelayEnvironmentLinkProofExpiredError":
-    case "RelayAgentActivityPublishProofExpiredError":
-    case "RelayAgentActivityPublishProofInvalidError":
+function relayProtectedError(error: RelayProtectedError): ConnectionAttemptError
+{
+  switch (error._tag)
+  {
+    case 'RelayAuthInvalidError':
+    case 'RelayEnvironmentLinkProofExpiredError':
+    case 'RelayAgentActivityPublishProofExpiredError':
+    case 'RelayAgentActivityPublishProofInvalidError':
       return new ConnectionBlockedError({
-        reason: "authentication",
+        reason: 'authentication',
         detail: error.message,
         traceId: error.traceId,
-      });
-    case "RelayEnvironmentConnectNotAuthorizedError":
-    case "RelayEnvironmentLinkProofInvalidError":
+      })
+    case 'RelayEnvironmentConnectNotAuthorizedError':
+    case 'RelayEnvironmentLinkProofInvalidError':
       return new ConnectionBlockedError({
-        reason: "permission",
+        reason: 'permission',
         detail: error.message,
         traceId: error.traceId,
-      });
-    case "RelayEnvironmentEndpointTimedOutError":
+      })
+    case 'RelayEnvironmentEndpointTimedOutError':
       return new ConnectionTransientError({
-        reason: "timeout",
+        reason: 'timeout',
         detail: error.message,
         traceId: error.traceId,
-      });
-    case "RelayEnvironmentEndpointUnavailableError":
-    case "RelayEnvironmentLinkUnavailableError":
+      })
+    case 'RelayEnvironmentEndpointUnavailableError':
+    case 'RelayEnvironmentLinkUnavailableError':
       return new ConnectionTransientError({
-        reason: "endpoint-unavailable",
+        reason: 'endpoint-unavailable',
         detail: error.message,
         traceId: error.traceId,
-      });
-    case "RelayEnvironmentLinkFailedError":
-    case "RelayInternalError":
+      })
+    case 'RelayEnvironmentLinkFailedError':
+    case 'RelayInternalError':
       return new ConnectionTransientError({
-        reason: "relay-unavailable",
+        reason: 'relay-unavailable',
         detail: error.message,
         traceId: error.traceId,
-      });
+      })
   }
 }
 
-export function mapManagedRelayError(error: ManagedRelayClientError): ConnectionAttemptError {
-  switch (error._tag) {
-    case "ManagedRelayRequestFailedError":
-      if (error.relayError) {
-        return relayProtectedError(error.relayError);
+export function mapManagedRelayError(error: ManagedRelayClientError): ConnectionAttemptError
+{
+  switch (error._tag)
+  {
+    case 'ManagedRelayRequestFailedError':
+      if (error.relayError)
+      {
+        return relayProtectedError(error.relayError)
       }
       return new ConnectionTransientError({
-        reason: "relay-unavailable",
+        reason: 'relay-unavailable',
         detail: error.message,
         ...(error.traceId ? { traceId: error.traceId } : {}),
-      });
-    case "ManagedRelayRequestTimeoutError":
+      })
+    case 'ManagedRelayRequestTimeoutError':
       return new ConnectionTransientError({
-        reason: "timeout",
+        reason: 'timeout',
         detail: error.message,
-      });
-    case "ManagedRelayUrlInvalidError":
+      })
+    case 'ManagedRelayUrlInvalidError':
       return new ConnectionBlockedError({
-        reason: "configuration",
+        reason: 'configuration',
         detail: error.message,
-      });
-    case "ManagedRelayAccessTokenScopesUnexpectedError":
+      })
+    case 'ManagedRelayAccessTokenScopesUnexpectedError':
       return new ConnectionBlockedError({
-        reason: "permission",
+        reason: 'permission',
         detail: error.message,
-      });
-    case "ManagedRelayDpopKeyLoadError":
-    case "ManagedRelayTokenProofCreationError":
-    case "ManagedRelayRequestProofCreationError":
+      })
+    case 'ManagedRelayDpopKeyLoadError':
+    case 'ManagedRelayTokenProofCreationError':
+    case 'ManagedRelayRequestProofCreationError':
       return new ConnectionBlockedError({
-        reason: "authentication",
+        reason: 'authentication',
         detail: error.message,
-      });
+      })
   }
 }
 
 export function mapRemoteEnvironmentError(
   error: RemoteEnvironmentAuthError,
-): ConnectionAttemptError {
-  switch (error._tag) {
-    case "EnvironmentAuthInvalidError":
+): ConnectionAttemptError
+{
+  switch (error._tag)
+  {
+    case 'EnvironmentAuthInvalidError':
       return new ConnectionBlockedError({
-        reason: "authentication",
-        detail: "The environment credential is invalid.",
+        reason: 'authentication',
+        detail: 'The environment credential is invalid.',
         traceId: error.traceId,
-      });
-    case "EnvironmentScopeRequiredError":
-    case "EnvironmentOperationForbiddenError":
+      })
+    case 'EnvironmentScopeRequiredError':
+    case 'EnvironmentOperationForbiddenError':
       return new ConnectionBlockedError({
-        reason: "permission",
-        detail: "The environment credential does not grant the required access.",
+        reason: 'permission',
+        detail: 'The environment credential does not grant the required access.',
         traceId: error.traceId,
-      });
-    case "EnvironmentRequestInvalidError":
+      })
+    case 'EnvironmentRequestInvalidError':
       return new ConnectionBlockedError({
-        reason: "configuration",
-        detail: "The environment rejected the authentication request.",
+        reason: 'configuration',
+        detail: 'The environment rejected the authentication request.',
         traceId: error.traceId,
-      });
-    case "EnvironmentResourceNotFoundError":
-      // Not expected during connection authorization, but the shared request
+      })
+    case 'EnvironmentResourceNotFoundError':
+      // not expected during connection authorization, but the shared request
       // error type now includes it (used by resource fetches like the thread
       // snapshot). Treat it as a configuration issue with the endpoint.
       return new ConnectionBlockedError({
-        reason: "configuration",
-        detail: "The environment endpoint could not be found.",
+        reason: 'configuration',
+        detail: 'The environment endpoint could not be found.',
         traceId: error.traceId,
-      });
-    case "RemoteEnvironmentAuthTimeoutError":
+      })
+    case 'RemoteEnvironmentAuthTimeoutError':
       return new ConnectionTransientError({
-        reason: "timeout",
+        reason: 'timeout',
         detail: error.message,
-      });
-    case "RemoteEnvironmentAuthFetchError":
+      })
+    case 'RemoteEnvironmentAuthFetchError':
       return new ConnectionTransientError({
-        reason: "network",
+        reason: 'network',
         detail: error.message,
-      });
-    case "EnvironmentInternalError":
+      })
+    case 'EnvironmentInternalError':
       return new ConnectionTransientError({
-        reason: "remote-unavailable",
-        detail: "The environment could not authorize the connection.",
+        reason: 'remote-unavailable',
+        detail: 'The environment could not authorize the connection.',
         traceId: error.traceId,
-      });
-    case "RemoteEnvironmentAuthInvalidJsonError":
-    case "RemoteEnvironmentAuthUndeclaredStatusError":
+      })
+    case 'RemoteEnvironmentAuthInvalidJsonError':
+    case 'RemoteEnvironmentAuthUndeclaredStatusError':
       return new ConnectionTransientError({
-        reason: "remote-unavailable",
+        reason: 'remote-unavailable',
         detail: error.message,
-      });
+      })
   }
 }

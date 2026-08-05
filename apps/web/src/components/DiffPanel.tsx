@@ -1,34 +1,34 @@
 // apps/web/src/components/DiffPanel.tsx
 // renders thread and checkpoint diffs with review controls
-import { useAtomValue } from "@effect/atom-react";
-import { useParams } from "@tanstack/react-router";
+import { useAtomValue } from '@effect/atom-react'
+import { useParams } from '@tanstack/react-router'
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
-import type { ScopedThreadRef, TurnId } from "@t3tools/contracts";
-import { ArrowRightIcon, CheckIcon, ChevronDownIcon, SearchIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { useOpenInPreferredEditor } from "../editorPreferences";
-import { type DraftId } from "../composerDraftStore";
-import { openDiffFilePrimaryAction } from "../diffFileActions";
-import { useCheckpointDiff } from "~/lib/checkpointDiffState";
-import { selectThreadDiffPanelSelection, useDiffPanelStore } from "../diffPanelStore";
-import { useTheme } from "../hooks/useTheme";
-import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
-import { useProject, useThread } from "../state/entities";
-import { resolveThreadRouteRef } from "../threadRoutes";
-import { useClientSettings } from "../hooks/useSettings";
-import { formatShortTimestamp } from "../timestampFormat";
-import { DiffPanelShell, type DiffPanelMode } from "./DiffPanelShell";
+} from '@t3tools/client-runtime/state/runtime'
+import { safeErrorLogAttributes } from '@t3tools/client-runtime/errors'
+import type { ScopedThreadRef, TurnId } from '@t3tools/contracts'
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon, SearchIcon } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useOpenInPreferredEditor } from '../editorPreferences'
+import { type DraftId } from '../composerDraftStore'
+import { openDiffFilePrimaryAction } from '../diffFileActions'
+import { useCheckpointDiff } from '~/lib/checkpointDiffState'
+import { selectThreadDiffPanelSelection, useDiffPanelStore } from '../diffPanelStore'
+import { useTheme } from '../hooks/useTheme'
+import { useTurnDiffSummaries } from '../hooks/useTurnDiffSummaries'
+import { useProject, useThread } from '../state/entities'
+import { resolveThreadRouteRef } from '../threadRoutes'
+import { useClientSettings } from '../hooks/useSettings'
+import { formatShortTimestamp } from '../timestampFormat'
+import { DiffPanelShell, type DiffPanelMode } from './DiffPanelShell'
 import {
   NativeDiffSurface,
   NativeDiffSurfaceControls,
   type NativeDiffRenderMode,
   useNativeDiffSurfaceController,
-} from "./diffs/NativeDiffSurface";
-import { Switch } from "./ui/switch";
+} from './diffs/NativeDiffSurface'
+import { Switch } from './ui/switch'
 import {
   Combobox,
   ComboboxEmpty,
@@ -37,7 +37,7 @@ import {
   ComboboxList,
   ComboboxPopup,
   ComboboxTrigger,
-} from "./ui/combobox";
+} from './ui/combobox'
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -46,43 +46,45 @@ import {
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
-} from "./ui/menu";
-import { useEnvironmentQuery } from "../state/query";
-import { serverEnvironment } from "../state/server";
-import { reviewEnvironment } from "../state/review";
-import { vcsEnvironment } from "../state/vcs";
-import { buildBaseRefChoices, filterBaseRefChoices } from "../lib/baseRefChoices";
+} from './ui/menu'
+import { useEnvironmentQuery } from '../state/query'
+import { serverEnvironment } from '../state/server'
+import { reviewEnvironment } from '../state/review'
+import { vcsEnvironment } from '../state/vcs'
+import { buildBaseRefChoices, filterBaseRefChoices } from '../lib/baseRefChoices'
 
-const AUTOMATIC_BASE_REF = "__automatic_base_ref__";
+const AUTOMATIC_BASE_REF = '__automatic_base_ref__'
 
-interface DiffPanelProps {
-  mode?: DiffPanelMode;
-  composerDraftTarget: ScopedThreadRef | DraftId;
-  initialGitScope: "branch" | "unstaged";
+interface DiffPanelProps
+{
+  mode?: DiffPanelMode
+  composerDraftTarget: ScopedThreadRef | DraftId
+  initialGitScope: 'branch' | 'unstaged'
 }
 
-export { DiffWorkerPoolProvider } from "./DiffWorkerPoolProvider";
+export { DiffWorkerPoolProvider } from './DiffWorkerPoolProvider'
 
 export default function DiffPanel({
-  mode = "inline",
+  mode = 'inline',
   composerDraftTarget,
   initialGitScope: initialGitScopeProp,
-}: DiffPanelProps) {
-  const { resolvedTheme } = useTheme();
-  const settings = useClientSettings();
-  const [initialGitScope] = useState(initialGitScopeProp);
-  const [diffRenderMode, setDiffRenderMode] = useState<NativeDiffRenderMode>("stacked");
-  const [wordWrap, setWordWrap] = useState(settings.wordWrap);
-  const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace);
-  const [baseRefQuery, setBaseRefQuery] = useState("");
+}: DiffPanelProps)
+{
+  const { resolvedTheme } = useTheme()
+  const settings = useClientSettings()
+  const [initialGitScope] = useState(initialGitScopeProp)
+  const [diffRenderMode, setDiffRenderMode] = useState<NativeDiffRenderMode>('stacked')
+  const [wordWrap, setWordWrap] = useState(settings.wordWrap)
+  const [diffIgnoreWhitespace, setDiffIgnoreWhitespace] = useState(settings.diffIgnoreWhitespace)
+  const [baseRefQuery, setBaseRefQuery] = useState('')
 
   const routeThreadRef = useParams({
     strict: false,
     select: (params) => resolveThreadRouteRef(params),
-  });
-  const activeThreadId = routeThreadRef?.threadId ?? null;
-  const activeThread = useThread(routeThreadRef);
-  const activeProjectId = activeThread?.projectId ?? null;
+  })
+  const activeThreadId = routeThreadRef?.threadId ?? null
+  const activeThread = useThread(routeThreadRef)
+  const activeProjectId = activeThread?.projectId ?? null
   const activeProject = useProject(
     activeThread && activeProjectId
       ? {
@@ -90,15 +92,15 @@ export default function DiffPanel({
           projectId: activeProjectId,
         }
       : null,
-  );
-  const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot;
+  )
+  const activeCwd = activeThread?.worktreePath ?? activeProject?.workspaceRoot
   const serverConfig = useAtomValue(
     serverEnvironment.configValueAtom(activeThread?.environmentId ?? null),
-  );
+  )
   const openInPreferredEditor = useOpenInPreferredEditor(
     activeThread?.environmentId ?? null,
     serverConfig?.availableEditors ?? [],
-  );
+  )
   const gitStatusQuery = useEnvironmentQuery(
     activeThread !== null && activeThread !== undefined && activeCwd != null
       ? vcsEnvironment.status({
@@ -106,82 +108,85 @@ export default function DiffPanel({
           input: { cwd: activeCwd },
         })
       : null,
-  );
+  )
   const diffSelection = useDiffPanelStore((state) =>
     selectThreadDiffPanelSelection(
       state.byThreadKey,
       routeThreadRef,
-      initialGitScope === "unstaged",
+      initialGitScope === 'unstaged',
     ),
-  );
-  const isGitRepo = gitStatusQuery.data?.isRepo ?? true;
+  )
+  const isGitRepo = gitStatusQuery.data?.isRepo ?? true
   const { turnDiffSummaries, inferredCheckpointTurnCountByTurnId } =
-    useTurnDiffSummaries(activeThread);
+    useTurnDiffSummaries(activeThread)
   const orderedTurnDiffSummaries = useMemo(
     () =>
-      [...turnDiffSummaries].toSorted((left, right) => {
+      [...turnDiffSummaries].toSorted((left, right) =>
+      {
         const leftTurnCount =
-          left.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[left.turnId] ?? 0;
+          left.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[left.turnId] ?? 0
         const rightTurnCount =
-          right.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[right.turnId] ?? 0;
-        if (leftTurnCount !== rightTurnCount) {
-          return rightTurnCount - leftTurnCount;
+          right.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[right.turnId] ?? 0
+        if (leftTurnCount !== rightTurnCount)
+        {
+          return rightTurnCount - leftTurnCount
         }
-        return right.completedAt.localeCompare(left.completedAt);
+        return right.completedAt.localeCompare(left.completedAt)
       }),
     [inferredCheckpointTurnCountByTurnId, turnDiffSummaries],
-  );
+  )
 
-  useEffect(() => {
-    if (!routeThreadRef || diffSelection.kind !== "turn") return;
+  useEffect(() =>
+  {
+    if (!routeThreadRef || diffSelection.kind !== 'turn') return
     useDiffPanelStore.getState().reconcileTurnSelection(
       routeThreadRef,
       orderedTurnDiffSummaries.map((summary) => summary.turnId),
-    );
-  }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef]);
+    )
+  }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef])
 
-  const selectedTurnId = diffSelection.kind === "turn" ? diffSelection.turnId : null;
-  const selectedGitScope = diffSelection.kind === "unstaged" ? "unstaged" : "branch";
-  const selectedBaseRef = diffSelection.kind === "branch" ? diffSelection.baseRef : null;
-  const selectedFilePath = diffSelection.kind === "turn" ? diffSelection.filePath : null;
+  const selectedTurnId = diffSelection.kind === 'turn' ? diffSelection.turnId : null
+  const selectedGitScope = diffSelection.kind === 'unstaged' ? 'unstaged' : 'branch'
+  const selectedBaseRef = diffSelection.kind === 'branch' ? diffSelection.baseRef : null
+  const selectedFilePath = diffSelection.kind === 'turn' ? diffSelection.filePath : null
   const selectedFileRevealRequestId =
-    diffSelection.kind === "turn" ? diffSelection.revealRequestId : 0;
+    diffSelection.kind === 'turn' ? diffSelection.revealRequestId : 0
   const selectedTurn =
     selectedTurnId === null
       ? undefined
       : (orderedTurnDiffSummaries.find((summary) => summary.turnId === selectedTurnId) ??
-        orderedTurnDiffSummaries[0]);
+        orderedTurnDiffSummaries[0])
   const selectedCheckpointTurnCount =
     selectedTurn &&
-    (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId]);
-  const latestTurn = orderedTurnDiffSummaries[0];
+    (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId])
+  const latestTurn = orderedTurnDiffSummaries[0]
   const selectedScopeLabel =
     selectedTurnId === null
-      ? selectedGitScope === "unstaged"
-        ? "Working tree"
-        : "Branch changes"
+      ? selectedGitScope === 'unstaged'
+        ? 'Working tree'
+        : 'Branch changes'
       : selectedTurn?.turnId === latestTurn?.turnId
-        ? "Latest turn"
-        : `Turn ${selectedCheckpointTurnCount ?? "?"}`;
-  const reviewSectionId = selectedTurn ? `turn:${selectedTurn.turnId}` : selectedGitScope;
+        ? 'Latest turn'
+        : `Turn ${selectedCheckpointTurnCount ?? '?'}`
+  const reviewSectionId = selectedTurn ? `turn:${selectedTurn.turnId}` : selectedGitScope
   const collapseScopeKey = routeThreadRef
     ? `${routeThreadRef.environmentId}:${routeThreadRef.threadId}:${reviewSectionId}`
-    : reviewSectionId;
+    : reviewSectionId
   const reviewSectionTitle = selectedTurn
-    ? `Turn ${selectedCheckpointTurnCount ?? "?"}`
-    : selectedGitScope === "unstaged"
-      ? "Working tree"
-      : "Branch changes";
+    ? `Turn ${selectedCheckpointTurnCount ?? '?'}`
+    : selectedGitScope === 'unstaged'
+      ? 'Working tree'
+      : 'Branch changes'
   const selectedCheckpointRange = useMemo(
     () =>
-      typeof selectedCheckpointTurnCount === "number"
+      typeof selectedCheckpointTurnCount === 'number'
         ? {
             fromTurnCount: Math.max(0, selectedCheckpointTurnCount - 1),
             toTurnCount: selectedCheckpointTurnCount,
           }
         : null,
     [selectedCheckpointTurnCount],
-  );
+  )
   const activeCheckpointDiff = useCheckpointDiff(
     {
       environmentId: activeThread?.environmentId ?? null,
@@ -192,7 +197,7 @@ export default function DiffPanel({
       cacheScope: selectedTurn ? `turn:${selectedTurn.turnId}` : null,
     },
     { enabled: isGitRepo && selectedTurn !== undefined },
-  );
+  )
   const primaryBranchDiffPreview = useEnvironmentQuery(
     selectedTurnId === null && activeThread && activeCwd
       ? reviewEnvironment.diffPreview({
@@ -204,12 +209,12 @@ export default function DiffPanel({
           },
         })
       : null,
-  );
+  )
   const shouldRetryBranchDiffAtEnvironmentCwd =
     selectedTurnId === null &&
-    primaryBranchDiffPreview.error?.includes("configured workspace root") === true &&
+    primaryBranchDiffPreview.error?.includes('configured workspace root') === true &&
     serverConfig?.cwd !== undefined &&
-    serverConfig.cwd !== activeCwd;
+    serverConfig.cwd !== activeCwd
   const fallbackBranchDiffPreview = useEnvironmentQuery(
     shouldRetryBranchDiffAtEnvironmentCwd && activeThread && serverConfig
       ? reviewEnvironment.diffPreview({
@@ -221,16 +226,16 @@ export default function DiffPanel({
           },
         })
       : null,
-  );
+  )
   const branchDiffPreview = shouldRetryBranchDiffAtEnvironmentCwd
     ? fallbackBranchDiffPreview
-    : primaryBranchDiffPreview;
+    : primaryBranchDiffPreview
   const selectedGitSource = branchDiffPreview.data?.sources.find(
-    (source) => source.kind === (selectedGitScope === "unstaged" ? "working-tree" : "branch-range"),
-  );
+    (source) => source.kind === (selectedGitScope === 'unstaged' ? 'working-tree' : 'branch-range'),
+  )
   const localBranchRefs = useEnvironmentQuery(
     selectedTurnId === null &&
-      selectedGitScope === "branch" &&
+      selectedGitScope === 'branch' &&
       activeThread &&
       branchDiffPreview.data?.cwd
       ? vcsEnvironment.listRefs({
@@ -238,16 +243,16 @@ export default function DiffPanel({
           input: {
             cwd: branchDiffPreview.data.cwd,
             includeMatchingRemoteRefs: true,
-            refKind: "local",
+            refKind: 'local',
             ...(baseRefQuery.trim().length > 0 ? { query: baseRefQuery.trim() } : {}),
             limit: 100,
           },
         })
       : null,
-  );
+  )
   const remoteBranchRefs = useEnvironmentQuery(
     selectedTurnId === null &&
-      selectedGitScope === "branch" &&
+      selectedGitScope === 'branch' &&
       activeThread &&
       branchDiffPreview.data?.cwd
       ? vcsEnvironment.listRefs({
@@ -255,35 +260,35 @@ export default function DiffPanel({
           input: {
             cwd: branchDiffPreview.data.cwd,
             includeMatchingRemoteRefs: true,
-            refKind: "remote",
+            refKind: 'remote',
             ...(baseRefQuery.trim().length > 0 ? { query: baseRefQuery.trim() } : {}),
             limit: 100,
           },
         })
       : null,
-  );
+  )
   const baseRefChoices = buildBaseRefChoices(
     localBranchRefs.data?.refs.filter((ref) => ref.name !== selectedGitSource?.headRef) ?? [],
     remoteBranchRefs.data?.refs ?? [],
-  );
-  const matchingBaseRefChoices = filterBaseRefChoices(baseRefChoices, baseRefQuery);
+  )
+  const matchingBaseRefChoices = filterBaseRefChoices(baseRefChoices, baseRefQuery)
   const valueForBaseRefChoice = (choice: (typeof baseRefChoices)[number]) =>
     selectedBaseRef && selectedBaseRef === choice.remote?.name
       ? selectedBaseRef
-      : (choice.local?.name ?? choice.remote?.name ?? choice.id);
-  const baseRefItems = [AUTOMATIC_BASE_REF, ...baseRefChoices.map(valueForBaseRefChoice)];
+      : (choice.local?.name ?? choice.remote?.name ?? choice.id)
+  const baseRefItems = [AUTOMATIC_BASE_REF, ...baseRefChoices.map(valueForBaseRefChoice)]
   const filteredBaseRefItems = [
     ...(baseRefQuery.trim().length === 0 ? [AUTOMATIC_BASE_REF] : []),
     ...matchingBaseRefChoices.map(valueForBaseRefChoice),
-  ];
-  const gitDiff = selectedGitSource?.diff;
+  ]
+  const gitDiff = selectedGitSource?.diff
 
-  const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : gitDiff;
-  const isSelectedPatchTruncated = !selectedTurn && selectedGitSource?.truncated === true;
+  const selectedPatch = selectedTurn ? activeCheckpointDiff.data?.diff : gitDiff
+  const isSelectedPatchTruncated = !selectedTurn && selectedGitSource?.truncated === true
   const isLoadingSelectedPatch = selectedTurn
     ? activeCheckpointDiff.isPending
-    : branchDiffPreview.isPending;
-  const selectedPatchError = selectedTurn ? activeCheckpointDiff.error : branchDiffPreview.error;
+    : branchDiffPreview.isPending
+  const selectedPatchError = selectedTurn ? activeCheckpointDiff.error : branchDiffPreview.error
   const diffSurface = useNativeDiffSurfaceController({
     source: {
       patch: selectedPatch,
@@ -293,20 +298,24 @@ export default function DiffPanel({
     collapseScopeKey,
     selectedFilePath,
     selectedFileRevealRequestId,
-  });
+  })
 
   const openDiffFile = useCallback(
-    (filePath: string) => {
+    (filePath: string) =>
+    {
       openDiffFilePrimaryAction({
         threadRef: routeThreadRef,
         filePath,
         activeCwd,
-        openInEditor: (targetPath) => {
-          void (async () => {
-            const result = await openInPreferredEditor(targetPath);
-            if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-              console.warn("Failed to open diff file in editor.", {
-                operation: "open-diff-file",
+        openInEditor: (targetPath) =>
+        {
+          void (async () =>
+          {
+            const result = await openInPreferredEditor(targetPath)
+            if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+            {
+              console.warn('Failed to open diff file in editor.', {
+                operation: 'open-diff-file',
                 ...(routeThreadRef
                   ? {
                       environmentId: routeThreadRef.environmentId,
@@ -314,26 +323,29 @@ export default function DiffPanel({
                     }
                   : {}),
                 ...safeErrorLogAttributes(squashAtomCommandFailure(result)),
-              });
+              })
             }
-          })();
+          })()
         },
-      });
+      })
     },
     [activeCwd, openInPreferredEditor, routeThreadRef],
-  );
-  const selectTurn = (turnId: TurnId) => {
-    if (!routeThreadRef) return;
-    useDiffPanelStore.getState().selectTurn(routeThreadRef, turnId);
-  };
-  const selectGitScope = (scope: "branch" | "unstaged") => {
-    if (!routeThreadRef) return;
-    useDiffPanelStore.getState().selectGitScope(routeThreadRef, scope);
-  };
-  const selectBranchBaseRef = (baseRef: string | null) => {
-    if (!routeThreadRef) return;
-    useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef);
-  };
+  )
+  const selectTurn = (turnId: TurnId) =>
+  {
+    if (!routeThreadRef) return
+    useDiffPanelStore.getState().selectTurn(routeThreadRef, turnId)
+  }
+  const selectGitScope = (scope: 'branch' | 'unstaged') =>
+  {
+    if (!routeThreadRef) return
+    useDiffPanelStore.getState().selectGitScope(routeThreadRef, scope)
+  }
+  const selectBranchBaseRef = (baseRef: string | null) =>
+  {
+    if (!routeThreadRef) return
+    useDiffPanelStore.getState().selectBranchBaseRef(routeThreadRef, baseRef)
+  }
 
   const headerRow = (
     <>
@@ -349,32 +361,33 @@ export default function DiffPanel({
           <DropdownMenuContent align="start" className="w-60">
             <DropdownMenuItem
               className={
-                selectedTurnId === null && selectedGitScope === "unstaged"
-                  ? "bg-foreground/[0.08]"
+                selectedTurnId === null && selectedGitScope === 'unstaged'
+                  ? 'bg-foreground/[0.08]'
                   : undefined
               }
-              onClick={() => selectGitScope("unstaged")}
+              onClick={() => selectGitScope('unstaged')}
             >
               <span>Working tree</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               className={
-                selectedTurnId === null && selectedGitScope === "branch"
-                  ? "bg-foreground/[0.08]"
+                selectedTurnId === null && selectedGitScope === 'branch'
+                  ? 'bg-foreground/[0.08]'
                   : undefined
               }
-              onClick={() => selectGitScope("branch")}
+              onClick={() => selectGitScope('branch')}
             >
               <span>Branch changes</span>
             </DropdownMenuItem>
             <DropdownMenuItem
               className={
                 selectedTurnId !== null && selectedTurn?.turnId === latestTurn?.turnId
-                  ? "bg-foreground/[0.08]"
+                  ? 'bg-foreground/[0.08]'
                   : undefined
               }
-              onClick={() => {
-                if (latestTurn) selectTurn(latestTurn.turnId);
+              onClick={() =>
+              {
+                if (latestTurn) selectTurn(latestTurn.turnId)
               }}
             >
               <span>Latest turn</span>
@@ -382,16 +395,17 @@ export default function DiffPanel({
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>Turn</DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-64">
-                {orderedTurnDiffSummaries.map((summary) => {
+                {orderedTurnDiffSummaries.map((summary) =>
+                {
                   const turnCount =
                     summary.checkpointTurnCount ??
                     inferredCheckpointTurnCountByTurnId[summary.turnId] ??
-                    "?";
+                    '?'
                   return (
                     <DropdownMenuItem
                       key={summary.turnId}
                       className={
-                        summary.turnId === selectedTurn?.turnId ? "bg-foreground/[0.08]" : undefined
+                        summary.turnId === selectedTurn?.turnId ? 'bg-foreground/[0.08]' : undefined
                       }
                       onClick={() => selectTurn(summary.turnId)}
                     >
@@ -400,30 +414,32 @@ export default function DiffPanel({
                         {formatShortTimestamp(summary.completedAt, settings.timestampFormat)}
                       </span>
                     </DropdownMenuItem>
-                  );
+                  )
                 })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
           </DropdownMenuContent>
         </DropdownMenu>
-        {selectedTurnId === null && selectedGitScope === "branch" && selectedGitSource?.baseRef && (
+        {selectedTurnId === null && selectedGitScope === 'branch' && selectedGitSource?.baseRef && (
           <div
             className="flex min-w-0 max-w-full items-center gap-2 overflow-hidden text-xs text-muted-foreground"
-            title={`${selectedGitSource.headRef ?? "HEAD"} → ${selectedGitSource.baseRef}`}
-            aria-label={`Comparing ${selectedGitSource.headRef ?? "HEAD"} against ${selectedGitSource.baseRef}`}
+            title={`${selectedGitSource.headRef ?? 'HEAD'} → ${selectedGitSource.baseRef}`}
+            aria-label={`Comparing ${selectedGitSource.headRef ?? 'HEAD'} against ${selectedGitSource.baseRef}`}
           >
-            <span className="min-w-0 max-w-48 truncate">{selectedGitSource.headRef ?? "HEAD"}</span>
+            <span className="min-w-0 max-w-48 truncate">{selectedGitSource.headRef ?? 'HEAD'}</span>
             <ArrowRightIcon className="size-3.5 shrink-0 opacity-70" />
             <Combobox
               items={baseRefItems}
               filteredItems={filteredBaseRefItems}
               value={selectedBaseRef ?? AUTOMATIC_BASE_REF}
-              onOpenChange={(open) => {
-                if (!open) setBaseRefQuery("");
+              onOpenChange={(open) =>
+              {
+                if (!open) setBaseRefQuery('')
               }}
-              onValueChange={(value) => {
-                if (!value) return;
-                selectBranchBaseRef(value === AUTOMATIC_BASE_REF ? null : value);
+              onValueChange={(value) =>
+              {
+                if (!value) return
+                selectBranchBaseRef(value === AUTOMATIC_BASE_REF ? null : value)
               }}
             >
               <ComboboxTrigger
@@ -471,10 +487,11 @@ export default function DiffPanel({
                   >
                     <span className="block min-w-0 truncate">Automatic</span>
                   </ComboboxItem>
-                  {baseRefChoices.map((choice) => {
-                    const item = valueForBaseRefChoice(choice);
-                    const hasBoth = choice.local !== null && choice.remote !== null;
-                    const useRemote = choice.remote?.name === item;
+                  {baseRefChoices.map((choice) =>
+                  {
+                    const item = valueForBaseRefChoice(choice)
+                    const hasBoth = choice.local !== null && choice.remote !== null
+                    const useRemote = choice.remote?.name === item
                     return (
                       <ComboboxItem
                         key={choice.id}
@@ -494,11 +511,10 @@ export default function DiffPanel({
                                 aria-label={`Use remote version of ${choice.label}`}
                                 checked={useRemote}
                                 className="[--thumb-size:--spacing(3)]"
-                                onCheckedChange={(checked) => {
-                                  const nextRef = checked
-                                    ? choice.remote?.name
-                                    : choice.local?.name;
-                                  if (nextRef) selectBranchBaseRef(nextRef);
+                                onCheckedChange={(checked) =>
+                                  {
+                                  const nextRef = checked ? choice.remote?.name : choice.local?.name
+                                  if (nextRef) selectBranchBaseRef(nextRef)
                                 }}
                               />
                             </div>
@@ -512,7 +528,7 @@ export default function DiffPanel({
                           ) : null}
                         </div>
                       </ComboboxItem>
-                    );
+                    )
                   })}
                 </ComboboxList>
               </ComboboxPopup>
@@ -530,7 +546,7 @@ export default function DiffPanel({
         onIgnoreWhitespaceChange={setDiffIgnoreWhitespace}
       />
     </>
-  );
+  )
 
   return (
     <DiffPanelShell mode={mode} header={headerRow}>
@@ -559,21 +575,21 @@ export default function DiffPanel({
           loading={isLoadingSelectedPatch}
           loadingLabel={
             selectedTurn
-              ? "Loading checkpoint diff..."
-              : selectedGitScope === "unstaged"
-                ? "Loading working tree diff..."
-                : "Loading branch diff..."
+              ? 'Loading checkpoint diff...'
+              : selectedGitScope === 'unstaged'
+                ? 'Loading working tree diff...'
+                : 'Loading branch diff...'
           }
           error={selectedPatchError}
           emptyMessage={
             diffSurface.hasNoNetChanges
-              ? "No net changes in this selection."
-              : "No patch available for this selection."
+              ? 'No net changes in this selection.'
+              : 'No patch available for this selection.'
           }
           truncated={isSelectedPatchTruncated}
           onOpenFile={openDiffFile}
         />
       )}
     </DiffPanelShell>
-  );
+  )
 }

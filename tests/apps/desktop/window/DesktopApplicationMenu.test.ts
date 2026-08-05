@@ -1,36 +1,39 @@
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { assert, describe, it } from "@effect/vitest";
-import * as Deferred from "effect/Deferred";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
+// tests/apps/desktop/window/DesktopApplicationMenu.test.ts
+// verify desktop application menu behavior
 
-import type * as Electron from "electron";
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import { assert, describe, it } from '@effect/vitest'
+import * as Deferred from 'effect/Deferred'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 
-import * as ElectronApp from "../../../../apps/desktop/src/electron/ElectronApp.ts";
-import * as ElectronDialog from "../../../../apps/desktop/src/electron/ElectronDialog.ts";
-import * as ElectronMenu from "../../../../apps/desktop/src/electron/ElectronMenu.ts";
-import * as DesktopApplicationMenu from "../../../../apps/desktop/src/window/DesktopApplicationMenu.ts";
-import * as DesktopConfig from "../../../../apps/desktop/src/app/DesktopConfig.ts";
-import * as DesktopEnvironment from "../../../../apps/desktop/src/app/DesktopEnvironment.ts";
-import * as DesktopUpdates from "../../../../apps/desktop/src/updates/DesktopUpdates.ts";
-import * as DesktopWindow from "../../../../apps/desktop/src/window/DesktopWindow.ts";
+import type * as Electron from 'electron'
+
+import * as ElectronApp from '../../../../apps/desktop/src/electron/ElectronApp.ts'
+import * as ElectronDialog from '../../../../apps/desktop/src/electron/ElectronDialog.ts'
+import * as ElectronMenu from '../../../../apps/desktop/src/electron/ElectronMenu.ts'
+import * as DesktopApplicationMenu from '../../../../apps/desktop/src/window/DesktopApplicationMenu.ts'
+import * as DesktopConfig from '../../../../apps/desktop/src/app/DesktopConfig.ts'
+import * as DesktopEnvironment from '../../../../apps/desktop/src/app/DesktopEnvironment.ts'
+import * as DesktopUpdates from '../../../../apps/desktop/src/updates/DesktopUpdates.ts'
+import * as DesktopWindow from '../../../../apps/desktop/src/window/DesktopWindow.ts'
 
 const environmentInput = {
-  dirname: "/repo/apps/desktop/dist-electron",
-  homeDirectory: "/Users/alice",
-  platform: "linux",
-  processArch: "arm64",
-  appVersion: "1.2.3",
-  appPath: "/repo",
+  dirname: '/repo/apps/desktop/dist-electron',
+  homeDirectory: '/Users/alice',
+  platform: 'linux',
+  processArch: 'arm64',
+  appVersion: '1.2.3',
+  appPath: '/repo',
   isPackaged: false,
-  resourcesPath: "/repo/resources",
+  resourcesPath: '/repo/resources',
   runningUnderArm64Translation: false,
-} satisfies DesktopEnvironment.MakeDesktopEnvironmentInput;
+} satisfies DesktopEnvironment.MakeDesktopEnvironmentInput
 
 const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
-  metadata: Effect.die("unexpected metadata read"),
-  name: Effect.succeed("456code"),
+  metadata: Effect.die('unexpected metadata read'),
+  name: Effect.succeed('456code'),
   whenReady: Effect.void,
   quit: Effect.void,
   exit: () => Effect.void,
@@ -46,31 +49,31 @@ const electronAppLayer = Layer.succeed(ElectronApp.ElectronApp, {
   setDockIcon: () => Effect.void,
   appendCommandLineSwitch: () => Effect.void,
   on: () => Effect.void,
-} satisfies ElectronApp.ElectronApp["Service"]);
+} satisfies ElectronApp.ElectronApp['Service'])
 
 const electronDialogLayer = Layer.succeed(ElectronDialog.ElectronDialog, {
   pickFolder: () => Effect.succeed(Option.none()),
   confirm: () => Effect.succeed(false),
   showMessageBox: () => Effect.succeed({ response: 0, checkboxChecked: false }),
   showErrorBox: () => Effect.void,
-} satisfies ElectronDialog.ElectronDialog["Service"]);
+} satisfies ElectronDialog.ElectronDialog['Service'])
 
 const desktopUpdatesLayer = Layer.succeed(DesktopUpdates.DesktopUpdates, {
-  getState: Effect.die("unexpected getState"),
+  getState: Effect.die('unexpected getState'),
   emitState: Effect.void,
   disabledReason: Effect.succeed(Option.none()),
   configure: Effect.void,
-  setChannel: () => Effect.die("unexpected setChannel"),
-  check: () => Effect.die("unexpected check"),
-  download: Effect.die("unexpected download"),
-  install: Effect.die("unexpected install"),
-} satisfies DesktopUpdates.DesktopUpdates["Service"]);
+  setChannel: () => Effect.die('unexpected setChannel'),
+  check: () => Effect.die('unexpected check'),
+  download: Effect.die('unexpected download'),
+  install: Effect.die('unexpected install'),
+} satisfies DesktopUpdates.DesktopUpdates['Service'])
 
 const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
   Layer.succeed(DesktopWindow.DesktopWindow, {
-    createMain: Effect.die("unexpected createMain"),
-    ensureMain: Effect.die("unexpected ensureMain"),
-    revealOrCreateMain: Effect.die("unexpected revealOrCreateMain"),
+    createMain: Effect.die('unexpected createMain'),
+    ensureMain: Effect.die('unexpected ensureMain'),
+    revealOrCreateMain: Effect.die('unexpected revealOrCreateMain'),
     activate: Effect.void,
     createMainIfBackendReady: Effect.void,
     showConnectingSplash: Effect.void,
@@ -79,7 +82,7 @@ const makeDesktopWindowLayer = (selectedAction: Deferred.Deferred<string>) =>
     flushMainWindowBounds: Effect.void,
     dispatchMenuAction: (action) => Deferred.succeed(selectedAction, action).pipe(Effect.asVoid),
     syncAppearance: Effect.void,
-  } satisfies DesktopWindow.DesktopWindow["Service"]);
+  } satisfies DesktopWindow.DesktopWindow['Service'])
 
 const makeElectronMenuLayer = (
   applicationMenuTemplate: Deferred.Deferred<readonly Electron.MenuItemConstructorOptions[]>,
@@ -89,18 +92,21 @@ const makeElectronMenuLayer = (
       Deferred.succeed(applicationMenuTemplate, template).pipe(Effect.asVoid),
     popupTemplate: () => Effect.void,
     showContextMenu: () => Effect.succeed(Option.none()),
-  } satisfies ElectronMenu.ElectronMenu["Service"]);
+  } satisfies ElectronMenu.ElectronMenu['Service'])
 
-describe("DesktopApplicationMenu", () => {
-  it.effect("installs the native menu and routes Settings through DesktopWindow", () =>
-    Effect.gen(function* () {
-      const selectedAction = yield* Deferred.make<string>();
+describe('DesktopApplicationMenu', () =>
+{
+  it.effect('installs the native menu and routes Settings through DesktopWindow', () =>
+    Effect.gen(function* ()
+    {
+      const selectedAction = yield* Deferred.make<string>()
       const applicationMenuTemplate =
-        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>();
+        yield* Deferred.make<readonly Electron.MenuItemConstructorOptions[]>()
 
-      yield* Effect.gen(function* () {
-        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu;
-        yield* menu.configure;
+      yield* Effect.gen(function* ()
+      {
+        const menu = yield* DesktopApplicationMenu.DesktopApplicationMenu
+        yield* menu.configure
       }).pipe(
         Effect.provide(
           DesktopApplicationMenu.layer.pipe(
@@ -116,23 +122,25 @@ describe("DesktopApplicationMenu", () => {
             ),
           ),
         ),
-      );
+      )
 
-      const template = yield* Deferred.await(applicationMenuTemplate);
-      const fileMenu = template.find((item) => item.label === "File");
-      assert.isDefined(fileMenu);
-      if (!Array.isArray(fileMenu.submenu)) {
-        throw new Error("Expected File menu submenu to be an array.");
+      const template = yield* Deferred.await(applicationMenuTemplate)
+      const fileMenu = template.find((item) => item.label === 'File')
+      assert.isDefined(fileMenu)
+      if (!Array.isArray(fileMenu.submenu))
+      {
+        throw new Error('Expected File menu submenu to be an array.')
       }
-      const settingsItem = fileMenu.submenu.find((item) => item.label === "Settings...");
-      assert.isDefined(settingsItem);
-      const settingsClick = settingsItem.click;
-      if (typeof settingsClick !== "function") {
-        throw new Error("Expected Settings menu item to have a click handler.");
+      const settingsItem = fileMenu.submenu.find((item) => item.label === 'Settings...')
+      assert.isDefined(settingsItem)
+      const settingsClick = settingsItem.click
+      if (typeof settingsClick !== 'function')
+      {
+        throw new Error('Expected Settings menu item to have a click handler.')
       }
 
-      settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent);
-      assert.equal(yield* Deferred.await(selectedAction), "open-settings");
+      settingsClick({} as Electron.MenuItem, {} as Electron.BrowserWindow, {} as KeyboardEvent)
+      assert.equal(yield* Deferred.await(selectedAction), 'open-settings')
     }),
-  );
-});
+  )
+})

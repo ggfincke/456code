@@ -1,145 +1,166 @@
-export type ComposerTriggerKind = "path" | "slash-command" | "slash-model" | "skill";
-export type ComposerSlashCommand = "model" | "plan" | "orchestrate" | "default";
+// packages/shared/src/composerTrigger.ts
+// define composer trigger kind
 
-export interface ComposerTrigger {
-  kind: ComposerTriggerKind;
-  query: string;
-  rangeStart: number;
-  rangeEnd: number;
+export type ComposerTriggerKind = 'path' | 'slash-command' | 'slash-model' | 'skill'
+export type ComposerSlashCommand = 'model' | 'plan' | 'orchestrate' | 'default'
+
+export interface ComposerTrigger
+{
+  kind: ComposerTriggerKind
+  query: string
+  rangeStart: number
+  rangeEnd: number
 }
 
-const SIMPLE_MENTION_PATH_REGEX = /^[^\s@"\\]+$/;
+const SIMPLE_MENTION_PATH_REGEX = /^[^\s@"\\]+$/
 
-export function serializeComposerMentionPath(path: string): string {
-  if (SIMPLE_MENTION_PATH_REGEX.test(path)) {
-    return path;
+export function serializeComposerMentionPath(path: string): string
+{
+  if (SIMPLE_MENTION_PATH_REGEX.test(path))
+  {
+    return path
   }
-  return `"${path.replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
+  return `"${path.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"`
 }
 
-function composerFileLinkBasename(path: string): string {
-  const separatorIndex = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path;
+function composerFileLinkBasename(path: string): string
+{
+  const separatorIndex = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
+  return separatorIndex >= 0 ? path.slice(separatorIndex + 1) : path
 }
 
-function escapeMarkdownLinkLabel(label: string): string {
-  return label.replaceAll("\\", "\\\\").replaceAll("[", "\\[").replaceAll("]", "\\]");
+function escapeMarkdownLinkLabel(label: string): string
+{
+  return label.replaceAll('\\', '\\\\').replaceAll('[', '\\[').replaceAll(']', '\\]')
 }
 
-function encodeMarkdownLinkDestination(path: string): string {
+function encodeMarkdownLinkDestination(path: string): string
+{
   return encodeURI(path)
-    .replaceAll("(", "%28")
-    .replaceAll(")", "%29")
-    .replaceAll("#", "%23")
-    .replaceAll("?", "%3F")
-    .replaceAll("\\", "%5C");
+    .replaceAll('(', '%28')
+    .replaceAll(')', '%29')
+    .replaceAll('#', '%23')
+    .replaceAll('?', '%3F')
+    .replaceAll('\\', '%5C')
 }
 
-export function serializeComposerFileLink(path: string): string {
-  const label = escapeMarkdownLinkLabel(composerFileLinkBasename(path));
-  return `[${label}](${encodeMarkdownLinkDestination(path)})`;
+export function serializeComposerFileLink(path: string): string
+{
+  const label = escapeMarkdownLinkLabel(composerFileLinkBasename(path))
+  return `[${label}](${encodeMarkdownLinkDestination(path)})`
 }
 
-function clampCursor(text: string, cursor: number): number {
-  if (!Number.isFinite(cursor)) return text.length;
-  return Math.max(0, Math.min(text.length, Math.floor(cursor)));
+function clampCursor(text: string, cursor: number): number
+{
+  if (!Number.isFinite(cursor)) return text.length
+  return Math.max(0, Math.min(text.length, Math.floor(cursor)))
 }
 
-function isWhitespace(char: string): boolean {
-  return char === " " || char === "\n" || char === "\t" || char === "\r";
+function isWhitespace(char: string): boolean
+{
+  return char === ' ' || char === '\n' || char === '\t' || char === '\r'
 }
 
-/**
- * Detect an active trigger (@path, $skill, /command) at the cursor position.
- *
- * Accepts an optional `isWhitespaceChar` override so callers with inline
- * placeholder characters (e.g. terminal context chips on web) can treat
- * those as token boundaries.
- */
+// detect an active trigger (@path, $skill, /command) at the cursor position.
+//
+// accepts an optional `isWhitespaceChar` override so callers with inline
+// placeholder characters (e.g. terminal context chips on web) can treat
+// those as token boundaries.
 export function detectComposerTrigger(
   text: string,
   cursorInput: number,
   isWhitespaceChar?: (char: string) => boolean,
-): ComposerTrigger | null {
-  const cursor = clampCursor(text, cursorInput);
-  const lineStart = text.lastIndexOf("\n", Math.max(0, cursor - 1)) + 1;
-  const linePrefix = text.slice(lineStart, cursor);
+): ComposerTrigger | null
+{
+  const cursor = clampCursor(text, cursorInput)
+  const lineStart = text.lastIndexOf('\n', Math.max(0, cursor - 1)) + 1
+  const linePrefix = text.slice(lineStart, cursor)
 
-  // Preserve line-start `/model` (with optional args) as a dedicated trigger.
-  // General `/` commands are whitespace-bounded tokens below so a second `/`
+  // preserve line-start `/model` (with optional args) as a dedicated trigger.
+  // general `/` commands are whitespace-bounded tokens below so a second `/`
   // works after a skill chip.
-  if (linePrefix.startsWith("/")) {
-    const commandMatch = /^\/(\S*)$/.exec(linePrefix);
-    if (commandMatch) {
-      const commandQuery = commandMatch[1] ?? "";
-      if (commandQuery.toLowerCase() === "model") {
+  if (linePrefix.startsWith('/'))
+  {
+    const commandMatch = /^\/(\S*)$/.exec(linePrefix)
+    if (commandMatch)
+    {
+      const commandQuery = commandMatch[1] ?? ''
+      if (commandQuery.toLowerCase() === 'model')
+      {
         return {
-          kind: "slash-model",
-          query: "",
+          kind: 'slash-model',
+          query: '',
           rangeStart: lineStart,
           rangeEnd: cursor,
-        };
+        }
       }
     }
 
-    const modelMatch = /^\/model(?:\s+(.*))?$/.exec(linePrefix);
-    if (modelMatch) {
+    const modelMatch = /^\/model(?:\s+(.*))?$/.exec(linePrefix)
+    if (modelMatch)
+    {
       return {
-        kind: "slash-model",
-        query: (modelMatch[1] ?? "").trim(),
+        kind: 'slash-model',
+        query: (modelMatch[1] ?? '').trim(),
         rangeStart: lineStart,
         rangeEnd: cursor,
-      };
+      }
     }
   }
 
-  const wsCheck = isWhitespaceChar ?? isWhitespace;
-  let tokenIdx = cursor - 1;
-  while (tokenIdx >= 0 && !wsCheck(text[tokenIdx] ?? "")) {
-    tokenIdx -= 1;
+  const wsCheck = isWhitespaceChar ?? isWhitespace
+  let tokenIdx = cursor - 1
+  while (tokenIdx >= 0 && !wsCheck(text[tokenIdx] ?? ''))
+  {
+    tokenIdx -= 1
   }
-  const tokenStart = tokenIdx + 1;
+  const tokenStart = tokenIdx + 1
 
-  const token = text.slice(tokenStart, cursor);
-  if (token.startsWith("/")) {
+  const token = text.slice(tokenStart, cursor)
+  if (token.startsWith('/'))
+  {
     return {
-      kind: "slash-command",
+      kind: 'slash-command',
       query: token.slice(1),
       rangeStart: tokenStart,
       rangeEnd: cursor,
-    };
+    }
   }
-  if (token.startsWith("$")) {
+  if (token.startsWith('$'))
+  {
     return {
-      kind: "skill",
+      kind: 'skill',
       query: token.slice(1),
       rangeStart: tokenStart,
       rangeEnd: cursor,
-    };
+    }
   }
-  if (!token.startsWith("@")) {
-    return null;
+  if (!token.startsWith('@'))
+  {
+    return null
   }
 
   return {
-    kind: "path",
+    kind: 'path',
     query: token.slice(1),
     rangeStart: tokenStart,
     rangeEnd: cursor,
-  };
+  }
 }
 
 export function parseStandaloneComposerSlashCommand(
   text: string,
-): Exclude<ComposerSlashCommand, "model"> | null {
-  const match = /^\/(plan|orchestrate|default)\s*$/i.exec(text.trim());
-  if (!match) {
-    return null;
+): Exclude<ComposerSlashCommand, 'model'> | null
+{
+  const match = /^\/(plan|orchestrate|default)\s*$/i.exec(text.trim())
+  if (!match)
+  {
+    return null
   }
-  const command = match[1]?.toLowerCase();
-  if (command === "plan") return "plan";
-  if (command === "orchestrate") return "orchestrate";
-  return "default";
+  const command = match[1]?.toLowerCase()
+  if (command === 'plan') return 'plan'
+  if (command === 'orchestrate') return 'orchestrate'
+  return 'default'
 }
 
 export function replaceTextRange(
@@ -147,9 +168,10 @@ export function replaceTextRange(
   rangeStart: number,
   rangeEnd: number,
   replacement: string,
-): { text: string; cursor: number } {
-  const safeStart = Math.max(0, Math.min(text.length, rangeStart));
-  const safeEnd = Math.max(safeStart, Math.min(text.length, rangeEnd));
-  const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`;
-  return { text: nextText, cursor: safeStart + replacement.length };
+): { text: string; cursor: number }
+{
+  const safeStart = Math.max(0, Math.min(text.length, rangeStart))
+  const safeEnd = Math.max(safeStart, Math.min(text.length, rangeEnd))
+  const nextText = `${text.slice(0, safeStart)}${replacement}${text.slice(safeEnd)}`
+  return { text: nextText, cursor: safeStart + replacement.length }
 }

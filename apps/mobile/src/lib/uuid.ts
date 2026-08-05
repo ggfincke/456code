@@ -1,9 +1,12 @@
-import * as Crypto from "expo-crypto";
+// apps/mobile/src/lib/uuid.ts
+// generate UUID v4 values
 
-export const uuidv4 = () => Crypto.randomUUID();
+import * as Crypto from 'expo-crypto'
 
-/** Random lowercase hex string of `byteLength` bytes (2 chars per byte). */
+export const uuidv4 = () => Crypto.randomUUID()
+
+// random lowercase hex string of `byteLength` bytes (2 chars per byte).
 export const randomHex = (byteLength: number): string =>
-  Array.from(Crypto.getRandomBytes(byteLength), (byte) => byte.toString(16).padStart(2, "0")).join(
-    "",
-  );
+  Array.from(Crypto.getRandomBytes(byteLength), (byte) => byte.toString(16).padStart(2, '0')).join(
+    '',
+  )

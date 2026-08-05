@@ -1,22 +1,28 @@
-"use client";
+// apps/web/src/components/preview/PreviewPanel.tsx
+// render preview panel
 
-import type { ScopedThreadRef } from "@t3tools/contracts";
+'use client'
 
-import { isPreviewSupportedInRuntime } from "~/previewStateStore";
+import type { ScopedThreadRef } from '@t3tools/contracts'
 
-import { PreviewPanelShell, type PreviewPanelMode } from "./PreviewPanelShell";
-import { PreviewView } from "./PreviewView";
+import { isPreviewSupportedInRuntime } from '~/previewStateStore'
 
-interface Props {
-  mode: PreviewPanelMode;
-  threadRef: ScopedThreadRef;
-  tabId?: string | null;
-  configuredUrls?: ReadonlyArray<string> | undefined;
-  visible: boolean;
+import { PreviewPanelShell, type PreviewPanelMode } from './PreviewPanelShell'
+import { PreviewView } from './PreviewView'
+
+interface Props
+{
+  mode: PreviewPanelMode
+  threadRef: ScopedThreadRef
+  tabId?: string | null
+  configuredUrls?: ReadonlyArray<string> | undefined
+  visible: boolean
 }
 
-export function PreviewPanel({ mode, threadRef, tabId, configuredUrls, visible }: Props) {
-  if (!isPreviewSupportedInRuntime()) {
+export function PreviewPanel({ mode, threadRef, tabId, configuredUrls, visible }: Props)
+{
+  if (!isPreviewSupportedInRuntime())
+  {
     return (
       <PreviewPanelShell mode={mode}>
         <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
@@ -25,7 +31,7 @@ export function PreviewPanel({ mode, threadRef, tabId, configuredUrls, visible }
           </p>
         </div>
       </PreviewPanelShell>
-    );
+    )
   }
 
   return (
@@ -37,5 +43,5 @@ export function PreviewPanel({ mode, threadRef, tabId, configuredUrls, visible }
         visible={visible}
       />
     </PreviewPanelShell>
-  );
+  )
 }

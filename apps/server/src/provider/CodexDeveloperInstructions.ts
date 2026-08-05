@@ -1,11 +1,11 @@
 // apps/server/src/provider/CodexDeveloperInstructions.ts
 // builds mode-specific instructions for Codex provider turns
 
-import type { ProviderInteractionMode } from "@t3tools/contracts";
+import type { ProviderInteractionMode } from '@t3tools/contracts'
 import {
   ORCHESTRATE_MODE_INSTRUCTIONS,
   T3_CODE_BROWSER_TOOL_INSTRUCTIONS,
-} from "./CollaborationModeInstructions.ts";
+} from './CollaborationModeInstructions.ts'
 
 const T3_CODE_PROPOSAL_TOOL_INSTRUCTIONS = `
 
@@ -14,7 +14,7 @@ const T3_CODE_PROPOSAL_TOOL_INSTRUCTIONS = `
 When the \`code456\` MCP server exposes \`proposal_preview_upsert\`, you MUST call it after the proposed edit set is decision-complete and before emitting the final \`<proposed_plan>\` block. Do not finalize the plan until the call succeeds. If a call fails, inspect the error and retry when it is actionable; if it still cannot succeed, report the preview failure instead of presenting an official final plan without its immutable revision. Pass only bounded typed file operations and, when useful, a SafeDocument MDX narrative. The authenticated 456code session derives environment, project, thread, provider, worktree root, and current turn plan identity; never invent or pass those authority values.
 
 \`proposal_preview_upsert\` is allowed in Plan Mode despite the general mutation restriction because it writes only 456code planning metadata, content-addressed blobs, and isolated retained Git refs. It does not edit the user's worktree or index and does not implement the plan. Never describe the preview as guaranteed future changes; call it a preview of the exact proposal revision against its captured workspace snapshot.
-`;
+`
 
 export const CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Plan Mode (Conversational)
 
@@ -138,9 +138,9 @@ Do not ask "should I proceed?" in the final output. The user can easily switch o
 Only produce at most one \`<proposed_plan>\` block per turn, and only when you are presenting a complete spec.
 ${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
 ${T3_CODE_PROPOSAL_TOOL_INSTRUCTIONS}
-</collaboration_mode>`;
+</collaboration_mode>`
 
-export const CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS = ORCHESTRATE_MODE_INSTRUCTIONS;
+export const CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS = ORCHESTRATE_MODE_INSTRUCTIONS
 
 export const CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS = `<collaboration_mode># Collaboration Mode: Default
 
@@ -154,29 +154,32 @@ The \`request_user_input\` tool is unavailable in Default mode. If you call it w
 
 In Default mode, strongly prefer making reasonable assumptions and executing the user's request rather than stopping to ask questions. If you absolutely must ask a question because the answer cannot be discovered from local context and a reasonable assumption would be risky, ask the user directly with a concise plain-text question. Never write a multiple choice question as a textual assistant message.
 ${T3_CODE_BROWSER_TOOL_INSTRUCTIONS}
-</collaboration_mode>`;
+</collaboration_mode>`
 
-export interface CodexRuntimeInfo {
-  readonly model: string;
-  readonly reasoningEffort: string;
+export interface CodexRuntimeInfo
+{
+  readonly model: string
+  readonly reasoningEffort: string
 }
 
-// Values come from trusted config, but keep the block single-line regardless.
-function toSingleLine(value: string): string {
-  return value.replaceAll(/\s+/g, " ").trim();
+// values come from trusted config, but keep the block single-line regardless.
+function toSingleLine(value: string): string
+{
+  return value.replaceAll(/\s+/g, ' ').trim()
 }
 
 export function buildCodexDeveloperInstructions(
   interactionMode: ProviderInteractionMode,
   runtime: CodexRuntimeInfo,
-): string {
+): string
+{
   const base =
-    interactionMode === "plan"
+    interactionMode === 'plan'
       ? CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS
-      : interactionMode === "orchestrate"
+      : interactionMode === 'orchestrate'
         ? CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS
-        : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS;
+        : CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS
   return `${base}
 
-<runtime_info>In case you're asked: you are running in 456code through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`;
+<runtime_info>In case you're asked: you are running in 456code through the Codex harness, as ${toSingleLine(runtime.model)} with ${toSingleLine(runtime.reasoningEffort)} reasoning effort. No need to mention this otherwise.</runtime_info>`
 }

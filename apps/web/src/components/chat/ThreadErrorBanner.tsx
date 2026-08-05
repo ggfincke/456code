@@ -1,17 +1,21 @@
-import { memo } from "react";
-import { Alert, AlertAction, AlertDescription } from "../ui/alert";
-import { Button } from "../ui/button";
-import { CircleAlertIcon, XIcon } from "lucide-react";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+// apps/web/src/components/chat/ThreadErrorBanner.tsx
+// render thread error banner
+
+import { memo } from 'react'
+import { Alert, AlertAction, AlertDescription } from '../ui/alert'
+import { Button } from '../ui/button'
+import { CircleAlertIcon, XIcon } from 'lucide-react'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 
 export const ThreadErrorBanner = memo(function ThreadErrorBanner({
   error,
   onDismiss,
 }: {
-  error: string | null;
-  onDismiss?: () => void;
-}) {
-  if (!error) return null;
+  error: string | null
+  onDismiss?: () => void
+})
+{
+  if (!error) return null
   return (
     <div className="mx-auto w-fit max-w-[min(48rem,calc(100%-2rem))] pt-3">
       <Alert variant="error">
@@ -33,5 +37,5 @@ export const ThreadErrorBanner = memo(function ThreadErrorBanner({
         )}
       </Alert>
     </div>
-  );
-});
+  )
+})

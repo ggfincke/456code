@@ -1,9 +1,10 @@
-import { ProjectFile } from "@t3tools/contracts";
+// packages/shared/src/projectFile.ts
+// expose project file from json
 
-import { fromLenientJson } from "./schemaJson.ts";
+import { ProjectFile } from '@t3tools/contracts'
 
-/**
- * Codec between the raw `456code.json` file contents (lenient JSONC string) and the
- * decoded {@link ProjectFile}.
- */
-export const ProjectFileFromJson = fromLenientJson(ProjectFile);
+import { fromLenientJson } from './schemaJson.ts'
+
+// codec between the raw `456code.json` file contents (lenient JSONC string) and the
+// decoded {@link ProjectFile}.
+export const ProjectFileFromJson = fromLenientJson(ProjectFile)

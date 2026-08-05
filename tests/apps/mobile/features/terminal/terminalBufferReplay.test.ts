@@ -1,46 +1,52 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/mobile/features/terminal/terminalBufferReplay.test.ts
+// verify terminal buffer replay behavior
+
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   getTerminalBufferReplayKey,
   getTerminalSurfaceReplayBuffer,
-} from "../../../../../apps/mobile/src/features/terminal/terminalBufferReplay";
+} from '../../../../../apps/mobile/src/features/terminal/terminalBufferReplay'
 
-describe("terminalBufferReplay", () => {
-  it("keys replay readiness by terminal identity and font metrics", () => {
+describe('terminalBufferReplay', () =>
+{
+  it('keys replay readiness by terminal identity and font metrics', () =>
+  {
     expect(
       getTerminalBufferReplayKey({
-        terminalKey: "env-1:thread-1:default",
+        terminalKey: 'env-1:thread-1:default',
         fontSize: 10,
       }),
-    ).toBe("env-1:thread-1:default:10");
-  });
+    ).toBe('env-1:thread-1:default:10')
+  })
 
-  it("shows terminal history while replay key is unset (initial mount / after key change)", () => {
+  it('shows terminal history while replay key is unset (initial mount / after key change)', () =>
+  {
     const replayKey = getTerminalBufferReplayKey({
-      terminalKey: "env-1:thread-1:default",
+      terminalKey: 'env-1:thread-1:default',
       fontSize: 10,
-    });
+    })
 
     expect(
       getTerminalSurfaceReplayBuffer({
-        buffer: "fastfetch output",
+        buffer: 'fastfetch output',
         replayKey,
         readyReplayKey: null,
       }),
-    ).toBe("fastfetch output");
+    ).toBe('fastfetch output')
     expect(
       getTerminalSurfaceReplayBuffer({
-        buffer: "fastfetch output",
+        buffer: 'fastfetch output',
         replayKey,
-        readyReplayKey: "env-1:thread-1:default:11",
+        readyReplayKey: 'env-1:thread-1:default:11',
       }),
-    ).toBe("");
+    ).toBe('')
     expect(
       getTerminalSurfaceReplayBuffer({
-        buffer: "fastfetch output",
+        buffer: 'fastfetch output',
         replayKey,
         readyReplayKey: replayKey,
       }),
-    ).toBe("fastfetch output");
-  });
-});
+    ).toBe('fastfetch output')
+  })
+})

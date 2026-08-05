@@ -1,66 +1,70 @@
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import { SourceControlProviderError, type ChangeRequest } from "@t3tools/contracts";
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import { SourceControlProviderError, type ChangeRequest } from '@t3tools/contracts'
 
-import * as AzureDevOpsCli from "./AzureDevOpsCli.ts";
-import * as SourceControlProvider from "./SourceControlProvider.ts";
+import * as AzureDevOpsCli from './AzureDevOpsCli.ts'
+import * as SourceControlProvider from './SourceControlProvider.ts'
 import {
   combinedAuthOutput,
   firstSafeAuthLine,
   providerAuth,
   type SourceControlAuthProbeInput,
   type SourceControlCliDiscoverySpec,
-} from "./SourceControlProviderDiscovery.ts";
+} from './SourceControlProviderDiscovery.ts'
 
-function parseAzureAuth(input: SourceControlAuthProbeInput) {
-  const account = input.stdout.trim().split(/\r?\n/)[0]?.trim();
+function parseAzureAuth(input: SourceControlAuthProbeInput)
+{
+  const account = input.stdout.trim().split(/\r?\n/)[0]?.trim()
 
-  if (input.exitCode !== 0) {
+  if (input.exitCode !== 0)
+  {
     return providerAuth({
-      status: "unauthenticated",
+      status: 'unauthenticated',
       detail:
-        firstSafeAuthLine(combinedAuthOutput(input)) ?? "Run `az login` to authenticate Azure CLI.",
-    });
+        firstSafeAuthLine(combinedAuthOutput(input)) ?? 'Run `az login` to authenticate Azure CLI.',
+    })
   }
 
-  if (account !== undefined && account.length > 0) {
+  if (account !== undefined && account.length > 0)
+  {
     return providerAuth({
-      status: "authenticated",
+      status: 'authenticated',
       account,
-      host: "dev.azure.com",
-    });
+      host: 'dev.azure.com',
+    })
   }
 
   return providerAuth({
-    status: "unknown",
-    host: "dev.azure.com",
-    detail: "Azure CLI account status could not be parsed.",
-  });
+    status: 'unknown',
+    host: 'dev.azure.com',
+    detail: 'Azure CLI account status could not be parsed.',
+  })
 }
 
 export const discovery = {
-  type: "cli",
-  kind: "azure-devops",
-  label: "Azure DevOps",
-  executable: "az",
-  versionArgs: ["--version"],
-  authArgs: ["account", "show", "--query", "user.name", "-o", "tsv"],
+  type: 'cli',
+  kind: 'azure-devops',
+  label: 'Azure DevOps',
+  executable: 'az',
+  versionArgs: ['--version'],
+  authArgs: ['account', 'show', '--query', 'user.name', '-o', 'tsv'],
   parseAuth: parseAzureAuth,
   installHint:
-    "Install the Azure command-line tools (`az`), then enable Azure DevOps support with `az extension add --name azure-devops`.",
-} satisfies SourceControlCliDiscoverySpec;
+    'Install the Azure command-line tools (`az`), then enable Azure DevOps support with `az extension add --name azure-devops`.',
+} satisfies SourceControlCliDiscoverySpec
 
 function toChangeRequest(summary: {
-  readonly number: number;
-  readonly title: string;
-  readonly url: string;
-  readonly baseRefName: string;
-  readonly headRefName: string;
-  readonly state: "open" | "closed" | "merged";
-  readonly updatedAt: ChangeRequest["updatedAt"];
-}): ChangeRequest {
+  readonly number: number
+  readonly title: string
+  readonly url: string
+  readonly baseRefName: string
+  readonly headRefName: string
+  readonly state: 'open' | 'closed' | 'merged'
+  readonly updatedAt: ChangeRequest['updatedAt']
+}): ChangeRequest
+{
   return {
-    provider: "azure-devops",
+    provider: 'azure-devops',
     number: summary.number,
     title: summary.title,
     url: summary.url,
@@ -69,16 +73,18 @@ function toChangeRequest(summary: {
     state: summary.state,
     updatedAt: summary.updatedAt,
     isCrossRepository: false,
-  };
+  }
 }
 
-export const make = Effect.gen(function* () {
-  const azure = yield* AzureDevOpsCli.AzureDevOpsCli;
+export const make = Effect.gen(function* ()
+{
+  const azure = yield* AzureDevOpsCli.AzureDevOpsCli
 
   return SourceControlProvider.SourceControlProvider.of({
-    kind: "azure-devops",
-    listChangeRequests: (input) => {
-      const source = SourceControlProvider.sourceControlRefFromInput(input);
+    kind: 'azure-devops',
+    listChangeRequests: (input) =>
+    {
+      const source = SourceControlProvider.sourceControlRefFromInput(input)
       return azure
         .listPullRequests({
           cwd: input.cwd,
@@ -92,8 +98,8 @@ export const make = Effect.gen(function* () {
           Effect.mapError(
             (error) =>
               new SourceControlProviderError({
-                provider: "azure-devops",
-                operation: "listChangeRequests",
+                provider: 'azure-devops',
+                operation: 'listChangeRequests',
                 command: error.command,
                 cwd: input.cwd,
                 reference: SourceControlProvider.transportSafeSourceControlErrorValue(
@@ -103,7 +109,7 @@ export const make = Effect.gen(function* () {
                 cause: error,
               }),
           ),
-        );
+        )
     },
     getChangeRequest: (input) =>
       azure.getPullRequest(input).pipe(
@@ -111,8 +117,8 @@ export const make = Effect.gen(function* () {
         Effect.mapError(
           (error) =>
             new SourceControlProviderError({
-              provider: "azure-devops",
-              operation: "getChangeRequest",
+              provider: 'azure-devops',
+              operation: 'getChangeRequest',
               command: error.command,
               cwd: input.cwd,
               reference: SourceControlProvider.transportSafeSourceControlErrorValue(
@@ -123,8 +129,9 @@ export const make = Effect.gen(function* () {
             }),
         ),
       ),
-    createChangeRequest: (input) => {
-      const source = SourceControlProvider.sourceControlRefFromInput(input);
+    createChangeRequest: (input) =>
+    {
+      const source = SourceControlProvider.sourceControlRefFromInput(input)
       return azure
         .createPullRequest({
           cwd: input.cwd,
@@ -139,8 +146,8 @@ export const make = Effect.gen(function* () {
           Effect.mapError(
             (error) =>
               new SourceControlProviderError({
-                provider: "azure-devops",
-                operation: "createChangeRequest",
+                provider: 'azure-devops',
+                operation: 'createChangeRequest',
                 command: error.command,
                 cwd: input.cwd,
                 reference: SourceControlProvider.transportSafeSourceControlErrorValue(
@@ -150,15 +157,15 @@ export const make = Effect.gen(function* () {
                 cause: error,
               }),
           ),
-        );
+        )
     },
     getRepositoryCloneUrls: (input) =>
       azure.getRepositoryCloneUrls(input).pipe(
         Effect.mapError(
           (error) =>
             new SourceControlProviderError({
-              provider: "azure-devops",
-              operation: "getRepositoryCloneUrls",
+              provider: 'azure-devops',
+              operation: 'getRepositoryCloneUrls',
               command: error.command,
               cwd: input.cwd,
               repository: SourceControlProvider.transportSafeSourceControlErrorValue(
@@ -174,8 +181,8 @@ export const make = Effect.gen(function* () {
         Effect.mapError(
           (error) =>
             new SourceControlProviderError({
-              provider: "azure-devops",
-              operation: "createRepository",
+              provider: 'azure-devops',
+              operation: 'createRepository',
               command: error.command,
               cwd: input.cwd,
               repository: SourceControlProvider.transportSafeSourceControlErrorValue(
@@ -191,8 +198,8 @@ export const make = Effect.gen(function* () {
         Effect.mapError(
           (error) =>
             new SourceControlProviderError({
-              provider: "azure-devops",
-              operation: "getDefaultBranch",
+              provider: 'azure-devops',
+              operation: 'getDefaultBranch',
               command: error.command,
               cwd: input.cwd,
               detail: error.detail,
@@ -211,8 +218,8 @@ export const make = Effect.gen(function* () {
           Effect.mapError(
             (error) =>
               new SourceControlProviderError({
-                provider: "azure-devops",
-                operation: "checkoutChangeRequest",
+                provider: 'azure-devops',
+                operation: 'checkoutChangeRequest',
                 command: error.command,
                 cwd: input.cwd,
                 reference: SourceControlProvider.transportSafeSourceControlErrorValue(
@@ -223,7 +230,7 @@ export const make = Effect.gen(function* () {
               }),
           ),
         ),
-  });
-});
+  })
+})
 
-export const layer = Layer.effect(SourceControlProvider.SourceControlProvider, make);
+export const layer = Layer.effect(SourceControlProvider.SourceControlProvider, make)

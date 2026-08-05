@@ -1,35 +1,40 @@
-import * as Effect from "effect/Effect";
-import * as Console from "effect/Console";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
+// packages/effect-acp/test/examples/cursor-acp-client.example.ts
+// verify cursor acp client example behavior
 
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
+import * as Effect from 'effect/Effect'
+import * as Console from 'effect/Console'
+import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 
-import * as AcpClient from "../../src/client.ts";
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 
-const program = Effect.gen(function* () {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-  const command = ChildProcess.make("cursor-agent", ["acp"], {
+import * as AcpClient from '../../src/client.ts'
+
+const program = Effect.gen(function* ()
+{
+  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const command = ChildProcess.make('cursor-agent', ['acp'], {
     cwd: process.cwd(),
     shell: false,
-  });
-  const handle = yield* spawner.spawn(command);
+  })
+  const handle = yield* spawner.spawn(command)
   const acpLayer = AcpClient.layerChildProcess(handle, {
     logIncoming: true,
     logOutgoing: true,
-  });
+  })
 
-  yield* Effect.gen(function* () {
-    const acp = yield* AcpClient.AcpClient;
+  yield* Effect.gen(function* ()
+  {
+    const acp = yield* AcpClient.AcpClient
 
     yield* acp.handleRequestPermission(() =>
       Effect.succeed({
         outcome: {
-          outcome: "selected",
-          optionId: "allow",
+          outcome: 'selected',
+          optionId: 'allow',
         },
       }),
-    );
+    )
     // yield* acp.handleSessionUpdate((notification) =>
     //   Console.log("session/update", JSON.stringify(notification)),
     // );
@@ -44,38 +49,38 @@ const program = Effect.gen(function* () {
         },
       },
       clientInfo: {
-        name: "effect-acp-example",
-        version: "0.0.0",
+        name: 'effect-acp-example',
+        version: '0.0.0',
       },
-    });
-    yield* Console.log("initialized", initialized);
+    })
+    yield* Console.log('initialized', initialized)
 
     const session = yield* acp.agent.createSession({
       cwd: process.cwd(),
       mcpServers: [],
-    });
+    })
 
     const config = yield* acp.agent.setSessionConfigOption({
       sessionId: session.sessionId,
-      configId: "model",
-      value: "claude-opus-4-6",
-    });
+      configId: 'model',
+      value: 'claude-opus-4-6',
+    })
 
-    yield* Console.log("config", config);
+    yield* Console.log('config', config)
 
     const result = yield* acp.agent.prompt({
       sessionId: session.sessionId,
       prompt: [
         {
-          type: "text",
-          text: "Illustrate your ability to create todo lists and then execute all of them. Do not write the list to disk, illustrate your built in ability!",
+          type: 'text',
+          text: 'Illustrate your ability to create todo lists and then execute all of them. Do not write the list to disk, illustrate your built in ability!',
         },
       ],
-    });
+    })
 
-    yield* Console.log("prompt result", result);
-    yield* acp.agent.cancel({ sessionId: session.sessionId });
-  }).pipe(Effect.provide(acpLayer));
-});
+    yield* Console.log('prompt result', result)
+    yield* acp.agent.cancel({ sessionId: session.sessionId })
+  }).pipe(Effect.provide(acpLayer))
+})
 
-program.pipe(Effect.scoped, Effect.provide(NodeServices.layer), NodeRuntime.runMain);
+program.pipe(Effect.scoped, Effect.provide(NodeServices.layer), NodeRuntime.runMain)

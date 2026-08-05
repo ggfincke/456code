@@ -1,17 +1,21 @@
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "./ui/empty";
-import { SidebarInset } from "./ui/sidebar";
-import { isElectron } from "../env";
-import { cn } from "~/lib/utils";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+// apps/web/src/components/NoActiveThreadState.tsx
+// render no active thread state
 
-export function NoActiveThreadState() {
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from './ui/empty'
+import { SidebarInset } from './ui/sidebar'
+import { isElectron } from '../env'
+import { cn } from '~/lib/utils'
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from '~/workspaceTitlebar'
+
+export function NoActiveThreadState()
+{
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <header
           className={cn(
-            "border-b border-border px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
-            isElectron ? "workspace-topbar drag-region" : "workspace-topbar",
+            'border-b border-border px-3 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5',
+            isElectron ? 'workspace-topbar drag-region' : 'workspace-topbar',
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
@@ -40,5 +44,5 @@ export function NoActiveThreadState() {
         </Empty>
       </div>
     </SidebarInset>
-  );
+  )
 }

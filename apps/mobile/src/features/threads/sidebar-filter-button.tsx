@@ -1,24 +1,27 @@
-import { SymbolView } from "../../components/AppSymbol";
-import { Pressable, StyleSheet, useColorScheme } from "react-native";
+// apps/mobile/src/features/threads/sidebar-filter-button.tsx
+// render sidebar filter button
 
-import { useThemeColor } from "../../lib/useThemeColor";
+import { SymbolView } from '../../components/AppSymbol'
+import { Pressable, StyleSheet, useColorScheme } from 'react-native'
+
+import { useThemeColor } from '../../lib/useThemeColor'
 
 export type SidebarFilterButtonIcon =
-  | "line.3.horizontal.decrease.circle"
-  | "line.3.horizontal.decrease.circle.fill";
+  'line.3.horizontal.decrease.circle' | 'line.3.horizontal.decrease.circle.fill'
 
 export function SidebarFilterButton(props: {
-  readonly accessibilityLabel: string;
-  readonly icon: SidebarFilterButtonIcon;
-  /** Rendered inside a shared capsule group — no own background/border. */
-  readonly grouped?: boolean;
-}) {
-  const iconColor = useThemeColor("--color-foreground");
-  const pressedBackgroundColor = useThemeColor("--color-subtle");
-  const colorScheme = useColorScheme() === "dark" ? "dark" : "light";
+  readonly accessibilityLabel: string
+  readonly icon: SidebarFilterButtonIcon
+  // rendered inside a shared capsule group — no own background/border.
+  readonly grouped?: boolean
+})
+{
+  const iconColor = useThemeColor('--color-foreground')
+  const pressedBackgroundColor = useThemeColor('--color-subtle')
+  const colorScheme = useColorScheme() === 'dark' ? 'dark' : 'light'
   const idleBackgroundColor =
-    colorScheme === "dark" ? "rgba(118,118,128,0.24)" : "rgba(255,255,255,0.72)";
-  const borderColor = colorScheme === "dark" ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.08)";
+    colorScheme === 'dark' ? 'rgba(118,118,128,0.24)' : 'rgba(255,255,255,0.72)'
+  const borderColor = colorScheme === 'dark' ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)'
 
   return (
     <Pressable
@@ -28,7 +31,7 @@ export function SidebarFilterButton(props: {
       hitSlop={4}
       style={({ pressed }) => [
         props.grouped
-          ? { backgroundColor: pressed ? pressedBackgroundColor : "transparent", borderWidth: 0 }
+          ? { backgroundColor: pressed ? pressedBackgroundColor : 'transparent', borderWidth: 0 }
           : {
               backgroundColor: pressed ? pressedBackgroundColor : idleBackgroundColor,
               borderColor,
@@ -38,5 +41,5 @@ export function SidebarFilterButton(props: {
     >
       <SymbolView name={props.icon} size={20} tintColor={iconColor} type="monochrome" />
     </Pressable>
-  );
+  )
 }

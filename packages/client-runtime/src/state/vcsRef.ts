@@ -1,9 +1,13 @@
-import type { EnvironmentId, VcsRef as ContractVcsRef } from "@t3tools/contracts";
+// packages/client-runtime/src/state/vcsRef.ts
+// manage vcs ref target state
 
-export interface VcsRefTarget {
-  readonly environmentId: EnvironmentId | null;
-  readonly cwd: string | null;
-  readonly query?: string | null;
+import type { EnvironmentId, VcsRef as ContractVcsRef } from '@t3tools/contracts'
+
+export interface VcsRefTarget
+{
+  readonly environmentId: EnvironmentId | null
+  readonly cwd: string | null
+  readonly query?: string | null
 }
 
-export type VcsRef = ContractVcsRef;
+export type VcsRef = ContractVcsRef

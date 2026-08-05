@@ -1,26 +1,30 @@
-import { matchers, routes, type Transform, type VercelConfig } from "@vercel/config/v1";
+// apps/web/vercel.ts
+// configure Vercel routing for the web application
 
-const ROUTER_HOST = "app.t3.codes";
-const HOSTED_WEB_CHANNEL_COOKIE = "456code_web_channel";
-const LATEST_ORIGIN = "https://latest.app.t3.codes";
-const NIGHTLY_ORIGIN = "https://nightly.app.t3.codes";
+import { matchers, routes, type Transform, type VercelConfig } from '@vercel/config/v1'
+
+const ROUTER_HOST = 'app.t3.codes'
+const HOSTED_WEB_CHANNEL_COOKIE = '456code_web_channel'
+const LATEST_ORIGIN = 'https://latest.app.t3.codes'
+const NIGHTLY_ORIGIN = 'https://nightly.app.t3.codes'
 const CLEAN_CHANNEL_QUERY_TRANSFORMS = [
   {
-    type: "request.query",
-    op: "delete",
-    target: { key: "channel" },
+    type: 'request.query',
+    op: 'delete',
+    target: { key: 'channel' },
   },
-] satisfies Transform[];
+] satisfies Transform[]
 
-function channelCookie(channel: "latest" | "nightly"): string {
+function channelCookie(channel: 'latest' | 'nightly'): string
+{
   return [
     `${HOSTED_WEB_CHANNEL_COOKIE}=${channel}`,
-    "Path=/",
-    "Max-Age=31536000",
-    "HttpOnly",
-    "Secure",
-    "SameSite=Lax",
-  ].join("; ");
+    'Path=/',
+    'Max-Age=31536000',
+    'HttpOnly',
+    'Secure',
+    'SameSite=Lax',
+  ].join('; ')
 }
 
 export const config: VercelConfig = {
@@ -33,34 +37,34 @@ export const config: VercelConfig = {
     "npm install -g vite-plus && vp install --filter '@t3tools/scripts...' --filter '@t3tools/web...'",
   routes: [
     {
-      src: "/__456code/channel",
-      has: [matchers.query("channel", "nightly")],
+      src: '/__456code/channel',
+      has: [matchers.query('channel', 'nightly')],
       transforms: CLEAN_CHANNEL_QUERY_TRANSFORMS,
       headers: {
-        Location: "/",
-        "Set-Cookie": channelCookie("nightly"),
+        Location: '/',
+        'Set-Cookie': channelCookie('nightly'),
       },
       status: 302,
     },
     {
-      src: "/__456code/channel",
+      src: '/__456code/channel',
       transforms: CLEAN_CHANNEL_QUERY_TRANSFORMS,
       headers: {
-        Location: "/",
-        "Set-Cookie": channelCookie("latest"),
+        Location: '/',
+        'Set-Cookie': channelCookie('latest'),
       },
       status: 302,
     },
     {
-      src: "/(.*)",
-      has: [matchers.host(ROUTER_HOST), matchers.cookie(HOSTED_WEB_CHANNEL_COOKIE, "nightly")],
+      src: '/(.*)',
+      has: [matchers.host(ROUTER_HOST), matchers.cookie(HOSTED_WEB_CHANNEL_COOKIE, 'nightly')],
       dest: `${NIGHTLY_ORIGIN}/$1`,
     },
     {
-      src: "/(.*)",
+      src: '/(.*)',
       has: [matchers.host(ROUTER_HOST)],
       dest: `${LATEST_ORIGIN}/$1`,
     },
   ],
-  rewrites: [routes.rewrite("/(.*)", "/index.html")],
-};
+  rewrites: [routes.rewrite('/(.*)', '/index.html')],
+}

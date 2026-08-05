@@ -1,5 +1,8 @@
-import { createAssetEnvironmentAtoms } from "@t3tools/client-runtime/state/assets";
+// apps/web/src/state/assets.ts
+// manage asset environment state
 
-import { connectionAtomRuntime } from "../connection/runtime";
+import { createAssetEnvironmentAtoms } from '@t3tools/client-runtime/state/assets'
 
-export const assetEnvironment = createAssetEnvironmentAtoms(connectionAtomRuntime);
+import { connectionAtomRuntime } from '../connection/runtime'
+
+export const assetEnvironment = createAssetEnvironmentAtoms(connectionAtomRuntime)

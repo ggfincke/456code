@@ -1,224 +1,235 @@
-import { assert, describe, it } from "@effect/vitest";
-import * as DateTime from "effect/DateTime";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Logger from "effect/Logger";
-import * as Option from "effect/Option";
-import * as PlatformError from "effect/PlatformError";
-import * as References from "effect/References";
+// tests/apps/server/diagnostics/TraceDiagnostics.test.ts
+// verify trace diagnostics behavior
 
-import * as TraceDiagnostics from "../../../../apps/server/src/diagnostics/TraceDiagnostics.ts";
+import { assert, describe, it } from '@effect/vitest'
+import * as DateTime from 'effect/DateTime'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as Logger from 'effect/Logger'
+import * as Option from 'effect/Option'
+import * as PlatformError from 'effect/PlatformError'
+import * as References from 'effect/References'
 
-function ns(ms: number): string {
-  return String(BigInt(ms) * 1_000_000n);
+import * as TraceDiagnostics from '../../../../apps/server/src/diagnostics/TraceDiagnostics.ts'
+
+function ns(ms: number): string
+{
+  return String(BigInt(ms) * 1_000_000n)
 }
 
 function record(input: {
-  readonly name: string;
-  readonly traceId: string;
-  readonly spanId: string;
-  readonly startMs: number;
-  readonly durationMs: number;
-  readonly exit?: { readonly _tag: "Success" | "Failure" | "Interrupted"; readonly cause?: string };
-  readonly events?: ReadonlyArray<unknown>;
-}) {
+  readonly name: string
+  readonly traceId: string
+  readonly spanId: string
+  readonly startMs: number
+  readonly durationMs: number
+  readonly exit?: { readonly _tag: 'Success' | 'Failure' | 'Interrupted'; readonly cause?: string }
+  readonly events?: ReadonlyArray<unknown>
+})
+{
   return JSON.stringify({
-    type: "effect-span",
+    type: 'effect-span',
     name: input.name,
     traceId: input.traceId,
     spanId: input.spanId,
     sampled: true,
-    kind: "internal",
+    kind: 'internal',
     startTimeUnixNano: ns(input.startMs),
     endTimeUnixNano: ns(input.startMs + input.durationMs),
     durationMs: input.durationMs,
     attributes: {},
     events: input.events ?? [],
     links: [],
-    exit: input.exit ?? { _tag: "Success" },
-  });
+    exit: input.exit ?? { _tag: 'Success' },
+  })
 }
 
-describe("TraceDiagnostics", () => {
-  it.effect("aggregates failures, slow spans, log levels, and parse errors", () =>
-    Effect.sync(() => {
+describe('TraceDiagnostics', () =>
+{
+  it.effect('aggregates failures, slow spans, log levels, and parse errors', () =>
+    Effect.sync(() =>
+    {
       const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
-        traceFilePath: "/tmp/server.trace.ndjson",
-        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
+        traceFilePath: '/tmp/server.trace.ndjson',
+        readAt: DateTime.makeUnsafe('2026-05-05T10:00:00.000Z'),
         slowSpanThresholdMs: 1_000,
         files: [
           {
-            path: "/tmp/server.trace.ndjson.1",
+            path: '/tmp/server.trace.ndjson.1',
             text: [
               record({
-                name: "server.getConfig",
-                traceId: "trace-a",
-                spanId: "span-a",
+                name: 'server.getConfig',
+                traceId: 'trace-a',
+                spanId: 'span-a',
                 startMs: 1_000,
                 durationMs: 50,
               }),
-              "not-json",
-            ].join("\n"),
+              'not-json',
+            ].join('\n'),
           },
           {
-            path: "/tmp/server.trace.ndjson",
+            path: '/tmp/server.trace.ndjson',
             text: [
               record({
-                name: "orchestration.dispatch",
-                traceId: "trace-b",
-                spanId: "span-b",
+                name: 'orchestration.dispatch',
+                traceId: 'trace-b',
+                spanId: 'span-b',
                 startMs: 2_000,
                 durationMs: 1_500,
-                exit: { _tag: "Failure", cause: "Provider crashed" },
+                exit: { _tag: 'Failure', cause: 'Provider crashed' },
                 events: [
                   {
-                    name: "provider failed",
+                    name: 'provider failed',
                     timeUnixNano: ns(3_400),
-                    attributes: { "effect.logLevel": "Error" },
+                    attributes: { 'effect.logLevel': 'Error' },
                   },
                 ],
               }),
               record({
-                name: "orchestration.dispatch",
-                traceId: "trace-c",
-                spanId: "span-c",
+                name: 'orchestration.dispatch',
+                traceId: 'trace-c',
+                spanId: 'span-c',
                 startMs: 4_000,
                 durationMs: 250,
-                exit: { _tag: "Failure", cause: "Provider crashed" },
+                exit: { _tag: 'Failure', cause: 'Provider crashed' },
               }),
               record({
-                name: "git.status",
-                traceId: "trace-d",
-                spanId: "span-d",
+                name: 'git.status',
+                traceId: 'trace-d',
+                spanId: 'span-d',
                 startMs: 5_000,
                 durationMs: 25,
-                exit: { _tag: "Interrupted", cause: "Interrupted" },
+                exit: { _tag: 'Interrupted', cause: 'Interrupted' },
                 events: [
                   {
-                    name: "status delayed",
+                    name: 'status delayed',
                     timeUnixNano: ns(5_010),
-                    attributes: { "effect.logLevel": "Warning" },
+                    attributes: { 'effect.logLevel': 'Warning' },
                   },
                 ],
               }),
-            ].join("\n"),
+            ].join('\n'),
           },
         ],
-      });
+      })
 
-      assert.equal(diagnostics.recordCount, 4);
-      assert.equal(DateTime.formatIso(diagnostics.readAt), "2026-05-05T10:00:00.000Z");
+      assert.equal(diagnostics.recordCount, 4)
+      assert.equal(DateTime.formatIso(diagnostics.readAt), '2026-05-05T10:00:00.000Z')
       assert.equal(
         Option.match(diagnostics.firstSpanAt, {
           onNone: () => null,
           onSome: DateTime.formatIso,
         }),
-        "1970-01-01T00:00:01.000Z",
-      );
+        '1970-01-01T00:00:01.000Z',
+      )
       assert.equal(
         Option.match(diagnostics.lastSpanAt, {
           onNone: () => null,
           onSome: DateTime.formatIso,
         }),
-        "1970-01-01T00:00:05.025Z",
-      );
-      assert.equal(diagnostics.parseErrorCount, 1);
-      assert.equal(diagnostics.failureCount, 2);
-      assert.equal(diagnostics.interruptionCount, 1);
-      assert.equal(diagnostics.slowSpanCount, 1);
-      assert.equal(diagnostics.logLevelCounts.Error, 1);
-      assert.equal(diagnostics.logLevelCounts.Warning, 1);
-      assert.equal(diagnostics.commonFailures[0]?.name, "orchestration.dispatch");
-      assert.equal(diagnostics.commonFailures[0]?.count, 2);
-      assert.equal(diagnostics.latestFailures[0]?.traceId, "trace-c");
-      assert.equal(diagnostics.slowestSpans[0]?.traceId, "trace-b");
-      assert.equal(diagnostics.latestWarningAndErrorLogs[0]?.message, "status delayed");
-      assert.equal(diagnostics.topSpansByCount[0]?.name, "orchestration.dispatch");
+        '1970-01-01T00:00:05.025Z',
+      )
+      assert.equal(diagnostics.parseErrorCount, 1)
+      assert.equal(diagnostics.failureCount, 2)
+      assert.equal(diagnostics.interruptionCount, 1)
+      assert.equal(diagnostics.slowSpanCount, 1)
+      assert.equal(diagnostics.logLevelCounts.Error, 1)
+      assert.equal(diagnostics.logLevelCounts.Warning, 1)
+      assert.equal(diagnostics.commonFailures[0]?.name, 'orchestration.dispatch')
+      assert.equal(diagnostics.commonFailures[0]?.count, 2)
+      assert.equal(diagnostics.latestFailures[0]?.traceId, 'trace-c')
+      assert.equal(diagnostics.slowestSpans[0]?.traceId, 'trace-b')
+      assert.equal(diagnostics.latestWarningAndErrorLogs[0]?.message, 'status delayed')
+      assert.equal(diagnostics.topSpansByCount[0]?.name, 'orchestration.dispatch')
     }),
-  );
+  )
 
-  it.effect("returns a not-found diagnostic when no files are available", () =>
-    Effect.sync(() => {
+  it.effect('returns a not-found diagnostic when no files are available', () =>
+    Effect.sync(() =>
+    {
       const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
-        traceFilePath: "/tmp/missing.trace.ndjson",
-        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
+        traceFilePath: '/tmp/missing.trace.ndjson',
+        readAt: DateTime.makeUnsafe('2026-05-05T10:00:00.000Z'),
         files: [],
-      });
+      })
 
-      assert.equal(diagnostics.recordCount, 0);
-      assert.equal(Option.getOrUndefined(diagnostics.error)?.kind, "trace-file-not-found");
+      assert.equal(diagnostics.recordCount, 0)
+      assert.equal(Option.getOrUndefined(diagnostics.error)?.kind, 'trace-file-not-found')
     }),
-  );
+  )
 
-  it.effect("preserves full failure causes and log messages", () =>
-    Effect.sync(() => {
-      const longCause = `VcsProcessSpawnError: ${"missing executable ".repeat(80)}`.trim();
-      const longMessage = `provider warning: ${"retrying command ".repeat(80)}`.trim();
+  it.effect('preserves full failure causes and log messages', () =>
+    Effect.sync(() =>
+    {
+      const longCause = `VcsProcessSpawnError: ${'missing executable '.repeat(80)}`.trim()
+      const longMessage = `provider warning: ${'retrying command '.repeat(80)}`.trim()
       const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
-        traceFilePath: "/tmp/server.trace.ndjson",
-        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
+        traceFilePath: '/tmp/server.trace.ndjson',
+        readAt: DateTime.makeUnsafe('2026-05-05T10:00:00.000Z'),
         files: [
           {
-            path: "/tmp/server.trace.ndjson",
+            path: '/tmp/server.trace.ndjson',
             text: record({
-              name: "VcsProcess.run",
-              traceId: "trace-long",
-              spanId: "span-long",
+              name: 'VcsProcess.run',
+              traceId: 'trace-long',
+              spanId: 'span-long',
               startMs: 1_000,
               durationMs: 25,
-              exit: { _tag: "Failure", cause: longCause },
+              exit: { _tag: 'Failure', cause: longCause },
               events: [
                 {
                   name: longMessage,
                   timeUnixNano: ns(1_010),
-                  attributes: { "effect.logLevel": "Warning" },
+                  attributes: { 'effect.logLevel': 'Warning' },
                 },
               ],
             }),
           },
         ],
-      });
+      })
 
-      assert.equal(diagnostics.latestFailures[0]?.cause, longCause);
-      assert.equal(diagnostics.commonFailures[0]?.cause, longCause);
-      assert.equal(diagnostics.latestWarningAndErrorLogs[0]?.message, longMessage);
+      assert.equal(diagnostics.latestFailures[0]?.cause, longCause)
+      assert.equal(diagnostics.commonFailures[0]?.cause, longCause)
+      assert.equal(diagnostics.latestWarningAndErrorLogs[0]?.message, longMessage)
     }),
-  );
+  )
 
-  it.effect("keeps loaded trace data when one rotated trace file fails to read", () =>
-    Effect.gen(function* () {
-      const traceFilePath = "/tmp/server.trace.ndjson";
+  it.effect('keeps loaded trace data when one rotated trace file fails to read', () =>
+    Effect.gen(function* ()
+    {
+      const traceFilePath = '/tmp/server.trace.ndjson'
       const readFailure = PlatformError.systemError({
-        _tag: "PermissionDenied",
-        module: "FileSystem",
-        method: "readFileString",
-        description: "permission denied",
+        _tag: 'PermissionDenied',
+        module: 'FileSystem',
+        method: 'readFileString',
+        description: 'permission denied',
         pathOrDescriptor: `${traceFilePath}.1`,
-      });
+      })
       const fileSystemLayer = FileSystem.layerNoop({
         readFileString: (path) =>
           path === `${traceFilePath}.1`
             ? Effect.fail(readFailure)
             : Effect.succeed(
                 record({
-                  name: "server.getConfig",
-                  traceId: "trace-a",
-                  spanId: "span-a",
+                  name: 'server.getConfig',
+                  traceId: 'trace-a',
+                  spanId: 'span-a',
                   startMs: 1_000,
                   durationMs: 50,
                 }),
               ),
-      });
-      const logAnnotations: Array<Record<string, unknown>> = [];
-      const logger = Logger.make<unknown, void>((options) => {
-        logAnnotations.push({ ...options.fiber.getRef(References.CurrentLogAnnotations) });
-      });
+      })
+      const logAnnotations: Array<Record<string, unknown>> = []
+      const logger = Logger.make<unknown, void>((options) =>
+      {
+        logAnnotations.push({ ...options.fiber.getRef(References.CurrentLogAnnotations) })
+      })
 
       const diagnostics = yield* TraceDiagnostics.readTraceDiagnostics({
         traceFilePath,
         maxFiles: 1,
-        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
+        readAt: DateTime.makeUnsafe('2026-05-05T10:00:00.000Z'),
       }).pipe(
         Effect.provide(
           Layer.mergeAll(
@@ -226,39 +237,40 @@ describe("TraceDiagnostics", () => {
             Logger.layer([logger], { mergeWithExisting: false }),
           ),
         ),
-      );
+      )
 
-      assert.equal(diagnostics.recordCount, 1);
+      assert.equal(diagnostics.recordCount, 1)
       assert.equal(
         Option.getOrElse(diagnostics.partialFailure, () => false),
         true,
-      );
+      )
       assert.deepStrictEqual(Option.getOrUndefined(diagnostics.error), {
-        kind: "trace-file-read-failed",
+        kind: 'trace-file-read-failed',
         message: `Failed to read local trace file '${traceFilePath}.1'.`,
-      });
-      assert.deepStrictEqual(diagnostics.scannedFilePaths, [`${traceFilePath}.1`, traceFilePath]);
+      })
+      assert.deepStrictEqual(diagnostics.scannedFilePaths, [`${traceFilePath}.1`, traceFilePath])
 
       const failureLog = logAnnotations.find(
         (annotations) => annotations.traceFilePath === `${traceFilePath}.1`,
-      );
-      assert.exists(failureLog);
+      )
+      assert.exists(failureLog)
       assert.deepStrictEqual(failureLog, {
         traceFilePath: `${traceFilePath}.1`,
-        errorTag: "TraceFileReadError",
-        causeTag: "PermissionDenied",
-      });
+        errorTag: 'TraceFileReadError',
+        causeTag: 'PermissionDenied',
+      })
     }),
-  );
+  )
 
-  it.effect("keeps only the slowest span occurrences while aggregating large inputs", () =>
-    Effect.sync(() => {
+  it.effect('keeps only the slowest span occurrences while aggregating large inputs', () =>
+    Effect.sync(() =>
+    {
       const diagnostics = TraceDiagnostics.aggregateTraceDiagnostics({
-        traceFilePath: "/tmp/server.trace.ndjson",
-        readAt: DateTime.makeUnsafe("2026-05-05T10:00:00.000Z"),
+        traceFilePath: '/tmp/server.trace.ndjson',
+        readAt: DateTime.makeUnsafe('2026-05-05T10:00:00.000Z'),
         files: [
           {
-            path: "/tmp/server.trace.ndjson",
+            path: '/tmp/server.trace.ndjson',
             text: Array.from({ length: 25 }, (_, index) =>
               record({
                 name: `span-${index}`,
@@ -267,17 +279,17 @@ describe("TraceDiagnostics", () => {
                 startMs: index * 1_000,
                 durationMs: index,
               }),
-            ).join("\n"),
+            ).join('\n'),
           },
         ],
-      });
+      })
 
-      assert.equal(diagnostics.recordCount, 25);
-      assert.equal(diagnostics.slowestSpans.length, 10);
+      assert.equal(diagnostics.recordCount, 25)
+      assert.equal(diagnostics.slowestSpans.length, 10)
       assert.deepStrictEqual(
         diagnostics.slowestSpans.map((span) => span.durationMs),
         [24, 23, 22, 21, 20, 19, 18, 17, 16, 15],
-      );
+      )
     }),
-  );
-});
+  )
+})

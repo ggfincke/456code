@@ -1,11 +1,12 @@
 // apps/server/src/persistence/Migrations/038_ProposalGenerations.ts
 // stores bounded cartographer analysis jobs and authenticated artifacts
 
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS proposal_generations (
@@ -36,15 +37,15 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_proposal_generations_revision_created
     ON proposal_generations(revision_id, created_at DESC)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_proposal_generations_thread_state
     ON proposal_generations(thread_id, state, created_at DESC)
-  `;
-});
+  `
+})

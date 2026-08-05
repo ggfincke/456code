@@ -1,22 +1,27 @@
-import { assert, it } from "@effect/vitest";
+// tests/apps/server/codexModelOptions.test.ts
+// verify codex model options behavior
 
-import { ProviderInstanceId } from "@t3tools/contracts";
-import { createModelSelection } from "@t3tools/shared/model";
+import { assert, it } from '@effect/vitest'
 
-import { getCodexServiceTierOptionValue } from "../../../apps/server/src/codexModelOptions.ts";
+import { ProviderInstanceId } from '@t3tools/contracts'
+import { createModelSelection } from '@t3tools/shared/model'
 
-it("returns the selected Codex service tier id", () => {
-  const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.5", [
-    { id: "serviceTier", value: "flex" },
-  ]);
+import { getCodexServiceTierOptionValue } from '../../../apps/server/src/codexModelOptions.ts'
 
-  assert.equal(getCodexServiceTierOptionValue(selection), "flex");
-});
+it('returns the selected Codex service tier id', () =>
+{
+  const selection = createModelSelection(ProviderInstanceId.make('codex'), 'gpt-5.5', [
+    { id: 'serviceTier', value: 'flex' },
+  ])
 
-it("keeps legacy persisted fast mode selections working", () => {
-  const selection = createModelSelection(ProviderInstanceId.make("codex"), "gpt-5.4", [
-    { id: "fastMode", value: true },
-  ]);
+  assert.equal(getCodexServiceTierOptionValue(selection), 'flex')
+})
 
-  assert.equal(getCodexServiceTierOptionValue(selection), "fast");
-});
+it('keeps legacy persisted fast mode selections working', () =>
+{
+  const selection = createModelSelection(ProviderInstanceId.make('codex'), 'gpt-5.4', [
+    { id: 'fastMode', value: true },
+  ])
+
+  assert.equal(getCodexServiceTierOptionValue(selection), 'fast')
+})

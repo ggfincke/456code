@@ -1,11 +1,14 @@
-import { type TurnId } from "@t3tools/contracts";
-import { memo, useCallback, useMemo, useState } from "react";
-import { type TurnDiffFileChange } from "../../types";
+// apps/web/src/components/chat/ChangedFilesTree.tsx
+// render changed files tree
+
+import { type TurnId } from '@t3tools/contracts'
+import { memo, useCallback, useMemo, useState } from 'react'
+import { type TurnDiffFileChange } from '../../types'
 import {
   buildTurnDiffTree,
   summarizeTurnDiffStats,
   type TurnDiffTreeNode,
-} from "../../lib/turnDiffTree";
+} from '../../lib/turnDiffTree'
 import {
   ChevronsDownUpIcon,
   ChevronsUpDownIcon,
@@ -13,31 +16,32 @@ import {
   FileDiffIcon,
   FolderIcon,
   FolderClosedIcon,
-} from "lucide-react";
-import { cn } from "~/lib/utils";
-import { DiffStatLabel, hasNonZeroStat } from "./DiffStatLabel";
-import { PierreEntryIcon } from "./PierreEntryIcon";
-import { Button } from "../ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+} from 'lucide-react'
+import { cn } from '~/lib/utils'
+import { DiffStatLabel, hasNonZeroStat } from './DiffStatLabel'
+import { PierreEntryIcon } from './PierreEntryIcon'
+import { Button } from '../ui/button'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 import {
   changedFileName,
   selectChangedFilePreview,
   summarizeChangedFileScopes,
-} from "./changedFilesPresentation";
+} from './changedFilesPresentation'
 
-const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {};
+const EMPTY_DIRECTORY_OVERRIDES: Record<string, boolean> = {}
 
 export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
-  turnId: TurnId;
-  files: ReadonlyArray<TurnDiffFileChange>;
-  expanded: boolean;
-  showCompactPreview: boolean;
-  allDirectoriesExpanded: boolean;
-  resolvedTheme: "light" | "dark";
-  onExpandedChange: (expanded: boolean) => void;
-  onToggleAllDirectories: () => void;
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-}) {
+  turnId: TurnId
+  files: ReadonlyArray<TurnDiffFileChange>
+  expanded: boolean
+  showCompactPreview: boolean
+  allDirectoriesExpanded: boolean
+  resolvedTheme: 'light' | 'dark'
+  onExpandedChange: (expanded: boolean) => void
+  onToggleAllDirectories: () => void
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void
+})
+{
   const {
     turnId,
     files,
@@ -48,24 +52,24 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
     onExpandedChange,
     onToggleAllDirectories,
     onOpenTurnDiff,
-  } = props;
-  const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files]);
-  const scopeSummary = useMemo(() => summarizeChangedFileScopes(files), [files]);
-  const previewFiles = useMemo(() => selectChangedFilePreview(files), [files]);
-  const compactPreviewVisible = showCompactPreview && !expanded;
+  } = props
+  const summaryStat = useMemo(() => summarizeTurnDiffStats(files), [files])
+  const scopeSummary = useMemo(() => summarizeChangedFileScopes(files), [files])
+  const previewFiles = useMemo(() => selectChangedFilePreview(files), [files])
+  const compactPreviewVisible = showCompactPreview && !expanded
 
   return (
     <div
       className="mt-4 rounded-2xl border border-border/70 bg-secondary p-2 dark:border-transparent dark:bg-input/32"
       data-changed-files-state={
-        expanded ? "expanded" : compactPreviewVisible ? "preview" : "collapsed"
+        expanded ? 'expanded' : compactPreviewVisible ? 'preview' : 'collapsed'
       }
     >
       <div
         className={cn(
-          "flex items-center justify-between gap-2 rounded-xl px-1",
+          'flex items-center justify-between gap-2 rounded-xl px-1',
           expanded &&
-            "sticky top-2 z-10 mb-2 bg-secondary dark:bg-[color-mix(in_srgb,var(--foreground)_2.5%,var(--background))]",
+            'sticky top-2 z-10 mb-2 bg-secondary dark:bg-[color-mix(in_srgb,var(--foreground)_2.5%,var(--background))]',
         )}
       >
         <button
@@ -78,13 +82,13 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
           <ChevronRightIcon
             aria-hidden="true"
             className={cn(
-              "size-3.5 shrink-0 text-muted-foreground transition-transform",
-              expanded && "rotate-90",
+              'size-3.5 shrink-0 text-muted-foreground transition-transform',
+              expanded && 'rotate-90',
             )}
           />
           <span className="flex min-w-0 items-center gap-1 whitespace-nowrap font-medium text-foreground text-xs leading-4">
             <span>
-              {files.length} changed file{files.length === 1 ? "" : "s"}
+              {files.length} changed file{files.length === 1 ? '' : 's'}
             </span>
             {hasNonZeroStat(summaryStat) && (
               <DiffStatLabel
@@ -96,7 +100,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
             )}
           </span>
           <span className="ml-1 hidden truncate text-[11px] text-muted-foreground group-hover:text-foreground/80 sm:inline">
-            {expanded ? "Hide files" : "Show files"}
+            {expanded ? 'Hide files' : 'Show files'}
           </span>
         </button>
         <div className="flex items-center gap-1.5">
@@ -110,7 +114,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                     variant="outline"
                     className="!size-[22px]"
                     aria-label={
-                      allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"
+                      allDirectoriesExpanded ? 'Collapse all folders' : 'Expand all folders'
                     }
                     data-scroll-anchor-ignore
                     onClick={onToggleAllDirectories}
@@ -124,7 +128,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                 )}
               </TooltipTrigger>
               <TooltipPopup side="top">
-                {allDirectoriesExpanded ? "Collapse all folders" : "Expand all folders"}
+                {allDirectoriesExpanded ? 'Collapse all folders' : 'Expand all folders'}
               </TooltipPopup>
             </Tooltip>
           ) : null}
@@ -164,7 +168,7 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
                 {index > 0 ? <span aria-hidden="true">·</span> : null}
                 <span className="font-mono text-foreground/75">{scope.label}</span>
                 <span>
-                  {scope.fileCount} file{scope.fileCount === 1 ? "" : "s"}
+                  {scope.fileCount} file{scope.fileCount === 1 ? '' : 's'}
                 </span>
               </span>
             ))}
@@ -198,56 +202,61 @@ export const ChangedFilesCard = memo(function ChangedFilesCard(props: {
         </div>
       ) : null}
     </div>
-  );
-});
+  )
+})
 
 export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
-  turnId: TurnId;
-  files: ReadonlyArray<TurnDiffFileChange>;
-  allDirectoriesExpanded: boolean;
-  resolvedTheme: "light" | "dark";
-  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void;
-}) {
-  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props;
-  const treeNodes = useMemo(() => buildTurnDiffTree(files), [files]);
+  turnId: TurnId
+  files: ReadonlyArray<TurnDiffFileChange>
+  allDirectoriesExpanded: boolean
+  resolvedTheme: 'light' | 'dark'
+  onOpenTurnDiff: (turnId: TurnId, filePath?: string) => void
+})
+{
+  const { files, allDirectoriesExpanded, onOpenTurnDiff, resolvedTheme, turnId } = props
+  const treeNodes = useMemo(() => buildTurnDiffTree(files), [files])
   const directoryPathsKey = useMemo(
-    () => collectDirectoryPaths(treeNodes).join("\u0000"),
+    () => collectDirectoryPaths(treeNodes).join('\u0000'),
     [treeNodes],
-  );
-  const hasDirectoryNodes = directoryPathsKey.length > 0;
-  const expansionStateKey = `${allDirectoriesExpanded ? "expanded" : "collapsed"}\u0000${directoryPathsKey}`;
+  )
+  const hasDirectoryNodes = directoryPathsKey.length > 0
+  const expansionStateKey = `${allDirectoriesExpanded ? 'expanded' : 'collapsed'}\u0000${directoryPathsKey}`
   const [directoryExpansionState, setDirectoryExpansionState] = useState<{
-    key: string;
-    overrides: Record<string, boolean>;
+    key: string
+    overrides: Record<string, boolean>
   }>(() => ({
     key: expansionStateKey,
     overrides: {},
-  }));
+  }))
   const expandedDirectories =
     directoryExpansionState.key === expansionStateKey
       ? directoryExpansionState.overrides
-      : EMPTY_DIRECTORY_OVERRIDES;
+      : EMPTY_DIRECTORY_OVERRIDES
 
   const toggleDirectory = useCallback(
-    (pathValue: string) => {
-      setDirectoryExpansionState((current) => {
-        const nextOverrides = current.key === expansionStateKey ? current.overrides : {};
+    (pathValue: string) =>
+    {
+      setDirectoryExpansionState((current) =>
+      {
+        const nextOverrides = current.key === expansionStateKey ? current.overrides : {}
         return {
           key: expansionStateKey,
           overrides: {
             ...nextOverrides,
             [pathValue]: !(nextOverrides[pathValue] ?? allDirectoriesExpanded),
           },
-        };
-      });
+        }
+      })
     },
     [allDirectoriesExpanded, expansionStateKey],
-  );
+  )
 
-  const renderTreeNode = (node: TurnDiffTreeNode, depth: number) => {
-    const leftPadding = 8 + depth * 14;
-    if (node.kind === "directory") {
-      const isExpanded = expandedDirectories[node.path] ?? allDirectoriesExpanded;
+  const renderTreeNode = (node: TurnDiffTreeNode, depth: number) =>
+  {
+    const leftPadding = 8 + depth * 14
+    if (node.kind === 'directory')
+    {
+      const isExpanded = expandedDirectories[node.path] ?? allDirectoriesExpanded
       return (
         <div key={`dir:${node.path}`}>
           <button
@@ -260,8 +269,8 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
             <ChevronRightIcon
               aria-hidden="true"
               className={cn(
-                "size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-hover:text-foreground/80",
-                isExpanded && "rotate-90",
+                'size-3.5 shrink-0 text-muted-foreground/70 transition-transform group-hover:text-foreground/80',
+                isExpanded && 'rotate-90',
               )}
             />
             {isExpanded ? (
@@ -284,7 +293,7 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
             </div>
           )}
         </div>
-      );
+      )
     }
 
     return (
@@ -313,18 +322,20 @@ export const ChangedFilesTree = memo(function ChangedFilesTree(props: {
           </span>
         )}
       </button>
-    );
-  };
-
-  return <div className="space-y-0.5">{treeNodes.map((node) => renderTreeNode(node, 0))}</div>;
-});
-
-function collectDirectoryPaths(nodes: ReadonlyArray<TurnDiffTreeNode>): string[] {
-  const paths: string[] = [];
-  for (const node of nodes) {
-    if (node.kind !== "directory") continue;
-    paths.push(node.path);
-    paths.push(...collectDirectoryPaths(node.children));
+    )
   }
-  return paths;
+
+  return <div className="space-y-0.5">{treeNodes.map((node) => renderTreeNode(node, 0))}</div>
+})
+
+function collectDirectoryPaths(nodes: ReadonlyArray<TurnDiffTreeNode>): string[]
+{
+  const paths: string[] = []
+  for (const node of nodes)
+  {
+    if (node.kind !== 'directory') continue
+    paths.push(node.path)
+    paths.push(...collectDirectoryPaths(node.children))
+  }
+  return paths
 }

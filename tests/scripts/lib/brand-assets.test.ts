@@ -1,63 +1,67 @@
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   BRAND_ASSET_PATHS,
   DEVELOPMENT_PUBLIC_ICON_OVERRIDES,
   resolveWebIconOverrides,
-} from "../../../scripts/lib/brand-assets.ts";
+} from '../../../scripts/lib/brand-assets.ts'
 
-describe("brand-assets", () => {
-  it("maps production and development web icon overrides", () => {
-    expect(resolveWebIconOverrides("production", "dist/client")).toEqual([
+describe('brand-assets', () =>
+{
+  it('maps production and development web icon overrides', () =>
+  {
+    expect(resolveWebIconOverrides('production', 'dist/client')).toEqual([
       {
         sourceRelativePath: BRAND_ASSET_PATHS.productionWebFaviconIco,
-        targetRelativePath: "dist/client/favicon.ico",
+        targetRelativePath: 'dist/client/favicon.ico',
       },
       {
         sourceRelativePath: BRAND_ASSET_PATHS.productionWebFavicon16Png,
-        targetRelativePath: "dist/client/favicon-16x16.png",
+        targetRelativePath: 'dist/client/favicon-16x16.png',
       },
       {
         sourceRelativePath: BRAND_ASSET_PATHS.productionWebFavicon32Png,
-        targetRelativePath: "dist/client/favicon-32x32.png",
+        targetRelativePath: 'dist/client/favicon-32x32.png',
       },
       {
         sourceRelativePath: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
-        targetRelativePath: "dist/client/apple-touch-icon.png",
+        targetRelativePath: 'dist/client/apple-touch-icon.png',
       },
-    ]);
+    ])
 
     expect(DEVELOPMENT_PUBLIC_ICON_OVERRIDES).toEqual([
       {
         sourceRelativePath: BRAND_ASSET_PATHS.developmentWebFaviconIco,
-        targetRelativePath: "apps/web/public/favicon.ico",
+        targetRelativePath: 'apps/web/public/favicon.ico',
       },
       {
         sourceRelativePath: BRAND_ASSET_PATHS.developmentWebFavicon16Png,
-        targetRelativePath: "apps/web/public/favicon-16x16.png",
+        targetRelativePath: 'apps/web/public/favicon-16x16.png',
       },
       {
         sourceRelativePath: BRAND_ASSET_PATHS.developmentWebFavicon32Png,
-        targetRelativePath: "apps/web/public/favicon-32x32.png",
+        targetRelativePath: 'apps/web/public/favicon-32x32.png',
       },
       {
         sourceRelativePath: BRAND_ASSET_PATHS.developmentWebAppleTouchIconPng,
-        targetRelativePath: "apps/web/public/apple-touch-icon.png",
+        targetRelativePath: 'apps/web/public/apple-touch-icon.png',
       },
-    ]);
-  });
+    ])
+  })
 
-  it("can target hosted web dist directly", () => {
-    expect(resolveWebIconOverrides("production", "apps/web/dist")).toContainEqual({
+  it('can target hosted web dist directly', () =>
+  {
+    expect(resolveWebIconOverrides('production', 'apps/web/dist')).toContainEqual({
       sourceRelativePath: BRAND_ASSET_PATHS.productionWebAppleTouchIconPng,
-      targetRelativePath: "apps/web/dist/apple-touch-icon.png",
-    });
-  });
+      targetRelativePath: 'apps/web/dist/apple-touch-icon.png',
+    })
+  })
 
-  it("maps hosted nightly web assets to nightly icons", () => {
-    expect(resolveWebIconOverrides("nightly", "apps/web/dist")).toContainEqual({
+  it('maps hosted nightly web assets to nightly icons', () =>
+  {
+    expect(resolveWebIconOverrides('nightly', 'apps/web/dist')).toContainEqual({
       sourceRelativePath: BRAND_ASSET_PATHS.nightlyWebFaviconIco,
-      targetRelativePath: "apps/web/dist/favicon.ico",
-    });
-  });
-});
+      targetRelativePath: 'apps/web/dist/favicon.ico',
+    })
+  })
+})

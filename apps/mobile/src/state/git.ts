@@ -1,5 +1,8 @@
-import { createGitEnvironmentAtoms } from "@t3tools/client-runtime/state/git";
+// apps/mobile/src/state/git.ts
+// manage git environment state
 
-import { connectionAtomRuntime } from "../connection/runtime";
+import { createGitEnvironmentAtoms } from '@t3tools/client-runtime/state/git'
 
-export const gitEnvironment = createGitEnvironmentAtoms(connectionAtomRuntime);
+import { connectionAtomRuntime } from '../connection/runtime'
+
+export const gitEnvironment = createGitEnvironmentAtoms(connectionAtomRuntime)

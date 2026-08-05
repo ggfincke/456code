@@ -1,14 +1,17 @@
-export const browserApiCorsAllowedMethods = ["GET", "POST", "OPTIONS"] as const;
+// apps/server/src/httpCors.ts
+// expose browser api cors allowed methods
+
+export const browserApiCorsAllowedMethods = ['GET', 'POST', 'OPTIONS'] as const
 export const browserApiCorsAllowedHeaders = [
-  "authorization",
-  "b3",
-  "traceparent",
-  "content-type",
-  "dpop",
-] as const;
+  'authorization',
+  'b3',
+  'traceparent',
+  'content-type',
+  'dpop',
+] as const
 
 export const browserApiCorsHeaders = {
-  "access-control-allow-origin": "*",
-  "access-control-allow-methods": browserApiCorsAllowedMethods.join(", "),
-  "access-control-allow-headers": browserApiCorsAllowedHeaders.join(", "),
-} as const;
+  'access-control-allow-origin': '*',
+  'access-control-allow-methods': browserApiCorsAllowedMethods.join(', '),
+  'access-control-allow-headers': browserApiCorsAllowedHeaders.join(', '),
+} as const

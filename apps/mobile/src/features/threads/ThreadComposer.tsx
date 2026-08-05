@@ -1,6 +1,6 @@
 // apps/mobile/src/features/threads/ThreadComposer.tsx
 // renders and controls the mobile thread message composer
-import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
+import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
 import type {
   EnvironmentId,
   MessageId,
@@ -10,15 +10,15 @@ import type {
   RuntimeMode,
   ServerConfig,
   ServerProviderSkill,
-} from "@t3tools/contracts";
+} from '@t3tools/contracts'
 import {
   detectComposerTrigger,
   replaceTextRange,
   serializeComposerFileLink,
   type ComposerTrigger,
-} from "@t3tools/shared/composerTrigger";
-import type { ReactNode } from "react";
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
+} from '@t3tools/shared/composerTrigger'
+import type { ReactNode } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type RefObject } from 'react'
 import {
   ActivityIndicator,
   Image,
@@ -27,79 +27,82 @@ import {
   useColorScheme,
   View,
   type ViewStyle,
-} from "react-native";
-import ImageViewing from "react-native-image-viewing";
+} from 'react-native'
+import ImageViewing from 'react-native-image-viewing'
 import Animated, {
   FadeIn,
   FadeInDown,
   FadeOut,
   FadeOutDown,
   LinearTransition,
-} from "react-native-reanimated";
-import { useThemeColor } from "../../lib/useThemeColor";
-import { armAgentAwarenessLiveActivityForLocalWork } from "../agent-awareness/remoteRegistration";
-import { scopedThreadKey } from "../../lib/scopedEntities";
+} from 'react-native-reanimated'
+import { useThemeColor } from '../../lib/useThemeColor'
+import { armAgentAwarenessLiveActivityForLocalWork } from '../agent-awareness/remoteRegistration'
+import { scopedThreadKey } from '../../lib/scopedEntities'
 
-import { AppText as Text } from "../../components/AppText";
-import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
+import { AppText as Text } from '../../components/AppText'
+import { ComposerAttachmentStrip } from '../../components/ComposerAttachmentStrip'
 import {
   ComposerEditor,
   type ComposerEditorHandle,
   type ComposerEditorSelection,
-} from "../../components/ComposerEditor";
+} from '../../components/ComposerEditor'
 import {
   ComposerToolbarButton,
   ComposerToolbarRow,
   ComposerToolbarScroller,
   ComposerToolbarTrigger,
-} from "../../components/ComposerToolbarTrigger";
-import { ControlPill, ControlPillMenu } from "../../components/ControlPill";
-import { ProviderIcon } from "../../components/ProviderIcon";
-import type { DraftComposerImageAttachment } from "../../lib/composerImages";
-import { buildModelOptions, groupByProvider } from "../../lib/modelOptions";
-import { useScaledTextRole } from "../settings/appearance/useScaledTextRole";
-import type { RemoteClientConnectionState } from "../../lib/connection";
+} from '../../components/ComposerToolbarTrigger'
+import { ControlPill, ControlPillMenu } from '../../components/ControlPill'
+import { ProviderIcon } from '../../components/ProviderIcon'
+import type { DraftComposerImageAttachment } from '../../lib/composerImages'
+import { buildModelOptions, groupByProvider } from '../../lib/modelOptions'
+import { useScaledTextRole } from '../settings/appearance/useScaledTextRole'
+import type { RemoteClientConnectionState } from '../../lib/connection'
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
   scoreQueryMatch,
-} from "@t3tools/shared/searchRanking";
+} from '@t3tools/shared/searchRanking'
 import {
   applyProviderOptionMenuEvent,
   buildProviderOptionMenuActions,
   providerOptionsConfigurationLabel,
   resolveProviderOptionDescriptors,
-} from "../../lib/providerOptions";
-import { useComposerPathSearch } from "../../state/use-composer-path-search";
-import { ComposerCommandPopover, type ComposerCommandItem } from "./ComposerCommandPopover";
-import { composerConnectionStatus, type ComposerStatusPillState } from "./threadComposerStatus";
+} from '../../lib/providerOptions'
+import { useComposerPathSearch } from '../../state/use-composer-path-search'
+import { ComposerCommandPopover, type ComposerCommandItem } from './ComposerCommandPopover'
+import { composerConnectionStatus, type ComposerStatusPillState } from './threadComposerStatus'
 
 function searchMobileComposerSkills(
   skills: ReadonlyArray<ServerProviderSkill>,
   query: string,
-): ComposerCommandItem[] {
-  const enabledSkills = skills.filter((s) => s.enabled);
+): ComposerCommandItem[]
+{
+  const enabledSkills = skills.filter((s) => s.enabled)
   const normalizedQuery = normalizeSearchQuery(query, {
     trimLeadingPattern: /^\$+/,
-  });
+  })
 
-  if (!normalizedQuery) {
+  if (!normalizedQuery)
+  {
     return enabledSkills.slice(0, 20).map((skill) => ({
       id: `skill:${skill.name}`,
-      type: "skill" as const,
+      type: 'skill' as const,
       skill,
       label: skill.displayName ?? skill.name,
-      description: skill.shortDescription ?? skill.description ?? "",
-    }));
+      description: skill.shortDescription ?? skill.description ?? '',
+    }))
   }
 
   const ranked: Array<{
-    item: (typeof enabledSkills)[number];
-    score: number;
-    tieBreaker: string;
-  }> = [];
-  for (const skill of enabledSkills) {
-    const displayLabel = (skill.displayName ?? skill.name).toLowerCase();
+    item: (typeof enabledSkills)[number]
+    score: number
+    tieBreaker: string
+  }> = []
+  for (const skill of enabledSkills)
+  {
+    const displayLabel = (skill.displayName ?? skill.name).toLowerCase()
     const scores = [
       scoreQueryMatch({
         value: skill.name.toLowerCase(),
@@ -109,7 +112,7 @@ function searchMobileComposerSkills(
         boundaryBase: 4,
         includesBase: 6,
         fuzzyBase: 100,
-        boundaryMarkers: ["-", "_", "/"],
+        boundaryMarkers: ['-', '_', '/'],
       }),
       scoreQueryMatch({
         value: displayLabel,
@@ -121,7 +124,7 @@ function searchMobileComposerSkills(
         fuzzyBase: 110,
       }),
       scoreQueryMatch({
-        value: skill.shortDescription?.toLowerCase() ?? "",
+        value: skill.shortDescription?.toLowerCase() ?? '',
         query: normalizedQuery,
         exactBase: 20,
         prefixBase: 22,
@@ -129,16 +132,17 @@ function searchMobileComposerSkills(
         includesBase: 26,
       }),
       scoreQueryMatch({
-        value: skill.description?.toLowerCase() ?? "",
+        value: skill.description?.toLowerCase() ?? '',
         query: normalizedQuery,
         exactBase: 30,
         prefixBase: 32,
         boundaryBase: 34,
         includesBase: 36,
       }),
-    ].filter((s): s is number => s !== null);
+    ].filter((s): s is number => s !== null)
 
-    if (scores.length > 0) {
+    if (scores.length > 0)
+    {
       insertRankedSearchResult(
         ranked,
         {
@@ -147,65 +151,66 @@ function searchMobileComposerSkills(
           tieBreaker: `${displayLabel}\u0000${skill.name}`,
         },
         20,
-      );
+      )
     }
   }
 
   return ranked.map(({ item: skill }) => ({
     id: `skill:${skill.name}`,
-    type: "skill" as const,
+    type: 'skill' as const,
     skill,
     label: skill.displayName ?? skill.name,
-    description: skill.shortDescription ?? skill.description ?? "",
-  }));
+    description: skill.shortDescription ?? skill.description ?? '',
+  }))
 }
 
 /**
  * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
  * Exported so the parent can compute feed overlap / content insets.
  */
-export const COMPOSER_COLLAPSED_CHROME = 60;
+export const COMPOSER_COLLAPSED_CHROME = 60
 
 /**
  * Height of the expanded composer (card + toolbar + vertical padding, excluding safe-area inset).
  * Used by the parent to compute the larger feed bottom inset when the composer is focused.
  */
-export const COMPOSER_EXPANDED_CHROME = 174;
+export const COMPOSER_EXPANDED_CHROME = 174
 
-export interface ThreadComposerProps {
-  readonly draftMessage: string;
-  readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>;
-  readonly placeholder: string;
-  readonly contentMaxWidth?: number;
-  readonly bottomInset?: number;
-  readonly connectionState: RemoteClientConnectionState;
-  readonly connectionError: string | null;
-  readonly environmentLabel: string | null;
+export interface ThreadComposerProps
+{
+  readonly draftMessage: string
+  readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>
+  readonly placeholder: string
+  readonly contentMaxWidth?: number
+  readonly bottomInset?: number
+  readonly connectionState: RemoteClientConnectionState
+  readonly connectionError: string | null
+  readonly environmentLabel: string | null
   /**
    * Message sync phase for the selected thread (drives the status pill):
    * "loading" = first fetch, nothing to show yet; "syncing" = cached messages
    * are on screen while they reconcile with the server.
    */
-  readonly threadSyncPhase?: "loading" | "syncing" | null;
-  readonly selectedThread: OrchestrationThreadShell;
-  readonly serverConfig: ServerConfig | null;
-  readonly queueCount: number;
-  readonly activeThreadBusy: boolean;
-  readonly sendBlockedReason: string | null;
-  readonly environmentId: EnvironmentId;
-  readonly projectCwd: string | null;
-  readonly editorRef?: RefObject<ComposerEditorHandle | null>;
-  readonly onChangeDraftMessage: (value: string) => void;
-  readonly onPickDraftImages: () => Promise<void>;
-  readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>;
-  readonly onRemoveDraftImage: (imageId: string) => void;
-  readonly onStopThread: () => void;
-  readonly onSendMessage: () => Promise<MessageId | null>;
-  readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void;
-  readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void;
-  readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void;
-  readonly onReconnectEnvironment: () => void;
-  readonly onExpandedChange?: (expanded: boolean) => void;
+  readonly threadSyncPhase?: 'loading' | 'syncing' | null
+  readonly selectedThread: OrchestrationThreadShell
+  readonly serverConfig: ServerConfig | null
+  readonly queueCount: number
+  readonly activeThreadBusy: boolean
+  readonly sendBlockedReason: string | null
+  readonly environmentId: EnvironmentId
+  readonly projectCwd: string | null
+  readonly editorRef?: RefObject<ComposerEditorHandle | null>
+  readonly onChangeDraftMessage: (value: string) => void
+  readonly onPickDraftImages: () => Promise<void>
+  readonly onNativePasteImages: (uris: ReadonlyArray<string>) => Promise<void>
+  readonly onRemoveDraftImage: (imageId: string) => void
+  readonly onStopThread: () => void
+  readonly onSendMessage: () => Promise<MessageId | null>
+  readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void
+  readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void
+  readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void
+  readonly onReconnectEnvironment: () => void
+  readonly onExpandedChange?: (expanded: boolean) => void
 }
 
 /**
@@ -220,37 +225,39 @@ export interface ThreadComposerProps {
 // running alongside that translate reads as jitter. Snapping the layout and
 // letting the keyboard-synced slide be the only motion looks native there.
 const COMPOSER_LAYOUT_TRANSITION =
-  Platform.OS === "android" ? undefined : LinearTransition.duration(220);
+  Platform.OS === 'android' ? undefined : LinearTransition.duration(220)
 
 export function ComposerSurface(props: {
-  readonly children: ReactNode;
-  readonly style: ViewStyle;
-  readonly isDarkMode: boolean;
-}) {
+  readonly children: ReactNode
+  readonly style: ViewStyle
+  readonly isDarkMode: boolean
+})
+{
   // Drop shadow lives on a wrapper: `overflow: "hidden"` on the surface itself
   // (needed to clip content to the pill shape) would clip the shadow on iOS.
   const shadowStyle: ViewStyle = {
     borderRadius: props.style.borderRadius,
-    shadowColor: "#000000",
+    shadowColor: '#000000',
     shadowOpacity: props.isDarkMode ? 0.35 : 0.12,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 6 },
     elevation: 10,
-  };
+  }
 
-  if (isLiquidGlassSupported) {
+  if (isLiquidGlassSupported)
+  {
     return (
       <Animated.View layout={COMPOSER_LAYOUT_TRANSITION} style={shadowStyle}>
         <LiquidGlassView
           effect="regular"
           interactive
-          colorScheme={props.isDarkMode ? "dark" : "light"}
+          colorScheme={props.isDarkMode ? 'dark' : 'light'}
           style={props.style}
         >
           {props.children}
         </LiquidGlassView>
       </Animated.View>
-    );
+    )
   }
 
   return (
@@ -259,23 +266,25 @@ export function ComposerSurface(props: {
         style={[
           props.style,
           {
-            backgroundColor: props.isDarkMode ? "rgba(44,44,46,0.96)" : "rgba(255,255,255,0.96)",
+            backgroundColor: props.isDarkMode ? 'rgba(44,44,46,0.96)' : 'rgba(255,255,255,0.96)',
             borderWidth: 1,
-            borderColor: props.isDarkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+            borderColor: props.isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
           },
         ]}
       >
         {props.children}
       </View>
     </Animated.View>
-  );
+  )
 }
 
 const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(props: {
-  readonly onPress: () => void;
-  readonly status: ComposerStatusPillState;
-}) {
-  if (props.status.kind === "blocked") {
+  readonly onPress: () => void
+  readonly status: ComposerStatusPillState
+})
+{
+  if (props.status.kind === 'blocked')
+  {
     return (
       <Animated.View
         className="absolute inset-x-0 bottom-full items-center pb-2"
@@ -293,10 +302,10 @@ const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(
           </Text>
         </View>
       </Animated.View>
-    );
+    )
   }
 
-  const isReconnecting = props.status.kind !== "unavailable";
+  const isReconnecting = props.status.kind !== 'unavailable'
 
   return (
     <Animated.View
@@ -323,219 +332,243 @@ const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(
         </Text>
       </Pressable>
     </Animated.View>
-  );
-});
+  )
+})
 
-export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposerProps) {
-  const isDarkMode = useColorScheme() === "dark";
-  const foregroundColor = useThemeColor("--color-foreground");
-  const bodyText = useScaledTextRole("body");
-  const fallbackInputRef = useRef<ComposerEditorHandle>(null);
-  const inputRef = props.editorRef ?? fallbackInputRef;
-  const [isFocused, setIsFocused] = useState(false);
-  const wasExpandedBeforePreviewRef = useRef(false);
-  const inFlightThreadIdsRef = useRef(new Set<string>());
-  const { onExpandedChange } = props;
+export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposerProps)
+{
+  const isDarkMode = useColorScheme() === 'dark'
+  const foregroundColor = useThemeColor('--color-foreground')
+  const bodyText = useScaledTextRole('body')
+  const fallbackInputRef = useRef<ComposerEditorHandle>(null)
+  const inputRef = props.editorRef ?? fallbackInputRef
+  const [isFocused, setIsFocused] = useState(false)
+  const wasExpandedBeforePreviewRef = useRef(false)
+  const inFlightThreadIdsRef = useRef(new Set<string>())
+  const { onExpandedChange } = props
 
-  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
-  const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0;
-  const isExpanded = isFocused;
-  const canSend = hasContent && props.sendBlockedReason === null;
+  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null)
+  const hasContent = props.draftMessage.trim().length > 0 || props.draftAttachments.length > 0
+  const isExpanded = isFocused
+  const canSend = hasContent && props.sendBlockedReason === null
 
   const onPressImage = useCallback(
-    (uri: string) => {
-      wasExpandedBeforePreviewRef.current = isFocused;
-      setPreviewImageUri(uri);
+    (uri: string) =>
+    {
+      wasExpandedBeforePreviewRef.current = isFocused
+      setPreviewImageUri(uri)
     },
     [isFocused],
-  );
+  )
 
-  const closePreview = useCallback(() => {
-    setPreviewImageUri(null);
-    if (wasExpandedBeforePreviewRef.current) {
-      setTimeout(() => inputRef.current?.focus(), 100);
+  const closePreview = useCallback(() =>
+  {
+    setPreviewImageUri(null)
+    if (wasExpandedBeforePreviewRef.current)
+    {
+      setTimeout(() => inputRef.current?.focus(), 100)
     }
-  }, [inputRef]);
+  }, [inputRef])
 
-  const handleFocus = useCallback(() => {
-    setIsFocused(true);
-    onExpandedChange?.(true);
-  }, [onExpandedChange]);
+  const handleFocus = useCallback(() =>
+  {
+    setIsFocused(true)
+    onExpandedChange?.(true)
+  }, [onExpandedChange])
 
-  const handleBlur = useCallback(() => {
-    setIsFocused(false);
-    onExpandedChange?.(false);
-  }, [onExpandedChange]);
+  const handleBlur = useCallback(() =>
+  {
+    setIsFocused(false)
+    onExpandedChange?.(false)
+  }, [onExpandedChange])
   const showStopAction =
-    props.selectedThread.session?.status === "running" ||
-    props.selectedThread.session?.status === "starting";
+    props.selectedThread.session?.status === 'running' ||
+    props.selectedThread.session?.status === 'starting'
 
   const sendLabel =
     props.sendBlockedReason !== null
-      ? "Sending blocked"
-      : props.connectionState !== "connected" || props.activeThreadBusy || props.queueCount > 0
-        ? "Queue"
-        : "Send";
-  const currentModelSelection = props.selectedThread.modelSelection;
-  const currentRuntimeMode = props.selectedThread.runtimeMode;
-  const currentInteractionMode = props.selectedThread.interactionMode ?? "default";
+      ? 'Sending blocked'
+      : props.connectionState !== 'connected' || props.activeThreadBusy || props.queueCount > 0
+        ? 'Queue'
+        : 'Send'
+  const currentModelSelection = props.selectedThread.modelSelection
+  const currentRuntimeMode = props.selectedThread.runtimeMode
+  const currentInteractionMode = props.selectedThread.interactionMode ?? 'default'
   const connectionStatus = composerConnectionStatus({
     connectionError: props.connectionError,
     connectionState: props.connectionState,
     environmentLabel: props.environmentLabel,
     sendBlockedReason: props.sendBlockedReason,
     threadSyncPhase: props.threadSyncPhase,
-  });
-  const toolbarFadeOpaque = isDarkMode ? "rgba(0,0,0,0.95)" : "rgba(255,255,255,0.95)";
-  const toolbarFadeTransparent = isDarkMode ? "rgba(0,0,0,0)" : "rgba(255,255,255,0)";
-  const selectedProviderStatus = useMemo(() => {
-    if (!props.serverConfig) return null;
+  })
+  const toolbarFadeOpaque = isDarkMode ? 'rgba(0,0,0,0.95)' : 'rgba(255,255,255,0.95)'
+  const toolbarFadeTransparent = isDarkMode ? 'rgba(0,0,0,0)' : 'rgba(255,255,255,0)'
+  const selectedProviderStatus = useMemo(() =>
+  {
+    if (!props.serverConfig) return null
     return (
       props.serverConfig.providers.find(
         (p) => p.instanceId === props.selectedThread.modelSelection.instanceId,
       ) ?? null
-    );
-  }, [props.serverConfig, props.selectedThread.modelSelection.instanceId]);
+    )
+  }, [props.serverConfig, props.selectedThread.modelSelection.instanceId])
   const providerSkills = useMemo(
     () =>
       (selectedProviderStatus?.skills ?? []).filter(
-        (skill) => skill.name.toLowerCase() !== "orchestrate",
+        (skill) => skill.name.toLowerCase() !== 'orchestrate',
       ),
     [selectedProviderStatus],
-  );
+  )
 
   // ── Trigger detection ────────────────────────────────────
   const [composerSelection, setComposerSelection] = useState(() => ({
     start: props.draftMessage.length,
     end: props.draftMessage.length,
-  }));
+  }))
 
-  const handleSelectionChange = useCallback((selection: ComposerEditorSelection) => {
-    setComposerSelection(selection);
-  }, []);
-  useEffect(() => {
-    const end = props.draftMessage.length;
-    setComposerSelection((selection) => {
-      const start = Math.min(selection.start, end);
-      const selectionEnd = Math.min(selection.end, end);
-      if (start === selection.start && selectionEnd === selection.end) {
-        return selection;
+  const handleSelectionChange = useCallback((selection: ComposerEditorSelection) =>
+  {
+    setComposerSelection(selection)
+  }, [])
+  useEffect(() =>
+  {
+    const end = props.draftMessage.length
+    setComposerSelection((selection) =>
+    {
+      const start = Math.min(selection.start, end)
+      const selectionEnd = Math.min(selection.end, end)
+      if (start === selection.start && selectionEnd === selection.end)
+      {
+        return selection
       }
-      return { start, end: selectionEnd };
-    });
-  }, [props.draftMessage.length]);
+      return { start, end: selectionEnd }
+    })
+  }, [props.draftMessage.length])
 
-  const composerTrigger = useMemo<ComposerTrigger | null>(() => {
-    if (composerSelection.start !== composerSelection.end) {
-      return null;
+  const composerTrigger = useMemo<ComposerTrigger | null>(() =>
+  {
+    if (composerSelection.start !== composerSelection.end)
+    {
+      return null
     }
-    return detectComposerTrigger(props.draftMessage, composerSelection.end);
-  }, [composerSelection, props.draftMessage]);
+    return detectComposerTrigger(props.draftMessage, composerSelection.end)
+  }, [composerSelection, props.draftMessage])
   const pathSearch = useComposerPathSearch({
     environmentId: props.environmentId,
-    cwd: composerTrigger?.kind === "path" ? props.projectCwd : null,
-    query: composerTrigger?.kind === "path" ? composerTrigger.query : null,
-  });
+    cwd: composerTrigger?.kind === 'path' ? props.projectCwd : null,
+    query: composerTrigger?.kind === 'path' ? composerTrigger.query : null,
+  })
 
-  const composerMenuItems: ComposerCommandItem[] = useMemo(() => {
-    if (!composerTrigger) return [];
+  const composerMenuItems: ComposerCommandItem[] = useMemo(() =>
+  {
+    if (!composerTrigger) return []
 
-    if (composerTrigger.kind === "slash-command") {
-      const q = composerTrigger.query.toLowerCase();
+    if (composerTrigger.kind === 'slash-command')
+    {
+      const q = composerTrigger.query.toLowerCase()
       const allBuiltIn = [
         {
-          id: "cmd:model",
-          type: "slash-command" as const,
-          command: "model",
-          label: "/model",
-          description: "Switch model",
+          id: 'cmd:model',
+          type: 'slash-command' as const,
+          command: 'model',
+          label: '/model',
+          description: 'Switch model',
         },
         {
-          id: "cmd:plan",
-          type: "slash-command" as const,
-          command: "plan",
-          label: "/plan",
-          description: "Switch to plan mode",
+          id: 'cmd:plan',
+          type: 'slash-command' as const,
+          command: 'plan',
+          label: '/plan',
+          description: 'Switch to plan mode',
         },
         {
-          id: "cmd:orchestrate",
-          type: "slash-command" as const,
-          command: "orchestrate",
-          label: "/orchestrate",
-          description: "Switch to orchestrate mode",
+          id: 'cmd:orchestrate',
+          type: 'slash-command' as const,
+          command: 'orchestrate',
+          label: '/orchestrate',
+          description: 'Switch to orchestrate mode',
         },
         {
-          id: "cmd:default",
-          type: "slash-command" as const,
-          command: "default",
-          label: "/default",
-          description: "Switch to default mode",
+          id: 'cmd:default',
+          type: 'slash-command' as const,
+          command: 'default',
+          label: '/default',
+          description: 'Switch to default mode',
         },
-      ];
-      const builtIn = allBuiltIn.filter((item) => item.command.includes(q));
+      ]
+      const builtIn = allBuiltIn.filter((item) => item.command.includes(q))
 
       const collidingSkillNames = new Set(
         providerSkills.filter((skill) => skill.enabled).map((skill) => skill.name.toLowerCase()),
-      );
+      )
 
-      const providerCommands: ComposerCommandItem[] = [];
-      for (const cmd of selectedProviderStatus?.slashCommands ?? []) {
-        if (collidingSkillNames.has(cmd.name.toLowerCase())) continue;
-        if (!cmd.name.toLowerCase().includes(q)) continue;
+      const providerCommands: ComposerCommandItem[] = []
+      for (const cmd of selectedProviderStatus?.slashCommands ?? [])
+      {
+        if (collidingSkillNames.has(cmd.name.toLowerCase())) continue
+        if (!cmd.name.toLowerCase().includes(q)) continue
         providerCommands.push({
           id: `pcmd:${cmd.name}`,
-          type: "provider-slash-command" as const,
+          type: 'provider-slash-command' as const,
           command: cmd,
           label: `/${cmd.name}`,
-          description: cmd.description ?? "",
-        });
+          description: cmd.description ?? '',
+        })
       }
 
-      const skillItems = searchMobileComposerSkills(providerSkills, composerTrigger.query);
+      const skillItems = searchMobileComposerSkills(providerSkills, composerTrigger.query)
 
-      return [...builtIn, ...providerCommands, ...skillItems];
+      return [...builtIn, ...providerCommands, ...skillItems]
     }
 
-    if (composerTrigger.kind === "skill") {
-      return searchMobileComposerSkills(providerSkills, composerTrigger.query);
+    if (composerTrigger.kind === 'skill')
+    {
+      return searchMobileComposerSkills(providerSkills, composerTrigger.query)
     }
 
-    if (composerTrigger.kind === "path") {
-      return pathSearch.entries.map((entry) => {
-        const parts = entry.path.split("/");
+    if (composerTrigger.kind === 'path')
+    {
+      return pathSearch.entries.map((entry) =>
+      {
+        const parts = entry.path.split('/')
         return {
           id: `path:${entry.path}`,
-          type: "path" as const,
+          type: 'path' as const,
           path: entry.path,
           kind: entry.kind,
           label: parts[parts.length - 1] ?? entry.path,
-          description: parts.length > 1 ? parts.slice(0, -1).join("/") : "",
-        };
-      });
+          description: parts.length > 1 ? parts.slice(0, -1).join('/') : '',
+        }
+      })
     }
 
-    return [];
-  }, [composerTrigger, pathSearch.entries, providerSkills, selectedProviderStatus]);
+    return []
+  }, [composerTrigger, pathSearch.entries, providerSkills, selectedProviderStatus])
 
   // ── Handle command selection ──────────────────────────────
-  const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props;
+  const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props
 
-  const handleSend = useCallback(async () => {
-    if (props.sendBlockedReason !== null) {
-      return;
+  const handleSend = useCallback(async () =>
+  {
+    if (props.sendBlockedReason !== null)
+    {
+      return
     }
-    const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id);
-    if (inFlightThreadIdsRef.current.has(threadKey)) return;
-    inFlightThreadIdsRef.current.add(threadKey);
-    try {
-      await onSendMessage();
+    const threadKey = scopedThreadKey(props.environmentId, props.selectedThread.id)
+    if (inFlightThreadIdsRef.current.has(threadKey)) return
+    inFlightThreadIdsRef.current.add(threadKey)
+    try
+    {
+      await onSendMessage()
       // defer live activity work until queued-message feedback is visible
       armAgentAwarenessLiveActivityForLocalWork({
         threadTitle: props.selectedThread.title,
-        projectTitle: props.environmentLabel ?? "456code",
-      });
-    } finally {
-      inFlightThreadIdsRef.current.delete(threadKey);
+        projectTitle: props.environmentLabel ?? '456code',
+      })
+    }
+    finally
+    {
+      inFlightThreadIdsRef.current.delete(threadKey)
     }
   }, [
     onSendMessage,
@@ -544,36 +577,45 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     props.sendBlockedReason,
     props.selectedThread.id,
     props.selectedThread.title,
-  ]);
+  ])
   const handleCommandSelect = useCallback(
-    (item: ComposerCommandItem) => {
-      if (!composerTrigger) return;
+    (item: ComposerCommandItem) =>
+    {
+      if (!composerTrigger) return
 
       if (
-        item.type === "slash-command" &&
-        (item.command === "plan" || item.command === "orchestrate" || item.command === "default")
-      ) {
+        item.type === 'slash-command' &&
+        (item.command === 'plan' || item.command === 'orchestrate' || item.command === 'default')
+      )
+      {
         const result = replaceTextRange(
           draftMessage,
           composerTrigger.rangeStart,
           composerTrigger.rangeEnd,
-          "",
-        );
-        setComposerSelection({ start: result.cursor, end: result.cursor });
-        onChangeDraftMessage(result.text);
-        onUpdateInteractionMode(item.command);
-        return;
+          '',
+        )
+        setComposerSelection({ start: result.cursor, end: result.cursor })
+        onChangeDraftMessage(result.text)
+        onUpdateInteractionMode(item.command)
+        return
       }
 
-      let replacement = "";
-      if (item.type === "path") {
-        replacement = `${serializeComposerFileLink(item.path)} `;
-      } else if (item.type === "skill") {
-        replacement = `$${item.skill.name} `;
-      } else if (item.type === "slash-command") {
-        replacement = `/${item.command} `;
-      } else if (item.type === "provider-slash-command") {
-        replacement = `/${item.command.name} `;
+      let replacement = ''
+      if (item.type === 'path')
+      {
+        replacement = `${serializeComposerFileLink(item.path)} `
+      }
+      else if (item.type === 'skill')
+      {
+        replacement = `$${item.skill.name} `
+      }
+      else if (item.type === 'slash-command')
+      {
+        replacement = `/${item.command} `
+      }
+      else if (item.type === 'provider-slash-command')
+      {
+        replacement = `/${item.command.name} `
       }
 
       const result = replaceTextRange(
@@ -581,25 +623,25 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         composerTrigger.rangeStart,
         composerTrigger.rangeEnd,
         replacement,
-      );
-      setComposerSelection({ start: result.cursor, end: result.cursor });
-      onChangeDraftMessage(result.text);
+      )
+      setComposerSelection({ start: result.cursor, end: result.cursor })
+      onChangeDraftMessage(result.text)
     },
     [composerTrigger, draftMessage, onChangeDraftMessage, onUpdateInteractionMode],
-  );
+  )
 
   // ── Model menu ───────────────────────────────────────────
   const modelOptions = useMemo(
     () => buildModelOptions(props.serverConfig, currentModelSelection),
     [props.serverConfig, currentModelSelection],
-  );
-  const providerGroups = useMemo(() => groupByProvider(modelOptions), [modelOptions]);
+  )
+  const providerGroups = useMemo(() => groupByProvider(modelOptions), [modelOptions])
   const currentModelOption =
     modelOptions.find(
       (option) =>
         option.selection.instanceId === currentModelSelection.instanceId &&
         option.selection.model === currentModelSelection.model,
-    ) ?? null;
+    ) ?? null
   const providerOptionDescriptors = useMemo(
     () =>
       resolveProviderOptionDescriptors({
@@ -607,11 +649,11 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         selections: currentModelSelection.options,
       }),
     [currentModelOption?.capabilities, currentModelSelection.options],
-  );
+  )
   const configurationLabel = useMemo(
     () => providerOptionsConfigurationLabel(providerOptionDescriptors),
     [providerOptionDescriptors],
-  );
+  )
   const modelMenuActions = useMemo(
     () =>
       providerGroups.map((group) => ({
@@ -628,97 +670,106 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           state:
             option.selection.instanceId === currentModelSelection.instanceId &&
             option.selection.model === currentModelSelection.model
-              ? ("on" as const)
+              ? ('on' as const)
               : undefined,
         })),
       })),
     [providerGroups, currentModelSelection],
-  );
+  )
 
   // ── Options menu ─────────────────────────────────────────
   const optionsMenuActions = useMemo(
     () => [
       ...buildProviderOptionMenuActions(providerOptionDescriptors),
       {
-        id: "options-runtime",
-        title: "Runtime",
+        id: 'options-runtime',
+        title: 'Runtime',
         subtitle:
-          currentRuntimeMode === "approval-required"
-            ? "Approve actions"
-            : currentRuntimeMode === "auto-accept-edits"
-              ? "Auto-accept edits"
-              : currentRuntimeMode === "auto"
-                ? "Auto"
-                : "Full access",
+          currentRuntimeMode === 'approval-required'
+            ? 'Approve actions'
+            : currentRuntimeMode === 'auto-accept-edits'
+              ? 'Auto-accept edits'
+              : currentRuntimeMode === 'auto'
+                ? 'Auto'
+                : 'Full access',
         subactions: [
-          { id: "options:runtime:approval-required", title: "Approve actions" },
-          { id: "options:runtime:auto-accept-edits", title: "Auto-accept edits" },
-          { id: "options:runtime:auto", title: "Auto" },
-          { id: "options:runtime:full-access", title: "Full access" },
-        ].map((option) => {
-          const value = option.id.replace("options:runtime:", "");
+          { id: 'options:runtime:approval-required', title: 'Approve actions' },
+          { id: 'options:runtime:auto-accept-edits', title: 'Auto-accept edits' },
+          { id: 'options:runtime:auto', title: 'Auto' },
+          { id: 'options:runtime:full-access', title: 'Full access' },
+        ].map((option) =>
+        {
+          const value = option.id.replace('options:runtime:', '')
           return {
             id: option.id,
             title: option.title,
-            state: currentRuntimeMode === value ? ("on" as const) : undefined,
-          };
+            state: currentRuntimeMode === value ? ('on' as const) : undefined,
+          }
         }),
       },
       {
-        id: "options-interaction",
-        title: "Interaction",
+        id: 'options-interaction',
+        title: 'Interaction',
         subtitle:
-          currentInteractionMode === "plan"
-            ? "Plan"
-            : currentInteractionMode === "orchestrate"
-              ? "Orchestrate"
-              : "Default",
+          currentInteractionMode === 'plan'
+            ? 'Plan'
+            : currentInteractionMode === 'orchestrate'
+              ? 'Orchestrate'
+              : 'Default',
         subactions: [
-          { id: "options:interaction:default", title: "Default" },
-          { id: "options:interaction:plan", title: "Plan" },
-          { id: "options:interaction:orchestrate", title: "Orchestrate" },
-        ].map((option) => {
-          const value = option.id.replace("options:interaction:", "");
+          { id: 'options:interaction:default', title: 'Default' },
+          { id: 'options:interaction:plan', title: 'Plan' },
+          { id: 'options:interaction:orchestrate', title: 'Orchestrate' },
+        ].map((option) =>
+        {
+          const value = option.id.replace('options:interaction:', '')
           return {
             id: option.id,
             title: option.title,
-            state: currentInteractionMode === value ? ("on" as const) : undefined,
-          };
+            state: currentInteractionMode === value ? ('on' as const) : undefined,
+          }
         }),
       },
     ],
     [currentInteractionMode, currentRuntimeMode, providerOptionDescriptors],
-  );
+  )
 
   // ── Menu handlers ────────────────────────────────────────
-  function handleModelMenuAction(event: string) {
-    if (!event.startsWith("model:")) {
-      return;
+  function handleModelMenuAction(event: string)
+  {
+    if (!event.startsWith('model:'))
+    {
+      return
     }
-    const modelKey = event.slice("model:".length);
-    const option = modelOptions.find((o) => o.key === modelKey);
-    if (option) {
-      props.onUpdateModelSelection(option.selection);
+    const modelKey = event.slice('model:'.length)
+    const option = modelOptions.find((o) => o.key === modelKey)
+    if (option)
+    {
+      props.onUpdateModelSelection(option.selection)
     }
   }
 
-  function handleOptionsMenuAction(event: string) {
-    const providerOptions = applyProviderOptionMenuEvent(providerOptionDescriptors, event);
-    if (providerOptions) {
+  function handleOptionsMenuAction(event: string)
+  {
+    const providerOptions = applyProviderOptionMenuEvent(providerOptionDescriptors, event)
+    if (providerOptions)
+    {
       props.onUpdateModelSelection({
         ...currentModelSelection,
         options: providerOptions,
-      });
-      return;
+      })
+      return
     }
-    if (event.startsWith("options:runtime:")) {
-      const runtimeMode = event.slice("options:runtime:".length) as RuntimeMode;
-      props.onUpdateRuntimeMode(runtimeMode);
-      return;
+    if (event.startsWith('options:runtime:'))
+    {
+      const runtimeMode = event.slice('options:runtime:'.length) as RuntimeMode
+      props.onUpdateRuntimeMode(runtimeMode)
+      return
     }
-    if (event.startsWith("options:interaction:")) {
-      const interactionMode = event.slice("options:interaction:".length) as ProviderInteractionMode;
-      props.onUpdateInteractionMode(interactionMode);
+    if (event.startsWith('options:interaction:'))
+    {
+      const interactionMode = event.slice('options:interaction:'.length) as ProviderInteractionMode
+      props.onUpdateInteractionMode(interactionMode)
     }
   }
 
@@ -730,8 +781,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         paddingTop: isExpanded ? 8 : 6,
         paddingBottom: (props.bottomInset ?? 0) + (isExpanded ? 8 : 6),
         experimental_backgroundImage: isDarkMode
-          ? "linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 55%, rgba(0,0,0,0.9) 100%)"
-          : "linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.6) 55%, rgba(255,255,255,0.9) 100%)",
+          ? 'linear-gradient(to bottom, rgba(0,0,0,0) 0%, rgba(0,0,0,0.6) 55%, rgba(0,0,0,0.9) 100%)'
+          : 'linear-gradient(to bottom, rgba(255,255,255,0) 0%, rgba(255,255,255,0.6) 55%, rgba(255,255,255,0.9) 100%)',
       }}
     >
       <Animated.View
@@ -763,15 +814,15 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             isExpanded
               ? {
                   borderRadius: 20,
-                  overflow: "hidden" as const,
+                  overflow: 'hidden' as const,
                   paddingHorizontal: 14,
                   paddingVertical: 12,
                 }
               : {
                   borderRadius: 999,
-                  overflow: "hidden" as const,
-                  flexDirection: "row" as const,
-                  alignItems: "center" as const,
+                  overflow: 'hidden' as const,
+                  flexDirection: 'row' as const,
+                  alignItems: 'center' as const,
                   paddingLeft: 18,
                   paddingRight: 5,
                   paddingVertical: 5,
@@ -781,7 +832,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           {/* Attachment strip — inside the card, above the text input */}
           {isExpanded ? (
             <Animated.View
-              className={props.draftAttachments.length > 0 ? "pb-2.5" : undefined}
+              className={props.draftAttachments.length > 0 ? 'pb-2.5' : undefined}
               entering={FadeIn.duration(160)}
               exiting={FadeOut.duration(120)}
             >
@@ -793,7 +844,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
             </Animated.View>
           ) : null}
 
-          <View className={isExpanded ? undefined : "min-w-0 flex-1"}>
+          <View className={isExpanded ? undefined : 'min-w-0 flex-1'}>
             <ComposerEditor
               ref={inputRef}
               multiline
@@ -811,7 +862,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               // Android: collapsed single line centers natively (gravity) in
               // a pill-height box matching the send button; iOS keeps insets.
               singleLineCentered={!isExpanded}
-              contentInsetVertical={isExpanded || Platform.OS === "android" ? 0 : 6}
+              contentInsetVertical={isExpanded || Platform.OS === 'android' ? 0 : 6}
               style={
                 isExpanded
                   ? {
@@ -928,7 +979,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         {props.queueCount > 0 ? (
           <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
             <Text className="pt-2 text-xs text-foreground-muted">
-              {props.queueCount} queued message{props.queueCount === 1 ? "" : "s"} will send
+              {props.queueCount} queued message{props.queueCount === 1 ? '' : 's'} will send
               automatically.
             </Text>
           </Animated.View>
@@ -944,5 +995,5 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         doubleTapToZoomEnabled
       />
     </Animated.View>
-  );
-});
+  )
+})

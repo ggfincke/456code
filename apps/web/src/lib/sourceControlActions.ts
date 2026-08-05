@@ -1,3 +1,6 @@
+// apps/web/src/lib/sourceControlActions.ts
+// read cached pull request resolution
+
 export {
   readCachedPullRequestResolution,
   useGitStackedAction,
@@ -7,4 +10,4 @@ export {
   useSourceControlPublishRepositoryAction,
   useVcsInitAction,
   useVcsPullAction,
-} from "../state/sourceControlActions";
+} from '../state/sourceControlActions'

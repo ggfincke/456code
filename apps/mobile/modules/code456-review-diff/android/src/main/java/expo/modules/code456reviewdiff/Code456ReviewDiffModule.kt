@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-review-diff/android/src/main/java/expo/modules/code456reviewdiff/Code456ReviewDiffModule.kt
+// registers the Android review diff module
 package expo.modules.code456reviewdiff
 
 import expo.modules.kotlin.modules.Module

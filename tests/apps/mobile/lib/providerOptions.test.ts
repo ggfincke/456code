@@ -1,100 +1,107 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/mobile/lib/providerOptions.test.ts
+// verify mobile provider options behavior
 
-import type { ModelCapabilities } from "@t3tools/contracts";
+import { describe, expect, it } from 'vite-plus/test'
+
+import type { ModelCapabilities } from '@t3tools/contracts'
 
 import {
   applyProviderOptionMenuEvent,
   buildProviderOptionMenuActions,
   providerOptionsConfigurationLabel,
   resolveProviderOptionDescriptors,
-} from "../../../../apps/mobile/src/lib/providerOptions";
+} from '../../../../apps/mobile/src/lib/providerOptions'
 
 const CODEX_CAPABILITIES: ModelCapabilities = {
   optionDescriptors: [
     {
-      id: "reasoningEffort",
-      label: "Reasoning",
-      type: "select",
+      id: 'reasoningEffort',
+      label: 'Reasoning',
+      type: 'select',
       options: [
-        { id: "medium", label: "Medium", isDefault: true },
-        { id: "high", label: "High" },
+        { id: 'medium', label: 'Medium', isDefault: true },
+        { id: 'high', label: 'High' },
       ],
-      currentValue: "medium",
+      currentValue: 'medium',
     },
     {
-      id: "serviceTier",
-      label: "Service Tier",
-      type: "select",
+      id: 'serviceTier',
+      label: 'Service Tier',
+      type: 'select',
       options: [
-        { id: "default", label: "Standard", isDefault: true },
-        { id: "priority", label: "Fast" },
+        { id: 'default', label: 'Standard', isDefault: true },
+        { id: 'priority', label: 'Fast' },
       ],
-      currentValue: "default",
+      currentValue: 'default',
     },
   ],
-};
+}
 
-describe("mobile provider options", () => {
-  it("renders the option descriptors advertised by the selected model", () => {
+describe('mobile provider options', () =>
+{
+  it('renders the option descriptors advertised by the selected model', () =>
+  {
     const descriptors = resolveProviderOptionDescriptors({
       capabilities: CODEX_CAPABILITIES,
       selections: undefined,
-    });
+    })
 
     expect(buildProviderOptionMenuActions(descriptors)).toMatchObject([
       {
-        title: "Reasoning",
-        subtitle: "Medium",
+        title: 'Reasoning',
+        subtitle: 'Medium',
         subactions: [
-          { title: "Medium (default)", state: "on" },
-          { title: "High", state: undefined },
+          { title: 'Medium (default)', state: 'on' },
+          { title: 'High', state: undefined },
         ],
       },
       {
-        title: "Service Tier",
-        subtitle: "Standard",
+        title: 'Service Tier',
+        subtitle: 'Standard',
         subactions: [
-          { title: "Standard (default)", state: "on" },
-          { title: "Fast", state: undefined },
+          { title: 'Standard (default)', state: 'on' },
+          { title: 'Fast', state: undefined },
         ],
       },
-    ]);
-    expect(providerOptionsConfigurationLabel(descriptors)).toBe("Medium · Standard");
-  });
+    ])
+    expect(providerOptionsConfigurationLabel(descriptors)).toBe('Medium · Standard')
+  })
 
-  it("updates generic select options without knowing provider-specific ids", () => {
+  it('updates generic select options without knowing provider-specific ids', () =>
+  {
     const descriptors = resolveProviderOptionDescriptors({
       capabilities: CODEX_CAPABILITIES,
       selections: undefined,
-    });
-    const actions = buildProviderOptionMenuActions(descriptors);
-    const fastEvent = actions[1]?.subactions?.[1]?.id;
+    })
+    const actions = buildProviderOptionMenuActions(descriptors)
+    const fastEvent = actions[1]?.subactions?.[1]?.id
 
-    expect(fastEvent).toBeDefined();
+    expect(fastEvent).toBeDefined()
     expect(applyProviderOptionMenuEvent(descriptors, fastEvent!)).toEqual([
-      { id: "reasoningEffort", value: "medium" },
-      { id: "serviceTier", value: "priority" },
-    ]);
-  });
+      { id: 'reasoningEffort', value: 'medium' },
+      { id: 'serviceTier', value: 'priority' },
+    ])
+  })
 
-  it("treats an unspecified boolean capability as off", () => {
+  it('treats an unspecified boolean capability as off', () =>
+  {
     const descriptors = resolveProviderOptionDescriptors({
       capabilities: {
-        optionDescriptors: [{ id: "fastMode", label: "Fast Mode", type: "boolean" }],
+        optionDescriptors: [{ id: 'fastMode', label: 'Fast Mode', type: 'boolean' }],
       },
       selections: undefined,
-    });
+    })
 
     expect(buildProviderOptionMenuActions(descriptors)).toMatchObject([
       {
-        title: "Fast Mode",
-        subtitle: "Off",
+        title: 'Fast Mode',
+        subtitle: 'Off',
         subactions: [
-          { title: "Off", state: "on" },
-          { title: "On", state: undefined },
+          { title: 'Off', state: 'on' },
+          { title: 'On', state: undefined },
         ],
       },
-    ]);
-    expect(providerOptionsConfigurationLabel(descriptors)).toBe("Configuration");
-  });
-});
+    ])
+    expect(providerOptionsConfigurationLabel(descriptors)).toBe('Configuration')
+  })
+})

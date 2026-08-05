@@ -17,3 +17,4 @@ style:
   MaxLineLength:
     active: true
     maxLineLength: 120
+    excludeCommentStatements: true

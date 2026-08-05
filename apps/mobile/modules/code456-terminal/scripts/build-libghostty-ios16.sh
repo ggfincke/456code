@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# apps/mobile/modules/code456-terminal/scripts/build-libghostty-ios16.sh
+# builds the Ghostty library for iOS 16
 
 set -euo pipefail
 

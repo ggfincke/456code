@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-terminal/android/src/main/java/expo/modules/code456terminal/TerminalCanvasView.kt
+// renders terminal cells on an Android canvas
 package expo.modules.code456terminal
 
 import android.content.ClipData
@@ -32,7 +34,8 @@ internal object TerminalTypefaces {
   var bold: Typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
     private set
 
-  @Suppress("TooGenericExceptionCaught") // Typeface.createFromAsset exposes RuntimeException.
+  // Typeface.createFromAsset exposes RuntimeException at this boundary
+  @Suppress("TooGenericExceptionCaught")
   fun ensureLoaded(context: Context) {
     if (loaded) return
     loaded = true
@@ -134,7 +137,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   private var extentCol = 0
   private var extentRow = 0
 
-  // Word-snapped span from the initial long-press; extending anchors to the
+  // word-snapped span from the initial long-press; extending anchors to the
   // far word edge so the word never shrinks mid-drag.
   private var wordStartCol = 0
   private var wordStartRow = 0
@@ -142,7 +145,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   private var wordEndRow = 0
   private var actionMode: ActionMode? = null
 
-  // Actual selection endpoints in viewport cells, derived from the decoded
+  // actual selection endpoints in viewport cells, derived from the decoded
   // frame (word-snap can extend past the pressed cell). Drive handle
   // placement and hit testing.
   private var selectionEndpointsValid = false
@@ -254,7 +257,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
   override fun onTouchEvent(event: MotionEvent): Boolean {
     if (event.actionMasked == MotionEvent.ACTION_DOWN) {
       parent?.requestDisallowInterceptTouchEvent(true)
-      // Touch-down always stops momentum, even when the event is consumed by
+      // touch-down always stops momentum, even when the event is consumed by
       // a selection-handle grab and never reaches the gesture detector.
       scroller.forceFinished(true)
       removeCallbacks(flingRunnable)
@@ -357,7 +360,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     val delegate = selectionDelegate ?: return
     val col = columnAt(px)
     val row = rowAt(py)
-    // Set before selectWordAt: the delegate re-renders synchronously and
+    // set before selectWordAt: the delegate re-renders synchronously and
     // updateSelectionEndpoints only scans while a selection is active.
     selectionActive = true
     if (!delegate.selectWordAt(col, row)) {
@@ -429,10 +432,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
 
   private fun handleRadius(): Float = max(cellHeightPx * 0.45f, 12f)
 
-  /**
-   * Begin dragging when the touch lands on a selection handle. The opposite
-   * endpoint becomes the drag anchor so the grabbed end follows the finger.
-   */
+  // begin dragging on a selection handle while the opposite end anchors
   private fun grabHandleAt(px: Float, py: Float): Boolean {
     if (!selectionActive || !selectionEndpointsValid) return false
     val slop = max(handleRadius() * 2f, 24 * density)
@@ -467,7 +467,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     return handleGrabbed
   }
 
-  /** Scan the decoded frame for the first/last selected cells. */
+  // scan the decoded frame for the first & last selected cells
   private fun updateSelectionEndpoints() {
     selectionEndpointsValid = false
     val currentFrame = frame
@@ -490,7 +490,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
     }
   }
 
-  // Anchor the toolbar to the actual word-snapped endpoints when known;
+  // anchor the toolbar to the actual word-snapped endpoints when known;
   // gesture cells can lag behind what the terminal selected.
   private fun selectionBounds(): Rect {
     val startCol = if (selectionEndpointsValid) selectionStartCol else min(anchorCol, extentCol)
@@ -538,7 +538,7 @@ internal class TerminalCanvasView(context: Context) : View(context) {
 
         override fun onDestroyActionMode(mode: ActionMode) {
           actionMode = null
-          // Dismissing the toolbar (e.g. Back) drops the selection too —
+          // dismissing the toolbar (e.g. Back) drops the selection too —
           // except mid-drag, where grabHandleAt finishes the mode on purpose.
           if (selectionActive && !dragSelecting) clearSelection()
         }

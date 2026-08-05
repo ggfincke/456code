@@ -1,37 +1,47 @@
-import { useWaitlist } from "@clerk/expo";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
-import { useState } from "react";
+// apps/mobile/src/features/cloud/CloudWaitlistEnrollment.tsx
+// render cloud waitlist enrollment
 
-import { cn } from "../../lib/cn";
-import { CloudWaitlistJoinRejectedError, joinCloudWaitlist } from "./cloudWaitlistJoin";
+import { useWaitlist } from '@clerk/expo'
+import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-native'
+import { useState } from 'react'
 
-export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void }) {
-  const { errors, fetchStatus, waitlist } = useWaitlist();
-  const [emailAddress, setEmailAddress] = useState("");
-  const [requestError, setRequestError] = useState<string | null>(null);
-  const isSubmitting = fetchStatus === "fetching";
-  const fieldError = errors.fields.emailAddress?.longMessage;
+import { cn } from '../../lib/cn'
+import { CloudWaitlistJoinRejectedError, joinCloudWaitlist } from './cloudWaitlistJoin'
 
-  const joinWaitlist = async () => {
-    const normalizedEmailAddress = emailAddress.trim();
-    if (!normalizedEmailAddress || isSubmitting) {
-      return;
+export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void })
+{
+  const { errors, fetchStatus, waitlist } = useWaitlist()
+  const [emailAddress, setEmailAddress] = useState('')
+  const [requestError, setRequestError] = useState<string | null>(null)
+  const isSubmitting = fetchStatus === 'fetching'
+  const fieldError = errors.fields.emailAddress?.longMessage
+
+  const joinWaitlist = async () =>
+  {
+    const normalizedEmailAddress = emailAddress.trim()
+    if (!normalizedEmailAddress || isSubmitting)
+    {
+      return
     }
 
-    setRequestError(null);
-    try {
-      await joinCloudWaitlist(waitlist, normalizedEmailAddress);
-    } catch (error) {
-      console.error(error);
+    setRequestError(null)
+    try
+    {
+      await joinCloudWaitlist(waitlist, normalizedEmailAddress)
+    }
+    catch (error)
+    {
+      console.error(error)
       setRequestError(
         error instanceof CloudWaitlistJoinRejectedError
-          ? "Could not join the waitlist. Check your email address and try again."
-          : "Could not join the waitlist. Check your connection and try again.",
-      );
+          ? 'Could not join the waitlist. Check your email address and try again.'
+          : 'Could not join the waitlist. Check your connection and try again.',
+      )
     }
-  };
+  }
 
-  if (waitlist.id) {
+  if (waitlist.id)
+  {
     return (
       <View className="gap-[18px]">
         <Text className="text-center font-sans-bold text-xl text-foreground">
@@ -42,7 +52,7 @@ export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void }
         </Text>
         <SignInAction onPress={props.onSignIn} />
       </View>
-    );
+    )
   }
 
   return (
@@ -59,13 +69,14 @@ export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void }
           autoComplete="email"
           autoCorrect={false}
           className={cn(
-            "min-h-[54px] rounded-2xl border border-input-border bg-input px-4 py-3.5 font-sans text-lg text-foreground border-continuous",
-            (fieldError || requestError) && "border-danger-foreground",
+            'min-h-[54px] rounded-2xl border border-input-border bg-input px-4 py-3.5 font-sans text-lg text-foreground border-continuous',
+            (fieldError || requestError) && 'border-danger-foreground',
           )}
           keyboardType="email-address"
-          onChangeText={(value) => {
-            setEmailAddress(value);
-            setRequestError(null);
+          onChangeText={(value) =>
+          {
+            setEmailAddress(value)
+            setRequestError(null)
           }}
           onSubmitEditing={() => void joinWaitlist()}
           placeholder="Enter your email address"
@@ -99,16 +110,17 @@ export function CloudWaitlistEnrollment(props: { readonly onSignIn: () => void }
           <ActivityIndicator colorClassName="accent-primary-foreground" size="small" />
         ) : null}
         <Text className="font-sans-bold text-base text-primary-foreground">
-          {isSubmitting ? "Joining" : "Join the waitlist"}
+          {isSubmitting ? 'Joining' : 'Join the waitlist'}
         </Text>
       </Pressable>
 
       <SignInAction onPress={props.onSignIn} />
     </View>
-  );
+  )
 }
 
-function SignInAction(props: { readonly onPress: () => void }) {
+function SignInAction(props: { readonly onPress: () => void })
+{
   return (
     <View className="flex-row items-center justify-center gap-1 pt-1">
       <Text className="font-sans text-base text-foreground-secondary">Already have access?</Text>
@@ -116,5 +128,5 @@ function SignInAction(props: { readonly onPress: () => void }) {
         <Text className="font-sans-bold text-base text-foreground">Sign in</Text>
       </Pressable>
     </View>
-  );
+  )
 }

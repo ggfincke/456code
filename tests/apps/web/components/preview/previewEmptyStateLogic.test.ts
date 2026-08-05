@@ -1,27 +1,33 @@
-import type { PreviewSessionSnapshot } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/web/components/preview/previewEmptyStateLogic.test.ts
+// verify should show preview empty state behavior
 
-import { shouldShowPreviewEmptyState } from "../../../../../apps/web/src/components/preview/previewEmptyStateLogic";
+import type { PreviewSessionSnapshot } from '@t3tools/contracts'
+import { describe, expect, it } from 'vite-plus/test'
 
-const snapshot = (navStatus: PreviewSessionSnapshot["navStatus"]): PreviewSessionSnapshot => ({
-  threadId: "thread-1",
-  tabId: "tab-1",
+import { shouldShowPreviewEmptyState } from '../../../../../apps/web/src/components/preview/previewEmptyStateLogic'
+
+const snapshot = (navStatus: PreviewSessionSnapshot['navStatus']): PreviewSessionSnapshot => ({
+  threadId: 'thread-1',
+  tabId: 'tab-1',
   navStatus,
   canGoBack: false,
   canGoForward: false,
-  updatedAt: "2026-06-12T20:00:00.000Z",
-});
+  updatedAt: '2026-06-12T20:00:00.000Z',
+})
 
-describe("shouldShowPreviewEmptyState", () => {
-  it("shows quick-open options for a new idle browser tab", () => {
-    expect(shouldShowPreviewEmptyState(snapshot({ _tag: "Idle" }))).toBe(true);
-  });
+describe('shouldShowPreviewEmptyState', () =>
+{
+  it('shows quick-open options for a new idle browser tab', () =>
+  {
+    expect(shouldShowPreviewEmptyState(snapshot({ _tag: 'Idle' }))).toBe(true)
+  })
 
-  it("shows browser content once navigation starts", () => {
+  it('shows browser content once navigation starts', () =>
+  {
     expect(
       shouldShowPreviewEmptyState(
-        snapshot({ _tag: "Loading", url: "http://localhost:5173", title: "" }),
+        snapshot({ _tag: 'Loading', url: 'http://localhost:5173', title: '' }),
       ),
-    ).toBe(false);
-  });
-});
+    ).toBe(false)
+  })
+})

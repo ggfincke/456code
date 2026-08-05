@@ -1,7 +1,11 @@
-// @effect-diagnostics nodeBuiltinImport:off
-import * as NodeFS from "node:fs";
-import * as NodePath from "node:path";
+// apps/server/src/git/Utils.ts
+// determine whether git repository
 
-export function isGitRepository(cwd: string): boolean {
-  return NodeFS.existsSync(NodePath.join(cwd, ".git"));
+// @effect-diagnostics nodeBuiltinImport:off
+import * as NodeFS from 'node:fs'
+import * as NodePath from 'node:path'
+
+export function isGitRepository(cwd: string): boolean
+{
+  return NodeFS.existsSync(NodePath.join(cwd, '.git'))
 }

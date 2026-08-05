@@ -1,8 +1,12 @@
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as Effect from "effect/Effect";
+// apps/server/src/persistence/Migrations/002_OrchestrationCommandReceipts.ts
+// apply persistence migration 002 orchestration command receipts
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as Effect from 'effect/Effect'
+
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS orchestration_command_receipts (
@@ -14,15 +18,15 @@ export default Effect.gen(function* () {
       status TEXT NOT NULL,
       error TEXT
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_orch_command_receipts_aggregate
     ON orchestration_command_receipts(aggregate_kind, aggregate_id)
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_orch_command_receipts_sequence
     ON orchestration_command_receipts(result_sequence)
-  `;
-});
+  `
+})

@@ -1,11 +1,10 @@
-/**
- * ProjectionSnapshotQuery - Read-model snapshot query service interface.
- *
- * Exposes the current orchestration projection snapshot for read-only API
- * access.
- *
- * @module ProjectionSnapshotQuery
- */
+// apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts
+// define projection snapshot query service contract
+
+// exposes the current orchestration projection snapshot for read-only API
+// access.
+//
+// @module ProjectionSnapshotQuery
 import type {
   CheckpointRef,
   OrchestrationCheckpointSummary,
@@ -20,187 +19,161 @@ import type {
   ProjectId,
   ThreadId,
   ThreadOrigin,
-} from "@t3tools/contracts";
-import * as Context from "effect/Context";
-import type * as Option from "effect/Option";
-import type * as Effect from "effect/Effect";
+} from '@t3tools/contracts'
+import * as Context from 'effect/Context'
+import type * as Option from 'effect/Option'
+import type * as Effect from 'effect/Effect'
 
-import type { ProjectionRepositoryError } from "../../persistence/Errors.ts";
+import type { ProjectionRepositoryError } from '../../persistence/Errors.ts'
 
-export interface ProjectionSnapshotCounts {
-  readonly projectCount: number;
-  readonly threadCount: number;
+export interface ProjectionSnapshotCounts
+{
+  readonly projectCount: number
+  readonly threadCount: number
 }
 
-export interface ProjectionSnapshotSequence {
-  readonly snapshotSequence: number;
+export interface ProjectionSnapshotSequence
+{
+  readonly snapshotSequence: number
 }
 
-export interface ProjectionThreadCheckpointContext {
-  readonly threadId: ThreadId;
-  readonly projectId: ProjectId;
-  readonly workspaceRoot: string;
-  readonly worktreePath: string | null;
-  readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>;
+export interface ProjectionThreadCheckpointContext
+{
+  readonly threadId: ThreadId
+  readonly projectId: ProjectId
+  readonly workspaceRoot: string
+  readonly worktreePath: string | null
+  readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>
 }
 
-export interface ProjectionFullThreadDiffContext {
-  readonly threadId: ThreadId;
-  readonly projectId: ProjectId;
-  readonly workspaceRoot: string;
-  readonly worktreePath: string | null;
-  readonly latestCheckpointTurnCount: number;
-  readonly toCheckpointRef: CheckpointRef | null;
+export interface ProjectionFullThreadDiffContext
+{
+  readonly threadId: ThreadId
+  readonly projectId: ProjectId
+  readonly workspaceRoot: string
+  readonly worktreePath: string | null
+  readonly latestCheckpointTurnCount: number
+  readonly toCheckpointRef: CheckpointRef | null
 }
 
-export interface ProjectionImportReconciliationContext {
+export interface ProjectionImportReconciliationContext
+{
   readonly projects: ReadonlyArray<{
-    readonly projectId: ProjectId;
-    readonly workspaceRoot: string;
-  }>;
+    readonly projectId: ProjectId
+    readonly workspaceRoot: string
+  }>
   readonly threads: ReadonlyArray<{
-    readonly threadId: ThreadId;
-    readonly projectId: ProjectId;
-    readonly modelSelection: ModelSelection;
-    readonly origin: ThreadOrigin;
-    readonly archived: boolean;
-  }>;
+    readonly threadId: ThreadId
+    readonly projectId: ProjectId
+    readonly modelSelection: ModelSelection
+    readonly origin: ThreadOrigin
+    readonly archived: boolean
+  }>
 }
 
 /**
  * ProjectionSnapshotQueryShape - Service API for read-model snapshots.
  */
-export interface ProjectionSnapshotQueryShape {
-  /**
-   * Read the lightweight command snapshot used to bootstrap the in-memory
-   * orchestration engine without hydrating message/activity/checkpoint bodies.
-   */
+export interface ProjectionSnapshotQueryShape
+{
+  // read the lightweight command snapshot used to bootstrap the in-memory
+  // orchestration engine without hydrating message/activity/checkpoint bodies.
   readonly getCommandReadModel: () => Effect.Effect<
     OrchestrationReadModel,
     ProjectionRepositoryError
-  >;
+  >
 
-  /**
-   * Read the latest orchestration projection snapshot.
-   *
-   * Rehydrates from projection tables and derives snapshot sequence from
-   * projector cursor state.
-   */
-  readonly getSnapshot: () => Effect.Effect<OrchestrationReadModel, ProjectionRepositoryError>;
+  // read the latest orchestration projection snapshot.
+  //
+  // rehydrates from projection tables and derives snapshot sequence from
+  // projector cursor state.
+  readonly getSnapshot: () => Effect.Effect<OrchestrationReadModel, ProjectionRepositoryError>
 
-  /**
-   * Read the latest orchestration shell snapshot.
-   *
-   * Returns only projects and thread shell summaries so clients can bootstrap
-   * lightweight navigation state without hydrating every thread body.
-   */
+  // read the latest orchestration shell snapshot.
+  //
+  // returns only projects and thread shell summaries so clients can bootstrap
+  // lightweight navigation state without hydrating every thread body.
   readonly getShellSnapshot: () => Effect.Effect<
     OrchestrationShellSnapshot,
     ProjectionRepositoryError
-  >;
+  >
 
-  /**
-   * Read archived thread shell summaries for the archive page.
-   *
-   * This query is separate from the main shell snapshot so archived threads
-   * are never bootstrapped into normal navigation state.
-   */
+  // read archived thread shell summaries for the archive page.
+  //
+  // this query is separate from the main shell snapshot so archived threads
+  // are never bootstrapped into normal navigation state.
   readonly getArchivedShellSnapshot: () => Effect.Effect<
     OrchestrationShellSnapshot,
     ProjectionRepositoryError
-  >;
+  >
 
-  /**
-   * Read the latest projection snapshot sequence without hydrating read-model
-   * entities.
-   */
+  // read the latest projection snapshot sequence without hydrating read-model
+  // entities.
   readonly getSnapshotSequence: () => Effect.Effect<
     ProjectionSnapshotSequence,
     ProjectionRepositoryError
-  >;
+  >
 
-  /**
-   * Read aggregate projection counts without hydrating the full read model.
-   */
-  readonly getCounts: () => Effect.Effect<ProjectionSnapshotCounts, ProjectionRepositoryError>;
+  // read aggregate projection counts without hydrating the full read model.
+  readonly getCounts: () => Effect.Effect<ProjectionSnapshotCounts, ProjectionRepositoryError>
 
-  /**
-   * Read the narrow project and imported-thread metadata needed to reconcile
-   * external session history without hydrating shell or thread bodies.
-   */
+  // read the narrow project and imported-thread metadata needed to reconcile
+  // external session history without hydrating shell or thread bodies.
   readonly getImportReconciliationContext: () => Effect.Effect<
     ProjectionImportReconciliationContext,
     ProjectionRepositoryError
-  >;
+  >
 
-  /**
-   * Read the active project for an exact workspace root match.
-   */
+  // read the active project for an exact workspace root match.
   readonly getActiveProjectByWorkspaceRoot: (
     workspaceRoot: string,
-  ) => Effect.Effect<Option.Option<OrchestrationProject>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<OrchestrationProject>, ProjectionRepositoryError>
 
-  /**
-   * Read a single active project shell row by id.
-   */
+  // read a single active project shell row by id.
   readonly getProjectShellById: (
     projectId: ProjectId,
-  ) => Effect.Effect<Option.Option<OrchestrationProjectShell>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<OrchestrationProjectShell>, ProjectionRepositoryError>
 
-  /**
-   * Read the earliest active thread for a project.
-   */
+  // read the earliest active thread for a project.
   readonly getFirstActiveThreadIdByProjectId: (
     projectId: ProjectId,
-  ) => Effect.Effect<Option.Option<ThreadId>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<ThreadId>, ProjectionRepositoryError>
 
-  /**
-   * Read the checkpoint context needed to resolve a single thread diff.
-   */
+  // read the checkpoint context needed to resolve a single thread diff.
   readonly getThreadCheckpointContext: (
     threadId: ThreadId,
-  ) => Effect.Effect<Option.Option<ProjectionThreadCheckpointContext>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<ProjectionThreadCheckpointContext>, ProjectionRepositoryError>
 
-  /**
-   * Read only the narrow context needed to compute a full-thread diff from
-   * checkpoint 0 to a specific turn count.
-   */
+  // read only the narrow context needed to compute a full-thread diff from
+  // checkpoint 0 to a specific turn count.
   readonly getFullThreadDiffContext: (
     threadId: ThreadId,
     toTurnCount: number,
-  ) => Effect.Effect<Option.Option<ProjectionFullThreadDiffContext>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<ProjectionFullThreadDiffContext>, ProjectionRepositoryError>
 
-  /**
-   * Read a single active thread shell row by id.
-   */
+  // read a single active thread shell row by id.
   readonly getThreadShellById: (
     threadId: ThreadId,
-  ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<OrchestrationThreadShell>, ProjectionRepositoryError>
 
-  /**
-   * Check whether an active or archived thread has completed session import
-   * without hydrating its imported transcript.
-   */
+  // check whether an active or archived thread has completed session import
+  // without hydrating its imported transcript.
   readonly isThreadImportFinalized: (
     threadId: ThreadId,
-  ) => Effect.Effect<boolean, ProjectionRepositoryError>;
+  ) => Effect.Effect<boolean, ProjectionRepositoryError>
 
-  /**
-   * Read a single active thread detail snapshot by id.
-   */
+  // read a single active thread detail snapshot by id.
   readonly getThreadDetailById: (
     threadId: ThreadId,
-  ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<OrchestrationThread>, ProjectionRepositoryError>
 
-  /**
-   * Read a single active thread detail together with the projection snapshot
-   * sequence in one consistent transaction, so the returned `snapshotSequence`
-   * exactly matches the state reflected in `thread` (no interleaving projector
-   * update between the two reads).
-   */
+  // read a single active thread detail together with the projection snapshot
+  // sequence in one consistent transaction, so the returned `snapshotSequence`
+  // exactly matches the state reflected in `thread` (no interleaving projector
+  // update between the two reads).
   readonly getThreadDetailSnapshot: (
     threadId: ThreadId,
-  ) => Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>, ProjectionRepositoryError>;
+  ) => Effect.Effect<Option.Option<OrchestrationThreadDetailSnapshot>, ProjectionRepositoryError>
 }
 
 /**
@@ -209,4 +182,5 @@ export interface ProjectionSnapshotQueryShape {
 export class ProjectionSnapshotQuery extends Context.Service<
   ProjectionSnapshotQuery,
   ProjectionSnapshotQueryShape
->()("456code/orchestration/Services/ProjectionSnapshotQuery") {}
+>()('456code/orchestration/Services/ProjectionSnapshotQuery')
+{}

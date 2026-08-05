@@ -1,94 +1,102 @@
-import { assert, describe } from "@effect/vitest";
+// tests/oxlint-plugin-456code/rules/no-global-process-runtime.test.ts
+// verify 456code/no global process runtime behavior
 
-import { createOxlintRuleHarness } from "../../../oxlint-plugin-456code/test/utils.ts";
+import { assert, describe } from '@effect/vitest'
 
-const rule = createOxlintRuleHarness("456code/no-global-process-runtime");
+import { createOxlintRuleHarness } from '../../../oxlint-plugin-456code/test/utils.ts'
 
-describe("456code/no-global-process-runtime", () => {
+const rule = createOxlintRuleHarness('456code/no-global-process-runtime')
+
+describe('456code/no-global-process-runtime', () =>
+{
   rule.valid(
-    "allows injected host process references",
+    'allows injected host process references',
     `
       import { HostProcessPlatform } from "@t3tools/shared/hostProcess";
       import * as Effect from "effect/Effect";
 
       export const isWindows = Effect.map(HostProcessPlatform, (platform) => platform === "win32");
     `,
-  );
+  )
 
   rule.valid(
-    "allows unrelated process members",
+    'allows unrelated process members',
     `
       process.exitCode = 1;
       const nodeEnv = process.env.NODE_ENV;
     `,
-  );
+  )
 
   rule.valid(
-    "allows unrelated node os imports",
+    'allows unrelated node os imports',
     `
       import { tmpdir } from "node:os";
 
       export const tempDirectory = tmpdir();
     `,
-  );
+  )
 
   rule.invalid(
-    "reports direct platform reads",
+    'reports direct platform reads',
     `
       export const isWindows = process.platform === "win32";
     `,
-    (output) => {
-      assert.match(output, /Use HostProcessPlatform/);
+    (output) =>
+    {
+      assert.match(output, /Use HostProcessPlatform/)
     },
-  );
+  )
 
   rule.invalid(
-    "reports direct architecture reads",
+    'reports direct architecture reads',
     `
       export const isArm = process.arch === "arm64";
     `,
-    (output) => {
-      assert.match(output, /Use HostProcessArchitecture/);
+    (output) =>
+    {
+      assert.match(output, /Use HostProcessArchitecture/)
     },
-  );
+  )
 
   rule.invalid(
-    "reports globalThis process platform reads",
+    'reports globalThis process platform reads',
     `
       export const terminalName = globalThis.process.platform === "win32" ? "xterm-color" : "xterm-256color";
     `,
-  );
+  )
 
   rule.invalid(
-    "reports node os namespace platform reads",
+    'reports node os namespace platform reads',
     `
       import * as NodeOS from "node:os";
 
       export const isWindows = NodeOS.platform() === "win32";
     `,
-    (output) => {
-      assert.match(output, /Use HostProcessPlatform/);
+    (output) =>
+    {
+      assert.match(output, /Use HostProcessPlatform/)
     },
-  );
+  )
 
   rule.invalid(
-    "reports renamed node os architecture imports",
+    'reports renamed node os architecture imports',
     `
       import { arch as hostArch } from "node:os";
 
       export const isArm = hostArch() === "arm64";
     `,
-    (output) => {
-      assert.match(output, /Use HostProcessArchitecture/);
+    (output) =>
+    {
+      assert.match(output, /Use HostProcessArchitecture/)
     },
-  );
+  )
 
   rule.invalid(
-    "reports default node os platform reads",
+    'reports default node os platform reads',
     `
       import os from "node:os";
 
       export const isWindows = os.platform() === "win32";
     `,
-  );
-});
+  )
+})

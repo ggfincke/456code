@@ -1,11 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
+// apps/web/src/routes/settings.general.tsx
+// render the settings general route
 
-import { GeneralSettingsPanel } from "../components/settings/SettingsPanels";
+import { createFileRoute } from '@tanstack/react-router'
 
-function SettingsGeneralRoute() {
-  return <GeneralSettingsPanel />;
+import { GeneralSettingsPanel } from '../components/settings/SettingsPanels'
+
+function SettingsGeneralRoute()
+{
+  return <GeneralSettingsPanel />
 }
 
-export const Route = createFileRoute("/settings/general")({
+export const Route = createFileRoute('/settings/general')({
   component: SettingsGeneralRoute,
-});
+})

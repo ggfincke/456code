@@ -1,66 +1,73 @@
-import { SymbolView } from "../../components/AppSymbol";
-import { connectionStatusText } from "@t3tools/client-runtime/connection";
-import type { AtomCommandResult } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId } from "@t3tools/contracts";
-import * as Cause from "effect/Cause";
-import { AsyncResult } from "effect/unstable/reactivity";
-import { useCallback, useState } from "react";
-import { Alert, Pressable, View } from "react-native";
-import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
-import { useThemeColor } from "../../lib/useThemeColor";
+// apps/mobile/src/features/connection/ConnectionEnvironmentRow.tsx
+// render connection environment row
 
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
-import { cn } from "../../lib/cn";
-import { copyTextWithHaptic } from "../../lib/copyTextWithHaptic";
-import type { ConnectedEnvironmentSummary } from "../../state/remote-runtime-types";
-import { ConnectionStatusDot } from "./ConnectionStatusDot";
+import { SymbolView } from '../../components/AppSymbol'
+import { connectionStatusText } from '@t3tools/client-runtime/connection'
+import type { AtomCommandResult } from '@t3tools/client-runtime/state/runtime'
+import type { EnvironmentId } from '@t3tools/contracts'
+import * as Cause from 'effect/Cause'
+import { AsyncResult } from 'effect/unstable/reactivity'
+import { useCallback, useState } from 'react'
+import { Alert, Pressable, View } from 'react-native'
+import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
+import { useThemeColor } from '../../lib/useThemeColor'
 
-function connectionStatusLabel(environment: ConnectedEnvironmentSummary): string | null {
+import { AppText as Text, AppTextInput as TextInput } from '../../components/AppText'
+import { cn } from '../../lib/cn'
+import { copyTextWithHaptic } from '../../lib/copyTextWithHaptic'
+import type { ConnectedEnvironmentSummary } from '../../state/remote-runtime-types'
+import { ConnectionStatusDot } from './ConnectionStatusDot'
+
+function connectionStatusLabel(environment: ConnectedEnvironmentSummary): string | null
+{
   return connectionStatusText({
     phase: environment.connectionState,
     error: environment.connectionError,
     traceId: environment.connectionErrorTraceId,
-  });
+  })
 }
 
 export function ConnectionEnvironmentRow(props: {
-  readonly environment: ConnectedEnvironmentSummary;
-  readonly expanded: boolean;
-  readonly onToggle: () => void;
-  readonly onReconnect: (environmentId: EnvironmentId) => void;
-  readonly onRemove: (environmentId: EnvironmentId) => void;
+  readonly environment: ConnectedEnvironmentSummary
+  readonly expanded: boolean
+  readonly onToggle: () => void
+  readonly onReconnect: (environmentId: EnvironmentId) => void
+  readonly onRemove: (environmentId: EnvironmentId) => void
   readonly onUpdate: (
     environmentId: EnvironmentId,
     updates: { readonly label: string; readonly displayUrl: string },
-  ) => Promise<AtomCommandResult<unknown, unknown>>;
-}) {
-  const [label, setLabel] = useState(props.environment.environmentLabel);
-  const [url, setUrl] = useState(props.environment.displayUrl);
+  ) => Promise<AtomCommandResult<unknown, unknown>>
+})
+{
+  const [label, setLabel] = useState(props.environment.environmentLabel)
+  const [url, setUrl] = useState(props.environment.displayUrl)
 
-  const mutedColor = useThemeColor("--color-icon-subtle");
-  const primaryFg = useThemeColor("--color-primary-foreground");
-  const dangerFg = useThemeColor("--color-danger-foreground");
-  const statusLabel = connectionStatusLabel(props.environment);
-  const statusTraceId = props.environment.connectionErrorTraceId;
-  const hasConnectionFailure = props.environment.connectionError !== null;
+  const mutedColor = useThemeColor('--color-icon-subtle')
+  const primaryFg = useThemeColor('--color-primary-foreground')
+  const dangerFg = useThemeColor('--color-danger-foreground')
+  const statusLabel = connectionStatusLabel(props.environment)
+  const statusTraceId = props.environment.connectionErrorTraceId
+  const hasConnectionFailure = props.environment.connectionError !== null
   const isRetrying =
-    props.environment.connectionState === "connecting" ||
-    props.environment.connectionState === "reconnecting";
-  const handleSave = useCallback(async () => {
+    props.environment.connectionState === 'connecting' ||
+    props.environment.connectionState === 'reconnecting'
+  const handleSave = useCallback(async () =>
+  {
     const result = await props.onUpdate(props.environment.environmentId, {
       label: label.trim(),
       displayUrl: url.trim(),
-    });
-    if (AsyncResult.isSuccess(result)) {
-      props.onToggle();
-      return;
+    })
+    if (AsyncResult.isSuccess(result))
+    {
+      props.onToggle()
+      return
     }
-    const error = Cause.squash(result.cause);
+    const error = Cause.squash(result.cause)
     Alert.alert(
-      "Could not update environment",
-      error instanceof Error ? error.message : "The environment could not be updated.",
-    );
-  }, [label, url, props]);
+      'Could not update environment',
+      error instanceof Error ? error.message : 'The environment could not be updated.',
+    )
+  }, [label, url, props])
 
   return (
     <Animated.View layout={LinearTransition.duration(250)} className="bg-card">
@@ -84,8 +91,8 @@ export function ConnectionEnvironmentRow(props: {
           {statusLabel ? (
             <Text
               className={cn(
-                "text-xs",
-                hasConnectionFailure ? "text-rose-500 dark:text-rose-400" : "text-foreground-muted",
+                'text-xs',
+                hasConnectionFailure ? 'text-rose-500 dark:text-rose-400' : 'text-foreground-muted',
               )}
               numberOfLines={props.expanded ? undefined : 1}
               selectable={props.expanded}
@@ -93,17 +100,19 @@ export function ConnectionEnvironmentRow(props: {
               {statusLabel}
               {statusTraceId ? (
                 <>
-                  {" Trace ID: "}
+                  {' Trace ID: '}
                   <Text
                     accessibilityHint="Copies the trace ID"
                     accessibilityRole="button"
                     className="underline decoration-dotted"
-                    onLongPress={(event) => {
-                      event.stopPropagation();
-                      copyTextWithHaptic(statusTraceId, { target: "connection-trace-id" });
+                    onLongPress={(event) =>
+                      {
+                      event.stopPropagation()
+                      copyTextWithHaptic(statusTraceId, { target: 'connection-trace-id' })
                     }}
-                    onPress={(event) => {
-                      event.stopPropagation();
+                    onPress={(event) =>
+                      {
+                      event.stopPropagation()
                     }}
                   >
                     {statusTraceId}
@@ -120,7 +129,7 @@ export function ConnectionEnvironmentRow(props: {
           tintColor={mutedColor}
           type="monochrome"
           style={{
-            transform: [{ rotate: props.expanded ? "180deg" : "0deg" }],
+            transform: [{ rotate: props.expanded ? '180deg' : '0deg' }],
           }}
         />
       </Pressable>
@@ -203,5 +212,5 @@ export function ConnectionEnvironmentRow(props: {
         </Animated.View>
       ) : null}
     </Animated.View>
-  );
+  )
 }

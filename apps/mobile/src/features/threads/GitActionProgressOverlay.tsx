@@ -1,50 +1,62 @@
-import * as Haptics from "expo-haptics";
-import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
-import { SymbolView } from "../../components/AppSymbol";
-import { useCallback, useEffect, useRef } from "react";
-import { ActivityIndicator, Pressable, StyleSheet, useColorScheme, View } from "react-native";
-import Animated, { FadeIn, FadeOut, LinearTransition } from "react-native-reanimated";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+// apps/mobile/src/features/threads/GitActionProgressOverlay.tsx
+// render git action progress overlay
 
-import { AppText as Text } from "../../components/AppText";
-import { tryOpenExternalUrl } from "../../lib/openExternalUrl";
-import { useThemeColor } from "../../lib/useThemeColor";
-import type { GitActionProgress } from "../../state/use-vcs-action-state";
+import * as Haptics from 'expo-haptics'
+import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
+import { SymbolView } from '../../components/AppSymbol'
+import { useCallback, useEffect, useRef } from 'react'
+import { ActivityIndicator, Pressable, StyleSheet, useColorScheme, View } from 'react-native'
+import Animated, { FadeIn, FadeOut, LinearTransition } from 'react-native-reanimated'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-const OVERLAY_LAYOUT_TRANSITION = LinearTransition.duration(220);
-const AnimatedLiquidGlassView = Animated.createAnimatedComponent(LiquidGlassView);
+import { AppText as Text } from '../../components/AppText'
+import { tryOpenExternalUrl } from '../../lib/openExternalUrl'
+import { useThemeColor } from '../../lib/useThemeColor'
+import type { GitActionProgress } from '../../state/use-vcs-action-state'
+
+const OVERLAY_LAYOUT_TRANSITION = LinearTransition.duration(220)
+const AnimatedLiquidGlassView = Animated.createAnimatedComponent(LiquidGlassView)
 
 export function GitActionProgressOverlay(props: {
-  readonly progress: GitActionProgress;
-  readonly onDismiss: () => void;
-}) {
-  const { progress, onDismiss } = props;
-  const insets = useSafeAreaInsets();
-  const prevPhaseRef = useRef(progress.phase);
+  readonly progress: GitActionProgress
+  readonly onDismiss: () => void
+})
+{
+  const { progress, onDismiss } = props
+  const insets = useSafeAreaInsets()
+  const prevPhaseRef = useRef(progress.phase)
 
-  useEffect(() => {
-    const prev = prevPhaseRef.current;
-    prevPhaseRef.current = progress.phase;
+  useEffect(() =>
+  {
+    const prev = prevPhaseRef.current
+    prevPhaseRef.current = progress.phase
 
-    if (prev === "running" && progress.phase === "success") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    } else if (prev === "running" && progress.phase === "error") {
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
+    if (prev === 'running' && progress.phase === 'success')
+    {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success)
     }
-  }, [progress.phase]);
-
-  const handlePress = useCallback(() => {
-    if (progress.prUrl) {
-      void tryOpenExternalUrl(progress.prUrl, "pull-request");
-      return;
+    else if (prev === 'running' && progress.phase === 'error')
+    {
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error)
     }
-    if (progress.phase === "success" || progress.phase === "error") {
-      onDismiss();
-    }
-  }, [onDismiss, progress.phase, progress.prUrl]);
+  }, [progress.phase])
 
-  if (progress.phase === "idle") {
-    return null;
+  const handlePress = useCallback(() =>
+  {
+    if (progress.prUrl)
+    {
+      void tryOpenExternalUrl(progress.prUrl, 'pull-request')
+      return
+    }
+    if (progress.phase === 'success' || progress.phase === 'error')
+    {
+      onDismiss()
+    }
+  }, [onDismiss, progress.phase, progress.prUrl])
+
+  if (progress.phase === 'idle')
+  {
+    return null
   }
 
   return (
@@ -59,15 +71,16 @@ export function GitActionProgressOverlay(props: {
         <OverlayContent progress={progress} />
       </Pressable>
     </Animated.View>
-  );
+  )
 }
 
-function OverlayContent(props: { readonly progress: GitActionProgress }) {
-  const { progress } = props;
-  const iconColor = useThemeColor("--color-icon");
-  const glassBorder = useThemeColor("--color-header-border");
-  const glassTint = useThemeColor("--color-glass-tint");
-  const isDarkMode = useColorScheme() === "dark";
+function OverlayContent(props: { readonly progress: GitActionProgress })
+{
+  const { progress } = props
+  const iconColor = useThemeColor('--color-icon')
+  const glassBorder = useThemeColor('--color-header-border')
+  const glassTint = useThemeColor('--color-glass-tint')
+  const isDarkMode = useColorScheme() === 'dark'
   const content = (
     <>
       <OverlayIcon phase={progress.phase} iconColor={iconColor} />
@@ -89,30 +102,31 @@ function OverlayContent(props: { readonly progress: GitActionProgress }) {
         <SymbolView name="arrow.up.right" size={13} tintColor={iconColor} type="monochrome" />
       ) : null}
     </>
-  );
+  )
 
-  if (isLiquidGlassSupported) {
+  if (isLiquidGlassSupported)
+  {
     return (
       <Animated.View
         layout={OVERLAY_LAYOUT_TRANSITION}
         style={{
           backgroundColor: glassTint,
           borderColor: glassBorder,
-          borderCurve: "continuous",
+          borderCurve: 'continuous',
           borderRadius: 26,
           borderWidth: StyleSheet.hairlineWidth,
-          overflow: "hidden",
+          overflow: 'hidden',
         }}
       >
         <AnimatedLiquidGlassView
-          colorScheme={isDarkMode ? "dark" : "light"}
+          colorScheme={isDarkMode ? 'dark' : 'light'}
           effect="regular"
           interactive
           layout={OVERLAY_LAYOUT_TRANSITION}
           style={{
-            borderCurve: "continuous",
+            borderCurve: 'continuous',
             borderRadius: 26,
-            overflow: "hidden",
+            overflow: 'hidden',
           }}
         >
           <Animated.View
@@ -123,13 +137,13 @@ function OverlayContent(props: { readonly progress: GitActionProgress }) {
           </Animated.View>
         </AnimatedLiquidGlassView>
       </Animated.View>
-    );
+    )
   }
 
   const bgClass =
-    progress.phase === "error"
-      ? "bg-red-50 dark:bg-red-950/80 border-red-200 dark:border-red-800"
-      : "bg-card border-border";
+    progress.phase === 'error'
+      ? 'bg-red-50 dark:bg-red-950/80 border-red-200 dark:border-red-800'
+      : 'bg-card border-border'
 
   return (
     <Animated.View
@@ -138,23 +152,25 @@ function OverlayContent(props: { readonly progress: GitActionProgress }) {
     >
       {content}
     </Animated.View>
-  );
+  )
 }
 
 function OverlayIcon(props: {
-  readonly phase: GitActionProgress["phase"];
-  readonly iconColor: ReturnType<typeof useThemeColor>;
-}) {
-  switch (props.phase) {
-    case "running":
-      return <ActivityIndicator size="small" />;
-    case "success":
+  readonly phase: GitActionProgress['phase']
+  readonly iconColor: ReturnType<typeof useThemeColor>
+})
+{
+  switch (props.phase)
+  {
+    case 'running':
+      return <ActivityIndicator size="small" />
+    case 'success':
       return (
         <View className="h-6 w-6 items-center justify-center rounded-full bg-green-500">
           <SymbolView name="checkmark" size={12} tintColor="white" type="monochrome" />
         </View>
-      );
-    case "error":
+      )
+    case 'error':
       return (
         <View className="h-6 w-6 items-center justify-center rounded-full bg-red-500">
           <SymbolView
@@ -164,8 +180,8 @@ function OverlayIcon(props: {
             type="monochrome"
           />
         </View>
-      );
+      )
     default:
-      return null;
+      return null
   }
 }

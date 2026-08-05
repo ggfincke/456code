@@ -1,14 +1,19 @@
-import { describe, expect, it } from "@effect/vitest";
-import * as DateTime from "effect/DateTime";
-import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
+// tests/apps/server/diagnostics/ProcessResourceMonitor.test.ts
+// verify process resource monitor behavior
 
-import * as ProcessResourceMonitor from "../../../../apps/server/src/diagnostics/ProcessResourceMonitor.ts";
+import { describe, expect, it } from '@effect/vitest'
+import * as DateTime from 'effect/DateTime'
+import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
 
-describe("ProcessResourceMonitor", () => {
-  it.effect("samples the server root process and descendants", () =>
-    Effect.sync(() => {
-      const sampledAt = DateTime.makeUnsafe("2026-05-05T10:00:00.000Z");
+import * as ProcessResourceMonitor from '../../../../apps/server/src/diagnostics/ProcessResourceMonitor.ts'
+
+describe('ProcessResourceMonitor', () =>
+{
+  it.effect('samples the server root process and descendants', () =>
+    Effect.sync(() =>
+    {
+      const sampledAt = DateTime.makeUnsafe('2026-05-05T10:00:00.000Z')
       const samples = ProcessResourceMonitor.collectMonitoredSamples({
         serverPid: 100,
         sampledAt,
@@ -18,56 +23,57 @@ describe("ProcessResourceMonitor", () => {
             pid: 100,
             ppid: 1,
             pgid: 100,
-            status: "S",
+            status: 'S',
             cpuPercent: 2,
             rssBytes: 1_000,
-            elapsed: "01:00",
-            command: "t3 server",
+            elapsed: '01:00',
+            command: 't3 server',
           },
           {
             pid: 101,
             ppid: 100,
             pgid: 100,
-            status: "S",
+            status: 'S',
             cpuPercent: 10,
             rssBytes: 2_000,
-            elapsed: "00:20",
-            command: "codex app-server",
+            elapsed: '00:20',
+            command: 'codex app-server',
           },
           {
             pid: 102,
             ppid: 101,
             pgid: 100,
-            status: "R",
+            status: 'R',
             cpuPercent: 50,
             rssBytes: 3_000,
-            elapsed: "00:05",
-            command: "rg needle",
+            elapsed: '00:05',
+            command: 'rg needle',
           },
           {
             pid: 200,
             ppid: 1,
             pgid: 200,
-            status: "R",
+            status: 'R',
             cpuPercent: 99,
             rssBytes: 9_000,
-            elapsed: "00:05",
-            command: "unrelated",
+            elapsed: '00:05',
+            command: 'unrelated',
           },
         ],
-      });
+      })
 
-      expect(samples.map((sample) => sample.pid)).toEqual([100, 101, 102]);
-      expect(samples.map((sample) => sample.depth)).toEqual([0, 1, 2]);
-      expect(samples[0]?.isServerRoot).toBe(true);
-      expect(samples[1]?.isServerRoot).toBe(false);
+      expect(samples.map((sample) => sample.pid)).toEqual([100, 101, 102])
+      expect(samples.map((sample) => sample.depth)).toEqual([0, 1, 2])
+      expect(samples[0]?.isServerRoot).toBe(true)
+      expect(samples[1]?.isServerRoot).toBe(false)
     }),
-  );
+  )
 
-  it.effect("rolls samples up by process and CPU time", () =>
-    Effect.sync(() => {
-      const firstAt = DateTime.makeUnsafe("2026-05-05T10:00:00.000Z");
-      const secondAt = DateTime.makeUnsafe("2026-05-05T10:00:05.000Z");
+  it.effect('rolls samples up by process and CPU time', () =>
+    Effect.sync(() =>
+    {
+      const firstAt = DateTime.makeUnsafe('2026-05-05T10:00:00.000Z')
+      const secondAt = DateTime.makeUnsafe('2026-05-05T10:00:05.000Z')
       const samples = [
         ...ProcessResourceMonitor.collectMonitoredSamples({
           serverPid: 100,
@@ -78,11 +84,11 @@ describe("ProcessResourceMonitor", () => {
               pid: 100,
               ppid: 1,
               pgid: 100,
-              status: "S",
+              status: 'S',
               cpuPercent: 10,
               rssBytes: 1_000,
-              elapsed: "01:00",
-              command: "t3 server",
+              elapsed: '01:00',
+              command: 't3 server',
             },
           ],
         }),
@@ -95,15 +101,15 @@ describe("ProcessResourceMonitor", () => {
               pid: 100,
               ppid: 1,
               pgid: 100,
-              status: "S",
+              status: 'S',
               cpuPercent: 30,
               rssBytes: 2_000,
-              elapsed: "01:05",
-              command: "t3 server",
+              elapsed: '01:05',
+              command: 't3 server',
             },
           ],
         }),
-      ];
+      ]
 
       const result = ProcessResourceMonitor.aggregateProcessResourceHistory({
         samples,
@@ -112,22 +118,23 @@ describe("ProcessResourceMonitor", () => {
         windowMs: 60_000,
         bucketMs: 10_000,
         lastFailure: null,
-      });
+      })
 
-      expect(Option.isNone(result.error)).toBe(true);
-      expect(result.topProcesses).toHaveLength(1);
-      expect(result.topProcesses[0]?.avgCpuPercent).toBe(20);
-      expect(result.topProcesses[0]?.maxCpuPercent).toBe(30);
-      expect(result.topProcesses[0]?.cpuSecondsApprox).toBe(2);
-      expect(result.totalCpuSecondsApprox).toBe(2);
-      expect(result.buckets.some((bucket) => bucket.maxCpuPercent === 30)).toBe(true);
+      expect(Option.isNone(result.error)).toBe(true)
+      expect(result.topProcesses).toHaveLength(1)
+      expect(result.topProcesses[0]?.avgCpuPercent).toBe(20)
+      expect(result.topProcesses[0]?.maxCpuPercent).toBe(30)
+      expect(result.topProcesses[0]?.cpuSecondsApprox).toBe(2)
+      expect(result.totalCpuSecondsApprox).toBe(2)
+      expect(result.buckets.some((bucket) => bucket.maxCpuPercent === 30)).toBe(true)
     }),
-  );
+  )
 
-  it.effect("keeps a process grouped when elapsed time drifts between samples", () =>
-    Effect.sync(() => {
-      const firstAt = DateTime.makeUnsafe("2026-05-05T10:00:00.400Z");
-      const secondAt = DateTime.makeUnsafe("2026-05-05T10:00:05.900Z");
+  it.effect('keeps a process grouped when elapsed time drifts between samples', () =>
+    Effect.sync(() =>
+    {
+      const firstAt = DateTime.makeUnsafe('2026-05-05T10:00:00.400Z')
+      const secondAt = DateTime.makeUnsafe('2026-05-05T10:00:05.900Z')
       const samples = [
         ...ProcessResourceMonitor.collectMonitoredSamples({
           serverPid: 100,
@@ -138,11 +145,11 @@ describe("ProcessResourceMonitor", () => {
               pid: 100,
               ppid: 1,
               pgid: 100,
-              status: "S",
+              status: 'S',
               cpuPercent: 1,
               rssBytes: 1_000,
-              elapsed: "01:00",
-              command: "t3 server",
+              elapsed: '01:00',
+              command: 't3 server',
             },
           ],
         }),
@@ -155,15 +162,15 @@ describe("ProcessResourceMonitor", () => {
               pid: 100,
               ppid: 1,
               pgid: 100,
-              status: "S",
+              status: 'S',
               cpuPercent: 2,
               rssBytes: 2_000,
-              elapsed: "01:06",
-              command: "t3 server",
+              elapsed: '01:06',
+              command: 't3 server',
             },
           ],
         }),
-      ];
+      ]
 
       const result = ProcessResourceMonitor.aggregateProcessResourceHistory({
         samples,
@@ -172,18 +179,19 @@ describe("ProcessResourceMonitor", () => {
         windowMs: 60_000,
         bucketMs: 10_000,
         lastFailure: null,
-      });
+      })
 
-      expect(result.topProcesses).toHaveLength(1);
-      expect(result.topProcesses[0]?.isServerRoot).toBe(true);
-      expect(result.topProcesses[0]?.sampleCount).toBe(2);
-      expect(result.topProcesses[0]?.maxRssBytes).toBe(2_000);
+      expect(result.topProcesses).toHaveLength(1)
+      expect(result.topProcesses[0]?.isServerRoot).toBe(true)
+      expect(result.topProcesses[0]?.sampleCount).toBe(2)
+      expect(result.topProcesses[0]?.maxRssBytes).toBe(2_000)
     }),
-  );
+  )
 
-  it.effect("returns all process summaries in the selected window", () =>
-    Effect.sync(() => {
-      const sampledAt = DateTime.makeUnsafe("2026-05-05T10:00:00.000Z");
+  it.effect('returns all process summaries in the selected window', () =>
+    Effect.sync(() =>
+    {
+      const sampledAt = DateTime.makeUnsafe('2026-05-05T10:00:00.000Z')
       const samples = ProcessResourceMonitor.collectMonitoredSamples({
         serverPid: 100,
         sampledAt,
@@ -193,24 +201,24 @@ describe("ProcessResourceMonitor", () => {
             pid: 100,
             ppid: 1,
             pgid: 100,
-            status: "S",
+            status: 'S',
             cpuPercent: 1,
             rssBytes: 1_000,
-            elapsed: "01:00",
-            command: "t3 server",
+            elapsed: '01:00',
+            command: 't3 server',
           },
           ...Array.from({ length: 35 }, (_, index) => ({
             pid: 200 + index,
             ppid: index === 0 ? 100 : 199 + index,
             pgid: 100,
-            status: "S",
+            status: 'S',
             cpuPercent: 35 - index,
             rssBytes: 2_000 + index,
-            elapsed: "00:10",
+            elapsed: '00:10',
             command: `worker ${index}`,
           })),
         ],
-      });
+      })
 
       const result = ProcessResourceMonitor.aggregateProcessResourceHistory({
         samples,
@@ -219,21 +227,22 @@ describe("ProcessResourceMonitor", () => {
         windowMs: 60_000,
         bucketMs: 10_000,
         lastFailure: null,
-      });
+      })
 
-      expect(result.topProcesses).toHaveLength(36);
-      expect(result.topProcesses.some((process) => process.command === "worker 34")).toBe(true);
+      expect(result.topProcesses).toHaveLength(36)
+      expect(result.topProcesses.some((process) => process.command === 'worker 34')).toBe(true)
     }),
-  );
+  )
 
-  it.effect("exposes bounded failure diagnostics while retaining the exact cause", () =>
-    Effect.sync(() => {
-      const readAt = DateTime.makeUnsafe("2026-05-05T10:00:00.000Z");
-      const cause = new Error("stderr included credential=secret-value");
+  it.effect('exposes bounded failure diagnostics while retaining the exact cause', () =>
+    Effect.sync(() =>
+    {
+      const readAt = DateTime.makeUnsafe('2026-05-05T10:00:00.000Z')
+      const cause = new Error('stderr included credential=secret-value')
       const failure = new ProcessResourceMonitor.ProcessResourceSamplingError({
-        failureTag: "ProcessDiagnosticsQueryFailedError",
+        failureTag: 'ProcessDiagnosticsQueryFailedError',
         cause,
-      });
+      })
 
       const result = ProcessResourceMonitor.aggregateProcessResourceHistory({
         samples: [],
@@ -242,14 +251,14 @@ describe("ProcessResourceMonitor", () => {
         windowMs: 60_000,
         bucketMs: 10_000,
         lastFailure: failure,
-      });
+      })
 
-      expect(failure.cause).toBe(cause);
+      expect(failure.cause).toBe(cause)
       expect(Option.getOrThrow(result.error)).toEqual({
-        failureTag: "ProcessDiagnosticsQueryFailedError",
-        message: "Failed to sample process resources (ProcessDiagnosticsQueryFailedError).",
-      });
-      expect(Option.getOrThrow(result.error).message).not.toContain("secret-value");
+        failureTag: 'ProcessDiagnosticsQueryFailedError',
+        message: 'Failed to sample process resources (ProcessDiagnosticsQueryFailedError).',
+      })
+      expect(Option.getOrThrow(result.error).message).not.toContain('secret-value')
     }),
-  );
-});
+  )
+})

@@ -1,16 +1,20 @@
-import { registerRootComponent } from "expo";
-import "react-native-gesture-handler";
-import { LogBox } from "react-native";
-import { featureFlags } from "react-native-screens";
+// apps/mobile/index.ts
+// register the mobile application entry point
 
-import App from "./src/App";
+import { registerRootComponent } from 'expo'
+import 'react-native-gesture-handler'
+import { LogBox } from 'react-native'
+import { featureFlags } from 'react-native-screens'
 
-// Required for react-native-screens' iOS FormSheet sizing fix when a nested
+import App from './src/App'
+
+// required for react-native-screens' iOS FormSheet sizing fix when a nested
 // native stack is rendered inside a non-fitToContents formSheet.
-featureFlags.experiment.synchronousScreenUpdatesEnabled = true;
+featureFlags.experiment.synchronousScreenUpdatesEnabled = true
 
-if (process.env.EXPO_PUBLIC_SHOWCASE === "1") {
-  LogBox.ignoreAllLogs();
+if (process.env.EXPO_PUBLIC_SHOWCASE === '1')
+{
+  LogBox.ignoreAllLogs()
 }
 
-registerRootComponent(App);
+registerRootComponent(App)

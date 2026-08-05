@@ -1,21 +1,26 @@
-import { useState } from "react";
-import { ActivityIndicator, View } from "react-native";
-import { WebView } from "react-native-webview";
+// apps/mobile/src/features/files/WorkspaceFileWebPreview.tsx
+// render workspace file web preview
 
-import { AppText as Text } from "../../components/AppText";
-import { LoadingStrip } from "../../components/LoadingStrip";
+import { useState } from 'react'
+import { ActivityIndicator, View } from 'react-native'
+import { WebView } from 'react-native-webview'
 
-export function WorkspaceFileWebPreview(props: { readonly uri: string | null }) {
-  const [loadProgress, setLoadProgress] = useState(0);
-  const [loadError, setLoadError] = useState<string | null>(null);
+import { AppText as Text } from '../../components/AppText'
+import { LoadingStrip } from '../../components/LoadingStrip'
 
-  if (props.uri === null) {
+export function WorkspaceFileWebPreview(props: { readonly uri: string | null })
+{
+  const [loadProgress, setLoadProgress] = useState(0)
+  const [loadError, setLoadError] = useState<string | null>(null)
+
+  if (props.uri === null)
+  {
     return (
       <View className="flex-1 items-center justify-center gap-3 bg-card px-6">
         <ActivityIndicator />
         <Text className="text-center text-sm text-foreground-muted">Preparing preview...</Text>
       </View>
-    );
+    )
   }
 
   return (
@@ -29,32 +34,36 @@ export function WorkspaceFileWebPreview(props: { readonly uri: string | null }) 
       ) : null}
       <WebView
         source={{ uri: props.uri }}
-        originWhitelist={["*"]}
+        originWhitelist={['*']}
         allowsBackForwardNavigationGestures
         allowsFullscreenVideo
         setSupportMultipleWindows={false}
         startInLoadingState
-        onLoadProgress={(event) => {
-          setLoadProgress(event.nativeEvent.progress);
+        onLoadProgress={(event) =>
+        {
+          setLoadProgress(event.nativeEvent.progress)
         }}
-        onLoadStart={() => {
-          setLoadProgress(0.05);
-          setLoadError(null);
+        onLoadStart={() =>
+        {
+          setLoadProgress(0.05)
+          setLoadError(null)
         }}
-        onLoadEnd={() => {
-          setLoadProgress(0);
+        onLoadEnd={() =>
+        {
+          setLoadProgress(0)
         }}
-        onError={(event) => {
-          setLoadProgress(0);
-          setLoadError(event.nativeEvent.description || "The file could not be rendered.");
+        onError={(event) =>
+        {
+          setLoadProgress(0)
+          setLoadError(event.nativeEvent.description || 'The file could not be rendered.')
         }}
         renderLoading={() => (
           <View className="absolute inset-0 items-center justify-center bg-card">
             <ActivityIndicator />
           </View>
         )}
-        style={{ flex: 1, backgroundColor: "transparent" }}
+        style={{ flex: 1, backgroundColor: 'transparent' }}
       />
     </View>
-  );
+  )
 }

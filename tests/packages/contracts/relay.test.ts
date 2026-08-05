@@ -1,16 +1,21 @@
-import { describe, expect, it } from "vite-plus/test";
-import * as OpenApi from "effect/unstable/httpapi/OpenApi";
+// tests/packages/contracts/relay.test.ts
+// verify relay api security behavior
 
-import { RelayApi } from "../../../packages/contracts/src/relay.ts";
+import { describe, expect, it } from 'vite-plus/test'
+import * as OpenApi from 'effect/unstable/httpapi/OpenApi'
 
-describe("RelayApi security", () => {
-  it("describes DPoP access tokens using the HTTP DPoP authorization scheme", () => {
-    const document = OpenApi.fromApi(RelayApi);
+import { RelayApi } from '../../../packages/contracts/src/relay.ts'
+
+describe('RelayApi security', () =>
+{
+  it('describes DPoP access tokens using the HTTP DPoP authorization scheme', () =>
+  {
+    const document = OpenApi.fromApi(RelayApi)
 
     expect(document.components.securitySchemes?.relayDpop).toEqual({
-      type: "http",
-      scheme: "DPoP",
-      description: "DPoP-bound access token. Requests must also include the DPoP proof JWT header.",
-    });
-  });
-});
+      type: 'http',
+      scheme: 'DPoP',
+      description: 'DPoP-bound access token. Requests must also include the DPoP proof JWT header.',
+    })
+  })
+})

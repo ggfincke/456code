@@ -1,79 +1,85 @@
-import { isLiquidGlassSupported, LiquidGlassView } from "@callstack/liquid-glass";
-import type { ComposerTriggerKind } from "@t3tools/shared/composerTrigger";
-import type { ServerProviderSkill, ServerProviderSlashCommand } from "@t3tools/contracts";
-import { SymbolView } from "../../components/AppSymbol";
-import { memo, useMemo } from "react";
-import { Pressable, ScrollView, useColorScheme, View, type ViewStyle } from "react-native";
+// apps/mobile/src/features/threads/ComposerCommandPopover.tsx
+// render composer command popover
 
-import { AppText as Text } from "../../components/AppText";
-import { PierreEntryIcon } from "../../components/PierreEntryIcon";
+import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
+import type { ComposerTriggerKind } from '@t3tools/shared/composerTrigger'
+import type { ServerProviderSkill, ServerProviderSlashCommand } from '@t3tools/contracts'
+import { SymbolView } from '../../components/AppSymbol'
+import { memo, useMemo } from 'react'
+import { Pressable, ScrollView, useColorScheme, View, type ViewStyle } from 'react-native'
+
+import { AppText as Text } from '../../components/AppText'
+import { PierreEntryIcon } from '../../components/PierreEntryIcon'
 export type ComposerCommandItem =
   | {
-      readonly id: string;
-      readonly type: "path";
-      readonly path: string;
-      readonly kind: "file" | "directory";
-      readonly label: string;
-      readonly description: string;
+      readonly id: string
+      readonly type: 'path'
+      readonly path: string
+      readonly kind: 'file' | 'directory'
+      readonly label: string
+      readonly description: string
     }
   | {
-      readonly id: string;
-      readonly type: "slash-command";
-      readonly command: string;
-      readonly label: string;
-      readonly description: string;
+      readonly id: string
+      readonly type: 'slash-command'
+      readonly command: string
+      readonly label: string
+      readonly description: string
     }
   | {
-      readonly id: string;
-      readonly type: "provider-slash-command";
-      readonly command: ServerProviderSlashCommand;
-      readonly label: string;
-      readonly description: string;
+      readonly id: string
+      readonly type: 'provider-slash-command'
+      readonly command: ServerProviderSlashCommand
+      readonly label: string
+      readonly description: string
     }
   | {
-      readonly id: string;
-      readonly type: "skill";
-      readonly skill: ServerProviderSkill;
-      readonly label: string;
-      readonly description: string;
-    };
+      readonly id: string
+      readonly type: 'skill'
+      readonly skill: ServerProviderSkill
+      readonly label: string
+      readonly description: string
+    }
 
-interface ComposerCommandPopoverProps {
-  readonly items: ReadonlyArray<ComposerCommandItem>;
-  readonly triggerKind: ComposerTriggerKind | null;
-  readonly isLoading: boolean;
-  readonly onSelect: (item: ComposerCommandItem) => void;
+interface ComposerCommandPopoverProps
+{
+  readonly items: ReadonlyArray<ComposerCommandItem>
+  readonly triggerKind: ComposerTriggerKind | null
+  readonly isLoading: boolean
+  readonly onSelect: (item: ComposerCommandItem) => void
 }
 
 type ComposerCommandGroup = {
-  readonly id: string;
-  readonly label: string | null;
-  readonly items: ReadonlyArray<ComposerCommandItem>;
-};
+  readonly id: string
+  readonly label: string | null
+  readonly items: ReadonlyArray<ComposerCommandItem>
+}
 
 function PopoverSurface(props: {
-  readonly children: React.ReactNode;
-  readonly isDarkMode: boolean;
-  readonly style?: ViewStyle;
-}) {
+  readonly children: React.ReactNode
+  readonly isDarkMode: boolean
+  readonly style?: ViewStyle
+})
+{
   const baseStyle: ViewStyle = {
     borderRadius: 16,
-    overflow: "hidden",
+    overflow: 'hidden',
     ...props.style,
-  };
+  }
 
-  if (isLiquidGlassSupported) {
+  if (isLiquidGlassSupported)
+  {
     return (
       <LiquidGlassView
         effect="clear"
         interactive={false}
-        tintColor={props.isDarkMode ? "rgba(30,30,32,0.95)" : "rgba(255,255,255,0.92)"}
-        colorScheme={props.isDarkMode ? "dark" : "light"}
+        tintColor={props.isDarkMode ? 'rgba(30,30,32,0.95)' : 'rgba(255,255,255,0.92)'}
+        colorScheme={props.isDarkMode ? 'dark' : 'light'}
         style={baseStyle}
       >
         {props.children}
       </LiquidGlassView>
-    );
+    )
   }
 
   return (
@@ -81,100 +87,113 @@ function PopoverSurface(props: {
       style={[
         baseStyle,
         {
-          backgroundColor: props.isDarkMode ? "rgba(44,44,46,0.96)" : "rgba(255,255,255,0.96)",
+          backgroundColor: props.isDarkMode ? 'rgba(44,44,46,0.96)' : 'rgba(255,255,255,0.96)',
           borderWidth: 1,
-          borderColor: props.isDarkMode ? "rgba(255,255,255,0.08)" : "rgba(0,0,0,0.06)",
+          borderColor: props.isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)',
         },
       ]}
     >
       {props.children}
     </View>
-  );
+  )
 }
 
-function itemIcon(item: ComposerCommandItem) {
-  switch (item.type) {
-    case "slash-command":
-    case "provider-slash-command":
-      return "terminal" as const;
-    case "skill":
-      return "cube" as const;
-    case "path":
-      return null;
+function itemIcon(item: ComposerCommandItem)
+{
+  switch (item.type)
+  {
+    case 'slash-command':
+    case 'provider-slash-command':
+      return 'terminal' as const
+    case 'skill':
+      return 'cube' as const
+    case 'path':
+      return null
   }
 }
 
 function groupCommandItems(
   items: ReadonlyArray<ComposerCommandItem>,
   triggerKind: ComposerTriggerKind | null,
-): ComposerCommandGroup[] {
-  if (triggerKind === "skill") {
-    return items.length > 0 ? [{ id: "skills", label: "Skills", items }] : [];
+): ComposerCommandGroup[]
+{
+  if (triggerKind === 'skill')
+  {
+    return items.length > 0 ? [{ id: 'skills', label: 'Skills', items }] : []
   }
-  if (triggerKind === "path") {
-    return items.length > 0 ? [{ id: "files", label: "Files", items }] : [];
+  if (triggerKind === 'path')
+  {
+    return items.length > 0 ? [{ id: 'files', label: 'Files', items }] : []
   }
-  if (triggerKind !== "slash-command" && triggerKind !== "slash-model") {
-    return items.length > 0 ? [{ id: "default", label: null, items }] : [];
+  if (triggerKind !== 'slash-command' && triggerKind !== 'slash-model')
+  {
+    return items.length > 0 ? [{ id: 'default', label: null, items }] : []
   }
 
-  const builtInItems = items.filter((item) => item.type === "slash-command");
-  const providerItems = items.filter((item) => item.type === "provider-slash-command");
-  const skillItems = items.filter((item) => item.type === "skill");
+  const builtInItems = items.filter((item) => item.type === 'slash-command')
+  const providerItems = items.filter((item) => item.type === 'provider-slash-command')
+  const skillItems = items.filter((item) => item.type === 'skill')
 
-  const groups: ComposerCommandGroup[] = [];
-  if (builtInItems.length > 0) {
-    groups.push({ id: "built-in", label: "Commands", items: builtInItems });
+  const groups: ComposerCommandGroup[] = []
+  if (builtInItems.length > 0)
+  {
+    groups.push({ id: 'built-in', label: 'Commands', items: builtInItems })
   }
-  if (providerItems.length > 0) {
-    groups.push({ id: "provider", label: "Provider", items: providerItems });
+  if (providerItems.length > 0)
+  {
+    groups.push({ id: 'provider', label: 'Provider', items: providerItems })
   }
-  if (skillItems.length > 0) {
-    groups.push({ id: "skills", label: "Skills", items: skillItems });
+  if (skillItems.length > 0)
+  {
+    groups.push({ id: 'skills', label: 'Skills', items: skillItems })
   }
-  return groups;
+  return groups
 }
 
-function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean): string {
-  if (isLoading) {
-    return triggerKind === "path" ? "Searching files…" : "Loading…";
+function emptyText(triggerKind: ComposerTriggerKind | null, isLoading: boolean): string
+{
+  if (isLoading)
+  {
+    return triggerKind === 'path' ? 'Searching files…' : 'Loading…'
   }
-  switch (triggerKind) {
-    case "path":
-      return "No matching files or folders.";
-    case "skill":
-      return "No skills found.";
-    case "slash-command":
-    case "slash-model":
-      return "No matching commands.";
+  switch (triggerKind)
+  {
+    case 'path':
+      return 'No matching files or folders.'
+    case 'skill':
+      return 'No skills found.'
+    case 'slash-command':
+    case 'slash-model':
+      return 'No matching commands.'
     default:
-      return "No results.";
+      return 'No results.'
   }
 }
 
 const CommandRow = memo(function CommandRow(props: {
-  readonly item: ComposerCommandItem;
-  readonly onPress: () => void;
-  readonly isLast: boolean;
-}) {
-  const iconName = itemIcon(props.item);
-  const iconColor = "#a1a1aa";
+  readonly item: ComposerCommandItem
+  readonly onPress: () => void
+  readonly isLast: boolean
+})
+{
+  const iconName = itemIcon(props.item)
+  const iconColor = '#a1a1aa'
 
   return (
     <Pressable
       onPress={props.onPress}
       style={({ pressed }) => ({
-        flexDirection: "row",
-        alignItems: "center",
+        flexDirection: 'row',
+        alignItems: 'center',
         paddingHorizontal: 14,
         paddingVertical: 10,
         gap: 10,
         opacity: pressed ? 0.6 : 1,
         borderBottomWidth: props.isLast ? 0 : 0.5,
-        borderBottomColor: "rgba(255,255,255,0.1)",
+        borderBottomColor: 'rgba(255,255,255,0.1)',
       })}
     >
-      {props.item.type === "path" ? (
+      {props.item.type === 'path' ? (
         <PierreEntryIcon path={props.item.path} kind={props.item.kind} size={16} />
       ) : iconName ? (
         <SymbolView name={iconName} size={14} tintColor={iconColor} type="monochrome" />
@@ -188,17 +207,18 @@ const CommandRow = memo(function CommandRow(props: {
         </Text>
       ) : null}
     </Pressable>
-  );
-});
+  )
+})
 
 export const ComposerCommandPopover = memo(function ComposerCommandPopover(
   props: ComposerCommandPopoverProps,
-) {
-  const isDarkMode = useColorScheme() === "dark";
+)
+{
+  const isDarkMode = useColorScheme() === 'dark'
   const groups = useMemo(
     () => groupCommandItems(props.items, props.triggerKind),
     [props.items, props.triggerKind],
-  );
+  )
 
   return (
     <PopoverSurface isDarkMode={isDarkMode}>
@@ -236,5 +256,5 @@ export const ComposerCommandPopover = memo(function ComposerCommandPopover(
         </View>
       )}
     </PopoverSurface>
-  );
-});
+  )
+})

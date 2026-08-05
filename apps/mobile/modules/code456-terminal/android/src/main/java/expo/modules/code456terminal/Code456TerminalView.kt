@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-terminal/android/src/main/java/expo/modules/code456terminal/Code456TerminalView.kt
+// hosts the Ghostty terminal surface on Android
 package expo.modules.code456terminal
 
 import android.content.Context
@@ -223,7 +225,7 @@ class Code456TerminalView(context: Context, appContext: AppContext) : ExpoView(
         event.action == KeyEvent.ACTION_DOWN
       val isEnter = isImeSend || isHardwareEnter
       if (isEnter) {
-        // Enter must send CR: raw-mode TUIs treat LF as Ctrl+J (insert newline).
+        // enter must send CR: raw-mode TUIs treat LF as Ctrl+J (insert newline).
         onInput(mapOf("data" to "\r"))
         true
       } else {
@@ -237,7 +239,7 @@ class Code456TerminalView(context: Context, appContext: AppContext) : ExpoView(
           onInput(mapOf("data" to "\u007F"))
           true
         }
-        // Hardware keyboard Ctrl+A..Z -> control bytes 0x01..0x1A (Ctrl+C, Ctrl+Z, ...).
+        // hardware keyboard Ctrl+A..Z -> control bytes 0x01..0x1A (Ctrl+C, Ctrl+Z, ...).
         event.isCtrlPressed && keyCode in KeyEvent.KEYCODE_A..KeyEvent.KEYCODE_Z -> {
           onInput(
             mapOf("data" to (keyCode - KeyEvent.KEYCODE_A + 1).toChar().toString()),
@@ -350,7 +352,7 @@ class Code456TerminalView(context: Context, appContext: AppContext) : ExpoView(
     val suffix = initialBuffer.substring(fedBuffer.length)
     if (suffix.isNotEmpty()) {
       emitResponse(GhosttyBridge.nativeFeed(terminalHandle, suffix.toByteArray(Charsets.UTF_8)))
-      // New output invalidates an active selection (matches the web drawer);
+      // new output invalidates an active selection (matches the web drawer);
       // otherwise the copy toolbar drifts out of sync with the grid.
       if (terminalCanvas.hasActiveSelection()) {
         GhosttyBridge.nativeClearSelection(terminalHandle)

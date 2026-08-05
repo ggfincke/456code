@@ -1,12 +1,16 @@
-import { useMemo } from "react";
+// apps/mobile/src/state/use-selected-thread-worktree.ts
+// manage selected thread worktree through a React hook
 
-import { useSelectedThreadDetail } from "./use-thread-detail";
-import { useThreadSelection } from "./use-thread-selection";
-import { resolvePreferredThreadWorktreePath } from "../features/terminal/terminalLaunchContext";
+import { useMemo } from 'react'
 
-export function useSelectedThreadWorktree() {
-  const { selectedThread, selectedThreadProject } = useThreadSelection();
-  const selectedThreadDetail = useSelectedThreadDetail();
+import { useSelectedThreadDetail } from './use-thread-detail'
+import { useThreadSelection } from './use-thread-selection'
+import { resolvePreferredThreadWorktreePath } from '../features/terminal/terminalLaunchContext'
+
+export function useSelectedThreadWorktree()
+{
+  const { selectedThread, selectedThreadProject } = useThreadSelection()
+  const selectedThreadDetail = useSelectedThreadDetail()
 
   const selectedThreadWorktreePath = useMemo(
     () =>
@@ -15,10 +19,10 @@ export function useSelectedThreadWorktree() {
         threadDetailWorktreePath: selectedThreadDetail?.worktreePath ?? null,
       }),
     [selectedThread?.worktreePath, selectedThreadDetail?.worktreePath],
-  );
+  )
 
   return {
     selectedThreadWorktreePath,
     selectedThreadCwd: selectedThreadWorktreePath ?? selectedThreadProject?.workspaceRoot ?? null,
-  };
+  }
 }

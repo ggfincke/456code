@@ -1,8 +1,12 @@
-import type * as React from "react";
+// apps/web/src/components/ui/kbd.tsx
+// render reusable kbd UI primitives
 
-import { cn } from "~/lib/utils";
+import type * as React from 'react'
 
-function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
+import { cn } from '~/lib/utils'
+
+function Kbd({ className, ...props }: React.ComponentProps<'kbd'>)
+{
   return (
     <kbd
       className={cn(
@@ -12,17 +16,18 @@ function Kbd({ className, ...props }: React.ComponentProps<"kbd">) {
       data-slot="kbd"
       {...props}
     />
-  );
+  )
 }
 
-function KbdGroup({ className, ...props }: React.ComponentProps<"kbd">) {
+function KbdGroup({ className, ...props }: React.ComponentProps<'kbd'>)
+{
   return (
     <kbd
-      className={cn("inline-flex items-center gap-1", className)}
+      className={cn('inline-flex items-center gap-1', className)}
       data-slot="kbd-group"
       {...props}
     />
-  );
+  )
 }
 
-export { Kbd, KbdGroup };
+export { Kbd, KbdGroup }

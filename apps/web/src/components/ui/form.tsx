@@ -1,17 +1,21 @@
-"use client";
+// apps/web/src/components/ui/form.tsx
+// render reusable form UI primitives
 
-import { Form as FormPrimitive } from "@base-ui/react/form";
+'use client'
 
-import { cn } from "~/lib/utils";
+import { Form as FormPrimitive } from '@base-ui/react/form'
 
-function Form({ className, ...props }: FormPrimitive.Props) {
+import { cn } from '~/lib/utils'
+
+function Form({ className, ...props }: FormPrimitive.Props)
+{
   return (
     <FormPrimitive
-      className={cn("flex w-full flex-col gap-4", className)}
+      className={cn('flex w-full flex-col gap-4', className)}
       data-slot="form"
       {...props}
     />
-  );
+  )
 }
 
-export { Form };
+export { Form }

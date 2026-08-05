@@ -1,62 +1,65 @@
-import React from "react";
-import { Platform, StyleSheet, Text as RNText, type TextProps, type ViewStyle } from "react-native";
-import Code456MarkdownTextRunNativeComponent from "./Code456MarkdownTextRunNativeComponent";
-import Code456MarkdownTextNativeComponent from "./Code456MarkdownTextNativeComponent";
-import { flattenStyles } from "./util";
+// apps/mobile/modules/code456-markdown-text/src/MarkdownTextPrimitive.tsx
+// render markdown text primitive
+
+import React from 'react'
+import { Platform, StyleSheet, Text as RNText, type TextProps, type ViewStyle } from 'react-native'
+import Code456MarkdownTextRunNativeComponent from './Code456MarkdownTextRunNativeComponent'
+import Code456MarkdownTextNativeComponent from './Code456MarkdownTextNativeComponent'
+import { flattenStyles } from './util'
 
 const TextAncestorContext = React.createContext<[boolean, ViewStyle]>([
   false,
   StyleSheet.create({}),
-]);
+])
 
 const textDefaults: TextProps = {
   allowFontScaling: true,
   selectable: true,
-};
+}
 
-const useTextAncestorContext = () => React.useContext(TextAncestorContext);
+const useTextAncestorContext = () => React.useContext(TextAncestorContext)
 
-/**
- * Event fired by `onSelectionChange`. `start`/`end` are 0-based UTF-16 indices
- * into the rendered string. `start === end` means the selection was cleared.
- */
+// event fired by `onSelectionChange`. `start`/`end` are 0-based UTF-16 indices
+// into the rendered string. `start === end` means the selection was cleared.
 export type SelectionChangeEvent = {
-  nativeEvent: { target: number; start: number; end: number };
-};
+  nativeEvent: { target: number; start: number; end: number }
+}
 
 export type MarkdownTextPrimitiveProps = TextProps & {
-  uiTextView?: boolean;
-  /**
-   * Fired when the native text selection changes. Only fires on iOS when
-   * `uiTextView` is true. Note: fires on every selection-edge adjustment
-   * (e.g. dragging a selection handle), so consumers driving expensive work
-   * off this event should debounce.
-   */
-  onSelectionChange?: (event: SelectionChangeEvent) => void;
-};
+  uiTextView?: boolean
+  // fired when the native text selection changes. Only fires on iOS when
+  // `uiTextView` is true. Note: fires on every selection-edge adjustment
+  // (e.g. dragging a selection handle), so consumers driving expensive work
+  // off this event should debounce.
+  onSelectionChange?: (event: SelectionChangeEvent) => void
+}
 
-function MarkdownTextPrimitiveChild({ style, children, ...rest }: MarkdownTextPrimitiveProps) {
-  const [isAncestor, rootStyle] = useTextAncestorContext();
+function MarkdownTextPrimitiveChild({ style, children, ...rest }: MarkdownTextPrimitiveProps)
+{
+  const [isAncestor, rootStyle] = useTextAncestorContext()
 
-  // Flatten the styles, and apply the root styles when needed
-  const flattenedStyle = React.useMemo(() => flattenStyles(rootStyle, style), [rootStyle, style]);
+  // flatten the styles, and apply the root styles when needed
+  const flattenedStyle = React.useMemo(() => flattenStyles(rootStyle, style), [rootStyle, style])
   const contextValue = React.useMemo<[boolean, ViewStyle]>(
     () => [true, flattenedStyle],
     [flattenedStyle],
-  );
-  let childPosition = 0;
-  const nativeChildren = React.Children.toArray(children).map((child) => {
-    const position = childPosition;
-    childPosition += 1;
+  )
+  let childPosition = 0
+  const nativeChildren = React.Children.toArray(children).map((child) =>
+  {
+    const position = childPosition
+    childPosition += 1
 
-    if (React.isValidElement(child)) {
-      return child;
+    if (React.isValidElement(child))
+    {
+      return child
     }
-    if (typeof child !== "string" && typeof child !== "number") {
-      return null;
+    if (typeof child !== 'string' && typeof child !== 'number')
+    {
+      return null
     }
 
-    const text = child.toString();
+    const text = child.toString()
     return (
       // @ts-expect-error The generated run props do not include inherited Text props.
       <Code456MarkdownTextRunNativeComponent
@@ -65,10 +68,11 @@ function MarkdownTextPrimitiveChild({ style, children, ...rest }: MarkdownTextPr
         text={text}
         {...rest}
       />
-    );
-  });
+    )
+  })
 
-  if (!isAncestor) {
+  if (!isAncestor)
+  {
     return (
       <TextAncestorContext.Provider value={contextValue}>
         <Code456MarkdownTextNativeComponent
@@ -83,27 +87,31 @@ function MarkdownTextPrimitiveChild({ style, children, ...rest }: MarkdownTextPr
           {nativeChildren}
         </Code456MarkdownTextNativeComponent>
       </TextAncestorContext.Provider>
-    );
+    )
   }
 
-  return <>{nativeChildren}</>;
+  return <>{nativeChildren}</>
 }
 
-function MarkdownTextPrimitiveInner(props: MarkdownTextPrimitiveProps) {
-  const [isAncestor] = useTextAncestorContext();
+function MarkdownTextPrimitiveInner(props: MarkdownTextPrimitiveProps)
+{
+  const [isAncestor] = useTextAncestorContext()
 
-  // Even if the uiTextView prop is set, we can still default to using
+  // even if the uiTextView prop is set, we can still default to using
   // normal selection (i.e. base RN text) if the text doesn't need to be
   // selectable
-  if ((!props.selectable || !props.uiTextView) && !isAncestor) {
-    return <RNText {...props} />;
+  if ((!props.selectable || !props.uiTextView) && !isAncestor)
+  {
+    return <RNText {...props} />
   }
-  return <MarkdownTextPrimitiveChild {...props} />;
+  return <MarkdownTextPrimitiveChild {...props} />
 }
 
-export function MarkdownTextPrimitive(props: MarkdownTextPrimitiveProps) {
-  if (Platform.OS !== "ios") {
-    return <RNText {...props} />;
+export function MarkdownTextPrimitive(props: MarkdownTextPrimitiveProps)
+{
+  if (Platform.OS !== 'ios')
+  {
+    return <RNText {...props} />
   }
-  return <MarkdownTextPrimitiveInner {...props} />;
+  return <MarkdownTextPrimitiveInner {...props} />
 }

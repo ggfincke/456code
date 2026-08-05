@@ -1,45 +1,50 @@
-import { DEFAULT_TERMINAL_ID, type EnvironmentId, type ThreadId } from "@t3tools/contracts";
-import { SymbolView } from "../../components/AppSymbol";
-import { memo, useCallback, useEffect, useMemo, useRef } from "react";
-import { Pressable, View } from "react-native";
+// apps/mobile/src/features/terminal/ThreadTerminalPanel.tsx
+// render thread terminal panel
 
-import { AppText as Text } from "../../components/AppText";
-import { terminalEnvironment } from "../../state/terminal";
-import { useAtomCommand } from "../../state/use-atom-command";
-import { useAttachedTerminalSession } from "../../state/use-terminal-session";
-import { TerminalSurface } from "./NativeTerminalSurface";
-import { hasNativeTerminalSurface } from "./nativeTerminalModule";
+import { DEFAULT_TERMINAL_ID, type EnvironmentId, type ThreadId } from '@t3tools/contracts'
+import { SymbolView } from '../../components/AppSymbol'
+import { memo, useCallback, useEffect, useMemo, useRef } from 'react'
+import { Pressable, View } from 'react-native'
+
+import { AppText as Text } from '../../components/AppText'
+import { terminalEnvironment } from '../../state/terminal'
+import { useAtomCommand } from '../../state/use-atom-command'
+import { useAttachedTerminalSession } from '../../state/use-terminal-session'
+import { TerminalSurface } from './NativeTerminalSurface'
+import { hasNativeTerminalSurface } from './nativeTerminalModule'
 import {
   buildThreadTerminalAttachInput,
   type TerminalGridSize,
   type ThreadTerminalSubscriptionIdentity,
-} from "./threadTerminalPanelModel";
+} from './threadTerminalPanelModel'
 
-interface ThreadTerminalPanelProps {
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-  readonly cwd: string;
-  readonly worktreePath: string | null;
-  readonly visible: boolean;
-  readonly onClose: () => void;
+interface ThreadTerminalPanelProps
+{
+  readonly environmentId: EnvironmentId
+  readonly threadId: ThreadId
+  readonly cwd: string
+  readonly worktreePath: string | null
+  readonly visible: boolean
+  readonly onClose: () => void
 }
 
-const DEFAULT_TERMINAL_COLS = 80;
-const DEFAULT_TERMINAL_ROWS = 24;
+const DEFAULT_TERMINAL_COLS = 80
+const DEFAULT_TERMINAL_ROWS = 24
 
 export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
   props: ThreadTerminalPanelProps,
-) {
-  const writeTerminal = useAtomCommand(terminalEnvironment.write, "terminal write");
-  const resizeTerminal = useAtomCommand(terminalEnvironment.resize, "terminal resize");
-  const closeTerminal = useAtomCommand(terminalEnvironment.close, "terminal close");
-  const openTerminal = useAtomCommand(terminalEnvironment.open, "terminal open");
-  const nativeTerminalAvailable = hasNativeTerminalSurface();
-  const terminalId = DEFAULT_TERMINAL_ID;
+)
+{
+  const writeTerminal = useAtomCommand(terminalEnvironment.write, 'terminal write')
+  const resizeTerminal = useAtomCommand(terminalEnvironment.resize, 'terminal resize')
+  const closeTerminal = useAtomCommand(terminalEnvironment.close, 'terminal close')
+  const openTerminal = useAtomCommand(terminalEnvironment.open, 'terminal open')
+  const nativeTerminalAvailable = hasNativeTerminalSurface()
+  const terminalId = DEFAULT_TERMINAL_ID
   const lastGridSizeRef = useRef<TerminalGridSize>({
     cols: DEFAULT_TERMINAL_COLS,
     rows: DEFAULT_TERMINAL_ROWS,
-  });
+  })
   const subscriptionIdentity = useMemo<ThreadTerminalSubscriptionIdentity>(
     () => ({
       environmentId: props.environmentId,
@@ -49,47 +54,50 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
       worktreePath: props.worktreePath,
     }),
     [props.cwd, props.environmentId, props.threadId, props.worktreePath, terminalId],
-  );
+  )
   const attachInput = useMemo(
     () =>
       props.visible
         ? buildThreadTerminalAttachInput(subscriptionIdentity, lastGridSizeRef.current)
         : null,
     [props.visible, subscriptionIdentity],
-  );
+  )
   const terminal = useAttachedTerminalSession({
     environmentId: props.environmentId,
     terminal: attachInput,
-  });
+  })
 
-  const terminalKey = `${props.environmentId}:${props.threadId}:${terminalId}`;
-  const isRunning = terminal.status === "running" || terminal.status === "starting";
+  const terminalKey = `${props.environmentId}:${props.threadId}:${terminalId}`
+  const isRunning = terminal.status === 'running' || terminal.status === 'starting'
 
-  // Close the session and dismiss the panel when the process ends while
+  // close the session and dismiss the panel when the process ends while
   // attached (e.g. typing `exit`), mirroring the web drawer's
   // onSessionExited flow.
-  const runningTerminalKeyRef = useRef<string | null>(null);
-  const reopenedStaleTerminalKeyRef = useRef<string | null>(null);
+  const runningTerminalKeyRef = useRef<string | null>(null)
+  const reopenedStaleTerminalKeyRef = useRef<string | null>(null)
 
-  // Attach subscriptions are cached with an idle TTL; reopening the panel
+  // attach subscriptions are cached with an idle TTL; reopening the panel
   // after its session ended reuses the stale stream without a new attach
   // RPC. Issue an explicit open so the server respawns the session and its
   // snapshot flows into the live subscription.
-  useEffect(() => {
-    if (isRunning) {
-      reopenedStaleTerminalKeyRef.current = null;
-      return;
+  useEffect(() =>
+  {
+    if (isRunning)
+    {
+      reopenedStaleTerminalKeyRef.current = null
+      return
     }
     if (
       attachInput === null ||
-      (terminal.status !== "closed" && terminal.status !== "exited") ||
+      (terminal.status !== 'closed' && terminal.status !== 'exited') ||
       terminal.version === 0 ||
       runningTerminalKeyRef.current === terminalKey ||
       reopenedStaleTerminalKeyRef.current === terminalKey
-    ) {
-      return;
+    )
+    {
+      return
     }
-    reopenedStaleTerminalKeyRef.current = terminalKey;
+    reopenedStaleTerminalKeyRef.current = terminalKey
     void openTerminal({
       environmentId: props.environmentId,
       input: {
@@ -100,12 +108,14 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
         cols: lastGridSizeRef.current.cols,
         rows: lastGridSizeRef.current.rows,
       },
-    }).then((result) => {
-      // Release the guard on failure so a later render can retry the respawn.
-      if (result._tag === "Failure" && reopenedStaleTerminalKeyRef.current === terminalKey) {
-        reopenedStaleTerminalKeyRef.current = null;
+    }).then((result) =>
+    {
+      // release the guard on failure so a later render can retry the respawn.
+      if (result._tag === 'Failure' && reopenedStaleTerminalKeyRef.current === terminalKey)
+      {
+        reopenedStaleTerminalKeyRef.current = null
       }
-    });
+    })
   }, [
     attachInput,
     isRunning,
@@ -118,43 +128,48 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
     terminal.version,
     terminalId,
     terminalKey,
-  ]);
+  ])
 
-  useEffect(() => {
-    // Forget both markers while hidden: if the process ends while the panel
+  useEffect(() =>
+  {
+    // forget both markers while hidden: if the process ends while the panel
     // is unobserved (or was just auto-closed), the next show must take the
     // stale-reopen path instead of treating it as a live exit or skipping
     // the respawn.
-    if (attachInput === null) {
-      runningTerminalKeyRef.current = null;
-      reopenedStaleTerminalKeyRef.current = null;
-      return;
+    if (attachInput === null)
+    {
+      runningTerminalKeyRef.current = null
+      reopenedStaleTerminalKeyRef.current = null
+      return
     }
-    if (isRunning) {
-      runningTerminalKeyRef.current = terminalKey;
-      return;
+    if (isRunning)
+    {
+      runningTerminalKeyRef.current = terminalKey
+      return
     }
-    // The web drawer treats both exited and closed as session end.
-    const sessionEnded = terminal.status === "exited" || terminal.status === "closed";
-    if (!sessionEnded || runningTerminalKeyRef.current !== terminalKey) {
-      return;
+    // the web drawer treats both exited and closed as session end.
+    const sessionEnded = terminal.status === 'exited' || terminal.status === 'closed'
+    if (!sessionEnded || runningTerminalKeyRef.current !== terminalKey)
+    {
+      return
     }
-    runningTerminalKeyRef.current = null;
-    // Mark this key handled so the stale-attach effect doesn't respawn the
+    runningTerminalKeyRef.current = null
+    // mark this key handled so the stale-attach effect doesn't respawn the
     // session the user just ended.
-    reopenedStaleTerminalKeyRef.current = terminalKey;
+    reopenedStaleTerminalKeyRef.current = terminalKey
     void closeTerminal({
       environmentId: props.environmentId,
       input: {
         threadId: props.threadId,
         terminalId,
       },
-    });
-    props.onClose();
-  }, [attachInput, closeTerminal, isRunning, props, terminal.status, terminalId, terminalKey]);
+    })
+    props.onClose()
+  }, [attachInput, closeTerminal, isRunning, props, terminal.status, terminalId, terminalKey])
 
   const sendResize = useCallback(
-    (size: TerminalGridSize) => {
+    (size: TerminalGridSize) =>
+    {
       void resizeTerminal({
         environmentId: props.environmentId,
         input: {
@@ -163,21 +178,25 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
           cols: size.cols,
           rows: size.rows,
         },
-      });
+      })
     },
     [props.environmentId, props.threadId, resizeTerminal, terminalId],
-  );
+  )
 
-  useEffect(() => {
-    if (isRunning) {
-      sendResize(lastGridSizeRef.current);
+  useEffect(() =>
+  {
+    if (isRunning)
+    {
+      sendResize(lastGridSizeRef.current)
     }
-  }, [isRunning, sendResize]);
+  }, [isRunning, sendResize])
 
   const handleInput = useCallback(
-    (data: string) => {
-      if (!isRunning) {
-        return;
+    (data: string) =>
+    {
+      if (!isRunning)
+      {
+        return
       }
 
       void writeTerminal({
@@ -187,30 +206,34 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
           terminalId,
           data,
         },
-      });
+      })
     },
     [isRunning, props.environmentId, props.threadId, terminalId, writeTerminal],
-  );
+  )
 
   const handleResize = useCallback(
-    (size: TerminalGridSize) => {
-      const previousSize = lastGridSizeRef.current;
-      if (size.cols === previousSize.cols && size.rows === previousSize.rows) {
-        return;
+    (size: TerminalGridSize) =>
+    {
+      const previousSize = lastGridSizeRef.current
+      if (size.cols === previousSize.cols && size.rows === previousSize.rows)
+      {
+        return
       }
 
-      lastGridSizeRef.current = size;
-      if (!isRunning) {
-        return;
+      lastGridSizeRef.current = size
+      if (!isRunning)
+      {
+        return
       }
 
-      sendResize(size);
+      sendResize(size)
     },
     [isRunning, sendResize],
-  );
+  )
 
-  if (!props.visible) {
-    return null;
+  if (!props.visible)
+  {
+    return null
   }
 
   return (
@@ -221,7 +244,7 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
             Terminal
           </Text>
           <Text className="text-2xs text-neutral-500" numberOfLines={1}>
-            {nativeTerminalAvailable ? "Native Ghostty surface" : "Text fallback active"}
+            {nativeTerminalAvailable ? 'Native Ghostty surface' : 'Text fallback active'}
           </Text>
         </View>
         <View className="flex-row items-center gap-2">
@@ -247,5 +270,5 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
         style={{ flex: 1 }}
       />
     </View>
-  );
-});
+  )
+})

@@ -1,32 +1,39 @@
-import { useEffect, useRef } from "react";
-import * as Notifications from "expo-notifications";
-import { useLinkTo } from "@react-navigation/native";
+// apps/mobile/src/features/agent-awareness/notificationNavigation.ts
+// manage agent notification navigation through a React hook
 
-import { routeAgentNotificationResponseOnce } from "./notificationPayload";
-import { consumeLastAgentNotificationResponse } from "./notificationResponseConsumer";
+import { useEffect, useRef } from 'react'
+import * as Notifications from 'expo-notifications'
+import { useLinkTo } from '@react-navigation/native'
 
-export function useAgentNotificationNavigation(): void {
-  const linkTo = useLinkTo();
-  const handledResponseIds = useRef(new Set<string>());
+import { routeAgentNotificationResponseOnce } from './notificationPayload'
+import { consumeLastAgentNotificationResponse } from './notificationResponseConsumer'
 
-  useEffect(() => {
-    const handleResponse = (response: Notifications.NotificationResponse): void => {
+export function useAgentNotificationNavigation(): void
+{
+  const linkTo = useLinkTo()
+  const handledResponseIds = useRef(new Set<string>())
+
+  useEffect(() =>
+  {
+    const handleResponse = (response: Notifications.NotificationResponse): void =>
+    {
       routeAgentNotificationResponseOnce({
         handledResponseIds: handledResponseIds.current,
         response,
         navigate: linkTo,
-      });
-    };
+      })
+    }
 
-    const subscription = Notifications.addNotificationResponseReceivedListener(handleResponse);
+    const subscription = Notifications.addNotificationResponseReceivedListener(handleResponse)
     void consumeLastAgentNotificationResponse({
       getLastResponse: () => Notifications.getLastNotificationResponseAsync(),
       clearLastResponse: () => Notifications.clearLastNotificationResponseAsync(),
       handleResponse,
-    });
+    })
 
-    return () => {
-      subscription.remove();
-    };
-  }, [linkTo]);
+    return () =>
+    {
+      subscription.remove()
+    }
+  }, [linkTo])
 }

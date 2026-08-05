@@ -1,7 +1,10 @@
-import { useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { TextInputWrapper } from "expo-paste-input";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
-import { useCallback, useEffect, useMemo, useState } from "react";
+// apps/mobile/src/features/review/ReviewCommentComposerSheet.tsx
+// render review comment composer sheet
+
+import { useNavigation, type StaticScreenProps } from '@react-navigation/native'
+import { TextInputWrapper } from 'expo-paste-input'
+import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Platform,
   Pressable,
@@ -9,146 +12,166 @@ import {
   View,
   useColorScheme,
   useWindowDimensions,
-} from "react-native";
-import { KeyboardAvoidingView, KeyboardStickyView } from "react-native-keyboard-controller";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import ImageViewing from "react-native-image-viewing";
+} from 'react-native'
+import { KeyboardAvoidingView, KeyboardStickyView } from 'react-native-keyboard-controller'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import ImageViewing from 'react-native-image-viewing'
 
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
-import { SymbolView } from "../../components/AppSymbol";
-import { ComposerAttachmentStrip } from "../../components/ComposerAttachmentStrip";
-import { ControlPill } from "../../components/ControlPill";
-import { cn } from "../../lib/cn";
-import type { DraftComposerImageAttachment } from "../../lib/composerImages";
-import { convertPastedImagesToAttachments, pickComposerImages } from "../../lib/composerImages";
-import { useThemeColor } from "../../lib/useThemeColor";
-import { useNativePaste } from "../../lib/useNativePaste";
-import { setPendingConnectionError } from "../../state/use-remote-environment-registry";
-import { appendReviewCommentToDraft } from "../../state/use-thread-composer-state";
+import { AppText as Text, AppTextInput as TextInput } from '../../components/AppText'
+import { SymbolView } from '../../components/AppSymbol'
+import { ComposerAttachmentStrip } from '../../components/ComposerAttachmentStrip'
+import { ControlPill } from '../../components/ControlPill'
+import { cn } from '../../lib/cn'
+import type { DraftComposerImageAttachment } from '../../lib/composerImages'
+import { convertPastedImagesToAttachments, pickComposerImages } from '../../lib/composerImages'
+import { useThemeColor } from '../../lib/useThemeColor'
+import { useNativePaste } from '../../lib/useNativePaste'
+import { setPendingConnectionError } from '../../state/use-remote-environment-registry'
+import { appendReviewCommentToDraft } from '../../state/use-thread-composer-state'
 import {
   clearReviewCommentTarget,
   formatReviewCommentContext,
   getReviewUnifiedLineNumber,
   getSelectedReviewCommentLines,
   useReviewCommentTarget,
-} from "./reviewCommentSelection";
-import { useAppearanceCodeSurface } from "../settings/appearance/useAppearanceCodeSurface";
-import { changeTone, DiffTokenText, ReviewChangeBar } from "./reviewDiffRendering";
+} from './reviewCommentSelection'
+import { useAppearanceCodeSurface } from '../settings/appearance/useAppearanceCodeSurface'
+import { changeTone, DiffTokenText, ReviewChangeBar } from './reviewDiffRendering'
 import {
   highlightReviewSelectedLines,
   type ReviewDiffTheme,
   type ReviewHighlightedToken,
-} from "./shikiReviewHighlighter";
+} from './shikiReviewHighlighter'
 
-const REVIEW_COMMENT_PREVIEW_MAX_LINES = 5;
+const REVIEW_COMMENT_PREVIEW_MAX_LINES = 5
 
 type ReviewCommentComposerSheetProps = StaticScreenProps<{
-  readonly environmentId: EnvironmentId;
-  readonly threadId: ThreadId;
-}>;
+  readonly environmentId: EnvironmentId
+  readonly threadId: ThreadId
+}>
 
-export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProps) {
-  const isAndroid = Platform.OS === "android";
-  const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
-  const { width } = useWindowDimensions();
-  const colorScheme = useColorScheme();
-  const iconTint = String(useThemeColor("--color-icon"));
-  const target = useReviewCommentTarget();
-  const { codeSurface } = useAppearanceCodeSurface();
-  const { environmentId, threadId } = props.route.params;
-  const [commentText, setCommentText] = useState("");
+export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProps)
+{
+  const isAndroid = Platform.OS === 'android'
+  const navigation = useNavigation()
+  const insets = useSafeAreaInsets()
+  const { width } = useWindowDimensions()
+  const colorScheme = useColorScheme()
+  const iconTint = String(useThemeColor('--color-icon'))
+  const target = useReviewCommentTarget()
+  const { codeSurface } = useAppearanceCodeSurface()
+  const { environmentId, threadId } = props.route.params
+  const [commentText, setCommentText] = useState('')
   const [highlightedLinesById, setHighlightedLinesById] = useState<
     Record<string, ReadonlyArray<ReviewHighlightedToken>>
-  >({});
-  const [attachments, setAttachments] = useState<ReadonlyArray<DraftComposerImageAttachment>>([]);
-  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null);
+  >({})
+  const [attachments, setAttachments] = useState<ReadonlyArray<DraftComposerImageAttachment>>([])
+  const [previewImageUri, setPreviewImageUri] = useState<string | null>(null)
 
   const selectedLines = useMemo(
     () => (target ? getSelectedReviewCommentLines(target) : []),
     [target],
-  );
-  const firstLine = selectedLines[0] ?? null;
-  const lastLine = selectedLines[selectedLines.length - 1] ?? null;
-  const firstNumber = firstLine ? getReviewUnifiedLineNumber(firstLine) : null;
-  const lastNumber = lastLine ? getReviewUnifiedLineNumber(lastLine) : null;
-  const selectedTheme = (colorScheme === "dark" ? "dark" : "light") satisfies ReviewDiffTheme;
+  )
+  const firstLine = selectedLines[0] ?? null
+  const lastLine = selectedLines[selectedLines.length - 1] ?? null
+  const firstNumber = firstLine ? getReviewUnifiedLineNumber(firstLine) : null
+  const lastNumber = lastLine ? getReviewUnifiedLineNumber(lastLine) : null
+  const selectedTheme = (colorScheme === 'dark' ? 'dark' : 'light') satisfies ReviewDiffTheme
   const canSubmit =
-    commentText.trim().length > 0 && target !== null && !!environmentId && !!threadId;
+    commentText.trim().length > 0 && target !== null && !!environmentId && !!threadId
   const selectionLabel =
     selectedLines.length === 1
       ? firstNumber !== null
         ? `Line ${firstNumber}`
-        : "File comment"
+        : 'File comment'
       : firstNumber !== null && lastNumber !== null
         ? `Lines ${firstNumber}-${lastNumber}`
-        : `${selectedLines.length} lines selected`;
+        : `${selectedLines.length} lines selected`
   const previewHeight = Math.max(
     Math.min(selectedLines.length, REVIEW_COMMENT_PREVIEW_MAX_LINES) * codeSurface.rowHeight,
     codeSurface.rowHeight,
-  );
-  const previewViewportWidth = Math.max(width - 40, 280);
-  const dismissComposer = useCallback(() => {
-    clearReviewCommentTarget();
-    navigation.goBack();
-  }, [navigation]);
-  const handleNativePaste = useNativePaste((uris) => {
-    void (async () => {
-      try {
+  )
+  const previewViewportWidth = Math.max(width - 40, 280)
+  const dismissComposer = useCallback(() =>
+  {
+    clearReviewCommentTarget()
+    navigation.goBack()
+  }, [navigation])
+  const handleNativePaste = useNativePaste((uris) =>
+  {
+    void (async () =>
+    {
+      try
+      {
         const images = await convertPastedImagesToAttachments({
           uris,
           existingCount: attachments.length,
-        });
-        if (images.length > 0) {
-          setAttachments((current) => [...current, ...images]);
+        })
+        if (images.length > 0)
+        {
+          setAttachments((current) => [...current, ...images])
         }
-      } catch (error) {
-        console.error("[review comment] error converting pasted images", error);
       }
-    })();
-  });
+      catch (error)
+      {
+        console.error('[review comment] error converting pasted images', error)
+      }
+    })()
+  })
 
-  useEffect(() => {
-    if (!target || selectedLines.length === 0) {
-      setHighlightedLinesById({});
-      return;
+  useEffect(() =>
+  {
+    if (!target || selectedLines.length === 0)
+    {
+      setHighlightedLinesById({})
+      return
     }
 
-    let cancelled = false;
+    let cancelled = false
     void highlightReviewSelectedLines({
       filePath: target.filePath,
       lines: selectedLines,
       theme: selectedTheme,
     })
-      .then((next) => {
-        if (!cancelled) {
-          setHighlightedLinesById(next);
+      .then((next) =>
+      {
+        if (!cancelled)
+        {
+          setHighlightedLinesById(next)
         }
       })
-      .catch(() => {
-        if (!cancelled) {
-          setHighlightedLinesById({});
+      .catch(() =>
+      {
+        if (!cancelled)
+        {
+          setHighlightedLinesById({})
         }
-      });
+      })
 
-    return () => {
-      cancelled = true;
-    };
-  }, [selectedLines, selectedTheme, target]);
-
-  async function handlePickImages(): Promise<void> {
-    const result = await pickComposerImages({ existingCount: attachments.length });
-    if (result.images.length > 0) {
-      setAttachments((current) => [...current, ...result.images]);
+    return () =>
+    {
+      cancelled = true
     }
-    if (result.error) {
-      setPendingConnectionError(result.error);
+  }, [selectedLines, selectedTheme, target])
+
+  async function handlePickImages(): Promise<void>
+  {
+    const result = await pickComposerImages({ existingCount: attachments.length })
+    if (result.images.length > 0)
+    {
+      setAttachments((current) => [...current, ...result.images])
+    }
+    if (result.error)
+    {
+      setPendingConnectionError(result.error)
     }
   }
 
-  const handleSubmit = useCallback(() => {
-    if (!target || !environmentId || !threadId || commentText.trim().length === 0) {
-      return;
+  const handleSubmit = useCallback(() =>
+  {
+    if (!target || !environmentId || !threadId || commentText.trim().length === 0)
+    {
+      return
     }
 
     appendReviewCommentToDraft({
@@ -156,10 +179,10 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
       threadId,
       text: formatReviewCommentContext(target, commentText),
       attachments,
-    });
-    setAttachments([]);
-    dismissComposer();
-  }, [attachments, commentText, dismissComposer, environmentId, target, threadId]);
+    })
+    setAttachments([])
+    dismissComposer()
+  }, [attachments, commentText, dismissComposer, environmentId, target, threadId])
 
   return (
     <View className="flex-1">
@@ -224,18 +247,19 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                     style={{ height: previewHeight }}
                   >
                     <View style={{ minWidth: previewViewportWidth }}>
-                      {selectedLines.map((line) => {
-                        const lineNumber = getReviewUnifiedLineNumber(line);
+                      {selectedLines.map((line) =>
+                        {
+                        const lineNumber = getReviewUnifiedLineNumber(line)
 
                         return (
                           <View
                             key={line.id}
-                            className={cn("flex-row items-start", changeTone(line.change))}
+                            className={cn('flex-row items-start', changeTone(line.change))}
                             style={{ height: codeSurface.rowHeight }}
                           >
                             <ReviewChangeBar change={line.change} height={codeSurface.rowHeight} />
                             <Text className="w-9 py-1 pr-1 text-right text-2xs font-mono text-foreground-muted">
-                              {lineNumber ?? ""}
+                              {lineNumber ?? ''}
                             </Text>
                             <View className="min-w-0 flex-1 shrink-0 px-1 py-1">
                               <DiffTokenText
@@ -247,7 +271,7 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                               />
                             </View>
                           </View>
-                        );
+                        )
                       })}
                     </View>
                   </ScrollView>
@@ -279,10 +303,11 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
                         imageSize={60}
                         onPressImage={setPreviewImageUri}
                         removeButtonPlacement="gutter"
-                        onRemove={(imageId) => {
+                        onRemove={(imageId) =>
+                          {
                           setAttachments((current) =>
                             current.filter((image) => image.id !== imageId),
-                          );
+                          )
                         }}
                       />
                     </View>
@@ -346,5 +371,5 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
         doubleTapToZoomEnabled
       />
     </View>
-  );
+  )
 }

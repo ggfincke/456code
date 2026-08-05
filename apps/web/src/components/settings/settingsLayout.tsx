@@ -1,18 +1,23 @@
-import { Undo2Icon } from "lucide-react";
-import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useState } from "react";
+// apps/web/src/components/settings/settingsLayout.tsx
+// render settings layout
 
-import { cn } from "../../lib/utils";
-import { Button } from "../ui/button";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Undo2Icon } from 'lucide-react'
+import { type ComponentPropsWithoutRef, type ReactNode, useEffect, useState } from 'react'
 
-/** Re-render every `intervalMs`; return a stable timestamp snapshot for render-time relative labels. */
-export function useRelativeTimeTick(intervalMs = 1_000) {
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const id = setInterval(() => setNowMs(Date.now()), intervalMs);
-    return () => clearInterval(id);
-  }, [intervalMs]);
-  return nowMs;
+import { cn } from '../../lib/utils'
+import { Button } from '../ui/button'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
+
+// re-render every `intervalMs`; return a stable timestamp snapshot for render-time relative labels.
+export function useRelativeTimeTick(intervalMs = 1_000)
+{
+  const [nowMs, setNowMs] = useState(() => Date.now())
+  useEffect(() =>
+  {
+    const id = setInterval(() => setNowMs(Date.now()), intervalMs)
+    return () => clearInterval(id)
+  }, [intervalMs])
+  return nowMs
 }
 
 export function SettingsSection({
@@ -22,14 +27,15 @@ export function SettingsSection({
   children,
   className,
   ...sectionProps
-}: ComponentPropsWithoutRef<"section"> & {
-  title: string;
-  icon?: ReactNode;
-  headerAction?: ReactNode;
-  children: ReactNode;
-}) {
+}: ComponentPropsWithoutRef<'section'> & {
+  title: string
+  icon?: ReactNode
+  headerAction?: ReactNode
+  children: ReactNode
+})
+{
   return (
-    <section {...sectionProps} className={cn("space-y-3", className)}>
+    <section {...sectionProps} className={cn('space-y-3', className)}>
       <div className="flex min-h-8 items-center justify-between gap-4 px-3 sm:px-4">
         <h2 className="flex items-center gap-2 text-lg font-semibold tracking-[-0.025em] text-foreground">
           {icon}
@@ -39,7 +45,7 @@ export function SettingsSection({
       </div>
       <div className="relative space-y-1 overflow-visible text-foreground">{children}</div>
     </section>
-  );
+  )
 }
 
 export function SettingsRow({
@@ -51,18 +57,19 @@ export function SettingsRow({
   children,
   className,
   ...rowProps
-}: Omit<ComponentPropsWithoutRef<"div">, "title"> & {
-  title: ReactNode;
-  description: ReactNode;
-  status?: ReactNode;
-  resetAction?: ReactNode;
-  control?: ReactNode;
-  children?: ReactNode;
-}) {
+}: Omit<ComponentPropsWithoutRef<'div'>, 'title'> & {
+  title: ReactNode
+  description: ReactNode
+  status?: ReactNode
+  resetAction?: ReactNode
+  control?: ReactNode
+  children?: ReactNode
+})
+{
   return (
     <div
       {...rowProps}
-      className={cn("rounded-xl px-3 sm:px-4", children ? "pt-3 pb-1" : "py-3", className)}
+      className={cn('rounded-xl px-3 sm:px-4', children ? 'pt-3 pb-1' : 'py-3', className)}
     >
       <div className="flex flex-col gap-3 sm:grid sm:grid-cols-[minmax(0,1fr)_minmax(10rem,auto)] sm:items-center sm:gap-8">
         <div className="min-w-0 flex-1 space-y-1">
@@ -85,10 +92,11 @@ export function SettingsRow({
       </div>
       {children}
     </div>
-  );
+  )
 }
 
-export function SettingResetButton({ label, onClick }: { label: string; onClick: () => void }) {
+export function SettingResetButton({ label, onClick }: { label: string; onClick: () => void })
+{
   return (
     <Tooltip>
       <TooltipTrigger
@@ -98,9 +106,10 @@ export function SettingResetButton({ label, onClick }: { label: string; onClick:
             variant="ghost"
             aria-label={`Reset ${label} to default`}
             className="size-5 rounded-sm p-0 text-muted-foreground hover:text-foreground"
-            onClick={(event) => {
-              event.stopPropagation();
-              onClick();
+            onClick={(event) =>
+            {
+              event.stopPropagation()
+              onClick()
             }}
           >
             <Undo2Icon className="size-3" />
@@ -109,21 +118,22 @@ export function SettingResetButton({ label, onClick }: { label: string; onClick:
       />
       <TooltipPopup side="top">Reset to default</TooltipPopup>
     </Tooltip>
-  );
+  )
 }
 
 export function SettingsPageContainer({
   children,
   className,
 }: {
-  children: ReactNode;
-  className?: string;
-}) {
+  children: ReactNode
+  className?: string
+})
+{
   return (
     <div className="settings-page-scroll-fade scrollbar-gutter-both flex-1 overflow-y-auto px-4 pt-10 pb-7 sm:px-8 sm:pt-12 sm:pb-10">
-      <div className={cn("mx-auto flex w-full max-w-4xl flex-col gap-12", className)}>
+      <div className={cn('mx-auto flex w-full max-w-4xl flex-col gap-12', className)}>
         {children}
       </div>
     </div>
-  );
+  )
 }

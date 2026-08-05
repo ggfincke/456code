@@ -1,13 +1,18 @@
-import * as Schema from "effect/Schema";
+// apps/mobile/src/native/nativeViewResolutionError.ts
+// define native errors
+
+import * as Schema from 'effect/Schema'
 
 export class NativeViewResolutionError extends Schema.TaggedErrorClass<NativeViewResolutionError>()(
-  "NativeViewResolutionError",
+  'NativeViewResolutionError',
   {
     nativeModuleName: Schema.String,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to resolve native view ${this.nativeModuleName}.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to resolve native view ${this.nativeModuleName}.`
   }
 }

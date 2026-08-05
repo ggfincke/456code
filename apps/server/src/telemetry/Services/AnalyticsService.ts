@@ -1,2 +1,4 @@
-// Compatibility shim for the intentionally excluded orchestration harness.
-export { AnalyticsService } from "../AnalyticsService.ts";
+// apps/server/src/telemetry/Services/AnalyticsService.ts
+// define analytics service service contract
+
+export { AnalyticsService } from '../AnalyticsService.ts'

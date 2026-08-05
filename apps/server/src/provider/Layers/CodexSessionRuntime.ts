@@ -18,64 +18,65 @@ import {
   RuntimeMode,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import { resolveSpawnCommand } from "@t3tools/shared/shell";
-import { normalizeModelSlug } from "@t3tools/shared/model";
-import * as Crypto from "effect/Crypto";
-import * as DateTime from "effect/DateTime";
-import * as Deferred from "effect/Deferred";
-import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
-import * as Layer from "effect/Layer";
-import * as Queue from "effect/Queue";
-import * as Ref from "effect/Ref";
-import * as Schema from "effect/Schema";
-import * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
-import { ChildProcess, ChildProcessSpawner } from "effect/unstable/process";
-import * as CodexClient from "effect-codex-app-server/client";
-import * as CodexErrors from "effect-codex-app-server/errors";
-import * as CodexRpc from "effect-codex-app-server/rpc";
-import * as EffectCodexSchema from "effect-codex-app-server/schema";
+} from '@t3tools/contracts'
+import { resolveSpawnCommand } from '@t3tools/shared/shell'
+import { normalizeModelSlug } from '@t3tools/shared/model'
+import * as Crypto from 'effect/Crypto'
+import * as DateTime from 'effect/DateTime'
+import * as Deferred from 'effect/Deferred'
+import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Layer from 'effect/Layer'
+import * as Queue from 'effect/Queue'
+import * as Ref from 'effect/Ref'
+import * as Schema from 'effect/Schema'
+import * as Scope from 'effect/Scope'
+import * as Stream from 'effect/Stream'
+import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
+import * as CodexClient from 'effect-codex-app-server/client'
+import * as CodexErrors from 'effect-codex-app-server/errors'
+import * as CodexRpc from 'effect-codex-app-server/rpc'
+import * as EffectCodexSchema from 'effect-codex-app-server/schema'
 
-import { buildCodexInitializeParams } from "./CodexProvider.ts";
-import { codexSessionAppServerArgs } from "./codexLaunchArgs.ts";
-import { expandHomePath } from "../../pathExpansion.ts";
-import { buildCodexDeveloperInstructions } from "../CodexDeveloperInstructions.ts";
-const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse);
+import { buildCodexInitializeParams } from './CodexProvider.ts'
+import { codexSessionAppServerArgs } from './codexLaunchArgs.ts'
+import { expandHomePath } from '../../pathExpansion.ts'
+import { buildCodexDeveloperInstructions } from '../CodexDeveloperInstructions.ts'
+const decodeV2TurnStartResponse = Schema.decodeUnknownEffect(EffectCodexSchema.V2TurnStartResponse)
 
-const PROVIDER = ProviderDriverKind.make("codex");
+const PROVIDER = ProviderDriverKind.make('codex')
 
-const ANSI_ESCAPE_CHAR = String.fromCharCode(27);
-const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE_CHAR}\\[[0-9;]*m`, "g");
+const ANSI_ESCAPE_CHAR = String.fromCharCode(27)
+const ANSI_ESCAPE_REGEX = new RegExp(`${ANSI_ESCAPE_CHAR}\\[[0-9;]*m`, 'g')
 const CODEX_STDERR_LOG_REGEX =
-  /^\d{4}-\d{2}-\d{2}T\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+\S+:\s+(.*)$/;
+  /^\d{4}-\d{2}-\d{2}T\S+\s+(TRACE|DEBUG|INFO|WARN|ERROR)\s+\S+:\s+(.*)$/
 const BENIGN_ERROR_LOG_SNIPPETS = [
-  "state db missing rollout path for thread",
-  "state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back",
-];
-const CODEX_APP_SERVER_FORCE_KILL_AFTER = "2 seconds" as const;
+  'state db missing rollout path for thread',
+  'state db record_discrepancy: find_thread_path_by_id_str_in_subdir, falling_back',
+]
+const CODEX_APP_SERVER_FORCE_KILL_AFTER = '2 seconds' as const
 const RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS = [
-  "not found",
-  "missing thread",
-  "no such thread",
-  "unknown thread",
-  "does not exist",
-];
+  'not found',
+  'missing thread',
+  'no such thread',
+  'unknown thread',
+  'does not exist',
+]
 
-export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | undefined): boolean {
-  return appServerArgs?.some((argument) => argument.includes("mcp_servers.")) === true;
+export function hasConfiguredMcpServer(appServerArgs: ReadonlyArray<string> | undefined): boolean
+{
+  return appServerArgs?.some((argument) => argument.includes('mcp_servers.')) === true
 }
 
 export const CodexResumeCursorSchema = Schema.Struct({
   threadId: Schema.String,
   requireExisting: Schema.optionalKey(Schema.Literal(true)),
-});
+})
 const CodexUserInputAnswerObject = Schema.Struct({
   answers: Schema.Array(Schema.String),
-});
-const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema);
-const isCodexUserInputAnswerObject = Schema.is(CodexUserInputAnswerObject);
+})
+const isCodexResumeCursorSchema = Schema.is(CodexResumeCursorSchema)
+const isCodexUserInputAnswerObject = Schema.is(CodexUserInputAnswerObject)
 
 // TODO: Verify `packages/effect-codex-app-server/scripts/generate.ts` so the generated
 // `V2TurnStartParams` schema includes `collaborationMode` directly.
@@ -83,78 +84,83 @@ const CodexTurnStartParamsWithCollaborationMode = EffectCodexSchema.V2TurnStartP
   Schema.fieldsAssign({
     collaborationMode: Schema.optionalKey(EffectCodexSchema.V2TurnStartParams__CollaborationMode),
   }),
-);
+)
 const decodeCodexTurnStartParamsWithCollaborationMode = Schema.decodeUnknownEffect(
   CodexTurnStartParamsWithCollaborationMode,
-);
+)
 
 export type CodexTurnStartParamsWithCollaborationMode =
-  typeof CodexTurnStartParamsWithCollaborationMode.Type;
+  typeof CodexTurnStartParamsWithCollaborationMode.Type
 
-export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type;
-type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams["serviceTier"]>;
+export type CodexResumeCursor = typeof CodexResumeCursorSchema.Type
+type CodexServiceTier = NonNullable<EffectCodexSchema.V2ThreadStartParams['serviceTier']>
 type CodexThreadItem =
-  | EffectCodexSchema.V2ThreadReadResponse["thread"]["turns"][number]["items"][number]
-  | EffectCodexSchema.V2ThreadRollbackResponse["thread"]["turns"][number]["items"][number];
+  | EffectCodexSchema.V2ThreadReadResponse['thread']['turns'][number]['items'][number]
+  | EffectCodexSchema.V2ThreadRollbackResponse['thread']['turns'][number]['items'][number]
 
-export interface CodexSessionRuntimeOptions {
-  readonly threadId: ThreadId;
-  readonly providerInstanceId?: ProviderInstanceId;
-  readonly binaryPath: string;
-  readonly homePath?: string;
-  readonly launchArgs?: string;
-  readonly environment?: NodeJS.ProcessEnv;
-  readonly cwd: string;
-  readonly runtimeMode: RuntimeMode;
-  readonly model?: string;
-  readonly serviceTier?: CodexServiceTier | undefined;
-  readonly resumeCursor?: CodexResumeCursor;
-  readonly appServerArgs?: ReadonlyArray<string>;
+export interface CodexSessionRuntimeOptions
+{
+  readonly threadId: ThreadId
+  readonly providerInstanceId?: ProviderInstanceId
+  readonly binaryPath: string
+  readonly homePath?: string
+  readonly launchArgs?: string
+  readonly environment?: NodeJS.ProcessEnv
+  readonly cwd: string
+  readonly runtimeMode: RuntimeMode
+  readonly model?: string
+  readonly serviceTier?: CodexServiceTier | undefined
+  readonly resumeCursor?: CodexResumeCursor
+  readonly appServerArgs?: ReadonlyArray<string>
 }
 
-export interface CodexSessionRuntimeSendTurnInput {
-  readonly input?: string;
+export interface CodexSessionRuntimeSendTurnInput
+{
+  readonly input?: string
   readonly attachments?: ReadonlyArray<{
-    readonly type: "image";
-    readonly url: string;
-  }>;
-  readonly model?: string;
-  readonly serviceTier?: CodexServiceTier | undefined;
-  readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined;
-  readonly interactionMode?: ProviderInteractionMode;
+    readonly type: 'image'
+    readonly url: string
+  }>
+  readonly model?: string
+  readonly serviceTier?: CodexServiceTier | undefined
+  readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort | undefined
+  readonly interactionMode?: ProviderInteractionMode
 }
 
-export interface CodexThreadTurnSnapshot {
-  readonly id: TurnId;
-  readonly items: ReadonlyArray<CodexThreadItem>;
+export interface CodexThreadTurnSnapshot
+{
+  readonly id: TurnId
+  readonly items: ReadonlyArray<CodexThreadItem>
 }
 
-export interface CodexThreadSnapshot {
-  readonly threadId: string;
-  readonly turns: ReadonlyArray<CodexThreadTurnSnapshot>;
+export interface CodexThreadSnapshot
+{
+  readonly threadId: string
+  readonly turns: ReadonlyArray<CodexThreadTurnSnapshot>
 }
 
-export interface CodexSessionRuntimeShape {
-  readonly start: () => Effect.Effect<ProviderSession, CodexSessionRuntimeError>;
-  readonly getSession: Effect.Effect<ProviderSession>;
+export interface CodexSessionRuntimeShape
+{
+  readonly start: () => Effect.Effect<ProviderSession, CodexSessionRuntimeError>
+  readonly getSession: Effect.Effect<ProviderSession>
   readonly sendTurn: (
     input: CodexSessionRuntimeSendTurnInput,
-  ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>;
-  readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>;
-  readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  ) => Effect.Effect<ProviderTurnStartResult, CodexSessionRuntimeError>
+  readonly interruptTurn: (turnId?: TurnId) => Effect.Effect<void, CodexSessionRuntimeError>
+  readonly readThread: Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>
   readonly rollbackThread: (
     numTurns: number,
-  ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>;
+  ) => Effect.Effect<CodexThreadSnapshot, CodexSessionRuntimeError>
   readonly respondToRequest: (
     requestId: ApprovalRequestId,
     decision: ProviderApprovalDecision,
-  ) => Effect.Effect<void, CodexSessionRuntimeError>;
+  ) => Effect.Effect<void, CodexSessionRuntimeError>
   readonly respondToUserInput: (
     requestId: ApprovalRequestId,
     answers: ProviderUserInputAnswers,
-  ) => Effect.Effect<void, CodexSessionRuntimeError>;
-  readonly events: Stream.Stream<ProviderEvent, never>;
-  readonly close: Effect.Effect<void>;
+  ) => Effect.Effect<void, CodexSessionRuntimeError>
+  readonly events: Stream.Stream<ProviderEvent, never>
+  readonly close: Effect.Effect<void>
 }
 
 export type CodexSessionRuntimeError =
@@ -162,159 +168,179 @@ export type CodexSessionRuntimeError =
   | CodexSessionRuntimePendingApprovalNotFoundError
   | CodexSessionRuntimePendingUserInputNotFoundError
   | CodexSessionRuntimeInvalidUserInputAnswersError
-  | CodexSessionRuntimeThreadIdMissingError;
+  | CodexSessionRuntimeThreadIdMissingError
 
 export class CodexSessionRuntimePendingApprovalNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingApprovalNotFoundError>()(
-  "CodexSessionRuntimePendingApprovalNotFoundError",
+  'CodexSessionRuntimePendingApprovalNotFoundError',
   {
     requestId: Schema.String,
   },
-) {
-  override get message(): string {
-    return `Unknown pending Codex approval request: ${this.requestId}`;
+)
+{
+  override get message(): string
+  {
+    return `Unknown pending Codex approval request: ${this.requestId}`
   }
 }
 
 export class CodexSessionRuntimePendingUserInputNotFoundError extends Schema.TaggedErrorClass<CodexSessionRuntimePendingUserInputNotFoundError>()(
-  "CodexSessionRuntimePendingUserInputNotFoundError",
+  'CodexSessionRuntimePendingUserInputNotFoundError',
   {
     requestId: Schema.String,
   },
-) {
-  override get message(): string {
-    return `Unknown pending Codex user input request: ${this.requestId}`;
+)
+{
+  override get message(): string
+  {
+    return `Unknown pending Codex user input request: ${this.requestId}`
   }
 }
 
 export class CodexSessionRuntimeInvalidUserInputAnswersError extends Schema.TaggedErrorClass<CodexSessionRuntimeInvalidUserInputAnswersError>()(
-  "CodexSessionRuntimeInvalidUserInputAnswersError",
+  'CodexSessionRuntimeInvalidUserInputAnswersError',
   {
     questionId: Schema.String,
   },
-) {
-  override get message(): string {
-    return `Invalid Codex user input answers for question '${this.questionId}'`;
+)
+{
+  override get message(): string
+  {
+    return `Invalid Codex user input answers for question '${this.questionId}'`
   }
 }
 
 export class CodexSessionRuntimeThreadIdMissingError extends Schema.TaggedErrorClass<CodexSessionRuntimeThreadIdMissingError>()(
-  "CodexSessionRuntimeThreadIdMissingError",
+  'CodexSessionRuntimeThreadIdMissingError',
   {
     threadId: Schema.String,
   },
-) {
-  override get message(): string {
-    return `Codex session is missing a provider thread id for ${this.threadId}`;
+)
+{
+  override get message(): string
+  {
+    return `Codex session is missing a provider thread id for ${this.threadId}`
   }
 }
 
-interface PendingApproval {
-  readonly requestId: ApprovalRequestId;
-  readonly jsonRpcId: string;
-  readonly requestKind: ProviderRequestKind;
-  readonly turnId: TurnId | undefined;
-  readonly itemId: ProviderItemId | undefined;
-  readonly decision: Deferred.Deferred<ProviderApprovalDecision>;
+interface PendingApproval
+{
+  readonly requestId: ApprovalRequestId
+  readonly jsonRpcId: string
+  readonly requestKind: ProviderRequestKind
+  readonly turnId: TurnId | undefined
+  readonly itemId: ProviderItemId | undefined
+  readonly decision: Deferred.Deferred<ProviderApprovalDecision>
 }
 
-interface ApprovalCorrelation {
-  readonly requestId: ApprovalRequestId;
-  readonly requestKind: ProviderRequestKind;
-  readonly turnId: TurnId | undefined;
-  readonly itemId: ProviderItemId | undefined;
+interface ApprovalCorrelation
+{
+  readonly requestId: ApprovalRequestId
+  readonly requestKind: ProviderRequestKind
+  readonly turnId: TurnId | undefined
+  readonly itemId: ProviderItemId | undefined
 }
 
-interface PendingUserInput {
-  readonly requestId: ApprovalRequestId;
-  readonly turnId: TurnId | undefined;
-  readonly itemId: ProviderItemId | undefined;
-  readonly answers: Deferred.Deferred<ProviderUserInputAnswers>;
+interface PendingUserInput
+{
+  readonly requestId: ApprovalRequestId
+  readonly turnId: TurnId | undefined
+  readonly itemId: ProviderItemId | undefined
+  readonly answers: Deferred.Deferred<ProviderUserInputAnswers>
 }
 
 type CodexServerNotification = {
   readonly [M in CodexRpc.ServerNotificationMethod]: {
-    readonly method: M;
-    readonly params: CodexRpc.ServerNotificationParamsByMethod[M];
-  };
-}[CodexRpc.ServerNotificationMethod];
+    readonly method: M
+    readonly params: CodexRpc.ServerNotificationParamsByMethod[M]
+  }
+}[CodexRpc.ServerNotificationMethod]
 
 function makeCodexServerNotification<M extends CodexRpc.ServerNotificationMethod>(
   method: M,
   params: CodexRpc.ServerNotificationParamsByMethod[M],
-): CodexServerNotification {
-  return { method, params } as CodexServerNotification;
+): CodexServerNotification
+{
+  return { method, params } as CodexServerNotification
 }
 
 function normalizeCodexModelSlug(
   model: string | undefined | null,
   preferredId?: string,
-): string | undefined {
-  const normalized = normalizeModelSlug(model);
-  if (!normalized) {
-    return undefined;
+): string | undefined
+{
+  const normalized = normalizeModelSlug(model)
+  if (!normalized)
+  {
+    return undefined
   }
-  if (preferredId?.endsWith("-codex") && preferredId !== normalized) {
-    return preferredId;
+  if (preferredId?.endsWith('-codex') && preferredId !== normalized)
+  {
+    return preferredId
   }
-  return normalized;
+  return normalized
 }
 
 function readResumeCursorThreadId(
-  resumeCursor: ProviderSession["resumeCursor"],
-): string | undefined {
-  return isCodexResumeCursorSchema(resumeCursor) ? resumeCursor.threadId : undefined;
+  resumeCursor: ProviderSession['resumeCursor'],
+): string | undefined
+{
+  return isCodexResumeCursorSchema(resumeCursor) ? resumeCursor.threadId : undefined
 }
 
-function makeCodexResumeCursor(threadId: string, requireExisting: boolean): CodexResumeCursor {
+function makeCodexResumeCursor(threadId: string, requireExisting: boolean): CodexResumeCursor
+{
   return {
     threadId,
     ...(requireExisting ? { requireExisting: true as const } : {}),
-  };
+  }
 }
 
 function runtimeModeToThreadConfig(input: RuntimeMode): {
-  readonly approvalPolicy: EffectCodexSchema.V2ThreadStartParams__AskForApproval;
-  readonly sandbox: EffectCodexSchema.V2ThreadStartParams__SandboxMode;
+  readonly approvalPolicy: EffectCodexSchema.V2ThreadStartParams__AskForApproval
+  readonly sandbox: EffectCodexSchema.V2ThreadStartParams__SandboxMode
   // Always explicit: omitting the field on resume keeps the thread's previous
   // reviewer, which would leave auto_review sticky after switching modes.
-  readonly approvalsReviewer: EffectCodexSchema.V2ThreadStartParams__ApprovalsReviewer;
-} {
-  switch (input) {
-    case "approval-required":
+  readonly approvalsReviewer: EffectCodexSchema.V2ThreadStartParams__ApprovalsReviewer
+}
+{
+  switch (input)
+  {
+    case 'approval-required':
       return {
-        approvalPolicy: "untrusted",
-        sandbox: "read-only",
-        approvalsReviewer: "user",
-      };
-    case "auto-accept-edits":
+        approvalPolicy: 'untrusted',
+        sandbox: 'read-only',
+        approvalsReviewer: 'user',
+      }
+    case 'auto-accept-edits':
       return {
-        approvalPolicy: "on-request",
-        sandbox: "workspace-write",
-        approvalsReviewer: "user",
-      };
-    case "auto":
+        approvalPolicy: 'on-request',
+        sandbox: 'workspace-write',
+        approvalsReviewer: 'user',
+      }
+    case 'auto':
       return {
-        approvalPolicy: "on-request",
-        sandbox: "workspace-write",
-        approvalsReviewer: "auto_review",
-      };
-    case "full-access":
+        approvalPolicy: 'on-request',
+        sandbox: 'workspace-write',
+        approvalsReviewer: 'auto_review',
+      }
+    case 'full-access':
     default:
       return {
-        approvalPolicy: "never",
-        sandbox: "danger-full-access",
-        approvalsReviewer: "user",
-      };
+        approvalPolicy: 'never',
+        sandbox: 'danger-full-access',
+        approvalsReviewer: 'user',
+      }
   }
 }
 
 function buildThreadStartParams(input: {
-  readonly cwd: string;
-  readonly runtimeMode: RuntimeMode;
-  readonly model: string | undefined;
-  readonly serviceTier: CodexServiceTier | undefined;
-}): EffectCodexSchema.V2ThreadStartParams {
-  const config = runtimeModeToThreadConfig(input.runtimeMode);
+  readonly cwd: string
+  readonly runtimeMode: RuntimeMode
+  readonly model: string | undefined
+  readonly serviceTier: CodexServiceTier | undefined
+}): EffectCodexSchema.V2ThreadStartParams
+{
+  const config = runtimeModeToThreadConfig(input.runtimeMode)
   return {
     cwd: input.cwd,
     approvalPolicy: config.approvalPolicy,
@@ -322,44 +348,48 @@ function buildThreadStartParams(input: {
     approvalsReviewer: config.approvalsReviewer,
     ...(input.model ? { model: input.model } : {}),
     ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
-  };
+  }
 }
 
 function runtimeModeToTurnSandboxPolicy(
   input: RuntimeMode,
-): EffectCodexSchema.V2TurnStartParams__SandboxPolicy {
-  switch (input) {
-    case "approval-required":
+): EffectCodexSchema.V2TurnStartParams__SandboxPolicy
+{
+  switch (input)
+  {
+    case 'approval-required':
       return {
-        type: "readOnly",
-      };
-    case "auto-accept-edits":
-    case "auto":
+        type: 'readOnly',
+      }
+    case 'auto-accept-edits':
+    case 'auto':
       return {
-        type: "workspaceWrite",
-      };
-    case "full-access":
+        type: 'workspaceWrite',
+      }
+    case 'full-access':
     default:
       return {
-        type: "dangerFullAccess",
-      };
+        type: 'dangerFullAccess',
+      }
   }
 }
 
 function buildCodexCollaborationMode(input: {
-  readonly interactionMode?: ProviderInteractionMode;
-  readonly model?: string;
-  readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
-}): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined {
-  if (input.interactionMode === undefined) {
-    return undefined;
+  readonly interactionMode?: ProviderInteractionMode
+  readonly model?: string
+  readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort
+}): EffectCodexSchema.V2TurnStartParams__CollaborationMode | undefined
+{
+  if (input.interactionMode === undefined)
+  {
+    return undefined
   }
-  const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL;
-  const reasoningEffort = input.effort ?? "medium";
+  const model = normalizeCodexModelSlug(input.model) ?? DEFAULT_MODEL
+  const reasoningEffort = input.effort ?? 'medium'
   return {
     // app-server currently exposes only default and plan as protocol modes;
     // orchestrate is enforced by its developer instructions on the default tool surface
-    mode: input.interactionMode === "plan" ? "plan" : "default",
+    mode: input.interactionMode === 'plan' ? 'plan' : 'default',
     settings: {
       model,
       reasoning_effort: reasoningEffort,
@@ -368,42 +398,45 @@ function buildCodexCollaborationMode(input: {
         reasoningEffort,
       }),
     },
-  };
+  }
 }
 
 export function buildTurnStartParams(input: {
-  readonly threadId: string;
-  readonly runtimeMode: RuntimeMode;
-  readonly prompt?: string;
+  readonly threadId: string
+  readonly runtimeMode: RuntimeMode
+  readonly prompt?: string
   readonly attachments?: ReadonlyArray<{
-    readonly type: "image";
-    readonly url: string;
-  }>;
-  readonly model?: string;
-  readonly serviceTier?: CodexServiceTier;
-  readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort;
-  readonly interactionMode?: ProviderInteractionMode;
+    readonly type: 'image'
+    readonly url: string
+  }>
+  readonly model?: string
+  readonly serviceTier?: CodexServiceTier
+  readonly effort?: EffectCodexSchema.V2TurnStartParams__ReasoningEffort
+  readonly interactionMode?: ProviderInteractionMode
 }): Effect.Effect<
   CodexTurnStartParamsWithCollaborationMode,
   CodexErrors.CodexAppServerProtocolParseError
-> {
-  const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = [];
-  if (input.prompt) {
+>
+{
+  const turnInput: Array<EffectCodexSchema.V2TurnStartParams__UserInput> = []
+  if (input.prompt)
+  {
     turnInput.push({
-      type: "text",
+      type: 'text',
       text: input.prompt,
-    });
+    })
   }
-  for (const attachment of input.attachments ?? []) {
-    turnInput.push(attachment);
+  for (const attachment of input.attachments ?? [])
+  {
+    turnInput.push(attachment)
   }
 
-  const config = runtimeModeToThreadConfig(input.runtimeMode);
+  const config = runtimeModeToThreadConfig(input.runtimeMode)
   const collaborationMode = buildCodexCollaborationMode({
     ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
     ...(input.model ? { model: input.model } : {}),
     ...(input.effort ? { effort: input.effort } : {}),
-  });
+  })
 
   return decodeCodexTurnStartParamsWithCollaborationMode({
     threadId: input.threadId,
@@ -418,80 +451,90 @@ export function buildTurnStartParams(input: {
   }).pipe(
     Effect.mapError((cause) =>
       CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
-        "decode-request-payload",
+        'decode-request-payload',
         cause,
-        { method: "turn/start" },
+        { method: 'turn/start' },
       ),
     ),
-  );
+  )
 }
 
-function classifyCodexStderrLine(rawLine: string): { readonly message: string } | null {
-  const line = rawLine.replaceAll(ANSI_ESCAPE_REGEX, "").trim();
-  if (!line) {
-    return null;
+function classifyCodexStderrLine(rawLine: string): { readonly message: string } | null
+{
+  const line = rawLine.replaceAll(ANSI_ESCAPE_REGEX, '').trim()
+  if (!line)
+  {
+    return null
   }
 
-  const match = line.match(CODEX_STDERR_LOG_REGEX);
-  if (match) {
-    const level = match[1];
-    if (level && level !== "ERROR") {
-      return null;
+  const match = line.match(CODEX_STDERR_LOG_REGEX)
+  if (match)
+  {
+    const level = match[1]
+    if (level && level !== 'ERROR')
+    {
+      return null
     }
-    if (BENIGN_ERROR_LOG_SNIPPETS.some((snippet) => line.includes(snippet))) {
-      return null;
+    if (BENIGN_ERROR_LOG_SNIPPETS.some((snippet) => line.includes(snippet)))
+    {
+      return null
     }
   }
 
-  return { message: line };
+  return { message: line }
 }
 
-export function isRecoverableThreadResumeError(error: unknown): boolean {
-  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
-  if (!message.includes("thread")) {
-    return false;
+export function isRecoverableThreadResumeError(error: unknown): boolean
+{
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase()
+  if (!message.includes('thread'))
+  {
+    return false
   }
-  return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet));
+  return RECOVERABLE_THREAD_RESUME_ERROR_SNIPPETS.some((snippet) => message.includes(snippet))
 }
 
 type CodexThreadOpenResponse =
-  | CodexRpc.ClientRequestResponsesByMethod["thread/start"]
-  | CodexRpc.ClientRequestResponsesByMethod["thread/resume"];
+  | CodexRpc.ClientRequestResponsesByMethod['thread/start']
+  | CodexRpc.ClientRequestResponsesByMethod['thread/resume']
 
-type CodexThreadOpenMethod = "thread/start" | "thread/resume";
+type CodexThreadOpenMethod = 'thread/start' | 'thread/resume'
 
-interface CodexThreadOpenClient {
+interface CodexThreadOpenClient
+{
   readonly request: <M extends CodexThreadOpenMethod>(
     method: M,
     payload: CodexRpc.ClientRequestParamsByMethod[M],
-  ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>;
+  ) => Effect.Effect<CodexRpc.ClientRequestResponsesByMethod[M], CodexErrors.CodexAppServerError>
 }
 
 export const openCodexThread = (input: {
-  readonly client: CodexThreadOpenClient;
-  readonly threadId: ThreadId;
-  readonly runtimeMode: RuntimeMode;
-  readonly cwd: string;
-  readonly requestedModel: string | undefined;
-  readonly serviceTier: CodexServiceTier | undefined;
-  readonly resumeThreadId: string | undefined;
-  readonly requireExisting?: boolean;
-  readonly onResumeFallback?: () => Effect.Effect<void, CodexErrors.CodexAppServerError>;
-}): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> => {
-  const resumeThreadId = input.resumeThreadId;
+  readonly client: CodexThreadOpenClient
+  readonly threadId: ThreadId
+  readonly runtimeMode: RuntimeMode
+  readonly cwd: string
+  readonly requestedModel: string | undefined
+  readonly serviceTier: CodexServiceTier | undefined
+  readonly resumeThreadId: string | undefined
+  readonly requireExisting?: boolean
+  readonly onResumeFallback?: () => Effect.Effect<void, CodexErrors.CodexAppServerError>
+}): Effect.Effect<CodexThreadOpenResponse, CodexErrors.CodexAppServerError> =>
+{
+  const resumeThreadId = input.resumeThreadId
   const startParams = buildThreadStartParams({
     cwd: input.cwd,
     runtimeMode: input.runtimeMode,
     model: input.requestedModel,
     serviceTier: input.serviceTier,
-  });
+  })
 
-  if (resumeThreadId === undefined) {
-    return input.client.request("thread/start", startParams);
+  if (resumeThreadId === undefined)
+  {
+    return input.client.request('thread/start', startParams)
   }
 
   return input.client
-    .request("thread/resume", {
+    .request('thread/resume', {
       threadId: resumeThreadId,
       ...startParams,
     })
@@ -499,7 +542,7 @@ export const openCodexThread = (input: {
       Effect.catchIf(
         (error) => input.requireExisting !== true && isRecoverableThreadResumeError(error),
         (error) =>
-          Effect.logWarning("codex app-server thread resume fell back to fresh start", {
+          Effect.logWarning('codex app-server thread resume fell back to fresh start', {
             threadId: input.threadId,
             requestedRuntimeMode: input.runtimeMode,
             resumeThreadId,
@@ -507,116 +550,120 @@ export const openCodexThread = (input: {
             cause: error,
           }).pipe(
             Effect.andThen(input.onResumeFallback?.() ?? Effect.void),
-            Effect.andThen(input.client.request("thread/start", startParams)),
+            Effect.andThen(input.client.request('thread/start', startParams)),
           ),
       ),
-    );
-};
+    )
+}
 
-function readNotificationThreadId(notification: CodexServerNotification): string | undefined {
-  switch (notification.method) {
-    case "thread/started":
-      return notification.params.thread.id;
-    case "error":
-    case "thread/status/changed":
-    case "thread/archived":
-    case "thread/unarchived":
-    case "thread/closed":
-    case "thread/name/updated":
-    case "thread/tokenUsage/updated":
-    case "turn/started":
-    case "hook/started":
-    case "turn/completed":
-    case "hook/completed":
-    case "turn/diff/updated":
-    case "turn/plan/updated":
-    case "item/started":
-    case "item/autoApprovalReview/started":
-    case "item/autoApprovalReview/completed":
-    case "item/completed":
-    case "rawResponseItem/completed":
-    case "item/agentMessage/delta":
-    case "item/plan/delta":
-    case "item/commandExecution/outputDelta":
-    case "item/commandExecution/terminalInteraction":
-    case "item/fileChange/outputDelta":
-    case "item/fileChange/patchUpdated":
-    case "serverRequest/resolved":
-    case "item/mcpToolCall/progress":
-    case "item/reasoning/summaryTextDelta":
-    case "item/reasoning/summaryPartAdded":
-    case "item/reasoning/textDelta":
-    case "thread/compacted":
-    case "thread/realtime/started":
-    case "thread/realtime/itemAdded":
-    case "thread/realtime/transcript/delta":
-    case "thread/realtime/transcript/done":
-    case "thread/realtime/outputAudio/delta":
-    case "thread/realtime/sdp":
-    case "thread/realtime/error":
-    case "thread/realtime/closed":
-      return notification.params.threadId;
+function readNotificationThreadId(notification: CodexServerNotification): string | undefined
+{
+  switch (notification.method)
+  {
+    case 'thread/started':
+      return notification.params.thread.id
+    case 'error':
+    case 'thread/status/changed':
+    case 'thread/archived':
+    case 'thread/unarchived':
+    case 'thread/closed':
+    case 'thread/name/updated':
+    case 'thread/tokenUsage/updated':
+    case 'turn/started':
+    case 'hook/started':
+    case 'turn/completed':
+    case 'hook/completed':
+    case 'turn/diff/updated':
+    case 'turn/plan/updated':
+    case 'item/started':
+    case 'item/autoApprovalReview/started':
+    case 'item/autoApprovalReview/completed':
+    case 'item/completed':
+    case 'rawResponseItem/completed':
+    case 'item/agentMessage/delta':
+    case 'item/plan/delta':
+    case 'item/commandExecution/outputDelta':
+    case 'item/commandExecution/terminalInteraction':
+    case 'item/fileChange/outputDelta':
+    case 'item/fileChange/patchUpdated':
+    case 'serverRequest/resolved':
+    case 'item/mcpToolCall/progress':
+    case 'item/reasoning/summaryTextDelta':
+    case 'item/reasoning/summaryPartAdded':
+    case 'item/reasoning/textDelta':
+    case 'thread/compacted':
+    case 'thread/realtime/started':
+    case 'thread/realtime/itemAdded':
+    case 'thread/realtime/transcript/delta':
+    case 'thread/realtime/transcript/done':
+    case 'thread/realtime/outputAudio/delta':
+    case 'thread/realtime/sdp':
+    case 'thread/realtime/error':
+    case 'thread/realtime/closed':
+      return notification.params.threadId
     default:
-      return undefined;
+      return undefined
   }
 }
 
 function readRouteFields(notification: CodexServerNotification): {
-  readonly turnId: TurnId | undefined;
-  readonly itemId: ProviderItemId | undefined;
-} {
-  switch (notification.method) {
-    case "thread/started":
+  readonly turnId: TurnId | undefined
+  readonly itemId: ProviderItemId | undefined
+}
+{
+  switch (notification.method)
+  {
+    case 'thread/started':
       return {
         turnId: undefined,
         itemId: undefined,
-      };
-    case "turn/started":
-    case "turn/completed":
+      }
+    case 'turn/started':
+    case 'turn/completed':
       return {
         turnId: TurnId.make(notification.params.turn.id),
         itemId: undefined,
-      };
-    case "error":
+      }
+    case 'error':
       return {
         turnId: TurnId.make(notification.params.turnId),
         itemId: undefined,
-      };
-    case "turn/diff/updated":
-    case "turn/plan/updated":
+      }
+    case 'turn/diff/updated':
+    case 'turn/plan/updated':
       return {
         turnId: TurnId.make(notification.params.turnId),
         itemId: undefined,
-      };
-    case "serverRequest/resolved":
+      }
+    case 'serverRequest/resolved':
       return {
         turnId: undefined,
         itemId: undefined,
-      };
-    case "item/started":
-    case "item/completed":
+      }
+    case 'item/started':
+    case 'item/completed':
       return {
         turnId: TurnId.make(notification.params.turnId),
         itemId: ProviderItemId.make(notification.params.item.id),
-      };
-    case "item/agentMessage/delta":
-    case "item/plan/delta":
-    case "item/commandExecution/outputDelta":
-    case "item/commandExecution/terminalInteraction":
-    case "item/fileChange/outputDelta":
-    case "item/fileChange/patchUpdated":
-    case "item/reasoning/summaryTextDelta":
-    case "item/reasoning/summaryPartAdded":
-    case "item/reasoning/textDelta":
+      }
+    case 'item/agentMessage/delta':
+    case 'item/plan/delta':
+    case 'item/commandExecution/outputDelta':
+    case 'item/commandExecution/terminalInteraction':
+    case 'item/fileChange/outputDelta':
+    case 'item/fileChange/patchUpdated':
+    case 'item/reasoning/summaryTextDelta':
+    case 'item/reasoning/summaryPartAdded':
+    case 'item/reasoning/textDelta':
       return {
         turnId: TurnId.make(notification.params.turnId),
         itemId: ProviderItemId.make(notification.params.itemId),
-      };
+      }
     default:
       return {
         turnId: undefined,
         itemId: undefined,
-      };
+      }
   }
 }
 
@@ -624,41 +671,47 @@ function rememberCollabReceiverTurns(
   collabReceiverTurns: Map<string, TurnId>,
   notification: CodexServerNotification,
   parentTurnId: TurnId | undefined,
-): void {
-  if (!parentTurnId) {
-    return;
+): void
+{
+  if (!parentTurnId)
+  {
+    return
   }
 
-  if (notification.method !== "item/started" && notification.method !== "item/completed") {
-    return;
+  if (notification.method !== 'item/started' && notification.method !== 'item/completed')
+  {
+    return
   }
 
-  if (notification.params.item.type !== "collabAgentToolCall") {
-    return;
+  if (notification.params.item.type !== 'collabAgentToolCall')
+  {
+    return
   }
 
-  for (const receiverThreadId of notification.params.item.receiverThreadIds) {
-    collabReceiverTurns.set(receiverThreadId, parentTurnId);
+  for (const receiverThreadId of notification.params.item.receiverThreadIds)
+  {
+    collabReceiverTurns.set(receiverThreadId, parentTurnId)
   }
 }
 
 function shouldSuppressChildConversationNotification(
   method: CodexRpc.ServerNotificationMethod,
-): boolean {
+): boolean
+{
   return (
-    method === "thread/started" ||
-    method === "thread/status/changed" ||
-    method === "thread/archived" ||
-    method === "thread/unarchived" ||
-    method === "thread/closed" ||
-    method === "thread/compacted" ||
-    method === "thread/name/updated" ||
-    method === "thread/tokenUsage/updated" ||
-    method === "turn/started" ||
-    method === "turn/completed" ||
-    method === "turn/plan/updated" ||
-    method === "item/plan/delta"
-  );
+    method === 'thread/started' ||
+    method === 'thread/status/changed' ||
+    method === 'thread/archived' ||
+    method === 'thread/unarchived' ||
+    method === 'thread/closed' ||
+    method === 'thread/compacted' ||
+    method === 'thread/name/updated' ||
+    method === 'thread/tokenUsage/updated' ||
+    method === 'turn/started' ||
+    method === 'turn/completed' ||
+    method === 'turn/plan/updated' ||
+    method === 'item/plan/delta'
+  )
 }
 
 function toCodexUserInputAnswer(
@@ -667,26 +720,31 @@ function toCodexUserInputAnswer(
 ): Effect.Effect<
   EffectCodexSchema.ToolRequestUserInputResponse__ToolRequestUserInputAnswer,
   CodexSessionRuntimeInvalidUserInputAnswersError
-> {
-  if (typeof value === "string") {
-    return Effect.succeed({ answers: [value] });
+>
+{
+  if (typeof value === 'string')
+  {
+    return Effect.succeed({ answers: [value] })
   }
-  if (Array.isArray(value)) {
-    const answers = value.filter((entry): entry is string => typeof entry === "string");
-    return Effect.succeed({ answers });
+  if (Array.isArray(value))
+  {
+    const answers = value.filter((entry): entry is string => typeof entry === 'string')
+    return Effect.succeed({ answers })
   }
-  if (isCodexUserInputAnswerObject(value)) {
-    return Effect.succeed({ answers: value.answers });
+  if (isCodexUserInputAnswerObject(value))
+  {
+    return Effect.succeed({ answers: value.answers })
   }
-  return Effect.fail(new CodexSessionRuntimeInvalidUserInputAnswersError({ questionId }));
+  return Effect.fail(new CodexSessionRuntimeInvalidUserInputAnswersError({ questionId }))
 }
 
 function toCodexUserInputAnswers(
   answers: ProviderUserInputAnswers,
 ): Effect.Effect<
-  EffectCodexSchema.ToolRequestUserInputResponse["answers"],
+  EffectCodexSchema.ToolRequestUserInputResponse['answers'],
   CodexSessionRuntimeInvalidUserInputAnswersError
-> {
+>
+{
   return Effect.forEach(
     Object.entries(answers),
     ([questionId, value]) =>
@@ -694,37 +752,41 @@ function toCodexUserInputAnswers(
         Effect.map((answer) => [questionId, answer] as const),
       ),
     { concurrency: 1 },
-  ).pipe(Effect.map((entries) => Object.fromEntries(entries)));
+  ).pipe(Effect.map((entries) => Object.fromEntries(entries)))
 }
 
-function currentProviderThreadId(session: ProviderSession): string | undefined {
-  return readResumeCursorThreadId(session.resumeCursor);
+function currentProviderThreadId(session: ProviderSession): string | undefined
+{
+  return readResumeCursorThreadId(session.resumeCursor)
 }
 
 function updateSession(
   sessionRef: Ref.Ref<ProviderSession>,
   updates: Partial<ProviderSession>,
-): Effect.Effect<void> {
-  return Effect.gen(function* () {
-    const updatedAt = DateTime.formatIso(yield* DateTime.now);
+): Effect.Effect<void>
+{
+  return Effect.gen(function* ()
+  {
+    const updatedAt = DateTime.formatIso(yield* DateTime.now)
     yield* Ref.update(sessionRef, (session) => ({
       ...session,
       ...updates,
       updatedAt,
-    }));
-  });
+    }))
+  })
 }
 
 function parseThreadSnapshot(
   response: EffectCodexSchema.V2ThreadReadResponse | EffectCodexSchema.V2ThreadRollbackResponse,
-): CodexThreadSnapshot {
+): CodexThreadSnapshot
+{
   return {
     threadId: response.thread.id,
     turns: response.thread.turns.map((turn) => ({
       id: TurnId.make(turn.id),
       items: turn.items,
     })),
-  };
+  }
 }
 
 export const makeCodexSessionRuntime = (
@@ -734,31 +796,32 @@ export const makeCodexSessionRuntime = (
   CodexErrors.CodexAppServerError,
   ChildProcessSpawner.ChildProcessSpawner | Crypto.Crypto | Scope.Scope
 > =>
-  Effect.gen(function* () {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-    const runtimeScope = yield* Scope.Scope;
-    const crypto = yield* Crypto.Crypto;
-    const events = yield* Queue.unbounded<ProviderEvent>();
-    const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>());
-    const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>());
-    const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>());
-    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>());
-    const closedRef = yield* Ref.make(false);
+  Effect.gen(function* ()
+  {
+    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+    const runtimeScope = yield* Scope.Scope
+    const crypto = yield* Crypto.Crypto
+    const events = yield* Queue.unbounded<ProviderEvent>()
+    const pendingApprovalsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingApproval>())
+    const approvalCorrelationsRef = yield* Ref.make(new Map<string, ApprovalCorrelation>())
+    const pendingUserInputsRef = yield* Ref.make(new Map<ApprovalRequestId, PendingUserInput>())
+    const collabReceiverTurnsRef = yield* Ref.make(new Map<string, TurnId>())
+    const closedRef = yield* Ref.make(false)
 
     // `~` is not shell-expanded when env vars are set via
     // `child_process.spawn`; `expandHomePath` lets a configured
     // `CODEX_HOME=~/.codex_work` reach codex as an absolute path.
-    const resolvedHomePath = options.homePath ? expandHomePath(options.homePath) : undefined;
+    const resolvedHomePath = options.homePath ? expandHomePath(options.homePath) : undefined
     const env = {
       ...options.environment,
       ...(resolvedHomePath ? { CODEX_HOME: resolvedHomePath } : {}),
-    };
-    const extendEnv = options.environment === undefined;
-    const appServerArgs = codexSessionAppServerArgs(options.appServerArgs, options.launchArgs);
+    }
+    const extendEnv = options.environment === undefined
+    const appServerArgs = codexSessionAppServerArgs(options.appServerArgs, options.launchArgs)
     const spawnCommand = yield* resolveSpawnCommand(options.binaryPath, appServerArgs, {
       env,
       extendEnv,
-    });
+    })
     const child = yield* spawner
       .spawn(
         ChildProcess.make(spawnCommand.command, spawnCommand.args, {
@@ -778,18 +841,18 @@ export const makeCodexSessionRuntime = (
               cause,
             }),
         ),
-      );
+      )
 
     const clientContext = yield* CodexClient.layerChildProcess(child).pipe(
       Layer.build,
       Effect.provideService(Scope.Scope, runtimeScope),
-    );
+    )
     const client = yield* Effect.service(CodexClient.CodexAppServerClient).pipe(
       Effect.provide(clientContext),
-    );
-    const serverNotifications = yield* Queue.unbounded<CodexServerNotification>();
-    const nowIso = Effect.map(DateTime.now, DateTime.formatIso);
-    const requireExistingResume = options.resumeCursor?.requireExisting === true;
+    )
+    const serverNotifications = yield* Queue.unbounded<CodexServerNotification>()
+    const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
+    const requireExistingResume = options.resumeCursor?.requireExisting === true
     const randomUUIDv4 = (purpose: CodexErrors.CodexAppServerIdentifierPurpose) =>
       crypto.randomUUIDv4.pipe(
         Effect.mapError(
@@ -799,13 +862,13 @@ export const makeCodexSessionRuntime = (
               cause,
             }),
         ),
-      );
+      )
 
-    const sessionCreatedAt = yield* nowIso;
+    const sessionCreatedAt = yield* nowIso
     const initialSession = {
       provider: PROVIDER,
       ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
-      status: "connecting",
+      status: 'connecting',
       runtimeMode: options.runtimeMode,
       cwd: options.cwd,
       ...(options.model ? { model: options.model } : {}),
@@ -813,28 +876,29 @@ export const makeCodexSessionRuntime = (
       ...(options.resumeCursor !== undefined ? { resumeCursor: options.resumeCursor } : {}),
       createdAt: sessionCreatedAt,
       updatedAt: sessionCreatedAt,
-    } satisfies ProviderSession;
-    const sessionRef = yield* Ref.make<ProviderSession>(initialSession);
-    const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid);
+    } satisfies ProviderSession
+    const sessionRef = yield* Ref.make<ProviderSession>(initialSession)
+    const offerEvent = (event: ProviderEvent) => Queue.offer(events, event).pipe(Effect.asVoid)
 
-    const emitEvent = (event: Omit<ProviderEvent, "id" | "provider" | "createdAt">) =>
-      Effect.gen(function* () {
-        const id = yield* randomUUIDv4("provider-event");
+    const emitEvent = (event: Omit<ProviderEvent, 'id' | 'provider' | 'createdAt'>) =>
+      Effect.gen(function* ()
+      {
+        const id = yield* randomUUIDv4('provider-event')
         return yield* offerEvent({
           id: EventId.make(id),
           provider: PROVIDER,
           ...(options.providerInstanceId ? { providerInstanceId: options.providerInstanceId } : {}),
           createdAt: yield* nowIso,
           ...event,
-        });
-      });
+        })
+      })
     const emitSessionEvent = (method: string, message: string) =>
       emitEvent({
-        kind: "session",
+        kind: 'session',
         threadId: options.threadId,
         method,
         message,
-      });
+      })
 
     const settlePendingApprovals = (decision: ProviderApprovalDecision) =>
       Ref.get(pendingApprovalsRef).pipe(
@@ -846,7 +910,7 @@ export const makeCodexSessionRuntime = (
             { discard: true },
           ),
         ),
-      );
+      )
 
     const settlePendingUserInputs = (answers: ProviderUserInputAnswers) =>
       Ref.get(pendingUserInputsRef).pipe(
@@ -858,284 +922,309 @@ export const makeCodexSessionRuntime = (
             { discard: true },
           ),
         ),
-      );
+      )
 
     const handleRawNotification = (notification: CodexServerNotification) =>
-      Effect.gen(function* () {
-        const payload = notification.params;
-        const route = readRouteFields(notification);
-        const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef);
-        const childParentTurnId = (() => {
-          const providerConversationId = readNotificationThreadId(notification);
+      Effect.gen(function* ()
+      {
+        const payload = notification.params
+        const route = readRouteFields(notification)
+        const collabReceiverTurns = yield* Ref.get(collabReceiverTurnsRef)
+        const childParentTurnId = (() =>
+        {
+          const providerConversationId = readNotificationThreadId(notification)
           return providerConversationId
             ? collabReceiverTurns.get(providerConversationId)
-            : undefined;
-        })();
+            : undefined
+        })()
 
-        rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId);
-        if (childParentTurnId && shouldSuppressChildConversationNotification(notification.method)) {
-          yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
-          return;
+        rememberCollabReceiverTurns(collabReceiverTurns, notification, route.turnId)
+        if (childParentTurnId && shouldSuppressChildConversationNotification(notification.method))
+        {
+          yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns)
+          return
         }
 
-        let requestId: ApprovalRequestId | undefined;
-        let requestKind: ProviderRequestKind | undefined;
-        let turnId = childParentTurnId ?? route.turnId;
-        let itemId = route.itemId;
+        let requestId: ApprovalRequestId | undefined
+        let requestKind: ProviderRequestKind | undefined
+        let turnId = childParentTurnId ?? route.turnId
+        let itemId = route.itemId
 
-        if (notification.method === "serverRequest/resolved") {
+        if (notification.method === 'serverRequest/resolved')
+        {
           const rawRequestId =
-            typeof notification.params.requestId === "string"
+            typeof notification.params.requestId === 'string'
               ? notification.params.requestId
-              : String(notification.params.requestId);
+              : String(notification.params.requestId)
           const correlation = rawRequestId
             ? (yield* Ref.get(approvalCorrelationsRef)).get(rawRequestId)
-            : undefined;
-          if (correlation) {
-            requestId = correlation.requestId;
-            requestKind = correlation.requestKind;
-            turnId = correlation.turnId ?? turnId;
-            itemId = correlation.itemId ?? itemId;
-            yield* Ref.update(approvalCorrelationsRef, (current) => {
-              const next = new Map(current);
-              next.delete(rawRequestId);
-              return next;
-            });
+            : undefined
+          if (correlation)
+          {
+            requestId = correlation.requestId
+            requestKind = correlation.requestKind
+            turnId = correlation.turnId ?? turnId
+            itemId = correlation.itemId ?? itemId
+            yield* Ref.update(approvalCorrelationsRef, (current) =>
+            {
+              const next = new Map(current)
+              next.delete(rawRequestId)
+              return next
+            })
           }
         }
 
-        yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns);
+        yield* Ref.set(collabReceiverTurnsRef, collabReceiverTurns)
         yield* emitEvent({
-          kind: "notification",
+          kind: 'notification',
           threadId: options.threadId,
           method: notification.method,
           ...(turnId ? { turnId } : {}),
           ...(itemId ? { itemId } : {}),
           ...(requestId ? { requestId } : {}),
           ...(requestKind ? { requestKind } : {}),
-          ...(notification.method === "item/agentMessage/delta"
+          ...(notification.method === 'item/agentMessage/delta'
             ? { textDelta: notification.params.delta }
             : {}),
           ...(payload !== undefined ? { payload } : {}),
-        });
-      });
+        })
+      })
 
-    const currentSessionProviderThreadId = Effect.map(Ref.get(sessionRef), currentProviderThreadId);
+    const currentSessionProviderThreadId = Effect.map(Ref.get(sessionRef), currentProviderThreadId)
 
-    yield* client.handleServerNotification("thread/started", (payload) =>
+    yield* client.handleServerNotification('thread/started', (payload) =>
       currentSessionProviderThreadId.pipe(
-        Effect.flatMap((providerThreadId) => {
-          if (providerThreadId && payload.thread.id !== providerThreadId) {
-            return Effect.void;
+        Effect.flatMap((providerThreadId) =>
+        {
+          if (providerThreadId && payload.thread.id !== providerThreadId)
+          {
+            return Effect.void
           }
           return updateSession(sessionRef, {
             resumeCursor: makeCodexResumeCursor(payload.thread.id, requireExistingResume),
-          });
+          })
         }),
       ),
-    );
+    )
 
-    yield* client.handleServerNotification("turn/started", (payload) =>
+    yield* client.handleServerNotification('turn/started', (payload) =>
       currentSessionProviderThreadId.pipe(
-        Effect.flatMap((providerThreadId) => {
-          if (providerThreadId && payload.threadId !== providerThreadId) {
-            return Effect.void;
+        Effect.flatMap((providerThreadId) =>
+        {
+          if (providerThreadId && payload.threadId !== providerThreadId)
+          {
+            return Effect.void
           }
           return updateSession(sessionRef, {
-            status: "running",
+            status: 'running',
             activeTurnId: TurnId.make(payload.turn.id),
-          });
+          })
         }),
       ),
-    );
+    )
 
-    yield* client.handleServerNotification("turn/completed", (payload) =>
+    yield* client.handleServerNotification('turn/completed', (payload) =>
       currentSessionProviderThreadId.pipe(
-        Effect.flatMap((providerThreadId) => {
-          if (providerThreadId && payload.threadId !== providerThreadId) {
-            return Effect.void;
+        Effect.flatMap((providerThreadId) =>
+        {
+          if (providerThreadId && payload.threadId !== providerThreadId)
+          {
+            return Effect.void
           }
           const lastError =
-            payload.turn.status === "failed" && "error" in payload.turn && payload.turn.error
+            payload.turn.status === 'failed' && 'error' in payload.turn && payload.turn.error
               ? payload.turn.error.message
-              : undefined;
+              : undefined
           return updateSession(sessionRef, {
-            status: payload.turn.status === "failed" ? "error" : "ready",
+            status: payload.turn.status === 'failed' ? 'error' : 'ready',
             activeTurnId: undefined,
             ...(lastError ? { lastError } : {}),
-          });
+          })
         }),
       ),
-    );
+    )
 
-    yield* client.handleServerNotification("error", (payload) =>
+    yield* client.handleServerNotification('error', (payload) =>
       currentSessionProviderThreadId.pipe(
-        Effect.flatMap((providerThreadId) => {
-          const payloadThreadId = payload.threadId;
-          if (providerThreadId && payloadThreadId && payloadThreadId !== providerThreadId) {
-            return Effect.void;
+        Effect.flatMap((providerThreadId) =>
+        {
+          const payloadThreadId = payload.threadId
+          if (providerThreadId && payloadThreadId && payloadThreadId !== providerThreadId)
+          {
+            return Effect.void
           }
-          const errorMessage = payload.error.message;
-          const willRetry = payload.willRetry;
+          const errorMessage = payload.error.message
+          const willRetry = payload.willRetry
           return updateSession(sessionRef, {
-            status: willRetry ? "running" : "error",
+            status: willRetry ? 'running' : 'error',
             ...(errorMessage ? { lastError: errorMessage } : {}),
-          });
+          })
         }),
       ),
-    );
+    )
 
-    yield* client.handleServerRequest("item/commandExecution/requestApproval", (payload) =>
-      Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* randomUUIDv4("command-approval-request"));
-        const turnId = TurnId.make(payload.turnId);
-        const itemId = ProviderItemId.make(payload.itemId);
-        const decision = yield* Deferred.make<ProviderApprovalDecision>();
+    yield* client.handleServerRequest('item/commandExecution/requestApproval', (payload) =>
+      Effect.gen(function* ()
+      {
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4('command-approval-request'))
+        const turnId = TurnId.make(payload.turnId)
+        const itemId = ProviderItemId.make(payload.itemId)
+        const decision = yield* Deferred.make<ProviderApprovalDecision>()
 
-        yield* Ref.update(pendingApprovalsRef, (current) => {
-          const next = new Map(current);
+        yield* Ref.update(pendingApprovalsRef, (current) =>
+        {
+          const next = new Map(current)
           next.set(requestId, {
             requestId,
             jsonRpcId: payload.approvalId ?? payload.itemId,
-            requestKind: "command",
+            requestKind: 'command',
             turnId,
             itemId,
             decision,
-          });
-          return next;
-        });
-        yield* Ref.update(approvalCorrelationsRef, (current) => {
-          const next = new Map(current);
+          })
+          return next
+        })
+        yield* Ref.update(approvalCorrelationsRef, (current) =>
+        {
+          const next = new Map(current)
           next.set(payload.approvalId ?? payload.itemId, {
             requestId,
-            requestKind: "command",
+            requestKind: 'command',
             turnId,
             itemId,
-          });
-          return next;
-        });
+          })
+          return next
+        })
 
         yield* emitEvent({
-          kind: "request",
+          kind: 'request',
           threadId: options.threadId,
-          method: "item/commandExecution/requestApproval",
+          method: 'item/commandExecution/requestApproval',
           requestId,
-          requestKind: "command",
+          requestKind: 'command',
           ...(turnId ? { turnId } : {}),
           ...(itemId ? { itemId } : {}),
           payload,
-        });
+        })
 
         const resolved = yield* Deferred.await(decision).pipe(
           Effect.ensuring(
-            Ref.update(pendingApprovalsRef, (current) => {
-              const next = new Map(current);
-              next.delete(requestId);
-              return next;
+            Ref.update(pendingApprovalsRef, (current) =>
+            {
+              const next = new Map(current)
+              next.delete(requestId)
+              return next
             }),
           ),
-        );
+        )
         return {
           decision: resolved,
-        } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse;
+        } satisfies EffectCodexSchema.CommandExecutionRequestApprovalResponse
       }),
-    );
+    )
 
-    yield* client.handleServerRequest("item/fileChange/requestApproval", (payload) =>
-      Effect.gen(function* () {
+    yield* client.handleServerRequest('item/fileChange/requestApproval', (payload) =>
+      Effect.gen(function* ()
+      {
         const requestId = ApprovalRequestId.make(
-          yield* randomUUIDv4("file-change-approval-request"),
-        );
-        const turnId = TurnId.make(payload.turnId);
-        const itemId = ProviderItemId.make(payload.itemId);
-        const decision = yield* Deferred.make<ProviderApprovalDecision>();
+          yield* randomUUIDv4('file-change-approval-request'),
+        )
+        const turnId = TurnId.make(payload.turnId)
+        const itemId = ProviderItemId.make(payload.itemId)
+        const decision = yield* Deferred.make<ProviderApprovalDecision>()
 
-        yield* Ref.update(pendingApprovalsRef, (current) => {
-          const next = new Map(current);
+        yield* Ref.update(pendingApprovalsRef, (current) =>
+        {
+          const next = new Map(current)
           next.set(requestId, {
             requestId,
             jsonRpcId: payload.itemId,
-            requestKind: "file-change",
+            requestKind: 'file-change',
             turnId,
             itemId,
             decision,
-          });
-          return next;
-        });
-        yield* Ref.update(approvalCorrelationsRef, (current) => {
-          const next = new Map(current);
+          })
+          return next
+        })
+        yield* Ref.update(approvalCorrelationsRef, (current) =>
+        {
+          const next = new Map(current)
           next.set(payload.itemId, {
             requestId,
-            requestKind: "file-change",
+            requestKind: 'file-change',
             turnId,
             itemId,
-          });
-          return next;
-        });
+          })
+          return next
+        })
 
         yield* emitEvent({
-          kind: "request",
+          kind: 'request',
           threadId: options.threadId,
-          method: "item/fileChange/requestApproval",
+          method: 'item/fileChange/requestApproval',
           requestId,
-          requestKind: "file-change",
+          requestKind: 'file-change',
           ...(turnId ? { turnId } : {}),
           ...(itemId ? { itemId } : {}),
           payload,
-        });
+        })
 
         const resolved = yield* Deferred.await(decision).pipe(
           Effect.ensuring(
-            Ref.update(pendingApprovalsRef, (current) => {
-              const next = new Map(current);
-              next.delete(requestId);
-              return next;
+            Ref.update(pendingApprovalsRef, (current) =>
+            {
+              const next = new Map(current)
+              next.delete(requestId)
+              return next
             }),
           ),
-        );
+        )
         return {
           decision: resolved,
-        } satisfies EffectCodexSchema.FileChangeRequestApprovalResponse;
+        } satisfies EffectCodexSchema.FileChangeRequestApprovalResponse
       }),
-    );
+    )
 
-    yield* client.handleServerRequest("item/tool/requestUserInput", (payload) =>
-      Effect.gen(function* () {
-        const requestId = ApprovalRequestId.make(yield* randomUUIDv4("user-input-request"));
-        const turnId = TurnId.make(payload.turnId);
-        const itemId = ProviderItemId.make(payload.itemId);
-        const answers = yield* Deferred.make<ProviderUserInputAnswers>();
+    yield* client.handleServerRequest('item/tool/requestUserInput', (payload) =>
+      Effect.gen(function* ()
+      {
+        const requestId = ApprovalRequestId.make(yield* randomUUIDv4('user-input-request'))
+        const turnId = TurnId.make(payload.turnId)
+        const itemId = ProviderItemId.make(payload.itemId)
+        const answers = yield* Deferred.make<ProviderUserInputAnswers>()
 
-        yield* Ref.update(pendingUserInputsRef, (current) => {
-          const next = new Map(current);
+        yield* Ref.update(pendingUserInputsRef, (current) =>
+        {
+          const next = new Map(current)
           next.set(requestId, {
             requestId,
             turnId,
             itemId,
             answers,
-          });
-          return next;
-        });
+          })
+          return next
+        })
 
         yield* emitEvent({
-          kind: "request",
+          kind: 'request',
           threadId: options.threadId,
-          method: "item/tool/requestUserInput",
+          method: 'item/tool/requestUserInput',
           requestId,
           ...(turnId ? { turnId } : {}),
           ...(itemId ? { itemId } : {}),
           payload,
-        });
+        })
 
         const resolvedAnswers = yield* Deferred.await(answers).pipe(
           Effect.ensuring(
-            Ref.update(pendingUserInputsRef, (current) => {
-              const next = new Map(current);
-              next.delete(requestId);
-              return next;
+            Ref.update(pendingUserInputsRef, (current) =>
+            {
+              const next = new Map(current)
+              next.delete(requestId)
+              return next
             }),
           ),
-        );
+        )
 
         return {
           answers: yield* toCodexUserInputAnswers(resolvedAnswers).pipe(
@@ -1145,20 +1234,20 @@ export const makeCodexSessionRuntime = (
               }),
             ),
           ),
-        } satisfies EffectCodexSchema.ToolRequestUserInputResponse;
+        } satisfies EffectCodexSchema.ToolRequestUserInputResponse
       }),
-    );
+    )
 
     yield* client.handleUnknownServerRequest((method) =>
       Effect.fail(CodexErrors.CodexAppServerRequestError.methodNotFound(method)),
-    );
+    )
 
     const registerServerNotification = <M extends CodexRpc.ServerNotificationMethod>(method: M) =>
       client.handleServerNotification(method, (params) =>
         Queue.offer(serverNotifications, makeCodexServerNotification(method, params)).pipe(
           Effect.asVoid,
         ),
-      );
+      )
 
     yield* Effect.forEach(
       Object.values(
@@ -1166,37 +1255,40 @@ export const makeCodexSessionRuntime = (
       ) as ReadonlyArray<CodexRpc.ServerNotificationMethod>,
       registerServerNotification,
       { concurrency: 1, discard: true },
-    );
+    )
 
     yield* Stream.fromQueue(serverNotifications).pipe(
       Stream.runForEach(handleRawNotification),
       Effect.forkIn(runtimeScope),
-    );
+    )
 
-    const stderrRemainderRef = yield* Ref.make("");
+    const stderrRemainderRef = yield* Ref.make('')
     yield* child.stderr.pipe(
       Stream.decodeText(),
       Stream.runForEach((chunk) =>
-        Ref.modify(stderrRemainderRef, (current) => {
-          const combined = current + chunk;
-          const lines = combined.split("\n");
-          const remainder = lines.pop() ?? "";
-          return [lines.map((line) => line.replace(/\r$/, "")), remainder] as const;
+        Ref.modify(stderrRemainderRef, (current) =>
+        {
+          const combined = current + chunk
+          const lines = combined.split('\n')
+          const remainder = lines.pop() ?? ''
+          return [lines.map((line) => line.replace(/\r$/, '')), remainder] as const
         }).pipe(
           Effect.flatMap((lines) =>
             Effect.forEach(
               lines,
-              (line) => {
-                const classified = classifyCodexStderrLine(line);
-                if (!classified) {
-                  return Effect.void;
+              (line) =>
+              {
+                const classified = classifyCodexStderrLine(line)
+                if (!classified)
+                {
+                  return Effect.void
                 }
                 return emitEvent({
-                  kind: "notification",
+                  kind: 'notification',
                   threadId: options.threadId,
-                  method: "process/stderr",
+                  method: 'process/stderr',
                   message: classified.message,
-                });
+                })
               },
               { discard: true },
             ),
@@ -1204,41 +1296,44 @@ export const makeCodexSessionRuntime = (
         ),
       ),
       Effect.forkIn(runtimeScope),
-    );
+    )
 
     yield* child.exitCode.pipe(
       Effect.flatMap((exitCode) =>
         Ref.get(closedRef).pipe(
-          Effect.flatMap((closed) => {
-            if (closed) {
-              return Effect.void;
+          Effect.flatMap((closed) =>
+          {
+            if (closed)
+            {
+              return Effect.void
             }
-            const nextStatus = exitCode === 0 ? "closed" : "error";
+            const nextStatus = exitCode === 0 ? 'closed' : 'error'
             return updateSession(sessionRef, {
               status: nextStatus,
               activeTurnId: undefined,
             }).pipe(
               Effect.andThen(
                 emitSessionEvent(
-                  "session/exited",
+                  'session/exited',
                   exitCode === 0
-                    ? "Codex App Server exited."
+                    ? 'Codex App Server exited.'
                     : `Codex App Server exited with code ${exitCode}.`,
                 ),
               ),
-            );
+            )
           }),
         ),
       ),
       Effect.forkIn(runtimeScope),
-    );
+    )
 
-    const start = Effect.fn("CodexSessionRuntime.start")(function* () {
-      yield* emitSessionEvent("session/connecting", "Starting Codex App Server session.");
-      yield* client.request("initialize", buildCodexInitializeParams());
-      yield* client.notify("initialized", undefined);
+    const start = Effect.fn('CodexSessionRuntime.start')(function* ()
+    {
+      yield* emitSessionEvent('session/connecting', 'Starting Codex App Server session.')
+      yield* client.request('initialize', buildCodexInitializeParams())
+      yield* client.notify('initialized', undefined)
 
-      const requestedModel = normalizeCodexModelSlug(options.model);
+      const requestedModel = normalizeCodexModelSlug(options.model)
 
       const opened = yield* openCodexThread({
         client,
@@ -1251,76 +1346,82 @@ export const makeCodexSessionRuntime = (
         requireExisting: requireExistingResume,
         onResumeFallback: () =>
           emitEvent({
-            kind: "notification",
+            kind: 'notification',
             threadId: options.threadId,
-            method: "thread/resumeFallback",
-            message: "resume fell back to a fresh provider thread; native history was not found",
+            method: 'thread/resumeFallback',
+            message: 'resume fell back to a fresh provider thread; native history was not found',
           }),
-      });
+      })
 
-      const providerThreadId = opened.thread.id;
+      const providerThreadId = opened.thread.id
       const session = {
         ...(yield* Ref.get(sessionRef)),
-        status: "ready",
+        status: 'ready',
         cwd: opened.cwd,
         model: opened.model,
         resumeCursor: makeCodexResumeCursor(providerThreadId, requireExistingResume),
         updatedAt: yield* nowIso,
-      } satisfies ProviderSession;
-      yield* Ref.set(sessionRef, session);
-      yield* emitSessionEvent("session/ready", "Codex App Server session ready.");
-      return session;
-    });
+      } satisfies ProviderSession
+      yield* Ref.set(sessionRef, session)
+      yield* emitSessionEvent('session/ready', 'Codex App Server session ready.')
+      return session
+    })
 
-    const readProviderThreadId = Effect.gen(function* () {
-      const providerThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
-      if (!providerThreadId) {
+    const readProviderThreadId = Effect.gen(function* ()
+    {
+      const providerThreadId = currentProviderThreadId(yield* Ref.get(sessionRef))
+      if (!providerThreadId)
+      {
         return yield* new CodexSessionRuntimeThreadIdMissingError({
           threadId: options.threadId,
-        });
+        })
       }
-      return providerThreadId;
-    });
+      return providerThreadId
+    })
 
-    const close = Effect.gen(function* () {
-      const alreadyClosed = yield* Ref.getAndSet(closedRef, true);
-      if (alreadyClosed) {
-        return;
+    const close = Effect.gen(function* ()
+    {
+      const alreadyClosed = yield* Ref.getAndSet(closedRef, true)
+      if (alreadyClosed)
+      {
+        return
       }
-      yield* settlePendingApprovals("cancel");
-      yield* settlePendingUserInputs({});
+      yield* settlePendingApprovals('cancel')
+      yield* settlePendingUserInputs({})
       yield* updateSession(sessionRef, {
-        status: "closed",
+        status: 'closed',
         activeTurnId: undefined,
-      });
-      yield* emitSessionEvent("session/closed", "Session stopped").pipe(
+      })
+      yield* emitSessionEvent('session/closed', 'Session stopped').pipe(
         Effect.catch((cause) =>
-          Effect.logError("Failed to emit Codex session closed event.", { cause }),
+          Effect.logError('Failed to emit Codex session closed event.', { cause }),
         ),
-      );
-      yield* Scope.close(runtimeScope, Exit.void);
-      yield* Queue.shutdown(serverNotifications);
-      yield* Queue.shutdown(events);
-    });
+      )
+      yield* Scope.close(runtimeScope, Exit.void)
+      yield* Queue.shutdown(serverNotifications)
+      yield* Queue.shutdown(events)
+    })
 
     return {
       start,
       getSession: Ref.get(sessionRef),
       sendTurn: (input) =>
-        Effect.gen(function* () {
-          const providerThreadId = yield* readProviderThreadId;
-          if (hasConfiguredMcpServer(options.appServerArgs)) {
-            yield* client.request("config/mcpServer/reload", undefined).pipe(
+        Effect.gen(function* ()
+        {
+          const providerThreadId = yield* readProviderThreadId
+          if (hasConfiguredMcpServer(options.appServerArgs))
+          {
+            yield* client.request('config/mcpServer/reload', undefined).pipe(
               Effect.catch((cause) =>
-                Effect.logWarning("Failed to refresh Codex MCP tool catalog before turn.", {
+                Effect.logWarning('Failed to refresh Codex MCP tool catalog before turn.', {
                   cause,
                 }),
               ),
-            );
+            )
           }
           const normalizedModel = normalizeCodexModelSlug(
             input.model ?? (yield* Ref.get(sessionRef)).model,
-          );
+          )
           const params = yield* buildTurnStartParams({
             threadId: providerThreadId,
             runtimeMode: options.runtimeMode,
@@ -1330,24 +1431,24 @@ export const makeCodexSessionRuntime = (
             ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
             ...(input.effort ? { effort: input.effort } : {}),
             ...(input.interactionMode ? { interactionMode: input.interactionMode } : {}),
-          });
-          const rawResponse = yield* client.raw.request("turn/start", params);
+          })
+          const rawResponse = yield* client.raw.request('turn/start', params)
           const response = yield* decodeV2TurnStartResponse(rawResponse).pipe(
             Effect.mapError((error) =>
               CodexErrors.CodexAppServerProtocolParseError.fromSchemaError(
-                "decode-response-payload",
+                'decode-response-payload',
                 error,
-                { method: "turn/start" },
+                { method: 'turn/start' },
               ),
             ),
-          );
-          const turnId = TurnId.make(response.turn.id);
+          )
+          const turnId = TurnId.make(response.turn.id)
           yield* updateSession(sessionRef, {
-            status: "running",
+            status: 'running',
             activeTurnId: turnId,
             ...(normalizedModel ? { model: normalizedModel } : {}),
-          });
-          const resumedProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef));
+          })
+          const resumedProviderThreadId = currentProviderThreadId(yield* Ref.get(sessionRef))
           return {
             threadId: options.threadId,
             turnId,
@@ -1359,60 +1460,67 @@ export const makeCodexSessionRuntime = (
                   ),
                 }
               : {}),
-          } satisfies ProviderTurnStartResult;
+          } satisfies ProviderTurnStartResult
         }),
       interruptTurn: (turnId) =>
-        Effect.gen(function* () {
-          const providerThreadId = yield* readProviderThreadId;
-          const session = yield* Ref.get(sessionRef);
-          const effectiveTurnId = turnId ?? session.activeTurnId;
-          if (!effectiveTurnId) {
-            return;
+        Effect.gen(function* ()
+        {
+          const providerThreadId = yield* readProviderThreadId
+          const session = yield* Ref.get(sessionRef)
+          const effectiveTurnId = turnId ?? session.activeTurnId
+          if (!effectiveTurnId)
+          {
+            return
           }
-          yield* client.request("turn/interrupt", {
+          yield* client.request('turn/interrupt', {
             threadId: providerThreadId,
             turnId: effectiveTurnId,
-          });
+          })
         }),
-      readThread: Effect.gen(function* () {
-        const providerThreadId = yield* readProviderThreadId;
-        const response = yield* client.request("thread/read", {
+      readThread: Effect.gen(function* ()
+      {
+        const providerThreadId = yield* readProviderThreadId
+        const response = yield* client.request('thread/read', {
           threadId: providerThreadId,
           includeTurns: true,
-        });
-        return parseThreadSnapshot(response);
+        })
+        return parseThreadSnapshot(response)
       }),
       rollbackThread: (numTurns) =>
-        Effect.gen(function* () {
-          const providerThreadId = yield* readProviderThreadId;
-          const response = yield* client.request("thread/rollback", {
+        Effect.gen(function* ()
+        {
+          const providerThreadId = yield* readProviderThreadId
+          const response = yield* client.request('thread/rollback', {
             threadId: providerThreadId,
             numTurns,
-          });
+          })
           yield* updateSession(sessionRef, {
-            status: "ready",
+            status: 'ready',
             activeTurnId: undefined,
-          });
-          return parseThreadSnapshot(response);
+          })
+          return parseThreadSnapshot(response)
         }),
       respondToRequest: (requestId, decision) =>
-        Effect.gen(function* () {
-          const pending = (yield* Ref.get(pendingApprovalsRef)).get(requestId);
-          if (!pending) {
+        Effect.gen(function* ()
+        {
+          const pending = (yield* Ref.get(pendingApprovalsRef)).get(requestId)
+          if (!pending)
+          {
             return yield* new CodexSessionRuntimePendingApprovalNotFoundError({
               requestId,
-            });
+            })
           }
-          yield* Ref.update(pendingApprovalsRef, (current) => {
-            const next = new Map(current);
-            next.delete(requestId);
-            return next;
-          });
-          yield* Deferred.succeed(pending.decision, decision);
+          yield* Ref.update(pendingApprovalsRef, (current) =>
+          {
+            const next = new Map(current)
+            next.delete(requestId)
+            return next
+          })
+          yield* Deferred.succeed(pending.decision, decision)
           yield* emitEvent({
-            kind: "notification",
+            kind: 'notification',
             threadId: options.threadId,
-            method: "item/requestApproval/decision",
+            method: 'item/requestApproval/decision',
             requestId: pending.requestId,
             requestKind: pending.requestKind,
             ...(pending.turnId ? { turnId: pending.turnId } : {}),
@@ -1422,36 +1530,39 @@ export const makeCodexSessionRuntime = (
               requestKind: pending.requestKind,
               decision,
             },
-          });
+          })
         }),
       respondToUserInput: (requestId, answers) =>
-        Effect.gen(function* () {
-          const pending = (yield* Ref.get(pendingUserInputsRef)).get(requestId);
-          if (!pending) {
+        Effect.gen(function* ()
+        {
+          const pending = (yield* Ref.get(pendingUserInputsRef)).get(requestId)
+          if (!pending)
+          {
             return yield* new CodexSessionRuntimePendingUserInputNotFoundError({
               requestId,
-            });
+            })
           }
-          const codexAnswers = yield* toCodexUserInputAnswers(answers);
-          yield* Ref.update(pendingUserInputsRef, (current) => {
-            const next = new Map(current);
-            next.delete(requestId);
-            return next;
-          });
-          yield* Deferred.succeed(pending.answers, answers);
+          const codexAnswers = yield* toCodexUserInputAnswers(answers)
+          yield* Ref.update(pendingUserInputsRef, (current) =>
+          {
+            const next = new Map(current)
+            next.delete(requestId)
+            return next
+          })
+          yield* Deferred.succeed(pending.answers, answers)
           yield* emitEvent({
-            kind: "notification",
+            kind: 'notification',
             threadId: options.threadId,
-            method: "item/tool/requestUserInput/answered",
+            method: 'item/tool/requestUserInput/answered',
             requestId: pending.requestId,
             ...(pending.turnId ? { turnId: pending.turnId } : {}),
             ...(pending.itemId ? { itemId: pending.itemId } : {}),
             payload: {
               answers: codexAnswers,
             },
-          });
+          })
         }),
       events: Stream.fromQueue(events),
       close,
-    } satisfies CodexSessionRuntimeShape;
-  });
+    } satisfies CodexSessionRuntimeShape
+  })

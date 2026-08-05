@@ -1,139 +1,147 @@
-import { MessageId } from "@t3tools/contracts";
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/web/historyBootstrap.test.ts
+// verify build bootstrap input behavior
 
-import { buildBootstrapInput } from "../../../apps/web/src/historyBootstrap";
+import { MessageId } from '@t3tools/contracts'
+import { describe, expect, it } from 'vite-plus/test'
 
-const messageId = (value: string) => MessageId.make(value);
+import { buildBootstrapInput } from '../../../apps/web/src/historyBootstrap'
 
-describe("buildBootstrapInput", () => {
-  it("includes full transcript when under budget", () => {
+const messageId = (value: string) => MessageId.make(value)
+
+describe('buildBootstrapInput', () =>
+{
+  it('includes full transcript when under budget', () =>
+  {
     const result = buildBootstrapInput(
       [
         {
-          id: messageId("u-1"),
-          role: "user",
-          text: "hello",
-          createdAt: "2026-02-09T00:00:00.000Z",
+          id: messageId('u-1'),
+          role: 'user',
+          text: 'hello',
+          createdAt: '2026-02-09T00:00:00.000Z',
           turnId: null,
-          updatedAt: "2026-02-09T00:00:00.000Z",
+          updatedAt: '2026-02-09T00:00:00.000Z',
           streaming: false,
         },
         {
-          id: messageId("a-1"),
-          role: "assistant",
-          text: "world",
-          createdAt: "2026-02-09T00:00:01.000Z",
+          id: messageId('a-1'),
+          role: 'assistant',
+          text: 'world',
+          createdAt: '2026-02-09T00:00:01.000Z',
           turnId: null,
-          updatedAt: "2026-02-09T00:00:01.000Z",
+          updatedAt: '2026-02-09T00:00:01.000Z',
           streaming: false,
         },
       ],
       "what's next?",
       1_500,
-    );
+    )
 
-    expect(result.includedCount).toBe(2);
-    expect(result.omittedCount).toBe(0);
-    expect(result.truncated).toBe(false);
-    expect(result.text).toContain("USER:\nhello");
-    expect(result.text).toContain("ASSISTANT:\nworld");
-    expect(result.text).toContain("Latest user request (answer this now):");
-    expect(result.text).toContain("what's next?");
-  });
+    expect(result.includedCount).toBe(2)
+    expect(result.omittedCount).toBe(0)
+    expect(result.truncated).toBe(false)
+    expect(result.text).toContain('USER:\nhello')
+    expect(result.text).toContain('ASSISTANT:\nworld')
+    expect(result.text).toContain('Latest user request (answer this now):')
+    expect(result.text).toContain("what's next?")
+  })
 
-  it("truncates older transcript messages when over budget", () => {
+  it('truncates older transcript messages when over budget', () =>
+  {
     const result = buildBootstrapInput(
       [
         {
-          id: messageId("u-1"),
-          role: "user",
-          text: "first question with details",
-          createdAt: "2026-02-09T00:00:00.000Z",
+          id: messageId('u-1'),
+          role: 'user',
+          text: 'first question with details',
+          createdAt: '2026-02-09T00:00:00.000Z',
           turnId: null,
-          updatedAt: "2026-02-09T00:00:00.000Z",
+          updatedAt: '2026-02-09T00:00:00.000Z',
           streaming: false,
         },
         {
-          id: messageId("a-1"),
-          role: "assistant",
-          text: "first answer with details",
-          createdAt: "2026-02-09T00:00:01.000Z",
+          id: messageId('a-1'),
+          role: 'assistant',
+          text: 'first answer with details',
+          createdAt: '2026-02-09T00:00:01.000Z',
           turnId: null,
-          updatedAt: "2026-02-09T00:00:01.000Z",
+          updatedAt: '2026-02-09T00:00:01.000Z',
           streaming: false,
         },
         {
-          id: messageId("u-2"),
-          role: "user",
-          text: "second question with details",
-          createdAt: "2026-02-09T00:00:02.000Z",
+          id: messageId('u-2'),
+          role: 'user',
+          text: 'second question with details',
+          createdAt: '2026-02-09T00:00:02.000Z',
           turnId: null,
-          updatedAt: "2026-02-09T00:00:02.000Z",
+          updatedAt: '2026-02-09T00:00:02.000Z',
           streaming: false,
         },
       ],
-      "final request",
+      'final request',
       320,
-    );
+    )
 
-    expect(result.truncated).toBe(true);
-    expect(result.omittedCount).toBeGreaterThan(0);
-    expect(result.includedCount).toBeLessThan(3);
-    expect(result.text).toContain("omitted to stay within input limits");
-    expect(result.text.length).toBeLessThanOrEqual(320);
-  });
+    expect(result.truncated).toBe(true)
+    expect(result.omittedCount).toBeGreaterThan(0)
+    expect(result.includedCount).toBeLessThan(3)
+    expect(result.text).toContain('omitted to stay within input limits')
+    expect(result.text.length).toBeLessThanOrEqual(320)
+  })
 
-  it("preserves the latest prompt when prompt-only fallback is required", () => {
-    const latestPrompt = "Please keep this exact latest prompt.";
+  it('preserves the latest prompt when prompt-only fallback is required', () =>
+  {
+    const latestPrompt = 'Please keep this exact latest prompt.'
     const result = buildBootstrapInput(
       [
         {
-          id: messageId("u-1"),
-          role: "user",
-          text: "old context",
-          createdAt: "2026-02-09T00:00:00.000Z",
+          id: messageId('u-1'),
+          role: 'user',
+          text: 'old context',
+          createdAt: '2026-02-09T00:00:00.000Z',
           turnId: null,
-          updatedAt: "2026-02-09T00:00:00.000Z",
+          updatedAt: '2026-02-09T00:00:00.000Z',
           streaming: false,
         },
       ],
       latestPrompt,
       latestPrompt.length + 3,
-    );
+    )
 
-    expect(result.text).toBe(latestPrompt);
-    expect(result.includedCount).toBe(0);
-    expect(result.omittedCount).toBe(1);
-    expect(result.truncated).toBe(true);
-  });
+    expect(result.text).toBe(latestPrompt)
+    expect(result.includedCount).toBe(0)
+    expect(result.omittedCount).toBe(1)
+    expect(result.truncated).toBe(true)
+  })
 
-  it("captures user image attachment context in transcript blocks", () => {
+  it('captures user image attachment context in transcript blocks', () =>
+  {
     const result = buildBootstrapInput(
       [
         {
-          id: messageId("u-image"),
-          role: "user",
-          text: "",
+          id: messageId('u-image'),
+          role: 'user',
+          text: '',
           attachments: [
             {
-              type: "image",
-              id: "img-1",
-              name: "screenshot.png",
-              mimeType: "image/png",
+              type: 'image',
+              id: 'img-1',
+              name: 'screenshot.png',
+              mimeType: 'image/png',
               sizeBytes: 2_048,
             },
           ],
-          createdAt: "2026-02-09T00:00:00.000Z",
+          createdAt: '2026-02-09T00:00:00.000Z',
           turnId: null,
-          updatedAt: "2026-02-09T00:00:00.000Z",
+          updatedAt: '2026-02-09T00:00:00.000Z',
           streaming: false,
         },
       ],
-      "What does this error mean?",
+      'What does this error mean?',
       1_500,
-    );
+    )
 
-    expect(result.text).toContain("Attached image");
-    expect(result.text).toContain("screenshot.png");
-  });
-});
+    expect(result.text).toContain('Attached image')
+    expect(result.text).toContain('screenshot.png')
+  })
+})

@@ -1,30 +1,41 @@
-import { ClientSettingsSchema, type ClientSettings } from "@t3tools/contracts";
+// apps/web/src/clientPersistenceStorage.ts
+// persist client persistence storage data
 
-import { getLocalStorageItem, setLocalStorageItem } from "./hooks/useLocalStorage";
+import { ClientSettingsSchema, type ClientSettings } from '@t3tools/contracts'
 
-export const CLIENT_SETTINGS_STORAGE_KEY = "456code:client-settings:v1";
+import { getLocalStorageItem, setLocalStorageItem } from './hooks/useLocalStorage'
 
-function hasWindow(): boolean {
-  return typeof window !== "undefined";
+export const CLIENT_SETTINGS_STORAGE_KEY = '456code:client-settings:v1'
+
+function hasWindow(): boolean
+{
+  return typeof window !== 'undefined'
 }
 
-export function readBrowserClientSettings(): ClientSettings | null {
-  if (!hasWindow()) {
-    return null;
+export function readBrowserClientSettings(): ClientSettings | null
+{
+  if (!hasWindow())
+  {
+    return null
   }
 
-  try {
-    return getLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, ClientSettingsSchema);
-  } catch (error) {
-    console.error("Could not read persisted client settings.", error);
-    return null;
+  try
+  {
+    return getLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, ClientSettingsSchema)
+  }
+  catch (error)
+  {
+    console.error('Could not read persisted client settings.', error)
+    return null
   }
 }
 
-export function writeBrowserClientSettings(settings: ClientSettings): void {
-  if (!hasWindow()) {
-    return;
+export function writeBrowserClientSettings(settings: ClientSettings): void
+{
+  if (!hasWindow())
+  {
+    return
   }
 
-  setLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, settings, ClientSettingsSchema);
+  setLocalStorageItem(CLIENT_SETTINGS_STORAGE_KEY, settings, ClientSettingsSchema)
 }

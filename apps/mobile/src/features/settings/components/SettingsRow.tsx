@@ -1,32 +1,36 @@
-import { useNavigation } from "@react-navigation/native";
-import type { ComponentProps } from "react";
-import { Pressable, View } from "react-native";
+// apps/mobile/src/features/settings/components/SettingsRow.tsx
+// render settings row
 
-import { SymbolView } from "../../../components/AppSymbol";
+import { useNavigation } from '@react-navigation/native'
+import type { ComponentProps } from 'react'
+import { Pressable, View } from 'react-native'
 
-import { AppText as Text } from "../../../components/AppText";
-import { useThemeColor } from "../../../lib/useThemeColor";
-import type { SettingsSheetTarget } from "./settings-sheet-targets";
+import { SymbolView } from '../../../components/AppSymbol'
 
-type SymbolName = ComponentProps<typeof SymbolView>["name"];
+import { AppText as Text } from '../../../components/AppText'
+import { useThemeColor } from '../../../lib/useThemeColor'
+import type { SettingsSheetTarget } from './settings-sheet-targets'
+
+type SymbolName = ComponentProps<typeof SymbolView>['name']
 
 export function SettingsRow(props: {
-  readonly disabled?: boolean;
-  readonly icon: SymbolName;
-  readonly label: string;
-  readonly value?: string;
-  readonly target?: SettingsSheetTarget;
-  readonly onPress?: () => void;
-}) {
-  const navigation = useNavigation();
-  const icon = useThemeColor("--color-icon");
-  const chevron = useThemeColor("--color-chevron");
+  readonly disabled?: boolean
+  readonly icon: SymbolName
+  readonly label: string
+  readonly value?: string
+  readonly target?: SettingsSheetTarget
+  readonly onPress?: () => void
+})
+{
+  const navigation = useNavigation()
+  const icon = useThemeColor('--color-icon')
+  const chevron = useThemeColor('--color-chevron')
   const content = (
     <View
       className={
         props.disabled
-          ? "flex-row items-center gap-4 p-4 opacity-[0.45]"
-          : "flex-row items-center gap-4 p-4"
+          ? 'flex-row items-center gap-4 p-4 opacity-[0.45]'
+          : 'flex-row items-center gap-4 p-4'
       }
     >
       <SymbolView name={props.icon} size={22} tintColor={icon} type="monochrome" weight="regular" />
@@ -52,29 +56,30 @@ export function SettingsRow(props: {
         weight="semibold"
       />
     </View>
-  );
+  )
 
-  const target = props.target;
-  if (target) {
+  const target = props.target
+  if (target)
+  {
     return (
       <Pressable
         accessibilityLabel={props.label}
         accessibilityRole="button"
         disabled={props.disabled}
         onPress={() =>
-          navigation.navigate("SettingsSheet", {
+          navigation.navigate('SettingsSheet', {
             screen: target,
           })
         }
       >
         {content}
       </Pressable>
-    );
+    )
   }
 
   return (
     <Pressable accessibilityRole="button" disabled={props.disabled} onPress={props.onPress}>
       {content}
     </Pressable>
-  );
+  )
 }

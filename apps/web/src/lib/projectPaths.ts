@@ -1,3 +1,6 @@
+// apps/web/src/lib/projectPaths.ts
+// append browse path segment
+
 export {
   appendBrowsePathSegment,
   canNavigateUp,
@@ -14,4 +17,4 @@ export {
   normalizeProjectPathForComparison,
   normalizeProjectPathForDispatch,
   resolveProjectPathForDispatch,
-} from "@t3tools/client-runtime/state/projects";
+} from '@t3tools/client-runtime/state/projects'

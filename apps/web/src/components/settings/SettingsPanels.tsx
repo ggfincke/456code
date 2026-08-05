@@ -1,10 +1,10 @@
 // apps/web/src/components/settings/SettingsPanels.tsx
 // renders grouped application settings panels
-import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from "lucide-react";
-import { Link } from "@tanstack/react-router";
-import type { CSSProperties } from "react";
-import { useCallback, useMemo, useRef, useState } from "react";
-import { useAtomValue } from "@effect/atom-react";
+import { ArchiveIcon, ArchiveX, LoaderIcon, PlusIcon, RefreshCwIcon } from 'lucide-react'
+import { Link } from '@tanstack/react-router'
+import type { CSSProperties } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
+import { useAtomValue } from '@effect/atom-react'
 import {
   defaultInstanceIdForDriver,
   type DesktopUpdateChannel,
@@ -14,76 +14,76 @@ import {
   type ProviderInstanceId,
   type ScopedThreadRef,
   type SidebarProjectGroupingMode,
-} from "@t3tools/contracts";
-import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { safeErrorLogAttributes } from "@t3tools/client-runtime/errors";
+} from '@t3tools/contracts'
+import { scopeThreadRef } from '@t3tools/client-runtime/environment'
+import { safeErrorLogAttributes } from '@t3tools/client-runtime/errors'
 import {
   isAtomCommandInterrupted,
   settlePromise,
   squashAtomCommandFailure,
-} from "@t3tools/client-runtime/state/runtime";
+} from '@t3tools/client-runtime/state/runtime'
 import {
   DEFAULT_UNIFIED_SETTINGS,
   MAX_GLASS_OPACITY,
   MIN_GLASS_OPACITY,
   type ProviderUsageDisplayMode,
-} from "@t3tools/contracts/settings";
-import { createModelSelection } from "@t3tools/shared/model";
-import * as Arr from "effect/Array";
-import * as Duration from "effect/Duration";
-import * as Equal from "effect/Equal";
-import * as Result from "effect/Result";
-import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from "../../branding";
+} from '@t3tools/contracts/settings'
+import { createModelSelection } from '@t3tools/shared/model'
+import * as Arr from 'effect/Array'
+import * as Duration from 'effect/Duration'
+import * as Equal from 'effect/Equal'
+import * as Result from 'effect/Result'
+import { APP_VERSION, HOSTED_APP_CHANNEL, HOSTED_APP_CHANNEL_LABEL } from '../../branding'
 import {
   canCheckForUpdate,
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateInstallConfirmationMessage,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
-} from "../../components/desktopUpdate.logic";
-import { ProviderModelPicker } from "../chat/ProviderModelPicker";
-import { TraitsPicker } from "../chat/TraitsPicker";
-import { isElectron } from "../../env";
-import { buildHostedChannelSelectionUrl, type HostedAppChannel } from "../../hostedPairing";
-import { useTheme } from "../../hooks/useTheme";
-import { usePrimarySettings, useUpdatePrimarySettings } from "../../hooks/useSettings";
-import { useThreadActions } from "../../hooks/useThreadActions";
-import { useDesktopUpdateState } from "../../state/desktopUpdate";
+} from '../../components/desktopUpdate.logic'
+import { ProviderModelPicker } from '../chat/ProviderModelPicker'
+import { TraitsPicker } from '../chat/TraitsPicker'
+import { isElectron } from '../../env'
+import { buildHostedChannelSelectionUrl, type HostedAppChannel } from '../../hostedPairing'
+import { useTheme } from '../../hooks/useTheme'
+import { usePrimarySettings, useUpdatePrimarySettings } from '../../hooks/useSettings'
+import { useThreadActions } from '../../hooks/useThreadActions'
+import { useDesktopUpdateState } from '../../state/desktopUpdate'
 import {
   getCustomModelOptionsByInstance,
   resolveAppModelSelectionState,
-} from "../../modelSelection";
+} from '../../modelSelection'
 import {
   applyProviderInstanceSettings,
   deriveProviderInstanceEntries,
   sortProviderInstanceEntries,
-} from "../../providerInstances";
-import { ensureLocalApi, readLocalApi } from "../../localApi";
+} from '../../providerInstances'
+import { ensureLocalApi, readLocalApi } from '../../localApi'
 import {
   primaryServerObservabilityAtom,
   primaryServerProvidersAtom,
   serverEnvironment,
-} from "../../state/server";
-import { usePrimaryEnvironment } from "../../state/environments";
-import { useProjects } from "../../state/entities";
-import { useArchivedThreadSnapshots } from "../../lib/archivedThreadsState";
-import { formatRelativeTimeLabel, getRelativeTimeState } from "../../timestampFormat";
-import { Button } from "../ui/button";
-import { DraftInput } from "../ui/draft-input";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
-import { Switch } from "../ui/switch";
-import { stackedThreadToast, toastManager } from "../ui/toast";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { AddProviderInstanceDialog } from "./AddProviderInstanceDialog";
+} from '../../state/server'
+import { usePrimaryEnvironment } from '../../state/environments'
+import { useProjects } from '../../state/entities'
+import { useArchivedThreadSnapshots } from '../../lib/archivedThreadsState'
+import { formatRelativeTimeLabel, getRelativeTimeState } from '../../timestampFormat'
+import { Button } from '../ui/button'
+import { DraftInput } from '../ui/draft-input'
+import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../ui/select'
+import { Switch } from '../ui/switch'
+import { stackedThreadToast, toastManager } from '../ui/toast'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
+import { AddProviderInstanceDialog } from './AddProviderInstanceDialog'
 import {
   canOneClickUpdateProviderCandidate,
   collectProviderUpdateCandidates,
   hasOneClickUpdateProviderCandidate,
   isProviderUpdateActive,
   type ProviderUpdateCandidate,
-} from "../ProviderUpdateLaunchNotification.logic";
-import { ProviderInstanceCard } from "./ProviderInstanceCard";
-import { DRIVER_OPTIONS, getDriverOption } from "./providerDriverMeta";
+} from '../ProviderUpdateLaunchNotification.logic'
+import { ProviderInstanceCard } from './ProviderInstanceCard'
+import { DRIVER_OPTIONS, getDriverOption } from './providerDriverMeta'
 import {
   buildProviderInstanceUpdatePatch,
   formatDiagnosticsDescription,
@@ -91,226 +91,243 @@ import {
   projectGroupingModeFromToggle,
   readLastEnabledProjectGroupingMode,
   rememberEnabledProjectGroupingMode,
-} from "./SettingsPanels.logic";
+} from './SettingsPanels.logic'
 import {
   SettingResetButton,
   SettingsPageContainer,
   SettingsRow,
   SettingsSection,
   useRelativeTimeTick,
-} from "./settingsLayout";
-import { ProjectFavicon } from "../ProjectFavicon";
-import { useAtomCommand } from "../../state/use-atom-command";
+} from './settingsLayout'
+import { ProjectFavicon } from '../ProjectFavicon'
+import { useAtomCommand } from '../../state/use-atom-command'
 
 const THEME_OPTIONS = [
   {
-    value: "system",
-    label: "System",
+    value: 'system',
+    label: 'System',
   },
   {
-    value: "light",
-    label: "Light",
+    value: 'light',
+    label: 'Light',
   },
   {
-    value: "dark",
-    label: "Dark",
+    value: 'dark',
+    label: 'Dark',
   },
   {
-    value: "ocean",
-    label: "Ocean",
+    value: 'ocean',
+    label: 'Ocean',
   },
-] as const;
+] as const
 
 const TIMESTAMP_FORMAT_LABELS = {
-  locale: "System default",
-  "12-hour": "12-hour",
-  "24-hour": "24-hour",
-} as const;
+  locale: 'System default',
+  '12-hour': '12-hour',
+  '24-hour': '24-hour',
+} as const
 
 const PROVIDER_USAGE_DISPLAY_LABELS = {
-  "percent-left": "Percent left",
-  "percent-used": "Percent used",
-} satisfies Record<ProviderUsageDisplayMode, string>;
+  'percent-left': 'Percent left',
+  'percent-used': 'Percent used',
+} satisfies Record<ProviderUsageDisplayMode, string>
 
-const DEFAULT_DRIVER_KIND = ProviderDriverKind.make("codex");
+const DEFAULT_DRIVER_KIND = ProviderDriverKind.make('codex')
 
 function withoutProviderInstanceKey<V>(
   record: Readonly<Record<ProviderInstanceId, V>> | undefined,
   key: ProviderInstanceId,
-): Record<ProviderInstanceId, V> {
-  const next = { ...record } as Record<ProviderInstanceId, V>;
-  delete next[key];
-  return next;
+): Record<ProviderInstanceId, V>
+{
+  const next = { ...record } as Record<ProviderInstanceId, V>
+  delete next[key]
+  return next
 }
 
 function withoutProviderInstanceFavorites(
   favorites: ReadonlyArray<{ readonly provider: ProviderInstanceId; readonly model: string }>,
   instanceId: ProviderInstanceId,
-) {
-  return favorites.filter((favorite) => favorite.provider !== instanceId);
+)
+{
+  return favorites.filter((favorite) => favorite.provider !== instanceId)
 }
 
 const PROVIDER_SETTINGS = DRIVER_OPTIONS.map((definition) => ({
   provider: definition.value,
-}));
+}))
 
-function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null }) {
-  useRelativeTimeTick();
-  const lastCheckedRelative = getRelativeTimeState(lastCheckedAt);
+function ProviderLastChecked({ lastCheckedAt }: { lastCheckedAt: string | null })
+{
+  useRelativeTimeTick()
+  const lastCheckedRelative = getRelativeTimeState(lastCheckedAt)
 
-  if (lastCheckedRelative.status === "missing") {
-    return null;
+  if (lastCheckedRelative.status === 'missing')
+  {
+    return null
   }
 
-  if (lastCheckedRelative.status === "invalid") {
-    return <span className="text-[11px] text-muted-foreground/50">Checked unavailable</span>;
+  if (lastCheckedRelative.status === 'invalid')
+  {
+    return <span className="text-[11px] text-muted-foreground/50">Checked unavailable</span>
   }
 
   return (
     <span className="text-[11px] text-muted-foreground/60">
       {lastCheckedRelative.suffix ? (
         <>
-          Checked <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>{" "}
+          Checked <span className="font-mono tabular-nums">{lastCheckedRelative.value}</span>{' '}
           {lastCheckedRelative.suffix}
         </>
       ) : (
         <>Checked {lastCheckedRelative.value}</>
       )}
     </span>
-  );
+  )
 }
 
-function AboutVersionTitle() {
+function AboutVersionTitle()
+{
   return (
     <span className="inline-flex items-center gap-2">
       <span>Version</span>
       <code className="text-[11px] font-medium text-muted-foreground">{APP_VERSION}</code>
     </span>
-  );
+  )
 }
 
-function AboutVersionSection() {
-  const updateState = useDesktopUpdateState();
-  const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false);
+function AboutVersionSection()
+{
+  const updateState = useDesktopUpdateState()
+  const [isChangingUpdateChannel, setIsChangingUpdateChannel] = useState(false)
 
-  const hasDesktopBridge = typeof window !== "undefined" && Boolean(window.desktopBridge);
-  const selectedUpdateChannel = updateState?.channel ?? "latest";
-  const selectedHostedAppChannel = hasDesktopBridge ? null : HOSTED_APP_CHANNEL;
+  const hasDesktopBridge = typeof window !== 'undefined' && Boolean(window.desktopBridge)
+  const selectedUpdateChannel = updateState?.channel ?? 'latest'
+  const selectedHostedAppChannel = hasDesktopBridge ? null : HOSTED_APP_CHANNEL
 
   const handleUpdateChannelChange = useCallback(
-    (channel: DesktopUpdateChannel) => {
-      const bridge = window.desktopBridge;
+    (channel: DesktopUpdateChannel) =>
+    {
+      const bridge = window.desktopBridge
       if (
         !bridge ||
-        typeof bridge.setUpdateChannel !== "function" ||
+        typeof bridge.setUpdateChannel !== 'function' ||
         channel === selectedUpdateChannel
-      ) {
-        return;
+      )
+      {
+        return
       }
 
-      setIsChangingUpdateChannel(true);
+      setIsChangingUpdateChannel(true)
       void bridge
         .setUpdateChannel(channel)
-        .catch((error: unknown) => {
+        .catch((error: unknown) =>
+        {
           toastManager.add(
             stackedThreadToast({
-              type: "error",
-              title: "Could not change update track",
-              description: error instanceof Error ? error.message : "Update track change failed.",
+              type: 'error',
+              title: 'Could not change update track',
+              description: error instanceof Error ? error.message : 'Update track change failed.',
             }),
-          );
+          )
         })
-        .finally(() => {
-          setIsChangingUpdateChannel(false);
-        });
+        .finally(() =>
+        {
+          setIsChangingUpdateChannel(false)
+        })
     },
     [selectedUpdateChannel],
-  );
+  )
 
-  const handleButtonClick = useCallback(() => {
-    const bridge = window.desktopBridge;
-    if (!bridge) return;
+  const handleButtonClick = useCallback(() =>
+  {
+    const bridge = window.desktopBridge
+    if (!bridge) return
 
-    const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
+    const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : 'none'
 
-    if (action === "download") {
-      void bridge.downloadUpdate().catch((error: unknown) => {
+    if (action === 'download')
+    {
+      void bridge.downloadUpdate().catch((error: unknown) =>
+      {
         toastManager.add(
           stackedThreadToast({
-            type: "error",
-            title: "Could not download update",
-            description: error instanceof Error ? error.message : "Download failed.",
+            type: 'error',
+            title: 'Could not download update',
+            description: error instanceof Error ? error.message : 'Download failed.',
           }),
-        );
-      });
-      return;
+        )
+      })
+      return
     }
 
-    if (action === "install") {
+    if (action === 'install')
+    {
       const confirmed = window.confirm(
         getDesktopUpdateInstallConfirmationMessage(
           updateState ?? { availableVersion: null, downloadedVersion: null },
           navigator.platform,
         ),
-      );
-      if (!confirmed) return;
-      void bridge.installUpdate().catch((error: unknown) => {
+      )
+      if (!confirmed) return
+      void bridge.installUpdate().catch((error: unknown) =>
+      {
         toastManager.add(
           stackedThreadToast({
-            type: "error",
-            title: "Could not install update",
-            description: error instanceof Error ? error.message : "Install failed.",
+            type: 'error',
+            title: 'Could not install update',
+            description: error instanceof Error ? error.message : 'Install failed.',
           }),
-        );
-      });
-      return;
+        )
+      })
+      return
     }
 
-    if (typeof bridge.checkForUpdate !== "function") return;
+    if (typeof bridge.checkForUpdate !== 'function') return
     void bridge
       .checkForUpdate()
-      .then((result) => {
-        if (!result.checked) {
+      .then((result) =>
+      {
+        if (!result.checked)
+        {
           toastManager.add(
             stackedThreadToast({
-              type: "error",
-              title: "Could not check for updates",
+              type: 'error',
+              title: 'Could not check for updates',
               description:
-                result.state.message ?? "Automatic updates are not available in this build.",
+                result.state.message ?? 'Automatic updates are not available in this build.',
             }),
-          );
+          )
         }
       })
-      .catch((error: unknown) => {
+      .catch((error: unknown) =>
+      {
         toastManager.add(
           stackedThreadToast({
-            type: "error",
-            title: "Could not check for updates",
-            description: error instanceof Error ? error.message : "Update check failed.",
+            type: 'error',
+            title: 'Could not check for updates',
+            description: error instanceof Error ? error.message : 'Update check failed.',
           }),
-        );
-      });
-  }, [updateState]);
+        )
+      })
+  }, [updateState])
 
-  const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
-  const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;
+  const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : 'none'
+  const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null
   const buttonDisabled =
-    action === "none"
-      ? !canCheckForUpdate(updateState)
-      : isDesktopUpdateButtonDisabled(updateState);
+    action === 'none' ? !canCheckForUpdate(updateState) : isDesktopUpdateButtonDisabled(updateState)
 
-  const actionLabel: Record<string, string> = { download: "Download", install: "Install" };
+  const actionLabel: Record<string, string> = { download: 'Download', install: 'Install' }
   const statusLabel: Record<string, string> = {
-    checking: "Checking…",
-    downloading: "Downloading…",
-    "up-to-date": "Up to Date",
-  };
+    checking: 'Checking…',
+    downloading: 'Downloading…',
+    'up-to-date': 'Up to Date',
+  }
   const buttonLabel =
-    actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
+    actionLabel[action] ?? statusLabel[updateState?.status ?? ''] ?? 'Check for Updates'
   const description =
-    action === "download" || action === "install"
-      ? "Update available."
-      : "Current version of the application.";
+    action === 'download' || action === 'install'
+      ? 'Update available.'
+      : 'Current version of the application.'
 
   return (
     <>
@@ -323,7 +340,7 @@ function AboutVersionSection() {
               render={
                 <Button
                   size="xs"
-                  variant={action === "install" ? "default" : "outline"}
+                  variant={action === 'install' ? 'default' : 'outline'}
                   disabled={buttonDisabled}
                   onClick={handleButtonClick}
                 >
@@ -342,8 +359,9 @@ function AboutVersionSection() {
           control={
             <Select
               value={selectedUpdateChannel}
-              onValueChange={(value) => {
-                handleUpdateChannelChange(value as DesktopUpdateChannel);
+              onValueChange={(value) =>
+                {
+                handleUpdateChannelChange(value as DesktopUpdateChannel)
               }}
             >
               <SelectTrigger
@@ -352,7 +370,7 @@ function AboutVersionSection() {
                 disabled={isChangingUpdateChannel}
               >
                 <SelectValue>
-                  {selectedUpdateChannel === "nightly" ? "Nightly" : "Stable"}
+                  {selectedUpdateChannel === 'nightly' ? 'Nightly' : 'Stable'}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -373,11 +391,12 @@ function AboutVersionSection() {
           control={
             <Select
               value={selectedHostedAppChannel}
-              onValueChange={(value) => {
-                if (value === selectedHostedAppChannel) return;
+              onValueChange={(value) =>
+                {
+                if (value === selectedHostedAppChannel) return
                 window.location.assign(
                   buildHostedChannelSelectionUrl({ channel: value as HostedAppChannel }),
-                );
+                )
               }}
             >
               <SelectTrigger className="w-full sm:w-40" aria-label="Update track">
@@ -396,71 +415,72 @@ function AboutVersionSection() {
         />
       ) : null}
     </>
-  );
+  )
 }
 
-export function useSettingsRestore(onRestored?: () => void) {
-  const { theme, setTheme } = useTheme();
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+export function useSettingsRestore(onRestored?: () => void)
+{
+  const { theme, setTheme } = useTheme()
+  const settings = usePrimarySettings()
+  const updateSettings = useUpdatePrimarySettings()
 
   const isTextGenerationModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
+  )
 
   const changedSettingLabels = useMemo(
     () => [
-      ...(theme !== "system" ? ["Theme"] : []),
-      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ["Glass opacity"] : []),
+      ...(theme !== 'system' ? ['Theme'] : []),
+      ...(settings.glassOpacity !== DEFAULT_UNIFIED_SETTINGS.glassOpacity ? ['Glass opacity'] : []),
       ...(settings.timestampFormat !== DEFAULT_UNIFIED_SETTINGS.timestampFormat
-        ? ["Time format"]
+        ? ['Time format']
         : []),
       ...(settings.providerUsageDisplayMode !== DEFAULT_UNIFIED_SETTINGS.providerUsageDisplayMode
-        ? ["Usage display"]
+        ? ['Usage display']
         : []),
       ...(settings.sidebarThreadPreviewCount !== DEFAULT_UNIFIED_SETTINGS.sidebarThreadPreviewCount
-        ? ["Visible threads"]
+        ? ['Visible threads']
         : []),
       ...(settings.sidebarProjectGroupingMode !==
       DEFAULT_UNIFIED_SETTINGS.sidebarProjectGroupingMode
-        ? ["Project Grouping"]
+        ? ['Project Grouping']
         : []),
-      ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
+      ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ['Word wrap'] : []),
       ...(settings.diffIgnoreWhitespace !== DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace
-        ? ["Diff whitespace changes"]
+        ? ['Diff whitespace changes']
         : []),
       ...(settings.autoOpenPlanSidebar !== DEFAULT_UNIFIED_SETTINGS.autoOpenPlanSidebar
-        ? ["Auto-open task panel"]
+        ? ['Auto-open task panel']
         : []),
       ...(settings.enableAssistantStreaming !== DEFAULT_UNIFIED_SETTINGS.enableAssistantStreaming
-        ? ["Assistant output"]
+        ? ['Assistant output']
         : []),
       ...(settings.enableProviderUpdateChecks !==
       DEFAULT_UNIFIED_SETTINGS.enableProviderUpdateChecks
-        ? ["Provider update checks"]
+        ? ['Provider update checks']
         : []),
       ...(Duration.toMillis(settings.automaticGitFetchInterval) !==
       Duration.toMillis(DEFAULT_UNIFIED_SETTINGS.automaticGitFetchInterval)
-        ? ["Automatic Git fetch interval"]
+        ? ['Automatic Git fetch interval']
         : []),
       ...(settings.defaultThreadEnvMode !== DEFAULT_UNIFIED_SETTINGS.defaultThreadEnvMode
-        ? ["New thread mode"]
+        ? ['New thread mode']
         : []),
       ...(settings.newWorktreesStartFromOrigin !==
       DEFAULT_UNIFIED_SETTINGS.newWorktreesStartFromOrigin
-        ? ["New worktrees start from origin"]
+        ? ['New worktrees start from origin']
         : []),
       ...(settings.addProjectBaseDirectory !== DEFAULT_UNIFIED_SETTINGS.addProjectBaseDirectory
-        ? ["Add project base directory"]
+        ? ['Add project base directory']
         : []),
       ...(settings.confirmThreadArchive !== DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive
-        ? ["Archive confirmation"]
+        ? ['Archive confirmation']
         : []),
       ...(settings.confirmThreadDelete !== DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete
-        ? ["Delete confirmation"]
+        ? ['Delete confirmation']
         : []),
-      ...(isTextGenerationModelDirty ? ["Text generation model"] : []),
+      ...(isTextGenerationModelDirty ? ['Text generation model'] : []),
     ],
     [
       isTextGenerationModelDirty,
@@ -482,19 +502,20 @@ export function useSettingsRestore(onRestored?: () => void) {
       settings.wordWrap,
       theme,
     ],
-  );
+  )
 
-  const restoreDefaults = useCallback(async () => {
-    if (changedSettingLabels.length === 0) return;
-    const api = readLocalApi();
+  const restoreDefaults = useCallback(async () =>
+  {
+    if (changedSettingLabels.length === 0) return
+    const api = readLocalApi()
     const confirmed = await (api ?? ensureLocalApi()).dialogs.confirm(
-      ["Restore default settings?", `This will reset: ${changedSettingLabels.join(", ")}.`].join(
-        "\n",
+      ['Restore default settings?', `This will reset: ${changedSettingLabels.join(', ')}.`].join(
+        '\n',
       ),
-    );
-    if (!confirmed) return;
+    )
+    if (!confirmed) return
 
-    setTheme("system");
+    setTheme('system')
     updateSettings({
       timestampFormat: DEFAULT_UNIFIED_SETTINGS.timestampFormat,
       providerUsageDisplayMode: DEFAULT_UNIFIED_SETTINGS.providerUsageDisplayMode,
@@ -513,61 +534,62 @@ export function useSettingsRestore(onRestored?: () => void) {
       confirmThreadArchive: DEFAULT_UNIFIED_SETTINGS.confirmThreadArchive,
       confirmThreadDelete: DEFAULT_UNIFIED_SETTINGS.confirmThreadDelete,
       textGenerationModelSelection: DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-    });
-    onRestored?.();
-  }, [changedSettingLabels, onRestored, setTheme, updateSettings]);
+    })
+    onRestored?.()
+  }, [changedSettingLabels, onRestored, setTheme, updateSettings])
 
   return {
     changedSettingLabels,
     restoreDefaults,
-  };
+  }
 }
 
-export function GeneralSettingsPanel() {
-  const { theme, setTheme } = useTheme();
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
+export function GeneralSettingsPanel()
+{
+  const { theme, setTheme } = useTheme()
+  const settings = usePrimarySettings()
+  const updateSettings = useUpdatePrimarySettings()
   const lastEnabledProjectGroupingMode = useRef<SidebarProjectGroupingMode>(
     readLastEnabledProjectGroupingMode(),
-  );
-  const observability = useAtomValue(primaryServerObservabilityAtom);
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
+  )
+  const observability = useAtomValue(primaryServerObservabilityAtom)
+  const serverProviders = useAtomValue(primaryServerProvidersAtom)
   const glassOpacityRatio =
-    (settings.glassOpacity - MIN_GLASS_OPACITY) / (MAX_GLASS_OPACITY - MIN_GLASS_OPACITY);
+    (settings.glassOpacity - MIN_GLASS_OPACITY) / (MAX_GLASS_OPACITY - MIN_GLASS_OPACITY)
   const glassOpacitySliderStyle = {
-    "--glass-slider-progress": `${glassOpacityRatio * 100}%`,
-    "--glass-slider-fill-offset": `${0.5 - glassOpacityRatio}rem`,
-  } as CSSProperties;
+    '--glass-slider-progress': `${glassOpacityRatio * 100}%`,
+    '--glass-slider-fill-offset': `${0.5 - glassOpacityRatio}rem`,
+  } as CSSProperties
   const diagnosticsDescription = formatDiagnosticsDescription({
     localTracingEnabled: observability?.localTracingEnabled ?? false,
     otlpTracesEnabled: observability?.otlpTracesEnabled ?? false,
     otlpTracesUrl: observability?.otlpTracesUrl,
     otlpMetricsEnabled: observability?.otlpMetricsEnabled ?? false,
     otlpMetricsUrl: observability?.otlpMetricsUrl,
-  });
+  })
 
-  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
-  const textGenInstanceId = textGenerationModelSelection.instanceId;
-  const textGenModel = textGenerationModelSelection.model;
-  const textGenModelOptions = textGenerationModelSelection.options;
+  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders)
+  const textGenInstanceId = textGenerationModelSelection.instanceId
+  const textGenModel = textGenerationModelSelection.model
+  const textGenModelOptions = textGenerationModelSelection.options
   const textGenerationModelInstanceEntries = sortProviderInstanceEntries(
     applyProviderInstanceSettings(deriveProviderInstanceEntries(serverProviders), settings),
-  );
+  )
   const textGenInstanceEntry = textGenerationModelInstanceEntries.find(
     (entry) => entry.instanceId === textGenInstanceId,
-  );
+  )
   const textGenProvider: ProviderDriverKind =
-    textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND;
+    textGenInstanceEntry?.driverKind ?? DEFAULT_DRIVER_KIND
   const textGenerationModelOptionsByInstance = getCustomModelOptionsByInstance(
     settings,
     serverProviders,
     textGenInstanceId,
     textGenModel,
-  );
+  )
   const isTextGenerationModelDirty = !Equal.equals(
     settings.textGenerationModelSelection ?? null,
     DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection ?? null,
-  );
+  )
 
   return (
     <SettingsPageContainer>
@@ -576,27 +598,29 @@ export function GeneralSettingsPanel() {
           title="Theme"
           description="Choose how 456code looks across the app."
           resetAction={
-            theme !== "system" ? (
-              <SettingResetButton label="theme" onClick={() => setTheme("system")} />
+            theme !== 'system' ? (
+              <SettingResetButton label="theme" onClick={() => setTheme('system')} />
             ) : null
           }
           control={
             <Select
               value={theme}
-              onValueChange={(value) => {
+              onValueChange={(value) =>
+              {
                 if (
-                  value === "system" ||
-                  value === "light" ||
-                  value === "dark" ||
-                  value === "ocean"
-                ) {
-                  setTheme(value);
+                  value === 'system' ||
+                  value === 'light' ||
+                  value === 'dark' ||
+                  value === 'ocean'
+                )
+                {
+                  setTheme(value)
                 }
               }}
             >
               <SelectTrigger className="w-full sm:w-40" aria-label="Theme preference">
                 <SelectValue>
-                  {THEME_OPTIONS.find((option) => option.value === theme)?.label ?? "System"}
+                  {THEME_OPTIONS.find((option) => option.value === theme)?.label ?? 'System'}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -637,14 +661,16 @@ export function GeneralSettingsPanel() {
                 id="glass-opacity"
                 max={MAX_GLASS_OPACITY}
                 min={MIN_GLASS_OPACITY}
-                onChange={(event) => {
-                  const glassOpacity = Number(event.currentTarget.value);
+                onChange={(event) =>
+                {
+                  const glassOpacity = Number(event.currentTarget.value)
                   if (
                     Number.isInteger(glassOpacity) &&
                     glassOpacity >= MIN_GLASS_OPACITY &&
                     glassOpacity <= MAX_GLASS_OPACITY
-                  ) {
-                    updateSettings({ glassOpacity });
+                  )
+                  {
+                    updateSettings({ glassOpacity })
                   }
                 }}
                 step={5}
@@ -675,17 +701,19 @@ export function GeneralSettingsPanel() {
           control={
             <Switch
               checked={isProjectGroupingEnabled(settings.sidebarProjectGroupingMode)}
-              onCheckedChange={(checked) => {
-                if (!checked && settings.sidebarProjectGroupingMode !== "separate") {
-                  lastEnabledProjectGroupingMode.current = settings.sidebarProjectGroupingMode;
-                  rememberEnabledProjectGroupingMode(settings.sidebarProjectGroupingMode);
+              onCheckedChange={(checked) =>
+              {
+                if (!checked && settings.sidebarProjectGroupingMode !== 'separate')
+                {
+                  lastEnabledProjectGroupingMode.current = settings.sidebarProjectGroupingMode
+                  rememberEnabledProjectGroupingMode(settings.sidebarProjectGroupingMode)
                 }
                 updateSettings({
                   sidebarProjectGroupingMode: projectGroupingModeFromToggle(
                     checked,
                     lastEnabledProjectGroupingMode.current,
                   ),
-                });
+                })
               }}
               aria-label="Project Grouping"
             />
@@ -710,9 +738,11 @@ export function GeneralSettingsPanel() {
           control={
             <Select
               value={settings.timestampFormat}
-              onValueChange={(value) => {
-                if (value === "locale" || value === "12-hour" || value === "24-hour") {
-                  updateSettings({ timestampFormat: value });
+              onValueChange={(value) =>
+              {
+                if (value === 'locale' || value === '12-hour' || value === '24-hour')
+                {
+                  updateSettings({ timestampFormat: value })
                 }
               }}
             >
@@ -724,10 +754,10 @@ export function GeneralSettingsPanel() {
                   {TIMESTAMP_FORMAT_LABELS.locale}
                 </SelectItem>
                 <SelectItem hideIndicator value="12-hour">
-                  {TIMESTAMP_FORMAT_LABELS["12-hour"]}
+                  {TIMESTAMP_FORMAT_LABELS['12-hour']}
                 </SelectItem>
                 <SelectItem hideIndicator value="24-hour">
-                  {TIMESTAMP_FORMAT_LABELS["24-hour"]}
+                  {TIMESTAMP_FORMAT_LABELS['24-hour']}
                 </SelectItem>
               </SelectPopup>
             </Select>
@@ -753,9 +783,11 @@ export function GeneralSettingsPanel() {
           control={
             <Select
               value={settings.providerUsageDisplayMode}
-              onValueChange={(value) => {
-                if (value === "percent-left" || value === "percent-used") {
-                  updateSettings({ providerUsageDisplayMode: value });
+              onValueChange={(value) =>
+              {
+                if (value === 'percent-left' || value === 'percent-used')
+                {
+                  updateSettings({ providerUsageDisplayMode: value })
                 }
               }}
             >
@@ -766,10 +798,10 @@ export function GeneralSettingsPanel() {
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
                 <SelectItem hideIndicator value="percent-left">
-                  {PROVIDER_USAGE_DISPLAY_LABELS["percent-left"]}
+                  {PROVIDER_USAGE_DISPLAY_LABELS['percent-left']}
                 </SelectItem>
                 <SelectItem hideIndicator value="percent-used">
-                  {PROVIDER_USAGE_DISPLAY_LABELS["percent-used"]}
+                  {PROVIDER_USAGE_DISPLAY_LABELS['percent-used']}
                 </SelectItem>
               </SelectPopup>
             </Select>
@@ -928,15 +960,17 @@ export function GeneralSettingsPanel() {
           control={
             <Select
               value={settings.defaultThreadEnvMode}
-              onValueChange={(value) => {
-                if (value === "local" || value === "worktree") {
-                  updateSettings({ defaultThreadEnvMode: value });
+              onValueChange={(value) =>
+              {
+                if (value === 'local' || value === 'worktree')
+                {
+                  updateSettings({ defaultThreadEnvMode: value })
                 }
               }}
             >
               <SelectTrigger className="w-full sm:w-44" aria-label="Default thread mode">
                 <SelectValue>
-                  {settings.defaultThreadEnvMode === "worktree" ? "New worktree" : "Local"}
+                  {settings.defaultThreadEnvMode === 'worktree' ? 'New worktree' : 'Local'}
                 </SelectValue>
               </SelectTrigger>
               <SelectPopup align="end" alignItemWithTrigger={false}>
@@ -951,7 +985,7 @@ export function GeneralSettingsPanel() {
           }
         />
 
-        {settings.defaultThreadEnvMode === "worktree" ? (
+        {settings.defaultThreadEnvMode === 'worktree' ? (
           <SettingsRow
             className="bg-muted/20 sm:pl-9"
             title="Start from origin"
@@ -1088,7 +1122,8 @@ export function GeneralSettingsPanel() {
                 modelOptionsByInstance={textGenerationModelOptionsByInstance}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onInstanceModelChange={(instanceId, model) => {
+                onInstanceModelChange={(instanceId, model) =>
+                {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
@@ -1097,7 +1132,7 @@ export function GeneralSettingsPanel() {
                       },
                       serverProviders,
                     ),
-                  });
+                  })
                 }}
               />
               <TraitsPicker
@@ -1111,12 +1146,14 @@ export function GeneralSettingsPanel() {
                 }
                 model={textGenModel}
                 prompt=""
-                onPromptChange={() => {}}
+                onPromptChange={() =>
+                {}}
                 modelOptions={textGenModelOptions}
                 allowPromptInjectedEffort={false}
                 triggerVariant="outline"
                 triggerClassName="min-w-0 max-w-none shrink-0 text-foreground/90 hover:text-foreground"
-                onModelOptionsChange={(nextOptions) => {
+                onModelOptionsChange={(nextOptions) =>
+                {
                   updateSettings({
                     textGenerationModelSelection: resolveAppModelSelectionState(
                       {
@@ -1129,7 +1166,7 @@ export function GeneralSettingsPanel() {
                       },
                       serverProviders,
                     ),
-                  });
+                  })
                 }}
               />
             </div>
@@ -1157,95 +1194,104 @@ export function GeneralSettingsPanel() {
         />
       </SettingsSection>
     </SettingsPageContainer>
-  );
+  )
 }
 
-export function ProviderSettingsPanel() {
-  const settings = usePrimarySettings();
-  const updateSettings = useUpdatePrimarySettings();
-  const serverProviders = useAtomValue(primaryServerProvidersAtom);
-  const primaryEnvironment = usePrimaryEnvironment();
+export function ProviderSettingsPanel()
+{
+  const settings = usePrimarySettings()
+  const updateSettings = useUpdatePrimarySettings()
+  const serverProviders = useAtomValue(primaryServerProvidersAtom)
+  const primaryEnvironment = usePrimaryEnvironment()
   const refreshServerProviders = useAtomCommand(serverEnvironment.refreshProviders, {
     reportFailure: false,
-  });
+  })
   const updateProvider = useAtomCommand(serverEnvironment.updateProvider, {
     reportFailure: false,
-  });
-  const [isRefreshingProviders, setIsRefreshingProviders] = useState(false);
-  const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false);
+  })
+  const [isRefreshingProviders, setIsRefreshingProviders] = useState(false)
+  const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false)
   const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
     ReadonlySet<ProviderDriverKind>
-  >(() => new Set());
-  const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({});
-  const refreshingRef = useRef(false);
+  >(() => new Set())
+  const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({})
+  const refreshingRef = useRef(false)
 
   const providerUpdateCandidates = useMemo(
     () => collectProviderUpdateCandidates(serverProviders),
     [serverProviders],
-  );
+  )
   const providerUpdateCandidateByInstanceId = useMemo(
     () => new Map(providerUpdateCandidates.map((candidate) => [candidate.instanceId, candidate])),
     [providerUpdateCandidates],
-  );
+  )
   const visibleProviderSettings = PROVIDER_SETTINGS.filter(
     (providerSettings) =>
-      providerSettings.provider !== "cursor" ||
+      providerSettings.provider !== 'cursor' ||
       serverProviders.some(
         (provider) =>
-          provider.instanceId === defaultInstanceIdForDriver(ProviderDriverKind.make("cursor")),
+          provider.instanceId === defaultInstanceIdForDriver(ProviderDriverKind.make('cursor')),
       ),
-  );
-  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders);
-  const textGenInstanceId = textGenerationModelSelection.instanceId;
+  )
+  const textGenerationModelSelection = resolveAppModelSelectionState(settings, serverProviders)
+  const textGenInstanceId = textGenerationModelSelection.instanceId
   const lastCheckedAt =
     serverProviders.length > 0
       ? serverProviders.reduce(
           (latest, provider) => (provider.checkedAt > latest ? provider.checkedAt : latest),
           serverProviders[0]!.checkedAt,
         )
-      : null;
+      : null
 
-  const refreshProviders = useCallback(() => {
-    if (refreshingRef.current) return;
-    refreshingRef.current = true;
-    setIsRefreshingProviders(true);
-    if (!primaryEnvironment) {
-      refreshingRef.current = false;
-      setIsRefreshingProviders(false);
-      return;
+  const refreshProviders = useCallback(() =>
+  {
+    if (refreshingRef.current) return
+    refreshingRef.current = true
+    setIsRefreshingProviders(true)
+    if (!primaryEnvironment)
+    {
+      refreshingRef.current = false
+      setIsRefreshingProviders(false)
+      return
     }
-    void (async () => {
+    void (async () =>
+    {
       const result = await refreshServerProviders({
         environmentId: primaryEnvironment.environmentId,
         input: {},
-      });
-      refreshingRef.current = false;
-      setIsRefreshingProviders(false);
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        console.warn("Failed to refresh providers", {
-          operation: "refresh-providers",
+      })
+      refreshingRef.current = false
+      setIsRefreshingProviders(false)
+      if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+      {
+        console.warn('Failed to refresh providers', {
+          operation: 'refresh-providers',
           environmentId: primaryEnvironment.environmentId,
           ...safeErrorLogAttributes(squashAtomCommandFailure(result)),
-        });
+        })
       }
-    })();
-  }, [primaryEnvironment, refreshServerProviders]);
+    })()
+  }, [primaryEnvironment, refreshServerProviders])
 
   const runProviderUpdate = useCallback(
-    async (candidate: ProviderUpdateCandidate) => {
-      if (!primaryEnvironment) return;
-      let started = false;
-      setUpdatingProviderDrivers((previous) => {
-        if (previous.has(candidate.driver)) {
-          return previous;
+    async (candidate: ProviderUpdateCandidate) =>
+    {
+      if (!primaryEnvironment) return
+      let started = false
+      setUpdatingProviderDrivers((previous) =>
+      {
+        if (previous.has(candidate.driver))
+        {
+          return previous
         }
-        started = true;
-        const next = new Set(previous);
-        next.add(candidate.driver);
-        return next;
-      });
-      if (!started) {
-        return;
+        started = true
+        const next = new Set(previous)
+        next.add(candidate.driver)
+        return next
+      })
+      if (!started)
+      {
+        return
       }
 
       const result = await updateProvider({
@@ -1254,104 +1300,113 @@ export function ProviderSettingsPanel() {
           provider: candidate.driver,
           instanceId: candidate.instanceId,
         },
-      });
-      if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
-        const error = squashAtomCommandFailure(result);
+      })
+      if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+      {
+        const error = squashAtomCommandFailure(result)
         toastManager.add(
           stackedThreadToast({
-            type: "error",
+            type: 'error',
             title: `Could not update ${PROVIDER_DISPLAY_NAMES[candidate.driver] ?? candidate.driver}`,
             description:
               error instanceof Error
                 ? error.message
-                : "The provider update command could not be started.",
+                : 'The provider update command could not be started.',
           }),
-        );
+        )
       }
-      setUpdatingProviderDrivers((previous) => {
-        if (!previous.has(candidate.driver)) {
-          return previous;
+      setUpdatingProviderDrivers((previous) =>
+      {
+        if (!previous.has(candidate.driver))
+        {
+          return previous
         }
-        const next = new Set(previous);
-        next.delete(candidate.driver);
-        return next;
-      });
+        const next = new Set(previous)
+        next.delete(candidate.driver)
+        return next
+      })
     },
     [primaryEnvironment, updateProvider],
-  );
+  )
 
-  interface InstanceRow {
-    readonly instanceId: ProviderInstanceId;
-    readonly instance: ProviderInstanceConfig;
-    readonly driver: ProviderDriverKind;
-    readonly isDefault: boolean;
-    readonly isDirty?: boolean;
+  interface InstanceRow
+  {
+    readonly instanceId: ProviderInstanceId
+    readonly instance: ProviderInstanceConfig
+    readonly driver: ProviderDriverKind
+    readonly isDefault: boolean
+    readonly isDirty?: boolean
   }
 
   const instancesByDriver = new Map<
     ProviderDriverKind,
     Array<[ProviderInstanceId, ProviderInstanceConfig]>
-  >();
-  for (const [rawId, instance] of Object.entries(settings.providerInstances ?? {})) {
-    const driver = instance.driver;
-    const list = instancesByDriver.get(driver) ?? [];
-    list.push([rawId as ProviderInstanceId, instance]);
-    instancesByDriver.set(driver, list);
+  >()
+  for (const [rawId, instance] of Object.entries(settings.providerInstances ?? {}))
+  {
+    const driver = instance.driver
+    const list = instancesByDriver.get(driver) ?? []
+    list.push([rawId as ProviderInstanceId, instance])
+    instancesByDriver.set(driver, list)
   }
 
   const defaultSlotIdsBySource = new Set<string>(
     visibleProviderSettings.map((providerSettings) =>
       String(defaultInstanceIdForDriver(providerSettings.provider)),
     ),
-  );
+  )
 
-  const rows: InstanceRow[] = [];
+  const rows: InstanceRow[] = []
   const visibleDriverKinds = new Set<ProviderDriverKind>(
     visibleProviderSettings.map((providerSettings) => providerSettings.provider),
-  );
+  )
 
-  for (const providerSettings of visibleProviderSettings) {
-    type LegacyProviderSettings = (typeof settings.providers)[keyof typeof settings.providers];
-    const legacyProviders = settings.providers as Record<string, LegacyProviderSettings>;
+  for (const providerSettings of visibleProviderSettings)
+  {
+    type LegacyProviderSettings = (typeof settings.providers)[keyof typeof settings.providers]
+    const legacyProviders = settings.providers as Record<string, LegacyProviderSettings>
     const defaultLegacyProviders = DEFAULT_UNIFIED_SETTINGS.providers as Record<
       string,
       LegacyProviderSettings
-    >;
-    const driver = providerSettings.provider;
-    const defaultInstanceId = defaultInstanceIdForDriver(driver);
-    const explicitInstance = settings.providerInstances?.[defaultInstanceId];
-    const legacyConfig = legacyProviders[providerSettings.provider]!;
-    const defaultLegacyConfig = defaultLegacyProviders[providerSettings.provider]!;
+    >
+    const driver = providerSettings.provider
+    const defaultInstanceId = defaultInstanceIdForDriver(driver)
+    const explicitInstance = settings.providerInstances?.[defaultInstanceId]
+    const legacyConfig = legacyProviders[providerSettings.provider]!
+    const defaultLegacyConfig = defaultLegacyProviders[providerSettings.provider]!
     const effectiveInstance: ProviderInstanceConfig =
       explicitInstance ??
       ({
         driver,
         enabled: legacyConfig.enabled,
         config: legacyConfig,
-      } satisfies ProviderInstanceConfig);
+      } satisfies ProviderInstanceConfig)
     const isDirty =
-      explicitInstance !== undefined || !Equal.equals(legacyConfig, defaultLegacyConfig);
+      explicitInstance !== undefined || !Equal.equals(legacyConfig, defaultLegacyConfig)
     rows.push({
       instanceId: defaultInstanceId,
       instance: effectiveInstance,
       driver,
       isDefault: true,
       isDirty,
-    });
-    for (const [id, instance] of instancesByDriver.get(providerSettings.provider) ?? []) {
-      if (id === defaultInstanceId) continue;
-      rows.push({ instanceId: id, instance, driver: instance.driver, isDefault: false });
+    })
+    for (const [id, instance] of instancesByDriver.get(providerSettings.provider) ?? [])
+    {
+      if (id === defaultInstanceId) continue
+      rows.push({ instanceId: id, instance, driver: instance.driver, isDefault: false })
     }
   }
-  for (const [driver, list] of instancesByDriver) {
-    if (visibleDriverKinds.has(driver)) continue;
-    for (const [id, instance] of list) {
+  for (const [driver, list] of instancesByDriver)
+  {
+    if (visibleDriverKinds.has(driver)) continue
+    for (const [id, instance] of list)
+    {
       rows.push({
         instanceId: id,
         instance,
         driver: instance.driver,
         isDefault: defaultSlotIdsBySource.has(String(id)),
-      });
+      })
     }
   }
 
@@ -1361,9 +1416,10 @@ export function ProviderSettingsPanel() {
     options?: {
       readonly textGenerationModelSelection?: Parameters<
         typeof buildProviderInstanceUpdatePatch
-      >[0]["textGenerationModelSelection"];
+      >[0]['textGenerationModelSelection']
     },
-  ) => {
+  ) =>
+  {
     updateSettings(
       buildProviderInstanceUpdatePatch({
         settings,
@@ -1373,27 +1429,29 @@ export function ProviderSettingsPanel() {
         isDefault: row.isDefault,
         textGenerationModelSelection: options?.textGenerationModelSelection,
       }),
-    );
-  };
+    )
+  }
 
-  const deleteProviderInstance = (id: ProviderInstanceId) => {
+  const deleteProviderInstance = (id: ProviderInstanceId) =>
+  {
     updateSettings({
       providerInstances: withoutProviderInstanceKey(settings.providerInstances, id),
       providerModelPreferences: withoutProviderInstanceKey(settings.providerModelPreferences, id),
       favorites: withoutProviderInstanceFavorites(settings.favorites ?? [], id),
-    });
-  };
+    })
+  }
 
   const updateProviderModelPreferences = (
     instanceId: ProviderInstanceId,
     next: {
-      readonly hiddenModels: ReadonlyArray<string>;
-      readonly modelOrder: ReadonlyArray<string>;
+      readonly hiddenModels: ReadonlyArray<string>
+      readonly modelOrder: ReadonlyArray<string>
     },
-  ) => {
-    const hiddenModels = [...new Set(next.hiddenModels.filter((slug) => slug.trim().length > 0))];
-    const modelOrder = [...new Set(next.modelOrder.filter((slug) => slug.trim().length > 0))];
-    const rest = withoutProviderInstanceKey(settings.providerModelPreferences, instanceId);
+  ) =>
+  {
+    const hiddenModels = [...new Set(next.hiddenModels.filter((slug) => slug.trim().length > 0))]
+    const modelOrder = [...new Set(next.modelOrder.filter((slug) => slug.trim().length > 0))]
+    const rest = withoutProviderInstanceKey(settings.providerModelPreferences, instanceId)
     updateSettings({
       providerModelPreferences:
         hiddenModels.length === 0 && modelOrder.length === 0
@@ -1405,38 +1463,41 @@ export function ProviderSettingsPanel() {
                 modelOrder,
               },
             },
-    });
-  };
+    })
+  }
 
   const updateProviderFavoriteModels = (
     instanceId: ProviderInstanceId,
     nextFavoriteModels: ReadonlyArray<string>,
-  ) => {
+  ) =>
+  {
     const favoriteModels = [
       ...new Set(
-        Arr.filterMap(nextFavoriteModels, (slug) => {
-          const trimmedSlug = slug.trim();
-          return trimmedSlug.length > 0 ? Result.succeed(trimmedSlug) : Result.failVoid;
+        Arr.filterMap(nextFavoriteModels, (slug) =>
+        {
+          const trimmedSlug = slug.trim()
+          return trimmedSlug.length > 0 ? Result.succeed(trimmedSlug) : Result.failVoid
         }),
       ),
-    ];
+    ]
     updateSettings({
       favorites: [
         ...withoutProviderInstanceFavorites(settings.favorites ?? [], instanceId),
         ...favoriteModels.map((model) => ({ provider: instanceId, model })),
       ],
-    });
-  };
+    })
+  }
 
-  const resetDefaultInstance = (driverKind: ProviderDriverKind) => {
-    type LegacyProviderSettings = (typeof settings.providers)[keyof typeof settings.providers];
+  const resetDefaultInstance = (driverKind: ProviderDriverKind) =>
+  {
+    type LegacyProviderSettings = (typeof settings.providers)[keyof typeof settings.providers]
     const defaultLegacyProviders = DEFAULT_UNIFIED_SETTINGS.providers as Record<
       string,
       LegacyProviderSettings | undefined
-    >;
-    const defaultInstanceId = defaultInstanceIdForDriver(driverKind);
-    const defaultLegacyProvider = defaultLegacyProviders[driverKind];
-    if (defaultLegacyProvider === undefined) return;
+    >
+    const defaultInstanceId = defaultInstanceIdForDriver(driverKind)
+    const defaultLegacyProvider = defaultLegacyProviders[driverKind]
+    if (defaultLegacyProvider === undefined) return
     updateSettings({
       providers: {
         ...settings.providers,
@@ -1448,8 +1509,8 @@ export function ProviderSettingsPanel() {
         defaultInstanceId,
       ),
       favorites: withoutProviderInstanceFavorites(settings.favorites ?? [], defaultInstanceId),
-    });
-  };
+    })
+  }
 
   return (
     <SettingsPageContainer>
@@ -1498,43 +1559,44 @@ export function ProviderSettingsPanel() {
           </div>
         }
       >
-        {rows.map((row) => {
-          const driverOption = getDriverOption(row.driver);
+        {rows.map((row) =>
+        {
+          const driverOption = getDriverOption(row.driver)
           const liveProvider = serverProviders.find(
             (candidate) => candidate.instanceId === row.instanceId,
-          );
+          )
           const updateCandidate = liveProvider
             ? providerUpdateCandidateByInstanceId.get(liveProvider.instanceId)
-            : undefined;
+            : undefined
           const isDriverUpdateRunning =
             updateCandidate !== undefined &&
             (updatingProviderDrivers.has(updateCandidate.driver) ||
               serverProviders.some(
                 (provider) =>
                   provider.driver === updateCandidate.driver && isProviderUpdateActive(provider),
-              ));
+              ))
           const showInlineUpdateButton =
             updateCandidate !== undefined &&
-            hasOneClickUpdateProviderCandidate(updateCandidate, serverProviders);
+            hasOneClickUpdateProviderCandidate(updateCandidate, serverProviders)
           const canRunInlineUpdate =
             updateCandidate !== undefined &&
             canOneClickUpdateProviderCandidate(updateCandidate, serverProviders) &&
-            !updatingProviderDrivers.has(updateCandidate.driver);
+            !updatingProviderDrivers.has(updateCandidate.driver)
           const modelPreferences = settings.providerModelPreferences?.[row.instanceId] ?? {
             hiddenModels: [],
             modelOrder: [],
-          };
+          }
           const favoriteModels = Arr.filterMap(settings.favorites ?? [], (favorite) =>
             favorite.provider === row.instanceId ? Result.succeed(favorite.model) : Result.failVoid,
-          );
-          const resetLabel = driverOption?.label ?? String(row.driver);
+          )
+          const resetLabel = driverOption?.label ?? String(row.driver)
           const headerAction =
             row.isDefault && row.isDirty ? (
               <SettingResetButton
                 label={`${resetLabel} provider settings`}
                 onClick={() => resetDefaultInstance(row.driver)}
               />
-            ) : null;
+            ) : null
           return (
             <ProviderInstanceCard
               key={row.instanceId}
@@ -1549,17 +1611,21 @@ export function ProviderSettingsPanel() {
                   [row.instanceId]: open,
                 }))
               }
-              onUpdate={(next) => {
-                const wasEnabled = row.instance.enabled ?? true;
-                const isDisabling = next.enabled === false && wasEnabled;
-                const shouldClearTextGen = isDisabling && textGenInstanceId === row.instanceId;
-                if (shouldClearTextGen) {
+              onUpdate={(next) =>
+              {
+                const wasEnabled = row.instance.enabled ?? true
+                const isDisabling = next.enabled === false && wasEnabled
+                const shouldClearTextGen = isDisabling && textGenInstanceId === row.instanceId
+                if (shouldClearTextGen)
+                {
                   updateProviderInstance(row, next, {
                     textGenerationModelSelection:
                       DEFAULT_UNIFIED_SETTINGS.textGenerationModelSelection,
-                  });
-                } else {
-                  updateProviderInstance(row, next);
+                  })
+                }
+                else
+                {
+                  updateProviderInstance(row, next)
                 }
               }}
               onDelete={row.isDefault ? undefined : () => deleteProviderInstance(row.instanceId)}
@@ -1584,17 +1650,19 @@ export function ProviderSettingsPanel() {
               }
               onRunUpdate={
                 showInlineUpdateButton && updateCandidate
-                  ? () => {
-                      if (!canRunInlineUpdate) {
-                        return;
+                  ? () =>
+                    {
+                      if (!canRunInlineUpdate)
+                        {
+                        return
                       }
-                      void runProviderUpdate(updateCandidate);
+                      void runProviderUpdate(updateCandidate)
                     }
                   : undefined
               }
               isUpdating={showInlineUpdateButton ? isDriverUpdateRunning : undefined}
             />
-          );
+          )
         })}
       </SettingsSection>
 
@@ -1602,24 +1670,26 @@ export function ProviderSettingsPanel() {
         <AddProviderInstanceDialog open onOpenChange={setIsAddInstanceDialogOpen} />
       ) : null}
     </SettingsPageContainer>
-  );
+  )
 }
 
-export function ArchivedThreadsPanel() {
-  const projects = useProjects();
-  const { unarchiveThread, confirmAndDeleteThread } = useThreadActions();
+export function ArchivedThreadsPanel()
+{
+  const projects = useProjects()
+  const { unarchiveThread, confirmAndDeleteThread } = useThreadActions()
   const environmentIds = useMemo(
     () => [...new Set(projects.map((project) => project.environmentId))],
     [projects],
-  );
+  )
   const {
     snapshots: archivedSnapshots,
     error: archiveError,
     isLoading: isLoadingArchive,
     refresh: refreshArchivedThreads,
-  } = useArchivedThreadSnapshots(environmentIds);
+  } = useArchivedThreadSnapshots(environmentIds)
 
-  const archivedGroups = useMemo(() => {
+  const archivedGroups = useMemo(() =>
+  {
     const projectsByEnvironmentAndId = new Map(
       archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
         snapshot.projects.map(
@@ -1635,87 +1705,101 @@ export function ArchivedThreadsPanel() {
             ] as const,
         ),
       ),
-    );
+    )
     const threads = archivedSnapshots.flatMap(({ environmentId, snapshot }) =>
       snapshot.threads.map((thread) => ({
         ...thread,
         environmentId,
       })),
-    );
+    )
 
-    const archivedProjects = Array.from(projectsByEnvironmentAndId.values());
+    const archivedProjects = Array.from(projectsByEnvironmentAndId.values())
     const groups: Array<{
-      readonly project: (typeof archivedProjects)[number];
-      readonly threads: Array<(typeof threads)[number]>;
-    }> = [];
-    for (const project of archivedProjects) {
-      const projectThreads: Array<(typeof threads)[number]> = [];
-      for (const thread of threads) {
-        if (thread.projectId === project.id && thread.environmentId === project.environmentId) {
-          projectThreads.push(thread);
+      readonly project: (typeof archivedProjects)[number]
+      readonly threads: Array<(typeof threads)[number]>
+    }> = []
+    for (const project of archivedProjects)
+    {
+      const projectThreads: Array<(typeof threads)[number]> = []
+      for (const thread of threads)
+      {
+        if (thread.projectId === project.id && thread.environmentId === project.environmentId)
+        {
+          projectThreads.push(thread)
         }
       }
-      if (projectThreads.length > 0) {
+      if (projectThreads.length > 0)
+      {
         groups.push({
           project,
-          threads: projectThreads.toSorted((left, right) => {
-            const leftKey = left.archivedAt ?? left.createdAt;
-            const rightKey = right.archivedAt ?? right.createdAt;
-            return rightKey.localeCompare(leftKey) || right.id.localeCompare(left.id);
+          threads: projectThreads.toSorted((left, right) =>
+          {
+            const leftKey = left.archivedAt ?? left.createdAt
+            const rightKey = right.archivedAt ?? right.createdAt
+            return rightKey.localeCompare(leftKey) || right.id.localeCompare(left.id)
           }),
-        });
+        })
       }
     }
-    return groups;
-  }, [archivedSnapshots]);
+    return groups
+  }, [archivedSnapshots])
 
   const handleArchivedThreadContextMenu = useCallback(
-    async (threadRef: ScopedThreadRef, position: { x: number; y: number }) => {
-      const api = readLocalApi();
-      if (!api) return;
+    async (threadRef: ScopedThreadRef, position: { x: number; y: number }) =>
+    {
+      const api = readLocalApi()
+      if (!api) return
       const clicked = await api.contextMenu.show(
         [
-          { id: "unarchive", label: "Unarchive" },
-          { id: "delete", label: "Delete", destructive: true },
+          { id: 'unarchive', label: 'Unarchive' },
+          { id: 'delete', label: 'Delete', destructive: true },
         ],
         position,
-      );
+      )
 
-      if (clicked === "unarchive") {
-        const result = await unarchiveThread(threadRef);
-        if (result._tag === "Success") {
-          refreshArchivedThreads();
-        } else if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
+      if (clicked === 'unarchive')
+      {
+        const result = await unarchiveThread(threadRef)
+        if (result._tag === 'Success')
+        {
+          refreshArchivedThreads()
+        }
+        else if (!isAtomCommandInterrupted(result))
+        {
+          const error = squashAtomCommandFailure(result)
           toastManager.add(
             stackedThreadToast({
-              type: "error",
-              title: "Failed to unarchive thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              type: 'error',
+              title: 'Failed to unarchive thread',
+              description: error instanceof Error ? error.message : 'An error occurred.',
             }),
-          );
+          )
         }
-        return;
+        return
       }
 
-      if (clicked === "delete") {
-        const result = await confirmAndDeleteThread(threadRef);
-        if (result._tag === "Success") {
-          refreshArchivedThreads();
-        } else if (!isAtomCommandInterrupted(result)) {
-          const error = squashAtomCommandFailure(result);
+      if (clicked === 'delete')
+      {
+        const result = await confirmAndDeleteThread(threadRef)
+        if (result._tag === 'Success')
+        {
+          refreshArchivedThreads()
+        }
+        else if (!isAtomCommandInterrupted(result))
+        {
+          const error = squashAtomCommandFailure(result)
           toastManager.add(
             stackedThreadToast({
-              type: "error",
-              title: "Failed to delete thread",
-              description: error instanceof Error ? error.message : "An error occurred.",
+              type: 'error',
+              title: 'Failed to delete thread',
+              description: error instanceof Error ? error.message : 'An error occurred.',
             }),
-          );
+          )
         }
       }
     },
     [confirmAndDeleteThread, refreshArchivedThreads, unarchiveThread],
-  );
+  )
 
   return (
     <SettingsPageContainer>
@@ -1730,16 +1814,16 @@ export function ArchivedThreadsPanel() {
                   <ArchiveIcon className="size-3.5 text-muted-foreground" />
                 )}
                 {isLoadingArchive
-                  ? "Loading archived threads"
+                  ? 'Loading archived threads'
                   : archiveError
-                    ? "Could not load archived threads"
-                    : "No archived threads"}
+                    ? 'Could not load archived threads'
+                    : 'No archived threads'}
               </span>
             }
             description={
               isLoadingArchive
-                ? "Checking connected environments."
-                : (archiveError ?? "Archived threads will appear here.")
+                ? 'Checking connected environments.'
+                : (archiveError ?? 'Archived threads will appear here.')
             }
           />
         </SettingsSection>
@@ -1753,9 +1837,11 @@ export function ArchivedThreadsPanel() {
             {projectThreads.map((thread) => (
               <SettingsRow
                 key={thread.id}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  void (async () => {
+                onContextMenu={(event) =>
+                  {
+                  event.preventDefault()
+                  void (async () =>
+                    {
                     const result = await settlePromise(() =>
                       handleArchivedThreadContextMenu(
                         scopeThreadRef(thread.environmentId, thread.id),
@@ -1764,25 +1850,26 @@ export function ArchivedThreadsPanel() {
                           y: event.clientY,
                         },
                       ),
-                    );
-                    if (result._tag === "Failure") {
-                      const error = squashAtomCommandFailure(result);
+                    )
+                    if (result._tag === 'Failure')
+                      {
+                      const error = squashAtomCommandFailure(result)
                       toastManager.add(
                         stackedThreadToast({
-                          type: "error",
-                          title: "Archived thread action failed",
+                          type: 'error',
+                          title: 'Archived thread action failed',
                           description:
-                            error instanceof Error ? error.message : "An error occurred.",
+                            error instanceof Error ? error.message : 'An error occurred.',
                         }),
-                      );
+                      )
                     }
-                  })();
+                  })()
                 }}
                 title={thread.title}
                 description={
                   <>
                     Archived {formatRelativeTimeLabel(thread.archivedAt ?? thread.createdAt)}
-                    {" \u00b7 Created "}
+                    {' \u00b7 Created '}
                     {formatRelativeTimeLabel(thread.createdAt)}
                   </>
                 }
@@ -1792,27 +1879,31 @@ export function ArchivedThreadsPanel() {
                     variant="outline"
                     size="sm"
                     className="h-7 shrink-0 cursor-pointer gap-1.5 px-2.5"
-                    onClick={() => {
-                      void (async () => {
+                    onClick={() =>
+                      {
+                      void (async () =>
+                        {
                         const result = await unarchiveThread(
                           scopeThreadRef(thread.environmentId, thread.id),
-                        );
-                        if (result._tag === "Success") {
-                          refreshArchivedThreads();
-                          return;
+                        )
+                        if (result._tag === 'Success')
+                          {
+                          refreshArchivedThreads()
+                          return
                         }
-                        if (!isAtomCommandInterrupted(result)) {
-                          const error = squashAtomCommandFailure(result);
+                        if (!isAtomCommandInterrupted(result))
+                          {
+                          const error = squashAtomCommandFailure(result)
                           toastManager.add(
                             stackedThreadToast({
-                              type: "error",
-                              title: "Failed to unarchive thread",
+                              type: 'error',
+                              title: 'Failed to unarchive thread',
                               description:
-                                error instanceof Error ? error.message : "An error occurred.",
+                                error instanceof Error ? error.message : 'An error occurred.',
                             }),
-                          );
+                          )
                         }
-                      })();
+                      })()
                     }}
                   >
                     <ArchiveX className="size-3.5" />
@@ -1825,5 +1916,5 @@ export function ArchivedThreadsPanel() {
         ))
       )}
     </SettingsPageContainer>
-  );
+  )
 }

@@ -1,12 +1,16 @@
-import { assert, describe } from "@effect/vitest";
+// tests/oxlint-plugin-456code/rules/no-inline-schema-compile.test.ts
+// verify 456code/no inline schema compile behavior
 
-import { createOxlintRuleHarness } from "../../../oxlint-plugin-456code/test/utils.ts";
+import { assert, describe } from '@effect/vitest'
 
-const rule = createOxlintRuleHarness("456code/no-inline-schema-compile");
+import { createOxlintRuleHarness } from '../../../oxlint-plugin-456code/test/utils.ts'
 
-describe("456code/no-inline-schema-compile", () => {
+const rule = createOxlintRuleHarness('456code/no-inline-schema-compile')
+
+describe('456code/no-inline-schema-compile', () =>
+{
   rule.valid(
-    "allows schema compilers hoisted to module scope",
+    'allows schema compilers hoisted to module scope',
     `
       import { Schema } from "effect";
 
@@ -15,10 +19,10 @@ describe("456code/no-inline-schema-compile", () => {
 
       export const parseUser = (input: unknown) => decodeUser(input);
     `,
-  );
+  )
 
   rule.valid(
-    "allows factory helpers that return a precompiled decoder",
+    'allows factory helpers that return a precompiled decoder',
     `
       import { Schema } from "effect";
 
@@ -27,10 +31,10 @@ describe("456code/no-inline-schema-compile", () => {
         return (input: unknown) => decode(input);
       };
     `,
-  );
+  )
 
   rule.valid(
-    "allows schema construction helpers that use encode transformations",
+    'allows schema construction helpers that use encode transformations',
     `
       import { Schema } from "effect";
 
@@ -42,20 +46,20 @@ describe("456code/no-inline-schema-compile", () => {
           }),
         );
     `,
-  );
+  )
 
   rule.valid(
-    "allows dynamic schema parameters that cannot be hoisted to module scope",
+    'allows dynamic schema parameters that cannot be hoisted to module scope',
     `
       import { Schema } from "effect";
 
       export const parseWith = <A, I>(schema: Schema.Codec<A, I>, input: unknown) =>
         Schema.decodeUnknownEffect(schema)(input);
     `,
-  );
+  )
 
   rule.invalid(
-    "reports schema compilers inside function bodies",
+    'reports schema compilers inside function bodies',
     `
       import { Schema } from "effect";
 
@@ -63,21 +67,23 @@ describe("456code/no-inline-schema-compile", () => {
 
       export const parseUser = (input: unknown) => Schema.decodeUnknownEffect(User)(input);
     `,
-    (output) => {
-      assert.match(output, /Hoist Schema\.decodeUnknownEffect/);
+    (output) =>
+    {
+      assert.match(output, /Hoist Schema\.decodeUnknownEffect/)
     },
-  );
+  )
 
   rule.invalid(
-    "reports inline schema literals as high confidence findings",
+    'reports inline schema literals as high confidence findings',
     `
       import { Schema } from "effect";
 
       export const parseUser = (input: unknown) =>
         Schema.decodeUnknownEffect(Schema.Struct({ name: Schema.String }))(input);
     `,
-    (output) => {
-      assert.match(output, /inline schema literal and the compiled function/);
+    (output) =>
+    {
+      assert.match(output, /inline schema literal and the compiled function/)
     },
-  );
-});
+  )
+})

@@ -1,16 +1,21 @@
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+// apps/server/src/persistence/Migrations/032_AuthPairingProofKeyThumbprint.ts
+// apply persistence migration 032 auth pairing proof key thumbprint
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   const pairingLinkColumns = yield* sql<{ readonly name: string }>`
     PRAGMA table_info(auth_pairing_links)
-  `;
-  if (!pairingLinkColumns.some((column) => column.name === "proof_key_thumbprint")) {
+  `
+  if (!pairingLinkColumns.some((column) => column.name === 'proof_key_thumbprint'))
+  {
     yield* sql`
       ALTER TABLE auth_pairing_links
       ADD COLUMN proof_key_thumbprint TEXT
-    `;
+    `
   }
-});
+})

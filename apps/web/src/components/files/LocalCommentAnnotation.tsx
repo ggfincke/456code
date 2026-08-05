@@ -1,16 +1,20 @@
-import { MessageCircle, Trash2 } from "lucide-react";
-import { useState } from "react";
+// apps/web/src/components/files/LocalCommentAnnotation.tsx
+// render local comment annotation
 
-import { Button } from "~/components/ui/button";
-import { Textarea } from "~/components/ui/textarea";
+import { MessageCircle, Trash2 } from 'lucide-react'
+import { useState } from 'react'
 
-interface LocalCommentAnnotationProps {
-  kind: "draft" | "comment";
-  rangeLabel: string;
-  text: string;
-  onCancel: () => void;
-  onComment: (text: string) => void;
-  onDelete: () => void;
+import { Button } from '~/components/ui/button'
+import { Textarea } from '~/components/ui/textarea'
+
+interface LocalCommentAnnotationProps
+{
+  kind: 'draft' | 'comment'
+  rangeLabel: string
+  text: string
+  onCancel: () => void
+  onComment: (text: string) => void
+  onDelete: () => void
 }
 
 export function LocalCommentAnnotation({
@@ -20,10 +24,12 @@ export function LocalCommentAnnotation({
   onCancel,
   onComment,
   onDelete,
-}: LocalCommentAnnotationProps) {
-  const [text, setText] = useState("");
+}: LocalCommentAnnotationProps)
+{
+  const [text, setText] = useState('')
 
-  if (kind === "comment") {
+  if (kind === 'comment')
+  {
     return (
       <div
         data-file-comment-annotation
@@ -43,7 +49,7 @@ export function LocalCommentAnnotation({
           {savedText}
         </p>
       </div>
-    );
+    )
   }
 
   return (
@@ -66,14 +72,17 @@ export function LocalCommentAnnotation({
         placeholder="Request change"
         aria-label={`Comment on lines ${rangeLabel}`}
         onChange={(event) => setText(event.target.value)}
-        onKeyDown={(event) => {
-          if (event.key === "Escape") {
-            event.preventDefault();
-            onCancel();
+        onKeyDown={(event) =>
+        {
+          if (event.key === 'Escape')
+          {
+            event.preventDefault()
+            onCancel()
           }
-          if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && text.trim()) {
-            event.preventDefault();
-            onComment(text.trim());
+          if ((event.metaKey || event.ctrlKey) && event.key === 'Enter' && text.trim())
+          {
+            event.preventDefault()
+            onComment(text.trim())
           }
         }}
       />
@@ -86,5 +95,5 @@ export function LocalCommentAnnotation({
         </Button>
       </div>
     </div>
-  );
+  )
 }

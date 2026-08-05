@@ -1,5 +1,9 @@
-import { AddProjectSourceScreen } from "./AddProjectScreen";
+// apps/mobile/src/features/projects/AddProjectSourceRoute.tsx
+// render the add project source route route
 
-export function AddProjectSourceRoute() {
-  return <AddProjectSourceScreen />;
+import { AddProjectSourceScreen } from './AddProjectScreen'
+
+export function AddProjectSourceRoute()
+{
+  return <AddProjectSourceScreen />
 }

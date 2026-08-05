@@ -1,69 +1,80 @@
-import type { EnvironmentId, OrchestrationThread, ThreadId } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import { useEffect, useMemo, useState } from "react";
+// apps/mobile/src/state/queries.ts
+// manage thread detail view state
 
-import { orchestrationEnvironment } from "./orchestration";
-import { projectEnvironment } from "./projects";
-import { useEnvironmentQuery } from "./query";
-import { useEnvironmentThread } from "./threads";
-import { vcsEnvironment } from "./vcs";
+import type { EnvironmentId, OrchestrationThread, ThreadId } from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import { useEffect, useMemo, useState } from 'react'
+
+import { orchestrationEnvironment } from './orchestration'
+import { projectEnvironment } from './projects'
+import { useEnvironmentQuery } from './query'
+import { useEnvironmentThread } from './threads'
+import { vcsEnvironment } from './vcs'
 import {
   buildCheckpointDiffTargets,
   normalizeComposerPathSearchQuery,
   type CheckpointDiffTarget,
-} from "./queryTargets";
+} from './queryTargets'
 
-const COMPOSER_PATH_SEARCH_DEBOUNCE_MS = 200;
-const COMPOSER_PATH_SEARCH_LIMIT = 20;
-const VCS_REF_LIST_LIMIT = 100;
+const COMPOSER_PATH_SEARCH_DEBOUNCE_MS = 200
+const COMPOSER_PATH_SEARCH_LIMIT = 20
+const VCS_REF_LIST_LIMIT = 100
 
-export interface ThreadDetailView {
-  readonly data: OrchestrationThread | null;
-  readonly error: string | null;
-  readonly isPending: boolean;
-  readonly isDeleted: boolean;
+export interface ThreadDetailView
+{
+  readonly data: OrchestrationThread | null
+  readonly error: string | null
+  readonly isPending: boolean
+  readonly isDeleted: boolean
 }
 
-export interface ComposerPathSearchTarget {
-  readonly environmentId: EnvironmentId | null;
-  readonly cwd: string | null;
-  readonly query: string | null;
+export interface ComposerPathSearchTarget
+{
+  readonly environmentId: EnvironmentId | null
+  readonly cwd: string | null
+  readonly query: string | null
 }
 
-function useDebouncedValue<A>(value: A, delayMs: number): A {
-  const [debounced, setDebounced] = useState(value);
+function useDebouncedValue<A>(value: A, delayMs: number): A
+{
+  const [debounced, setDebounced] = useState(value)
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setDebounced(value);
-    }, delayMs);
-    return () => {
-      clearTimeout(timer);
-    };
-  }, [delayMs, value]);
+  useEffect(() =>
+  {
+    const timer = setTimeout(() =>
+    {
+      setDebounced(value)
+    }, delayMs)
+    return () =>
+    {
+      clearTimeout(timer)
+    }
+  }, [delayMs, value])
 
-  return debounced;
+  return debounced
 }
 
 export function useThreadDetail(
   environmentId: EnvironmentId | null,
   threadId: ThreadId | null,
-): ThreadDetailView {
-  const state = useEnvironmentThread(environmentId, threadId);
+): ThreadDetailView
+{
+  const state = useEnvironmentThread(environmentId, threadId)
   return {
     data: Option.getOrNull(state.data),
     error: Option.getOrNull(state.error),
-    isPending: state.status === "synchronizing",
-    isDeleted: state.status === "deleted",
-  };
+    isPending: state.status === 'synchronizing',
+    isDeleted: state.status === 'deleted',
+  }
 }
 
 export function useBranches(input: {
-  readonly environmentId: EnvironmentId | null;
-  readonly cwd: string | null;
-  readonly query?: string | null;
-}) {
-  const query = input.query?.trim() ?? "";
+  readonly environmentId: EnvironmentId | null
+  readonly cwd: string | null
+  readonly query?: string | null
+})
+{
+  const query = input.query?.trim() ?? ''
   return useEnvironmentQuery(
     input.environmentId !== null && input.cwd !== null
       ? vcsEnvironment.listRefs({
@@ -75,10 +86,11 @@ export function useBranches(input: {
           },
         })
       : null,
-  );
+  )
 }
 
-export function useComposerPathSearch(target: ComposerPathSearchTarget) {
+export function useComposerPathSearch(target: ComposerPathSearchTarget)
+{
   const normalizedTarget = useMemo(
     () => ({
       environmentId: target.environmentId,
@@ -86,8 +98,8 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
       query: normalizeComposerPathSearchQuery(target.query),
     }),
     [target.cwd, target.environmentId, target.query],
-  );
-  const debouncedTarget = useDebouncedValue(normalizedTarget, COMPOSER_PATH_SEARCH_DEBOUNCE_MS);
+  )
+  const debouncedTarget = useDebouncedValue(normalizedTarget, COMPOSER_PATH_SEARCH_DEBOUNCE_MS)
   const result = useEnvironmentQuery(
     debouncedTarget.environmentId !== null &&
       debouncedTarget.cwd !== null &&
@@ -101,17 +113,18 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget) {
           },
         })
       : null,
-  );
+  )
 
   return {
     entries: result.data?.entries ?? [],
     error: result.error,
     isPending: normalizedTarget.query !== debouncedTarget.query || result.isPending,
     refresh: result.refresh,
-  };
+  }
 }
 
-export function useCheckpointDiff(target: CheckpointDiffTarget) {
+export function useCheckpointDiff(target: CheckpointDiffTarget)
+{
   const targets = useMemo(
     () => buildCheckpointDiffTargets(target),
     [
@@ -121,14 +134,14 @@ export function useCheckpointDiff(target: CheckpointDiffTarget) {
       target.threadId,
       target.toTurnCount,
     ],
-  );
+  )
   const fullThread = useEnvironmentQuery(
     targets.fullThread === null
       ? null
       : orchestrationEnvironment.fullThreadDiff(targets.fullThread),
-  );
+  )
   const turn = useEnvironmentQuery(
     targets.turn === null ? null : orchestrationEnvironment.turnDiff(targets.turn),
-  );
-  return targets.fullThread === null ? turn : fullThread;
+  )
+  return targets.fullThread === null ? turn : fullThread
 }

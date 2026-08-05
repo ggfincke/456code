@@ -1,44 +1,52 @@
-import { cn } from "~/lib/utils";
+// apps/web/src/components/chat/ComposerPendingTerminalContexts.tsx
+// render composer pending terminal contexts
+
+import { cn } from '~/lib/utils'
 import {
   type TerminalContextDraft,
   formatTerminalContextLabel,
   isTerminalContextExpired,
-} from "~/lib/terminalContext";
-import { TerminalContextInlineChip } from "./TerminalContextInlineChip";
+} from '~/lib/terminalContext'
+import { TerminalContextInlineChip } from './TerminalContextInlineChip'
 
-interface ComposerPendingTerminalContextsProps {
-  contexts: ReadonlyArray<TerminalContextDraft>;
-  className?: string;
+interface ComposerPendingTerminalContextsProps
+{
+  contexts: ReadonlyArray<TerminalContextDraft>
+  className?: string
 }
 
-interface ComposerPendingTerminalContextChipProps {
-  context: TerminalContextDraft;
+interface ComposerPendingTerminalContextChipProps
+{
+  context: TerminalContextDraft
 }
 
 export function ComposerPendingTerminalContextChip({
   context,
-}: ComposerPendingTerminalContextChipProps) {
-  const label = formatTerminalContextLabel(context);
-  const expired = isTerminalContextExpired(context);
+}: ComposerPendingTerminalContextChipProps)
+{
+  const label = formatTerminalContextLabel(context)
+  const expired = isTerminalContextExpired(context)
   const tooltipText = expired
     ? `Terminal context expired. Remove and re-add ${label} to include it in your message.`
-    : context.text;
+    : context.text
 
-  return <TerminalContextInlineChip label={label} tooltipText={tooltipText} expired={expired} />;
+  return <TerminalContextInlineChip label={label} tooltipText={tooltipText} expired={expired} />
 }
 
-export function ComposerPendingTerminalContexts(props: ComposerPendingTerminalContextsProps) {
-  const { contexts, className } = props;
+export function ComposerPendingTerminalContexts(props: ComposerPendingTerminalContextsProps)
+{
+  const { contexts, className } = props
 
-  if (contexts.length === 0) {
-    return null;
+  if (contexts.length === 0)
+  {
+    return null
   }
 
   return (
-    <div className={cn("flex flex-wrap gap-1.5", className)}>
+    <div className={cn('flex flex-wrap gap-1.5', className)}>
       {contexts.map((context) => (
         <ComposerPendingTerminalContextChip key={context.id} context={context} />
       ))}
     </div>
-  );
+  )
 }

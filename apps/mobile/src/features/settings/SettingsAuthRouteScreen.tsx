@@ -1,30 +1,37 @@
-import { useAuth } from "@clerk/expo";
-import { AuthView, UserProfileView } from "@clerk/expo/native";
-import { StackActions, useNavigation } from "@react-navigation/native";
-import { NativeStackScreenOptions } from "../../native/StackHeader";
-import { useEffect } from "react";
-import { View } from "react-native";
+// apps/mobile/src/features/settings/SettingsAuthRouteScreen.tsx
+// render the settings auth route screen route
 
-import { hasCloudPublicConfig } from "../cloud/publicConfig";
+import { useAuth } from '@clerk/expo'
+import { AuthView, UserProfileView } from '@clerk/expo/native'
+import { StackActions, useNavigation } from '@react-navigation/native'
+import { NativeStackScreenOptions } from '../../native/StackHeader'
+import { useEffect } from 'react'
+import { View } from 'react-native'
 
-export function SettingsAuthRouteScreen() {
-  const navigation = useNavigation();
+import { hasCloudPublicConfig } from '../cloud/publicConfig'
 
-  useEffect(() => {
-    if (!hasCloudPublicConfig()) {
-      navigation.dispatch(StackActions.replace("Settings"));
+export function SettingsAuthRouteScreen()
+{
+  const navigation = useNavigation()
+
+  useEffect(() =>
+  {
+    if (!hasCloudPublicConfig())
+    {
+      navigation.dispatch(StackActions.replace('Settings'))
     }
-  }, [navigation]);
+  }, [navigation])
 
-  return hasCloudPublicConfig() ? <ConfiguredSettingsAuthRouteScreen /> : null;
+  return hasCloudPublicConfig() ? <ConfiguredSettingsAuthRouteScreen /> : null
 }
 
-function ConfiguredSettingsAuthRouteScreen() {
-  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+function ConfiguredSettingsAuthRouteScreen()
+{
+  const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false })
 
   return (
     <>
-      <NativeStackScreenOptions options={{ title: isSignedIn ? "Account" : "Sign in" }} />
+      <NativeStackScreenOptions options={{ title: isSignedIn ? 'Account' : 'Sign in' }} />
       <View collapsable={false} className="flex-1 overflow-hidden bg-sheet">
         {isLoaded ? (
           isSignedIn ? (
@@ -35,5 +42,5 @@ function ConfiguredSettingsAuthRouteScreen() {
         ) : null}
       </View>
     </>
-  );
+  )
 }

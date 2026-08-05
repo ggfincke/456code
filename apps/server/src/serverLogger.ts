@@ -1,16 +1,20 @@
-import * as Effect from "effect/Effect";
-import * as Logger from "effect/Logger";
-import * as References from "effect/References";
-import * as Layer from "effect/Layer";
+// apps/server/src/serverLogger.ts
+// expose server logger live
 
-import { ServerConfig } from "./config.ts";
+import * as Effect from 'effect/Effect'
+import * as Logger from 'effect/Logger'
+import * as References from 'effect/References'
+import * as Layer from 'effect/Layer'
 
-export const ServerLoggerLive = Effect.gen(function* () {
-  const config = yield* ServerConfig;
-  const minimumLogLevelLayer = Layer.succeed(References.MinimumLogLevel, config.logLevel);
+import { ServerConfig } from './config.ts'
+
+export const ServerLoggerLive = Effect.gen(function* ()
+{
+  const config = yield* ServerConfig
+  const minimumLogLevelLayer = Layer.succeed(References.MinimumLogLevel, config.logLevel)
   const loggerLayer = Logger.layer([Logger.consolePretty(), Logger.tracerLogger], {
     mergeWithExisting: false,
-  });
+  })
 
-  return Layer.mergeAll(loggerLayer, minimumLogLevelLayer);
-}).pipe(Layer.unwrap);
+  return Layer.mergeAll(loggerLayer, minimumLogLevelLayer)
+}).pipe(Layer.unwrap)

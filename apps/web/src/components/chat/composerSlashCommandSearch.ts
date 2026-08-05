@@ -1,18 +1,22 @@
+// apps/web/src/components/chat/composerSlashCommandSearch.ts
+// search slash command items
+
 import {
   insertRankedSearchResult,
   normalizeSearchQuery,
   scoreQueryMatch,
-} from "@t3tools/shared/searchRanking";
+} from '@t3tools/shared/searchRanking'
 
-import type { ComposerCommandItem } from "./ComposerCommandMenu";
+import type { ComposerCommandItem } from './ComposerCommandMenu'
 
 function scoreSlashCommandItem(
-  item: Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>,
+  item: Extract<ComposerCommandItem, { type: 'slash-command' | 'provider-slash-command' }>,
   query: string,
-): number | null {
+): number | null
+{
   const primaryValue =
-    item.type === "slash-command" ? item.command.toLowerCase() : item.command.name.toLowerCase();
-  const description = item.description.toLowerCase();
+    item.type === 'slash-command' ? item.command.toLowerCase() : item.command.name.toLowerCase()
+  const description = item.description.toLowerCase()
 
   const scores = [
     scoreQueryMatch({
@@ -23,7 +27,7 @@ function scoreSlashCommandItem(
       boundaryBase: 4,
       includesBase: 6,
       fuzzyBase: 100,
-      boundaryMarkers: ["-", "_", "/"],
+      boundaryMarkers: ['-', '_', '/'],
     }),
     scoreQueryMatch({
       value: description,
@@ -33,36 +37,41 @@ function scoreSlashCommandItem(
       boundaryBase: 24,
       includesBase: 26,
     }),
-  ].filter((score): score is number => score !== null);
+  ].filter((score): score is number => score !== null)
 
-  if (scores.length === 0) {
-    return null;
+  if (scores.length === 0)
+  {
+    return null
   }
 
-  return Math.min(...scores);
+  return Math.min(...scores)
 }
 
 export function searchSlashCommandItems(
   items: ReadonlyArray<
-    Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>
+    Extract<ComposerCommandItem, { type: 'slash-command' | 'provider-slash-command' }>
   >,
   query: string,
-): Array<Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>> {
-  const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\/+/ });
-  if (!normalizedQuery) {
-    return [...items];
+): Array<Extract<ComposerCommandItem, { type: 'slash-command' | 'provider-slash-command' }>>
+{
+  const normalizedQuery = normalizeSearchQuery(query, { trimLeadingPattern: /^\/+/ })
+  if (!normalizedQuery)
+  {
+    return [...items]
   }
 
   const ranked: Array<{
-    item: Extract<ComposerCommandItem, { type: "slash-command" | "provider-slash-command" }>;
-    score: number;
-    tieBreaker: string;
-  }> = [];
+    item: Extract<ComposerCommandItem, { type: 'slash-command' | 'provider-slash-command' }>
+    score: number
+    tieBreaker: string
+  }> = []
 
-  for (const item of items) {
-    const score = scoreSlashCommandItem(item, normalizedQuery);
-    if (score === null) {
-      continue;
+  for (const item of items)
+  {
+    const score = scoreSlashCommandItem(item, normalizedQuery)
+    if (score === null)
+    {
+      continue
     }
 
     insertRankedSearchResult(
@@ -71,13 +80,13 @@ export function searchSlashCommandItems(
         item,
         score,
         tieBreaker:
-          item.type === "slash-command"
+          item.type === 'slash-command'
             ? `0\u0000${item.command}`
             : `1\u0000${item.command.name}\u0000${item.provider}`,
       },
       Number.POSITIVE_INFINITY,
-    );
+    )
   }
 
-  return ranked.map((entry) => entry.item);
+  return ranked.map((entry) => entry.item)
 }

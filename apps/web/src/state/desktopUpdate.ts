@@ -1,51 +1,61 @@
-import { useAtomValue } from "@effect/atom-react";
-import type { DesktopBridge, DesktopUpdateState } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as Queue from "effect/Queue";
-import * as Schema from "effect/Schema";
-import * as Stream from "effect/Stream";
-import * as AsyncResult from "effect/unstable/reactivity/AsyncResult";
-import { Atom } from "effect/unstable/reactivity";
+// apps/web/src/state/desktopUpdate.ts
+// manage desktop update state read error state
 
-type DesktopUpdateBridge = Pick<DesktopBridge, "getUpdateState" | "onUpdateState">;
+import { useAtomValue } from '@effect/atom-react'
+import type { DesktopBridge, DesktopUpdateState } from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import * as Queue from 'effect/Queue'
+import * as Schema from 'effect/Schema'
+import * as Stream from 'effect/Stream'
+import * as AsyncResult from 'effect/unstable/reactivity/AsyncResult'
+import { Atom } from 'effect/unstable/reactivity'
 
-const INITIAL_STATE_READ_ATTEMPT_COUNT = 3;
+type DesktopUpdateBridge = Pick<DesktopBridge, 'getUpdateState' | 'onUpdateState'>
+
+const INITIAL_STATE_READ_ATTEMPT_COUNT = 3
 
 export class DesktopUpdateStateReadError extends Schema.TaggedErrorClass<DesktopUpdateStateReadError>()(
-  "DesktopUpdateStateReadError",
+  'DesktopUpdateStateReadError',
   {
     attemptCount: Schema.Number,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to read the initial desktop update state after ${this.attemptCount} attempts.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to read the initial desktop update state after ${this.attemptCount} attempts.`
   }
 }
 
-function getDesktopUpdateBridge(): DesktopUpdateBridge | undefined {
-  return typeof window === "undefined" ? undefined : window.desktopBridge;
+function getDesktopUpdateBridge(): DesktopUpdateBridge | undefined
+{
+  return typeof window === 'undefined' ? undefined : window.desktopBridge
 }
 
-export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridge | undefined) {
+export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridge | undefined)
+{
   const updates = Stream.callback<DesktopUpdateState | null>((queue) =>
-    Effect.gen(function* () {
-      const bridge = getBridge();
-      if (!bridge) {
-        Queue.offerUnsafe(queue, null);
-        return yield* Effect.never;
+    Effect.gen(function* ()
+    {
+      const bridge = getBridge()
+      if (!bridge)
+      {
+        Queue.offerUnsafe(queue, null)
+        return yield* Effect.never
       }
 
-      let receivedUpdate = false;
+      let receivedUpdate = false
       yield* Effect.acquireRelease(
         Effect.sync(() =>
-          bridge.onUpdateState((state) => {
-            receivedUpdate = true;
-            Queue.offerUnsafe(queue, state);
+          bridge.onUpdateState((state) =>
+          {
+            receivedUpdate = true
+            Queue.offerUnsafe(queue, state)
           }),
         ),
         (unsubscribe) => Effect.sync(unsubscribe),
-      );
+      )
 
       const initialState = yield* Effect.tryPromise({
         try: () => bridge.getUpdateState(),
@@ -64,23 +74,25 @@ export function createDesktopUpdateStateAtom(getBridge: () => DesktopUpdateBridg
               attemptCount: error.attemptCount,
             }).pipe(Effect.as(null)),
         }),
-      );
-      if (!receivedUpdate && initialState !== null) {
-        Queue.offerUnsafe(queue, initialState);
+      )
+      if (!receivedUpdate && initialState !== null)
+      {
+        Queue.offerUnsafe(queue, initialState)
       }
 
-      return yield* Effect.never;
+      return yield* Effect.never
     }),
-  );
+  )
 
   return Atom.make(updates, { initialValue: null }).pipe(
     Atom.keepAlive,
-    Atom.withLabel("desktop:update-state"),
-  );
+    Atom.withLabel('desktop:update-state'),
+  )
 }
 
-const desktopUpdateStateAtom = createDesktopUpdateStateAtom(getDesktopUpdateBridge);
+const desktopUpdateStateAtom = createDesktopUpdateStateAtom(getDesktopUpdateBridge)
 
-export function useDesktopUpdateState(): DesktopUpdateState | null {
-  return AsyncResult.getOrElse(useAtomValue(desktopUpdateStateAtom), () => null);
+export function useDesktopUpdateState(): DesktopUpdateState | null
+{
+  return AsyncResult.getOrElse(useAtomValue(desktopUpdateStateAtom), () => null)
 }

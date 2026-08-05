@@ -1,21 +1,26 @@
-import * as Schema from "effect/Schema";
+// apps/server/src/provider/Errors.ts
+// define provider errors
 
-import type { CheckpointServiceError } from "../checkpointing/Errors.ts";
+import * as Schema from 'effect/Schema'
+
+import type { CheckpointServiceError } from '../checkpointing/Errors.ts'
 
 /**
  * ProviderAdapterValidationError - Invalid adapter API input.
  */
 export class ProviderAdapterValidationError extends Schema.TaggedErrorClass<ProviderAdapterValidationError>()(
-  "ProviderAdapterValidationError",
+  'ProviderAdapterValidationError',
   {
     provider: Schema.String,
     operation: Schema.String,
     issue: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Provider adapter validation failed (${this.provider}) in ${this.operation}: ${this.issue}`;
+)
+{
+  override get message(): string
+  {
+    return `Provider adapter validation failed (${this.provider}) in ${this.operation}: ${this.issue}`
   }
 }
 
@@ -23,15 +28,17 @@ export class ProviderAdapterValidationError extends Schema.TaggedErrorClass<Prov
  * ProviderAdapterSessionNotFoundError - Adapter-owned session id is unknown.
  */
 export class ProviderAdapterSessionNotFoundError extends Schema.TaggedErrorClass<ProviderAdapterSessionNotFoundError>()(
-  "ProviderAdapterSessionNotFoundError",
+  'ProviderAdapterSessionNotFoundError',
   {
     provider: Schema.String,
     threadId: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Unknown ${this.provider} adapter thread: ${this.threadId}`;
+)
+{
+  override get message(): string
+  {
+    return `Unknown ${this.provider} adapter thread: ${this.threadId}`
   }
 }
 
@@ -39,15 +46,17 @@ export class ProviderAdapterSessionNotFoundError extends Schema.TaggedErrorClass
  * ProviderAdapterSessionClosedError - Adapter session exists but is closed.
  */
 export class ProviderAdapterSessionClosedError extends Schema.TaggedErrorClass<ProviderAdapterSessionClosedError>()(
-  "ProviderAdapterSessionClosedError",
+  'ProviderAdapterSessionClosedError',
   {
     provider: Schema.String,
     threadId: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `${this.provider} adapter thread is closed: ${this.threadId}`;
+)
+{
+  override get message(): string
+  {
+    return `${this.provider} adapter thread is closed: ${this.threadId}`
   }
 }
 
@@ -55,16 +64,18 @@ export class ProviderAdapterSessionClosedError extends Schema.TaggedErrorClass<P
  * ProviderAdapterRequestError - Provider protocol request failed or timed out.
  */
 export class ProviderAdapterRequestError extends Schema.TaggedErrorClass<ProviderAdapterRequestError>()(
-  "ProviderAdapterRequestError",
+  'ProviderAdapterRequestError',
   {
     provider: Schema.String,
     method: Schema.String,
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Provider adapter request failed (${this.provider}) for ${this.method}: ${this.detail}`;
+)
+{
+  override get message(): string
+  {
+    return `Provider adapter request failed (${this.provider}) for ${this.method}: ${this.detail}`
   }
 }
 
@@ -72,16 +83,18 @@ export class ProviderAdapterRequestError extends Schema.TaggedErrorClass<Provide
  * ProviderAdapterProcessError - Provider process lifecycle failure.
  */
 export class ProviderAdapterProcessError extends Schema.TaggedErrorClass<ProviderAdapterProcessError>()(
-  "ProviderAdapterProcessError",
+  'ProviderAdapterProcessError',
   {
     provider: Schema.String,
     threadId: Schema.String,
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Provider adapter process error (${this.provider}) for thread ${this.threadId}: ${this.detail}`;
+)
+{
+  override get message(): string
+  {
+    return `Provider adapter process error (${this.provider}) for thread ${this.threadId}: ${this.detail}`
   }
 }
 
@@ -89,15 +102,17 @@ export class ProviderAdapterProcessError extends Schema.TaggedErrorClass<Provide
  * ProviderValidationError - Invalid provider API input.
  */
 export class ProviderValidationError extends Schema.TaggedErrorClass<ProviderValidationError>()(
-  "ProviderValidationError",
+  'ProviderValidationError',
   {
     operation: Schema.String,
     issue: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Provider validation failed in ${this.operation}: ${this.issue}`;
+)
+{
+  override get message(): string
+  {
+    return `Provider validation failed in ${this.operation}: ${this.issue}`
   }
 }
 
@@ -105,14 +120,16 @@ export class ProviderValidationError extends Schema.TaggedErrorClass<ProviderVal
  * ProviderUnsupportedError - Requested provider is not implemented.
  */
 export class ProviderUnsupportedError extends Schema.TaggedErrorClass<ProviderUnsupportedError>()(
-  "ProviderUnsupportedError",
+  'ProviderUnsupportedError',
   {
     provider: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Provider '${this.provider}' is not implemented`;
+)
+{
+  override get message(): string
+  {
+    return `Provider '${this.provider}' is not implemented`
   }
 }
 
@@ -126,14 +143,16 @@ export class ProviderUnsupportedError extends Schema.TaggedErrorClass<ProviderUn
  * has finished its first reload.
  */
 export class ProviderInstanceNotFoundError extends Schema.TaggedErrorClass<ProviderInstanceNotFoundError>()(
-  "ProviderInstanceNotFoundError",
+  'ProviderInstanceNotFoundError',
   {
     instanceId: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `No provider instance bound to id '${this.instanceId}'`;
+)
+{
+  override get message(): string
+  {
+    return `No provider instance bound to id '${this.instanceId}'`
   }
 }
 
@@ -143,16 +162,18 @@ export class ProviderInstanceNotFoundError extends Schema.TaggedErrorClass<Provi
  * an "unavailable" shadow snapshot rather than crashing the server.
  */
 export class ProviderDriverError extends Schema.TaggedErrorClass<ProviderDriverError>()(
-  "ProviderDriverError",
+  'ProviderDriverError',
   {
     driver: Schema.String,
     instanceId: Schema.String,
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Provider driver '${this.driver}' failed to create instance '${this.instanceId}': ${this.detail}`;
+)
+{
+  override get message(): string
+  {
+    return `Provider driver '${this.driver}' failed to create instance '${this.instanceId}': ${this.detail}`
   }
 }
 
@@ -160,14 +181,16 @@ export class ProviderDriverError extends Schema.TaggedErrorClass<ProviderDriverE
  * ProviderSessionNotFoundError - Provider-facing session not found.
  */
 export class ProviderSessionNotFoundError extends Schema.TaggedErrorClass<ProviderSessionNotFoundError>()(
-  "ProviderSessionNotFoundError",
+  'ProviderSessionNotFoundError',
   {
     threadId: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Unknown provider thread: ${this.threadId}`;
+)
+{
+  override get message(): string
+  {
+    return `Unknown provider thread: ${this.threadId}`
   }
 }
 
@@ -175,15 +198,17 @@ export class ProviderSessionNotFoundError extends Schema.TaggedErrorClass<Provid
  * ProviderSessionDirectoryPersistenceError - Session directory persistence failure.
  */
 export class ProviderSessionDirectoryPersistenceError extends Schema.TaggedErrorClass<ProviderSessionDirectoryPersistenceError>()(
-  "ProviderSessionDirectoryPersistenceError",
+  'ProviderSessionDirectoryPersistenceError',
   {
     operation: Schema.String,
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
-    return `Provider session directory persistence error in ${this.operation}: ${this.detail}`;
+)
+{
+  override get message(): string
+  {
+    return `Provider session directory persistence error in ${this.operation}: ${this.detail}`
   }
 }
 
@@ -192,7 +217,7 @@ export type ProviderAdapterError =
   | ProviderAdapterSessionNotFoundError
   | ProviderAdapterSessionClosedError
   | ProviderAdapterRequestError
-  | ProviderAdapterProcessError;
+  | ProviderAdapterProcessError
 
 export type ProviderServiceError =
   | ProviderValidationError
@@ -201,4 +226,4 @@ export type ProviderServiceError =
   | ProviderSessionNotFoundError
   | ProviderSessionDirectoryPersistenceError
   | ProviderAdapterError
-  | CheckpointServiceError;
+  | CheckpointServiceError

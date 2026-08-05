@@ -1,12 +1,17 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/web/components/ThreadTerminalDrawer.test.ts
+// verify resolve terminal selection action position behavior
+
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   resolveTerminalSelectionActionPosition,
   shouldHandleTerminalSelectionMouseUp,
-} from "../../../../apps/web/src/components/ThreadTerminalDrawer";
+} from '../../../../apps/web/src/components/ThreadTerminalDrawer'
 
-describe("resolveTerminalSelectionActionPosition", () => {
-  it("prefers the selection rect over the last pointer position", () => {
+describe('resolveTerminalSelectionActionPosition', () =>
+{
+  it('prefers the selection rect over the last pointer position', () =>
+  {
     expect(
       resolveTerminalSelectionActionPosition({
         bounds: { left: 100, top: 50, width: 500, height: 220 },
@@ -17,10 +22,11 @@ describe("resolveTerminalSelectionActionPosition", () => {
     ).toEqual({
       x: 260,
       y: 144,
-    });
-  });
+    })
+  })
 
-  it("falls back to the pointer position when no selection rect is available", () => {
+  it('falls back to the pointer position when no selection rect is available', () =>
+  {
     expect(
       resolveTerminalSelectionActionPosition({
         bounds: { left: 100, top: 50, width: 500, height: 220 },
@@ -31,10 +37,11 @@ describe("resolveTerminalSelectionActionPosition", () => {
     ).toEqual({
       x: 180,
       y: 130,
-    });
-  });
+    })
+  })
 
-  it("clamps the pointer fallback into the terminal drawer bounds", () => {
+  it('clamps the pointer fallback into the terminal drawer bounds', () =>
+  {
     expect(
       resolveTerminalSelectionActionPosition({
         bounds: { left: 100, top: 50, width: 500, height: 220 },
@@ -45,7 +52,7 @@ describe("resolveTerminalSelectionActionPosition", () => {
     ).toEqual({
       x: 600,
       y: 270,
-    });
+    })
 
     expect(
       resolveTerminalSelectionActionPosition({
@@ -57,12 +64,13 @@ describe("resolveTerminalSelectionActionPosition", () => {
     ).toEqual({
       x: 100,
       y: 50,
-    });
-  });
+    })
+  })
 
-  it("only handles mouseup when the selection gesture started in the terminal", () => {
-    expect(shouldHandleTerminalSelectionMouseUp(true, 0)).toBe(true);
-    expect(shouldHandleTerminalSelectionMouseUp(false, 0)).toBe(false);
-    expect(shouldHandleTerminalSelectionMouseUp(true, 1)).toBe(false);
-  });
-});
+  it('only handles mouseup when the selection gesture started in the terminal', () =>
+  {
+    expect(shouldHandleTerminalSelectionMouseUp(true, 0)).toBe(true)
+    expect(shouldHandleTerminalSelectionMouseUp(false, 0)).toBe(false)
+    expect(shouldHandleTerminalSelectionMouseUp(true, 1)).toBe(false)
+  })
+})

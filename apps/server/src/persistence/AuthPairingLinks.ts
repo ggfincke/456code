@@ -1,24 +1,27 @@
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
-import * as SqlSchema from "effect/unstable/sql/SqlSchema";
+// apps/server/src/persistence/AuthPairingLinks.ts
+// expose auth pairing link record
 
-import { AuthEnvironmentScopes } from "@t3tools/contracts";
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
+
+import { AuthEnvironmentScopes } from '@t3tools/contracts'
 
 import {
   type AuthPairingLinkRepositoryError,
   PersistenceDecodeError,
   type PersistenceErrorCorrelation,
   PersistenceSqlError,
-} from "./Errors.ts";
+} from './Errors.ts'
 
 export const AuthPairingLinkRecord = Schema.Struct({
   id: Schema.String,
   credential: Schema.String,
-  method: Schema.Literals(["desktop-bootstrap", "one-time-token"]),
+  method: Schema.Literals(['desktop-bootstrap', 'one-time-token']),
   scopes: Schema.fromJsonString(AuthEnvironmentScopes),
   subject: Schema.String,
   label: Schema.NullOr(Schema.String),
@@ -27,45 +30,45 @@ export const AuthPairingLinkRecord = Schema.Struct({
   expiresAt: Schema.DateTimeUtcFromString,
   consumedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
   revokedAt: Schema.NullOr(Schema.DateTimeUtcFromString),
-});
-export type AuthPairingLinkRecord = typeof AuthPairingLinkRecord.Type;
+})
+export type AuthPairingLinkRecord = typeof AuthPairingLinkRecord.Type
 
 export const CreateAuthPairingLinkInput = Schema.Struct({
   id: Schema.String,
   credential: Schema.String,
-  method: Schema.Literals(["desktop-bootstrap", "one-time-token"]),
+  method: Schema.Literals(['desktop-bootstrap', 'one-time-token']),
   scopes: AuthEnvironmentScopes,
   subject: Schema.String,
   label: Schema.NullOr(Schema.String),
   proofKeyThumbprint: Schema.NullOr(Schema.String),
   createdAt: Schema.DateTimeUtcFromString,
   expiresAt: Schema.DateTimeUtcFromString,
-});
-export type CreateAuthPairingLinkInput = typeof CreateAuthPairingLinkInput.Type;
+})
+export type CreateAuthPairingLinkInput = typeof CreateAuthPairingLinkInput.Type
 
 export const ConsumeAuthPairingLinkInput = Schema.Struct({
   credential: Schema.String,
   proofKeyThumbprint: Schema.NullOr(Schema.String),
   consumedAt: Schema.DateTimeUtcFromString,
   now: Schema.DateTimeUtcFromString,
-});
-export type ConsumeAuthPairingLinkInput = typeof ConsumeAuthPairingLinkInput.Type;
+})
+export type ConsumeAuthPairingLinkInput = typeof ConsumeAuthPairingLinkInput.Type
 
 export const ListActiveAuthPairingLinksInput = Schema.Struct({
   now: Schema.DateTimeUtcFromString,
-});
-export type ListActiveAuthPairingLinksInput = typeof ListActiveAuthPairingLinksInput.Type;
+})
+export type ListActiveAuthPairingLinksInput = typeof ListActiveAuthPairingLinksInput.Type
 
 export const RevokeAuthPairingLinkInput = Schema.Struct({
   id: Schema.String,
   revokedAt: Schema.DateTimeUtcFromString,
-});
-export type RevokeAuthPairingLinkInput = typeof RevokeAuthPairingLinkInput.Type;
+})
+export type RevokeAuthPairingLinkInput = typeof RevokeAuthPairingLinkInput.Type
 
 export const GetAuthPairingLinkByCredentialInput = Schema.Struct({
   credential: Schema.String,
-});
-export type GetAuthPairingLinkByCredentialInput = typeof GetAuthPairingLinkByCredentialInput.Type;
+})
+export type GetAuthPairingLinkByCredentialInput = typeof GetAuthPairingLinkByCredentialInput.Type
 
 const AuthPairingLinkRawDbRow = Schema.Struct({
   id: Schema.String,
@@ -79,36 +82,38 @@ const AuthPairingLinkRawDbRow = Schema.Struct({
   expiresAt: Schema.Unknown,
   consumedAt: Schema.Unknown,
   revokedAt: Schema.Unknown,
-});
+})
 
-const decodeAuthPairingLinkDbRow = Schema.decodeUnknownEffect(AuthPairingLinkRecord);
+const decodeAuthPairingLinkDbRow = Schema.decodeUnknownEffect(AuthPairingLinkRecord)
 
 export class AuthPairingLinkRepository extends Context.Service<
   AuthPairingLinkRepository,
   {
     readonly create: (
       input: CreateAuthPairingLinkInput,
-    ) => Effect.Effect<void, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<void, AuthPairingLinkRepositoryError>
     readonly consumeAvailable: (
       input: ConsumeAuthPairingLinkInput,
-    ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>
     readonly listActive: (
       input: ListActiveAuthPairingLinksInput,
-    ) => Effect.Effect<ReadonlyArray<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<ReadonlyArray<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>
     readonly revoke: (
       input: RevokeAuthPairingLinkInput,
-    ) => Effect.Effect<boolean, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<boolean, AuthPairingLinkRepositoryError>
     readonly getByCredential: (
       input: GetAuthPairingLinkByCredentialInput,
-    ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>;
+    ) => Effect.Effect<Option.Option<AuthPairingLinkRecord>, AuthPairingLinkRepositoryError>
   }
->()("456code/persistence/AuthPairingLinks/AuthPairingLinkRepository") {}
+>()('456code/persistence/AuthPairingLinks/AuthPairingLinkRepository')
+{}
 
 function toPersistenceSqlOrDecodeError(
   sqlOperation: string,
   decodeOperation: string,
   correlation?: PersistenceErrorCorrelation,
-) {
+)
+{
   return (cause: unknown): AuthPairingLinkRepositoryError =>
     Schema.isSchemaError(cause)
       ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
@@ -116,11 +121,12 @@ function toPersistenceSqlOrDecodeError(
           operation: sqlOperation,
           ...(correlation === undefined ? {} : { correlation }),
           cause,
-        });
+        })
 }
 
-export const make = Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export const make = Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   const createPairingLinkRow = SqlSchema.void({
     Request: CreateAuthPairingLinkInput,
@@ -153,7 +159,7 @@ export const make = Effect.gen(function* () {
           NULL
         )
       `,
-  });
+  })
 
   const consumeAvailablePairingLinkRow = SqlSchema.findOneOption({
     Request: ConsumeAuthPairingLinkInput,
@@ -183,7 +189,7 @@ export const make = Effect.gen(function* () {
           consumed_at AS "consumedAt",
           revoked_at AS "revokedAt"
       `,
-  });
+  })
 
   const listActivePairingLinkRows = SqlSchema.findAll({
     Request: ListActiveAuthPairingLinksInput,
@@ -208,7 +214,7 @@ export const make = Effect.gen(function* () {
           AND expires_at > ${now}
         ORDER BY created_at DESC, id DESC
       `,
-  });
+  })
 
   const revokePairingLinkRow = SqlSchema.findAll({
     Request: RevokeAuthPairingLinkInput,
@@ -222,7 +228,7 @@ export const make = Effect.gen(function* () {
           AND consumed_at IS NULL
         RETURNING id AS "id"
       `,
-  });
+  })
 
   const getPairingLinkRowByCredential = SqlSchema.findOneOption({
     Request: GetAuthPairingLinkByCredentialInput,
@@ -244,25 +250,25 @@ export const make = Effect.gen(function* () {
         FROM auth_pairing_links
         WHERE credential = ${credential}
       `,
-  });
+  })
 
-  const create: AuthPairingLinkRepository["Service"]["create"] = (input) =>
+  const create: AuthPairingLinkRepository['Service']['create'] = (input) =>
     createPairingLinkRow(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.create:query",
-          "AuthPairingLinkRepository.create:encodeRequest",
+          'AuthPairingLinkRepository.create:query',
+          'AuthPairingLinkRepository.create:encodeRequest',
           { pairingLinkId: input.id },
         ),
       ),
-    );
+    )
 
-  const consumeAvailable: AuthPairingLinkRepository["Service"]["consumeAvailable"] = (input) =>
+  const consumeAvailable: AuthPairingLinkRepository['Service']['consumeAvailable'] = (input) =>
     consumeAvailablePairingLinkRow(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.consumeAvailable:query",
-          "AuthPairingLinkRepository.consumeAvailable:decodeRow",
+          'AuthPairingLinkRepository.consumeAvailable:query',
+          'AuthPairingLinkRepository.consumeAvailable:decodeRow',
         ),
       ),
       Effect.flatMap((rowOption) =>
@@ -272,7 +278,7 @@ export const make = Effect.gen(function* () {
             decodeAuthPairingLinkDbRow(row).pipe(
               Effect.mapError((cause) =>
                 PersistenceDecodeError.fromSchemaError(
-                  "AuthPairingLinkRepository.consumeAvailable:decodeRow",
+                  'AuthPairingLinkRepository.consumeAvailable:decodeRow',
                   cause,
                   { pairingLinkId: row.id },
                 ),
@@ -281,14 +287,14 @@ export const make = Effect.gen(function* () {
             ),
         }),
       ),
-    );
+    )
 
-  const listActive: AuthPairingLinkRepository["Service"]["listActive"] = (input) =>
+  const listActive: AuthPairingLinkRepository['Service']['listActive'] = (input) =>
     listActivePairingLinkRows(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.listActive:query",
-          "AuthPairingLinkRepository.listActive:decodeRows",
+          'AuthPairingLinkRepository.listActive:query',
+          'AuthPairingLinkRepository.listActive:decodeRows',
         ),
       ),
       Effect.flatMap((rows) =>
@@ -296,7 +302,7 @@ export const make = Effect.gen(function* () {
           decodeAuthPairingLinkDbRow(row).pipe(
             Effect.mapError((cause) =>
               PersistenceDecodeError.fromSchemaError(
-                "AuthPairingLinkRepository.listActive:decodeRows",
+                'AuthPairingLinkRepository.listActive:decodeRows',
                 cause,
                 { pairingLinkId: row.id },
               ),
@@ -304,26 +310,26 @@ export const make = Effect.gen(function* () {
           ),
         ),
       ),
-    );
+    )
 
-  const revoke: AuthPairingLinkRepository["Service"]["revoke"] = (input) =>
+  const revoke: AuthPairingLinkRepository['Service']['revoke'] = (input) =>
     revokePairingLinkRow(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.revoke:query",
-          "AuthPairingLinkRepository.revoke:decodeRows",
+          'AuthPairingLinkRepository.revoke:query',
+          'AuthPairingLinkRepository.revoke:decodeRows',
           { pairingLinkId: input.id },
         ),
       ),
       Effect.map((rows) => rows.length > 0),
-    );
+    )
 
-  const getByCredential: AuthPairingLinkRepository["Service"]["getByCredential"] = (input) =>
+  const getByCredential: AuthPairingLinkRepository['Service']['getByCredential'] = (input) =>
     getPairingLinkRowByCredential(input).pipe(
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          "AuthPairingLinkRepository.getByCredential:query",
-          "AuthPairingLinkRepository.getByCredential:decodeRow",
+          'AuthPairingLinkRepository.getByCredential:query',
+          'AuthPairingLinkRepository.getByCredential:decodeRow',
         ),
       ),
       Effect.flatMap((rowOption) =>
@@ -333,7 +339,7 @@ export const make = Effect.gen(function* () {
             decodeAuthPairingLinkDbRow(row).pipe(
               Effect.mapError((cause) =>
                 PersistenceDecodeError.fromSchemaError(
-                  "AuthPairingLinkRepository.getByCredential:decodeRow",
+                  'AuthPairingLinkRepository.getByCredential:decodeRow',
                   cause,
                   { pairingLinkId: row.id },
                 ),
@@ -342,7 +348,7 @@ export const make = Effect.gen(function* () {
             ),
         }),
       ),
-    );
+    )
 
   return {
     create,
@@ -350,7 +356,7 @@ export const make = Effect.gen(function* () {
     listActive,
     revoke,
     getByCredential,
-  } satisfies AuthPairingLinkRepository["Service"];
-});
+  } satisfies AuthPairingLinkRepository['Service']
+})
 
-export const layer = Layer.effect(AuthPairingLinkRepository, make);
+export const layer = Layer.effect(AuthPairingLinkRepository, make)

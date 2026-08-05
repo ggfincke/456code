@@ -1,12 +1,17 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/web/browser/hostedBrowserWebviewStyle.test.ts
+// verify resolve hosted browser webview wrapper style behavior
+
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   HIDDEN_BROWSER_WEBVIEW_OFFSET,
   resolveHostedBrowserWebviewWrapperStyle,
-} from "../../../../apps/web/src/browser/hostedBrowserWebviewStyle";
+} from '../../../../apps/web/src/browser/hostedBrowserWebviewStyle'
 
-describe("resolveHostedBrowserWebviewWrapperStyle", () => {
-  it("places an active webview on its presented surface", () => {
+describe('resolveHostedBrowserWebviewWrapperStyle', () =>
+{
+  it('places an active webview on its presented surface', () =>
+  {
     expect(
       resolveHostedBrowserWebviewWrapperStyle({
         active: true,
@@ -19,16 +24,17 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
       width: 800,
       height: 600,
       zIndex: 30,
-      pointerEvents: "auto",
-    });
-  });
+      pointerEvents: 'auto',
+    })
+  })
 
-  it("keeps an inactive webview paintable while moving it offscreen", () => {
+  it('keeps an inactive webview paintable while moving it offscreen', () =>
+  {
     const style = resolveHostedBrowserWebviewWrapperStyle({
       active: false,
       rect: { x: 12, y: 34, width: 800, height: 600 },
       hiddenSize: { width: 393, height: 852 },
-    });
+    })
 
     expect(style).toEqual({
       left: HIDDEN_BROWSER_WEBVIEW_OFFSET,
@@ -36,8 +42,8 @@ describe("resolveHostedBrowserWebviewWrapperStyle", () => {
       width: 393,
       height: 852,
       zIndex: -1,
-      pointerEvents: "none",
-      visibility: "visible",
-    });
-  });
-});
+      pointerEvents: 'none',
+      visibility: 'visible',
+    })
+  })
+})

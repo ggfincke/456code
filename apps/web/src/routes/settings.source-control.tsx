@@ -1,7 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+// apps/web/src/routes/settings.source-control.tsx
+// render the settings source control route
 
-import { SourceControlSettingsPanel } from "../components/settings/SourceControlSettings";
+import { createFileRoute } from '@tanstack/react-router'
 
-export const Route = createFileRoute("/settings/source-control")({
+import { SourceControlSettingsPanel } from '../components/settings/SourceControlSettings'
+
+export const Route = createFileRoute('/settings/source-control')({
   component: SourceControlSettingsPanel,
-});
+})

@@ -1,6 +1,10 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+// packages/client-runtime/src/state/vcsStatus.ts
+// manage vcs status target state
 
-export interface VcsStatusTarget {
-  readonly environmentId: EnvironmentId | null;
-  readonly cwd: string | null;
+import type { EnvironmentId } from '@t3tools/contracts'
+
+export interface VcsStatusTarget
+{
+  readonly environmentId: EnvironmentId | null
+  readonly cwd: string | null
 }

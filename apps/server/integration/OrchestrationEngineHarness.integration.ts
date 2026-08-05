@@ -1,148 +1,157 @@
 // apps/server/integration/OrchestrationEngineHarness.integration.ts
 // provides a persisted orchestration runtime harness for integration tests
 // @effect-diagnostics nodeBuiltinImport:off
-import * as NodeChildProcess from "node:child_process";
+import * as NodeChildProcess from 'node:child_process'
 
-import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeServices from '@effect/platform-node/NodeServices'
 import {
   ApprovalRequestId,
   CodexSettings,
   ProviderDriverKind,
   type OrchestrationEvent,
   type OrchestrationThread,
-} from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as Exit from "effect/Exit";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as ManagedRuntime from "effect/ManagedRuntime";
-import * as Option from "effect/Option";
-import * as Path from "effect/Path";
-import * as Ref from "effect/Ref";
-import * as Schedule from "effect/Schedule";
-import * as Schema from "effect/Schema";
-import * as Scope from "effect/Scope";
-import * as Stream from "effect/Stream";
+} from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as ManagedRuntime from 'effect/ManagedRuntime'
+import * as Option from 'effect/Option'
+import * as Path from 'effect/Path'
+import * as Ref from 'effect/Ref'
+import * as Schedule from 'effect/Schedule'
+import * as Schema from 'effect/Schema'
+import * as Scope from 'effect/Scope'
+import * as Stream from 'effect/Stream'
 
-import * as CheckpointStore from "../src/checkpointing/CheckpointStore.ts";
-import { TextGeneration, type TextGenerationShape } from "../src/textGeneration/TextGeneration.ts";
-import { OrchestrationCommandReceiptRepositoryLive } from "../src/persistence/Layers/OrchestrationCommandReceipts.ts";
-import { OrchestrationEventStoreLive } from "../src/persistence/Layers/OrchestrationEventStore.ts";
-import { ProjectionCheckpointRepositoryLive } from "../src/persistence/Layers/ProjectionCheckpoints.ts";
-import { ProjectionPendingApprovalRepositoryLive } from "../src/persistence/Layers/ProjectionPendingApprovals.ts";
-import { ProviderSessionRuntimeRepositoryLive } from "../src/persistence/Layers/ProviderSessionRuntime.ts";
-import { makeSqlitePersistenceLive } from "../src/persistence/Layers/Sqlite.ts";
-import { ProjectionCheckpointRepository } from "../src/persistence/Services/ProjectionCheckpoints.ts";
-import { ProjectionPendingApprovalRepository } from "../src/persistence/Services/ProjectionPendingApprovals.ts";
-import { makeAdapterRegistryMock } from "../src/provider/testUtils/providerAdapterRegistryMock.ts";
-import { ProviderAdapterRegistry } from "../src/provider/Services/ProviderAdapterRegistry.ts";
-import { makeProviderRegistryLayer } from "../src/provider/testUtils/providerRegistryMock.ts";
-import { ProviderSessionDirectoryLive } from "../src/provider/Layers/ProviderSessionDirectory.ts";
-import { ServerSettingsService } from "../src/serverSettings.ts";
-import { makeProviderServiceLive } from "../src/provider/Layers/ProviderService.ts";
-import { makeCodexAdapter } from "../src/provider/Layers/CodexAdapter.ts";
+import * as CheckpointStore from '../src/checkpointing/CheckpointStore.ts'
+import { TextGeneration, type TextGenerationShape } from '../src/textGeneration/TextGeneration.ts'
+import { OrchestrationCommandReceiptRepositoryLive } from '../src/persistence/Layers/OrchestrationCommandReceipts.ts'
+import { OrchestrationEventStoreLive } from '../src/persistence/Layers/OrchestrationEventStore.ts'
+import { ProjectionCheckpointRepositoryLive } from '../src/persistence/Layers/ProjectionCheckpoints.ts'
+import { ProjectionPendingApprovalRepositoryLive } from '../src/persistence/Layers/ProjectionPendingApprovals.ts'
+import { ProviderSessionRuntimeRepositoryLive } from '../src/persistence/Layers/ProviderSessionRuntime.ts'
+import { makeSqlitePersistenceLive } from '../src/persistence/Layers/Sqlite.ts'
+import { ProjectionCheckpointRepository } from '../src/persistence/Services/ProjectionCheckpoints.ts'
+import { ProjectionPendingApprovalRepository } from '../src/persistence/Services/ProjectionPendingApprovals.ts'
+import { makeAdapterRegistryMock } from '../src/provider/testUtils/providerAdapterRegistryMock.ts'
+import { ProviderAdapterRegistry } from '../src/provider/Services/ProviderAdapterRegistry.ts'
+import { makeProviderRegistryLayer } from '../src/provider/testUtils/providerRegistryMock.ts'
+import { ProviderSessionDirectoryLive } from '../src/provider/Layers/ProviderSessionDirectory.ts'
+import { ServerSettingsService } from '../src/serverSettings.ts'
+import { makeProviderServiceLive } from '../src/provider/Layers/ProviderService.ts'
+import { makeCodexAdapter } from '../src/provider/Layers/CodexAdapter.ts'
 import {
   NoOpProviderEventLoggers,
   ProviderEventLoggers,
-} from "../src/provider/Layers/ProviderEventLoggers.ts";
-import { ProviderService } from "../src/provider/Services/ProviderService.ts";
-import { AnalyticsService } from "../src/telemetry/Services/AnalyticsService.ts";
-import { CheckpointReactorLive } from "../src/orchestration/Layers/CheckpointReactor.ts";
-import * as RepositoryIdentityResolver from "../src/project/RepositoryIdentityResolver.ts";
-import { OrchestrationEngineLive } from "../src/orchestration/Layers/OrchestrationEngine.ts";
-import { OrchestrationProjectionPipelineLive } from "../src/orchestration/Layers/ProjectionPipeline.ts";
-import { OrchestrationProjectionSnapshotQueryLive } from "../src/orchestration/Layers/ProjectionSnapshotQuery.ts";
-import { RuntimeReceiptBusTest } from "../src/orchestration/Layers/RuntimeReceiptBus.ts";
-import { OrchestrationReactorLive } from "../src/orchestration/Layers/OrchestrationReactor.ts";
-import { ProviderCommandReactorLive } from "../src/orchestration/Layers/ProviderCommandReactor.ts";
-import { ProviderRuntimeIngestionLive } from "../src/orchestration/Layers/ProviderRuntimeIngestion.ts";
+} from '../src/provider/Layers/ProviderEventLoggers.ts'
+import { ProviderService } from '../src/provider/Services/ProviderService.ts'
+import { AnalyticsService } from '../src/telemetry/Services/AnalyticsService.ts'
+import { CheckpointReactorLive } from '../src/orchestration/Layers/CheckpointReactor.ts'
+import * as RepositoryIdentityResolver from '../src/project/RepositoryIdentityResolver.ts'
+import { OrchestrationEngineLive } from '../src/orchestration/Layers/OrchestrationEngine.ts'
+import { OrchestrationProjectionPipelineLive } from '../src/orchestration/Layers/ProjectionPipeline.ts'
+import { OrchestrationProjectionSnapshotQueryLive } from '../src/orchestration/Layers/ProjectionSnapshotQuery.ts'
+import { RuntimeReceiptBusTest } from '../src/orchestration/Layers/RuntimeReceiptBus.ts'
+import { OrchestrationReactorLive } from '../src/orchestration/Layers/OrchestrationReactor.ts'
+import { ProviderCommandReactorLive } from '../src/orchestration/Layers/ProviderCommandReactor.ts'
+import { ProviderRuntimeIngestionLive } from '../src/orchestration/Layers/ProviderRuntimeIngestion.ts'
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
-} from "../src/orchestration/Services/OrchestrationEngine.ts";
-import { ThreadDeletionReactor } from "../src/orchestration/Services/ThreadDeletionReactor.ts";
-import { OrchestrationReactor } from "../src/orchestration/Services/OrchestrationReactor.ts";
-import { ProjectionSnapshotQuery } from "../src/orchestration/Services/ProjectionSnapshotQuery.ts";
+} from '../src/orchestration/Services/OrchestrationEngine.ts'
+import { ThreadDeletionReactor } from '../src/orchestration/Services/ThreadDeletionReactor.ts'
+import { OrchestrationReactor } from '../src/orchestration/Services/OrchestrationReactor.ts'
+import { ProjectionSnapshotQuery } from '../src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import {
   RuntimeReceiptBus,
   type OrchestrationRuntimeReceipt,
-} from "../src/orchestration/Services/RuntimeReceiptBus.ts";
+} from '../src/orchestration/Services/RuntimeReceiptBus.ts'
 
 import {
   makeTestProviderAdapterHarness,
   type TestProviderAdapterHarness,
-} from "./TestProviderAdapter.integration.ts";
-import { deriveServerPaths, ServerConfig } from "../src/config.ts";
-import * as WorkspaceEntries from "../src/workspace/WorkspaceEntries.ts";
-import * as WorkspacePaths from "../src/workspace/WorkspacePaths.ts";
-import * as VcsDriverRegistry from "../src/vcs/VcsDriverRegistry.ts";
-import { VcsStatusBroadcaster } from "../src/vcs/VcsStatusBroadcaster.ts";
-import { GitWorkflowService } from "../src/git/GitWorkflowService.ts";
-import * as VcsProcess from "../src/vcs/VcsProcess.ts";
+} from './TestProviderAdapter.integration.ts'
+import { deriveServerPaths, ServerConfig } from '../src/config.ts'
+import * as WorkspaceEntries from '../src/workspace/WorkspaceEntries.ts'
+import * as WorkspacePaths from '../src/workspace/WorkspacePaths.ts'
+import * as VcsDriverRegistry from '../src/vcs/VcsDriverRegistry.ts'
+import { VcsStatusBroadcaster } from '../src/vcs/VcsStatusBroadcaster.ts'
+import { GitWorkflowService } from '../src/git/GitWorkflowService.ts'
+import * as VcsProcess from '../src/vcs/VcsProcess.ts'
 
-const decodeCodexSettings = Schema.decodeEffect(CodexSettings);
+const decodeCodexSettings = Schema.decodeEffect(CodexSettings)
 
-function runGit(cwd: string, args: ReadonlyArray<string>) {
-  return NodeChildProcess.execFileSync("git", args, {
+function runGit(cwd: string, args: ReadonlyArray<string>)
+{
+  return NodeChildProcess.execFileSync('git', args, {
     cwd,
-    stdio: ["ignore", "pipe", "pipe"],
-    encoding: "utf8",
-  });
+    stdio: ['ignore', 'pipe', 'pipe'],
+    encoding: 'utf8',
+  })
 }
 
-const initializeGitWorkspace = Effect.fn(function* (cwd: string) {
-  runGit(cwd, ["init", "--initial-branch=main"]);
-  runGit(cwd, ["config", "user.email", "test@example.com"]);
-  runGit(cwd, ["config", "user.name", "Test User"]);
-  const fileSystem = yield* FileSystem.FileSystem;
-  const { join } = yield* Path.Path;
-  yield* fileSystem.writeFileString(join(cwd, "README.md"), "v1\n");
-  runGit(cwd, ["add", "."]);
-  runGit(cwd, ["commit", "-m", "Initial"]);
-});
+const initializeGitWorkspace = Effect.fn(function* (cwd: string)
+{
+  runGit(cwd, ['init', '--initial-branch=main'])
+  runGit(cwd, ['config', 'user.email', 'test@example.com'])
+  runGit(cwd, ['config', 'user.name', 'Test User'])
+  const fileSystem = yield* FileSystem.FileSystem
+  const { join } = yield* Path.Path
+  yield* fileSystem.writeFileString(join(cwd, 'README.md'), 'v1\n')
+  runGit(cwd, ['add', '.'])
+  runGit(cwd, ['commit', '-m', 'Initial'])
+})
 
-export function gitRefExists(cwd: string, ref: string): boolean {
-  try {
-    runGit(cwd, ["show-ref", "--verify", "--quiet", ref]);
-    return true;
-  } catch {
-    return false;
+export function gitRefExists(cwd: string, ref: string): boolean
+{
+  try
+  {
+    runGit(cwd, ['show-ref', '--verify', '--quiet', ref])
+    return true
+  }
+  catch
+  {
+    return false
   }
 }
 
-export function gitShowFileAtRef(cwd: string, ref: string, filePath: string): string {
-  return runGit(cwd, ["show", `${ref}:${filePath}`]);
+export function gitShowFileAtRef(cwd: string, ref: string, filePath: string): string
+{
+  return runGit(cwd, ['show', `${ref}:${filePath}`])
 }
 
 class WaitForTimeoutError extends Schema.TaggedErrorClass<WaitForTimeoutError>()(
-  "WaitForTimeoutError",
+  'WaitForTimeoutError',
   {
     description: Schema.String,
   },
-) {}
+)
+{}
 
 function waitFor<A, E>(
   read: Effect.Effect<A, E>,
   predicate: (value: A) => boolean,
   description: string,
   timeoutMs?: number,
-): Effect.Effect<A, never>;
+): Effect.Effect<A, never>
 function waitFor<A, B extends A, E>(
   read: Effect.Effect<A, E>,
   predicate: (value: A) => value is B,
   description: string,
   timeoutMs?: number,
-): Effect.Effect<B, never>;
+): Effect.Effect<B, never>
 function waitFor<A, E>(
   read: Effect.Effect<A, E>,
   predicate: (value: A) => boolean,
   description: string,
   timeoutMs = 40_000,
-): Effect.Effect<A, never> {
-  const RETRY_SIGNAL = "wait_for_retry";
-  const retryIntervalMs = 10;
-  const maxRetries = Math.max(0, Math.floor(timeoutMs / retryIntervalMs));
-  const retrySchedule = Schedule.spaced(`${retryIntervalMs} millis`);
+): Effect.Effect<A, never>
+{
+  const RETRY_SIGNAL = 'wait_for_retry'
+  const retryIntervalMs = 10
+  const maxRetries = Math.max(0, Math.floor(timeoutMs / retryIntervalMs))
+  const retrySchedule = Schedule.spaced(`${retryIntervalMs} millis`)
 
   return read.pipe(
     Effect.filterOrFail(predicate, () => RETRY_SIGNAL),
@@ -155,138 +164,144 @@ function waitFor<A, E>(
       error === RETRY_SIGNAL ? new WaitForTimeoutError({ description }) : error,
     ),
     Effect.orDie,
-  );
+  )
 }
 
 class OrchestrationHarnessRuntimeError extends Schema.TaggedErrorClass<OrchestrationHarnessRuntimeError>()(
-  "OrchestrationHarnessRuntimeError",
+  'OrchestrationHarnessRuntimeError',
   {
     operation: Schema.String,
     cause: Schema.optional(Schema.Defect()),
   },
-) {}
+)
+{}
 
 const tryRuntimePromise = <A>(operation: string, run: () => Promise<A>) =>
   Effect.tryPromise({
     try: run,
     catch: (cause) => new OrchestrationHarnessRuntimeError({ operation, cause }),
-  });
+  })
 
-export interface OrchestrationIntegrationHarness {
-  readonly rootDir: string;
-  readonly workspaceDir: string;
-  readonly dbPath: string;
-  readonly adapterHarness: TestProviderAdapterHarness | null;
-  readonly engine: OrchestrationEngineShape;
-  readonly snapshotQuery: ProjectionSnapshotQuery["Service"];
-  readonly providerService: ProviderService["Service"];
-  readonly checkpointStore: CheckpointStore.CheckpointStore["Service"];
-  readonly checkpointRepository: ProjectionCheckpointRepository["Service"];
-  readonly pendingApprovalRepository: ProjectionPendingApprovalRepository["Service"];
+export interface OrchestrationIntegrationHarness
+{
+  readonly rootDir: string
+  readonly workspaceDir: string
+  readonly dbPath: string
+  readonly adapterHarness: TestProviderAdapterHarness | null
+  readonly engine: OrchestrationEngineShape
+  readonly snapshotQuery: ProjectionSnapshotQuery['Service']
+  readonly providerService: ProviderService['Service']
+  readonly checkpointStore: CheckpointStore.CheckpointStore['Service']
+  readonly checkpointRepository: ProjectionCheckpointRepository['Service']
+  readonly pendingApprovalRepository: ProjectionPendingApprovalRepository['Service']
   readonly waitForThread: (
     threadId: string,
     predicate: (thread: OrchestrationThread) => boolean,
     timeoutMs?: number,
-  ) => Effect.Effect<OrchestrationThread, never>;
+  ) => Effect.Effect<OrchestrationThread, never>
   readonly waitForDomainEvent: (
     predicate: (event: OrchestrationEvent) => boolean,
     timeoutMs?: number,
-  ) => Effect.Effect<ReadonlyArray<OrchestrationEvent>, never>;
+  ) => Effect.Effect<ReadonlyArray<OrchestrationEvent>, never>
   readonly waitForPendingApproval: (
     requestId: string,
     predicate: (row: {
-      readonly status: "pending" | "resolved";
-      readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-      readonly resolvedAt: string | null;
+      readonly status: 'pending' | 'resolved'
+      readonly decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel' | null
+      readonly resolvedAt: string | null
     }) => boolean,
     timeoutMs?: number,
   ) => Effect.Effect<
     {
-      readonly status: "pending" | "resolved";
-      readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-      readonly resolvedAt: string | null;
+      readonly status: 'pending' | 'resolved'
+      readonly decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel' | null
+      readonly resolvedAt: string | null
     },
     never
-  >;
+  >
   readonly waitForReceipt: {
     (
       predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,
       timeoutMs?: number,
-    ): Effect.Effect<OrchestrationRuntimeReceipt, never>;
+    ): Effect.Effect<OrchestrationRuntimeReceipt, never>
     <Receipt extends OrchestrationRuntimeReceipt>(
       predicate: (receipt: OrchestrationRuntimeReceipt) => receipt is Receipt,
       timeoutMs?: number,
-    ): Effect.Effect<Receipt, never>;
-  };
-  readonly dispose: Effect.Effect<void, never>;
+    ): Effect.Effect<Receipt, never>
+  }
+  readonly dispose: Effect.Effect<void, never>
 }
 
-interface MakeOrchestrationIntegrationHarnessOptions {
-  readonly provider?: ProviderDriverKind;
-  readonly realCodex?: boolean;
-  readonly rootDir?: string;
-  readonly startReactor?: boolean;
+interface MakeOrchestrationIntegrationHarnessOptions
+{
+  readonly provider?: ProviderDriverKind
+  readonly realCodex?: boolean
+  readonly rootDir?: string
+  readonly startReactor?: boolean
 }
 
 export const makeOrchestrationIntegrationHarness = (
   options?: MakeOrchestrationIntegrationHarnessOptions,
 ) =>
-  Effect.gen(function* () {
-    const path = yield* Path.Path;
-    const fileSystem = yield* FileSystem.FileSystem;
+  Effect.gen(function* ()
+  {
+    const path = yield* Path.Path
+    const fileSystem = yield* FileSystem.FileSystem
 
-    const provider = options?.provider ?? ProviderDriverKind.make("codex");
-    const useRealCodex = options?.realCodex === true;
+    const provider = options?.provider ?? ProviderDriverKind.make('codex')
+    const useRealCodex = options?.realCodex === true
     const adapterHarness = useRealCodex
       ? null
       : yield* makeTestProviderAdapterHarness({
           provider,
-        });
+        })
     const fakeRegistry = adapterHarness
       ? Layer.succeed(
           ProviderAdapterRegistry,
           makeAdapterRegistryMock({ [adapterHarness.provider]: adapterHarness.adapter }),
         )
-      : null;
+      : null
     const rootDir =
       options?.rootDir ??
       (yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-orchestration-integration-",
-      }));
-    const workspaceDir = path.join(rootDir, "workspace");
+        prefix: 't3-orchestration-integration-',
+      }))
+    const workspaceDir = path.join(rootDir, 'workspace')
     const { stateDir, dbPath } = yield* deriveServerPaths(rootDir, undefined).pipe(
       Effect.provideService(Path.Path, path),
-    );
-    yield* fileSystem.makeDirectory(workspaceDir, { recursive: true });
-    yield* fileSystem.makeDirectory(stateDir, { recursive: true });
-    if (!(yield* fileSystem.exists(path.join(workspaceDir, ".git")))) {
-      yield* initializeGitWorkspace(workspaceDir);
+    )
+    yield* fileSystem.makeDirectory(workspaceDir, { recursive: true })
+    yield* fileSystem.makeDirectory(stateDir, { recursive: true })
+    if (!(yield* fileSystem.exists(path.join(workspaceDir, '.git'))))
+    {
+      yield* initializeGitWorkspace(workspaceDir)
     }
 
-    const persistenceLayer = makeSqlitePersistenceLive(dbPath);
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath)
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
-    );
+    )
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
       Layer.provide(ProviderSessionRuntimeRepositoryLive),
-    );
+    )
     const realCodexRegistry = Layer.effect(
       ProviderAdapterRegistry,
-      Effect.gen(function* () {
-        const codexSettings = yield* decodeCodexSettings({});
-        const codexAdapter = yield* makeCodexAdapter(codexSettings);
+      Effect.gen(function* ()
+      {
+        const codexSettings = yield* decodeCodexSettings({})
+        const codexAdapter = yield* makeCodexAdapter(codexSettings)
         return makeAdapterRegistryMock({
-          [ProviderDriverKind.make("codex")]: codexAdapter,
-        });
+          [ProviderDriverKind.make('codex')]: codexAdapter,
+        })
       }),
     ).pipe(
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
       Layer.provideMerge(providerSessionDirectoryLayer),
-    );
-    const providerEventLoggersLayer = Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers);
+    )
+    const providerEventLoggersLayer = Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)
     const providerLayer = useRealCodex
       ? makeProviderServiceLive().pipe(
           Layer.provide(providerSessionDirectoryLayer),
@@ -299,11 +314,11 @@ export const makeOrchestrationIntegrationHarness = (
           Layer.provide(fakeRegistry!),
           Layer.provide(AnalyticsService.layerTest),
           Layer.provide(providerEventLoggersLayer),
-        );
-    const providerRegistryLayer = makeProviderRegistryLayer();
+        )
+    const providerRegistryLayer = makeProviderRegistryLayer()
 
-    const checkpointStoreLayer = CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer));
-    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive;
+    const checkpointStoreLayer = CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))
+    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive
     const runtimeServicesLayer = Layer.mergeAll(
       projectionSnapshotQueryLayer,
       orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
@@ -312,44 +327,44 @@ export const makeOrchestrationIntegrationHarness = (
       checkpointStoreLayer,
       providerLayer,
       RuntimeReceiptBusTest,
-    );
-    const serverSettingsLayer = ServerSettingsService.layerTest();
+    )
+    const serverSettingsLayer = ServerSettingsService.layerTest()
     const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(serverSettingsLayer),
-    );
+    )
     const gitWorkflowLayer = Layer.mock(GitWorkflowService)({
       renameBranch: (input: {
-        readonly cwd: string;
-        readonly oldBranch: string;
-        readonly newBranch: string;
+        readonly cwd: string
+        readonly oldBranch: string
+        readonly newBranch: string
       }) => Effect.succeed({ branch: input.newBranch }),
-    });
+    })
     const textGenerationLayer = Layer.succeed(TextGeneration, {
-      generateBranchName: () => Effect.succeed({ branch: "update" }),
-      generateThreadTitle: () => Effect.succeed({ title: "New thread" }),
-    } as unknown as TextGenerationShape);
+      generateBranchName: () => Effect.succeed({ branch: 'update' }),
+      generateThreadTitle: () => Effect.succeed({ title: 'New thread' }),
+    } as unknown as TextGenerationShape)
     const providerCommandReactorLayer = ProviderCommandReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(gitWorkflowLayer),
       Layer.provideMerge(textGenerationLayer),
       Layer.provideMerge(serverSettingsLayer),
-    );
+    )
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(
         Layer.succeed(VcsStatusBroadcaster, {
-          getStatus: () => Effect.die("getStatus should not be called in this test"),
+          getStatus: () => Effect.die('getStatus should not be called in this test'),
           refreshLocalStatus: () =>
             Effect.succeed({
               isRepo: true,
               hasPrimaryRemote: false,
               isDefaultRef: true,
-              refName: "main",
+              refName: 'main',
               hasWorkingTreeChanges: false,
               workingTree: { files: [], insertions: 0, deletions: 0 },
             }),
-          refreshStatus: () => Effect.die("refreshStatus should not be called in this test"),
+          refreshStatus: () => Effect.die('refreshStatus should not be called in this test'),
           streamStatus: () => Stream.empty,
         }),
       ),
@@ -362,7 +377,7 @@ export const makeOrchestrationIntegrationHarness = (
       ),
       Layer.provideMerge(WorkspacePaths.layer),
       Layer.provideMerge(VcsProcess.layer),
-    );
+    )
     const orchestrationReactorLayer = OrchestrationReactorLive.pipe(
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
@@ -373,7 +388,7 @@ export const makeOrchestrationIntegrationHarness = (
           drain: Effect.void,
         }),
       ),
-    );
+    )
     const layer = Layer.empty.pipe(
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(orchestrationReactorLayer),
@@ -383,49 +398,50 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(ServerSettingsService.layerTest()),
       Layer.provideMerge(ServerConfig.layerTest(workspaceDir, rootDir)),
       Layer.provideMerge(NodeServices.layer),
-    );
+    )
 
-    const runtime = ManagedRuntime.make(layer);
-    const engine = yield* tryRuntimePromise("load OrchestrationEngine service", () =>
+    const runtime = ManagedRuntime.make(layer)
+    const engine = yield* tryRuntimePromise('load OrchestrationEngine service', () =>
       runtime.runPromise(Effect.service(OrchestrationEngineService)),
-    ).pipe(Effect.orDie);
-    const reactor = yield* tryRuntimePromise("load OrchestrationReactor service", () =>
+    ).pipe(Effect.orDie)
+    const reactor = yield* tryRuntimePromise('load OrchestrationReactor service', () =>
       runtime.runPromise(Effect.service(OrchestrationReactor)),
-    ).pipe(Effect.orDie);
-    const snapshotQuery = yield* tryRuntimePromise("load ProjectionSnapshotQuery service", () =>
+    ).pipe(Effect.orDie)
+    const snapshotQuery = yield* tryRuntimePromise('load ProjectionSnapshotQuery service', () =>
       runtime.runPromise(Effect.service(ProjectionSnapshotQuery)),
-    ).pipe(Effect.orDie);
-    const providerService = yield* tryRuntimePromise("load ProviderService service", () =>
+    ).pipe(Effect.orDie)
+    const providerService = yield* tryRuntimePromise('load ProviderService service', () =>
       runtime.runPromise(Effect.service(ProviderService)),
-    ).pipe(Effect.orDie);
-    const checkpointStore = yield* tryRuntimePromise("load CheckpointStore service", () =>
+    ).pipe(Effect.orDie)
+    const checkpointStore = yield* tryRuntimePromise('load CheckpointStore service', () =>
       runtime.runPromise(Effect.service(CheckpointStore.CheckpointStore)),
-    ).pipe(Effect.orDie);
+    ).pipe(Effect.orDie)
     const checkpointRepository = yield* tryRuntimePromise(
-      "load ProjectionCheckpointRepository service",
+      'load ProjectionCheckpointRepository service',
       () => runtime.runPromise(Effect.service(ProjectionCheckpointRepository)),
-    ).pipe(Effect.orDie);
+    ).pipe(Effect.orDie)
     const pendingApprovalRepository = yield* tryRuntimePromise(
-      "load ProjectionPendingApprovalRepository service",
+      'load ProjectionPendingApprovalRepository service',
       () => runtime.runPromise(Effect.service(ProjectionPendingApprovalRepository)),
-    ).pipe(Effect.orDie);
-    const runtimeReceiptBus = yield* tryRuntimePromise("load RuntimeReceiptBus service", () =>
+    ).pipe(Effect.orDie)
+    const runtimeReceiptBus = yield* tryRuntimePromise('load RuntimeReceiptBus service', () =>
       runtime.runPromise(Effect.service(RuntimeReceiptBus)),
-    ).pipe(Effect.orDie);
+    ).pipe(Effect.orDie)
 
-    const scope = yield* Scope.make("sequential");
-    const receiptHistory = yield* Ref.make<ReadonlyArray<OrchestrationRuntimeReceipt>>([]);
-    if (options?.startReactor !== false) {
-      yield* tryRuntimePromise("start OrchestrationReactor", () =>
+    const scope = yield* Scope.make('sequential')
+    const receiptHistory = yield* Ref.make<ReadonlyArray<OrchestrationRuntimeReceipt>>([])
+    if (options?.startReactor !== false)
+    {
+      yield* tryRuntimePromise('start OrchestrationReactor', () =>
         runtime.runPromise(reactor.start().pipe(Scope.provide(scope))),
-      ).pipe(Effect.orDie);
+      ).pipe(Effect.orDie)
       yield* Stream.runForEach(runtimeReceiptBus.streamEventsForTest, (receipt) =>
         Ref.update(receiptHistory, (history) => [...history, receipt]).pipe(Effect.asVoid),
-      ).pipe(Effect.forkIn(scope));
-      yield* Effect.sleep(10);
+      ).pipe(Effect.forkIn(scope))
+      yield* Effect.sleep(10)
     }
 
-    const waitForThread: OrchestrationIntegrationHarness["waitForThread"] = (
+    const waitForThread: OrchestrationIntegrationHarness['waitForThread'] = (
       threadId,
       predicate,
       timeoutMs,
@@ -441,9 +457,9 @@ export const makeOrchestrationIntegrationHarness = (
         (thread): thread is OrchestrationThread => thread !== null && predicate(thread),
         `projected thread '${threadId}'`,
         timeoutMs,
-      ) as Effect.Effect<OrchestrationThread, never>;
+      ) as Effect.Effect<OrchestrationThread, never>
 
-    const waitForDomainEvent: OrchestrationIntegrationHarness["waitForDomainEvent"] = (
+    const waitForDomainEvent: OrchestrationIntegrationHarness['waitForDomainEvent'] = (
       predicate,
       timeoutMs,
     ) =>
@@ -452,11 +468,11 @@ export const makeOrchestrationIntegrationHarness = (
           Effect.map((chunk): ReadonlyArray<OrchestrationEvent> => Array.from(chunk)),
         ),
         (events) => events.some(predicate),
-        "domain event",
+        'domain event',
         timeoutMs,
-      );
+      )
 
-    const waitForPendingApproval: OrchestrationIntegrationHarness["waitForPendingApproval"] = (
+    const waitForPendingApproval: OrchestrationIntegrationHarness['waitForPendingApproval'] = (
       requestId,
       predicate,
       timeoutMs,
@@ -479,69 +495,74 @@ export const makeOrchestrationIntegrationHarness = (
         (
           row,
         ): row is {
-          readonly status: "pending" | "resolved";
-          readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-          readonly resolvedAt: string | null;
+          readonly status: 'pending' | 'resolved'
+          readonly decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel' | null
+          readonly resolvedAt: string | null
         } => row !== null && predicate(row),
         `pending approval '${requestId}'`,
         timeoutMs,
       ) as Effect.Effect<
         {
-          readonly status: "pending" | "resolved";
-          readonly decision: "accept" | "acceptForSession" | "decline" | "cancel" | null;
-          readonly resolvedAt: string | null;
+          readonly status: 'pending' | 'resolved'
+          readonly decision: 'accept' | 'acceptForSession' | 'decline' | 'cancel' | null
+          readonly resolvedAt: string | null
         },
         never
-      >;
+      >
 
     function waitForReceipt(
       predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,
       timeoutMs?: number,
-    ): Effect.Effect<OrchestrationRuntimeReceipt, never>;
+    ): Effect.Effect<OrchestrationRuntimeReceipt, never>
     function waitForReceipt<Receipt extends OrchestrationRuntimeReceipt>(
       predicate: (receipt: OrchestrationRuntimeReceipt) => receipt is Receipt,
       timeoutMs?: number,
-    ): Effect.Effect<Receipt, never>;
+    ): Effect.Effect<Receipt, never>
     function waitForReceipt(
       predicate: (receipt: OrchestrationRuntimeReceipt) => boolean,
       timeoutMs?: number,
-    ) {
+    )
+    {
       const readMatchingReceipt = Ref.get(receiptHistory).pipe(
         Effect.map((history) => history.find(predicate)),
-      );
+      )
 
       return waitFor(
         readMatchingReceipt,
         (receipt): receipt is OrchestrationRuntimeReceipt => receipt !== undefined,
-        "runtime receipt",
+        'runtime receipt',
         timeoutMs,
-      );
+      )
     }
 
-    let disposed = false;
-    const dispose = Effect.gen(function* () {
-      if (disposed) {
-        return;
+    let disposed = false
+    const dispose = Effect.gen(function* ()
+    {
+      if (disposed)
+      {
+        return
       }
-      disposed = true;
+      disposed = true
 
-      const shutdown = Effect.gen(function* () {
-        const closeScopeExit = yield* Effect.exit(Scope.close(scope, Exit.void));
-        const disposeRuntimeExit = yield* Effect.exit(Effect.promise(() => runtime.dispose()));
+      const shutdown = Effect.gen(function* ()
+      {
+        const closeScopeExit = yield* Effect.exit(Scope.close(scope, Exit.void))
+        const disposeRuntimeExit = yield* Effect.exit(Effect.promise(() => runtime.dispose()))
 
         const failureCause = Exit.isFailure(closeScopeExit)
           ? closeScopeExit.cause
           : Exit.isFailure(disposeRuntimeExit)
             ? disposeRuntimeExit.cause
-            : null;
+            : null
 
-        if (failureCause) {
-          return yield* Effect.failCause(failureCause);
+        if (failureCause)
+        {
+          return yield* Effect.failCause(failureCause)
         }
-      });
+      })
 
-      yield* shutdown;
-    });
+      yield* shutdown
+    })
 
     return {
       rootDir,
@@ -559,5 +580,5 @@ export const makeOrchestrationIntegrationHarness = (
       waitForPendingApproval,
       waitForReceipt,
       dispose,
-    } satisfies OrchestrationIntegrationHarness;
-  });
+    } satisfies OrchestrationIntegrationHarness
+  })

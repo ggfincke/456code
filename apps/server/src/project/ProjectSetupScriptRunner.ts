@@ -1,96 +1,108 @@
-import { ProjectId } from "@t3tools/contracts";
-import { projectScriptRuntimeEnv, setupProjectScript } from "@t3tools/shared/projectScripts";
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
+// apps/server/src/project/ProjectSetupScriptRunner.ts
+// define project setup script runner result no script
 
-import * as ProjectionSnapshotQuery from "../orchestration/Services/ProjectionSnapshotQuery.ts";
-import * as TerminalManager from "../terminal/Manager.ts";
+import { ProjectId } from '@t3tools/contracts'
+import { projectScriptRuntimeEnv, setupProjectScript } from '@t3tools/shared/projectScripts'
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
 
-export interface ProjectSetupScriptRunnerResultNoScript {
-  readonly status: "no-script";
+import * as ProjectionSnapshotQuery from '../orchestration/Services/ProjectionSnapshotQuery.ts'
+import * as TerminalManager from '../terminal/Manager.ts'
+
+export interface ProjectSetupScriptRunnerResultNoScript
+{
+  readonly status: 'no-script'
 }
 
-export interface ProjectSetupScriptRunnerResultStarted {
-  readonly status: "started";
-  readonly scriptId: string;
-  readonly scriptName: string;
-  readonly terminalId: string;
-  readonly cwd: string;
+export interface ProjectSetupScriptRunnerResultStarted
+{
+  readonly status: 'started'
+  readonly scriptId: string
+  readonly scriptName: string
+  readonly terminalId: string
+  readonly cwd: string
 }
 
 export type ProjectSetupScriptRunnerResult =
-  | ProjectSetupScriptRunnerResultNoScript
-  | ProjectSetupScriptRunnerResultStarted;
+  ProjectSetupScriptRunnerResultNoScript | ProjectSetupScriptRunnerResultStarted
 
-export interface ProjectSetupScriptRunnerInput {
-  readonly threadId: string;
-  readonly projectId?: string;
-  readonly projectCwd?: string;
-  readonly worktreePath: string;
-  readonly preferredTerminalId?: string;
+export interface ProjectSetupScriptRunnerInput
+{
+  readonly threadId: string
+  readonly projectId?: string
+  readonly projectCwd?: string
+  readonly worktreePath: string
+  readonly preferredTerminalId?: string
 }
 
 export class ProjectSetupScriptOperationError extends Schema.TaggedErrorClass<ProjectSetupScriptOperationError>()(
-  "ProjectSetupScriptOperationError",
+  'ProjectSetupScriptOperationError',
   {
     threadId: Schema.String,
     projectId: Schema.optional(Schema.String),
     projectCwd: Schema.optional(Schema.String),
     worktreePath: Schema.String,
-    operation: Schema.Literals(["resolveProject", "openTerminal", "writeCommand"]),
+    operation: Schema.Literals(['resolveProject', 'openTerminal', 'writeCommand']),
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Project setup script operation '${this.operation}' failed for thread '${this.threadId}' in '${this.worktreePath}'.`;
+)
+{
+  override get message(): string
+  {
+    return `Project setup script operation '${this.operation}' failed for thread '${this.threadId}' in '${this.worktreePath}'.`
   }
 }
 
 export class ProjectSetupScriptProjectNotFoundError extends Schema.TaggedErrorClass<ProjectSetupScriptProjectNotFoundError>()(
-  "ProjectSetupScriptProjectNotFoundError",
+  'ProjectSetupScriptProjectNotFoundError',
   {
     threadId: Schema.String,
     projectId: Schema.optional(Schema.String),
     projectCwd: Schema.optional(Schema.String),
     worktreePath: Schema.String,
   },
-) {
-  override get message(): string {
-    return `Project was not found for setup script execution for thread '${this.threadId}' in '${this.worktreePath}'.`;
+)
+{
+  override get message(): string
+  {
+    return `Project was not found for setup script execution for thread '${this.threadId}' in '${this.worktreePath}'.`
   }
 }
 
 export const ProjectSetupScriptRunnerError = Schema.Union([
   ProjectSetupScriptOperationError,
   ProjectSetupScriptProjectNotFoundError,
-]);
-export type ProjectSetupScriptRunnerError = typeof ProjectSetupScriptRunnerError.Type;
+])
+export type ProjectSetupScriptRunnerError = typeof ProjectSetupScriptRunnerError.Type
 
 export class ProjectSetupScriptRunner extends Context.Service<
   ProjectSetupScriptRunner,
   {
     readonly runForThread: (
       input: ProjectSetupScriptRunnerInput,
-    ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError>;
+    ) => Effect.Effect<ProjectSetupScriptRunnerResult, ProjectSetupScriptRunnerError>
   }
->()("456code/project/ProjectSetupScriptRunner") {}
+>()('456code/project/ProjectSetupScriptRunner')
+{}
 
-export const make = Effect.gen(function* () {
-  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery;
-  const terminalManager = yield* TerminalManager.TerminalManager;
+export const make = Effect.gen(function* ()
+{
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery.ProjectionSnapshotQuery
+  const terminalManager = yield* TerminalManager.TerminalManager
 
-  const runForThread: ProjectSetupScriptRunner["Service"]["runForThread"] = Effect.fn(
-    "ProjectSetupScriptRunner.runForThread",
-  )(function* (input) {
+  const runForThread: ProjectSetupScriptRunner['Service']['runForThread'] = Effect.fn(
+    'ProjectSetupScriptRunner.runForThread',
+  )(function* (input)
+  {
     const errorContext = {
       threadId: input.threadId,
       worktreePath: input.worktreePath,
       ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
       ...(input.projectCwd === undefined ? {} : { projectCwd: input.projectCwd }),
-    };
+    }
     const projectById = input.projectId
       ? yield* projectionSnapshotQuery.getProjectShellById(ProjectId.make(input.projectId)).pipe(
           Effect.map(Option.getOrUndefined),
@@ -98,12 +110,12 @@ export const make = Effect.gen(function* () {
             (cause) =>
               new ProjectSetupScriptOperationError({
                 ...errorContext,
-                operation: "resolveProject",
+                operation: 'resolveProject',
                 cause,
               }),
           ),
         )
-      : null;
+      : null
     const project =
       projectById ??
       (input.projectCwd
@@ -113,30 +125,32 @@ export const make = Effect.gen(function* () {
               (cause) =>
                 new ProjectSetupScriptOperationError({
                   ...errorContext,
-                  operation: "resolveProject",
+                  operation: 'resolveProject',
                   cause,
                 }),
             ),
           )
-        : null);
+        : null)
 
-    if (!project) {
-      return yield* new ProjectSetupScriptProjectNotFoundError(errorContext);
+    if (!project)
+    {
+      return yield* new ProjectSetupScriptProjectNotFoundError(errorContext)
     }
 
-    const script = setupProjectScript(project.scripts);
-    if (!script) {
+    const script = setupProjectScript(project.scripts)
+    if (!script)
+    {
       return {
-        status: "no-script",
-      } as const;
+        status: 'no-script',
+      } as const
     }
 
-    const terminalId = input.preferredTerminalId ?? `setup-${script.id}`;
-    const cwd = input.worktreePath;
+    const terminalId = input.preferredTerminalId ?? `setup-${script.id}`
+    const cwd = input.worktreePath
     const env = projectScriptRuntimeEnv({
       project: { cwd: project.workspaceRoot },
       worktreePath: input.worktreePath,
-    });
+    })
 
     yield* terminalManager
       .open({
@@ -151,11 +165,11 @@ export const make = Effect.gen(function* () {
           (cause) =>
             new ProjectSetupScriptOperationError({
               ...errorContext,
-              operation: "openTerminal",
+              operation: 'openTerminal',
               cause,
             }),
         ),
-      );
+      )
     yield* terminalManager
       .write({
         threadId: input.threadId,
@@ -167,22 +181,22 @@ export const make = Effect.gen(function* () {
           (cause) =>
             new ProjectSetupScriptOperationError({
               ...errorContext,
-              operation: "writeCommand",
+              operation: 'writeCommand',
               cause,
             }),
         ),
-      );
+      )
 
     return {
-      status: "started",
+      status: 'started',
       scriptId: script.id,
       scriptName: script.name,
       terminalId,
       cwd,
-    } as const;
-  });
+    } as const
+  })
 
-  return ProjectSetupScriptRunner.of({ runForThread });
-});
+  return ProjectSetupScriptRunner.of({ runForThread })
+})
 
-export const layer = Layer.effect(ProjectSetupScriptRunner, make);
+export const layer = Layer.effect(ProjectSetupScriptRunner, make)

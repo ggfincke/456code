@@ -1,27 +1,32 @@
-import { useEffect, useState } from "react";
+// apps/web/src/components/settings/BetaSettingsPanel.tsx
+// render beta settings panel
 
-import { useClientSettings, useUpdateClientSettings } from "../../hooks/useSettings";
-import { Input } from "../ui/input";
-import { Switch } from "../ui/switch";
-import { SettingsPageContainer, SettingsRow, SettingsSection } from "./settingsLayout";
+import { useEffect, useState } from 'react'
 
-const AUTO_SETTLE_MIN_DAYS = 1;
-const AUTO_SETTLE_MAX_DAYS = 90;
-const AUTO_SETTLE_DEFAULT_DAYS = 3;
+import { useClientSettings, useUpdateClientSettings } from '../../hooks/useSettings'
+import { Input } from '../ui/input'
+import { Switch } from '../ui/switch'
+import { SettingsPageContainer, SettingsRow, SettingsSection } from './settingsLayout'
+
+const AUTO_SETTLE_MIN_DAYS = 1
+const AUTO_SETTLE_MAX_DAYS = 90
+const AUTO_SETTLE_DEFAULT_DAYS = 3
 
 function AutoSettleDaysInput({
   value,
   onCommit,
 }: {
-  value: number;
-  onCommit: (days: number) => void;
-}) {
-  // Local draft so the field can be emptied mid-edit; the setting only moves
+  value: number
+  onCommit: (days: number) => void
+})
+{
+  // local draft so the field can be emptied mid-edit; the setting only moves
   // on valid input and snaps back to the persisted value on blur.
-  const [draft, setDraft] = useState(String(value));
-  useEffect(() => {
-    setDraft(String(value));
-  }, [value]);
+  const [draft, setDraft] = useState(String(value))
+  useEffect(() =>
+  {
+    setDraft(String(value))
+  }, [value])
 
   return (
     <Input
@@ -30,32 +35,35 @@ function AutoSettleDaysInput({
       max={AUTO_SETTLE_MAX_DAYS}
       className="w-full sm:w-24"
       value={draft}
-      onChange={(event) => {
-        setDraft(event.target.value);
-        // Number(), not parseInt: "3.5" must be rejected (not truncated to a
+      onChange={(event) =>
+      {
+        setDraft(event.target.value)
+        // number(), not parseInt: "3.5" must be rejected (not truncated to a
         // committed 3 while the field shows 3.5) — commit only when the
         // persisted value matches the displayed one.
-        const parsed = Number(event.target.value);
+        const parsed = Number(event.target.value)
         if (
           Number.isInteger(parsed) &&
           parsed >= AUTO_SETTLE_MIN_DAYS &&
           parsed <= AUTO_SETTLE_MAX_DAYS
-        ) {
-          onCommit(parsed);
+        )
+        {
+          onCommit(parsed)
         }
       }}
       onBlur={() => setDraft(String(value))}
       aria-label="Days of inactivity before auto-settle"
     />
-  );
+  )
 }
 
-export function BetaSettingsPanel() {
-  const sidebarV2Enabled = useClientSettings((settings) => settings.sidebarV2Enabled);
+export function BetaSettingsPanel()
+{
+  const sidebarV2Enabled = useClientSettings((settings) => settings.sidebarV2Enabled)
   const sidebarAutoSettleAfterDays = useClientSettings(
     (settings) => settings.sidebarAutoSettleAfterDays,
-  );
-  const updateSettings = useUpdateClientSettings();
+  )
+  const updateSettings = useUpdateClientSettings()
 
   return (
     <SettingsPageContainer>
@@ -104,5 +112,5 @@ export function BetaSettingsPanel() {
         ) : null}
       </SettingsSection>
     </SettingsPageContainer>
-  );
+  )
 }

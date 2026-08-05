@@ -1,6 +1,6 @@
 // apps/web/src/routes/settings.tsx
 // declares settings routes and navigation metadata
-import { RotateCcwIcon } from "lucide-react";
+import { RotateCcwIcon } from 'lucide-react'
 import {
   Outlet,
   createFileRoute,
@@ -8,18 +8,19 @@ import {
   useCanGoBack,
   useLocation,
   useNavigate,
-} from "@tanstack/react-router";
-import { useCallback, useEffect, useState } from "react";
+} from '@tanstack/react-router'
+import { useCallback, useEffect, useState } from 'react'
 
-import { useSettingsRestore } from "../components/settings/SettingsPanels";
-import { Button } from "../components/ui/button";
-import { SidebarInset } from "../components/ui/sidebar";
-import { isElectron } from "../env";
-import { cn } from "~/lib/utils";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+import { useSettingsRestore } from '../components/settings/SettingsPanels'
+import { Button } from '../components/ui/button'
+import { SidebarInset } from '../components/ui/sidebar'
+import { isElectron } from '../env'
+import { cn } from '~/lib/utils'
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from '~/workspaceTitlebar'
 
-function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
-  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored);
+function RestoreDefaultsButton({ onRestored }: { onRestored: () => void })
+{
+  const { changedSettingLabels, restoreDefaults } = useSettingsRestore(onRestored)
 
   return (
     <Button
@@ -31,44 +32,52 @@ function RestoreDefaultsButton({ onRestored }: { onRestored: () => void }) {
       <RotateCcwIcon className="mx-1 size-3.5" />
       Restore defaults
     </Button>
-  );
+  )
 }
 
-function SettingsContentLayout() {
-  const location = useLocation();
-  const navigate = useNavigate();
-  const canGoBack = useCanGoBack();
-  const [restoreSignal, setRestoreSignal] = useState(0);
-  const showRestoreDefaults = location.pathname === "/settings/general";
-  const handleRestored = () => setRestoreSignal((value) => value + 1);
-  const navigateBackWithinApp = useCallback(() => {
-    if (canGoBack) {
-      window.history.back();
-      return;
+function SettingsContentLayout()
+{
+  const location = useLocation()
+  const navigate = useNavigate()
+  const canGoBack = useCanGoBack()
+  const [restoreSignal, setRestoreSignal] = useState(0)
+  const showRestoreDefaults = location.pathname === '/settings/general'
+  const handleRestored = () => setRestoreSignal((value) => value + 1)
+  const navigateBackWithinApp = useCallback(() =>
+  {
+    if (canGoBack)
+    {
+      window.history.back()
+      return
     }
-    void navigate({ to: "/" });
-  }, [canGoBack, navigate]);
+    void navigate({ to: '/' })
+  }, [canGoBack, navigate])
 
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.key === "Escape") {
-        event.preventDefault();
+  useEffect(() =>
+  {
+    const onKeyDown = (event: KeyboardEvent) =>
+    {
+      if (event.defaultPrevented) return
+      if (event.key === 'Escape')
+      {
+        event.preventDefault()
 
-        const activeElement = document.activeElement;
-        if (activeElement instanceof HTMLElement) {
-          activeElement.blur();
+        const activeElement = document.activeElement
+        if (activeElement instanceof HTMLElement)
+        {
+          activeElement.blur()
         }
 
-        navigateBackWithinApp();
+        navigateBackWithinApp()
       }
-    };
+    }
 
-    window.addEventListener("keydown", onKeyDown);
-    return () => {
-      window.removeEventListener("keydown", onKeyDown);
-    };
-  }, [navigateBackWithinApp]);
+    window.addEventListener('keydown', onKeyDown)
+    return () =>
+    {
+      window.removeEventListener('keydown', onKeyDown)
+    }
+  }, [navigateBackWithinApp])
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground isolate">
@@ -76,7 +85,7 @@ function SettingsContentLayout() {
         {!isElectron && (
           <header
             className={cn(
-              "px-3 py-2 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5",
+              'px-3 py-2 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5',
               COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             )}
           >
@@ -94,7 +103,7 @@ function SettingsContentLayout() {
         {isElectron && (
           <div
             className={cn(
-              "drag-region flex h-[52px] shrink-0 items-center px-5 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]",
+              'drag-region flex h-[52px] shrink-0 items-center px-5 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]',
               COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
             )}
           >
@@ -114,25 +123,29 @@ function SettingsContentLayout() {
         </div>
       </div>
     </SidebarInset>
-  );
+  )
 }
 
-function SettingsRouteLayout() {
-  return <SettingsContentLayout />;
+function SettingsRouteLayout()
+{
+  return <SettingsContentLayout />
 }
 
-export const Route = createFileRoute("/settings")({
-  beforeLoad: async ({ context, location }) => {
+export const Route = createFileRoute('/settings')({
+  beforeLoad: async ({ context, location }) =>
+  {
     if (
-      context.authGateState.status !== "authenticated" &&
-      context.authGateState.status !== "hosted-static"
-    ) {
-      throw redirect({ to: "/pair", replace: true });
+      context.authGateState.status !== 'authenticated' &&
+      context.authGateState.status !== 'hosted-static'
+    )
+    {
+      throw redirect({ to: '/pair', replace: true })
     }
 
-    if (location.pathname === "/settings") {
-      throw redirect({ to: "/settings/general", replace: true });
+    if (location.pathname === '/settings')
+    {
+      throw redirect({ to: '/settings/general', replace: true })
     }
   },
   component: SettingsRouteLayout,
-});
+})

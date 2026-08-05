@@ -6,47 +6,49 @@
  *
  * @module ServerConfig
  */
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as LogLevel from "effect/LogLevel";
-import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as LogLevel from 'effect/LogLevel'
+import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
 
-export const DEFAULT_PORT = 3773;
+export const DEFAULT_PORT = 3773
 
-export const RuntimeMode = Schema.Literals(["web", "desktop"]);
-export type RuntimeMode = typeof RuntimeMode.Type;
+export const RuntimeMode = Schema.Literals(['web', 'desktop'])
+export type RuntimeMode = typeof RuntimeMode.Type
 
-export const StartupPresentation = Schema.Literals(["browser", "headless"]);
-export type StartupPresentation = typeof StartupPresentation.Type;
+export const StartupPresentation = Schema.Literals(['browser', 'headless'])
+export type StartupPresentation = typeof StartupPresentation.Type
 
 /**
  * ServerDerivedPaths - Derived paths from the base directory.
  */
-export interface ServerDerivedPaths {
-  readonly stateDir: string;
-  readonly dbPath: string;
-  readonly keybindingsConfigPath: string;
-  readonly settingsPath: string;
-  readonly providerStatusCacheDir: string;
-  readonly worktreesDir: string;
-  readonly attachmentsDir: string;
-  readonly logsDir: string;
-  readonly serverLogPath: string;
-  readonly serverTracePath: string;
-  readonly providerLogsDir: string;
-  readonly providerEventLogPath: string;
-  readonly terminalLogsDir: string;
-  readonly anonymousIdPath: string;
-  readonly environmentIdPath: string;
-  readonly serverRuntimeStatePath: string;
-  readonly secretsDir: string;
+export interface ServerDerivedPaths
+{
+  readonly stateDir: string
+  readonly dbPath: string
+  readonly keybindingsConfigPath: string
+  readonly settingsPath: string
+  readonly providerStatusCacheDir: string
+  readonly worktreesDir: string
+  readonly attachmentsDir: string
+  readonly logsDir: string
+  readonly serverLogPath: string
+  readonly serverTracePath: string
+  readonly providerLogsDir: string
+  readonly providerEventLogPath: string
+  readonly terminalLogsDir: string
+  readonly anonymousIdPath: string
+  readonly environmentIdPath: string
+  readonly serverRuntimeStatePath: string
+  readonly secretsDir: string
 }
 
-export interface DeriveServerPathsOptions {
-  readonly baseDirIsExplicit?: boolean;
+export interface DeriveServerPathsOptions
+{
+  readonly baseDirIsExplicit?: boolean
 }
 
 /**
@@ -55,82 +57,85 @@ export interface DeriveServerPathsOptions {
 export class ServerConfig extends Context.Service<
   ServerConfig,
   ServerDerivedPaths & {
-    readonly logLevel: LogLevel.LogLevel;
-    readonly traceMinLevel: LogLevel.LogLevel;
-    readonly traceTimingEnabled: boolean;
-    readonly traceBatchWindowMs: number;
-    readonly traceMaxBytes: number;
-    readonly traceMaxFiles: number;
-    readonly otlpTracesUrl: string | undefined;
-    readonly otlpMetricsUrl: string | undefined;
-    readonly otlpExportIntervalMs: number;
-    readonly otlpServiceName: string;
-    readonly mode: RuntimeMode;
-    readonly port: number;
-    readonly host: string | undefined;
-    readonly cwd: string;
-    readonly baseDir: string;
-    readonly staticDir: string | undefined;
-    readonly devUrl: URL | undefined;
-    readonly noBrowser: boolean;
-    readonly startupPresentation: StartupPresentation;
-    readonly desktopBootstrapToken: string | undefined;
-    readonly autoBootstrapProjectFromCwd: boolean;
-    readonly logWebSocketEvents: boolean;
-    readonly tailscaleServeEnabled: boolean;
-    readonly tailscaleServePort: number;
+    readonly logLevel: LogLevel.LogLevel
+    readonly traceMinLevel: LogLevel.LogLevel
+    readonly traceTimingEnabled: boolean
+    readonly traceBatchWindowMs: number
+    readonly traceMaxBytes: number
+    readonly traceMaxFiles: number
+    readonly otlpTracesUrl: string | undefined
+    readonly otlpMetricsUrl: string | undefined
+    readonly otlpExportIntervalMs: number
+    readonly otlpServiceName: string
+    readonly mode: RuntimeMode
+    readonly port: number
+    readonly host: string | undefined
+    readonly cwd: string
+    readonly baseDir: string
+    readonly staticDir: string | undefined
+    readonly devUrl: URL | undefined
+    readonly noBrowser: boolean
+    readonly startupPresentation: StartupPresentation
+    readonly desktopBootstrapToken: string | undefined
+    readonly autoBootstrapProjectFromCwd: boolean
+    readonly logWebSocketEvents: boolean
+    readonly tailscaleServeEnabled: boolean
+    readonly tailscaleServePort: number
   }
->()("456code/config/ServerConfig") {
+>()('456code/config/ServerConfig')
+{
   /** @deprecated Import and use `layerTest` from this module. */
   static readonly layerTest = (
     cwd: string,
     baseDirOrPrefix: string | { readonly prefix: string },
-  ) => layerTest(cwd, baseDirOrPrefix);
+  ) => layerTest(cwd, baseDirOrPrefix)
 }
 
-export const make = (config: ServerConfig["Service"]) => ServerConfig.of(config);
+export const make = (config: ServerConfig['Service']) => ServerConfig.of(config)
 
-export const layer = (config: ServerConfig["Service"]) => Layer.succeed(ServerConfig, make(config));
+export const layer = (config: ServerConfig['Service']) => Layer.succeed(ServerConfig, make(config))
 
 export const deriveServerPaths = Effect.fn(function* (
-  baseDir: ServerConfig["Service"]["baseDir"],
-  devUrl: ServerConfig["Service"]["devUrl"],
+  baseDir: ServerConfig['Service']['baseDir'],
+  devUrl: ServerConfig['Service']['devUrl'],
   options: DeriveServerPathsOptions = {},
-): Effect.fn.Return<ServerDerivedPaths, never, Path.Path> {
-  const { join } = yield* Path.Path;
+): Effect.fn.Return<ServerDerivedPaths, never, Path.Path>
+{
+  const { join } = yield* Path.Path
   const stateDir = join(
     baseDir,
-    devUrl !== undefined && !options.baseDirIsExplicit ? "dev" : "userdata",
-  );
-  const dbPath = join(stateDir, "state.sqlite");
-  const attachmentsDir = join(stateDir, "attachments");
-  const logsDir = join(stateDir, "logs");
-  const providerLogsDir = join(logsDir, "provider");
-  const providerStatusCacheDir = join(baseDir, "caches");
+    devUrl !== undefined && !options.baseDirIsExplicit ? 'dev' : 'userdata',
+  )
+  const dbPath = join(stateDir, 'state.sqlite')
+  const attachmentsDir = join(stateDir, 'attachments')
+  const logsDir = join(stateDir, 'logs')
+  const providerLogsDir = join(logsDir, 'provider')
+  const providerStatusCacheDir = join(baseDir, 'caches')
   return {
     stateDir,
     dbPath,
-    keybindingsConfigPath: join(stateDir, "keybindings.json"),
-    settingsPath: join(stateDir, "settings.json"),
+    keybindingsConfigPath: join(stateDir, 'keybindings.json'),
+    settingsPath: join(stateDir, 'settings.json'),
     providerStatusCacheDir,
-    worktreesDir: join(baseDir, "worktrees"),
+    worktreesDir: join(baseDir, 'worktrees'),
     attachmentsDir,
     logsDir,
-    serverLogPath: join(logsDir, "server.log"),
-    serverTracePath: join(logsDir, "server.trace.ndjson"),
+    serverLogPath: join(logsDir, 'server.log'),
+    serverTracePath: join(logsDir, 'server.trace.ndjson'),
     providerLogsDir,
-    providerEventLogPath: join(providerLogsDir, "events.log"),
-    terminalLogsDir: join(logsDir, "terminals"),
-    anonymousIdPath: join(stateDir, "anonymous-id"),
-    environmentIdPath: join(stateDir, "environment-id"),
-    serverRuntimeStatePath: join(stateDir, "server-runtime.json"),
-    secretsDir: join(stateDir, "secrets"),
-  };
-});
+    providerEventLogPath: join(providerLogsDir, 'events.log'),
+    terminalLogsDir: join(logsDir, 'terminals'),
+    anonymousIdPath: join(stateDir, 'anonymous-id'),
+    environmentIdPath: join(stateDir, 'environment-id'),
+    serverRuntimeStatePath: join(stateDir, 'server-runtime.json'),
+    secretsDir: join(stateDir, 'secrets'),
+  }
+})
 
-export const ensureServerDirectories = Effect.fn(function* (derivedPaths: ServerDerivedPaths) {
-  const fs = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
+export const ensureServerDirectories = Effect.fn(function* (derivedPaths: ServerDerivedPaths)
+{
+  const fs = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
 
   yield* Effect.all(
     [
@@ -146,26 +151,27 @@ export const ensureServerDirectories = Effect.fn(function* (derivedPaths: Server
       fs.makeDirectory(path.dirname(derivedPaths.anonymousIdPath), { recursive: true }),
       fs.makeDirectory(path.dirname(derivedPaths.serverRuntimeStatePath), { recursive: true }),
     ],
-    { concurrency: "unbounded" },
-  );
-});
+    { concurrency: 'unbounded' },
+  )
+})
 
-const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
+const makeTest = Effect.fn('ServerConfig.makeTest')(function* (
   cwd: string,
   baseDirOrPrefix: string | { readonly prefix: string },
-) {
-  const devUrl = undefined;
-  const fs = yield* FileSystem.FileSystem;
+)
+{
+  const devUrl = undefined
+  const fs = yield* FileSystem.FileSystem
   const baseDir =
-    typeof baseDirOrPrefix === "string"
+    typeof baseDirOrPrefix === 'string'
       ? baseDirOrPrefix
-      : yield* fs.makeTempDirectoryScoped({ prefix: baseDirOrPrefix.prefix });
-  const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
-  yield* ensureServerDirectories(derivedPaths);
+      : yield* fs.makeTempDirectoryScoped({ prefix: baseDirOrPrefix.prefix })
+  const derivedPaths = yield* deriveServerPaths(baseDir, devUrl)
+  yield* ensureServerDirectories(derivedPaths)
 
   return ServerConfig.of({
-    logLevel: "Error",
-    traceMinLevel: "Info",
+    logLevel: 'Error',
+    traceMinLevel: 'Info',
     traceTimingEnabled: true,
     traceBatchWindowMs: 200,
     traceMaxBytes: 10 * 1024 * 1024,
@@ -173,11 +179,11 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     otlpTracesUrl: undefined,
     otlpMetricsUrl: undefined,
     otlpExportIntervalMs: 10_000,
-    otlpServiceName: "t3-server",
+    otlpServiceName: 't3-server',
     cwd,
     baseDir,
     ...derivedPaths,
-    mode: "web",
+    mode: 'web',
     autoBootstrapProjectFromCwd: false,
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
@@ -188,30 +194,33 @@ const makeTest = Effect.fn("ServerConfig.makeTest")(function* (
     staticDir: undefined,
     devUrl,
     noBrowser: false,
-    startupPresentation: "browser",
-  });
-});
+    startupPresentation: 'browser',
+  })
+})
 
 export const layerTest = (cwd: string, baseDirOrPrefix: string | { readonly prefix: string }) =>
-  Layer.effect(ServerConfig, makeTest(cwd, baseDirOrPrefix));
+  Layer.effect(ServerConfig, makeTest(cwd, baseDirOrPrefix))
 
-export const resolveStaticDir = Effect.fn(function* () {
-  const { join, resolve } = yield* Path.Path;
-  const { exists } = yield* FileSystem.FileSystem;
-  const bundledClient = resolve(join(import.meta.dirname, "client"));
-  const bundledStat = yield* exists(join(bundledClient, "index.html")).pipe(
+export const resolveStaticDir = Effect.fn(function* ()
+{
+  const { join, resolve } = yield* Path.Path
+  const { exists } = yield* FileSystem.FileSystem
+  const bundledClient = resolve(join(import.meta.dirname, 'client'))
+  const bundledStat = yield* exists(join(bundledClient, 'index.html')).pipe(
     Effect.orElseSucceed(() => false),
-  );
-  if (bundledStat) {
-    return bundledClient;
+  )
+  if (bundledStat)
+  {
+    return bundledClient
   }
 
-  const monorepoClient = resolve(join(import.meta.dirname, "../../web/dist"));
-  const monorepoStat = yield* exists(join(monorepoClient, "index.html")).pipe(
+  const monorepoClient = resolve(join(import.meta.dirname, '../../web/dist'))
+  const monorepoStat = yield* exists(join(monorepoClient, 'index.html')).pipe(
     Effect.orElseSucceed(() => false),
-  );
-  if (monorepoStat) {
-    return monorepoClient;
+  )
+  if (monorepoStat)
+  {
+    return monorepoClient
   }
-  return undefined;
-});
+  return undefined
+})

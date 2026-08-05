@@ -1,5 +1,8 @@
-import { createAuthEnvironmentAtoms } from "@t3tools/client-runtime/state/auth";
+// apps/mobile/src/state/auth.ts
+// manage auth environment state
 
-import { connectionAtomRuntime } from "../connection/runtime";
+import { createAuthEnvironmentAtoms } from '@t3tools/client-runtime/state/auth'
 
-export const authEnvironment = createAuthEnvironmentAtoms(connectionAtomRuntime);
+import { connectionAtomRuntime } from '../connection/runtime'
+
+export const authEnvironment = createAuthEnvironmentAtoms(connectionAtomRuntime)

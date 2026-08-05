@@ -1,61 +1,68 @@
 // apps/web/src/components/chat/ComposerPrimaryActions.tsx
 // renders composer send and interrupt actions
 
-import { memo, type PointerEventHandler } from "react";
-import { ChevronDownIcon, ChevronLeftIcon } from "lucide-react";
-import { cn } from "~/lib/utils";
-import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from "../SidebarStageBackdrop";
-import { Button } from "../ui/button";
-import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
-import { Spinner } from "../ui/spinner";
+import { memo, type PointerEventHandler } from 'react'
+import { ChevronDownIcon, ChevronLeftIcon } from 'lucide-react'
+import { cn } from '~/lib/utils'
+import { StageBackdropButtonArt, useSidebarStageBackdropVariant } from '../SidebarStageBackdrop'
+import { Button } from '../ui/button'
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from '../ui/menu'
+import { Spinner } from '../ui/spinner'
 
-interface PendingActionState {
-  questionIndex: number;
-  isLastQuestion: boolean;
-  canAdvance: boolean;
-  isResponding: boolean;
-  isComplete: boolean;
+interface PendingActionState
+{
+  questionIndex: number
+  isLastQuestion: boolean
+  canAdvance: boolean
+  isResponding: boolean
+  isComplete: boolean
 }
 
-interface ComposerPrimaryActionsProps {
-  compact: boolean;
-  pendingAction: PendingActionState | null;
-  isRunning: boolean;
-  showPlanFollowUpPrompt: boolean;
-  promptHasText: boolean;
-  isSendBusy: boolean;
-  sendDisabledReason: string | null;
-  isConnecting: boolean;
-  isEnvironmentUnavailable: boolean;
-  isPreparingWorktree: boolean;
-  hasSendableContent: boolean;
-  preserveComposerFocusOnPointerDown?: boolean;
-  onPreviousPendingQuestion: () => void;
-  onInterrupt: () => void;
-  onImplementPlanInNewThread: () => void;
+interface ComposerPrimaryActionsProps
+{
+  compact: boolean
+  pendingAction: PendingActionState | null
+  isRunning: boolean
+  showPlanFollowUpPrompt: boolean
+  promptHasText: boolean
+  isSendBusy: boolean
+  sendDisabledReason: string | null
+  isConnecting: boolean
+  isEnvironmentUnavailable: boolean
+  isPreparingWorktree: boolean
+  hasSendableContent: boolean
+  preserveComposerFocusOnPointerDown?: boolean
+  onPreviousPendingQuestion: () => void
+  onInterrupt: () => void
+  onImplementPlanInNewThread: () => void
 }
 
 export const formatPendingPrimaryActionLabel = (input: {
-  compact: boolean;
-  isLastQuestion: boolean;
-  isResponding: boolean;
-  questionIndex: number;
-}) => {
-  if (input.isResponding) {
-    return "Submitting...";
+  compact: boolean
+  isLastQuestion: boolean
+  isResponding: boolean
+  questionIndex: number
+}) =>
+{
+  if (input.isResponding)
+  {
+    return 'Submitting...'
   }
-  if (input.compact) {
-    return input.isLastQuestion ? "Submit" : "Next";
+  if (input.compact)
+  {
+    return input.isLastQuestion ? 'Submit' : 'Next'
   }
-  if (!input.isLastQuestion) {
-    return "Next question";
+  if (!input.isLastQuestion)
+  {
+    return 'Next question'
   }
-  return input.questionIndex > 0 ? "Submit answers" : "Submit answer";
-};
+  return input.questionIndex > 0 ? 'Submit answers' : 'Submit answer'
+}
 
-const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) => {
-  event.preventDefault();
-};
+const preventPointerFocus: PointerEventHandler<HTMLElement> = (event) =>
+{
+  event.preventDefault()
+}
 
 export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   compact,
@@ -73,16 +80,18 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   onPreviousPendingQuestion,
   onInterrupt,
   onImplementPlanInNewThread,
-}: ComposerPrimaryActionsProps) {
+}: ComposerPrimaryActionsProps)
+{
   const pointerFocusProps = preserveComposerFocusOnPointerDown
     ? { onPointerDown: preventPointerFocus }
-    : undefined;
-  const isSendDisabled = sendDisabledReason !== null;
-  const stageBackdropVariant = useSidebarStageBackdropVariant();
+    : undefined
+  const isSendDisabled = sendDisabledReason !== null
+  const stageBackdropVariant = useSidebarStageBackdropVariant()
 
-  if (pendingAction) {
+  if (pendingAction)
+  {
     return (
-      <div className={cn("flex items-center justify-end", compact ? "gap-1.5" : "gap-2")}>
+      <div className={cn('flex items-center justify-end', compact ? 'gap-1.5' : 'gap-2')}>
         {pendingAction.questionIndex > 0 ? (
           compact ? (
             <Button
@@ -112,7 +121,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         <Button
           type="submit"
           size="sm"
-          className={cn("rounded-full", compact ? "px-3" : "px-4")}
+          className={cn('rounded-full', compact ? 'px-3' : 'px-4')}
           {...pointerFocusProps}
           disabled={
             isEnvironmentUnavailable ||
@@ -128,10 +137,11 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           })}
         </Button>
       </div>
-    );
+    )
   }
 
-  if (isRunning) {
+  if (isRunning)
+  {
     return (
       <button
         type="button"
@@ -144,22 +154,24 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           <rect x="2" y="2" width="8" height="8" rx="1.5" />
         </svg>
       </button>
-    );
+    )
   }
 
-  if (showPlanFollowUpPrompt) {
-    if (promptHasText) {
+  if (showPlanFollowUpPrompt)
+  {
+    if (promptHasText)
+    {
       return (
         <Button
           type="submit"
           size="sm"
-          className={cn("rounded-full", compact ? "h-9 px-3 sm:h-8" : "h-9 px-4 sm:h-8")}
+          className={cn('rounded-full', compact ? 'h-9 px-3 sm:h-8' : 'h-9 px-4 sm:h-8')}
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Refine"}
+          {isConnecting || isSendBusy ? 'Sending...' : 'Refine'}
         </Button>
-      );
+      )
     }
 
     return (
@@ -171,7 +183,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           {...pointerFocusProps}
           disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
         >
-          {isConnecting || isSendBusy ? "Sending..." : "Implement"}
+          {isConnecting || isSendBusy ? 'Sending...' : 'Implement'}
         </Button>
         <Menu>
           <MenuTrigger
@@ -198,17 +210,17 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
           </MenuPopup>
         </Menu>
       </div>
-    );
+    )
   }
 
   return (
     <button
       type="submit"
       className={cn(
-        "relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8",
+        'relative isolate flex h-9 w-9 items-center justify-center overflow-hidden rounded-full text-primary-foreground shadow-xs transition-all duration-150 enabled:cursor-pointer enabled:inset-shadow-[0_1px_--theme(--color-white/16%)] hover:scale-105 active:inset-shadow-[0_1px_--theme(--color-black/8%)] active:shadow-none disabled:pointer-events-none disabled:opacity-30 disabled:shadow-none disabled:hover:scale-100 sm:h-8 sm:w-8',
         stageBackdropVariant
-          ? "bg-transparent enabled:shadow-black/24 enabled:hover:brightness-110"
-          : "bg-primary/90 enabled:shadow-primary/24 hover:bg-primary",
+          ? 'bg-transparent enabled:shadow-black/24 enabled:hover:brightness-110'
+          : 'bg-primary/90 enabled:shadow-primary/24 hover:bg-primary',
       )}
       {...pointerFocusProps}
       disabled={
@@ -220,16 +232,16 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
       }
       aria-label={
         isEnvironmentUnavailable
-          ? "Environment disconnected"
+          ? 'Environment disconnected'
           : sendDisabledReason
             ? sendDisabledReason
             : isConnecting
-              ? "Connecting"
+              ? 'Connecting'
               : isPreparingWorktree
-                ? "Preparing worktree"
+                ? 'Preparing worktree'
                 : isSendBusy
-                  ? "Sending"
-                  : "Send message"
+                  ? 'Sending'
+                  : 'Send message'
       }
     >
       {stageBackdropVariant ? (
@@ -251,5 +263,5 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
         </svg>
       )}
     </button>
-  );
-});
+  )
+})

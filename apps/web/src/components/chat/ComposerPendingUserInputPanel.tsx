@@ -1,20 +1,24 @@
-import { type ApprovalRequestId } from "@t3tools/contracts";
-import { memo, useEffect, useEffectEvent, useRef, useState } from "react";
-import { type PendingUserInput } from "../../session-logic";
+// apps/web/src/components/chat/ComposerPendingUserInputPanel.tsx
+// render composer pending user input panel
+
+import { type ApprovalRequestId } from '@t3tools/contracts'
+import { memo, useEffect, useEffectEvent, useRef, useState } from 'react'
+import { type PendingUserInput } from '../../session-logic'
 import {
   derivePendingUserInputProgress,
   type PendingUserInputDraftAnswer,
-} from "../../pendingUserInput";
-import { CheckIcon } from "lucide-react";
-import { cn } from "~/lib/utils";
+} from '../../pendingUserInput'
+import { CheckIcon } from 'lucide-react'
+import { cn } from '~/lib/utils'
 
-interface PendingUserInputPanelProps {
-  pendingUserInputs: PendingUserInput[];
-  respondingRequestIds: ApprovalRequestId[];
-  answers: Record<string, PendingUserInputDraftAnswer>;
-  questionIndex: number;
-  onToggleOption: (questionId: string, optionLabel: string) => void;
-  onAdvance: () => void;
+interface PendingUserInputPanelProps
+{
+  pendingUserInputs: PendingUserInput[]
+  respondingRequestIds: ApprovalRequestId[]
+  answers: Record<string, PendingUserInputDraftAnswer>
+  questionIndex: number
+  onToggleOption: (questionId: string, optionLabel: string) => void
+  onAdvance: () => void
 }
 
 export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserInputPanel({
@@ -24,10 +28,11 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
   questionIndex,
   onToggleOption,
   onAdvance,
-}: PendingUserInputPanelProps) {
-  if (pendingUserInputs.length === 0) return null;
-  const activePrompt = pendingUserInputs[0];
-  if (!activePrompt) return null;
+}: PendingUserInputPanelProps)
+{
+  if (pendingUserInputs.length === 0) return null
+  const activePrompt = pendingUserInputs[0]
+  if (!activePrompt) return null
 
   return (
     <ComposerPendingUserInputCard
@@ -39,8 +44,8 @@ export const ComposerPendingUserInputPanel = memo(function ComposerPendingUserIn
       onToggleOption={onToggleOption}
       onAdvance={onAdvance}
     />
-  );
-});
+  )
+})
 
 const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard({
   prompt,
@@ -50,130 +55,146 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
   onToggleOption,
   onAdvance,
 }: {
-  prompt: PendingUserInput;
-  isResponding: boolean;
-  answers: Record<string, PendingUserInputDraftAnswer>;
-  questionIndex: number;
-  onToggleOption: (questionId: string, optionLabel: string) => void;
-  onAdvance: () => void;
-}) {
-  const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex);
-  const activeQuestion = progress.activeQuestion;
-  const activeQuestionIdRef = useRef(activeQuestion?.id ?? null);
-  activeQuestionIdRef.current = activeQuestion?.id ?? null;
+  prompt: PendingUserInput
+  isResponding: boolean
+  answers: Record<string, PendingUserInputDraftAnswer>
+  questionIndex: number
+  onToggleOption: (questionId: string, optionLabel: string) => void
+  onAdvance: () => void
+})
+{
+  const progress = derivePendingUserInputProgress(prompt.questions, answers, questionIndex)
+  const activeQuestion = progress.activeQuestion
+  const activeQuestionIdRef = useRef(activeQuestion?.id ?? null)
+  activeQuestionIdRef.current = activeQuestion?.id ?? null
   const autoAdvanceTimerRef = useRef<{
-    questionId: string;
-    timeoutId: number;
-  } | null>(null);
-  const onAdvanceRef = useRef(onAdvance);
+    questionId: string
+    timeoutId: number
+  } | null>(null)
+  const onAdvanceRef = useRef(onAdvance)
   const [optimisticSingleSelect, setOptimisticSingleSelect] = useState<{
-    questionId: string;
-    optionLabel: string;
-  } | null>(null);
+    questionId: string
+    optionLabel: string
+  } | null>(null)
 
-  useEffect(() => {
-    onAdvanceRef.current = onAdvance;
-  }, [onAdvance]);
+  useEffect(() =>
+  {
+    onAdvanceRef.current = onAdvance
+  }, [onAdvance])
 
-  useEffect(() => {
-    if (!activeQuestion || activeQuestion.multiSelect || !optimisticSingleSelect) {
-      return;
+  useEffect(() =>
+  {
+    if (!activeQuestion || activeQuestion.multiSelect || !optimisticSingleSelect)
+    {
+      return
     }
-    if (optimisticSingleSelect.questionId !== activeQuestion.id) {
-      setOptimisticSingleSelect(null);
-      return;
+    if (optimisticSingleSelect.questionId !== activeQuestion.id)
+    {
+      setOptimisticSingleSelect(null)
+      return
     }
     if (
       progress.customAnswer.trim().length === 0 &&
       progress.selectedOptionLabels.includes(optimisticSingleSelect.optionLabel)
-    ) {
-      setOptimisticSingleSelect(null);
+    )
+    {
+      setOptimisticSingleSelect(null)
     }
-  }, [
-    activeQuestion,
-    optimisticSingleSelect,
-    progress.customAnswer,
-    progress.selectedOptionLabels,
-  ]);
+  }, [activeQuestion, optimisticSingleSelect, progress.customAnswer, progress.selectedOptionLabels])
 
-  useEffect(() => {
-    const timer = autoAdvanceTimerRef.current;
-    if (timer && timer.questionId !== activeQuestion?.id) {
-      window.clearTimeout(timer.timeoutId);
-      autoAdvanceTimerRef.current = null;
+  useEffect(() =>
+  {
+    const timer = autoAdvanceTimerRef.current
+    if (timer && timer.questionId !== activeQuestion?.id)
+    {
+      window.clearTimeout(timer.timeoutId)
+      autoAdvanceTimerRef.current = null
     }
-  }, [activeQuestion?.id]);
+  }, [activeQuestion?.id])
 
   // clear the auto-advance timer on unmount
-  useEffect(() => {
-    return () => {
-      const timer = autoAdvanceTimerRef.current;
-      if (timer) {
-        window.clearTimeout(timer.timeoutId);
-        autoAdvanceTimerRef.current = null;
+  useEffect(() =>
+  {
+    return () =>
+    {
+      const timer = autoAdvanceTimerRef.current
+      if (timer)
+      {
+        window.clearTimeout(timer.timeoutId)
+        autoAdvanceTimerRef.current = null
       }
-    };
-  }, []);
+    }
+  }, [])
 
-  const handleOptionSelection = useEffectEvent((questionId: string, optionLabel: string) => {
-    if (activeQuestion?.multiSelect) {
-      onToggleOption(questionId, optionLabel);
-      return;
+  const handleOptionSelection = useEffectEvent((questionId: string, optionLabel: string) =>
+  {
+    if (activeQuestion?.multiSelect)
+    {
+      onToggleOption(questionId, optionLabel)
+      return
     }
-    setOptimisticSingleSelect({ questionId, optionLabel });
-    onToggleOption(questionId, optionLabel);
-    const armedTimer = autoAdvanceTimerRef.current;
-    if (armedTimer) {
-      window.clearTimeout(armedTimer.timeoutId);
+    setOptimisticSingleSelect({ questionId, optionLabel })
+    onToggleOption(questionId, optionLabel)
+    const armedTimer = autoAdvanceTimerRef.current
+    if (armedTimer)
+    {
+      window.clearTimeout(armedTimer.timeoutId)
     }
-    const timeoutId = window.setTimeout(() => {
+    const timeoutId = window.setTimeout(() =>
+    {
       if (
         autoAdvanceTimerRef.current?.questionId !== questionId ||
         activeQuestionIdRef.current !== questionId
-      ) {
-        return;
+      )
+      {
+        return
       }
-      autoAdvanceTimerRef.current = null;
-      onAdvanceRef.current();
-    }, 200);
-    autoAdvanceTimerRef.current = { questionId, timeoutId };
-  });
+      autoAdvanceTimerRef.current = null
+      onAdvanceRef.current()
+    }, 200)
+    autoAdvanceTimerRef.current = { questionId, timeoutId }
+  })
 
-  // Keyboard shortcut: number keys 1-9 select corresponding options when focus is
+  // keyboard shortcut: number keys 1-9 select corresponding options when focus is
   // outside editable fields. Multi-select prompts toggle options in place; single-
   // select prompts keep the existing auto-advance behavior.
-  useEffect(() => {
-    if (!activeQuestion || isResponding) return;
-    const handler = (event: globalThis.KeyboardEvent) => {
-      if (event.metaKey || event.ctrlKey || event.altKey) return;
-      const target = event.target;
-      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) {
-        return;
+  useEffect(() =>
+  {
+    if (!activeQuestion || isResponding) return
+    const handler = (event: globalThis.KeyboardEvent) =>
+    {
+      if (event.metaKey || event.ctrlKey || event.altKey) return
+      const target = event.target
+      if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement)
+      {
+        return
       }
       if (
         target instanceof HTMLElement &&
         target.closest('[contenteditable]:not([contenteditable="false"])')
-      ) {
-        return;
+      )
+      {
+        return
       }
-      const digit = Number.parseInt(event.key, 10);
-      if (Number.isNaN(digit) || digit < 1 || digit > 9) return;
-      const optionIndex = digit - 1;
-      if (optionIndex >= activeQuestion.options.length) return;
-      const option = activeQuestion.options[optionIndex];
-      if (!option) return;
-      event.preventDefault();
-      handleOptionSelection(activeQuestion.id, option.label);
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [activeQuestion, isResponding]);
+      const digit = Number.parseInt(event.key, 10)
+      if (Number.isNaN(digit) || digit < 1 || digit > 9) return
+      const optionIndex = digit - 1
+      if (optionIndex >= activeQuestion.options.length) return
+      const option = activeQuestion.options[optionIndex]
+      if (!option) return
+      event.preventDefault()
+      handleOptionSelection(activeQuestion.id, option.label)
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [activeQuestion, isResponding])
 
-  if (!activeQuestion) {
-    return null;
+  if (!activeQuestion)
+  {
+    return null
   }
 
-  const customAnswerActive = progress.customAnswer.trim().length > 0;
+  const customAnswerActive = progress.customAnswer.trim().length > 0
 
   return (
     <div className="px-4 py-3 sm:px-5">
@@ -192,22 +213,23 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
         <p className="mt-1 text-xs text-muted-foreground/65">Select one or more options.</p>
       ) : null}
       <div className="mt-3 space-y-1.5">
-        {activeQuestion.options.map((option, index) => {
+        {activeQuestion.options.map((option, index) =>
+        {
           const isOptimisticallySelected =
             optimisticSingleSelect?.questionId === activeQuestion.id &&
-            optimisticSingleSelect.optionLabel === option.label;
+            optimisticSingleSelect.optionLabel === option.label
           const isSelected =
             isOptimisticallySelected ||
-            (!customAnswerActive && progress.selectedOptionLabels.includes(option.label));
-          const shortcutKey = index < 9 ? index + 1 : null;
+            (!customAnswerActive && progress.selectedOptionLabels.includes(option.label))
+          const shortcutKey = index < 9 ? index + 1 : null
           const className = cn(
-            "group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25",
+            'group flex w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-all duration-150 focus-visible:border-primary/40 focus-visible:ring-1 focus-visible:ring-primary/25',
             isSelected
-              ? "border-primary/30 bg-primary/8 text-foreground"
-              : "border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34",
-            isResponding && "opacity-50 cursor-not-allowed",
-            !isResponding && "cursor-pointer",
-          );
+              ? 'border-primary/30 bg-primary/8 text-foreground'
+              : 'border-transparent bg-muted/22 text-foreground/85 hover:border-border/45 hover:bg-muted/34',
+            isResponding && 'opacity-50 cursor-not-allowed',
+            !isResponding && 'cursor-pointer',
+          )
           const content = (
             <>
               <div className="min-w-0 flex-1 flex flex-col gap-0.5">
@@ -221,30 +243,31 @@ const ComposerPendingUserInputCard = memo(function ComposerPendingUserInputCard(
               ) : shortcutKey !== null ? (
                 <kbd
                   className={cn(
-                    "flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150",
-                    "bg-background/35 text-muted-foreground/70 group-hover:border-border/70 group-hover:text-muted-foreground",
+                    'flex size-5 shrink-0 items-center justify-center rounded border border-border/50 text-[11px] font-medium tabular-nums transition-colors duration-150',
+                    'bg-background/35 text-muted-foreground/70 group-hover:border-border/70 group-hover:text-muted-foreground',
                   )}
                 >
                   {shortcutKey}
                 </kbd>
               ) : null}
             </>
-          );
+          )
           return (
             <button
               key={`${activeQuestion.id}:${option.label}`}
               type="button"
               disabled={isResponding}
-              onClick={() => {
-                handleOptionSelection(activeQuestion.id, option.label);
+              onClick={() =>
+              {
+                handleOptionSelection(activeQuestion.id, option.label)
               }}
               className={className}
             >
               {content}
             </button>
-          );
+          )
         })}
       </div>
     </div>
-  );
-});
+  )
+})

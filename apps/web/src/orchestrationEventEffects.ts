@@ -1,87 +1,104 @@
-import type { OrchestrationEvent, ThreadId } from "@t3tools/contracts";
+// apps/web/src/orchestrationEventEffects.ts
+// derive orchestration batch effects
 
-export interface OrchestrationBatchEffects {
-  promoteDraftThreadIds: ThreadId[];
-  clearDeletedThreadIds: ThreadId[];
-  removeTerminalUiStateThreadIds: ThreadId[];
-  needsProviderInvalidation: boolean;
+import type { OrchestrationEvent, ThreadId } from '@t3tools/contracts'
+
+export interface OrchestrationBatchEffects
+{
+  promoteDraftThreadIds: ThreadId[]
+  clearDeletedThreadIds: ThreadId[]
+  removeTerminalUiStateThreadIds: ThreadId[]
+  needsProviderInvalidation: boolean
 }
 
 export function deriveOrchestrationBatchEffects(
   events: readonly OrchestrationEvent[],
-): OrchestrationBatchEffects {
+): OrchestrationBatchEffects
+{
   const threadLifecycleEffects = new Map<
     ThreadId,
     {
-      clearPromotedDraft: boolean;
-      clearDeletedThread: boolean;
-      removeTerminalUiState: boolean;
+      clearPromotedDraft: boolean
+      clearDeletedThread: boolean
+      removeTerminalUiState: boolean
     }
-  >();
-  let needsProviderInvalidation = false;
+  >()
+  let needsProviderInvalidation = false
 
-  for (const event of events) {
-    switch (event.type) {
-      case "thread.turn-diff-completed":
-      case "thread.reverted": {
-        needsProviderInvalidation = true;
-        break;
+  for (const event of events)
+  {
+    switch (event.type)
+    {
+      case 'thread.turn-diff-completed':
+      case 'thread.reverted':
+      {
+        needsProviderInvalidation = true
+        break
       }
 
-      case "thread.created": {
+      case 'thread.created':
+      {
         threadLifecycleEffects.set(event.payload.threadId, {
           clearPromotedDraft: true,
           clearDeletedThread: false,
           removeTerminalUiState: false,
-        });
-        break;
+        })
+        break
       }
 
-      case "thread.deleted": {
+      case 'thread.deleted':
+      {
         threadLifecycleEffects.set(event.payload.threadId, {
           clearPromotedDraft: false,
           clearDeletedThread: true,
           removeTerminalUiState: true,
-        });
-        break;
+        })
+        break
       }
 
-      case "thread.archived": {
+      case 'thread.archived':
+      {
         threadLifecycleEffects.set(event.payload.threadId, {
           clearPromotedDraft: false,
           clearDeletedThread: false,
           removeTerminalUiState: true,
-        });
-        break;
+        })
+        break
       }
 
-      case "thread.unarchived": {
+      case 'thread.unarchived':
+      {
         threadLifecycleEffects.set(event.payload.threadId, {
           clearPromotedDraft: false,
           clearDeletedThread: false,
           removeTerminalUiState: false,
-        });
-        break;
+        })
+        break
       }
 
-      default: {
-        break;
+      default:
+      {
+        break
       }
     }
   }
 
-  const promoteDraftThreadIds: ThreadId[] = [];
-  const clearDeletedThreadIds: ThreadId[] = [];
-  const removeTerminalUiStateThreadIds: ThreadId[] = [];
-  for (const [threadId, effect] of threadLifecycleEffects) {
-    if (effect.clearPromotedDraft) {
-      promoteDraftThreadIds.push(threadId);
+  const promoteDraftThreadIds: ThreadId[] = []
+  const clearDeletedThreadIds: ThreadId[] = []
+  const removeTerminalUiStateThreadIds: ThreadId[] = []
+  for (const [threadId, effect] of threadLifecycleEffects)
+  {
+    if (effect.clearPromotedDraft)
+    {
+      promoteDraftThreadIds.push(threadId)
     }
-    if (effect.clearDeletedThread) {
-      clearDeletedThreadIds.push(threadId);
+    if (effect.clearDeletedThread)
+    {
+      clearDeletedThreadIds.push(threadId)
     }
-    if (effect.removeTerminalUiState) {
-      removeTerminalUiStateThreadIds.push(threadId);
+    if (effect.removeTerminalUiState)
+    {
+      removeTerminalUiStateThreadIds.push(threadId)
     }
   }
 
@@ -90,5 +107,5 @@ export function deriveOrchestrationBatchEffects(
     clearDeletedThreadIds,
     removeTerminalUiStateThreadIds,
     needsProviderInvalidation,
-  };
+  }
 }

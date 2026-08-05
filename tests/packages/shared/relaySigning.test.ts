@@ -1,9 +1,14 @@
-import { describe, expect, it } from "@effect/vitest";
+// tests/packages/shared/relaySigning.test.ts
+// verify relay signing behavior
 
-import { stableStringify } from "../../../packages/shared/src/relaySigning.ts";
+import { describe, expect, it } from '@effect/vitest'
 
-describe("relaySigning", () => {
-  it("canonicalizes object keys recursively", () => {
+import { stableStringify } from '../../../packages/shared/src/relaySigning.ts'
+
+describe('relaySigning', () =>
+{
+  it('canonicalizes object keys recursively', () =>
+  {
     expect(
       stableStringify({
         z: 1,
@@ -11,8 +16,8 @@ describe("relaySigning", () => {
           y: true,
           b: null,
         },
-        list: [{ c: "three", a: "one" }],
+        list: [{ c: 'three', a: 'one' }],
       }),
-    ).toBe('{"a":{"b":null,"y":true},"list":[{"a":"one","c":"three"}],"z":1}');
-  });
-});
+    ).toBe('{"a":{"b":null,"y":true},"list":[{"a":"one","c":"three"}],"z":1}')
+  })
+})

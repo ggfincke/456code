@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-composer-editor/ios/Code456ComposerEditorView.swift
+// bridges the iOS composer editor view
 import ExpoModulesCore
 import UIKit
 

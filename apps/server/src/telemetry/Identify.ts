@@ -1,90 +1,103 @@
-import * as NodeOS from "node:os";
-import * as Crypto from "effect/Crypto";
-import * as Effect from "effect/Effect";
-import * as Encoding from "effect/Encoding";
-import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
-import * as Path from "effect/Path";
-import * as PlatformError from "effect/PlatformError";
-import * as Schema from "effect/Schema";
+// apps/server/src/telemetry/Identify.ts
+// resolve telemetry identifier for home
 
-import * as ServerConfig from "../config.ts";
+import * as NodeOS from 'node:os'
+import * as Crypto from 'effect/Crypto'
+import * as Effect from 'effect/Effect'
+import * as Encoding from 'effect/Encoding'
+import * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
+import * as Path from 'effect/Path'
+import * as PlatformError from 'effect/PlatformError'
+import * as Schema from 'effect/Schema'
+
+import * as ServerConfig from '../config.ts'
 
 const CodexAuthJsonSchema = Schema.Struct({
   tokens: Schema.Struct({
     account_id: Schema.String,
   }),
-});
+})
 
 const ClaudeJsonSchema = Schema.Struct({
   userID: Schema.String,
-});
+})
 
-export const TelemetryIdentitySource = Schema.Literals(["codex", "claude", "anonymous"]);
-export type TelemetryIdentitySource = typeof TelemetryIdentitySource.Type;
+export const TelemetryIdentitySource = Schema.Literals(['codex', 'claude', 'anonymous'])
+export type TelemetryIdentitySource = typeof TelemetryIdentitySource.Type
 
 export class TelemetryIdentityReadError extends Schema.TaggedErrorClass<TelemetryIdentityReadError>()(
-  "TelemetryIdentityReadError",
+  'TelemetryIdentityReadError',
   {
     source: TelemetryIdentitySource,
     filePath: Schema.String,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to read ${this.source} telemetry identity at '${this.filePath}'.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to read ${this.source} telemetry identity at '${this.filePath}'.`
   }
 }
 
 export class TelemetryIdentityDecodeError extends Schema.TaggedErrorClass<TelemetryIdentityDecodeError>()(
-  "TelemetryIdentityDecodeError",
+  'TelemetryIdentityDecodeError',
   {
-    source: Schema.Literals(["codex", "claude"]),
+    source: Schema.Literals(['codex', 'claude']),
     filePath: Schema.String,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to decode ${this.source} telemetry identity at '${this.filePath}'.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to decode ${this.source} telemetry identity at '${this.filePath}'.`
   }
 }
 
 export class TelemetryAnonymousIdGenerationError extends Schema.TaggedErrorClass<TelemetryAnonymousIdGenerationError>()(
-  "TelemetryAnonymousIdGenerationError",
+  'TelemetryAnonymousIdGenerationError',
   {
-    source: Schema.Literal("anonymous"),
+    source: Schema.Literal('anonymous'),
     filePath: Schema.String,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to generate anonymous telemetry identity for '${this.filePath}'.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to generate anonymous telemetry identity for '${this.filePath}'.`
   }
 }
 
 export class TelemetryAnonymousIdPersistenceError extends Schema.TaggedErrorClass<TelemetryAnonymousIdPersistenceError>()(
-  "TelemetryAnonymousIdPersistenceError",
+  'TelemetryAnonymousIdPersistenceError',
   {
-    source: Schema.Literal("anonymous"),
+    source: Schema.Literal('anonymous'),
     filePath: Schema.String,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to persist anonymous telemetry identity at '${this.filePath}'.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to persist anonymous telemetry identity at '${this.filePath}'.`
   }
 }
 
 export class TelemetryIdentityHashError extends Schema.TaggedErrorClass<TelemetryIdentityHashError>()(
-  "TelemetryIdentityHashError",
+  'TelemetryIdentityHashError',
   {
     source: TelemetryIdentitySource,
-    algorithm: Schema.Literal("SHA-256"),
+    algorithm: Schema.Literal('SHA-256'),
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to hash ${this.source} telemetry identity with ${this.algorithm}.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to hash ${this.source} telemetry identity with ${this.algorithm}.`
   }
 }
 
@@ -93,38 +106,42 @@ type TelemetryIdentityError =
   | TelemetryIdentityDecodeError
   | TelemetryAnonymousIdGenerationError
   | TelemetryAnonymousIdPersistenceError
-  | TelemetryIdentityHashError;
+  | TelemetryIdentityHashError
 
-const decodeCodexAuthJson = Schema.decodeEffect(Schema.fromJsonString(CodexAuthJsonSchema));
-const decodeClaudeJson = Schema.decodeEffect(Schema.fromJsonString(ClaudeJsonSchema));
+const decodeCodexAuthJson = Schema.decodeEffect(Schema.fromJsonString(CodexAuthJsonSchema))
+const decodeClaudeJson = Schema.decodeEffect(Schema.fromJsonString(ClaudeJsonSchema))
 
-function isNotFoundError(error: PlatformError.PlatformError): boolean {
-  return error.reason._tag === "NotFound";
+function isNotFoundError(error: PlatformError.PlatformError): boolean
+{
+  return error.reason._tag === 'NotFound'
 }
 
-const getTelemetryIdentityCauseAnnotations = (cause: unknown) => {
-  if (cause instanceof PlatformError.PlatformError) {
+const getTelemetryIdentityCauseAnnotations = (cause: unknown) =>
+{
+  if (cause instanceof PlatformError.PlatformError)
+  {
     return {
-      causeKind: "platform",
+      causeKind: 'platform',
       platformReason: cause.reason._tag,
-    };
+    }
   }
-  if (cause instanceof Schema.SchemaError) {
-    return { causeKind: "schema" };
+  if (cause instanceof Schema.SchemaError)
+  {
+    return { causeKind: 'schema' }
   }
-  return { causeKind: "other" };
-};
+  return { causeKind: 'other' }
+}
 
 const logTelemetryIdentityError = (error: TelemetryIdentityError) =>
   Effect.logWarning(error.message).pipe(
     Effect.annotateLogs({
       errorTag: error._tag,
       source: error.source,
-      ...("filePath" in error ? { filePath: error.filePath } : {}),
+      ...('filePath' in error ? { filePath: error.filePath } : {}),
       ...getTelemetryIdentityCauseAnnotations(error.cause),
       ...(error.stack === undefined ? {} : { errorStack: error.stack }),
     }),
-  );
+  )
 
 const readIdentityFile = (
   fileSystem: FileSystem.FileSystem,
@@ -145,79 +162,85 @@ const readIdentityFile = (
               }),
             ),
     }),
-  );
+  )
 
 const hash = (source: TelemetryIdentitySource, value: string) =>
   Crypto.Crypto.pipe(
-    Effect.flatMap((crypto) => crypto.digest("SHA-256", new TextEncoder().encode(value))),
+    Effect.flatMap((crypto) => crypto.digest('SHA-256', new TextEncoder().encode(value))),
     Effect.map(Encoding.encodeHex),
     Effect.mapError(
       (cause) =>
         new TelemetryIdentityHashError({
           source,
-          algorithm: "SHA-256",
+          algorithm: 'SHA-256',
           cause,
         }),
     ),
-  );
+  )
 
-const getCodexAccountId = Effect.fn("TelemetryIdentity.getCodexAccountId")(function* (
+const getCodexAccountId = Effect.fn('TelemetryIdentity.getCodexAccountId')(function* (
   homeDirectory: string,
-) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
+)
+{
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
 
-  const authJsonPath = path.join(homeDirectory, ".codex", "auth.json");
-  const encoded = yield* readIdentityFile(fileSystem, "codex", authJsonPath);
-  if (Option.isNone(encoded)) {
-    return Option.none<string>();
+  const authJsonPath = path.join(homeDirectory, '.codex', 'auth.json')
+  const encoded = yield* readIdentityFile(fileSystem, 'codex', authJsonPath)
+  if (Option.isNone(encoded))
+  {
+    return Option.none<string>()
   }
   const authJson = yield* decodeCodexAuthJson(encoded.value).pipe(
     Effect.mapError(
       (cause) =>
         new TelemetryIdentityDecodeError({
-          source: "codex",
+          source: 'codex',
           filePath: authJsonPath,
           cause,
         }),
     ),
-  );
+  )
 
-  return Option.some(authJson.tokens.account_id);
-});
+  return Option.some(authJson.tokens.account_id)
+})
 
-const getClaudeUserId = Effect.fn("TelemetryIdentity.getClaudeUserId")(function* (
+const getClaudeUserId = Effect.fn('TelemetryIdentity.getClaudeUserId')(function* (
   homeDirectory: string,
-) {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const path = yield* Path.Path;
+)
+{
+  const fileSystem = yield* FileSystem.FileSystem
+  const path = yield* Path.Path
 
-  const claudeJsonPath = path.join(homeDirectory, ".claude.json");
-  const encoded = yield* readIdentityFile(fileSystem, "claude", claudeJsonPath);
-  if (Option.isNone(encoded)) {
-    return Option.none<string>();
+  const claudeJsonPath = path.join(homeDirectory, '.claude.json')
+  const encoded = yield* readIdentityFile(fileSystem, 'claude', claudeJsonPath)
+  if (Option.isNone(encoded))
+  {
+    return Option.none<string>()
   }
   const claudeJson = yield* decodeClaudeJson(encoded.value).pipe(
     Effect.mapError(
       (cause) =>
         new TelemetryIdentityDecodeError({
-          source: "claude",
+          source: 'claude',
           filePath: claudeJsonPath,
           cause,
         }),
     ),
-  );
+  )
 
-  return Option.some(claudeJson.userID);
-});
+  return Option.some(claudeJson.userID)
+})
 
-const upsertAnonymousId = Effect.gen(function* () {
-  const fileSystem = yield* FileSystem.FileSystem;
-  const { anonymousIdPath } = yield* ServerConfig.ServerConfig;
+const upsertAnonymousId = Effect.gen(function* ()
+{
+  const fileSystem = yield* FileSystem.FileSystem
+  const { anonymousIdPath } = yield* ServerConfig.ServerConfig
 
-  const existing = yield* readIdentityFile(fileSystem, "anonymous", anonymousIdPath);
-  if (Option.isSome(existing)) {
-    return existing.value;
+  const existing = yield* readIdentityFile(fileSystem, 'anonymous', anonymousIdPath)
+  if (Option.isSome(existing))
+  {
+    return existing.value
   }
 
   const anonymousId = yield* Crypto.Crypto.pipe(
@@ -225,34 +248,33 @@ const upsertAnonymousId = Effect.gen(function* () {
     Effect.mapError(
       (cause) =>
         new TelemetryAnonymousIdGenerationError({
-          source: "anonymous",
+          source: 'anonymous',
           filePath: anonymousIdPath,
           cause,
         }),
     ),
-  );
+  )
   yield* fileSystem.writeFileString(anonymousIdPath, anonymousId).pipe(
     Effect.mapError(
       (cause) =>
         new TelemetryAnonymousIdPersistenceError({
-          source: "anonymous",
+          source: 'anonymous',
           filePath: anonymousIdPath,
           cause,
         }),
     ),
-  );
+  )
 
-  return anonymousId;
-});
+  return anonymousId
+})
 
-/**
- * getTelemetryIdentifier - Users are "identified" by finding the first match of the following, then hashing the value.
- * 1. ~/.codex/auth.json tokens.account_id
- * 2. ~/.claude.json userID
- * 3. ~/.456code/telemetry/anonymous-id
- */
-export const getTelemetryIdentifierForHome = Effect.fn("getTelemetryIdentifierForHome")(
-  function* (homeDirectory: string) {
+// getTelemetryIdentifier - Users are "identified" by finding the first match of the following, then hashing the value.
+// 1. ~/.codex/auth.json tokens.account_id
+// 2. ~/.claude.json userID
+// 3. ~/.456code/telemetry/anonymous-id
+export const getTelemetryIdentifierForHome = Effect.fn('getTelemetryIdentifierForHome')(
+  function* (homeDirectory: string)
+  {
     const codexAccountId = yield* getCodexAccountId(homeDirectory).pipe(
       Effect.catchTags({
         TelemetryIdentityReadError: (error) =>
@@ -260,9 +282,10 @@ export const getTelemetryIdentifierForHome = Effect.fn("getTelemetryIdentifierFo
         TelemetryIdentityDecodeError: (error) =>
           logTelemetryIdentityError(error).pipe(Effect.as(Option.none<string>())),
       }),
-    );
-    if (Option.isSome(codexAccountId)) {
-      return yield* hash("codex", codexAccountId.value);
+    )
+    if (Option.isSome(codexAccountId))
+    {
+      return yield* hash('codex', codexAccountId.value)
     }
 
     const claudeUserId = yield* getClaudeUserId(homeDirectory).pipe(
@@ -272,9 +295,10 @@ export const getTelemetryIdentifierForHome = Effect.fn("getTelemetryIdentifierFo
         TelemetryIdentityDecodeError: (error) =>
           logTelemetryIdentityError(error).pipe(Effect.as(Option.none<string>())),
       }),
-    );
-    if (Option.isSome(claudeUserId)) {
-      return yield* hash("claude", claudeUserId.value);
+    )
+    if (Option.isSome(claudeUserId))
+    {
+      return yield* hash('claude', claudeUserId.value)
     }
 
     const anonymousId = yield* upsertAnonymousId.pipe(
@@ -287,17 +311,18 @@ export const getTelemetryIdentifierForHome = Effect.fn("getTelemetryIdentifierFo
         TelemetryAnonymousIdPersistenceError: (error) =>
           logTelemetryIdentityError(error).pipe(Effect.as(Option.none<string>())),
       }),
-    );
-    if (Option.isSome(anonymousId)) {
-      return yield* hash("anonymous", anonymousId.value);
+    )
+    if (Option.isSome(anonymousId))
+    {
+      return yield* hash('anonymous', anonymousId.value)
     }
 
-    return null;
+    return null
   },
   Effect.tapError(logTelemetryIdentityError),
   Effect.orElseSucceed(() => null),
-);
+)
 
 export const getTelemetryIdentifier = Effect.suspend(() =>
   getTelemetryIdentifierForHome(NodeOS.homedir()),
-);
+)

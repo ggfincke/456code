@@ -1,12 +1,15 @@
-import { createEnvironmentProjectAtoms } from "@t3tools/client-runtime/state/projects";
-import { createProjectEnvironmentAtoms } from "@t3tools/client-runtime/state/projects";
+// apps/web/src/state/projects.ts
+// manage project environment state
 
-import { environmentCatalog } from "../connection/catalog";
-import { connectionAtomRuntime } from "../connection/runtime";
-import { environmentSnapshotAtom } from "./shell";
+import { createEnvironmentProjectAtoms } from '@t3tools/client-runtime/state/projects'
+import { createProjectEnvironmentAtoms } from '@t3tools/client-runtime/state/projects'
 
-export const projectEnvironment = createProjectEnvironmentAtoms(connectionAtomRuntime);
+import { environmentCatalog } from '../connection/catalog'
+import { connectionAtomRuntime } from '../connection/runtime'
+import { environmentSnapshotAtom } from './shell'
+
+export const projectEnvironment = createProjectEnvironmentAtoms(connectionAtomRuntime)
 export const environmentProjects = createEnvironmentProjectAtoms({
   catalogValueAtom: environmentCatalog.catalogValueAtom,
   snapshotAtom: environmentSnapshotAtom,
-});
+})

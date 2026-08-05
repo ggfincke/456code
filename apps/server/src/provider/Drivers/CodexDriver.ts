@@ -1,77 +1,74 @@
 // apps/server/src/provider/Drivers/CodexDriver.ts
 // creates isolated Codex provider instances and source-bound continuation routes
-/**
- * CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
- *
- * A driver is a plain value (not a Context.Service) whose `create()` returns
- * one `ProviderInstance` bundling:
- *   - `snapshot`   — the live `ServerProviderShape` for this instance;
- *   - `adapter`    — the Codex session/turn/approval runtime;
- *   - `textGeneration` — commit/PR/branch/title generation via `codex exec`.
- *
- * Each call to `create()` captures the `codexConfig` argument in closures
- * owned by the returned instance. Two instances created with different
- * `homePath`s (e.g. `codex_personal` + `codex_work`) therefore run with
- * fully independent Codex app-server processes and `CODEX_HOME`
- * environments — no shared mutable state.
- *
- * Resource lifecycle: `create()` runs in a scope handed in by the registry.
- * Closing that scope releases the adapter's child processes, the managed
- * snapshot's refresh fibre, and the text-generation binaries' transient
- * scratch files. The registry uses this to tear down an instance when its
- * `providerInstances` entry disappears or its config changes.
- *
- * @module provider/Drivers/CodexDriver
- */
-import { CodexSettings, ProviderDriverKind, type ServerProvider } from "@t3tools/contracts";
-import * as Duration from "effect/Duration";
-import * as Crypto from "effect/Crypto";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
-import { HttpClient } from "effect/unstable/http";
-import { ChildProcessSpawner } from "effect/unstable/process";
 
-import { makeCodexTextGeneration } from "../../textGeneration/CodexTextGeneration.ts";
-import { ServerConfig } from "../../config.ts";
-import { ServerSettingsService } from "../../serverSettings.ts";
-import { canonicalFileContinuationIdentity } from "../continuationIdentity.ts";
-import { ProviderDriverError } from "../Errors.ts";
-import { makeCodexAdapter } from "../Layers/CodexAdapter.ts";
-import { checkCodexProviderStatus, makePendingCodexProvider } from "../Layers/CodexProvider.ts";
-import { ProviderEventLoggers } from "../Layers/ProviderEventLoggers.ts";
-import { makeManagedServerProvider } from "../makeManagedServerProvider.ts";
-import type { ProviderDriver, ProviderInstance } from "../ProviderDriver.ts";
-import type { ServerProviderDraft } from "../providerSnapshot.ts";
-import { mergeProviderInstanceEnvironment } from "../ProviderInstanceEnvironment.ts";
+// CodexDriver — first concrete `ProviderDriver` in the new per-instance model.
+//
+// a driver is a plain value (not a Context.Service) whose `create()` returns
+// one `ProviderInstance` bundling:
+//   - `snapshot`   — the live `ServerProviderShape` for this instance;
+//   - `adapter`    — the Codex session/turn/approval runtime;
+//   - `textGeneration` — commit/PR/branch/title generation via `codex exec`.
+//
+// each call to `create()` captures the `codexConfig` argument in closures
+// owned by the returned instance. Two instances created with different
+// `homePath`s (e.g. `codex_personal` + `codex_work`) therefore run with
+// fully independent Codex app-server processes and `CODEX_HOME`
+// environments — no shared mutable state.
+//
+// resource lifecycle: `create()` runs in a scope handed in by the registry.
+// closing that scope releases the adapter's child processes, the managed
+// snapshot's refresh fibre, and the text-generation binaries' transient
+// scratch files. The registry uses this to tear down an instance when its
+// `providerInstances` entry disappears or its config changes.
+//
+// @module provider/Drivers/CodexDriver
+import { CodexSettings, ProviderDriverKind, type ServerProvider } from '@t3tools/contracts'
+import * as Duration from 'effect/Duration'
+import * as Crypto from 'effect/Crypto'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
+import { HttpClient } from 'effect/unstable/http'
+import { ChildProcessSpawner } from 'effect/unstable/process'
+
+import { makeCodexTextGeneration } from '../../textGeneration/CodexTextGeneration.ts'
+import { ServerConfig } from '../../config.ts'
+import { ServerSettingsService } from '../../serverSettings.ts'
+import { canonicalFileContinuationIdentity } from '../continuationIdentity.ts'
+import { ProviderDriverError } from '../Errors.ts'
+import { makeCodexAdapter } from '../Layers/CodexAdapter.ts'
+import { checkCodexProviderStatus, makePendingCodexProvider } from '../Layers/CodexProvider.ts'
+import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
+import { makeManagedServerProvider } from '../makeManagedServerProvider.ts'
+import type { ProviderDriver, ProviderInstance } from '../ProviderDriver.ts'
+import type { ServerProviderDraft } from '../providerSnapshot.ts'
+import { mergeProviderInstanceEnvironment } from '../ProviderInstanceEnvironment.ts'
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makePackageManagedProviderMaintenanceResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from "../providerMaintenance.ts";
+} from '../providerMaintenance.ts'
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from "../providerUpdateSettings.ts";
-import { materializeCodexShadowHome, resolveCodexHomeLayout } from "./CodexHomeLayout.ts";
-const decodeCodexSettings = Schema.decodeSync(CodexSettings);
+} from '../providerUpdateSettings.ts'
+import { materializeCodexShadowHome, resolveCodexHomeLayout } from './CodexHomeLayout.ts'
+const decodeCodexSettings = Schema.decodeSync(CodexSettings)
 
-const DRIVER_KIND = ProviderDriverKind.make("codex");
-const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5);
+const DRIVER_KIND = ProviderDriverKind.make('codex')
+const SNAPSHOT_REFRESH_INTERVAL = Duration.minutes(5)
 const UPDATE = makePackageManagedProviderMaintenanceResolver({
   provider: DRIVER_KIND,
-  npmPackageName: "@openai/codex",
-  homebrewFormula: "codex",
+  npmPackageName: '@openai/codex',
+  homebrewFormula: 'codex',
   nativeUpdate: null,
-});
+})
 
-/**
- * Services the driver needs to materialize an instance. Surfaced as the
- * driver's `R` so the registry layer aggregates these across every
- * registered driver and the runtime satisfies them once.
- */
+// services the driver needs to materialize an instance. Surfaced as the
+// driver's `R` so the registry layer aggregates these across every
+// registered driver and the runtime satisfies them once.
 export type CodexDriverEnv =
   | ChildProcessSpawner.ChildProcessSpawner
   | Crypto.Crypto
@@ -80,20 +77,18 @@ export type CodexDriverEnv =
   | Path.Path
   | ProviderEventLoggers
   | ServerConfig
-  | ServerSettingsService;
+  | ServerSettingsService
 
-/**
- * Stamp instance identity onto a `ServerProvider` snapshot produced by the
- * driver-kind-only codex helpers. Once `buildServerProvider` in
- * `providerSnapshot.ts` is widened to accept `instanceId`/`driver`, this
- * wrapper disappears.
- */
+// stamp instance identity onto a `ServerProvider` snapshot produced by the
+// driver-kind-only codex helpers. Once `buildServerProvider` in
+// `providerSnapshot.ts` is widened to accept `instanceId`/`driver`, this
+// wrapper disappears.
 const withInstanceIdentity =
   (input: {
-    readonly instanceId: ProviderInstance["instanceId"];
-    readonly displayName: string | undefined;
-    readonly accentColor: string | undefined;
-    readonly continuationGroupKey: string;
+    readonly instanceId: ProviderInstance['instanceId']
+    readonly displayName: string | undefined
+    readonly accentColor: string | undefined
+    readonly continuationGroupKey: string
   }) =>
   (snapshot: ServerProviderDraft): ServerProvider => ({
     ...snapshot,
@@ -102,30 +97,31 @@ const withInstanceIdentity =
     ...(input.displayName ? { displayName: input.displayName } : {}),
     ...(input.accentColor ? { accentColor: input.accentColor } : {}),
     continuation: { groupKey: input.continuationGroupKey },
-  });
+  })
 
 export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
   driverKind: DRIVER_KIND,
   metadata: {
-    displayName: "Codex",
+    displayName: 'Codex',
     supportsMultipleInstances: true,
   },
   configSchema: CodexSettings,
   defaultConfig: (): CodexSettings => decodeCodexSettings({}),
   create: ({ instanceId, displayName, accentColor, environment, enabled, config }) =>
-    Effect.gen(function* () {
-      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner;
-      const fileSystem = yield* FileSystem.FileSystem;
-      const httpClient = yield* HttpClient.HttpClient;
-      const path = yield* Path.Path;
-      const { cwd } = yield* ServerConfig;
-      const serverSettings = yield* ServerSettingsService;
-      const eventLoggers = yield* ProviderEventLoggers;
-      const processEnv = mergeProviderInstanceEnvironment(environment);
+    Effect.gen(function* ()
+    {
+      const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+      const fileSystem = yield* FileSystem.FileSystem
+      const httpClient = yield* HttpClient.HttpClient
+      const path = yield* Path.Path
+      const { cwd } = yield* ServerConfig
+      const serverSettings = yield* ServerSettingsService
+      const eventLoggers = yield* ProviderEventLoggers
+      const processEnv = mergeProviderInstanceEnvironment(environment)
       const homeLayout = yield* resolveCodexHomeLayout(config, {
         environment: processEnv,
         cwd,
-      });
+      })
       yield* materializeCodexShadowHome(homeLayout).pipe(
         Effect.mapError(
           (cause) =>
@@ -136,27 +132,27 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               cause,
             }),
         ),
-      );
+      )
       const resolveContinuationIdentity = canonicalFileContinuationIdentity(
         DRIVER_KIND,
-        path.join(homeLayout.sharedHomePath, "sessions"),
-      ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem));
-      const continuationIdentity = yield* resolveContinuationIdentity;
+        path.join(homeLayout.sharedHomePath, 'sessions'),
+      ).pipe(Effect.provideService(FileSystem.FileSystem, fileSystem))
+      const continuationIdentity = yield* resolveContinuationIdentity
       const stampIdentity = withInstanceIdentity({
         instanceId,
         displayName,
         accentColor,
         continuationGroupKey: continuationIdentity.continuationKey,
-      });
+      })
       const effectiveConfig = {
         ...config,
         enabled,
-        homePath: homeLayout.effectiveHomePath ?? "",
-      } satisfies CodexSettings;
+        homePath: homeLayout.effectiveHomePath ?? '',
+      } satisfies CodexSettings
       const maintenanceCapabilities = yield* resolveProviderMaintenanceCapabilitiesEffect(UPDATE, {
         binaryPath: effectiveConfig.binaryPath,
         env: processEnv,
-      });
+      })
 
       // `makeCodexAdapter` and `makeCodexTextGeneration` have `never` error
       // channels at construction time — their failure modes are all on the
@@ -168,18 +164,18 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         instanceId,
         environment: processEnv,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
-      });
-      const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv);
+      })
+      const textGeneration = yield* makeCodexTextGeneration(effectiveConfig, processEnv)
 
-      // Build a managed snapshot whose settings never change — mutations come
+      // build a managed snapshot whose settings never change — mutations come
       // in as instance rebuilds from the registry rather than in-place
       // updates. Pre-provide `ChildProcessSpawner` so the check fits
       // `makeManagedServerProvider.checkProvider`'s `R = never`.
       const checkProvider = checkCodexProviderStatus(effectiveConfig, undefined, processEnv).pipe(
         Effect.map(stampIdentity),
         Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
-      );
-      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings);
+      )
+      const snapshotSettings = makeProviderSnapshotSettingsSource(effectiveConfig, serverSettings)
       const snapshot = yield* makeManagedServerProvider<ProviderSnapshotSettings<CodexSettings>>({
         maintenanceCapabilities,
         getSettings: snapshotSettings.getSettings,
@@ -206,7 +202,7 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
               cause,
             }),
         ),
-      );
+      )
 
       return {
         instanceId,
@@ -219,6 +215,6 @@ export const CodexDriver: ProviderDriver<CodexSettings, CodexDriverEnv> = {
         snapshot,
         adapter,
         textGeneration,
-      } satisfies ProviderInstance;
+      } satisfies ProviderInstance
     }),
-};
+}

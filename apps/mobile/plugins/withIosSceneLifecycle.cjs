@@ -1,4 +1,7 @@
-const { withAppDelegate, withInfoPlist } = require("expo/config-plugins");
+// apps/mobile/plugins/withIosSceneLifecycle.cjs
+// configure ios scene lifecycle in Expo projects
+
+const { withAppDelegate, withInfoPlist } = require('expo/config-plugins')
 
 const SCENE_DELEGATE = `
 
@@ -66,34 +69,39 @@ class SceneDelegate: UIResponder, UIWindowSceneDelegate {
       continue: userActivity,
       restorationHandler: { _ in })
   }
-}`;
+}`
 
-module.exports = function withIosSceneLifecycle(config) {
-  config = withInfoPlist(config, (nextConfig) => {
+module.exports = function withIosSceneLifecycle(config)
+{
+  config = withInfoPlist(config, (nextConfig) =>
+  {
     nextConfig.modResults.UIApplicationSceneManifest = {
       UIApplicationSupportsMultipleScenes: false,
       UISceneConfigurations: {
         UIWindowSceneSessionRoleApplication: [
           {
-            UISceneConfigurationName: "Default Configuration",
-            UISceneDelegateClassName: "$(PRODUCT_MODULE_NAME).SceneDelegate",
+            UISceneConfigurationName: 'Default Configuration',
+            UISceneDelegateClassName: '$(PRODUCT_MODULE_NAME).SceneDelegate',
           },
         ],
       },
-    };
-
-    return nextConfig;
-  });
-
-  return withAppDelegate(config, (nextConfig) => {
-    if (nextConfig.modResults.language !== "swift") {
-      throw new Error("The iOS scene lifecycle plugin requires a Swift AppDelegate.");
     }
 
-    if (!nextConfig.modResults.contents.includes("class SceneDelegate:")) {
-      nextConfig.modResults.contents += SCENE_DELEGATE;
+    return nextConfig
+  })
+
+  return withAppDelegate(config, (nextConfig) =>
+  {
+    if (nextConfig.modResults.language !== 'swift')
+    {
+      throw new Error('The iOS scene lifecycle plugin requires a Swift AppDelegate.')
     }
 
-    return nextConfig;
-  });
-};
+    if (!nextConfig.modResults.contents.includes('class SceneDelegate:'))
+    {
+      nextConfig.modResults.contents += SCENE_DELEGATE
+    }
+
+    return nextConfig
+  })
+}

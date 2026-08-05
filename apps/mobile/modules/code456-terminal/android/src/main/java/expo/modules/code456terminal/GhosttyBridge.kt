@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-terminal/android/src/main/java/expo/modules/code456terminal/GhosttyBridge.kt
+// bridges the Ghostty terminal runtime on Android
 package expo.modules.code456terminal
 
 internal object GhosttyBridge {

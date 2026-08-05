@@ -1,10 +1,15 @@
-const { withEntitlementsPlist } = require("expo/config-plugins");
+// apps/mobile/plugins/withoutIosPersonalTeamCapabilities.cjs
+// configure ios personal team capabilities in Expo projects
 
-module.exports = function withoutIosPersonalTeamCapabilities(config) {
-  return withEntitlementsPlist(config, (modConfig) => {
-    delete modConfig.modResults["aps-environment"];
-    delete modConfig.modResults["com.apple.developer.applesignin"];
-    delete modConfig.modResults["com.apple.security.application-groups"];
-    return modConfig;
-  });
-};
+const { withEntitlementsPlist } = require('expo/config-plugins')
+
+module.exports = function withoutIosPersonalTeamCapabilities(config)
+{
+  return withEntitlementsPlist(config, (modConfig) =>
+  {
+    delete modConfig.modResults['aps-environment']
+    delete modConfig.modResults['com.apple.developer.applesignin']
+    delete modConfig.modResults['com.apple.security.application-groups']
+    return modConfig
+  })
+}

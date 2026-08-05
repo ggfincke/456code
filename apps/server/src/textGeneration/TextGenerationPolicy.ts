@@ -1,12 +1,15 @@
-import * as Schema from "effect/Schema";
+// apps/server/src/textGeneration/TextGenerationPolicy.ts
+// expose text generation policy kind
+
+import * as Schema from 'effect/Schema'
 
 export const TextGenerationPolicyKind = Schema.Literals([
-  "default",
-  "conventional_commits",
-  "repo_conventions",
-  "custom",
-]);
-export type TextGenerationPolicyKind = typeof TextGenerationPolicyKind.Type;
+  'default',
+  'conventional_commits',
+  'repo_conventions',
+  'custom',
+])
+export type TextGenerationPolicyKind = typeof TextGenerationPolicyKind.Type
 
 export const TextGenerationPolicy = Schema.Struct({
   kind: TextGenerationPolicyKind,
@@ -15,5 +18,5 @@ export const TextGenerationPolicy = Schema.Struct({
   branchInstructions: Schema.optional(Schema.String),
   threadTitleInstructions: Schema.optional(Schema.String),
   inferRepositoryConventions: Schema.Boolean,
-});
-export type TextGenerationPolicy = typeof TextGenerationPolicy.Type;
+})
+export type TextGenerationPolicy = typeof TextGenerationPolicy.Type

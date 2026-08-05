@@ -1,8 +1,12 @@
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+// apps/server/src/persistence/Migrations/013_ProjectionThreadProposedPlans.ts
+// apply persistence migration 013 projection thread proposed plans
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     CREATE TABLE IF NOT EXISTS projection_thread_proposed_plans (
@@ -13,10 +17,10 @@ export default Effect.gen(function* () {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_thread_proposed_plans_thread_created
     ON projection_thread_proposed_plans(thread_id, created_at)
-  `;
-});
+  `
+})

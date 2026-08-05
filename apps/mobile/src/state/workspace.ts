@@ -1,17 +1,21 @@
-import { useAtomValue } from "@effect/atom-react";
-import { useMemo } from "react";
+// apps/mobile/src/state/workspace.ts
+// manage workspace state through a React hook
 
-import { environmentShellSummaryAtom } from "./shell";
-import { projectWorkspaceEnvironment, projectWorkspaceState } from "./workspaceModel";
-import { useEnvironments } from "./environments";
+import { useAtomValue } from '@effect/atom-react'
+import { useMemo } from 'react'
 
-export function useWorkspaceState() {
-  const { isReady, networkStatus, environments } = useEnvironments();
-  const shellSummary = useAtomValue(environmentShellSummaryAtom);
+import { environmentShellSummaryAtom } from './shell'
+import { projectWorkspaceEnvironment, projectWorkspaceState } from './workspaceModel'
+import { useEnvironments } from './environments'
+
+export function useWorkspaceState()
+{
+  const { isReady, networkStatus, environments } = useEnvironments()
+  const shellSummary = useAtomValue(environmentShellSummaryAtom)
   const projectedEnvironments = useMemo(
     () => environments.map(projectWorkspaceEnvironment),
     [environments],
-  );
+  )
   const state = useMemo(
     () =>
       projectWorkspaceState({
@@ -21,10 +25,10 @@ export function useWorkspaceState() {
         shellSummary,
       }),
     [isReady, networkStatus, projectedEnvironments, shellSummary],
-  );
+  )
 
   return {
     environments: projectedEnvironments,
     state,
-  };
+  }
 }

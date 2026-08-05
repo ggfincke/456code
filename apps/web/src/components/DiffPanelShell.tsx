@@ -1,36 +1,41 @@
-import type { ReactNode } from "react";
+// apps/web/src/components/DiffPanelShell.tsx
+// render diff panel shell
 
-import { isElectron } from "~/env";
-import { cn } from "~/lib/utils";
+import type { ReactNode } from 'react'
 
-import { Skeleton } from "./ui/skeleton";
+import { isElectron } from '~/env'
+import { cn } from '~/lib/utils'
 
-export type DiffPanelMode = "inline" | "sheet" | "sidebar" | "embedded";
+import { Skeleton } from './ui/skeleton'
 
-function getDiffPanelHeaderRowClassName(mode: DiffPanelMode) {
-  const shouldUseDragRegion = isElectron && mode !== "sheet" && mode !== "embedded";
+export type DiffPanelMode = 'inline' | 'sheet' | 'sidebar' | 'embedded'
+
+function getDiffPanelHeaderRowClassName(mode: DiffPanelMode)
+{
+  const shouldUseDragRegion = isElectron && mode !== 'sheet' && mode !== 'embedded'
   return cn(
-    "flex items-center justify-between gap-2 px-4",
+    'flex items-center justify-between gap-2 px-4',
     shouldUseDragRegion
-      ? "drag-region h-[52px] border-b border-border wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]"
-      : "surface-subheader",
-  );
+      ? 'drag-region h-[52px] border-b border-border wco:h-[env(titlebar-area-height)] wco:pr-[calc(100vw-env(titlebar-area-width)-env(titlebar-area-x)+1em)]'
+      : 'surface-subheader',
+  )
 }
 
 export function DiffPanelShell(props: {
-  mode: DiffPanelMode;
-  header: ReactNode;
-  children: ReactNode;
-}) {
-  const shouldUseDragRegion = isElectron && props.mode !== "sheet" && props.mode !== "embedded";
+  mode: DiffPanelMode
+  header: ReactNode
+  children: ReactNode
+})
+{
+  const shouldUseDragRegion = isElectron && props.mode !== 'sheet' && props.mode !== 'embedded'
 
   return (
     <div
       className={cn(
-        "flex h-full min-w-0 flex-col bg-background",
-        props.mode === "inline"
-          ? "w-[42vw] min-w-[360px] max-w-[560px] shrink-0 border-l border-border"
-          : "w-full",
+        'flex h-full min-w-0 flex-col bg-background',
+        props.mode === 'inline'
+          ? 'w-[42vw] min-w-[360px] max-w-[560px] shrink-0 border-l border-border'
+          : 'w-full',
       )}
     >
       {shouldUseDragRegion ? (
@@ -42,10 +47,11 @@ export function DiffPanelShell(props: {
       )}
       {props.children}
     </div>
-  );
+  )
 }
 
-export function DiffPanelHeaderSkeleton() {
+export function DiffPanelHeaderSkeleton()
+{
   return (
     <>
       <div className="min-w-0 flex-1">
@@ -56,10 +62,11 @@ export function DiffPanelHeaderSkeleton() {
         <Skeleton className="size-7 rounded-md" />
       </div>
     </>
-  );
+  )
 }
 
-export function DiffPanelLoadingState(props: { label: string }) {
+export function DiffPanelLoadingState(props: { label: string })
+{
   return (
     <div className="flex min-h-0 flex-1 flex-col p-2">
       <div
@@ -84,5 +91,5 @@ export function DiffPanelLoadingState(props: { label: string }) {
         </div>
       </div>
     </div>
-  );
+  )
 }

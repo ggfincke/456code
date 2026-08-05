@@ -1,8 +1,12 @@
-import { Separator as SeparatorPrimitive } from "@base-ui/react/separator";
+// apps/web/src/components/ui/separator.tsx
+// render reusable separator UI primitives
 
-import { cn } from "~/lib/utils";
+import { Separator as SeparatorPrimitive } from '@base-ui/react/separator'
 
-function Separator({ className, orientation = "horizontal", ...props }: SeparatorPrimitive.Props) {
+import { cn } from '~/lib/utils'
+
+function Separator({ className, orientation = 'horizontal', ...props }: SeparatorPrimitive.Props)
+{
   return (
     <SeparatorPrimitive
       className={cn(
@@ -13,7 +17,7 @@ function Separator({ className, orientation = "horizontal", ...props }: Separato
       orientation={orientation}
       {...props}
     />
-  );
+  )
 }
 
-export { Separator };
+export { Separator }

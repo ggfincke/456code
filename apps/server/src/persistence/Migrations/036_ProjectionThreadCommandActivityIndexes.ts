@@ -1,11 +1,12 @@
 // apps/server/src/persistence/Migrations/036_ProjectionThreadCommandActivityIndexes.ts
 // indexes the bounded command read-model activity projection
 
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_thread_activities_command_window
@@ -25,7 +26,7 @@ export default Effect.gen(function* () {
     )
     WHERE json_valid(payload_json) = 0
       OR COALESCE(json_extract(payload_json, '$.type'), '') <> 'import.continuation'
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_thread_activities_command_relevant
@@ -38,7 +39,7 @@ export default Effect.gen(function* () {
       'provider.approval.respond.failed',
       'provider.user-input.respond.failed'
     )
-  `;
+  `
 
   yield* sql`
     CREATE INDEX IF NOT EXISTS idx_projection_thread_activities_import_continuation
@@ -58,5 +59,5 @@ export default Effect.gen(function* () {
     )
     WHERE json_valid(payload_json) = 1
       AND json_extract(payload_json, '$.type') = 'import.continuation'
-  `;
-});
+  `
+})

@@ -1,3 +1,6 @@
+// apps/mobile/src/features/cloud/ClerkSettingsSheetDetent.tsx
+// provide clerk settings sheet detent context
+
 import {
   createContext,
   type PropsWithChildren,
@@ -5,40 +8,43 @@ import {
   useContext,
   useMemo,
   useState,
-} from "react";
+} from 'react'
 
-interface ClerkSettingsSheetDetentValue {
-  collapse: () => void;
-  expand: () => void;
-  isExpanded: boolean;
+interface ClerkSettingsSheetDetentValue
+{
+  collapse: () => void
+  expand: () => void
+  isExpanded: boolean
 }
 
-const ClerkSettingsSheetDetentContext = createContext<ClerkSettingsSheetDetentValue | null>(null);
+const ClerkSettingsSheetDetentContext = createContext<ClerkSettingsSheetDetentValue | null>(null)
 
-interface ClerkSettingsSheetDetentProviderProps extends PropsWithChildren {
-  initiallyExpanded: boolean;
+interface ClerkSettingsSheetDetentProviderProps extends PropsWithChildren
+{
+  initiallyExpanded: boolean
 }
 
 export function ClerkSettingsSheetDetentProvider({
   children,
   initiallyExpanded,
-}: ClerkSettingsSheetDetentProviderProps) {
-  const [isExpanded, setIsExpanded] = useState(initiallyExpanded);
-  const collapse = useCallback(() => setIsExpanded(false), []);
-  const expand = useCallback(() => setIsExpanded(true), []);
-  const value = useMemo(() => ({ collapse, expand, isExpanded }), [collapse, expand, isExpanded]);
+}: ClerkSettingsSheetDetentProviderProps)
+{
+  const [isExpanded, setIsExpanded] = useState(initiallyExpanded)
+  const collapse = useCallback(() => setIsExpanded(false), [])
+  const expand = useCallback(() => setIsExpanded(true), [])
+  const value = useMemo(() => ({ collapse, expand, isExpanded }), [collapse, expand, isExpanded])
 
-  return (
-    <ClerkSettingsSheetDetentContext value={value}>{children}</ClerkSettingsSheetDetentContext>
-  );
+  return <ClerkSettingsSheetDetentContext value={value}>{children}</ClerkSettingsSheetDetentContext>
 }
 
-export function useClerkSettingsSheetDetent(): ClerkSettingsSheetDetentValue {
-  const value = useContext(ClerkSettingsSheetDetentContext);
-  if (!value) {
+export function useClerkSettingsSheetDetent(): ClerkSettingsSheetDetentValue
+{
+  const value = useContext(ClerkSettingsSheetDetentContext)
+  if (!value)
+  {
     throw new Error(
-      "useClerkSettingsSheetDetent must be used inside ClerkSettingsSheetDetentProvider",
-    );
+      'useClerkSettingsSheetDetent must be used inside ClerkSettingsSheetDetentProvider',
+    )
   }
-  return value;
+  return value
 }

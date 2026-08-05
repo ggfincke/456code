@@ -1,8 +1,11 @@
-import { WsRpcGroup } from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import { RpcClient } from "effect/unstable/rpc";
+// packages/client-runtime/src/rpc/protocol.ts
+// create ws rpc protocol client
 
-export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup);
-type RpcClientFactory = typeof makeWsRpcProtocolClient;
+import { WsRpcGroup } from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import { RpcClient } from 'effect/unstable/rpc'
+
+export const makeWsRpcProtocolClient = RpcClient.make(WsRpcGroup)
+type RpcClientFactory = typeof makeWsRpcProtocolClient
 export type WsRpcProtocolClient =
-  RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never;
+  RpcClientFactory extends Effect.Effect<infer Client, any, any> ? Client : never

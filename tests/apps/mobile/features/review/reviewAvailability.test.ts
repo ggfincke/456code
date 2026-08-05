@@ -1,11 +1,15 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/mobile/features/review/reviewAvailability.test.ts
+// verify resolve review availability behavior
 
-import { resolveReviewAvailability } from "../../../../../apps/mobile/src/features/review/reviewAvailability";
+import { describe, expect, it } from 'vite-plus/test'
 
-describe("resolveReviewAvailability", () => {
+import { resolveReviewAvailability } from '../../../../../apps/mobile/src/features/review/reviewAvailability'
+
+describe('resolveReviewAvailability', () =>
+{
   it.each([
     [
-      "offline with other cached section",
+      'offline with other cached section',
       {
         hasEnvironmentPresentation: true,
         isEnvironmentConnected: false,
@@ -15,7 +19,7 @@ describe("resolveReviewAvailability", () => {
       { showConnectionNotice: true, showSectionToolbar: true },
     ],
     [
-      "offline with no cached sections",
+      'offline with no cached sections',
       {
         hasEnvironmentPresentation: true,
         isEnvironmentConnected: false,
@@ -25,7 +29,7 @@ describe("resolveReviewAvailability", () => {
       { showConnectionNotice: true, showSectionToolbar: false },
     ],
     [
-      "offline with cached selected content",
+      'offline with cached selected content',
       {
         hasEnvironmentPresentation: true,
         isEnvironmentConnected: false,
@@ -34,7 +38,8 @@ describe("resolveReviewAvailability", () => {
       },
       { showConnectionNotice: false, showSectionToolbar: true },
     ],
-  ])("%s", (_label, input, expected) => {
-    expect(resolveReviewAvailability(input)).toEqual(expected);
-  });
-});
+  ])('%s', (_label, input, expected) =>
+  {
+    expect(resolveReviewAvailability(input)).toEqual(expected)
+  })
+})

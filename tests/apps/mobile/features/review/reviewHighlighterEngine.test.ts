@@ -1,34 +1,44 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/mobile/features/review/reviewHighlighterEngine.test.ts
+// verify resolve review highlighter engine preference behavior
+
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   resolveReviewHighlighterEngine,
   resolveReviewHighlighterEnginePreference,
-} from "../../../../../apps/mobile/src/features/review/reviewHighlighterEngine";
+} from '../../../../../apps/mobile/src/features/review/reviewHighlighterEngine'
 
-describe("resolveReviewHighlighterEnginePreference", () => {
-  it("defaults invalid values to native", () => {
-    expect(resolveReviewHighlighterEnginePreference(undefined)).toBe("native");
-    expect(resolveReviewHighlighterEnginePreference("bogus")).toBe("native");
-  });
+describe('resolveReviewHighlighterEnginePreference', () =>
+{
+  it('defaults invalid values to native', () =>
+  {
+    expect(resolveReviewHighlighterEnginePreference(undefined)).toBe('native')
+    expect(resolveReviewHighlighterEnginePreference('bogus')).toBe('native')
+  })
 
-  it("accepts supported values", () => {
-    expect(resolveReviewHighlighterEnginePreference("javascript")).toBe("javascript");
-    expect(resolveReviewHighlighterEnginePreference("js")).toBe("javascript");
-    expect(resolveReviewHighlighterEnginePreference("native")).toBe("native");
-  });
-});
+  it('accepts supported values', () =>
+  {
+    expect(resolveReviewHighlighterEnginePreference('javascript')).toBe('javascript')
+    expect(resolveReviewHighlighterEnginePreference('js')).toBe('javascript')
+    expect(resolveReviewHighlighterEnginePreference('native')).toBe('native')
+  })
+})
 
-describe("resolveReviewHighlighterEngine", () => {
-  it("uses javascript when explicitly requested", () => {
-    expect(resolveReviewHighlighterEngine("javascript", true)).toBe("javascript");
-    expect(resolveReviewHighlighterEngine("javascript", false)).toBe("javascript");
-  });
+describe('resolveReviewHighlighterEngine', () =>
+{
+  it('uses javascript when explicitly requested', () =>
+  {
+    expect(resolveReviewHighlighterEngine('javascript', true)).toBe('javascript')
+    expect(resolveReviewHighlighterEngine('javascript', false)).toBe('javascript')
+  })
 
-  it("uses native when available for native preference", () => {
-    expect(resolveReviewHighlighterEngine("native", true)).toBe("native");
-  });
+  it('uses native when available for native preference', () =>
+  {
+    expect(resolveReviewHighlighterEngine('native', true)).toBe('native')
+  })
 
-  it("falls back to javascript when native is unavailable", () => {
-    expect(resolveReviewHighlighterEngine("native", false)).toBe("javascript");
-  });
-});
+  it('falls back to javascript when native is unavailable', () =>
+  {
+    expect(resolveReviewHighlighterEngine('native', false)).toBe('javascript')
+  })
+})

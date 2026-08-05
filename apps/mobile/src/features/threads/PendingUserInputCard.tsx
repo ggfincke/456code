@@ -1,29 +1,30 @@
-import type { ApprovalRequestId } from "@t3tools/contracts";
-import { Pressable, View } from "react-native";
+// apps/mobile/src/features/threads/PendingUserInputCard.tsx
+// render pending user input card
 
-import { AppText as Text, AppTextInput as TextInput } from "../../components/AppText";
-import { cn } from "../../lib/cn";
-import type { PendingUserInput, PendingUserInputDraftAnswer } from "../../lib/threadActivity";
+import type { ApprovalRequestId } from '@t3tools/contracts'
+import { Pressable, View } from 'react-native'
 
-export interface PendingUserInputCardProps {
-  readonly pendingUserInput: PendingUserInput;
-  readonly drafts: Record<string, PendingUserInputDraftAnswer>;
-  readonly answers: Record<string, string> | null;
-  readonly respondingUserInputId: ApprovalRequestId | null;
-  readonly onSelectOption: (
-    requestId: ApprovalRequestId,
-    questionId: string,
-    label: string,
-  ) => void;
+import { AppText as Text, AppTextInput as TextInput } from '../../components/AppText'
+import { cn } from '../../lib/cn'
+import type { PendingUserInput, PendingUserInputDraftAnswer } from '../../lib/threadActivity'
+
+export interface PendingUserInputCardProps
+{
+  readonly pendingUserInput: PendingUserInput
+  readonly drafts: Record<string, PendingUserInputDraftAnswer>
+  readonly answers: Record<string, string> | null
+  readonly respondingUserInputId: ApprovalRequestId | null
+  readonly onSelectOption: (requestId: ApprovalRequestId, questionId: string, label: string) => void
   readonly onChangeCustomAnswer: (
     requestId: ApprovalRequestId,
     questionId: string,
     customAnswer: string,
-  ) => void;
-  readonly onSubmit: () => Promise<unknown>;
+  ) => void
+  readonly onSubmit: () => Promise<unknown>
 }
 
-export function PendingUserInputCard(props: PendingUserInputCardProps) {
+export function PendingUserInputCard(props: PendingUserInputCardProps)
+{
   return (
     <View className="gap-2.5 rounded-[20px] border border-neutral-200 bg-neutral-100/80 p-4 dark:border-white/6 dark:bg-neutral-900/80">
       <Text className="font-sans-bold text-2xs uppercase tracking-[1.1px] text-sky-700 dark:text-sky-300">
@@ -32,8 +33,9 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
       <Text className="font-sans-bold text-lg text-neutral-950 dark:text-neutral-50">
         Fill in the pending answers
       </Text>
-      {props.pendingUserInput.questions.map((question) => {
-        const draft = props.drafts[question.id];
+      {props.pendingUserInput.questions.map((question) =>
+      {
+        const draft = props.drafts[question.id]
         return (
           <View key={question.id} className="gap-2 pt-1">
             <Text className="font-sans-bold text-xs uppercase tracking-[1px] text-neutral-500 dark:text-neutral-500">
@@ -43,17 +45,18 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
               {question.question}
             </Text>
             <View className="flex-row flex-wrap gap-2.5">
-              {question.options.map((option) => {
+              {question.options.map((option) =>
+              {
                 const selected =
-                  draft?.selectedOptionLabel === option.label && !draft.customAnswer?.trim().length;
+                  draft?.selectedOptionLabel === option.label && !draft.customAnswer?.trim().length
                 return (
                   <Pressable
                     key={option.label}
                     className={cn(
-                      "rounded-full border px-3 py-2.5 ",
+                      'rounded-full border px-3 py-2.5 ',
                       selected
-                        ? "border-blue-300/50 bg-blue-50 dark:border-blue-400/28 dark:bg-blue-400/14"
-                        : "border-neutral-200 bg-white dark:border-white/6 dark:bg-neutral-950/70",
+                        ? 'border-blue-300/50 bg-blue-50 dark:border-blue-400/28 dark:bg-blue-400/14'
+                        : 'border-neutral-200 bg-white dark:border-white/6 dark:bg-neutral-950/70',
                     )}
                     onPress={() =>
                       props.onSelectOption(
@@ -65,20 +68,20 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
                   >
                     <Text
                       className={cn(
-                        "font-sans-bold text-sm",
+                        'font-sans-bold text-sm',
                         selected
-                          ? "text-sky-700 dark:text-sky-300"
-                          : "text-neutral-600 dark:text-neutral-300",
+                          ? 'text-sky-700 dark:text-sky-300'
+                          : 'text-neutral-600 dark:text-neutral-300',
                       )}
                     >
                       {option.label}
                     </Text>
                   </Pressable>
-                );
+                )
               })}
             </View>
             <TextInput
-              value={draft?.customAnswer ?? ""}
+              value={draft?.customAnswer ?? ''}
               onChangeText={(value) =>
                 props.onChangeCustomAnswer(props.pendingUserInput.requestId, question.id, value)
               }
@@ -86,12 +89,12 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
               className="min-h-[54px] rounded-2xl border border-neutral-200 bg-white px-3.5 py-3 font-sans text-base text-neutral-950 dark:border-white/8 dark:bg-neutral-950/70 dark:text-neutral-50"
             />
           </View>
-        );
+        )
       })}
       <Pressable
         className={cn(
-          "items-center justify-center rounded-2xl px-4 py-3.5",
-          props.answers ? "bg-blue-500" : "bg-neutral-200 dark:bg-neutral-700/60",
+          'items-center justify-center rounded-2xl px-4 py-3.5',
+          props.answers ? 'bg-blue-500' : 'bg-neutral-200 dark:bg-neutral-700/60',
         )}
         disabled={
           props.answers === null || props.respondingUserInputId === props.pendingUserInput.requestId
@@ -101,5 +104,5 @@ export function PendingUserInputCard(props: PendingUserInputCardProps) {
         <Text className="font-sans-extrabold text-sm text-white">Submit answers</Text>
       </Pressable>
     </View>
-  );
+  )
 }

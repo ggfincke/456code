@@ -8,122 +8,138 @@ import {
   type ServerProvider,
   ServerSettings,
   type ServerSettingsPatch,
-} from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import { deepMerge } from "./Struct.ts";
-import { fromLenientJson } from "./schemaJson.ts";
-import { createModelSelection } from "./model.ts";
+} from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
+import { deepMerge } from './Struct.ts'
+import { fromLenientJson } from './schemaJson.ts'
+import { createModelSelection } from './model.ts'
 
-const ServerSettingsJson = fromLenientJson(ServerSettings);
-const decodeServerSettingsJson = Schema.decodeUnknownOption(ServerSettingsJson);
+const ServerSettingsJson = fromLenientJson(ServerSettings)
+const decodeServerSettingsJson = Schema.decodeUnknownOption(ServerSettingsJson)
 
-type LegacyProviderSettings = ServerSettings["providers"][keyof ServerSettings["providers"]];
+type LegacyProviderSettings = ServerSettings['providers'][keyof ServerSettings['providers']]
 
 const getLegacyProviderSettings = (
   settings: ServerSettings,
   provider: ProviderDriverKind,
 ): LegacyProviderSettings | undefined =>
-  (settings.providers as Record<string, LegacyProviderSettings | undefined>)[provider];
+  (settings.providers as Record<string, LegacyProviderSettings | undefined>)[provider]
 
 export function isModelSelectionProviderEnabled(
   settings: ServerSettings,
   selection: ModelSelection,
-): boolean {
-  const instanceConfig = settings.providerInstances[selection.instanceId];
-  if (instanceConfig !== undefined) {
-    return instanceConfig.enabled ?? true;
+): boolean
+{
+  const instanceConfig = settings.providerInstances[selection.instanceId]
+  if (instanceConfig !== undefined)
+  {
+    return instanceConfig.enabled ?? true
   }
 
   return (
     isProviderDriverKind(selection.instanceId) &&
     getLegacyProviderSettings(settings, selection.instanceId)?.enabled === true
-  );
+  )
 }
 
 export function resolveSourceControlWriterModelSelection(
   settings: ServerSettings,
   providers?: ReadonlyArray<ServerProvider>,
-): ModelSelection {
-  const selection = settings.sourceControlWriterModelSelection;
-  if (!selection || !isModelSelectionProviderEnabled(settings, selection)) {
-    return settings.textGenerationModelSelection;
+): ModelSelection
+{
+  const selection = settings.sourceControlWriterModelSelection
+  if (!selection || !isModelSelectionProviderEnabled(settings, selection))
+  {
+    return settings.textGenerationModelSelection
   }
-  if (providers === undefined) {
-    return selection;
+  if (providers === undefined)
+  {
+    return selection
   }
 
-  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId);
+  const provider = providers.find((candidate) => candidate.instanceId === selection.instanceId)
   return provider?.enabled === true && isProviderAvailable(provider)
     ? selection
-    : settings.textGenerationModelSelection;
+    : settings.textGenerationModelSelection
 }
 
-export interface PersistedServerObservabilitySettings {
-  readonly otlpTracesUrl: string | undefined;
-  readonly otlpMetricsUrl: string | undefined;
+export interface PersistedServerObservabilitySettings
+{
+  readonly otlpTracesUrl: string | undefined
+  readonly otlpMetricsUrl: string | undefined
 }
 
 export function normalizePersistedServerSettingString(
   value: string | null | undefined,
-): string | undefined {
-  const trimmed = value?.trim();
-  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+): string | undefined
+{
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : undefined
 }
 
 export function extractPersistedServerObservabilitySettings(input: {
   readonly observability?: {
-    readonly otlpTracesUrl?: string;
-    readonly otlpMetricsUrl?: string;
-  };
-}): PersistedServerObservabilitySettings {
+    readonly otlpTracesUrl?: string
+    readonly otlpMetricsUrl?: string
+  }
+}): PersistedServerObservabilitySettings
+{
   return {
     otlpTracesUrl: normalizePersistedServerSettingString(input.observability?.otlpTracesUrl),
     otlpMetricsUrl: normalizePersistedServerSettingString(input.observability?.otlpMetricsUrl),
-  };
+  }
 }
 
 export function parsePersistedServerObservabilitySettings(
   raw: string,
-): PersistedServerObservabilitySettings {
-  const decoded = decodeServerSettingsJson(raw);
-  if (Option.isSome(decoded)) {
-    return extractPersistedServerObservabilitySettings(decoded.value);
+): PersistedServerObservabilitySettings
+{
+  const decoded = decodeServerSettingsJson(raw)
+  if (Option.isSome(decoded))
+  {
+    return extractPersistedServerObservabilitySettings(decoded.value)
   }
-  return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined };
+  return { otlpTracesUrl: undefined, otlpMetricsUrl: undefined }
 }
 
 function shouldReplaceTextGenerationModelSelection(
-  patch: ServerSettingsPatch["textGenerationModelSelection"] | undefined,
-): boolean {
-  return Boolean(patch && (patch.instanceId !== undefined || patch.model !== undefined));
+  patch: ServerSettingsPatch['textGenerationModelSelection'] | undefined,
+): boolean
+{
+  return Boolean(patch && (patch.instanceId !== undefined || patch.model !== undefined))
 }
 
 function mergeModelSelectionOptionsById(input: {
-  current: ReadonlyArray<{ readonly id: string; readonly value: string | boolean }> | undefined;
-  patch: ReadonlyArray<{ readonly id: string; readonly value: string | boolean }> | undefined;
-}): Array<{ id: string; value: string | boolean }> | undefined {
-  if (input.patch === undefined) {
-    return input.current ? [...input.current] : undefined;
+  current: ReadonlyArray<{ readonly id: string; readonly value: string | boolean }> | undefined
+  patch: ReadonlyArray<{ readonly id: string; readonly value: string | boolean }> | undefined
+}): Array<{ id: string; value: string | boolean }> | undefined
+{
+  if (input.patch === undefined)
+  {
+    return input.current ? [...input.current] : undefined
   }
-  if (input.patch.length === 0) {
-    return undefined;
+  if (input.patch.length === 0)
+  {
+    return undefined
   }
 
-  const merged = new Map((input.current ?? []).map((selection) => [selection.id, selection.value]));
-  for (const selection of input.patch) {
-    merged.set(selection.id, selection.value);
+  const merged = new Map((input.current ?? []).map((selection) => [selection.id, selection.value]))
+  for (const selection of input.patch)
+  {
+    merged.set(selection.id, selection.value)
   }
-  return [...merged.entries()].map(([id, value]) => ({ id, value }));
+  return [...merged.entries()].map(([id, value]) => ({ id, value }))
 }
 
 export function applyServerSettingsPatch(
   current: ServerSettings,
   patch: ServerSettingsPatch,
-): ServerSettings {
-  const selectionPatch = patch.textGenerationModelSelection;
-  const { automaticGitFetchInterval, ...patchForMerge } = patch;
-  const next = deepMerge(current, patchForMerge);
+): ServerSettings
+{
+  const selectionPatch = patch.textGenerationModelSelection
+  const { automaticGitFetchInterval, ...patchForMerge } = patch
+  const next = deepMerge(current, patchForMerge)
   const nextWithReplacements = {
     ...next,
     ...(patch.providerInstances !== undefined
@@ -133,22 +149,23 @@ export function applyServerSettingsPatch(
       ? { sourceControlWriterModelSelection: patch.sourceControlWriterModelSelection }
       : {}),
     ...(automaticGitFetchInterval !== undefined ? { automaticGitFetchInterval } : {}),
-  };
-  if (!selectionPatch) {
-    return nextWithReplacements;
+  }
+  if (!selectionPatch)
+  {
+    return nextWithReplacements
   }
 
-  const instanceId = selectionPatch.instanceId ?? current.textGenerationModelSelection.instanceId;
-  const model = selectionPatch.model ?? current.textGenerationModelSelection.model;
+  const instanceId = selectionPatch.instanceId ?? current.textGenerationModelSelection.instanceId
+  const model = selectionPatch.model ?? current.textGenerationModelSelection.model
   const options = shouldReplaceTextGenerationModelSelection(selectionPatch)
     ? selectionPatch.options
     : mergeModelSelectionOptionsById({
         current: current.textGenerationModelSelection.options,
         patch: selectionPatch.options,
-      });
+      })
 
   return {
     ...nextWithReplacements,
     textGenerationModelSelection: createModelSelection(instanceId, model, options),
-  };
+  }
 }

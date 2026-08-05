@@ -1,24 +1,30 @@
-export const COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX = 620;
-export const COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX = 780;
+// apps/web/src/components/composerFooterLayout.ts
+// determine whether use compact composer footer
+
+export const COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX = 620
+export const COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX = 780
 export const COMPOSER_PRIMARY_ACTIONS_COMPACT_BREAKPOINT_PX =
-  COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX;
+  COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX
 
 export function shouldUseCompactComposerFooter(
   width: number | null,
   options?: { hasWideActions?: boolean },
-): boolean {
+): boolean
+{
   const breakpoint = options?.hasWideActions
     ? COMPOSER_FOOTER_WIDE_ACTIONS_COMPACT_BREAKPOINT_PX
-    : COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX;
-  return width !== null && width < breakpoint;
+    : COMPOSER_FOOTER_COMPACT_BREAKPOINT_PX
+  return width !== null && width < breakpoint
 }
 
 export function shouldUseCompactComposerPrimaryActions(
   width: number | null,
   options?: { hasWideActions?: boolean },
-): boolean {
-  if (!options?.hasWideActions) {
-    return false;
+): boolean
+{
+  if (!options?.hasWideActions)
+  {
+    return false
   }
-  return width !== null && width < COMPOSER_PRIMARY_ACTIONS_COMPACT_BREAKPOINT_PX;
+  return width !== null && width < COMPOSER_PRIMARY_ACTIONS_COMPACT_BREAKPOINT_PX
 }

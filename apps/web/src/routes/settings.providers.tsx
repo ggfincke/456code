@@ -1,11 +1,15 @@
-import { createFileRoute } from "@tanstack/react-router";
+// apps/web/src/routes/settings.providers.tsx
+// render the settings providers route
 
-import { ProviderSettingsPanel } from "../components/settings/SettingsPanels";
+import { createFileRoute } from '@tanstack/react-router'
 
-function SettingsProvidersRoute() {
-  return <ProviderSettingsPanel />;
+import { ProviderSettingsPanel } from '../components/settings/SettingsPanels'
+
+function SettingsProvidersRoute()
+{
+  return <ProviderSettingsPanel />
 }
 
-export const Route = createFileRoute("/settings/providers")({
+export const Route = createFileRoute('/settings/providers')({
   component: SettingsProvidersRoute,
-});
+})

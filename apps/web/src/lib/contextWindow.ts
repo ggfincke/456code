@@ -1,73 +1,83 @@
-import type { OrchestrationThreadActivity, ThreadTokenUsageSnapshot } from "@t3tools/contracts";
+import type { OrchestrationThreadActivity, ThreadTokenUsageSnapshot } from '@t3tools/contracts'
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" ? (value as Record<string, unknown>) : null;
+function asRecord(value: unknown): Record<string, unknown> | null
+{
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : null
 }
 
-function asFiniteNumber(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+function asFiniteNumber(value: unknown): number | null
+{
+  return typeof value === 'number' && Number.isFinite(value) ? value : null
 }
 
-function asBoolean(value: unknown): boolean | null {
-  return typeof value === "boolean" ? value : null;
+function asBoolean(value: unknown): boolean | null
+{
+  return typeof value === 'boolean' ? value : null
 }
 
 type NullableContextWindowUsage = {
   readonly [Key in keyof ThreadTokenUsageSnapshot]: undefined extends ThreadTokenUsageSnapshot[Key]
     ? Exclude<ThreadTokenUsageSnapshot[Key], undefined> | null
-    : ThreadTokenUsageSnapshot[Key];
-};
+    : ThreadTokenUsageSnapshot[Key]
+}
 
 export type ContextWindowSnapshot = NullableContextWindowUsage & {
-  readonly remainingTokens: number | null;
-  readonly usedPercentage: number | null;
-  readonly remainingPercentage: number | null;
-  readonly updatedAt: string;
-};
+  readonly remainingTokens: number | null
+  readonly usedPercentage: number | null
+  readonly remainingPercentage: number | null
+  readonly updatedAt: string
+}
 
 /** Map a provider driver kind to a user-facing display name. */
-export function formatProviderDisplayName(provider: string | null | undefined): string {
-  if (!provider) return "This agent";
-  switch (provider) {
-    case "claudeAgent":
-    case "claude":
-      return "Claude";
-    case "codex":
-      return "Codex";
-    case "cursor":
-      return "Cursor";
-    case "opencode":
-      return "OpenCode";
-    default: {
+export function formatProviderDisplayName(provider: string | null | undefined): string
+{
+  if (!provider) return 'This agent'
+  switch (provider)
+  {
+    case 'claudeAgent':
+    case 'claude':
+      return 'Claude'
+    case 'codex':
+      return 'Codex'
+    case 'cursor':
+      return 'Cursor'
+    case 'opencode':
+      return 'OpenCode'
+    default:
+    {
       // Title-case unknown driver kinds so they read reasonably.
-      const trimmed = provider.replace(/Agent$/i, "").trim();
-      if (trimmed.length === 0) return provider;
-      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+      const trimmed = provider.replace(/Agent$/i, '').trim()
+      if (trimmed.length === 0) return provider
+      return trimmed.charAt(0).toUpperCase() + trimmed.slice(1)
     }
   }
 }
 
 export function deriveLatestContextWindowSnapshot(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
-): ContextWindowSnapshot | null {
-  for (let index = activities.length - 1; index >= 0; index -= 1) {
-    const activity = activities[index];
-    if (!activity || activity.kind !== "context-window.updated") {
-      continue;
+): ContextWindowSnapshot | null
+{
+  for (let index = activities.length - 1; index >= 0; index -= 1)
+  {
+    const activity = activities[index]
+    if (!activity || activity.kind !== 'context-window.updated')
+    {
+      continue
     }
 
-    const payload = asRecord(activity.payload);
-    const usedTokens = asFiniteNumber(payload?.usedTokens);
-    if (usedTokens === null || usedTokens < 0) {
-      continue;
+    const payload = asRecord(activity.payload)
+    const usedTokens = asFiniteNumber(payload?.usedTokens)
+    if (usedTokens === null || usedTokens < 0)
+    {
+      continue
     }
 
-    const maxTokens = asFiniteNumber(payload?.maxTokens);
+    const maxTokens = asFiniteNumber(payload?.maxTokens)
     const usedPercentage =
-      maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null;
+      maxTokens !== null && maxTokens > 0 ? Math.min(100, (usedTokens / maxTokens) * 100) : null
     const remainingTokens =
-      maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null;
-    const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null;
+      maxTokens !== null ? Math.max(0, Math.round(maxTokens - usedTokens)) : null
+    const remainingPercentage = usedPercentage !== null ? Math.max(0, 100 - usedPercentage) : null
 
     return {
       usedTokens,
@@ -89,24 +99,29 @@ export function deriveLatestContextWindowSnapshot(
       durationMs: asFiniteNumber(payload?.durationMs),
       compactsAutomatically: asBoolean(payload?.compactsAutomatically) ?? false,
       updatedAt: activity.createdAt,
-    };
+    }
   }
 
-  return null;
+  return null
 }
 
-export function formatContextWindowTokens(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) {
-    return "0";
+export function formatContextWindowTokens(value: number | null): string
+{
+  if (value === null || !Number.isFinite(value))
+  {
+    return '0'
   }
-  if (value < 1_000) {
-    return `${Math.round(value)}`;
+  if (value < 1_000)
+  {
+    return `${Math.round(value)}`
   }
-  if (value < 10_000) {
-    return `${(value / 1_000).toFixed(1).replace(/\.0$/, "")}k`;
+  if (value < 10_000)
+  {
+    return `${(value / 1_000).toFixed(1).replace(/\.0$/, '')}k`
   }
-  if (value < 1_000_000) {
-    return `${Math.round(value / 1_000)}k`;
+  if (value < 1_000_000)
+  {
+    return `${Math.round(value / 1_000)}k`
   }
-  return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, "")}m`;
+  return `${(value / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`
 }

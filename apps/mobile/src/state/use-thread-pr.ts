@@ -1,26 +1,24 @@
-import type { EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+// apps/mobile/src/state/use-thread-pr.ts
+// manage thread pr through a React hook
 
-import { useEnvironmentQuery } from "./query";
-import { presentThreadPr, type ThreadPrPresentation } from "./thread-pr-presentation";
-import { vcsEnvironment } from "./vcs";
+import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 
-export {
-  presentThreadPr,
-  type ThreadPr,
-  type ThreadPrPresentation,
-} from "./thread-pr-presentation";
+import { useEnvironmentQuery } from './query'
+import { presentThreadPr, type ThreadPrPresentation } from './thread-pr-presentation'
+import { vcsEnvironment } from './vcs'
 
-/**
- * Live PR status for a thread's branch. Subscriptions are deduplicated per
- * (environmentId, cwd) by the atom family, so many rows on the same worktree
- * or project root share one stream — and virtualization means only visible
- * rows subscribe at all.
- */
+export { presentThreadPr, type ThreadPr, type ThreadPrPresentation } from './thread-pr-presentation'
+
+// live PR status for a thread's branch. Subscriptions are deduplicated per
+// (environmentId, cwd) by the atom family, so many rows on the same worktree
+// or project root share one stream — and virtualization means only visible
+// rows subscribe at all.
 export function useThreadPr(
   thread: EnvironmentThreadShell,
   projectCwd: string | null,
-): ThreadPrPresentation | null {
-  const cwd = thread.worktreePath ?? projectCwd;
+): ThreadPrPresentation | null
+{
+  const cwd = thread.worktreePath ?? projectCwd
   const gitStatus = useEnvironmentQuery(
     thread.branch !== null && cwd !== null
       ? vcsEnvironment.status({
@@ -28,14 +26,16 @@ export function useThreadPr(
           input: { cwd },
         })
       : null,
-  );
+  )
 
-  const status = gitStatus.data;
-  if (status === null || thread.branch === null || status.refName !== thread.branch) {
-    return null;
+  const status = gitStatus.data
+  if (status === null || thread.branch === null || status.refName !== thread.branch)
+  {
+    return null
   }
-  if (!status.pr) {
-    return null;
+  if (!status.pr)
+  {
+    return null
   }
-  return presentThreadPr(status.pr, status.sourceControlProvider);
+  return presentThreadPr(status.pr, status.sourceControlProvider)
 }

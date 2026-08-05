@@ -1,44 +1,47 @@
-import { assert, describe, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
+// tests/apps/desktop/ipc/methods/window.test.ts
+// verify get local environment bootstraps behavior
 
-import type * as Electron from "electron";
+import { assert, describe, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 
-import * as DesktopBackendManager from "../../../../../apps/desktop/src/backend/DesktopBackendManager.ts";
-import * as DesktopBackendPool from "../../../../../apps/desktop/src/backend/DesktopBackendPool.ts";
-import * as ElectronWindow from "../../../../../apps/desktop/src/electron/ElectronWindow.ts";
+import type * as Electron from 'electron'
+
+import * as DesktopBackendManager from '../../../../../apps/desktop/src/backend/DesktopBackendManager.ts'
+import * as DesktopBackendPool from '../../../../../apps/desktop/src/backend/DesktopBackendPool.ts'
+import * as ElectronWindow from '../../../../../apps/desktop/src/electron/ElectronWindow.ts'
 import {
   getLocalEnvironmentBootstraps,
   getWindowFullscreenState,
-} from "../../../../../apps/desktop/src/ipc/methods/window.ts";
+} from '../../../../../apps/desktop/src/ipc/methods/window.ts'
 
 const readyWslConfig: DesktopBackendManager.DesktopBackendStartConfig = {
-  executablePath: "wsl.exe",
-  args: ["-d", "Ubuntu", "--", "node", "/app/bin.mjs"],
-  entryPath: "/app/bin.mjs",
-  cwd: "/app",
+  executablePath: 'wsl.exe',
+  args: ['-d', 'Ubuntu', '--', 'node', '/app/bin.mjs'],
+  entryPath: '/app/bin.mjs',
+  cwd: '/app',
   env: {},
   extendEnv: false,
   bootstrap: {
-    mode: "desktop",
+    mode: 'desktop',
     noBrowser: true,
     port: 3774,
-    host: "0.0.0.0",
-    desktopBootstrapToken: "bootstrap-token",
+    host: '0.0.0.0',
+    desktopBootstrapToken: 'bootstrap-token',
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
   },
-  bootstrapDelivery: "stdin",
-  httpBaseUrl: new URL("http://127.0.0.1:3774"),
+  bootstrapDelivery: 'stdin',
+  httpBaseUrl: new URL('http://127.0.0.1:3774'),
   captureOutput: true,
   preflightFailure: Option.none(),
-  runningDistro: "Ubuntu",
-};
+  runningDistro: 'Ubuntu',
+}
 
 const defaultWslInstance: DesktopBackendManager.DesktopBackendInstance = {
-  id: DesktopBackendManager.BackendInstanceId("wsl:default"),
-  label: Effect.succeed("WSL (default distro)"),
+  id: DesktopBackendManager.BackendInstanceId('wsl:default'),
+  label: Effect.succeed('WSL (default distro)'),
   start: Effect.void,
   stop: () => Effect.void,
   currentConfig: Effect.succeed(Option.some(readyWslConfig)),
@@ -50,35 +53,38 @@ const defaultWslInstance: DesktopBackendManager.DesktopBackendInstance = {
     restartScheduled: false,
   }),
   waitForReady: () => Effect.succeed(true),
-};
+}
 
-describe("getLocalEnvironmentBootstraps", () => {
-  it.effect("publishes the concrete running distro without replacing the stable instance id", () =>
-    Effect.gen(function* () {
-      const result = yield* getLocalEnvironmentBootstraps.handler();
+describe('getLocalEnvironmentBootstraps', () =>
+{
+  it.effect('publishes the concrete running distro without replacing the stable instance id', () =>
+    Effect.gen(function* ()
+    {
+      const result = yield* getLocalEnvironmentBootstraps.handler()
 
       assert.deepEqual(result, [
         {
-          id: "wsl:default",
-          label: "WSL (Ubuntu)",
-          runningDistro: "Ubuntu",
-          httpBaseUrl: "http://127.0.0.1:3774/",
-          wsBaseUrl: "ws://127.0.0.1:3774/",
-          bootstrapToken: "bootstrap-token",
+          id: 'wsl:default',
+          label: 'WSL (Ubuntu)',
+          runningDistro: 'Ubuntu',
+          httpBaseUrl: 'http://127.0.0.1:3774/',
+          wsBaseUrl: 'ws://127.0.0.1:3774/',
+          bootstrapToken: 'bootstrap-token',
         },
-      ]);
+      ])
     }).pipe(Effect.provide(DesktopBackendPool.layerTest([defaultWslInstance]))),
-  );
+  )
 
-  it.effect("publishes a pending bootstrap only while a transient retry is scheduled", () => {
+  it.effect('publishes a pending bootstrap only while a transient retry is scheduled', () =>
+  {
     const retryingConfig: DesktopBackendManager.DesktopBackendStartConfig = {
       ...readyWslConfig,
       preflightFailure: Option.some({
-        reason: "WSL probe timed out",
+        reason: 'WSL probe timed out',
         fatal: false,
         retryLimit: 12,
       }),
-    };
+    }
     const retryingInstance: DesktopBackendManager.DesktopBackendInstance = {
       ...defaultWslInstance,
       currentConfig: Effect.succeed(Option.some(retryingConfig)),
@@ -89,30 +95,32 @@ describe("getLocalEnvironmentBootstraps", () => {
         restartAttempt: 2,
         restartScheduled: true,
       }),
-    };
+    }
 
-    return Effect.gen(function* () {
-      const result = yield* getLocalEnvironmentBootstraps.handler();
+    return Effect.gen(function* ()
+    {
+      const result = yield* getLocalEnvironmentBootstraps.handler()
       assert.deepEqual(result, [
         {
-          id: "wsl:default",
-          label: "WSL (default distro)",
+          id: 'wsl:default',
+          label: 'WSL (default distro)',
           runningDistro: null,
           httpBaseUrl: null,
           wsBaseUrl: null,
         },
-      ]);
-    }).pipe(Effect.provide(DesktopBackendPool.layerTest([retryingInstance])));
-  });
+      ])
+    }).pipe(Effect.provide(DesktopBackendPool.layerTest([retryingInstance])))
+  })
 
-  it.effect("omits a bounded transient bootstrap after retries stop", () => {
+  it.effect('omits a bounded transient bootstrap after retries stop', () =>
+  {
     const stoppedInstance: DesktopBackendManager.DesktopBackendInstance = {
       ...defaultWslInstance,
       currentConfig: Effect.succeed(
         Option.some({
           ...readyWslConfig,
           preflightFailure: Option.some({
-            reason: "WSL probe timed out",
+            reason: 'WSL probe timed out',
             fatal: false,
             retryLimit: 12,
           }),
@@ -125,27 +133,31 @@ describe("getLocalEnvironmentBootstraps", () => {
         restartAttempt: 12,
         restartScheduled: false,
       }),
-    };
+    }
 
-    return Effect.gen(function* () {
-      const result = yield* getLocalEnvironmentBootstraps.handler();
-      assert.deepEqual(result, []);
-    }).pipe(Effect.provide(DesktopBackendPool.layerTest([stoppedInstance])));
-  });
-});
+    return Effect.gen(function* ()
+    {
+      const result = yield* getLocalEnvironmentBootstraps.handler()
+      assert.deepEqual(result, [])
+    }).pipe(Effect.provide(DesktopBackendPool.layerTest([stoppedInstance])))
+  })
+})
 
-describe("getWindowFullscreenState", () => {
-  it.effect("reads the current native window state", () => {
-    const window = { isFullScreen: () => true } as Electron.BrowserWindow;
+describe('getWindowFullscreenState', () =>
+{
+  it.effect('reads the current native window state', () =>
+  {
+    const window = { isFullScreen: () => true } as Electron.BrowserWindow
 
-    return Effect.gen(function* () {
-      assert.isTrue(yield* getWindowFullscreenState.handler());
+    return Effect.gen(function* ()
+    {
+      assert.isTrue(yield* getWindowFullscreenState.handler())
     }).pipe(
       Effect.provide(
         Layer.mock(ElectronWindow.ElectronWindow)({
           currentMainOrFirst: Effect.succeed(Option.some(window)),
         }),
       ),
-    );
-  });
-});
+    )
+  })
+})

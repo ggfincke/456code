@@ -1,68 +1,75 @@
-import { beforeEach, describe, expect, it } from "vite-plus/test";
+// tests/apps/web/browser/browserPointerStore.test.ts
+// verify browser pointer store behavior
 
-import { useBrowserPointerStore } from "../../../../apps/web/src/browser/browserPointerStore";
+import { beforeEach, describe, expect, it } from 'vite-plus/test'
 
-beforeEach(() => {
-  useBrowserPointerStore.setState({ byTabId: {} });
-});
+import { useBrowserPointerStore } from '../../../../apps/web/src/browser/browserPointerStore'
 
-describe("browserPointerStore", () => {
-  it("tracks the latest pointer target independently for each tab", () => {
-    const store = useBrowserPointerStore.getState();
+beforeEach(() =>
+{
+  useBrowserPointerStore.setState({ byTabId: {} })
+})
+
+describe('browserPointerStore', () =>
+{
+  it('tracks the latest pointer target independently for each tab', () =>
+  {
+    const store = useBrowserPointerStore.getState()
     store.apply({
-      tabId: "tab_a",
-      phase: "move",
+      tabId: 'tab_a',
+      phase: 'move',
       x: 20,
       y: 30,
       sequence: 0,
-      createdAt: "2026-06-12T00:00:00.000Z",
-    });
+      createdAt: '2026-06-12T00:00:00.000Z',
+    })
     store.apply({
-      tabId: "tab_b",
-      phase: "move",
+      tabId: 'tab_b',
+      phase: 'move',
       x: 40,
       y: 50,
       sequence: 1,
-      createdAt: "2026-06-12T00:00:01.000Z",
-    });
+      createdAt: '2026-06-12T00:00:01.000Z',
+    })
     store.apply({
-      tabId: "tab_a",
-      phase: "click",
+      tabId: 'tab_a',
+      phase: 'click',
       x: 60,
       y: 70,
       sequence: 2,
-      createdAt: "2026-06-12T00:00:02.000Z",
-    });
+      createdAt: '2026-06-12T00:00:02.000Z',
+    })
 
     expect(useBrowserPointerStore.getState().byTabId).toMatchObject({
-      tab_a: { phase: "click", x: 60, y: 70, sequence: 2 },
-      tab_b: { phase: "move", x: 40, y: 50, sequence: 1 },
-    });
-  });
+      tab_a: { phase: 'click', x: 60, y: 70, sequence: 2 },
+      tab_b: { phase: 'move', x: 40, y: 50, sequence: 1 },
+    })
+  })
 
-  it("clears one tab without affecting the others", () => {
-    const store = useBrowserPointerStore.getState();
+  it('clears one tab without affecting the others', () =>
+  {
+    const store = useBrowserPointerStore.getState()
     store.apply({
-      tabId: "tab_a",
-      phase: "move",
+      tabId: 'tab_a',
+      phase: 'move',
       x: 20,
       y: 30,
       sequence: 0,
-      createdAt: "2026-06-12T00:00:00.000Z",
-    });
+      createdAt: '2026-06-12T00:00:00.000Z',
+    })
     store.apply({
-      tabId: "tab_b",
-      phase: "move",
+      tabId: 'tab_b',
+      phase: 'move',
       x: 40,
       y: 50,
       sequence: 1,
-      createdAt: "2026-06-12T00:00:01.000Z",
-    });
+      createdAt: '2026-06-12T00:00:01.000Z',
+    })
 
-    store.clear("tab_a");
+    store.clear('tab_a')
 
     expect(useBrowserPointerStore.getState().byTabId).toEqual({
       tab_b: expect.objectContaining({ x: 40, y: 50 }),
-    });
-  });
-});
+    })
+  })
+})

@@ -1,5 +1,9 @@
-import Constants from "expo-constants";
+// apps/mobile/src/features/agent-awareness/capabilities.ts
+// determine whether agent awareness push
 
-export function supportsAgentAwarenessPush() {
-  return Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true;
+import Constants from 'expo-constants'
+
+export function supportsAgentAwarenessPush()
+{
+  return Constants.expoConfig?.extra?.iosPersonalTeamBuild !== true
 }

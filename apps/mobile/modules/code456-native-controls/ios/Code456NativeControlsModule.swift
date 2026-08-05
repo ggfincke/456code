@@ -1,3 +1,5 @@
+// apps/mobile/modules/code456-native-controls/ios/Code456NativeControlsModule.swift
+// registers iOS native control views
 import ExpoModulesCore
 import Security
 

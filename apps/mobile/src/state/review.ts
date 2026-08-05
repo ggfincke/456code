@@ -1,5 +1,8 @@
-import { createReviewEnvironmentAtoms } from "@t3tools/client-runtime/state/review";
+// apps/mobile/src/state/review.ts
+// manage review environment state
 
-import { connectionAtomRuntime } from "../connection/runtime";
+import { createReviewEnvironmentAtoms } from '@t3tools/client-runtime/state/review'
 
-export const reviewEnvironment = createReviewEnvironmentAtoms(connectionAtomRuntime);
+import { connectionAtomRuntime } from '../connection/runtime'
+
+export const reviewEnvironment = createReviewEnvironmentAtoms(connectionAtomRuntime)

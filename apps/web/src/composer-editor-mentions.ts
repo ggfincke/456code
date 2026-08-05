@@ -1,43 +1,49 @@
+// apps/web/src/composer-editor-mentions.ts
+// define composer prompt segment
+
 import {
   INLINE_TERMINAL_CONTEXT_PLACEHOLDER,
   type TerminalContextDraft,
-} from "./lib/terminalContext";
+} from './lib/terminalContext'
 import {
   collectComposerInlineTokens,
   type ComposerInlineToken,
-} from "@t3tools/shared/composerInlineTokens";
+} from '@t3tools/shared/composerInlineTokens'
 
 export type ComposerPromptSegment =
   | {
-      type: "text";
-      text: string;
+      type: 'text'
+      text: string
     }
   | {
-      type: "mention";
-      path: string;
-      source: string;
+      type: 'mention'
+      path: string
+      source: string
     }
   | {
-      type: "skill";
-      name: string;
+      type: 'skill'
+      name: string
     }
   | {
-      type: "terminal-context";
-      context: TerminalContextDraft | null;
-    };
+      type: 'terminal-context'
+      context: TerminalContextDraft | null
+    }
 
-function rangeIncludesIndex(start: number, end: number, index: number): boolean {
-  return start <= index && index < end;
+function rangeIncludesIndex(start: number, end: number, index: number): boolean
+{
+  return start <= index && index < end
 }
 
-function pushTextSegment(segments: ComposerPromptSegment[], text: string): void {
-  if (!text) return;
-  const last = segments[segments.length - 1];
-  if (last && last.type === "text") {
-    last.text += text;
-    return;
+function pushTextSegment(segments: ComposerPromptSegment[], text: string): void
+{
+  if (!text) return
+  const last = segments[segments.length - 1]
+  if (last && last.type === 'text')
+  {
+    last.text += text
+    return
   }
-  segments.push({ type: "text", text });
+  segments.push({ type: 'text', text })
 }
 
 function forEachPromptSegmentSlice(
@@ -45,179 +51,211 @@ function forEachPromptSegmentSlice(
   visitor: (
     slice:
       | {
-          type: "text";
-          text: string;
-          promptOffset: number;
+          type: 'text'
+          text: string
+          promptOffset: number
         }
       | {
-          type: "terminal-context";
-          promptOffset: number;
+          type: 'terminal-context'
+          promptOffset: number
         },
   ) => boolean | void,
-): boolean {
-  let textCursor = 0;
+): boolean
+{
+  let textCursor = 0
 
-  for (let index = 0; index < prompt.length; index += 1) {
-    if (prompt[index] !== INLINE_TERMINAL_CONTEXT_PLACEHOLDER) {
-      continue;
+  for (let index = 0; index < prompt.length; index += 1)
+  {
+    if (prompt[index] !== INLINE_TERMINAL_CONTEXT_PLACEHOLDER)
+    {
+      continue
     }
 
     if (
       index > textCursor &&
       visitor({
-        type: "text",
+        type: 'text',
         text: prompt.slice(textCursor, index),
         promptOffset: textCursor,
       }) === true
-    ) {
-      return true;
+    )
+    {
+      return true
     }
-    if (visitor({ type: "terminal-context", promptOffset: index }) === true) {
-      return true;
+    if (visitor({ type: 'terminal-context', promptOffset: index }) === true)
+    {
+      return true
     }
-    textCursor = index + 1;
+    textCursor = index + 1
   }
 
   if (
     textCursor < prompt.length &&
     visitor({
-      type: "text",
+      type: 'text',
       text: prompt.slice(textCursor),
       promptOffset: textCursor,
     }) === true
-  ) {
-    return true;
+  )
+  {
+    return true
   }
 
-  return false;
+  return false
 }
 
 function forEachPromptTextSlice(
   prompt: string,
   visitor: (text: string, promptOffset: number) => boolean | void,
-): boolean {
-  return forEachPromptSegmentSlice(prompt, (slice) => {
-    if (slice.type !== "text") {
-      return false;
+): boolean
+{
+  return forEachPromptSegmentSlice(prompt, (slice) =>
+  {
+    if (slice.type !== 'text')
+    {
+      return false
     }
-    return visitor(slice.text, slice.promptOffset);
-  });
+    return visitor(slice.text, slice.promptOffset)
+  })
 }
 
 function forEachMentionMatch(
   prompt: string,
   visitor: (
-    match: Extract<ComposerInlineToken, { type: "mention" }>,
+    match: Extract<ComposerInlineToken, { type: 'mention' }>,
     promptOffset: number,
   ) => boolean | void,
-): boolean {
-  return forEachPromptTextSlice(prompt, (text, promptOffset) => {
-    for (const match of collectComposerInlineTokens(text)) {
-      if (match.type !== "mention") {
-        continue;
+): boolean
+{
+  return forEachPromptTextSlice(prompt, (text, promptOffset) =>
+  {
+    for (const match of collectComposerInlineTokens(text))
+    {
+      if (match.type !== 'mention')
+      {
+        continue
       }
-      if (visitor(match, promptOffset) === true) {
-        return true;
+      if (visitor(match, promptOffset) === true)
+      {
+        return true
       }
     }
-    return false;
-  });
+    return false
+  })
 }
 
-function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegment[] {
-  const segments: ComposerPromptSegment[] = [];
-  if (!text) {
-    return segments;
+function splitPromptTextIntoComposerSegments(text: string): ComposerPromptSegment[]
+{
+  const segments: ComposerPromptSegment[] = []
+  if (!text)
+  {
+    return segments
   }
 
-  const tokenMatches = collectComposerInlineTokens(text);
-  let cursor = 0;
-  for (const match of tokenMatches) {
-    if (match.start < cursor) {
-      continue;
+  const tokenMatches = collectComposerInlineTokens(text)
+  let cursor = 0
+  for (const match of tokenMatches)
+  {
+    if (match.start < cursor)
+    {
+      continue
     }
 
-    if (match.start > cursor) {
-      pushTextSegment(segments, text.slice(cursor, match.start));
+    if (match.start > cursor)
+    {
+      pushTextSegment(segments, text.slice(cursor, match.start))
     }
 
-    if (match.type === "mention") {
+    if (match.type === 'mention')
+    {
       segments.push({
-        type: "mention",
+        type: 'mention',
         path: match.value,
         source: match.source,
-      });
-    } else {
-      segments.push({ type: "skill", name: match.value });
+      })
+    }
+    else
+    {
+      segments.push({ type: 'skill', name: match.value })
     }
 
-    cursor = match.end;
+    cursor = match.end
   }
 
-  if (cursor < text.length) {
-    pushTextSegment(segments, text.slice(cursor));
+  if (cursor < text.length)
+  {
+    pushTextSegment(segments, text.slice(cursor))
   }
 
-  return segments;
+  return segments
 }
 
 export function selectionTouchesMentionBoundary(
   prompt: string,
   start: number,
   end: number,
-): boolean {
-  if (!prompt || start >= end) {
-    return false;
+): boolean
+{
+  if (!prompt || start >= end)
+  {
+    return false
   }
 
-  return forEachMentionMatch(prompt, (match, promptOffset) => {
-    const mentionStart = promptOffset + match.start;
-    const mentionEnd = promptOffset + match.end;
-    const beforeMentionIndex = mentionStart - 1;
-    const afterMentionIndex = mentionEnd;
+  return forEachMentionMatch(prompt, (match, promptOffset) =>
+  {
+    const mentionStart = promptOffset + match.start
+    const mentionEnd = promptOffset + match.end
+    const beforeMentionIndex = mentionStart - 1
+    const afterMentionIndex = mentionEnd
 
     if (
       beforeMentionIndex >= 0 &&
-      /\s/.test(prompt[beforeMentionIndex] ?? "") &&
+      /\s/.test(prompt[beforeMentionIndex] ?? '') &&
       rangeIncludesIndex(start, end, beforeMentionIndex)
-    ) {
-      return true;
+    )
+    {
+      return true
     }
 
     if (
       afterMentionIndex < prompt.length &&
-      /\s/.test(prompt[afterMentionIndex] ?? "") &&
+      /\s/.test(prompt[afterMentionIndex] ?? '') &&
       rangeIncludesIndex(start, end, afterMentionIndex)
-    ) {
-      return true;
+    )
+    {
+      return true
     }
-    return false;
-  });
+    return false
+  })
 }
 
 export function splitPromptIntoComposerSegments(
   prompt: string,
   terminalContexts: ReadonlyArray<TerminalContextDraft> = [],
-): ComposerPromptSegment[] {
-  if (!prompt) {
-    return [];
+): ComposerPromptSegment[]
+{
+  if (!prompt)
+  {
+    return []
   }
 
-  const segments: ComposerPromptSegment[] = [];
-  let terminalContextIndex = 0;
-  forEachPromptSegmentSlice(prompt, (slice) => {
-    if (slice.type === "text") {
-      segments.push(...splitPromptTextIntoComposerSegments(slice.text));
-      return false;
+  const segments: ComposerPromptSegment[] = []
+  let terminalContextIndex = 0
+  forEachPromptSegmentSlice(prompt, (slice) =>
+  {
+    if (slice.type === 'text')
+    {
+      segments.push(...splitPromptTextIntoComposerSegments(slice.text))
+      return false
     }
 
     segments.push({
-      type: "terminal-context",
+      type: 'terminal-context',
       context: terminalContexts[terminalContextIndex] ?? null,
-    });
-    terminalContextIndex += 1;
-    return false;
-  });
+    })
+    terminalContextIndex += 1
+    return false
+  })
 
-  return segments;
+  return segments
 }

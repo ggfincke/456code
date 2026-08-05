@@ -1,18 +1,20 @@
 // apps/server/src/persistence/Migrations/035_ProjectionThreadsOrigin.ts
 // adds imported thread provenance to the thread projection
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
   const columns = yield* sql<{ readonly name: string }>`
     PRAGMA table_info(projection_threads)
-  `;
+  `
 
-  if (!columns.some((column) => column.name === "origin_json")) {
+  if (!columns.some((column) => column.name === 'origin_json'))
+  {
     yield* sql`
       ALTER TABLE projection_threads
       ADD COLUMN origin_json TEXT
-    `;
+    `
   }
-});
+})

@@ -1,50 +1,47 @@
 // apps/mobile/src/features/threads/git/GitConfirmSheet.tsx
 // confirms default-branch actions and optional feature branch creation
 
-import { resolveDefaultBranchActionDialogCopy } from "@t3tools/client-runtime/state/vcs";
-import { resolveAutoFeatureBranchName } from "@t3tools/shared/git";
-import * as Arr from "effect/Array";
-import * as Result from "effect/Result";
-import { StackActions, useNavigation, type StaticScreenProps } from "@react-navigation/native";
-import { useCallback, useMemo } from "react";
-import { Platform, View } from "react-native";
+import { resolveDefaultBranchActionDialogCopy } from '@t3tools/client-runtime/state/vcs'
+import { resolveAutoFeatureBranchName } from '@t3tools/shared/git'
+import * as Arr from 'effect/Array'
+import * as Result from 'effect/Result'
+import { StackActions, useNavigation, type StaticScreenProps } from '@react-navigation/native'
+import { useCallback, useMemo } from 'react'
+import { Platform, View } from 'react-native'
 
-import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
-import { AndroidSheetHeader } from "../../../components/AndroidScreenHeader";
-import { AppText as Text } from "../../../components/AppText";
-import { useSelectedThreadGitActions } from "../../../state/use-selected-thread-git-actions";
-import { useSelectedThreadGitState } from "../../../state/use-selected-thread-git-state";
-import { SheetActionButton } from "./gitSheetComponents";
+import { AndroidSheetHeader } from '../../../components/AndroidScreenHeader'
+import { AppText as Text } from '../../../components/AppText'
+import { useSelectedThreadGitActions } from '../../../state/use-selected-thread-git-actions'
+import { useSelectedThreadGitState } from '../../../state/use-selected-thread-git-state'
+import { SheetActionButton } from './gitSheetComponents'
 
 type GitConfirmSheetProps = StaticScreenProps<{
-  readonly environmentId: string;
-  readonly threadId: string;
-  readonly confirmAction?: string;
-  readonly branchName?: string;
-  readonly includesCommit?: string;
-  readonly commitMessage?: string;
-  readonly filePaths?: string;
-}>;
+  readonly environmentId: string
+  readonly threadId: string
+  readonly confirmAction?: string
+  readonly branchName?: string
+  readonly includesCommit?: string
+  readonly commitMessage?: string
+  readonly filePaths?: string
+}>
 
-export function GitConfirmSheet(props: GitConfirmSheetProps) {
-  const navigation = useNavigation();
-  const insets = useSafeAreaInsets();
-  const gitState = useSelectedThreadGitState();
-  const gitActions = useSelectedThreadGitActions();
+export function GitConfirmSheet(props: GitConfirmSheetProps)
+{
+  const navigation = useNavigation()
+  const insets = useSafeAreaInsets()
+  const gitState = useSelectedThreadGitState()
+  const gitActions = useSelectedThreadGitActions()
 
-  const params = props.route.params;
+  const params = props.route.params
 
   const confirmAction = params.confirmAction as
-    | "push"
-    | "create_pr"
-    | "commit_push"
-    | "commit_push_pr"
-    | undefined;
-  const branchName = params.branchName ?? "";
-  const includesCommit = params.includesCommit === "true";
-  const environmentId = params.environmentId ?? "";
-  const threadId = params.threadId ?? "";
+    'push' | 'create_pr' | 'commit_push' | 'commit_push_pr' | undefined
+  const branchName = params.branchName ?? ''
+  const includesCommit = params.includesCommit === 'true'
+  const environmentId = params.environmentId ?? ''
+  const threadId = params.threadId ?? ''
 
   const copy = useMemo(
     () =>
@@ -56,46 +53,50 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
           })
         : null,
     [branchName, confirmAction, includesCommit],
-  );
+  )
 
-  const continuePendingAction = useCallback(async () => {
-    if (!confirmAction) return;
-    navigation.dispatch(StackActions.replace("Thread", { environmentId, threadId }));
+  const continuePendingAction = useCallback(async () =>
+  {
+    if (!confirmAction) return
+    navigation.dispatch(StackActions.replace('Thread', { environmentId, threadId }))
     await gitActions.onRunSelectedThreadGitAction({
       action: confirmAction,
       ...(params.commitMessage ? { commitMessage: params.commitMessage } : {}),
-      ...(params.filePaths ? { filePaths: params.filePaths.split(",") } : {}),
-    });
-  }, [confirmAction, environmentId, gitActions, params, navigation, threadId]);
+      ...(params.filePaths ? { filePaths: params.filePaths.split(',') } : {}),
+    })
+  }, [confirmAction, environmentId, gitActions, params, navigation, threadId])
 
-  const movePendingActionToFeatureBranch = useCallback(async () => {
-    if (!confirmAction) return;
-    navigation.dispatch(StackActions.replace("Thread", { environmentId, threadId }));
+  const movePendingActionToFeatureBranch = useCallback(async () =>
+  {
+    if (!confirmAction) return
+    navigation.dispatch(StackActions.replace('Thread', { environmentId, threadId }))
 
-    if (includesCommit) {
+    if (includesCommit)
+    {
       await gitActions.onRunSelectedThreadGitAction({
         action: confirmAction,
         featureBranch: true,
         ...(params.commitMessage ? { commitMessage: params.commitMessage } : {}),
-        ...(params.filePaths ? { filePaths: params.filePaths.split(",") } : {}),
-      });
-      return;
+        ...(params.filePaths ? { filePaths: params.filePaths.split(',') } : {}),
+      })
+      return
     }
 
     const branches =
       gitState.selectedThreadBranches.length > 0
         ? gitState.selectedThreadBranches
-        : await gitActions.refreshSelectedThreadBranches();
+        : await gitActions.refreshSelectedThreadBranches()
     const newBranchName = resolveAutoFeatureBranchName(
       Arr.filterMap(branches, (branch) =>
         branch.isRemote ? Result.failVoid : Result.succeed(branch.name),
       ),
-    );
-    const createdBranch = await gitActions.onCreateSelectedThreadBranch(newBranchName);
-    if (createdBranch === null) {
-      return;
+    )
+    const createdBranch = await gitActions.onCreateSelectedThreadBranch(newBranchName)
+    if (createdBranch === null)
+    {
+      return
     }
-    await gitActions.onRunSelectedThreadGitAction({ action: confirmAction });
+    await gitActions.onRunSelectedThreadGitAction({ action: confirmAction })
   }, [
     confirmAction,
     gitActions,
@@ -105,11 +106,11 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
     navigation,
     environmentId,
     threadId,
-  ]);
+  ])
 
   return (
     <View collapsable={false} className="flex-1 bg-sheet">
-      {Platform.OS === "android" ? (
+      {Platform.OS === 'android' ? (
         <AndroidSheetHeader title="Confirm action" onBack={() => navigation.goBack()} />
       ) : (
         <View className="min-h-4 pt-2" />
@@ -120,17 +121,17 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
           Confirm
         </Text>
         <Text className="text-center text-3xl font-sans-bold">
-          {copy?.title ?? "Run action on default branch?"}
+          {copy?.title ?? 'Run action on default branch?'}
         </Text>
         <Text className="text-center text-foreground-secondary text-sm font-medium leading-normal">
-          {copy?.description ?? "Choose how to continue."}
+          {copy?.description ?? 'Choose how to continue.'}
         </Text>
       </View>
 
       <View className="gap-3 px-5 pt-2" style={{ paddingBottom: Math.max(insets.bottom, 18) + 8 }}>
         <SheetActionButton
           icon="arrow.right.circle"
-          label={copy?.continueLabel ?? "Continue"}
+          label={copy?.continueLabel ?? 'Continue'}
           onPress={() => void continuePendingAction()}
         />
         <SheetActionButton
@@ -141,5 +142,5 @@ export function GitConfirmSheet(props: GitConfirmSheetProps) {
         />
       </View>
     </View>
-  );
+  )
 }

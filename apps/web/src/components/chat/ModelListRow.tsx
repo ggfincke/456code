@@ -1,46 +1,47 @@
-import { type ProviderDriverKind, type ProviderInstanceId } from "@t3tools/contracts";
-import { memo } from "react";
-import { StarIcon } from "lucide-react";
+import { type ProviderDriverKind, type ProviderInstanceId } from '@t3tools/contracts'
+import { memo } from 'react'
+import { StarIcon } from 'lucide-react'
 import {
   getDisplayModelName,
   getTriggerDisplayModelLabel,
   type ModelEsque,
   PROVIDER_ICON_BY_PROVIDER,
-} from "./providerIconUtils";
-import { ComboboxItem } from "../ui/combobox";
-import { Button } from "../ui/button";
-import { Kbd } from "../ui/kbd";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
-import { cn } from "~/lib/utils";
+} from './providerIconUtils'
+import { ComboboxItem } from '../ui/combobox'
+import { Button } from '../ui/button'
+import { Kbd } from '../ui/kbd'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
+import { cn } from '~/lib/utils'
 
 export const ModelListRow = memo(function ModelListRow(props: {
-  index: number;
-  model: ModelEsque;
+  index: number
+  model: ModelEsque
   /** Instance the model belongs to — the routing key used in combobox values. */
-  instanceId: ProviderInstanceId;
+  instanceId: ProviderInstanceId
   /** Driver kind of the instance — used for the provider icon glyph. */
-  driverKind: ProviderDriverKind;
+  driverKind: ProviderDriverKind
   /**
    * Display name to show in the secondary line (provider footer). Usually
    * the instance's configured `displayName` so custom instances like
    * "Codex Personal" render with their user-authored label.
    */
-  providerDisplayName: string;
-  providerAccentColor?: string | undefined;
-  isFavorite: boolean;
-  isSelected: boolean;
-  showProvider: boolean;
-  preferShortName?: boolean;
-  useTriggerLabel?: boolean;
-  showNewBadge?: boolean;
-  jumpLabel?: string | null;
-  disabledReason?: string | null;
-  onToggleFavorite: () => void;
-}) {
-  const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null;
+  providerDisplayName: string
+  providerAccentColor?: string | undefined
+  isFavorite: boolean
+  isSelected: boolean
+  showProvider: boolean
+  preferShortName?: boolean
+  useTriggerLabel?: boolean
+  showNewBadge?: boolean
+  jumpLabel?: string | null
+  disabledReason?: string | null
+  onToggleFavorite: () => void
+})
+{
+  const ProviderIcon = PROVIDER_ICON_BY_PROVIDER[props.driverKind] ?? null
   const providerLabel = props.model.subProvider
     ? `${props.providerDisplayName} · ${props.model.subProvider}`
-    : props.providerDisplayName;
+    : props.providerDisplayName
 
   const row = (
     <ComboboxItem
@@ -50,10 +51,10 @@ export const ModelListRow = memo(function ModelListRow(props: {
       disabled={Boolean(props.disabledReason)}
       contentClassName="flex w-full items-center gap-3"
       className={cn(
-        "group relative w-full !min-w-0 max-w-full cursor-pointer rounded-md px-2 py-2.5 transition-[background-color,box-shadow,color]",
-        "hover:bg-[color-mix(in_srgb,var(--popover)_90%,var(--foreground))] data-highlighted:bg-[color-mix(in_srgb,var(--popover)_90%,var(--foreground))] data-selected:bg-foreground/[0.08] data-selected:text-foreground data-selected:ring-0 [&[data-highlighted][data-selected]]:bg-[color-mix(in_srgb,var(--popover)_90%,var(--foreground))]",
+        'group relative w-full !min-w-0 max-w-full cursor-pointer rounded-md px-2 py-2.5 transition-[background-color,box-shadow,color]',
+        'hover:bg-[color-mix(in_srgb,var(--popover)_90%,var(--foreground))] data-highlighted:bg-[color-mix(in_srgb,var(--popover)_90%,var(--foreground))] data-selected:bg-foreground/[0.08] data-selected:text-foreground data-selected:ring-0 [&[data-highlighted][data-selected]]:bg-[color-mix(in_srgb,var(--popover)_90%,var(--foreground))]',
         props.disabledReason &&
-          "data-disabled:pointer-events-auto data-disabled:cursor-not-allowed data-disabled:hover:bg-transparent",
+          'data-disabled:pointer-events-auto data-disabled:cursor-not-allowed data-disabled:hover:bg-transparent',
       )}
     >
       <div className="min-w-0 flex-1 text-left">
@@ -96,38 +97,41 @@ export const ModelListRow = memo(function ModelListRow(props: {
                 size="icon-xs"
                 variant="ghost"
                 className={cn(
-                  "-mr-1 shrink-0 text-muted-foreground/70 opacity-64 transition-[color,opacity] hover:text-foreground hover:opacity-100 group-hover:opacity-100",
-                  props.isFavorite && "text-foreground opacity-100",
+                  '-mr-1 shrink-0 text-muted-foreground/70 opacity-64 transition-[color,opacity] hover:text-foreground hover:opacity-100 group-hover:opacity-100',
+                  props.isFavorite && 'text-foreground opacity-100',
                 )}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  props.onToggleFavorite();
+                onClick={(event) =>
+                {
+                  event.stopPropagation()
+                  props.onToggleFavorite()
                 }}
-                onKeyDown={(event) => {
-                  event.stopPropagation();
+                onKeyDown={(event) =>
+                {
+                  event.stopPropagation()
                 }}
                 disabled={Boolean(props.disabledReason)}
-                aria-label={props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+                aria-label={props.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
               >
                 <StarIcon
                   className={cn(
-                    "size-3.5 sm:size-3",
-                    props.isFavorite && "fill-current text-yellow-500",
+                    'size-3.5 sm:size-3',
+                    props.isFavorite && 'fill-current text-yellow-500',
                   )}
                 />
               </Button>
             }
           />
           <TooltipPopup side="top" align="center">
-            {props.isFavorite ? "Remove from favorites" : "Add to favorites"}
+            {props.isFavorite ? 'Remove from favorites' : 'Add to favorites'}
           </TooltipPopup>
         </Tooltip>
       </div>
     </ComboboxItem>
-  );
+  )
 
-  if (!props.disabledReason) {
-    return row;
+  if (!props.disabledReason)
+  {
+    return row
   }
 
   return (
@@ -137,5 +141,5 @@ export const ModelListRow = memo(function ModelListRow(props: {
         {props.disabledReason}
       </TooltipPopup>
     </Tooltip>
-  );
-});
+  )
+})

@@ -1,6 +1,9 @@
-import { GitPullRequestIcon } from "lucide-react";
-import type { ElementType } from "react";
-import type { SourceControlProviderInfo } from "@t3tools/contracts";
+// apps/web/src/sourceControlPresentation.ts
+// resolve source control presentation
+
+import { GitPullRequestIcon } from 'lucide-react'
+import type { ElementType } from 'react'
+import type { SourceControlProviderInfo } from '@t3tools/contracts'
 export {
   DEFAULT_CHANGE_REQUEST_TERMINOLOGY,
   formatChangeRequestAction,
@@ -9,54 +12,57 @@ export {
   resolveChangeRequestPresentation,
   type ChangeRequestPresentation,
   type ChangeRequestTerminology,
-} from "@t3tools/shared/sourceControl";
+} from '@t3tools/shared/sourceControl'
 import {
   getChangeRequestTerminology,
   resolveChangeRequestPresentation,
   type ChangeRequestTerminology,
-} from "@t3tools/shared/sourceControl";
-import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from "./components/Icons";
+} from '@t3tools/shared/sourceControl'
+import { AzureDevOpsIcon, BitbucketIcon, GitHubIcon, GitLabIcon } from './components/Icons'
 
-export interface SourceControlPresentation {
-  readonly providerName: string;
-  readonly terminology: ChangeRequestTerminology;
-  readonly Icon: ElementType<{ className?: string }>;
+export interface SourceControlPresentation
+{
+  readonly providerName: string
+  readonly terminology: ChangeRequestTerminology
+  readonly Icon: ElementType<{ className?: string }>
 }
 
 export function getSourceControlPresentation(
   provider: SourceControlProviderInfo | null | undefined,
-): SourceControlPresentation {
-  const presentation = resolveChangeRequestPresentation(provider);
-  switch (presentation.icon) {
-    case "github":
+): SourceControlPresentation
+{
+  const presentation = resolveChangeRequestPresentation(provider)
+  switch (presentation.icon)
+  {
+    case 'github':
       return {
         providerName: provider?.name || presentation.providerName,
         terminology: getChangeRequestTerminology(provider),
         Icon: GitHubIcon,
-      };
-    case "gitlab":
+      }
+    case 'gitlab':
       return {
         providerName: provider?.name || presentation.providerName,
         terminology: getChangeRequestTerminology(provider),
         Icon: GitLabIcon,
-      };
-    case "azure-devops":
+      }
+    case 'azure-devops':
       return {
         providerName: provider?.name || presentation.providerName,
         terminology: getChangeRequestTerminology(provider),
         Icon: AzureDevOpsIcon,
-      };
-    case "bitbucket":
+      }
+    case 'bitbucket':
       return {
         providerName: provider?.name || presentation.providerName,
         terminology: getChangeRequestTerminology(provider),
         Icon: BitbucketIcon,
-      };
-    case "change-request":
+      }
+    case 'change-request':
       return {
         providerName: provider?.name || presentation.providerName,
         terminology: getChangeRequestTerminology(provider),
         Icon: GitPullRequestIcon,
-      };
+      }
   }
 }

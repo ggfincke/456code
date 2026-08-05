@@ -1,35 +1,36 @@
-import { assert, describe, it } from "@effect/vitest";
-import * as Duration from "effect/Duration";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Ref from "effect/Ref";
-import { HttpClient } from "effect/unstable/http";
-import { ChildProcessSpawner } from "effect/unstable/process";
+import { assert, describe, it } from '@effect/vitest'
+import * as Duration from 'effect/Duration'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Ref from 'effect/Ref'
+import { HttpClient } from 'effect/unstable/http'
+import { ChildProcessSpawner } from 'effect/unstable/process'
 
-import * as DesktopObservability from "../../../../apps/desktop/src/app/DesktopObservability.ts";
-import * as DesktopAppSettings from "../../../../apps/desktop/src/settings/DesktopAppSettings.ts";
-import * as ElectronDialog from "../../../../apps/desktop/src/electron/ElectronDialog.ts";
-import * as DesktopWindow from "../../../../apps/desktop/src/window/DesktopWindow.ts";
-import * as DesktopBackendConfiguration from "../../../../apps/desktop/src/backend/DesktopBackendConfiguration.ts";
-import * as DesktopBackendPool from "../../../../apps/desktop/src/backend/DesktopBackendPool.ts";
+import * as DesktopObservability from '../../../../apps/desktop/src/app/DesktopObservability.ts'
+import * as DesktopAppSettings from '../../../../apps/desktop/src/settings/DesktopAppSettings.ts'
+import * as ElectronDialog from '../../../../apps/desktop/src/electron/ElectronDialog.ts'
+import * as DesktopWindow from '../../../../apps/desktop/src/window/DesktopWindow.ts'
+import * as DesktopBackendConfiguration from '../../../../apps/desktop/src/backend/DesktopBackendConfiguration.ts'
+import * as DesktopBackendPool from '../../../../apps/desktop/src/backend/DesktopBackendPool.ts'
 import type {
   DesktopBackendSnapshot,
   DesktopBackendStartConfig,
-} from "../../../../apps/desktop/src/backend/DesktopBackendManager.ts";
+} from '../../../../apps/desktop/src/backend/DesktopBackendManager.ts'
 
 function makeStubInstance(
   id: DesktopBackendPool.BackendInstanceId,
   label: string,
-): DesktopBackendPool.DesktopBackendInstance {
+): DesktopBackendPool.DesktopBackendInstance
+{
   const snapshot: DesktopBackendSnapshot = {
     desiredRunning: false,
     ready: false,
     activePid: Option.none(),
     restartAttempt: 0,
     restartScheduled: false,
-  };
+  }
   return {
     id,
     label: Effect.succeed(label),
@@ -38,23 +39,24 @@ function makeStubInstance(
     currentConfig: Effect.succeed(Option.none<DesktopBackendStartConfig>()),
     snapshot: Effect.succeed(snapshot),
     waitForReady: (_timeout: Duration.Duration) => Effect.succeed(false),
-  };
+  }
 }
 
 function makePoolLayer(
   labelRef: Ref.Ref<string>,
-): Layer.Layer<DesktopBackendPool.DesktopBackendPool> {
+): Layer.Layer<DesktopBackendPool.DesktopBackendPool>
+{
   return DesktopBackendPool.layer.pipe(
     Layer.provideMerge(
       Layer.mergeAll(
         FileSystem.layerNoop({}),
         Layer.succeed(
           ChildProcessSpawner.ChildProcessSpawner,
-          ChildProcessSpawner.make(() => Effect.die("unexpected child process spawn")),
+          ChildProcessSpawner.make(() => Effect.die('unexpected child process spawn')),
         ),
         Layer.succeed(
           HttpClient.HttpClient,
-          HttpClient.make(() => Effect.die("unexpected HTTP request")),
+          HttpClient.make(() => Effect.die('unexpected HTTP request')),
         ),
         Layer.succeed(DesktopObservability.DesktopBackendOutputLogFactory, {
           forInstance: () =>
@@ -62,72 +64,75 @@ function makePoolLayer(
               writeSessionBoundary: () => Effect.void,
               writeOutputChunk: () => Effect.void,
             } satisfies DesktopObservability.DesktopBackendOutputLogShape),
-        } satisfies DesktopObservability.DesktopBackendOutputLogFactory["Service"]),
+        } satisfies DesktopObservability.DesktopBackendOutputLogFactory['Service']),
         Layer.succeed(DesktopBackendConfiguration.DesktopBackendConfiguration, {
-          resolvePrimary: Effect.die("unexpected primary config resolve"),
+          resolvePrimary: Effect.die('unexpected primary config resolve'),
           resolvePrimaryLabel: Ref.get(labelRef),
-          resolveWsl: () => Effect.die("unexpected WSL config resolve"),
-        } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration["Service"]),
+          resolveWsl: () => Effect.die('unexpected WSL config resolve'),
+        } satisfies DesktopBackendConfiguration.DesktopBackendConfiguration['Service']),
         DesktopAppSettings.layerTest(),
         ElectronDialog.layer,
         Layer.succeed(DesktopWindow.DesktopWindow, {
-          createMain: Effect.die("unexpected window create"),
-          ensureMain: Effect.die("unexpected window ensure"),
-          revealOrCreateMain: Effect.die("unexpected window reveal"),
-          activate: Effect.die("unexpected window activate"),
-          createMainIfBackendReady: Effect.die("unexpected window create"),
+          createMain: Effect.die('unexpected window create'),
+          ensureMain: Effect.die('unexpected window ensure'),
+          revealOrCreateMain: Effect.die('unexpected window reveal'),
+          activate: Effect.die('unexpected window activate'),
+          createMainIfBackendReady: Effect.die('unexpected window create'),
           showConnectingSplash: Effect.void,
           handleBackendReady: () => Effect.void,
           handleBackendNotReady: Effect.void,
           flushMainWindowBounds: Effect.void,
-          dispatchMenuAction: () => Effect.die("unexpected menu action"),
+          dispatchMenuAction: () => Effect.die('unexpected menu action'),
           syncAppearance: Effect.void,
-        } satisfies DesktopWindow.DesktopWindow["Service"]),
+        } satisfies DesktopWindow.DesktopWindow['Service']),
       ),
     ),
-  );
+  )
 }
 
-describe("DesktopBackendPool", () => {
-  it.effect("layerTest exposes registered instances by id", () =>
-    Effect.gen(function* () {
-      const pool = yield* DesktopBackendPool.DesktopBackendPool;
-      const fetchedPrimary = yield* pool.get(DesktopBackendPool.PRIMARY_INSTANCE_ID);
-      const fetchedWsl = yield* pool.get(DesktopBackendPool.BackendInstanceId("wsl:ubuntu"));
-      const fetchedMissing = yield* pool.get(DesktopBackendPool.BackendInstanceId("missing"));
-      const all = yield* pool.list;
-      const resolvedPrimary = yield* pool.primary;
+describe('DesktopBackendPool', () =>
+{
+  it.effect('layerTest exposes registered instances by id', () =>
+    Effect.gen(function* ()
+    {
+      const pool = yield* DesktopBackendPool.DesktopBackendPool
+      const fetchedPrimary = yield* pool.get(DesktopBackendPool.PRIMARY_INSTANCE_ID)
+      const fetchedWsl = yield* pool.get(DesktopBackendPool.BackendInstanceId('wsl:ubuntu'))
+      const fetchedMissing = yield* pool.get(DesktopBackendPool.BackendInstanceId('missing'))
+      const all = yield* pool.list
+      const resolvedPrimary = yield* pool.primary
 
-      assert.equal(yield* Option.getOrThrow(fetchedPrimary).label, "Windows");
-      assert.equal(yield* Option.getOrThrow(fetchedWsl).label, "WSL (Ubuntu)");
-      assert.isTrue(Option.isNone(fetchedMissing));
-      assert.lengthOf(all, 2);
+      assert.equal(yield* Option.getOrThrow(fetchedPrimary).label, 'Windows')
+      assert.equal(yield* Option.getOrThrow(fetchedWsl).label, 'WSL (Ubuntu)')
+      assert.isTrue(Option.isNone(fetchedMissing))
+      assert.lengthOf(all, 2)
       // First instance becomes primary in layerTest so single-instance
       // stubs don't have to wire an explicit primary.
-      assert.equal(resolvedPrimary.id, DesktopBackendPool.PRIMARY_INSTANCE_ID);
+      assert.equal(resolvedPrimary.id, DesktopBackendPool.PRIMARY_INSTANCE_ID)
     }).pipe(
       Effect.provide(
         DesktopBackendPool.layerTest([
-          makeStubInstance(DesktopBackendPool.PRIMARY_INSTANCE_ID, "Windows"),
-          makeStubInstance(DesktopBackendPool.BackendInstanceId("wsl:ubuntu"), "WSL (Ubuntu)"),
+          makeStubInstance(DesktopBackendPool.PRIMARY_INSTANCE_ID, 'Windows'),
+          makeStubInstance(DesktopBackendPool.BackendInstanceId('wsl:ubuntu'), 'WSL (Ubuntu)'),
         ]),
       ),
     ),
-  );
+  )
 
-  it.effect("resolves the primary label lazily after pool layer construction", () =>
+  it.effect('resolves the primary label lazily after pool layer construction', () =>
     Effect.scoped(
-      Effect.gen(function* () {
-        const labelRef = yield* Ref.make("Windows");
+      Effect.gen(function* ()
+      {
+        const labelRef = yield* Ref.make('Windows')
         const pool = yield* DesktopBackendPool.DesktopBackendPool.pipe(
           Effect.provide(makePoolLayer(labelRef)),
-        );
-        const primary = yield* pool.primary;
+        )
+        const primary = yield* pool.primary
 
-        yield* Ref.set(labelRef, "WSL (Ubuntu)");
+        yield* Ref.set(labelRef, 'WSL (Ubuntu)')
 
-        assert.equal(yield* primary.label, "WSL (Ubuntu)");
+        assert.equal(yield* primary.label, 'WSL (Ubuntu)')
       }),
     ),
-  );
-});
+  )
+})

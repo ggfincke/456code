@@ -1,6 +1,10 @@
-import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
+// apps/mobile/src/lib/cn.ts
+// merge conditional mobile class names
 
-export function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
+import { type ClassValue, clsx } from 'clsx'
+import { twMerge } from 'tailwind-merge'
+
+export function cn(...inputs: ClassValue[])
+{
+  return twMerge(clsx(inputs))
 }

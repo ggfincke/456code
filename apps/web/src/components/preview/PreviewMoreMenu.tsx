@@ -1,9 +1,12 @@
-"use client";
+// apps/web/src/components/preview/PreviewMoreMenu.tsx
+// render preview more menu
 
-import type { DesktopPreviewColorScheme } from "@t3tools/contracts";
-import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from "lucide-react";
+'use client'
 
-import { Button } from "~/components/ui/button";
+import type { DesktopPreviewColorScheme } from '@t3tools/contracts'
+import { Minus, MoreVertical, Plus as PlusIcon, RotateCcw } from 'lucide-react'
+
+import { Button } from '~/components/ui/button'
 import {
   Menu,
   MenuItem,
@@ -15,44 +18,41 @@ import {
   MenuSubPopup,
   MenuSubTrigger,
   MenuTrigger,
-} from "~/components/ui/menu";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "~/components/ui/tooltip";
+} from '~/components/ui/menu'
+import { Tooltip, TooltipPopup, TooltipTrigger } from '~/components/ui/tooltip'
 
-import { previewBridge } from "./previewBridge";
+import { previewBridge } from './previewBridge'
 
 const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
-  value: DesktopPreviewColorScheme;
-  label: string;
+  value: DesktopPreviewColorScheme
+  label: string
 }> = [
-  { value: "system", label: "System" },
-  { value: "light", label: "Light" },
-  { value: "dark", label: "Dark" },
-];
+  { value: 'system', label: 'System' },
+  { value: 'light', label: 'Light' },
+  { value: 'dark', label: 'Dark' },
+]
 
-interface Props {
-  /** Active preview tab id. Tab-targeting actions are disabled without it. */
-  tabId: string | null;
-  /**
-   * True only after the desktop bridge has registered a `webContentsId` for
-   * the active tab. Tab-targeting actions throw on the desktop side until
-   * then; we disable those items so the menu doesn't fire silent no-ops.
-   */
-  hasWebContents: boolean;
-  /** Current zoom factor as a number (1.0 = 100%). */
-  zoomFactor: number;
-  /** Emulated `prefers-color-scheme` for the guest page. */
-  colorScheme: DesktopPreviewColorScheme;
-  /** Fixed viewport modes expose the device toolbar and resize rails. */
-  deviceToolbarVisible: boolean;
-  /** Switches between fill-panel mode and a fixed responsive viewport. */
-  onToggleDeviceToolbar: () => void;
+interface Props
+{
+  // active preview tab id. Tab-targeting actions are disabled without it.
+  tabId: string | null
+  // true only after the desktop bridge has registered a `webContentsId` for
+  // the active tab. Tab-targeting actions throw on the desktop side until
+  // then; we disable those items so the menu doesn't fire silent no-ops.
+  hasWebContents: boolean
+  // current zoom factor as a number (1.0 = 100%).
+  zoomFactor: number
+  // emulated `prefers-color-scheme` for the guest page.
+  colorScheme: DesktopPreviewColorScheme
+  // fixed viewport modes expose the device toolbar and resize rails.
+  deviceToolbarVisible: boolean
+  // switches between fill-panel mode and a fixed responsive viewport.
+  onToggleDeviceToolbar: () => void
 }
 
-/**
- * Three-dot menu in the chrome row. Wires Hard reload, DevTools, zoom
- * controls, and storage-clearing actions. Only mounted by `PreviewView`
- * when the desktop bridge is present, so we can call it unconditionally.
- */
+// three-dot menu in the chrome row. Wires Hard reload, DevTools, zoom
+// controls, and storage-clearing actions. Only mounted by `PreviewView`
+// when the desktop bridge is present, so we can call it unconditionally.
 export function PreviewMoreMenu({
   tabId,
   hasWebContents,
@@ -60,16 +60,18 @@ export function PreviewMoreMenu({
   colorScheme,
   deviceToolbarVisible,
   onToggleDeviceToolbar,
-}: Props) {
-  if (!previewBridge) return null;
-  const bridge = previewBridge;
-  const tabDisabled = !tabId || !hasWebContents;
-  const callTab = (op: (tabId: string) => Promise<void>) => () => {
-    if (!tabId) return;
-    void op(tabId).catch(() => undefined);
-  };
+}: Props)
+{
+  if (!previewBridge) return null
+  const bridge = previewBridge
+  const tabDisabled = !tabId || !hasWebContents
+  const callTab = (op: (tabId: string) => Promise<void>) => () =>
+  {
+    if (!tabId) return
+    void op(tabId).catch(() => undefined)
+  }
 
-  const zoomLabel = `${Math.round(zoomFactor * 100)}%`;
+  const zoomLabel = `${Math.round(zoomFactor * 100)}%`
   return (
     <Menu>
       <Tooltip>
@@ -94,18 +96,19 @@ export function PreviewMoreMenu({
           Open DevTools
         </MenuItem>
         <MenuItem onClick={onToggleDeviceToolbar} disabled={tabDisabled}>
-          {deviceToolbarVisible ? "Hide device toolbar" : "Show device toolbar"}
+          {deviceToolbarVisible ? 'Hide device toolbar' : 'Show device toolbar'}
         </MenuItem>
         <MenuSub>
           <MenuSubTrigger disabled={tabDisabled}>Appearance</MenuSubTrigger>
           <MenuSubPopup className="min-w-32">
             <MenuRadioGroup
               value={colorScheme}
-              onValueChange={(value) => {
-                if (!tabId) return;
+              onValueChange={(value) =>
+              {
+                if (!tabId) return
                 void bridge
                   .setColorScheme(tabId, value as DesktopPreviewColorScheme)
-                  .catch(() => undefined);
+                  .catch(() => undefined)
               }}
             >
               {COLOR_SCHEME_OPTIONS.map((option) => (
@@ -173,5 +176,5 @@ export function PreviewMoreMenu({
         </MenuItem>
       </MenuPopup>
     </Menu>
-  );
+  )
 }

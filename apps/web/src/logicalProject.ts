@@ -1,3 +1,6 @@
+// apps/web/src/logicalProject.ts
+// derive logical project key
+
 export {
   deriveLogicalProjectKey,
   deriveLogicalProjectKeyFromRef,
@@ -11,4 +14,4 @@ export {
   selectProjectGroupingSettings,
   type ProjectGroupingMode,
   type ProjectGroupingSettings,
-} from "@t3tools/client-runtime/state/project-grouping";
+} from '@t3tools/client-runtime/state/project-grouping'

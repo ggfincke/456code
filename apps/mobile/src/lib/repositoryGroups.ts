@@ -1,100 +1,119 @@
-import * as Order from "effect/Order";
-import * as Arr from "effect/Array";
-import type { RepositoryIdentity } from "@t3tools/contracts";
+// apps/mobile/src/lib/repositoryGroups.ts
+// define repository project group
 
-import { scopedProjectKey } from "./scopedEntities";
-import { EnvironmentProject, EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import * as Order from 'effect/Order'
+import * as Arr from 'effect/Array'
+import type { RepositoryIdentity } from '@t3tools/contracts'
 
-const DateDescending = Order.flip(Order.Date);
+import { scopedProjectKey } from './scopedEntities'
+import { EnvironmentProject, EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 
-export interface RepositoryProjectGroup {
-  readonly key: string;
-  readonly project: EnvironmentProject;
-  readonly threads: ReadonlyArray<EnvironmentThreadShell>;
-  readonly latestActivityAt: string;
+const DateDescending = Order.flip(Order.Date)
+
+export interface RepositoryProjectGroup
+{
+  readonly key: string
+  readonly project: EnvironmentProject
+  readonly threads: ReadonlyArray<EnvironmentThreadShell>
+  readonly latestActivityAt: string
 }
 
-export interface RepositoryGroup {
-  readonly key: string;
-  readonly title: string;
-  readonly subtitle: string | null;
-  readonly repositoryIdentity: RepositoryIdentity | null;
-  readonly projectCount: number;
-  readonly threadCount: number;
-  readonly latestActivityAt: string;
-  readonly projects: ReadonlyArray<RepositoryProjectGroup>;
+export interface RepositoryGroup
+{
+  readonly key: string
+  readonly title: string
+  readonly subtitle: string | null
+  readonly repositoryIdentity: RepositoryIdentity | null
+  readonly projectCount: number
+  readonly threadCount: number
+  readonly latestActivityAt: string
+  readonly projects: ReadonlyArray<RepositoryProjectGroup>
 }
 
-function compareIsoDateDescending(left: string, right: string): number {
-  return new Date(right).getTime() - new Date(left).getTime();
+function compareIsoDateDescending(left: string, right: string): number
+{
+  return new Date(right).getTime() - new Date(left).getTime()
 }
 
-function deriveRepositoryGroupKey(project: EnvironmentProject): string {
+function deriveRepositoryGroupKey(project: EnvironmentProject): string
+{
   return (
     project.repositoryIdentity?.canonicalKey ?? scopedProjectKey(project.environmentId, project.id)
-  );
+  )
 }
 
-function deriveRepositoryTitle(project: EnvironmentProject): string {
-  const identity = project.repositoryIdentity;
-  return identity?.displayName ?? identity?.name ?? project.title;
+function deriveRepositoryTitle(project: EnvironmentProject): string
+{
+  const identity = project.repositoryIdentity
+  return identity?.displayName ?? identity?.name ?? project.title
 }
 
-function deriveRepositorySubtitle(identity: RepositoryIdentity | null | undefined): string | null {
-  if (!identity) {
-    return null;
+function deriveRepositorySubtitle(identity: RepositoryIdentity | null | undefined): string | null
+{
+  if (!identity)
+  {
+    return null
   }
-  if (identity.owner && identity.name) {
-    return `${identity.owner}/${identity.name}`;
+  if (identity.owner && identity.name)
+  {
+    return `${identity.owner}/${identity.name}`
   }
-  return identity.canonicalKey;
+  return identity.canonicalKey
 }
 
 function deriveProjectLatestActivity(
   project: EnvironmentProject,
   threads: ReadonlyArray<EnvironmentThreadShell>,
-): string {
-  const latestThread = threads[0];
-  return latestThread?.updatedAt ?? latestThread?.createdAt ?? project.updatedAt;
+): string
+{
+  const latestThread = threads[0]
+  return latestThread?.updatedAt ?? latestThread?.createdAt ?? project.updatedAt
 }
 
 export function groupProjectsByRepository(input: {
-  readonly projects: ReadonlyArray<EnvironmentProject>;
-  readonly threads: ReadonlyArray<EnvironmentThreadShell>;
-}): ReadonlyArray<RepositoryGroup> {
-  const threadsByProjectKey = new Map<string, EnvironmentThreadShell[]>();
+  readonly projects: ReadonlyArray<EnvironmentProject>
+  readonly threads: ReadonlyArray<EnvironmentThreadShell>
+}): ReadonlyArray<RepositoryGroup>
+{
+  const threadsByProjectKey = new Map<string, EnvironmentThreadShell[]>()
 
-  for (const thread of input.threads) {
-    const key = scopedProjectKey(thread.environmentId, thread.projectId);
-    const existing = threadsByProjectKey.get(key);
-    if (existing) {
-      existing.push(thread);
-    } else {
-      threadsByProjectKey.set(key, [thread]);
+  for (const thread of input.threads)
+  {
+    const key = scopedProjectKey(thread.environmentId, thread.projectId)
+    const existing = threadsByProjectKey.get(key)
+    if (existing)
+    {
+      existing.push(thread)
+    }
+    else
+    {
+      threadsByProjectKey.set(key, [thread])
     }
   }
 
-  const grouped = new Map<string, RepositoryGroup>();
+  const grouped = new Map<string, RepositoryGroup>()
 
-  for (const project of input.projects) {
-    const key = deriveRepositoryGroupKey(project);
-    const projectKey = scopedProjectKey(project.environmentId, project.id);
+  for (const project of input.projects)
+  {
+    const key = deriveRepositoryGroupKey(project)
+    const projectKey = scopedProjectKey(project.environmentId, project.id)
     const threads = Arr.sortWith(
       threadsByProjectKey.get(projectKey) ?? [],
       (s) => new Date(s.updatedAt ?? s.createdAt),
       DateDescending,
-    );
+    )
 
-    const latestActivityAt = deriveProjectLatestActivity(project, threads);
+    const latestActivityAt = deriveProjectLatestActivity(project, threads)
     const projectGroup: RepositoryProjectGroup = {
       key: projectKey,
       project,
       threads,
       latestActivityAt,
-    };
+    }
 
-    const existing = grouped.get(key);
-    if (!existing) {
+    const existing = grouped.get(key)
+    if (!existing)
+    {
       grouped.set(key, {
         key,
         title: deriveRepositoryTitle(project),
@@ -104,8 +123,8 @@ export function groupProjectsByRepository(input: {
         threadCount: threads.length,
         latestActivityAt,
         projects: [projectGroup],
-      });
-      continue;
+      })
+      continue
     }
 
     grouped.set(key, {
@@ -124,8 +143,8 @@ export function groupProjectsByRepository(input: {
         (s) => new Date(s.latestActivityAt),
         DateDescending,
       ),
-    });
+    })
   }
 
-  return Arr.sortWith(grouped.values(), (s) => new Date(s.latestActivityAt), DateDescending);
+  return Arr.sortWith(grouped.values(), (s) => new Date(s.latestActivityAt), DateDescending)
 }

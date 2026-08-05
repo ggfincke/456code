@@ -1,88 +1,99 @@
-import { scopeProjectRef } from "@t3tools/client-runtime/environment";
-import { createFileRoute, Link } from "@tanstack/react-router";
-import { LinkIcon, PlusIcon, RotateCcwIcon } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+// apps/web/src/routes/_chat.index.tsx
+// render the chat index route
 
-import { openCommandPalette } from "../commandPaletteBus";
-import { sortScopedProjectsForSidebar } from "../components/Sidebar.logic";
-import { Button } from "../components/ui/button";
-import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from "../components/ui/empty";
-import { SidebarInset } from "../components/ui/sidebar";
-import { useNewThreadHandler } from "../hooks/useHandleNewThread";
+import { scopeProjectRef } from '@t3tools/client-runtime/environment'
+import { createFileRoute, Link } from '@tanstack/react-router'
+import { LinkIcon, PlusIcon, RotateCcwIcon } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+
+import { openCommandPalette } from '../commandPaletteBus'
+import { sortScopedProjectsForSidebar } from '../components/Sidebar.logic'
+import { Button } from '../components/ui/button'
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '../components/ui/empty'
+import { SidebarInset } from '../components/ui/sidebar'
+import { useNewThreadHandler } from '../hooks/useHandleNewThread'
 import {
   useAllEnvironmentShellsBootstrapped,
   useProjects,
   useThreadShells,
-} from "../state/entities";
-import { useEnvironments } from "../state/environments";
-import { APP_DISPLAY_NAME } from "~/branding";
-import { cn } from "~/lib/utils";
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from "~/workspaceTitlebar";
+} from '../state/entities'
+import { useEnvironments } from '../state/environments'
+import { APP_DISPLAY_NAME } from '~/branding'
+import { cn } from '~/lib/utils'
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from '~/workspaceTitlebar'
 
-function ChatIndexRouteView() {
-  const { authGateState } = Route.useRouteContext();
-  const { environments } = useEnvironments();
+function ChatIndexRouteView()
+{
+  const { authGateState } = Route.useRouteContext()
+  const { environments } = useEnvironments()
 
-  if (authGateState.status === "hosted-static" && environments.length === 0) {
-    return <HostedStaticOnboardingState />;
+  if (authGateState.status === 'hosted-static' && environments.length === 0)
+  {
+    return <HostedStaticOnboardingState />
   }
 
-  return <IndexDraftLanding />;
+  return <IndexDraftLanding />
 }
 
-/**
- * Landing on the index route drops straight into a draft thread for the most
- * recently active project, so the first screen is a prompt instead of a dead
- * end. Falls back to an add-project hero when no project exists yet.
- */
-function IndexDraftLanding() {
-  const projects = useProjects();
-  const threads = useThreadShells();
-  const bootstrapped = useAllEnvironmentShellsBootstrapped();
-  const handleNewThread = useNewThreadHandler();
-  const startingRef = useRef(false);
-  const [startState, setStartState] = useState({ failed: false, retryRequest: 0 });
+// landing on the index route drops straight into a draft thread for the most
+// recently active project, so the first screen is a prompt instead of a dead
+// end. Falls back to an add-project hero when no project exists yet.
+function IndexDraftLanding()
+{
+  const projects = useProjects()
+  const threads = useThreadShells()
+  const bootstrapped = useAllEnvironmentShellsBootstrapped()
+  const handleNewThread = useNewThreadHandler()
+  const startingRef = useRef(false)
+  const [startState, setStartState] = useState({ failed: false, retryRequest: 0 })
 
   const mostRecentProject = useMemo(
     () =>
       bootstrapped
-        ? (sortScopedProjectsForSidebar(projects, threads, "updated_at")[0] ?? null)
+        ? (sortScopedProjectsForSidebar(projects, threads, 'updated_at')[0] ?? null)
         : null,
     [bootstrapped, projects, threads],
-  );
+  )
 
-  useEffect(() => {
-    if (mostRecentProject === null || startingRef.current) {
-      return;
+  useEffect(() =>
+  {
+    if (mostRecentProject === null || startingRef.current)
+    {
+      return
     }
-    startingRef.current = true;
+    startingRef.current = true
     void handleNewThread(scopeProjectRef(mostRecentProject.environmentId, mostRecentProject.id), {
       replace: true,
-    }).catch(() => {
-      startingRef.current = false;
-      setStartState((state) => ({ ...state, failed: true }));
-    });
-  }, [handleNewThread, mostRecentProject, startState.retryRequest]);
+    }).catch(() =>
+    {
+      startingRef.current = false
+      setStartState((state) => ({ ...state, failed: true }))
+    })
+  }, [handleNewThread, mostRecentProject, startState.retryRequest])
 
-  if (!bootstrapped) {
-    return null;
+  if (!bootstrapped)
+  {
+    return null
   }
-  if (mostRecentProject !== null) {
+  if (mostRecentProject !== null)
+  {
     return startState.failed ? (
       <DraftStartError
-        onRetry={() => {
+        onRetry={() =>
+          {
           setStartState((state) => ({
             failed: false,
             retryRequest: state.retryRequest + 1,
-          }));
+          }))
         }}
       />
-    ) : null;
+    ) : null
   }
-  return <NoProjectsHero />;
+  return <NoProjectsHero />
 }
 
-function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
+function DraftStartError({ onRetry }: { readonly onRetry: () => void })
+{
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <Empty className="flex-1">
@@ -100,11 +111,12 @@ function DraftStartError({ onRetry }: { readonly onRetry: () => void }) {
         </EmptyHeader>
       </Empty>
     </SidebarInset>
-  );
+  )
 }
 
-function NoProjectsHero() {
-  const openAddProject = useCallback(() => openCommandPalette({ open: "add-project" }), []);
+function NoProjectsHero()
+{
+  const openAddProject = useCallback(() => openCommandPalette({ open: 'add-project' }), [])
 
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
@@ -129,20 +141,21 @@ function NoProjectsHero() {
         </Empty>
       </div>
     </SidebarInset>
-  );
+  )
 }
 
-export const Route = createFileRoute("/_chat/")({
+export const Route = createFileRoute('/_chat/')({
   component: ChatIndexRouteView,
-});
+})
 
-function HostedStaticOnboardingState() {
+function HostedStaticOnboardingState()
+{
   return (
     <SidebarInset className="h-dvh min-h-0 overflow-hidden overscroll-y-none bg-background text-foreground">
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden bg-background">
         <header
           className={cn(
-            "border-b border-border px-3 py-2 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5 sm:py-3",
+            'border-b border-border px-3 py-2 transition-[padding-left] duration-200 ease-linear motion-reduce:transition-none sm:px-5 sm:py-3',
             COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS,
           )}
         >
@@ -176,5 +189,5 @@ function HostedStaticOnboardingState() {
         </Empty>
       </div>
     </SidebarInset>
-  );
+  )
 }

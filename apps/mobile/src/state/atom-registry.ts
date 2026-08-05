@@ -1,3 +1,6 @@
-import { AtomRegistry } from "effect/unstable/reactivity";
+// apps/mobile/src/state/atom-registry.ts
+// manage app atom registry state
 
-export const appAtomRegistry = AtomRegistry.make();
+import { AtomRegistry } from 'effect/unstable/reactivity'
+
+export const appAtomRegistry = AtomRegistry.make()

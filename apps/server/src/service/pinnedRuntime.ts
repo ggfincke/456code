@@ -1,47 +1,50 @@
-import * as Duration from "effect/Duration";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Path from "effect/Path";
-import * as Schema from "effect/Schema";
-import * as Semaphore from "effect/Semaphore";
+// apps/server/src/service/pinnedRuntime.ts
+// define pinned runtime paths
 
-import * as ProcessRunner from "../processRunner.ts";
+import * as Duration from 'effect/Duration'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Path from 'effect/Path'
+import * as Schema from 'effect/Schema'
+import * as Semaphore from 'effect/Semaphore'
 
-/**
- * A pinned runtime is an exact `456code@<version>` npm-installed into
- * <baseDir>/runtime/versions/<version>. The boot service points its systemd
- * unit here — never `npx 456code`, whose cache is ephemeral and whose registry
- * fetch at boot would make startup depend on the network.
- */
+import * as ProcessRunner from '../processRunner.ts'
 
-const PINNED_RUNTIME_DIR = "runtime";
-const PINNED_RUNTIME_INSTALL_TIMEOUT = Duration.minutes(10);
-// Boot-service setup can be constructed in separate layers. Serialize the
+// a pinned runtime is an exact `456code@<version>` npm-installed into
+// <baseDir>/runtime/versions/<version>. The boot service points its systemd
+// unit here — never `npx 456code`, whose cache is ephemeral and whose registry
+// fetch at boot would make startup depend on the network.
+
+const PINNED_RUNTIME_DIR = 'runtime'
+const PINNED_RUNTIME_INSTALL_TIMEOUT = Duration.minutes(10)
+// boot-service setup can be constructed in separate layers. Serialize the
 // complete check/install/sentinel transaction across all callers in this
 // process.
-const pinnedRuntimeInstallLock = Semaphore.makeUnsafe(1);
+const pinnedRuntimeInstallLock = Semaphore.makeUnsafe(1)
 
-export interface PinnedRuntimePaths {
-  readonly versionDir: string;
-  readonly entryPath: string;
-  readonly sentinelPath: string;
+export interface PinnedRuntimePaths
+{
+  readonly versionDir: string
+  readonly entryPath: string
+  readonly sentinelPath: string
 }
 
 export function pinnedRuntimePaths(
   path: Path.Path,
   baseDir: string,
   version: string,
-): PinnedRuntimePaths {
-  const versionDir = path.join(baseDir, PINNED_RUNTIME_DIR, "versions", version);
+): PinnedRuntimePaths
+{
+  const versionDir = path.join(baseDir, PINNED_RUNTIME_DIR, 'versions', version)
   return {
     versionDir,
-    entryPath: path.join(versionDir, "node_modules", "456code", "dist", "bin.mjs"),
-    sentinelPath: path.join(versionDir, ".install-complete"),
-  };
+    entryPath: path.join(versionDir, 'node_modules', '456code', 'dist', 'bin.mjs'),
+    sentinelPath: path.join(versionDir, '.install-complete'),
+  }
 }
 
 export class PinnedRuntimeInstallError extends Schema.TaggedErrorClass<PinnedRuntimeInstallError>()(
-  "PinnedRuntimeInstallError",
+  'PinnedRuntimeInstallError',
   {
     step: Schema.String,
     exitCode: Schema.optional(Schema.Number),
@@ -49,34 +52,36 @@ export class PinnedRuntimeInstallError extends Schema.TaggedErrorClass<PinnedRun
     stderrLength: Schema.optional(Schema.Number),
     cause: Schema.optional(Schema.Defect()),
   },
-) {
-  override get message(): string {
+)
+{
+  override get message(): string
+  {
     return this.exitCode === undefined
       ? `Pinned runtime install failed while ${this.step}.`
-      : `Pinned runtime install failed while ${this.step} (exit code ${this.exitCode}).`;
+      : `Pinned runtime install failed while ${this.step} (exit code ${this.exitCode}).`
   }
 }
 
-/**
- * Installs `456code@<version>` into the pinned runtime directory unless a complete
- * install is already there, and returns its paths. The sentinel is written
- * only after npm exits 0; checking the entry file alone is not enough — npm
- * extracts files before running native builds (node-pty), so a killed
- * install leaves a plausible-looking but broken tree behind.
- */
-export const ensurePinnedRuntimeInstalled = Effect.fn("service.pinned_runtime.ensure_installed")(
+// installs `456code@<version>` into the pinned runtime directory unless a complete
+// install is already there, and returns its paths. The sentinel is written
+// only after npm exits 0; checking the entry file alone is not enough — npm
+// extracts files before running native builds (node-pty), so a killed
+// install leaves a plausible-looking but broken tree behind.
+export const ensurePinnedRuntimeInstalled = Effect.fn('service.pinned_runtime.ensure_installed')(
   function* (input: {
-    readonly baseDir: string;
-    readonly version: string;
-    readonly fs: FileSystem.FileSystem;
-    readonly path: Path.Path;
-    readonly runner: ProcessRunner.ProcessRunner["Service"];
-  }) {
-    const { fs, runner } = input;
-    const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version);
+    readonly baseDir: string
+    readonly version: string
+    readonly fs: FileSystem.FileSystem
+    readonly path: Path.Path
+    readonly runner: ProcessRunner.ProcessRunner['Service']
+  })
+  {
+    const { fs, runner } = input
+    const paths = pinnedRuntimePaths(input.path, input.baseDir, input.version)
 
     return yield* pinnedRuntimeInstallLock.withPermit(
-      Effect.gen(function* () {
+      Effect.gen(function* ()
+      {
         const alreadyPinned = yield* Effect.all([
           fs.exists(paths.sentinelPath),
           fs.exists(paths.entryPath),
@@ -84,11 +89,12 @@ export const ensurePinnedRuntimeInstalled = Effect.fn("service.pinned_runtime.en
           Effect.map(([sentinelExists, entryExists]) => sentinelExists && entryExists),
           Effect.mapError(
             (cause) =>
-              new PinnedRuntimeInstallError({ step: "checking the pinned runtime", cause }),
+              new PinnedRuntimeInstallError({ step: 'checking the pinned runtime', cause }),
           ),
-        );
-        if (alreadyPinned) {
-          return paths;
+        )
+        if (alreadyPinned)
+        {
+          return paths
         }
 
         yield* fs.remove(paths.versionDir, { recursive: true, force: true }).pipe(
@@ -96,25 +102,25 @@ export const ensurePinnedRuntimeInstalled = Effect.fn("service.pinned_runtime.en
           Effect.mapError(
             (cause) =>
               new PinnedRuntimeInstallError({
-                step: "preparing the pinned runtime directory",
+                step: 'preparing the pinned runtime directory',
                 cause,
               }),
           ),
-        );
+        )
 
-        const installStep = "installing the pinned 456code runtime (this can take a few minutes)";
+        const installStep = 'installing the pinned 456code runtime (this can take a few minutes)'
         yield* runner
           .run({
-            command: "npm",
+            command: 'npm',
             args: [
-              "install",
-              "--prefix",
+              'install',
+              '--prefix',
               paths.versionDir,
-              "--no-fund",
-              "--no-audit",
+              '--no-fund',
+              '--no-audit',
               `456code@${input.version}`,
             ],
-            // Native deps (node-pty) can compile from source on slow boxes; the
+            // native deps (node-pty) can compile from source on slow boxes; the
             // ProcessRunner default of 60s would kill a healthy install.
             timeout: PINNED_RUNTIME_INSTALL_TIMEOUT,
           })
@@ -133,19 +139,19 @@ export const ensurePinnedRuntimeInstalled = Effect.fn("service.pinned_runtime.en
             Effect.tapError(() =>
               fs.remove(paths.versionDir, { recursive: true, force: true }).pipe(Effect.ignore),
             ),
-          );
+          )
 
         yield* fs
           .writeFileString(paths.sentinelPath, `${input.version}\n`)
           .pipe(
             Effect.mapError(
               (cause) =>
-                new PinnedRuntimeInstallError({ step: "recording the completed install", cause }),
+                new PinnedRuntimeInstallError({ step: 'recording the completed install', cause }),
             ),
-          );
+          )
 
-        return paths;
+        return paths
       }),
-    );
+    )
   },
-);
+)

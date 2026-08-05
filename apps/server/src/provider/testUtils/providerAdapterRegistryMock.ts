@@ -1,55 +1,55 @@
 // apps/server/src/provider/testUtils/providerAdapterRegistryMock.ts
 // builds provider adapter registry mocks for focused server tests
-/**
- * Test helpers for constructing a `ProviderAdapterRegistryShape` mock from a
- * kind-keyed adapter map.
- *
- * Tests historically assembled a `registry` object with only `getByProvider`
- * + `listProviders` populated. Slice D grew the shape with `getByInstance`
- * and `listInstances`; this helper fills both in from a single kind-keyed
- * input so individual fixtures can stay concise.
- *
- * Non-default instance ids (e.g. `codex_personal`) are not addressable via
- * the shim returned here — the legacy test fixtures only ever had
- * single-instance-per-driver data anyway.
- *
- * @module provider/testUtils/providerAdapterRegistryMock
- */
+
+// test helpers for constructing a `ProviderAdapterRegistryShape` mock from a
+// kind-keyed adapter map.
+//
+// tests historically assembled a `registry` object with only `getByProvider`
+// + `listProviders` populated. Slice D grew the shape with `getByInstance`
+// and `listInstances`; this helper fills both in from a single kind-keyed
+// input so individual fixtures can stay concise.
+//
+// non-default instance ids (e.g. `codex_personal`) are not addressable via
+// the shim returned here — the legacy test fixtures only ever had
+// single-instance-per-driver data anyway.
+//
+// @module provider/testUtils/providerAdapterRegistryMock
 import {
   defaultInstanceIdForDriver,
   ProviderDriverKind,
   type ProviderInstanceId,
-} from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as PubSub from "effect/PubSub";
-import * as Record from "effect/Record";
-import * as Result from "effect/Result";
-import * as Stream from "effect/Stream";
+} from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import * as PubSub from 'effect/PubSub'
+import * as Record from 'effect/Record'
+import * as Result from 'effect/Result'
+import * as Stream from 'effect/Stream'
 
-import { ProviderUnsupportedError, type ProviderAdapterError } from "../Errors.ts";
-import type { ProviderAdapterShape } from "../Services/ProviderAdapter.ts";
-import type { ProviderAdapterRegistryShape } from "../Services/ProviderAdapterRegistry.ts";
+import { ProviderUnsupportedError, type ProviderAdapterError } from '../Errors.ts'
+import type { ProviderAdapterShape } from '../Services/ProviderAdapter.ts'
+import type { ProviderAdapterRegistryShape } from '../Services/ProviderAdapterRegistry.ts'
 
 export type KindAdapterMap = Partial<
   Record<ProviderDriverKind, ProviderAdapterShape<ProviderAdapterError>>
->;
+>
 
-/**
- * Build a `ProviderAdapterRegistryShape` from a kind-keyed adapter map.
- * Every adapter present in the map is addressable via both the legacy
- * `getByProvider(kind)` path and the new `getByInstance(id)` path (where
- * `id = defaultInstanceIdForDriver(kind)`).
- */
-export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapterRegistryShape => {
-  const byInstanceId = new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>();
-  for (const [kind, adapter] of Object.entries(adapters)) {
-    if (!adapter) continue;
-    const driverKind = ProviderDriverKind.make(kind);
-    byInstanceId.set(defaultInstanceIdForDriver(driverKind), adapter);
+// build a `ProviderAdapterRegistryShape` from a kind-keyed adapter map.
+// every adapter present in the map is addressable via both the legacy
+// `getByProvider(kind)` path and the new `getByInstance(id)` path (where
+// `id = defaultInstanceIdForDriver(kind)`).
+export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapterRegistryShape =>
+{
+  const byInstanceId = new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>()
+  for (const [kind, adapter] of Object.entries(adapters))
+  {
+    if (!adapter) continue
+    const driverKind = ProviderDriverKind.make(kind)
+    byInstanceId.set(defaultInstanceIdForDriver(driverKind), adapter)
   }
 
-  const getRoute: ProviderAdapterRegistryShape["getRoute"] = (instanceId) => {
-    const adapter = byInstanceId.get(instanceId);
+  const getRoute: ProviderAdapterRegistryShape['getRoute'] = (instanceId) =>
+  {
+    const adapter = byInstanceId.get(instanceId)
     return adapter
       ? Effect.succeed({
           info: {
@@ -68,8 +68,8 @@ export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapt
           new ProviderUnsupportedError({
             provider: ProviderDriverKind.make(instanceId),
           }),
-        );
-  };
+        )
+  }
 
   return {
     getRoute,
@@ -84,12 +84,12 @@ export const makeAdapterRegistryMock = (adapters: KindAdapterMap): ProviderAdapt
           ),
         ),
       ),
-    // Static test fixtures don't reload; an empty stream is enough to
+    // static test fixtures don't reload; an empty stream is enough to
     // satisfy the shape. Tests exercising hot-reload build their own
     // stream via the real `ProviderInstanceRegistry`.
     streamChanges: Stream.empty,
     subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), (pubsub) =>
       PubSub.subscribe(pubsub),
     ),
-  };
-};
+  }
+}

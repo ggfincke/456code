@@ -1,20 +1,26 @@
-import { describe, expect, it } from "@effect/vitest";
-import { EnvironmentId, ThreadId } from "@t3tools/contracts";
+// tests/apps/mobile/state/queries.test.ts
+// verify app queries behavior
+
+import { describe, expect, it } from '@effect/vitest'
+import { EnvironmentId, ThreadId } from '@t3tools/contracts'
 
 import {
   buildCheckpointDiffTargets,
   normalizeComposerPathSearchQuery,
-} from "../../../../apps/mobile/src/state/queryTargets";
+} from '../../../../apps/mobile/src/state/queryTargets'
 
-describe("appQueries", () => {
-  it("normalizes composer path search input", () => {
-    expect(normalizeComposerPathSearchQuery("  src/app  ")).toBe("src/app");
-    expect(normalizeComposerPathSearchQuery(null)).toBe("");
-  });
+describe('appQueries', () =>
+{
+  it('normalizes composer path search input', () =>
+  {
+    expect(normalizeComposerPathSearchQuery('  src/app  ')).toBe('src/app')
+    expect(normalizeComposerPathSearchQuery(null)).toBe('')
+  })
 
-  it("routes the first turn range through the full-thread diff query", () => {
-    const environmentId = EnvironmentId.make("environment-a");
-    const threadId = ThreadId.make("thread-a");
+  it('routes the first turn range through the full-thread diff query', () =>
+  {
+    const environmentId = EnvironmentId.make('environment-a')
+    const threadId = ThreadId.make('thread-a')
 
     expect(
       buildCheckpointDiffTargets({
@@ -34,12 +40,13 @@ describe("appQueries", () => {
         },
       },
       turn: null,
-    });
-  });
+    })
+  })
 
-  it("routes later ranges through the incremental turn diff query", () => {
-    const environmentId = EnvironmentId.make("environment-a");
-    const threadId = ThreadId.make("thread-a");
+  it('routes later ranges through the incremental turn diff query', () =>
+  {
+    const environmentId = EnvironmentId.make('environment-a')
+    const threadId = ThreadId.make('thread-a')
 
     expect(
       buildCheckpointDiffTargets({
@@ -60,6 +67,6 @@ describe("appQueries", () => {
           ignoreWhitespace: false,
         },
       },
-    });
-  });
-});
+    })
+  })
+})

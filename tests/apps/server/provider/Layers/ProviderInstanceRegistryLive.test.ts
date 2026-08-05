@@ -1,31 +1,30 @@
 // tests/apps/server/provider/Layers/ProviderInstanceRegistryLive.test.ts
 // verifies live multi-instance driver construction and provider isolation
-/**
- * Multi-instance validation slices for `ProviderInstanceRegistryLive`.
- *
- * Two axes of the driver/registry refactor are exercised here:
- *
- *  1. **Same driver, many instances** — the "multi-instance codex slice"
- *     describe block below configures two independent `codex` instances and
- *     asserts each gets its own closures and identity. This is the
- *     multi-codex capability the refactor exists to unlock.
- *
- *  2. **Many drivers, one registry** — the "all drivers slice" describe
- *     block below configures one instance of every shipped driver
- *     (`codex`, `claudeAgent`, `cursor`, `grok`, `opencode`) in a single
- *     `ProviderInstanceConfigMap` and asserts the registry boots them all
- *     without cross-contamination. This proves the driver SPI is uniform
- *     across every provider — any driver plugs into the registry through
- *     the same `ProviderDriver` value contract.
- *
- * Every instance in these tests is configured with `enabled: false` so the
- * provider-status checks short-circuit to pending/disabled snapshots
- * without trying to spawn real `codex` / `claude` / `agent` / `grok` / `opencode`
- * binaries. That keeps the assertions focused on registry routing
- * behaviour rather than the runtime details of each provider.
- */
-import { describe, expect, it } from "@effect/vitest";
-import * as NodeServices from "@effect/platform-node/NodeServices";
+
+// multi-instance validation slices for `ProviderInstanceRegistryLive`.
+//
+// two axes of the driver/registry refactor are exercised here:
+//
+//  1. **Same driver, many instances** — the "multi-instance codex slice"
+//     describe block below configures two independent `codex` instances and
+//     asserts each gets its own closures and identity. This is the
+//     multi-codex capability the refactor exists to unlock.
+//
+//  2. **Many drivers, one registry** — the "all drivers slice" describe
+//     block below configures one instance of every shipped driver
+//     (`codex`, `claudeAgent`, `cursor`, `grok`, `opencode`) in a single
+//     `ProviderInstanceConfigMap` and asserts the registry boots them all
+//     without cross-contamination. This proves the driver SPI is uniform
+//     across every provider — any driver plugs into the registry through
+//     the same `ProviderDriver` value contract.
+//
+// every instance in these tests is configured with `enabled: false` so the
+// provider-status checks short-circuit to pending/disabled snapshots
+// without trying to spawn real `codex` / `claude` / `agent` / `grok` / `opencode`
+// binaries. That keeps the assertions focused on registry routing
+// behaviour rather than the runtime details of each provider.
+import { describe, expect, it } from '@effect/vitest'
+import * as NodeServices from '@effect/platform-node/NodeServices'
 import {
   type ClaudeSettings,
   type CodexSettings,
@@ -37,207 +36,211 @@ import {
   type ProviderInstanceEnvironment,
   ProviderInstanceEnvironmentVariableName,
   ProviderInstanceId,
-} from "@t3tools/contracts";
-import * as Effect from "effect/Effect";
-import * as Layer from "effect/Layer";
-import { HttpClient, HttpClientResponse } from "effect/unstable/http";
+} from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import * as Layer from 'effect/Layer'
+import { HttpClient, HttpClientResponse } from 'effect/unstable/http'
 
-import { ServerConfig } from "../../../../../apps/server/src/config.ts";
-import { ServerSettingsService } from "../../../../../apps/server/src/serverSettings.ts";
-import { ClaudeDriver } from "../../../../../apps/server/src/provider/Drivers/ClaudeDriver.ts";
-import { CodexDriver } from "../../../../../apps/server/src/provider/Drivers/CodexDriver.ts";
-import { CursorDriver } from "../../../../../apps/server/src/provider/Drivers/CursorDriver.ts";
-import { GrokDriver } from "../../../../../apps/server/src/provider/Drivers/GrokDriver.ts";
-import { OpenCodeDriver } from "../../../../../apps/server/src/provider/Drivers/OpenCodeDriver.ts";
-import { OpenCodeRuntimeLive } from "../../../../../apps/server/src/provider/opencodeRuntime.ts";
+import { ServerConfig } from '../../../../../apps/server/src/config.ts'
+import { ServerSettingsService } from '../../../../../apps/server/src/serverSettings.ts'
+import { ClaudeDriver } from '../../../../../apps/server/src/provider/Drivers/ClaudeDriver.ts'
+import { CodexDriver } from '../../../../../apps/server/src/provider/Drivers/CodexDriver.ts'
+import { CursorDriver } from '../../../../../apps/server/src/provider/Drivers/CursorDriver.ts'
+import { GrokDriver } from '../../../../../apps/server/src/provider/Drivers/GrokDriver.ts'
+import { OpenCodeDriver } from '../../../../../apps/server/src/provider/Drivers/OpenCodeDriver.ts'
+import { OpenCodeRuntimeLive } from '../../../../../apps/server/src/provider/opencodeRuntime.ts'
 import {
   NoOpProviderEventLoggers,
   ProviderEventLoggers,
-} from "../../../../../apps/server/src/provider/Layers/ProviderEventLoggers.ts";
-import { makeProviderInstanceRegistry } from "../../../../../apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts";
+} from '../../../../../apps/server/src/provider/Layers/ProviderEventLoggers.ts'
+import { makeProviderInstanceRegistry } from '../../../../../apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts'
 
 const TestHttpClientLive = Layer.succeed(
   HttpClient.HttpClient,
   HttpClient.make((request) =>
-    Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({ version: "0.0.0" }))),
+    Effect.succeed(HttpClientResponse.fromWeb(request, Response.json({ version: '0.0.0' }))),
   ),
-);
+)
 
 const makeCodexConfig = (overrides: Partial<CodexSettings>): CodexSettings => ({
   enabled: false,
-  binaryPath: "codex",
-  homePath: "",
-  shadowHomePath: "",
-  launchArgs: "",
+  binaryPath: 'codex',
+  homePath: '',
+  shadowHomePath: '',
+  launchArgs: '',
   customModels: [],
   ...overrides,
-});
+})
 
 const makeClaudeConfig = (overrides: Partial<ClaudeSettings>): ClaudeSettings => ({
   enabled: false,
-  binaryPath: "claude",
-  homePath: "",
+  binaryPath: 'claude',
+  homePath: '',
   customModels: [],
-  launchArgs: "",
+  launchArgs: '',
   ...overrides,
-});
+})
 
 const makeCursorConfig = (overrides: Partial<CursorSettings>): CursorSettings => ({
   enabled: false,
-  binaryPath: "cursor-agent",
-  apiEndpoint: "",
+  binaryPath: 'cursor-agent',
+  apiEndpoint: '',
   customModels: [],
   ...overrides,
-});
+})
 
 const makeGrokConfig = (overrides: Partial<GrokSettings>): GrokSettings => ({
   enabled: false,
-  binaryPath: "grok",
+  binaryPath: 'grok',
   customModels: [],
   ...overrides,
-});
+})
 
 const makeOpenCodeConfig = (overrides: Partial<OpenCodeSettings>): OpenCodeSettings => ({
   enabled: false,
-  binaryPath: "opencode",
-  serverUrl: "",
-  serverPassword: "",
+  binaryPath: 'opencode',
+  serverUrl: '',
+  serverPassword: '',
   customModels: [],
   ...overrides,
-});
+})
 
-describe("ProviderInstanceRegistryLive — multi-instance codex slice", () => {
+describe('ProviderInstanceRegistryLive — multi-instance codex slice', () =>
+{
   // `ServerConfig.layerTest` needs `FileSystem` to materialize its scratch
   // directory. `Layer.merge` just unions requirements, so we have to push
   // `NodeServices.layer` through `Layer.provideMerge` to satisfy that
   // dependency while still surfacing NodeServices to the test body (the
   // codex driver's `create` yields `ChildProcessSpawner` directly).
   const testLayer = ServerConfig.layerTest(process.cwd(), {
-    prefix: "provider-instance-registry-test",
+    prefix: 'provider-instance-registry-test',
   }).pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(TestHttpClientLive),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
-  );
+  )
 
-  it.live("boots two independent codex instances from a ProviderInstanceConfigMap", () =>
-    Effect.gen(function* () {
-      const personalId = ProviderInstanceId.make("codex_personal");
-      const workId = ProviderInstanceId.make("codex_work");
-      const codexDriverKind = ProviderDriverKind.make("codex");
+  it.live('boots two independent codex instances from a ProviderInstanceConfigMap', () =>
+    Effect.gen(function* ()
+    {
+      const personalId = ProviderInstanceId.make('codex_personal')
+      const workId = ProviderInstanceId.make('codex_work')
+      const codexDriverKind = ProviderDriverKind.make('codex')
 
       const configMap: ProviderInstanceConfigMap = {
         [personalId]: {
           driver: codexDriverKind,
-          displayName: "Codex (personal)",
+          displayName: 'Codex (personal)',
           enabled: false,
           config: makeCodexConfig({
-            binaryPath: "/opt/codex-personal/bin/codex",
-            homePath: "/home/julius/.codex_personal",
-            customModels: ["personal-preview"],
+            binaryPath: '/opt/codex-personal/bin/codex',
+            homePath: '/home/julius/.codex_personal',
+            customModels: ['personal-preview'],
           }),
         },
         [workId]: {
           driver: codexDriverKind,
-          displayName: "Codex (work)",
+          displayName: 'Codex (work)',
           enabled: false,
           config: makeCodexConfig({
-            binaryPath: "/opt/codex-work/bin/codex",
-            homePath: "/home/julius/.codex",
-            customModels: ["work-preview"],
+            binaryPath: '/opt/codex-work/bin/codex',
+            homePath: '/home/julius/.codex',
+            customModels: ['work-preview'],
           }),
         },
-      };
+      }
 
       const { registry } = yield* makeProviderInstanceRegistry({
         drivers: [CodexDriver],
         configMap,
-      });
+      })
 
-      const instances = yield* registry.listInstances;
+      const instances = yield* registry.listInstances
       expect(instances.map((instance) => instance.instanceId).toSorted()).toEqual(
         [personalId, workId].toSorted(),
-      );
-      expect(instances.every((instance) => instance.driverKind === codexDriverKind)).toBe(true);
+      )
+      expect(instances.every((instance) => instance.driverKind === codexDriverKind)).toBe(true)
       expect(instances.map((instance) => instance.displayName).toSorted()).toEqual(
-        ["Codex (personal)", "Codex (work)"].toSorted(),
-      );
+        ['Codex (personal)', 'Codex (work)'].toSorted(),
+      )
 
-      // Each instance must be retrievable by id and carry its *own* closures.
-      const personal = yield* registry.getInstance(personalId);
-      const work = yield* registry.getInstance(workId);
-      expect(personal).toBeDefined();
-      expect(work).toBeDefined();
-      expect(personal!.adapter).not.toBe(work!.adapter);
-      expect(personal!.textGeneration).not.toBe(work!.textGeneration);
-      expect(personal!.snapshot).not.toBe(work!.snapshot);
+      // each instance must be retrievable by id and carry its *own* closures.
+      const personal = yield* registry.getInstance(personalId)
+      const work = yield* registry.getInstance(workId)
+      expect(personal).toBeDefined()
+      expect(work).toBeDefined()
+      expect(personal!.adapter).not.toBe(work!.adapter)
+      expect(personal!.textGeneration).not.toBe(work!.textGeneration)
+      expect(personal!.snapshot).not.toBe(work!.snapshot)
 
-      // Snapshots identify themselves by instanceId + driver — this is
+      // snapshots identify themselves by instanceId + driver — this is
       // what makes per-instance routing distinguishable downstream.
-      const personalSnapshot = yield* personal!.snapshot.getSnapshot;
-      expect(personalSnapshot.instanceId).toBe(personalId);
-      expect(personalSnapshot.driver).toBe(codexDriverKind);
-      expect(personalSnapshot.enabled).toBe(false);
+      const personalSnapshot = yield* personal!.snapshot.getSnapshot
+      expect(personalSnapshot.instanceId).toBe(personalId)
+      expect(personalSnapshot.driver).toBe(codexDriverKind)
+      expect(personalSnapshot.enabled).toBe(false)
       expect(personalSnapshot.continuation?.groupKey).toBe(
         personal?.continuationIdentity.continuationKey,
-      );
+      )
 
-      const workSnapshot = yield* work!.snapshot.getSnapshot;
-      expect(workSnapshot.instanceId).toBe(workId);
-      expect(workSnapshot.driver).toBe(codexDriverKind);
-      expect(workSnapshot.enabled).toBe(false);
-      expect(workSnapshot.continuation?.groupKey).toBe(work?.continuationIdentity.continuationKey);
+      const workSnapshot = yield* work!.snapshot.getSnapshot
+      expect(workSnapshot.instanceId).toBe(workId)
+      expect(workSnapshot.driver).toBe(codexDriverKind)
+      expect(workSnapshot.enabled).toBe(false)
+      expect(workSnapshot.continuation?.groupKey).toBe(work?.continuationIdentity.continuationKey)
 
-      // Nothing goes to the unavailable bucket — both drivers are registered.
-      const unavailable = yield* registry.listUnavailable;
-      expect(unavailable).toEqual([]);
+      // nothing goes to the unavailable bucket — both drivers are registered.
+      const unavailable = yield* registry.listUnavailable
+      expect(unavailable).toEqual([])
     }).pipe(Effect.provide(testLayer)),
-  );
+  )
 
   it.live(
-    "shadows instances whose driver is not registered in this build without failing boot",
+    'shadows instances whose driver is not registered in this build without failing boot',
     () =>
-      Effect.gen(function* () {
-        const codexId = ProviderInstanceId.make("codex_main");
-        const ghostId = ProviderInstanceId.make("ghost_main");
+      Effect.gen(function* ()
+      {
+        const codexId = ProviderInstanceId.make('codex_main')
+        const ghostId = ProviderInstanceId.make('ghost_main')
 
         const configMap: ProviderInstanceConfigMap = {
           [codexId]: {
-            driver: ProviderDriverKind.make("codex"),
+            driver: ProviderDriverKind.make('codex'),
             enabled: false,
             config: makeCodexConfig({}),
           },
           [ghostId]: {
-            driver: ProviderDriverKind.make("ghostDriver"),
+            driver: ProviderDriverKind.make('ghostDriver'),
             displayName: "A fork-only driver we don't ship",
             enabled: false,
-            config: { arbitrary: "payload", preserved: true },
+            config: { arbitrary: 'payload', preserved: true },
           },
-        };
+        }
 
         const { registry } = yield* makeProviderInstanceRegistry({
           drivers: [CodexDriver],
           configMap,
-        });
+        })
 
-        const instances = yield* registry.listInstances;
-        expect(instances).toHaveLength(1);
-        expect(instances[0]!.instanceId).toBe(codexId);
+        const instances = yield* registry.listInstances
+        expect(instances).toHaveLength(1)
+        expect(instances[0]!.instanceId).toBe(codexId)
 
-        const unavailable = yield* registry.listUnavailable;
-        expect(unavailable).toHaveLength(1);
-        const ghost = unavailable[0]!;
-        expect(ghost.instanceId).toBe(ghostId);
-        expect(ghost.driver).toBe("ghostDriver");
-        expect(ghost.availability).toBe("unavailable");
-        expect(ghost.unavailableReason).toMatch(/ghostDriver/);
+        const unavailable = yield* registry.listUnavailable
+        expect(unavailable).toHaveLength(1)
+        const ghost = unavailable[0]!
+        expect(ghost.instanceId).toBe(ghostId)
+        expect(ghost.driver).toBe('ghostDriver')
+        expect(ghost.availability).toBe('unavailable')
+        expect(ghost.unavailableReason).toMatch(/ghostDriver/)
       }).pipe(Effect.provide(testLayer)),
-  );
-});
+  )
+})
 
-describe("ProviderInstanceRegistryLive — all drivers slice", () => {
-  // All drivers need `NodeServices` (ChildProcessSpawner + FileSystem +
+describe('ProviderInstanceRegistryLive — all drivers slice', () =>
+{
+  // all drivers need `NodeServices` (ChildProcessSpawner + FileSystem +
   // Path). `OpenCodeDriver.create` additionally yields `OpenCodeRuntime`
   // at construction time, so we wire `OpenCodeRuntimeLive` into the stack.
   // `OpenCodeRuntimeLive` bundles its own `NetService.layer` via
@@ -245,106 +248,107 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
   // `ChildProcessSpawner` — resolved here by piping it through
   // `provideMerge(NodeServices.layer)`.
   //
-  // The nested `provideMerge`s read bottom-up: `NodeServices.layer`
+  // the nested `provideMerge`s read bottom-up: `NodeServices.layer`
   // provides `OpenCodeRuntimeLive`'s deps while keeping its own outputs
   // surfaced; that merged layer then provides `ServerConfig.layerTest`'s
   // `FileSystem` dep while keeping everything else surfaced to the test.
-  const infraLayer = OpenCodeRuntimeLive.pipe(Layer.provideMerge(NodeServices.layer));
+  const infraLayer = OpenCodeRuntimeLive.pipe(Layer.provideMerge(NodeServices.layer))
   const testLayer = ServerConfig.layerTest(process.cwd(), {
-    prefix: "provider-instance-registry-all-drivers-test",
+    prefix: 'provider-instance-registry-all-drivers-test',
   }).pipe(
     Layer.provideMerge(infraLayer),
     Layer.provideMerge(ServerSettingsService.layerTest()),
     Layer.provideMerge(TestHttpClientLive),
     Layer.provideMerge(Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)),
-  );
+  )
 
-  it.live("boots one instance of every shipped driver from a single config map", () =>
-    Effect.gen(function* () {
-      const codexId = ProviderInstanceId.make("codex_default");
-      const claudeId = ProviderInstanceId.make("claude_default");
-      const cursorId = ProviderInstanceId.make("cursor_default");
-      const grokId = ProviderInstanceId.make("grok_default");
-      const openCodeId = ProviderInstanceId.make("opencode_default");
+  it.live('boots one instance of every shipped driver from a single config map', () =>
+    Effect.gen(function* ()
+    {
+      const codexId = ProviderInstanceId.make('codex_default')
+      const claudeId = ProviderInstanceId.make('claude_default')
+      const cursorId = ProviderInstanceId.make('cursor_default')
+      const grokId = ProviderInstanceId.make('grok_default')
+      const openCodeId = ProviderInstanceId.make('opencode_default')
 
-      const codexDriverKind = ProviderDriverKind.make("codex");
-      const claudeDriverKind = ProviderDriverKind.make("claudeAgent");
-      const cursorDriverKind = ProviderDriverKind.make("cursor");
-      const grokDriverKind = ProviderDriverKind.make("grok");
-      const openCodeDriverKind = ProviderDriverKind.make("opencode");
+      const codexDriverKind = ProviderDriverKind.make('codex')
+      const claudeDriverKind = ProviderDriverKind.make('claudeAgent')
+      const cursorDriverKind = ProviderDriverKind.make('cursor')
+      const grokDriverKind = ProviderDriverKind.make('grok')
+      const openCodeDriverKind = ProviderDriverKind.make('opencode')
 
       const configMap: ProviderInstanceConfigMap = {
         [codexId]: {
           driver: codexDriverKind,
-          displayName: "Codex",
+          displayName: 'Codex',
           enabled: false,
-          config: makeCodexConfig({ homePath: "/home/julius/.codex" }),
+          config: makeCodexConfig({ homePath: '/home/julius/.codex' }),
         },
         [claudeId]: {
           driver: claudeDriverKind,
-          displayName: "Claude",
+          displayName: 'Claude',
           enabled: false,
           config: makeClaudeConfig({
-            homePath: "/home/julius/.claude-work",
-            launchArgs: "--verbose",
+            homePath: '/home/julius/.claude-work',
+            launchArgs: '--verbose',
           }),
         },
         [cursorId]: {
           driver: cursorDriverKind,
-          displayName: "Cursor",
+          displayName: 'Cursor',
           enabled: false,
           config: makeCursorConfig({}),
         },
         [grokId]: {
           driver: grokDriverKind,
-          displayName: "Grok",
+          displayName: 'Grok',
           enabled: false,
           config: makeGrokConfig({}),
         },
         [openCodeId]: {
           driver: openCodeDriverKind,
-          displayName: "OpenCode",
+          displayName: 'OpenCode',
           enabled: false,
           config: makeOpenCodeConfig({}),
         },
-      };
+      }
 
       const { registry } = yield* makeProviderInstanceRegistry({
         drivers: [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver],
         configMap,
-      });
+      })
 
-      // Every configured instance must materialize — none downgraded to a
+      // every configured instance must materialize — none downgraded to a
       // shadow snapshot, because every driver in the map is registered.
-      const unavailable = yield* registry.listUnavailable;
-      expect(unavailable).toEqual([]);
+      const unavailable = yield* registry.listUnavailable
+      expect(unavailable).toEqual([])
 
-      const instances = yield* registry.listInstances;
-      expect(instances).toHaveLength(5);
+      const instances = yield* registry.listInstances
+      expect(instances).toHaveLength(5)
       expect(instances.map((instance) => instance.instanceId).toSorted()).toEqual(
         [codexId, claudeId, cursorId, grokId, openCodeId].toSorted(),
-      );
+      )
 
-      // Instance lookup by id resolves each instance to its own bundle —
+      // instance lookup by id resolves each instance to its own bundle —
       // this is how rest-of-server routes turn/session calls in the new
       // model. Each driver's bundle carries its advertised `driverKind`.
-      const codex = yield* registry.getInstance(codexId);
-      const claude = yield* registry.getInstance(claudeId);
-      const cursor = yield* registry.getInstance(cursorId);
-      const grok = yield* registry.getInstance(grokId);
-      const openCode = yield* registry.getInstance(openCodeId);
-      expect(codex?.driverKind).toBe(codexDriverKind);
-      expect(claude?.driverKind).toBe(claudeDriverKind);
-      expect(cursor?.driverKind).toBe(cursorDriverKind);
-      expect(grok?.driverKind).toBe(grokDriverKind);
-      expect(openCode?.driverKind).toBe(openCodeDriverKind);
-      expect(codex?.displayName).toBe("Codex");
-      expect(claude?.displayName).toBe("Claude");
-      expect(cursor?.displayName).toBe("Cursor");
-      expect(grok?.displayName).toBe("Grok");
-      expect(openCode?.displayName).toBe("OpenCode");
+      const codex = yield* registry.getInstance(codexId)
+      const claude = yield* registry.getInstance(claudeId)
+      const cursor = yield* registry.getInstance(cursorId)
+      const grok = yield* registry.getInstance(grokId)
+      const openCode = yield* registry.getInstance(openCodeId)
+      expect(codex?.driverKind).toBe(codexDriverKind)
+      expect(claude?.driverKind).toBe(claudeDriverKind)
+      expect(cursor?.driverKind).toBe(cursorDriverKind)
+      expect(grok?.driverKind).toBe(grokDriverKind)
+      expect(openCode?.driverKind).toBe(openCodeDriverKind)
+      expect(codex?.displayName).toBe('Codex')
+      expect(claude?.displayName).toBe('Claude')
+      expect(cursor?.displayName).toBe('Cursor')
+      expect(grok?.displayName).toBe('Grok')
+      expect(openCode?.displayName).toBe('OpenCode')
 
-      // Every instance owns its own set of closures — no sharing across
+      // every instance owns its own set of closures — no sharing across
       // drivers. `adapter` / `textGeneration` / `snapshot` are all
       // distinct references even when two instances happen to share a
       // trait (e.g. Cursor + others all use a stub-or-real
@@ -355,141 +359,135 @@ describe("ProviderInstanceRegistryLive — all drivers slice", () => {
         cursor!.adapter,
         grok!.adapter,
         openCode!.adapter,
-      ];
-      expect(new Set(adapters).size).toBe(adapters.length);
+      ]
+      expect(new Set(adapters).size).toBe(adapters.length)
       const textGenerations = [
         codex!.textGeneration,
         claude!.textGeneration,
         cursor!.textGeneration,
         grok!.textGeneration,
         openCode!.textGeneration,
-      ];
-      expect(new Set(textGenerations).size).toBe(textGenerations.length);
+      ]
+      expect(new Set(textGenerations).size).toBe(textGenerations.length)
       const snapshots = [
         codex!.snapshot,
         claude!.snapshot,
         cursor!.snapshot,
         grok!.snapshot,
         openCode!.snapshot,
-      ];
-      expect(new Set(snapshots).size).toBe(snapshots.length);
+      ]
+      expect(new Set(snapshots).size).toBe(snapshots.length)
 
-      // Snapshots identify themselves by `instanceId` + `driver` so
+      // snapshots identify themselves by `instanceId` + `driver` so
       // downstream aggregation in `ProviderRegistry` can tell instances
       // apart even when two share a driver. With `enabled: false`, the
       // check short-circuits and we get a disabled/pending snapshot back
       // — that's enough signal to validate the stamping wrapper without
       // spawning real binaries.
-      const codexSnapshot = yield* codex!.snapshot.getSnapshot;
-      expect(codexSnapshot.instanceId).toBe(codexId);
-      expect(codexSnapshot.driver).toBe(codexDriverKind);
-      expect(codexSnapshot.enabled).toBe(false);
-      expect(codexSnapshot.continuation?.groupKey).toBe(
-        codex?.continuationIdentity.continuationKey,
-      );
+      const codexSnapshot = yield* codex!.snapshot.getSnapshot
+      expect(codexSnapshot.instanceId).toBe(codexId)
+      expect(codexSnapshot.driver).toBe(codexDriverKind)
+      expect(codexSnapshot.enabled).toBe(false)
+      expect(codexSnapshot.continuation?.groupKey).toBe(codex?.continuationIdentity.continuationKey)
 
-      const claudeSnapshot = yield* claude!.snapshot.getSnapshot;
-      expect(claudeSnapshot.instanceId).toBe(claudeId);
-      expect(claudeSnapshot.driver).toBe(claudeDriverKind);
-      expect(claudeSnapshot.enabled).toBe(false);
+      const claudeSnapshot = yield* claude!.snapshot.getSnapshot
+      expect(claudeSnapshot.instanceId).toBe(claudeId)
+      expect(claudeSnapshot.driver).toBe(claudeDriverKind)
+      expect(claudeSnapshot.enabled).toBe(false)
       expect(claudeSnapshot.continuation?.groupKey).toBe(
         claude?.continuationIdentity.continuationKey,
-      );
+      )
 
-      const cursorSnapshot = yield* cursor!.snapshot.getSnapshot;
-      expect(cursorSnapshot.instanceId).toBe(cursorId);
-      expect(cursorSnapshot.driver).toBe(cursorDriverKind);
-      expect(cursorSnapshot.enabled).toBe(false);
+      const cursorSnapshot = yield* cursor!.snapshot.getSnapshot
+      expect(cursorSnapshot.instanceId).toBe(cursorId)
+      expect(cursorSnapshot.driver).toBe(cursorDriverKind)
+      expect(cursorSnapshot.enabled).toBe(false)
       expect(cursorSnapshot.continuation?.groupKey).toBe(
         cursor?.continuationIdentity.continuationKey,
-      );
+      )
 
-      const grokSnapshot = yield* grok!.snapshot.getSnapshot;
-      expect(grokSnapshot.instanceId).toBe(grokId);
-      expect(grokSnapshot.driver).toBe(grokDriverKind);
-      expect(grokSnapshot.enabled).toBe(false);
-      expect(grokSnapshot.continuation?.groupKey).toBe(grok?.continuationIdentity.continuationKey);
+      const grokSnapshot = yield* grok!.snapshot.getSnapshot
+      expect(grokSnapshot.instanceId).toBe(grokId)
+      expect(grokSnapshot.driver).toBe(grokDriverKind)
+      expect(grokSnapshot.enabled).toBe(false)
+      expect(grokSnapshot.continuation?.groupKey).toBe(grok?.continuationIdentity.continuationKey)
 
-      const openCodeSnapshot = yield* openCode!.snapshot.getSnapshot;
-      expect(openCodeSnapshot.instanceId).toBe(openCodeId);
-      expect(openCodeSnapshot.driver).toBe(openCodeDriverKind);
-      expect(openCodeSnapshot.enabled).toBe(false);
+      const openCodeSnapshot = yield* openCode!.snapshot.getSnapshot
+      expect(openCodeSnapshot.instanceId).toBe(openCodeId)
+      expect(openCodeSnapshot.driver).toBe(openCodeDriverKind)
+      expect(openCodeSnapshot.enabled).toBe(false)
       expect(openCodeSnapshot.continuation?.groupKey).toBe(
         openCode?.continuationIdentity.continuationKey,
-      );
+      )
     }).pipe(Effect.provide(testLayer)),
-  );
+  )
 
-  it.live("changes all five same-instance identities when their source config changes", () =>
-    Effect.gen(function* () {
+  it.live('changes all five same-instance identities when their source config changes', () =>
+    Effect.gen(function* ()
+    {
       const ids = {
-        codex: ProviderInstanceId.make("codex_source"),
-        claude: ProviderInstanceId.make("claude_source"),
-        cursor: ProviderInstanceId.make("cursor_source"),
-        grok: ProviderInstanceId.make("grok_source"),
-        openCode: ProviderInstanceId.make("opencode_source"),
-      };
+        codex: ProviderInstanceId.make('codex_source'),
+        claude: ProviderInstanceId.make('claude_source'),
+        cursor: ProviderInstanceId.make('cursor_source'),
+        grok: ProviderInstanceId.make('grok_source'),
+        openCode: ProviderInstanceId.make('opencode_source'),
+      }
       const sourceEnvironment = (name: string, value: string): ProviderInstanceEnvironment => [
         {
           name: ProviderInstanceEnvironmentVariableName.make(name),
           value,
           sensitive: true,
         },
-      ];
-      const configMap = (suffix: "a" | "b"): ProviderInstanceConfigMap => ({
+      ]
+      const configMap = (suffix: 'a' | 'b'): ProviderInstanceConfigMap => ({
         [ids.codex]: {
-          driver: ProviderDriverKind.make("codex"),
+          driver: ProviderDriverKind.make('codex'),
           enabled: false,
           config: makeCodexConfig({ homePath: `/accounts/${suffix}/.codex` }),
         },
         [ids.claude]: {
-          driver: ProviderDriverKind.make("claudeAgent"),
+          driver: ProviderDriverKind.make('claudeAgent'),
           enabled: false,
           config: makeClaudeConfig({ homePath: `/accounts/${suffix}/.claude` }),
         },
         [ids.cursor]: {
-          driver: ProviderDriverKind.make("cursor"),
+          driver: ProviderDriverKind.make('cursor'),
           enabled: false,
-          environment: sourceEnvironment("CURSOR_API_KEY", `cursor-secret-${suffix}`),
+          environment: sourceEnvironment('CURSOR_API_KEY', `cursor-secret-${suffix}`),
           config: makeCursorConfig({ apiEndpoint: `https://cursor-${suffix}.example` }),
         },
         [ids.grok]: {
-          driver: ProviderDriverKind.make("grok"),
+          driver: ProviderDriverKind.make('grok'),
           enabled: false,
-          environment: sourceEnvironment("XAI_API_KEY", `grok-secret-${suffix}`),
+          environment: sourceEnvironment('XAI_API_KEY', `grok-secret-${suffix}`),
           config: makeGrokConfig({}),
         },
         [ids.openCode]: {
-          driver: ProviderDriverKind.make("opencode"),
+          driver: ProviderDriverKind.make('opencode'),
           enabled: false,
           config: makeOpenCodeConfig({ serverUrl: `https://opencode-${suffix}.example` }),
         },
-      });
-      const drivers = [
-        CodexDriver,
-        ClaudeDriver,
-        CursorDriver,
-        GrokDriver,
-        OpenCodeDriver,
-      ] as const;
+      })
+      const drivers = [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver] as const
       const first = yield* makeProviderInstanceRegistry({
         drivers,
-        configMap: configMap("a"),
-      });
+        configMap: configMap('a'),
+      })
       const second = yield* makeProviderInstanceRegistry({
         drivers,
-        configMap: configMap("b"),
-      });
+        configMap: configMap('b'),
+      })
 
-      for (const instanceId of Object.values(ids)) {
-        const firstInstance = yield* first.registry.getInstance(instanceId);
-        const secondInstance = yield* second.registry.getInstance(instanceId);
+      for (const instanceId of Object.values(ids))
+      {
+        const firstInstance = yield* first.registry.getInstance(instanceId)
+        const secondInstance = yield* second.registry.getInstance(instanceId)
         expect(firstInstance?.continuationIdentity).not.toEqual(
           secondInstance?.continuationIdentity,
-        );
-        expect(firstInstance?.continuationIdentity.continuationKey).not.toContain("secret-a");
-        expect(secondInstance?.continuationIdentity.continuationKey).not.toContain("secret-b");
+        )
+        expect(firstInstance?.continuationIdentity.continuationKey).not.toContain('secret-a')
+        expect(secondInstance?.continuationIdentity.continuationKey).not.toContain('secret-b')
       }
     }).pipe(Effect.provide(testLayer)),
-  );
-});
+  )
+})

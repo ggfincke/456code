@@ -1,10 +1,13 @@
-import "vite-plus/test/config";
-import { defineConfig } from "vite-plus";
+// packages/client-runtime/vite.config.ts
+// configure client runtime Vite+ behavior
+
+import 'vite-plus/test/config'
+import { defineConfig } from 'vite-plus'
 
 export default defineConfig({
   test: {
-    environment: "node",
-    dir: "../../tests/packages/client-runtime",
-    include: ["**/*.test.ts"],
+    environment: 'node',
+    dir: '../../tests/packages/client-runtime',
+    include: ['**/*.test.ts'],
   },
-});
+})

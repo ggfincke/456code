@@ -1,37 +1,41 @@
-import { SymbolView } from "../components/AppSymbol";
-import { Image, Pressable, ScrollView, View } from "react-native";
-import { useThemeColor } from "../lib/useThemeColor";
+// apps/mobile/src/components/ComposerAttachmentStrip.tsx
+// render composer attachment strip
 
-import type { DraftComposerImageAttachment } from "../lib/composerImages";
+import { SymbolView } from '../components/AppSymbol'
+import { Image, Pressable, ScrollView, View } from 'react-native'
+import { useThemeColor } from '../lib/useThemeColor'
 
-export interface ComposerAttachmentStripProps {
-  /** Attachment images to display. */
-  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>;
-  /** Called when the user taps the remove button on an image. */
-  readonly onRemove: (imageId: string) => void;
-  /** Called when the user taps on an image thumbnail to preview it. */
-  readonly onPressImage?: (previewUri: string) => void;
-  /** Image thumbnail size in points.  Defaults to 72. */
-  readonly imageSize?: number;
-  /** Border radius of each image thumbnail.  Defaults to 16. */
-  readonly imageBorderRadius?: number;
-  /** Whether the remove button should sit in its own gutter instead of overlapping the image. */
-  readonly removeButtonPlacement?: "overlay" | "gutter";
+import type { DraftComposerImageAttachment } from '../lib/composerImages'
+
+export interface ComposerAttachmentStripProps
+{
+  // attachment images to display.
+  readonly attachments: ReadonlyArray<DraftComposerImageAttachment>
+  // called when the user taps the remove button on an image.
+  readonly onRemove: (imageId: string) => void
+  // called when the user taps on an image thumbnail to preview it.
+  readonly onPressImage?: (previewUri: string) => void
+  // image thumbnail size in points.  Defaults to 72.
+  readonly imageSize?: number
+  // border radius of each image thumbnail.  Defaults to 16.
+  readonly imageBorderRadius?: number
+  // whether the remove button should sit in its own gutter instead of overlapping the image.
+  readonly removeButtonPlacement?: 'overlay' | 'gutter'
 }
 
-/**
- * A horizontally-scrollable strip of image attachment thumbnails with remove
- * buttons.  Used by both the thread composer and the new-task draft screen.
- */
-export function ComposerAttachmentStrip(props: ComposerAttachmentStripProps) {
-  const subtleBg = useThemeColor("--color-subtle");
-  const size = props.imageSize ?? 72;
-  const radius = props.imageBorderRadius ?? 16;
-  const removeButtonPlacement = props.removeButtonPlacement ?? "overlay";
-  const removeButtonGutter = removeButtonPlacement === "gutter" ? 10 : 0;
+// a horizontally-scrollable strip of image attachment thumbnails with remove
+// buttons.  Used by both the thread composer and the new-task draft screen.
+export function ComposerAttachmentStrip(props: ComposerAttachmentStripProps)
+{
+  const subtleBg = useThemeColor('--color-subtle')
+  const size = props.imageSize ?? 72
+  const radius = props.imageBorderRadius ?? 16
+  const removeButtonPlacement = props.removeButtonPlacement ?? 'overlay'
+  const removeButtonGutter = removeButtonPlacement === 'gutter' ? 10 : 0
 
-  if (props.attachments.length === 0) {
-    return null;
+  if (props.attachments.length === 0)
+  {
+    return null
   }
 
   return (
@@ -68,8 +72,8 @@ export function ComposerAttachmentStrip(props: ComposerAttachmentStripProps) {
             <Pressable
               className="absolute h-[22px] w-[22px] items-center justify-center rounded-[11px] bg-black/55"
               style={{
-                top: removeButtonPlacement === "gutter" ? 0 : 4,
-                right: removeButtonPlacement === "gutter" ? 0 : 4,
+                top: removeButtonPlacement === 'gutter' ? 0 : 4,
+                right: removeButtonPlacement === 'gutter' ? 0 : 4,
               }}
               hitSlop={6}
               onPress={() => props.onRemove(image.id)}
@@ -86,5 +90,5 @@ export function ComposerAttachmentStrip(props: ComposerAttachmentStripProps) {
         ))}
       </View>
     </ScrollView>
-  );
+  )
 }

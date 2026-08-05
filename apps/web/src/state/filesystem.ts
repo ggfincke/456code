@@ -1,5 +1,8 @@
-import { createFilesystemEnvironmentAtoms } from "@t3tools/client-runtime/state/filesystem";
+// apps/web/src/state/filesystem.ts
+// manage filesystem environment state
 
-import { connectionAtomRuntime } from "../connection/runtime";
+import { createFilesystemEnvironmentAtoms } from '@t3tools/client-runtime/state/filesystem'
 
-export const filesystemEnvironment = createFilesystemEnvironmentAtoms(connectionAtomRuntime);
+import { connectionAtomRuntime } from '../connection/runtime'
+
+export const filesystemEnvironment = createFilesystemEnvironmentAtoms(connectionAtomRuntime)

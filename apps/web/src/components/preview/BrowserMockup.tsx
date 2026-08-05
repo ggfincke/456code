@@ -1,12 +1,16 @@
-import { cn } from "~/lib/utils";
+// apps/web/src/components/preview/BrowserMockup.tsx
+// render browser mockup
 
-/** Browser-window thumbnail glyph for the "Local" recommendation cards. */
-export function BrowserMockup({ className }: { className?: string }) {
+import { cn } from '~/lib/utils'
+
+// browser-window thumbnail glyph for the "Local" recommendation cards.
+export function BrowserMockup({ className }: { className?: string })
+{
   return (
     <div
       aria-hidden
       className={cn(
-        "relative flex flex-col gap-0.5 overflow-hidden rounded-[5px] border border-border/60 bg-card p-1 shadow-xs/5",
+        'relative flex flex-col gap-0.5 overflow-hidden rounded-[5px] border border-border/60 bg-card p-1 shadow-xs/5',
         className,
       )}
     >
@@ -20,5 +24,5 @@ export function BrowserMockup({ className }: { className?: string }) {
         <span className="h-[2px] w-3/5 rounded-full bg-muted-foreground/20" />
       </div>
     </div>
-  );
+  )
 }

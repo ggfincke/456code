@@ -1,6 +1,6 @@
-export { ComposerEditor } from "./ComposerEditor.native";
+export { ComposerEditor } from './ComposerEditor.native'
 export type {
   ComposerEditorHandle,
   ComposerEditorProps,
   ComposerEditorSelection,
-} from "./ComposerEditor.types";
+} from './ComposerEditor.types'

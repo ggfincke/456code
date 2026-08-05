@@ -1,7 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+// apps/web/src/routes/settings.keybindings.tsx
+// render the settings keybindings route
 
-import { KeybindingsSettingsPanel } from "../components/settings/KeybindingsSettings";
+import { createFileRoute } from '@tanstack/react-router'
 
-export const Route = createFileRoute("/settings/keybindings")({
+import { KeybindingsSettingsPanel } from '../components/settings/KeybindingsSettings'
+
+export const Route = createFileRoute('/settings/keybindings')({
   component: KeybindingsSettingsPanel,
-});
+})

@@ -1,3 +1,6 @@
+// apps/mobile/src/lib/typography.ts
+// expose mobile typography
+
 export const MOBILE_TYPOGRAPHY = {
   micro: { fontSize: 11, lineHeight: 14 },
   caption: { fontSize: 12, lineHeight: 16 },
@@ -8,9 +11,9 @@ export const MOBILE_TYPOGRAPHY = {
   title: { fontSize: 21, lineHeight: 28 },
   largeTitle: { fontSize: 26, lineHeight: 32 },
   display: { fontSize: 30, lineHeight: 36 },
-} as const;
+} as const
 
-/** Shared geometry for dense, horizontally scrolling code surfaces. */
+// shared geometry for dense, horizontally scrolling code surfaces.
 export const MOBILE_CODE_SURFACE = {
   rowHeight: 22,
   gutterWidth: 46,
@@ -18,4 +21,4 @@ export const MOBILE_CODE_SURFACE = {
   textVerticalInset: 2,
   fontSize: MOBILE_TYPOGRAPHY.caption.fontSize,
   lineNumberFontSize: MOBILE_TYPOGRAPHY.micro.fontSize,
-} as const;
+} as const

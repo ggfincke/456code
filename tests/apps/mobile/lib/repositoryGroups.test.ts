@@ -1,38 +1,40 @@
 // tests/apps/mobile/lib/repositoryGroups.test.ts
 // verifies mobile repository grouping across environments
-import { describe, expect, it } from "vite-plus/test";
+import { describe, expect, it } from 'vite-plus/test'
 
-import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from "@t3tools/contracts";
+import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
 
-import { groupProjectsByRepository } from "../../../../apps/mobile/src/lib/repositoryGroups";
-import { EnvironmentProject, EnvironmentThreadShell } from "@t3tools/client-runtime/state/shell";
+import { groupProjectsByRepository } from '../../../../apps/mobile/src/lib/repositoryGroups'
+import { EnvironmentProject, EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 
 function makeProject(
-  input: Partial<EnvironmentProject> & Pick<EnvironmentProject, "environmentId" | "id" | "title">,
-): EnvironmentProject {
+  input: Partial<EnvironmentProject> & Pick<EnvironmentProject, 'environmentId' | 'id' | 'title'>,
+): EnvironmentProject
+{
   return {
     workspaceRoot: `/workspaces/${input.id}`,
     repositoryIdentity: null,
     defaultModelSelection: null,
     scripts: [],
-    createdAt: "2026-04-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
+    createdAt: '2026-04-01T00:00:00.000Z',
+    updatedAt: '2026-04-01T00:00:00.000Z',
     ...input,
-  };
+  }
 }
 
 function makeThread(
   input: Partial<EnvironmentThreadShell> &
-    Pick<EnvironmentThreadShell, "environmentId" | "id" | "projectId" | "title" | "modelSelection">,
-): EnvironmentThreadShell {
+    Pick<EnvironmentThreadShell, 'environmentId' | 'id' | 'projectId' | 'title' | 'modelSelection'>,
+): EnvironmentThreadShell
+{
   return {
-    runtimeMode: "full-access",
-    interactionMode: "default",
+    runtimeMode: 'full-access',
+    interactionMode: 'default',
     branch: null,
     worktreePath: null,
     latestTurn: null,
-    createdAt: "2026-04-01T00:00:00.000Z",
-    updatedAt: "2026-04-01T00:00:00.000Z",
+    createdAt: '2026-04-01T00:00:00.000Z',
+    updatedAt: '2026-04-01T00:00:00.000Z',
     archivedAt: null,
     session: null,
     latestUserMessageAt: null,
@@ -43,68 +45,70 @@ function makeThread(
     origin: input.origin ?? null,
     settledOverride: input.settledOverride ?? null,
     settledAt: input.settledAt ?? null,
-  };
+  }
 }
 
-describe("groupProjectsByRepository", () => {
-  it("groups projects across environments by repository identity", () => {
+describe('groupProjectsByRepository', () =>
+{
+  it('groups projects across environments by repository identity', () =>
+  {
     const repoIdentity = {
-      canonicalKey: "github.com/t3tools/t3code",
+      canonicalKey: 'github.com/t3tools/t3code',
       locator: {
-        source: "git-remote" as const,
-        remoteName: "origin",
-        remoteUrl: "git@github.com:t3tools/t3code.git",
+        source: 'git-remote' as const,
+        remoteName: 'origin',
+        remoteUrl: 'git@github.com:t3tools/t3code.git',
       },
-      provider: "github",
-      owner: "t3tools",
-      name: "t3code",
-      displayName: "456code",
-    };
+      provider: 'github',
+      owner: 't3tools',
+      name: 't3code',
+      displayName: '456code',
+    }
 
     const projects = [
       makeProject({
-        environmentId: EnvironmentId.make("env-local"),
-        id: ProjectId.make("project-local"),
-        title: "456code",
+        environmentId: EnvironmentId.make('env-local'),
+        id: ProjectId.make('project-local'),
+        title: '456code',
         repositoryIdentity: repoIdentity,
       }),
       makeProject({
-        environmentId: EnvironmentId.make("env-staging"),
-        id: ProjectId.make("project-staging"),
-        title: "456code",
+        environmentId: EnvironmentId.make('env-staging'),
+        id: ProjectId.make('project-staging'),
+        title: '456code',
         repositoryIdentity: repoIdentity,
       }),
-    ];
+    ]
 
     const threads = [
       makeThread({
-        environmentId: EnvironmentId.make("env-staging"),
-        id: ThreadId.make("thread-2"),
-        projectId: ProjectId.make("project-staging"),
-        title: "Fix reconnect flow",
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-        updatedAt: "2026-04-02T12:00:00.000Z",
+        environmentId: EnvironmentId.make('env-staging'),
+        id: ThreadId.make('thread-2'),
+        projectId: ProjectId.make('project-staging'),
+        title: 'Fix reconnect flow',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
+        updatedAt: '2026-04-02T12:00:00.000Z',
       }),
       makeThread({
-        environmentId: EnvironmentId.make("env-local"),
-        id: ThreadId.make("thread-1"),
-        projectId: ProjectId.make("project-local"),
-        title: "Polish mobile shell",
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-        updatedAt: "2026-04-03T12:00:00.000Z",
+        environmentId: EnvironmentId.make('env-local'),
+        id: ThreadId.make('thread-1'),
+        projectId: ProjectId.make('project-local'),
+        title: 'Polish mobile shell',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
+        updatedAt: '2026-04-03T12:00:00.000Z',
       }),
-    ];
+    ]
 
-    const groups = groupProjectsByRepository({ projects, threads });
+    const groups = groupProjectsByRepository({ projects, threads })
 
-    expect(groups).toHaveLength(1);
+    expect(groups).toHaveLength(1)
     expect(groups[0]).toMatchObject({
-      key: "github.com/t3tools/t3code",
-      title: "456code",
-      subtitle: "t3tools/t3code",
+      key: 'github.com/t3tools/t3code',
+      title: '456code',
+      subtitle: 't3tools/t3code',
       projectCount: 2,
       threadCount: 2,
-    });
+    })
     expect(
       groups[0]?.projects.map((entry) => ({
         environmentId: entry.project.environmentId,
@@ -113,83 +117,85 @@ describe("groupProjectsByRepository", () => {
       })),
     ).toEqual([
       {
-        environmentId: "env-local",
-        latestActivityAt: "2026-04-03T12:00:00.000Z",
-        threads: ["thread-1"],
+        environmentId: 'env-local',
+        latestActivityAt: '2026-04-03T12:00:00.000Z',
+        threads: ['thread-1'],
       },
       {
-        environmentId: "env-staging",
-        latestActivityAt: "2026-04-02T12:00:00.000Z",
-        threads: ["thread-2"],
+        environmentId: 'env-staging',
+        latestActivityAt: '2026-04-02T12:00:00.000Z',
+        threads: ['thread-2'],
       },
-    ]);
-    expect(groups[0]?.latestActivityAt).toBe("2026-04-03T12:00:00.000Z");
-  });
+    ])
+    expect(groups[0]?.latestActivityAt).toBe('2026-04-03T12:00:00.000Z')
+  })
 
-  it("orders threads, projects, and repository groups by latest activity", () => {
+  it('orders threads, projects, and repository groups by latest activity', () =>
+  {
     const projects = [
       makeProject({
-        environmentId: EnvironmentId.make("env-local"),
-        id: ProjectId.make("older-project"),
-        title: "Older",
+        environmentId: EnvironmentId.make('env-local'),
+        id: ProjectId.make('older-project'),
+        title: 'Older',
       }),
       makeProject({
-        environmentId: EnvironmentId.make("env-local"),
-        id: ProjectId.make("newer-project"),
-        title: "Newer",
+        environmentId: EnvironmentId.make('env-local'),
+        id: ProjectId.make('newer-project'),
+        title: 'Newer',
       }),
-    ];
+    ]
 
     const threads = [
       makeThread({
-        environmentId: EnvironmentId.make("env-local"),
-        id: ThreadId.make("older-thread"),
-        projectId: ProjectId.make("older-project"),
-        title: "Older thread",
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-        updatedAt: "2026-04-02T12:00:00.000Z",
+        environmentId: EnvironmentId.make('env-local'),
+        id: ThreadId.make('older-thread'),
+        projectId: ProjectId.make('older-project'),
+        title: 'Older thread',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
+        updatedAt: '2026-04-02T12:00:00.000Z',
       }),
       makeThread({
-        environmentId: EnvironmentId.make("env-local"),
-        id: ThreadId.make("newer-thread"),
-        projectId: ProjectId.make("older-project"),
-        title: "Newer thread",
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-        updatedAt: "2026-04-04T12:00:00.000Z",
+        environmentId: EnvironmentId.make('env-local'),
+        id: ThreadId.make('newer-thread'),
+        projectId: ProjectId.make('older-project'),
+        title: 'Newer thread',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
+        updatedAt: '2026-04-04T12:00:00.000Z',
       }),
       makeThread({
-        environmentId: EnvironmentId.make("env-local"),
-        id: ThreadId.make("newest-thread"),
-        projectId: ProjectId.make("newer-project"),
-        title: "Newest thread",
-        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
-        updatedAt: "2026-04-05T12:00:00.000Z",
+        environmentId: EnvironmentId.make('env-local'),
+        id: ThreadId.make('newest-thread'),
+        projectId: ProjectId.make('newer-project'),
+        title: 'Newest thread',
+        modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
+        updatedAt: '2026-04-05T12:00:00.000Z',
       }),
-    ];
+    ]
 
-    const groups = groupProjectsByRepository({ projects, threads });
+    const groups = groupProjectsByRepository({ projects, threads })
 
-    expect(groups.map((group) => group.title)).toEqual(["Newer", "Older"]);
+    expect(groups.map((group) => group.title)).toEqual(['Newer', 'Older'])
     expect(groups[1]?.projects[0]?.threads.map((thread) => thread.id)).toEqual([
-      "newer-thread",
-      "older-thread",
-    ]);
-  });
+      'newer-thread',
+      'older-thread',
+    ])
+  })
 
-  it("falls back to a scoped project key when repository identity is unavailable", () => {
+  it('falls back to a scoped project key when repository identity is unavailable', () =>
+  {
     const projects = [
       makeProject({
-        environmentId: EnvironmentId.make("env-local"),
-        id: ProjectId.make("project-local"),
-        title: "Scratchpad",
+        environmentId: EnvironmentId.make('env-local'),
+        id: ProjectId.make('project-local'),
+        title: 'Scratchpad',
       }),
-    ];
+    ]
 
-    const groups = groupProjectsByRepository({ projects, threads: [] });
+    const groups = groupProjectsByRepository({ projects, threads: [] })
 
-    expect(groups).toHaveLength(1);
-    expect(groups[0]?.key).toBe("env-local:project-local");
-    expect(groups[0]?.title).toBe("Scratchpad");
-    expect(groups[0]?.subtitle).toBeNull();
-  });
-});
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.key).toBe('env-local:project-local')
+    expect(groups[0]?.title).toBe('Scratchpad')
+    expect(groups[0]?.subtitle).toBeNull()
+  })
+})

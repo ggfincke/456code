@@ -1,36 +1,44 @@
-import type { DesktopBridge } from "@t3tools/contracts";
-import { afterEach, beforeEach, describe, expect, it, vi } from "@effect/vitest";
+// tests/apps/web/environments/primary/desktopAuth.test.ts
+// verify desktop primary auth behavior
+
+import type { DesktopBridge } from '@t3tools/contracts'
+import { afterEach, beforeEach, describe, expect, it, vi } from '@effect/vitest'
 
 import {
   __resetDesktopPrimaryAuthForTests,
   readDesktopPrimaryBearerToken,
-} from "../../../../../apps/web/src/environments/primary/desktopAuth";
+} from '../../../../../apps/web/src/environments/primary/desktopAuth'
 
-describe("desktop primary auth", () => {
-  beforeEach(() => {
-    Object.defineProperty(globalThis, "window", {
+describe('desktop primary auth', () =>
+{
+  beforeEach(() =>
+  {
+    Object.defineProperty(globalThis, 'window', {
       configurable: true,
       value: {},
-    });
-  });
+    })
+  })
 
-  afterEach(() => {
-    __resetDesktopPrimaryAuthForTests();
-    Reflect.deleteProperty(globalThis, "window");
-  });
+  afterEach(() =>
+  {
+    __resetDesktopPrimaryAuthForTests()
+    Reflect.deleteProperty(globalThis, 'window')
+  })
 
-  it("reuses the main-process bearer token across renderer requests", async () => {
-    const getLocalEnvironmentBearerToken = vi.fn().mockResolvedValue("desktop-bearer-token");
+  it('reuses the main-process bearer token across renderer requests', async () =>
+  {
+    const getLocalEnvironmentBearerToken = vi.fn().mockResolvedValue('desktop-bearer-token')
     window.desktopBridge = {
       getLocalEnvironmentBearerToken,
-    } as unknown as DesktopBridge;
+    } as unknown as DesktopBridge
 
-    await expect(readDesktopPrimaryBearerToken()).resolves.toBe("desktop-bearer-token");
-    await expect(readDesktopPrimaryBearerToken()).resolves.toBe("desktop-bearer-token");
-    expect(getLocalEnvironmentBearerToken).toHaveBeenCalledTimes(1);
-  });
+    await expect(readDesktopPrimaryBearerToken()).resolves.toBe('desktop-bearer-token')
+    await expect(readDesktopPrimaryBearerToken()).resolves.toBe('desktop-bearer-token')
+    expect(getLocalEnvironmentBearerToken).toHaveBeenCalledTimes(1)
+  })
 
-  it("does not require desktop auth in a browser", async () => {
-    await expect(readDesktopPrimaryBearerToken()).resolves.toBeNull();
-  });
-});
+  it('does not require desktop auth in a browser', async () =>
+  {
+    await expect(readDesktopPrimaryBearerToken()).resolves.toBeNull()
+  })
+})

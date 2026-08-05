@@ -1,23 +1,24 @@
 // packages/client-runtime/src/state/workers.ts
 // environment atoms for the read-only worker-broker jobs surface
 
-import { WS_METHODS } from "@t3tools/contracts";
-import * as Duration from "effect/Duration";
-import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
-import { Atom } from "effect/unstable/reactivity";
+import { WS_METHODS } from '@t3tools/contracts'
+import * as Duration from 'effect/Duration'
+import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
+import * as Stream from 'effect/Stream'
+import { Atom } from 'effect/unstable/reactivity'
 
 import {
   createEnvironmentRpcQueryAtomFamily,
   createEnvironmentSubscriptionAtomFamily,
-} from "./runtime.ts";
-import type { EnvironmentRegistry } from "../connection/registry.ts";
-import { request, subscribe, type EnvironmentRpcInput } from "../rpc/client.ts";
+} from './runtime.ts'
+import type { EnvironmentRegistry } from '../connection/registry.ts'
+import { request, subscribe, type EnvironmentRpcInput } from '../rpc/client.ts'
 
-const FALLBACK_REFRESH_INTERVAL = Duration.seconds(30);
+const FALLBACK_REFRESH_INTERVAL = Duration.seconds(30)
 
-function workerSnapshots(input: EnvironmentRpcInput<typeof WS_METHODS.workersSubscribe>) {
+function workerSnapshots(input: EnvironmentRpcInput<typeof WS_METHODS.workersSubscribe>)
+{
   return subscribe(WS_METHODS.workersSubscribe, input).pipe(
     Stream.catchCause(() =>
       Stream.tick(FALLBACK_REFRESH_INTERVAL).pipe(
@@ -37,28 +38,30 @@ function workerSnapshots(input: EnvironmentRpcInput<typeof WS_METHODS.workersSub
         ),
       ),
     ),
-  );
+  )
 }
 
 export function createWorkersEnvironmentAtoms<R, E>(
   runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
-) {
+)
+{
   const list = createEnvironmentSubscriptionAtomFamily(runtime, {
-    label: "environment-data:workers:list",
+    label: 'environment-data:workers:list',
     subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.workersSubscribe>) =>
       workerSnapshots(input).pipe(Stream.map((snapshot) => snapshot.list)),
-  });
+  })
   const listRuns = createEnvironmentSubscriptionAtomFamily(runtime, {
-    label: "environment-data:workers:listRuns",
+    label: 'environment-data:workers:listRuns',
     subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.workersSubscribe>) =>
       workerSnapshots(input).pipe(Stream.map((snapshot) => snapshot.runs)),
-  });
+  })
   const getRun = createEnvironmentSubscriptionAtomFamily(runtime, {
-    label: "environment-data:workers:getRun",
+    label: 'environment-data:workers:getRun',
     subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.workersSubscribe>) =>
       workerSnapshots(input).pipe(
-        Stream.map((snapshot) => {
-          const run = snapshot.runs.runs[0];
+        Stream.map((snapshot) =>
+        {
+          const run = snapshot.runs.runs[0]
           return {
             readAt: snapshot.list.readAt,
             run: Option.fromNullishOr(run),
@@ -69,31 +72,31 @@ export function createWorkersEnvironmentAtoms<R, E>(
                     message: `Worker-broker run was not found.`,
                   })
                 : snapshot.list.error,
-          };
+          }
         }),
       ),
-  });
+  })
 
   return {
     readiness: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:workers:readiness",
+      label: 'environment-data:workers:readiness',
       tag: WS_METHODS.workersReadiness,
     }),
     list,
     listByRun: list,
     listRuns,
     getJob: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: "environment-data:workers:getJob",
+      label: 'environment-data:workers:getJob',
       tag: WS_METHODS.workersGetJob,
       staleTimeMs: 30_000,
       refreshIntervalMs: 30_000,
     }),
     activity: createEnvironmentSubscriptionAtomFamily(runtime, {
-      label: "environment-data:workers:activity",
+      label: 'environment-data:workers:activity',
       idleTtlMs: 0,
       subscribe: (input: EnvironmentRpcInput<typeof WS_METHODS.workersSubscribeActivity>) =>
         subscribe(WS_METHODS.workersSubscribeActivity, input),
     }),
     getRun,
-  };
+  }
 }

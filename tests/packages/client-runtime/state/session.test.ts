@@ -1,21 +1,27 @@
-import { describe, expect, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
+// tests/packages/client-runtime/state/session.test.ts
+// verify environment session state behavior
 
-import { initialConfigOption } from "../../../../packages/client-runtime/src/state/session.ts";
+import { describe, expect, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
 
-class TestConfigError extends Schema.TaggedErrorClass<TestConfigError>()("TestConfigError", {
+import { initialConfigOption } from '../../../../packages/client-runtime/src/state/session.ts'
+
+class TestConfigError extends Schema.TaggedErrorClass<TestConfigError>()('TestConfigError', {
   message: Schema.String,
-}) {}
+})
+{}
 
-describe("environment session state", () => {
-  it.effect("turns an initial config failure into an empty value", () =>
-    Effect.gen(function* () {
+describe('environment session state', () =>
+{
+  it.effect('turns an initial config failure into an empty value', () =>
+    Effect.gen(function* ()
+    {
       const result = yield* initialConfigOption(
-        Effect.fail(new TestConfigError({ message: "temporary failure" })),
-      );
-      expect(Option.isNone(result)).toBe(true);
+        Effect.fail(new TestConfigError({ message: 'temporary failure' })),
+      )
+      expect(Option.isNone(result)).toBe(true)
     }),
-  );
-});
+  )
+})

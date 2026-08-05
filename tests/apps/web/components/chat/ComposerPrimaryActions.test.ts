@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/apps/web/components/chat/ComposerPrimaryActions.test.ts
+// verify format pending primary action label behavior
 
-import { formatPendingPrimaryActionLabel } from "../../../../../apps/web/src/components/chat/ComposerPrimaryActions";
+import { describe, expect, it } from 'vite-plus/test'
 
-describe("formatPendingPrimaryActionLabel", () => {
-  it("returns 'Submitting...' while responding", () => {
+import { formatPendingPrimaryActionLabel } from '../../../../../apps/web/src/components/chat/ComposerPrimaryActions'
+
+describe('formatPendingPrimaryActionLabel', () =>
+{
+  it("returns 'Submitting...' while responding", () =>
+  {
     expect(
       formatPendingPrimaryActionLabel({
         compact: false,
@@ -11,6 +16,6 @@ describe("formatPendingPrimaryActionLabel", () => {
         isResponding: true,
         questionIndex: 0,
       }),
-    ).toBe("Submitting...");
-  });
-});
+    ).toBe('Submitting...')
+  })
+})

@@ -1,7 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+// apps/web/src/routes/settings.diagnostics.tsx
+// render the settings diagnostics route
 
-import { DiagnosticsSettingsPanel } from "../components/settings/DiagnosticsSettings";
+import { createFileRoute } from '@tanstack/react-router'
 
-export const Route = createFileRoute("/settings/diagnostics")({
+import { DiagnosticsSettingsPanel } from '../components/settings/DiagnosticsSettings'
+
+export const Route = createFileRoute('/settings/diagnostics')({
   component: DiagnosticsSettingsPanel,
-});
+})

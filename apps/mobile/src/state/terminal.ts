@@ -1,5 +1,8 @@
-import { createTerminalEnvironmentAtoms } from "@t3tools/client-runtime/state/terminal";
+// apps/mobile/src/state/terminal.ts
+// manage terminal environment state
 
-import { connectionAtomRuntime } from "../connection/runtime";
+import { createTerminalEnvironmentAtoms } from '@t3tools/client-runtime/state/terminal'
 
-export const terminalEnvironment = createTerminalEnvironmentAtoms(connectionAtomRuntime);
+import { connectionAtomRuntime } from '../connection/runtime'
+
+export const terminalEnvironment = createTerminalEnvironmentAtoms(connectionAtomRuntime)

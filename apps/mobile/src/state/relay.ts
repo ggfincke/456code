@@ -1,6 +1,8 @@
-import { createRelayEnvironmentDiscoveryAtoms } from "@t3tools/client-runtime/state/relay";
+// apps/mobile/src/state/relay.ts
+// manage relay environment discovery state
 
-import { connectionAtomRuntime } from "../connection/runtime";
+import { createRelayEnvironmentDiscoveryAtoms } from '@t3tools/client-runtime/state/relay'
 
-export const relayEnvironmentDiscovery =
-  createRelayEnvironmentDiscoveryAtoms(connectionAtomRuntime);
+import { connectionAtomRuntime } from '../connection/runtime'
+
+export const relayEnvironmentDiscovery = createRelayEnvironmentDiscoveryAtoms(connectionAtomRuntime)

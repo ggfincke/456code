@@ -1,7 +1,7 @@
 // tests/packages/shared/agentAwareness.test.ts
 // verifies projection of thread state into user-facing agent activity
 
-import { describe, expect, it } from "@effect/vitest";
+import { describe, expect, it } from '@effect/vitest'
 
 import type {
   EnvironmentId,
@@ -9,174 +9,182 @@ import type {
   OrchestrationThreadShell,
   ThreadId,
   TurnId,
-} from "@t3tools/contracts";
-import { ProviderInstanceId } from "@t3tools/contracts";
+} from '@t3tools/contracts'
+import { ProviderInstanceId } from '@t3tools/contracts'
 
-import { projectThreadAwareness } from "../../../packages/shared/src/agentAwareness.ts";
+import { projectThreadAwareness } from '../../../packages/shared/src/agentAwareness.ts'
 
-const NOW = "2026-05-22T12:00:00.000Z";
+const NOW = '2026-05-22T12:00:00.000Z'
 
 const project = {
-  title: "t3code",
-} satisfies Pick<OrchestrationProjectShell, "title">;
+  title: 't3code',
+} satisfies Pick<OrchestrationProjectShell, 'title'>
 
 function thread(
   overrides: Partial<OrchestrationThreadShell> = {},
 ): Pick<
   OrchestrationThreadShell,
-  | "id"
-  | "title"
-  | "modelSelection"
-  | "session"
-  | "latestTurn"
-  | "updatedAt"
-  | "hasPendingApprovals"
-  | "hasPendingUserInput"
-> {
+  | 'id'
+  | 'title'
+  | 'modelSelection'
+  | 'session'
+  | 'latestTurn'
+  | 'updatedAt'
+  | 'hasPendingApprovals'
+  | 'hasPendingUserInput'
+>
+{
   return {
-    id: "thread-1" as ThreadId,
-    title: "Fix failing CI",
-    modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+    id: 'thread-1' as ThreadId,
+    title: 'Fix failing CI',
+    modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
     session: null,
     latestTurn: null,
     updatedAt: NOW,
     hasPendingApprovals: false,
     hasPendingUserInput: false,
     ...overrides,
-  };
+  }
 }
 
-describe("projectThreadAwareness", () => {
-  it("returns null for idle threads without an active awareness state", () => {
+describe('projectThreadAwareness', () =>
+{
+  it('returns null for idle threads without an active awareness state', () =>
+  {
     expect(
       projectThreadAwareness({
-        environmentId: "env-1" as EnvironmentId,
+        environmentId: 'env-1' as EnvironmentId,
         project,
         thread: thread(),
       }),
-    ).toBeNull();
-  });
+    ).toBeNull()
+  })
 
-  it("prioritizes approval requests over running state", () => {
+  it('prioritizes approval requests over running state', () =>
+  {
     const state = projectThreadAwareness({
-      environmentId: "env-1" as EnvironmentId,
+      environmentId: 'env-1' as EnvironmentId,
       project,
       thread: thread({
         hasPendingApprovals: true,
         session: {
-          threadId: "thread-1" as ThreadId,
-          status: "running",
-          providerName: "Codex",
-          runtimeMode: "full-access",
-          activeTurnId: "turn-1" as TurnId,
+          threadId: 'thread-1' as ThreadId,
+          status: 'running',
+          providerName: 'Codex',
+          runtimeMode: 'full-access',
+          activeTurnId: 'turn-1' as TurnId,
           lastError: null,
           updatedAt: NOW,
         },
       }),
-    });
+    })
 
-    expect(state?.phase).toBe("waiting_for_approval");
-    expect(state?.headline).toBe("Approval needed");
-  });
+    expect(state?.phase).toBe('waiting_for_approval')
+    expect(state?.headline).toBe('Approval needed')
+  })
 
-  it("projects running provider sessions", () => {
+  it('projects running provider sessions', () =>
+  {
     const state = projectThreadAwareness({
-      environmentId: "env-1" as EnvironmentId,
+      environmentId: 'env-1' as EnvironmentId,
       project,
       thread: thread({
         session: {
-          threadId: "thread-1" as ThreadId,
-          status: "running",
-          providerName: "Codex",
-          runtimeMode: "full-access",
-          activeTurnId: "turn-1" as TurnId,
+          threadId: 'thread-1' as ThreadId,
+          status: 'running',
+          providerName: 'Codex',
+          runtimeMode: 'full-access',
+          activeTurnId: 'turn-1' as TurnId,
           lastError: null,
           updatedAt: NOW,
         },
       }),
-    });
+    })
 
     expect(state).toMatchObject({
-      phase: "running",
-      headline: "Agent is working",
-      detail: "Codex is active.",
-      modelTitle: "gpt-5.4",
-      deepLink: "/threads/env-1/thread-1",
-    });
-  });
+      phase: 'running',
+      headline: 'Agent is working',
+      detail: 'Codex is active.',
+      modelTitle: 'gpt-5.4',
+      deepLink: '/threads/env-1/thread-1',
+    })
+  })
 
-  it("projects completed turns as completed even when teardown settled them as interrupted", () => {
+  it('projects completed turns as completed even when teardown settled them as interrupted', () =>
+  {
     const finishedTurn = {
-      turnId: "turn-1" as TurnId,
-      state: "interrupted" as const,
+      turnId: 'turn-1' as TurnId,
+      state: 'interrupted' as const,
       requestedAt: NOW,
       startedAt: NOW,
       completedAt: NOW,
       assistantMessageId: null,
-    };
+    }
     const state = projectThreadAwareness({
-      environmentId: "env-1" as EnvironmentId,
+      environmentId: 'env-1' as EnvironmentId,
       project,
       thread: thread({ latestTurn: finishedTurn }),
-    });
+    })
 
     // Session teardown settles still-running turns by session status, and
     // that write can race turn.completed; the completion timestamp is the
     // durable signal. Without this the thread resolves to null persistently
     // and gets tombstoned off the lock-screen card instead of showing Done.
-    expect(state?.phase).toBe("completed");
+    expect(state?.phase).toBe('completed')
 
     const trulyInterrupted = projectThreadAwareness({
-      environmentId: "env-1" as EnvironmentId,
+      environmentId: 'env-1' as EnvironmentId,
       project,
       thread: thread({ latestTurn: { ...finishedTurn, completedAt: null } }),
-    });
-    expect(trulyInterrupted).toBeNull();
-  });
+    })
+    expect(trulyInterrupted).toBeNull()
+  })
 
-  it("projects ready sessions with no materialized turn as completed", () => {
+  it('projects ready sessions with no materialized turn as completed', () =>
+  {
     // partial or legacy shell snapshots can lack the latest turn row
     // the ready session remains a sufficient completion signal
     const state = projectThreadAwareness({
-      environmentId: "env-1" as EnvironmentId,
+      environmentId: 'env-1' as EnvironmentId,
       project,
       thread: thread({
         session: {
-          threadId: "thread-1" as ThreadId,
-          status: "ready",
-          providerName: "Codex",
-          runtimeMode: "full-access",
+          threadId: 'thread-1' as ThreadId,
+          status: 'ready',
+          providerName: 'Codex',
+          runtimeMode: 'full-access',
           activeTurnId: null,
           lastError: null,
           updatedAt: NOW,
         },
       }),
-    });
+    })
 
-    expect(state?.phase).toBe("completed");
-  });
+    expect(state?.phase).toBe('completed')
+  })
 
-  it("projects failures with the session error detail", () => {
+  it('projects failures with the session error detail', () =>
+  {
     const state = projectThreadAwareness({
-      environmentId: "env-1" as EnvironmentId,
+      environmentId: 'env-1' as EnvironmentId,
       project,
       thread: thread({
         session: {
-          threadId: "thread-1" as ThreadId,
-          status: "error",
-          providerName: "Codex",
-          runtimeMode: "full-access",
+          threadId: 'thread-1' as ThreadId,
+          status: 'error',
+          providerName: 'Codex',
+          runtimeMode: 'full-access',
           activeTurnId: null,
-          lastError: "Provider process exited.",
+          lastError: 'Provider process exited.',
           updatedAt: NOW,
         },
       }),
-    });
+    })
 
     expect(state).toMatchObject({
-      phase: "failed",
-      headline: "Agent failed",
-      detail: "Provider process exited.",
-    });
-  });
-});
+      phase: 'failed',
+      headline: 'Agent failed',
+      detail: 'Provider process exited.',
+    })
+  })
+})

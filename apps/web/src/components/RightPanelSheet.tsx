@@ -1,19 +1,25 @@
-import { type ReactNode } from "react";
+// apps/web/src/components/RightPanelSheet.tsx
+// render right panel sheet
 
-import { RIGHT_PANEL_SHEET_CLASS_NAME } from "../rightPanelLayout";
-import { Sheet, SheetPopup } from "./ui/sheet";
+import { type ReactNode } from 'react'
+
+import { RIGHT_PANEL_SHEET_CLASS_NAME } from '../rightPanelLayout'
+import { Sheet, SheetPopup } from './ui/sheet'
 
 export function RightPanelSheet(props: {
-  children: ReactNode;
-  open: boolean;
-  onClose: () => void;
-}) {
+  children: ReactNode
+  open: boolean
+  onClose: () => void
+})
+{
   return (
     <Sheet
       open={props.open}
-      onOpenChange={(open) => {
-        if (!open) {
-          props.onClose();
+      onOpenChange={(open) =>
+      {
+        if (!open)
+        {
+          props.onClose()
         }
       }}
     >
@@ -26,5 +32,5 @@ export function RightPanelSheet(props: {
         {props.children}
       </SheetPopup>
     </Sheet>
-  );
+  )
 }

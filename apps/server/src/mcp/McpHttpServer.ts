@@ -1,64 +1,65 @@
 // apps/server/src/mcp/McpHttpServer.ts
 // serves authenticated model context protocol requests
-import * as Cause from "effect/Cause";
-import * as Context from "effect/Context";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as Option from "effect/Option";
-import * as Sink from "effect/Sink";
-import * as Stream from "effect/Stream";
-import type * as Types from "effect/Types";
-import { McpSchema, McpServer, Tool } from "effect/unstable/ai";
-import { HttpRouter, HttpServerRequest, HttpServerResponse } from "effect/unstable/http";
+import * as Cause from 'effect/Cause'
+import * as Context from 'effect/Context'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
+import * as Sink from 'effect/Sink'
+import * as Stream from 'effect/Stream'
+import type * as Types from 'effect/Types'
+import { McpSchema, McpServer, Tool } from 'effect/unstable/ai'
+import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
 
-import packageJson from "../../package.json" with { type: "json" };
-import * as McpInvocationContext from "./McpInvocationContext.ts";
-import * as McpSessionRegistry from "./McpSessionRegistry.ts";
-import * as PreviewAutomationBroker from "./PreviewAutomationBroker.ts";
+import packageJson from '../../package.json' with { type: 'json' }
+import * as McpInvocationContext from './McpInvocationContext.ts'
+import * as McpSessionRegistry from './McpSessionRegistry.ts'
+import * as PreviewAutomationBroker from './PreviewAutomationBroker.ts'
 import {
   PreviewSnapshotToolkitHandlersLive,
   PreviewStandardToolkitHandlersLive,
-} from "./toolkits/preview/handlers.ts";
+} from './toolkits/preview/handlers.ts'
 import {
   PreviewSnapshotTool,
   PreviewSnapshotToolkit,
   PreviewStandardToolkit,
-} from "./toolkits/preview/tools.ts";
-import { ProposalToolkitHandlersLive } from "./toolkits/proposal/handlers.ts";
-import { ProposalToolkit } from "./toolkits/proposal/tools.ts";
+} from './toolkits/preview/tools.ts'
+import { ProposalToolkitHandlersLive } from './toolkits/proposal/handlers.ts'
+import { ProposalToolkit } from './toolkits/proposal/tools.ts'
 
-export const MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024;
+export const MCP_MAX_REQUEST_BODY_BYTES = 64 * 1024 * 1024
 
 export function mcpRequestBodyLimitLayer(
   maxBytes: number = MCP_MAX_REQUEST_BODY_BYTES,
-): Layer.Layer<never> {
+): Layer.Layer<never>
+{
   return HttpRouter.middleware()((httpEffect) =>
     httpEffect.pipe(
       Effect.provideService(HttpServerRequest.MaxBodySize, FileSystem.Size(maxBytes)),
     ),
-  ).layer;
+  ).layer
 }
 
 const unauthorized = HttpServerResponse.jsonUnsafe(
   {
-    error: "invalid_mcp_credential",
-    message: "A valid provider-scoped MCP bearer credential is required.",
+    error: 'invalid_mcp_credential',
+    message: 'A valid provider-scoped MCP bearer credential is required.',
   },
   {
     status: 401,
     headers: {
-      "cache-control": "no-store",
-      "www-authenticate": "Bearer",
+      'cache-control': 'no-store',
+      'www-authenticate': 'Bearer',
     },
   },
-);
+)
 
 type AuthenticatedHttpEffect = Effect.Effect<
   HttpServerResponse.HttpServerResponse,
   Types.unhandled,
   McpInvocationContext.McpInvocationContext
->;
+>
 
 type McpAuthMiddleware = (
   httpEffect: AuthenticatedHttpEffect,
@@ -66,87 +67,92 @@ type McpAuthMiddleware = (
   HttpServerResponse.HttpServerResponse,
   Types.unhandled,
   HttpServerRequest.HttpServerRequest
->;
+>
 
 export const normalizeMcpHttpResponse = (
   response: HttpServerResponse.HttpServerResponse,
-): HttpServerResponse.HttpServerResponse => {
+): HttpServerResponse.HttpServerResponse =>
+{
   const bodyIsEmpty =
-    response.body._tag === "Empty" ||
-    (response.body._tag === "Uint8Array" && response.body.contentLength === 0) ||
-    (response.body._tag === "Raw" && response.body.contentLength === 0);
+    response.body._tag === 'Empty' ||
+    (response.body._tag === 'Uint8Array' && response.body.contentLength === 0) ||
+    (response.body._tag === 'Raw' && response.body.contentLength === 0)
   return response.status === 200 && bodyIsEmpty
     ? HttpServerResponse.setStatus(response, 202)
-    : response;
-};
+    : response
+}
 
 const makeMcpAuthMiddleware = McpSessionRegistry.McpSessionRegistry.pipe(
-  Effect.map(
-    (registry): McpAuthMiddleware =>
-      Effect.fn("McpHttpServer.authenticateRequest")(function* (httpEffect) {
-        const request = yield* HttpServerRequest.HttpServerRequest;
-        const authorization = request.headers.authorization;
-        const token =
-          authorization?.startsWith("Bearer ") === true
-            ? authorization.slice("Bearer ".length).trim()
-            : "";
-        const invocation = yield* registry.resolve(token);
-        if (!invocation) {
-          // log failures because otherwise agents silently lose the 456code toolkit
-          yield* Effect.logWarning("rejected MCP request with an unusable credential", {
-            reason: token.length === 0 ? "missing_bearer_token" : "unknown_or_expired_token",
-          });
-          return unauthorized;
-        }
-        return yield* httpEffect.pipe(
-          Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
-          Effect.map(normalizeMcpHttpResponse),
-        );
-      }),
+  Effect.map((registry): McpAuthMiddleware =>
+    Effect.fn('McpHttpServer.authenticateRequest')(function* (httpEffect)
+    {
+      const request = yield* HttpServerRequest.HttpServerRequest
+      const authorization = request.headers.authorization
+      const token =
+        authorization?.startsWith('Bearer ') === true
+          ? authorization.slice('Bearer '.length).trim()
+          : ''
+      const invocation = yield* registry.resolve(token)
+      if (!invocation)
+      {
+        // log failures because otherwise agents silently lose the 456code toolkit
+        yield* Effect.logWarning('rejected MCP request with an unusable credential', {
+          reason: token.length === 0 ? 'missing_bearer_token' : 'unknown_or_expired_token',
+        })
+        return unauthorized
+      }
+      return yield* httpEffect.pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+        Effect.map(normalizeMcpHttpResponse),
+      )
+    }),
   ),
-  Effect.withSpan("McpHttpServer.makeAuthMiddleware"),
-);
+  Effect.withSpan('McpHttpServer.makeAuthMiddleware'),
+)
 
 const McpAuthMiddlewareLive = HttpRouter.middleware<{
-  provides: McpInvocationContext.McpInvocationContext;
-}>()(makeMcpAuthMiddleware).layer;
+  provides: McpInvocationContext.McpInvocationContext
+}>()(makeMcpAuthMiddleware).layer
 
-const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) => {
-  if (Cause.hasInterrupts(cause) || cause.reasons.some(Cause.isDieReason)) {
-    return Effect.failCause(cause).pipe(Effect.orDie);
+const previewSnapshotFailure = <E>(cause: Cause.Cause<E>) =>
+{
+  if (Cause.hasInterrupts(cause) || cause.reasons.some(Cause.isDieReason))
+  {
+    return Effect.failCause(cause).pipe(Effect.orDie)
   }
-  const failures = cause.reasons.filter(Cause.isFailReason);
-  const firstFailure = failures[0]?.error;
+  const failures = cause.reasons.filter(Cause.isFailReason)
+  const firstFailure = failures[0]?.error
   const errorTag =
-    typeof firstFailure === "object" &&
+    typeof firstFailure === 'object' &&
     firstFailure !== null &&
-    "_tag" in firstFailure &&
-    typeof firstFailure._tag === "string"
+    '_tag' in firstFailure &&
+    typeof firstFailure._tag === 'string'
       ? firstFailure._tag
-      : "PreviewSnapshotError";
+      : 'PreviewSnapshotError'
   const result = new McpSchema.CallToolResult({
     isError: true,
     structuredContent: {
       error: {
         _tag: errorTag,
-        operation: "snapshot",
+        operation: 'snapshot',
         failureCount: failures.length,
       },
     },
-    content: [{ type: "text", text: "Preview snapshot failed." }],
-  });
-  return Effect.logWarning("preview snapshot failed", {
-    operation: "snapshot",
+    content: [{ type: 'text', text: 'Preview snapshot failed.' }],
+  })
+  return Effect.logWarning('preview snapshot failed', {
+    operation: 'snapshot',
     errorTag,
     failureCount: failures.length,
-  }).pipe(Effect.as(result));
-};
+  }).pipe(Effect.as(result))
+}
 
-const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot")(function* () {
-  const server = yield* McpServer.McpServer;
-  const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker;
-  const built = yield* PreviewSnapshotToolkit;
-  const tool = PreviewSnapshotTool;
+const registerPreviewSnapshot = Effect.fn('McpHttpServer.registerPreviewSnapshot')(function* ()
+{
+  const server = yield* McpServer.McpServer
+  const broker = yield* PreviewAutomationBroker.PreviewAutomationBroker
+  const built = yield* PreviewSnapshotToolkit
+  const tool = PreviewSnapshotTool
   yield* server.addTool({
     tool: new McpSchema.Tool({
       name: tool.name,
@@ -165,12 +171,13 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
     }),
     annotations: tool.annotations,
     handle: (payload) =>
-      Effect.withFiber((fiber) => {
+      Effect.withFiber((fiber) =>
+      {
         const invocation = Context.getUnsafe(
           fiber.context,
           McpInvocationContext.McpInvocationContext,
-        );
-        return built.handle("preview_snapshot", payload).pipe(
+        )
+        return built.handle('preview_snapshot', payload).pipe(
           Stream.unwrap,
           Stream.run(Sink.last()),
           Effect.flatMap(Effect.fromOption),
@@ -178,17 +185,18 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
           Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
           Effect.matchCauseEffect({
             onFailure: previewSnapshotFailure,
-            onSuccess: ({ encodedResult }) => {
+            onSuccess: ({ encodedResult }) =>
+            {
               const snapshot = encodedResult as {
                 readonly screenshot: {
-                  readonly mimeType: "image/png";
-                  readonly data: string;
-                  readonly width: number;
-                  readonly height: number;
-                };
-                readonly [key: string]: unknown;
-              };
-              const { screenshot, ...page } = snapshot;
+                  readonly mimeType: 'image/png'
+                  readonly data: string
+                  readonly width: number
+                  readonly height: number
+                }
+                readonly [key: string]: unknown
+              }
+              const { screenshot, ...page } = snapshot
               const metadata = {
                 ...page,
                 screenshot: {
@@ -196,52 +204,52 @@ const registerPreviewSnapshot = Effect.fn("McpHttpServer.registerPreviewSnapshot
                   width: screenshot.width,
                   height: screenshot.height,
                 },
-              };
+              }
               return Effect.succeed(
                 new McpSchema.CallToolResult({
                   isError: false,
                   structuredContent: metadata,
                   content: [
-                    { type: "text", text: JSON.stringify(metadata) },
+                    { type: 'text', text: JSON.stringify(metadata) },
                     {
-                      type: "image",
-                      data: new Uint8Array(Buffer.from(screenshot.data, "base64")),
+                      type: 'image',
+                      data: new Uint8Array(Buffer.from(screenshot.data, 'base64')),
                       mimeType: screenshot.mimeType,
                     },
                   ],
                 }),
-              );
+              )
             },
           }),
-        );
+        )
       }),
-  });
-});
+  })
+})
 
 const PreviewStandardToolkitRegistrationLive = McpServer.toolkit(PreviewStandardToolkit).pipe(
   Layer.provide(PreviewStandardToolkitHandlersLive),
-);
+)
 
 const PreviewSnapshotRegistrationLive = Layer.effectDiscard(registerPreviewSnapshot()).pipe(
   Layer.provide(PreviewSnapshotToolkitHandlersLive),
-);
+)
 
 export const PreviewToolkitRegistrationLive = Layer.mergeAll(
   PreviewStandardToolkitRegistrationLive,
   PreviewSnapshotRegistrationLive,
-);
+)
 
 export const ProposalToolkitRegistrationLive = McpServer.toolkit(ProposalToolkit).pipe(
   Layer.provide(ProposalToolkitHandlersLive),
-);
+)
 
 const McpTransportLive = McpServer.layerHttp({
-  name: "456code",
+  name: '456code',
   version: packageJson.version,
-  path: "/mcp",
-}).pipe(Layer.provide([McpAuthMiddlewareLive, mcpRequestBodyLimitLayer()]));
+  path: '/mcp',
+}).pipe(Layer.provide([McpAuthMiddlewareLive, mcpRequestBodyLimitLayer()]))
 
 export const layer = Layer.mergeAll(
   PreviewToolkitRegistrationLive,
   ProposalToolkitRegistrationLive,
-).pipe(Layer.provideMerge(McpTransportLive));
+).pipe(Layer.provideMerge(McpTransportLive))

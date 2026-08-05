@@ -1,14 +1,14 @@
 // apps/server/src/serverRuntimeState.ts
 // persists and safely retires live server ownership metadata
-import * as DateTime from "effect/DateTime";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
+import * as DateTime from 'effect/DateTime'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
 
-import { writeFileStringAtomically } from "./atomicWrite.ts";
-import type * as ServerConfig from "./config.ts";
-import { formatHostForUrl, isWildcardHost } from "./startupAccess.ts";
+import { writeFileStringAtomically } from './atomicWrite.ts'
+import type * as ServerConfig from './config.ts'
+import { formatHostForUrl, isWildcardHost } from './startupAccess.ts'
 
 export const PersistedServerRuntimeState = Schema.Struct({
   version: Schema.Literal(1),
@@ -17,38 +17,41 @@ export const PersistedServerRuntimeState = Schema.Struct({
   port: Schema.Int,
   origin: Schema.String,
   startedAt: Schema.String,
-});
-export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type;
+})
+export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type
 
 export class ServerRuntimeStateError extends Schema.TaggedErrorClass<ServerRuntimeStateError>()(
-  "ServerRuntimeStateError",
+  'ServerRuntimeStateError',
   {
-    operation: Schema.Literals(["persist", "read", "decode", "clear"]),
+    operation: Schema.Literals(['persist', 'read', 'decode', 'clear']),
     statePath: Schema.String,
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
-    return `Failed to ${this.operation} server runtime state at ${this.statePath}.`;
+)
+{
+  override get message(): string
+  {
+    return `Failed to ${this.operation} server runtime state at ${this.statePath}.`
   }
 }
 
 const decodePersistedServerRuntimeState = Schema.decodeUnknownEffect(
   Schema.fromJsonString(PersistedServerRuntimeState),
-);
+)
 
 const runtimeOriginForConfig = (
-  config: Pick<ServerConfig.ServerConfig["Service"], "host">,
+  config: Pick<ServerConfig.ServerConfig['Service'], 'host'>,
   port: number,
-): PersistedServerRuntimeState["origin"] => {
+): PersistedServerRuntimeState['origin'] =>
+{
   const hostname =
-    config.host && !isWildcardHost(config.host) ? formatHostForUrl(config.host) : "127.0.0.1";
-  return `http://${hostname}:${port}`;
-};
+    config.host && !isWildcardHost(config.host) ? formatHostForUrl(config.host) : '127.0.0.1'
+  return `http://${hostname}:${port}`
+}
 
 export const makePersistedServerRuntimeState = (input: {
-  readonly config: Pick<ServerConfig.ServerConfig["Service"], "host">;
-  readonly port: number;
+  readonly config: Pick<ServerConfig.ServerConfig['Service'], 'host'>
+  readonly port: number
 }): Effect.Effect<PersistedServerRuntimeState> =>
   Effect.map(DateTime.now, (now) => ({
     version: 1,
@@ -57,11 +60,11 @@ export const makePersistedServerRuntimeState = (input: {
     port: input.port,
     origin: runtimeOriginForConfig(input.config, input.port),
     startedAt: DateTime.formatIso(now),
-  }));
+  }))
 
 export const persistServerRuntimeState = (input: {
-  readonly path: string;
-  readonly state: PersistedServerRuntimeState;
+  readonly path: string
+  readonly state: PersistedServerRuntimeState
 }) =>
   writeFileStringAtomically({
     filePath: input.path,
@@ -70,21 +73,22 @@ export const persistServerRuntimeState = (input: {
     Effect.mapError(
       (cause) =>
         new ServerRuntimeStateError({
-          operation: "persist",
+          operation: 'persist',
           statePath: input.path,
           cause,
         }),
     ),
-  );
+  )
 
 export const clearPersistedServerRuntimeState = (path: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
+  Effect.gen(function* ()
+  {
+    const fs = yield* FileSystem.FileSystem
     yield* fs.remove(path, { force: true }).pipe(
       Effect.mapError(
         (cause) =>
           new ServerRuntimeStateError({
-            operation: "clear",
+            operation: 'clear',
             statePath: path,
             cause,
           }),
@@ -99,8 +103,8 @@ export const clearPersistedServerRuntimeState = (path: string) =>
             }),
           ),
       }),
-    );
-  });
+    )
+  })
 
 const runtimeStatesMatch = (
   left: PersistedServerRuntimeState,
@@ -111,46 +115,54 @@ const runtimeStatesMatch = (
   left.host === right.host &&
   left.port === right.port &&
   left.origin === right.origin &&
-  left.startedAt === right.startedAt;
+  left.startedAt === right.startedAt
 
 const isServerRuntimeStateOwnerAlive = (pid: number): Effect.Effect<boolean> =>
-  Effect.sync(() => {
-    if (!Number.isSafeInteger(pid) || pid <= 0) {
-      return false;
+  Effect.sync(() =>
+  {
+    if (!Number.isSafeInteger(pid) || pid <= 0)
+    {
+      return false
     }
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch (cause) {
-      return !(cause instanceof Error && "code" in cause && cause.code === "ESRCH");
+    try
+    {
+      process.kill(pid, 0)
+      return true
     }
-  });
+    catch (cause)
+    {
+      return !(cause instanceof Error && 'code' in cause && cause.code === 'ESRCH')
+    }
+  })
 
 export const readPersistedServerRuntimeState = (path: string) =>
-  Effect.gen(function* () {
-    const fs = yield* FileSystem.FileSystem;
+  Effect.gen(function* ()
+  {
+    const fs = yield* FileSystem.FileSystem
     const raw = yield* fs.readFileString(path).pipe(
       Effect.matchEffect({
         onFailure: (cause) =>
-          cause.reason._tag === "NotFound"
+          cause.reason._tag === 'NotFound'
             ? Effect.succeed(Option.none<string>())
             : Effect.fail(
                 new ServerRuntimeStateError({
-                  operation: "read",
+                  operation: 'read',
                   statePath: path,
                   cause,
                 }),
               ),
         onSuccess: (contents) => Effect.succeed(Option.some(contents)),
       }),
-    );
-    if (Option.isNone(raw)) {
-      return Option.none<PersistedServerRuntimeState>();
+    )
+    if (Option.isNone(raw))
+    {
+      return Option.none<PersistedServerRuntimeState>()
     }
 
-    const trimmed = raw.value.trim();
-    if (trimmed.length === 0) {
-      return Option.none<PersistedServerRuntimeState>();
+    const trimmed = raw.value.trim()
+    if (trimmed.length === 0)
+    {
+      return Option.none<PersistedServerRuntimeState>()
     }
 
     return yield* decodePersistedServerRuntimeState(trimmed).pipe(
@@ -158,12 +170,12 @@ export const readPersistedServerRuntimeState = (path: string) =>
       Effect.mapError(
         (cause) =>
           new ServerRuntimeStateError({
-            operation: "decode",
+            operation: 'decode',
             statePath: path,
             cause,
           }),
       ),
-    );
+    )
   }).pipe(
     Effect.catchTags({
       ServerRuntimeStateError: (error) =>
@@ -176,31 +188,34 @@ export const readPersistedServerRuntimeState = (path: string) =>
           Effect.as(Option.none<PersistedServerRuntimeState>()),
         ),
     }),
-  );
+  )
 
 export const clearPersistedServerRuntimeStateIfStale = (input: {
-  readonly path: string;
-  readonly expectedState: PersistedServerRuntimeState;
+  readonly path: string
+  readonly expectedState: PersistedServerRuntimeState
 }) =>
-  Effect.gen(function* () {
-    const currentState = yield* readPersistedServerRuntimeState(input.path);
+  Effect.gen(function* ()
+  {
+    const currentState = yield* readPersistedServerRuntimeState(input.path)
     if (
       Option.isNone(currentState) ||
       !runtimeStatesMatch(currentState.value, input.expectedState) ||
       (yield* isServerRuntimeStateOwnerAlive(currentState.value.pid))
-    ) {
-      return false;
+    )
+    {
+      return false
     }
 
-    const stateBeforeClear = yield* readPersistedServerRuntimeState(input.path);
+    const stateBeforeClear = yield* readPersistedServerRuntimeState(input.path)
     if (
       Option.isNone(stateBeforeClear) ||
       !runtimeStatesMatch(stateBeforeClear.value, input.expectedState) ||
       (yield* isServerRuntimeStateOwnerAlive(stateBeforeClear.value.pid))
-    ) {
-      return false;
+    )
+    {
+      return false
     }
 
-    yield* clearPersistedServerRuntimeState(input.path);
-    return true;
-  });
+    yield* clearPersistedServerRuntimeState(input.path)
+    return true
+  })

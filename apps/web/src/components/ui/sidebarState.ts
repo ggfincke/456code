@@ -1,9 +1,13 @@
-export type ResponsiveSidebarState = "expanded" | "collapsed";
+// apps/web/src/components/ui/sidebarState.ts
+// render reusable sidebar state UI primitives
+
+export type ResponsiveSidebarState = 'expanded' | 'collapsed'
 
 export function resolveSidebarState(input: {
-  isMobile: boolean;
-  open: boolean;
-  openMobile: boolean;
-}): ResponsiveSidebarState {
-  return (input.isMobile ? input.openMobile : input.open) ? "expanded" : "collapsed";
+  isMobile: boolean
+  open: boolean
+  openMobile: boolean
+}): ResponsiveSidebarState
+{
+  return (input.isMobile ? input.openMobile : input.open) ? 'expanded' : 'collapsed'
 }

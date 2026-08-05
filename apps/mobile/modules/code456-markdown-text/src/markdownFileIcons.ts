@@ -1,8 +1,12 @@
-import type { ImageSourcePropType } from "react-native";
+// apps/mobile/modules/code456-markdown-text/src/markdownFileIcons.ts
+// provide mobile markdown file icons
 
-import type { MarkdownFileIcon } from "./markdownLinks";
-import { MARKDOWN_FILE_ICON_SOURCES } from "./markdownFileIcons.generated";
+import type { ImageSourcePropType } from 'react-native'
 
-export function markdownFileIconSource(icon: MarkdownFileIcon): ImageSourcePropType {
-  return MARKDOWN_FILE_ICON_SOURCES[icon];
+import type { MarkdownFileIcon } from './markdownLinks'
+import { MARKDOWN_FILE_ICON_SOURCES } from './markdownFileIcons.generated'
+
+export function markdownFileIconSource(icon: MarkdownFileIcon): ImageSourcePropType
+{
+  return MARKDOWN_FILE_ICON_SOURCES[icon]
 }

@@ -1,31 +1,32 @@
 // tests/apps/server/environment/ServerEnvironment.test.ts
 // verifies stable server identity and advertised environment capabilities
 
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import { expect, it } from "@effect/vitest";
-import * as Effect from "effect/Effect";
-import * as FileSystem from "effect/FileSystem";
-import * as Layer from "effect/Layer";
-import * as PlatformError from "effect/PlatformError";
-import * as Schema from "effect/Schema";
+import * as NodeServices from '@effect/platform-node/NodeServices'
+import { expect, it } from '@effect/vitest'
+import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
+import * as Layer from 'effect/Layer'
+import * as PlatformError from 'effect/PlatformError'
+import * as Schema from 'effect/Schema'
 
-import * as ServerConfig from "../../../../apps/server/src/config.ts";
-import * as ServerEnvironment from "../../../../apps/server/src/environment/ServerEnvironment.ts";
+import * as ServerConfig from '../../../../apps/server/src/config.ts'
+import * as ServerEnvironment from '../../../../apps/server/src/environment/ServerEnvironment.ts'
 
 const isServerEnvironmentIdPersistenceError = Schema.is(
   ServerEnvironment.ServerEnvironmentIdPersistenceError,
-);
+)
 
 const makeServerEnvironmentLayer = (baseDir: string) =>
-  ServerEnvironment.layer.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)));
+  ServerEnvironment.layer.pipe(Layer.provide(ServerConfig.layerTest(process.cwd(), baseDir)))
 
-const makeServerConfig = Effect.fn(function* (baseDir: string) {
-  const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined);
+const makeServerConfig = Effect.fn(function* (baseDir: string)
+{
+  const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, undefined)
 
   return {
     ...derivedPaths,
-    logLevel: "Error",
-    traceMinLevel: "Info",
+    logLevel: 'Error',
+    traceMinLevel: 'Info',
     traceTimingEnabled: true,
     traceBatchWindowMs: 200,
     traceMaxBytes: 10 * 1024 * 1024,
@@ -33,10 +34,10 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     otlpTracesUrl: undefined,
     otlpMetricsUrl: undefined,
     otlpExportIntervalMs: 10_000,
-    otlpServiceName: "t3-server",
+    otlpServiceName: 't3-server',
     cwd: process.cwd(),
     baseDir,
-    mode: "web",
+    mode: 'web',
     autoBootstrapProjectFromCwd: false,
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
@@ -47,70 +48,78 @@ const makeServerConfig = Effect.fn(function* (baseDir: string) {
     staticDir: undefined,
     devUrl: undefined,
     noBrowser: false,
-    startupPresentation: "browser",
-  } satisfies ServerConfig.ServerConfig["Service"];
-});
+    startupPresentation: 'browser',
+  } satisfies ServerConfig.ServerConfig['Service']
+})
 
-it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
-  it.effect("persists the environment id across service restarts", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
+it.layer(NodeServices.layer)('ServerEnvironmentLive', (it) =>
+{
+  it.effect('persists the environment id across service restarts', () =>
+    Effect.gen(function* ()
+    {
+      const fileSystem = yield* FileSystem.FileSystem
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-environment-test-",
-      });
+        prefix: 't3-server-environment-test-',
+      })
 
-      const first = yield* Effect.gen(function* () {
-        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-        return yield* serverEnvironment.getDescriptor;
-      }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)));
-      const second = yield* Effect.gen(function* () {
-        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-        return yield* serverEnvironment.getDescriptor;
-      }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)));
+      const first = yield* Effect.gen(function* ()
+      {
+        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment
+        return yield* serverEnvironment.getDescriptor
+      }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)))
+      const second = yield* Effect.gen(function* ()
+      {
+        const serverEnvironment = yield* ServerEnvironment.ServerEnvironment
+        return yield* serverEnvironment.getDescriptor
+      }).pipe(Effect.provide(makeServerEnvironmentLayer(baseDir)))
 
-      expect(first.environmentId).toBe(second.environmentId);
-      expect(second.capabilities.repositoryIdentity).toBe(true);
-      expect(second.capabilities.connectionProbe).toBe(true);
-      expect(second.capabilities.safeMdxDocument).toBe(true);
+      expect(first.environmentId).toBe(second.environmentId)
+      expect(second.capabilities.repositoryIdentity).toBe(true)
+      expect(second.capabilities.connectionProbe).toBe(true)
+      expect(second.capabilities.safeMdxDocument).toBe(true)
     }),
-  );
+  )
 
-  it.effect("structures persisted environment id filesystem failures", () =>
-    Effect.gen(function* () {
-      const fileSystem = yield* FileSystem.FileSystem;
+  it.effect('structures persisted environment id filesystem failures', () =>
+    Effect.gen(function* ()
+    {
+      const fileSystem = yield* FileSystem.FileSystem
       const baseDir = yield* fileSystem.makeTempDirectoryScoped({
-        prefix: "t3-server-environment-error-test-",
-      });
-      const serverConfig = yield* makeServerConfig(baseDir);
-      const environmentIdPath = serverConfig.environmentIdPath;
+        prefix: 't3-server-environment-error-test-',
+      })
+      const serverConfig = yield* makeServerConfig(baseDir)
+      const environmentIdPath = serverConfig.environmentIdPath
       const methodByOperation = {
-        check: "exists",
-        read: "readFileString",
-        write: "writeFileString",
-      } as const;
+        check: 'exists',
+        read: 'readFileString',
+        write: 'writeFileString',
+      } as const
 
-      for (const operation of ["check", "read", "write"] as const) {
-        const writeAttempts: string[] = [];
+      for (const operation of ['check', 'read', 'write'] as const)
+      {
+        const writeAttempts: string[] = []
         const cause = PlatformError.systemError({
-          _tag: "PermissionDenied",
-          module: "FileSystem",
+          _tag: 'PermissionDenied',
+          module: 'FileSystem',
           method: methodByOperation[operation],
-          description: "permission denied",
+          description: 'permission denied',
           pathOrDescriptor: environmentIdPath,
-        });
+        })
         const failingFileSystemLayer = FileSystem.layerNoop({
           exists: () =>
-            operation === "check" ? Effect.fail(cause) : Effect.succeed(operation === "read"),
+            operation === 'check' ? Effect.fail(cause) : Effect.succeed(operation === 'read'),
           readFileString: () => Effect.fail(cause),
-          writeFileString: (path) => {
-            writeAttempts.push(path);
-            return Effect.fail(cause);
+          writeFileString: (path) =>
+          {
+            writeAttempts.push(path)
+            return Effect.fail(cause)
           },
-        });
+        })
 
-        const error = yield* Effect.gen(function* () {
-          const serverEnvironment = yield* ServerEnvironment.ServerEnvironment;
-          return yield* serverEnvironment.getDescriptor;
+        const error = yield* Effect.gen(function* ()
+        {
+          const serverEnvironment = yield* ServerEnvironment.ServerEnvironment
+          return yield* serverEnvironment.getDescriptor
         }).pipe(
           Effect.provide(
             ServerEnvironment.layer.pipe(
@@ -118,20 +127,21 @@ it.layer(NodeServices.layer)("ServerEnvironmentLive", (it) => {
             ),
           ),
           Effect.flip,
-        );
+        )
 
-        expect(isServerEnvironmentIdPersistenceError(error)).toBe(true);
-        if (!isServerEnvironmentIdPersistenceError(error)) {
-          throw error;
+        expect(isServerEnvironmentIdPersistenceError(error)).toBe(true)
+        if (!isServerEnvironmentIdPersistenceError(error))
+        {
+          throw error
         }
-        expect(error.operation).toBe(operation);
-        expect(error.environmentIdPath).toBe(environmentIdPath);
-        expect(error.cause).toBe(cause);
+        expect(error.operation).toBe(operation)
+        expect(error.environmentIdPath).toBe(environmentIdPath)
+        expect(error.cause).toBe(cause)
         expect(error.message).toBe(
           `Server environment ID ${operation} failed at '${environmentIdPath}'.`,
-        );
-        expect(writeAttempts).toEqual(operation === "write" ? [environmentIdPath] : []);
+        )
+        expect(writeAttempts).toEqual(operation === 'write' ? [environmentIdPath] : [])
       }
     }),
-  );
-});
+  )
+})

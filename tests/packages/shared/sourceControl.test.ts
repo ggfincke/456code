@@ -1,81 +1,90 @@
-import { describe, expect, it } from "vite-plus/test";
+// tests/packages/shared/sourceControl.test.ts
+// verify source control presentation behavior
+
+import { describe, expect, it } from 'vite-plus/test'
 
 import {
   detectSourceControlProviderFromRemoteUrl,
   getChangeRequestTerminologyForKind,
   resolveChangeRequestPresentation,
-} from "../../../packages/shared/src/sourceControl.ts";
+} from '../../../packages/shared/src/sourceControl.ts'
 
-describe("source control presentation", () => {
+describe('source control presentation', () =>
+{
   it.each([
     {
-      label: "GitLab merge requests",
-      kind: "gitlab" as const,
-      expected: { shortLabel: "MR", singular: "merge request" },
+      label: 'GitLab merge requests',
+      kind: 'gitlab' as const,
+      expected: { shortLabel: 'MR', singular: 'merge request' },
     },
     {
-      label: "GitHub pull requests",
-      kind: "github" as const,
-      expected: { shortLabel: "PR", singular: "pull request" },
+      label: 'GitHub pull requests',
+      kind: 'github' as const,
+      expected: { shortLabel: 'PR', singular: 'pull request' },
     },
     {
-      label: "Azure DevOps pull requests",
-      kind: "azure-devops" as const,
-      expected: { shortLabel: "PR", singular: "pull request" },
+      label: 'Azure DevOps pull requests',
+      kind: 'azure-devops' as const,
+      expected: { shortLabel: 'PR', singular: 'pull request' },
     },
     {
-      label: "Bitbucket pull requests",
-      kind: "bitbucket" as const,
-      expected: { shortLabel: "PR", singular: "pull request" },
+      label: 'Bitbucket pull requests',
+      kind: 'bitbucket' as const,
+      expected: { shortLabel: 'PR', singular: 'pull request' },
     },
-  ])("uses $label terminology", ({ kind, expected }) => {
-    expect(getChangeRequestTerminologyForKind(kind)).toEqual(expected);
-  });
+  ])('uses $label terminology', ({ kind, expected }) =>
+  {
+    expect(getChangeRequestTerminologyForKind(kind)).toEqual(expected)
+  })
 
-  it("falls back to generic change request copy for unknown providers", () => {
+  it('falls back to generic change request copy for unknown providers', () =>
+  {
     expect(
-      resolveChangeRequestPresentation({ kind: "unknown", name: "forge", baseUrl: "" }),
+      resolveChangeRequestPresentation({ kind: 'unknown', name: 'forge', baseUrl: '' }),
     ).toEqual(
       expect.objectContaining({
-        shortName: "change request",
-        longName: "change request",
+        shortName: 'change request',
+        longName: 'change request',
       }),
-    );
-  });
-});
+    )
+  })
+})
 
-describe("detectSourceControlProviderFromRemoteUrl", () => {
-  it("detects common source control hosts", () => {
-    expect(detectSourceControlProviderFromRemoteUrl("git@github.com:owner/repo.git")?.kind).toBe(
-      "github",
-    );
+describe('detectSourceControlProviderFromRemoteUrl', () =>
+{
+  it('detects common source control hosts', () =>
+  {
+    expect(detectSourceControlProviderFromRemoteUrl('git@github.com:owner/repo.git')?.kind).toBe(
+      'github',
+    )
     expect(
-      detectSourceControlProviderFromRemoteUrl("https://gitlab.com/group/repo.git")?.kind,
-    ).toBe("gitlab");
+      detectSourceControlProviderFromRemoteUrl('https://gitlab.com/group/repo.git')?.kind,
+    ).toBe('gitlab')
     expect(
-      detectSourceControlProviderFromRemoteUrl("https://dev.azure.com/org/project/_git/repo")?.kind,
-    ).toBe("azure-devops");
+      detectSourceControlProviderFromRemoteUrl('https://dev.azure.com/org/project/_git/repo')?.kind,
+    ).toBe('azure-devops')
     expect(
-      detectSourceControlProviderFromRemoteUrl("git@bitbucket.org:workspace/repo.git")?.kind,
-    ).toBe("bitbucket");
-  });
+      detectSourceControlProviderFromRemoteUrl('git@bitbucket.org:workspace/repo.git')?.kind,
+    ).toBe('bitbucket')
+  })
 
-  it("preserves ports while classifying by hostname", () => {
+  it('preserves ports while classifying by hostname', () =>
+  {
     expect(
-      detectSourceControlProviderFromRemoteUrl("https://gitlab.com:8443/group/repo.git"),
+      detectSourceControlProviderFromRemoteUrl('https://gitlab.com:8443/group/repo.git'),
     ).toEqual({
-      kind: "gitlab",
-      name: "GitLab",
-      baseUrl: "https://gitlab.com:8443",
-    });
+      kind: 'gitlab',
+      name: 'GitLab',
+      baseUrl: 'https://gitlab.com:8443',
+    })
     expect(
       detectSourceControlProviderFromRemoteUrl(
-        "https://self-hosted.example.test:8443/group/repo.git",
+        'https://self-hosted.example.test:8443/group/repo.git',
       ),
     ).toEqual({
-      kind: "unknown",
-      name: "self-hosted.example.test:8443",
-      baseUrl: "https://self-hosted.example.test:8443",
-    });
-  });
-});
+      kind: 'unknown',
+      name: 'self-hosted.example.test:8443',
+      baseUrl: 'https://self-hosted.example.test:8443',
+    })
+  })
+})

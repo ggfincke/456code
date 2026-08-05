@@ -1,69 +1,69 @@
 // packages/contracts/src/settings.ts
 // defines server and client settings schemas
-import * as Effect from "effect/Effect";
-import * as Duration from "effect/Duration";
-import * as Schema from "effect/Schema";
-import * as SchemaTransformation from "effect/SchemaTransformation";
-import { TrimmedNonEmptyString, TrimmedString } from "./baseSchemas.ts";
-import { DEFAULT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from "./model.ts";
-import { ModelSelection } from "./orchestration.ts";
-import { ProviderInstanceConfig, ProviderInstanceId } from "./providerInstance.ts";
+import * as Effect from 'effect/Effect'
+import * as Duration from 'effect/Duration'
+import * as Schema from 'effect/Schema'
+import * as SchemaTransformation from 'effect/SchemaTransformation'
+import { TrimmedNonEmptyString, TrimmedString } from './baseSchemas.ts'
+import { DEFAULT_TEXT_GENERATION_MODEL, ProviderOptionSelections } from './model.ts'
+import { ModelSelection } from './orchestration.ts'
+import { ProviderInstanceConfig, ProviderInstanceId } from './providerInstance.ts'
 
 // ── Client Settings (local-only) ───────────────────────────────
 
-export const TimestampFormat = Schema.Literals(["locale", "12-hour", "24-hour"]);
-export type TimestampFormat = typeof TimestampFormat.Type;
-export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = "locale";
+export const TimestampFormat = Schema.Literals(['locale', '12-hour', '24-hour'])
+export type TimestampFormat = typeof TimestampFormat.Type
+export const DEFAULT_TIMESTAMP_FORMAT: TimestampFormat = 'locale'
 
-export const ProviderUsageDisplayMode = Schema.Literals(["percent-left", "percent-used"]);
-export type ProviderUsageDisplayMode = typeof ProviderUsageDisplayMode.Type;
-export const DEFAULT_PROVIDER_USAGE_DISPLAY_MODE: ProviderUsageDisplayMode = "percent-left";
+export const ProviderUsageDisplayMode = Schema.Literals(['percent-left', 'percent-used'])
+export type ProviderUsageDisplayMode = typeof ProviderUsageDisplayMode.Type
+export const DEFAULT_PROVIDER_USAGE_DISPLAY_MODE: ProviderUsageDisplayMode = 'percent-left'
 
-export const SidebarProjectSortOrder = Schema.Literals(["updated_at", "created_at", "manual"]);
-export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type;
-export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = "updated_at";
+export const SidebarProjectSortOrder = Schema.Literals(['updated_at', 'created_at', 'manual'])
+export type SidebarProjectSortOrder = typeof SidebarProjectSortOrder.Type
+export const DEFAULT_SIDEBAR_PROJECT_SORT_ORDER: SidebarProjectSortOrder = 'updated_at'
 
-export const SidebarThreadSortOrder = Schema.Literals(["updated_at", "created_at"]);
-export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type;
-export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = "updated_at";
+export const SidebarThreadSortOrder = Schema.Literals(['updated_at', 'created_at'])
+export type SidebarThreadSortOrder = typeof SidebarThreadSortOrder.Type
+export const DEFAULT_SIDEBAR_THREAD_SORT_ORDER: SidebarThreadSortOrder = 'updated_at'
 
 export const SidebarProjectGroupingMode = Schema.Literals([
-  "repository",
-  "repository_path",
-  "separate",
-]);
-export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type;
-export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = "repository";
-export const MIN_SIDEBAR_THREAD_PREVIEW_COUNT = 1;
-export const MAX_SIDEBAR_THREAD_PREVIEW_COUNT = 15;
+  'repository',
+  'repository_path',
+  'separate',
+])
+export type SidebarProjectGroupingMode = typeof SidebarProjectGroupingMode.Type
+export const DEFAULT_SIDEBAR_PROJECT_GROUPING_MODE: SidebarProjectGroupingMode = 'repository'
+export const MIN_SIDEBAR_THREAD_PREVIEW_COUNT = 1
+export const MAX_SIDEBAR_THREAD_PREVIEW_COUNT = 15
 export const SidebarThreadPreviewCount = Schema.Int.check(
   Schema.isBetween({
     minimum: MIN_SIDEBAR_THREAD_PREVIEW_COUNT,
     maximum: MAX_SIDEBAR_THREAD_PREVIEW_COUNT,
   }),
-);
-export type SidebarThreadPreviewCount = typeof SidebarThreadPreviewCount.Type;
-export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6;
-export const MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS = 1;
-export const MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS = 90;
+)
+export type SidebarThreadPreviewCount = typeof SidebarThreadPreviewCount.Type
+export const DEFAULT_SIDEBAR_THREAD_PREVIEW_COUNT: SidebarThreadPreviewCount = 6
+export const MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS = 1
+export const MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS = 90
 export const SidebarAutoSettleAfterDays = Schema.Number.check(
   Schema.isBetween({
     minimum: MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
     maximum: MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
   }),
-);
-export type SidebarAutoSettleAfterDays = typeof SidebarAutoSettleAfterDays.Type;
-export const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 3;
-export const MIN_GLASS_OPACITY = 40;
-export const MAX_GLASS_OPACITY = 100;
+)
+export type SidebarAutoSettleAfterDays = typeof SidebarAutoSettleAfterDays.Type
+export const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 3
+export const MIN_GLASS_OPACITY = 40
+export const MAX_GLASS_OPACITY = 100
 export const GlassOpacity = Schema.Int.check(
   Schema.isBetween({
     minimum: MIN_GLASS_OPACITY,
     maximum: MAX_GLASS_OPACITY,
   }),
-);
-export type GlassOpacity = typeof GlassOpacity.Type;
-export const DEFAULT_GLASS_OPACITY: GlassOpacity = 80;
+)
+export type GlassOpacity = typeof GlassOpacity.Type
+export const DEFAULT_GLASS_OPACITY: GlassOpacity = 80
 
 export const ClientSettingsSchema = Schema.Struct({
   autoOpenPlanSidebar: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -76,7 +76,7 @@ export const ClientSettingsSchema = Schema.Struct({
   glassOpacity: GlassOpacity.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_GLASS_OPACITY)),
   ),
-  // Model favorites. Historically keyed by provider kind, now
+  // model favorites. Historically keyed by provider kind, now
   // widened to `ProviderInstanceId` so users can favorite a specific model
   // on a custom provider instance (e.g. "Codex Personal · gpt-5") without
   // the UI collapsing it into the same bucket as the default Codex. The
@@ -128,15 +128,15 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_TIMESTAMP_FORMAT)),
   ),
   wordWrap: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-});
-export type ClientSettings = typeof ClientSettingsSchema.Type;
+})
+export type ClientSettings = typeof ClientSettingsSchema.Type
 
-export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientSettingsSchema)({});
+export const DEFAULT_CLIENT_SETTINGS: ClientSettings = Schema.decodeSync(ClientSettingsSchema)({})
 
 // ── Server Settings (server-authoritative) ────────────────────
 
-export const ThreadEnvMode = Schema.Literals(["local", "worktree"]);
-export type ThreadEnvMode = typeof ThreadEnvMode.Type;
+export const ThreadEnvMode = Schema.Literals(['local', 'worktree'])
+export type ThreadEnvMode = typeof ThreadEnvMode.Type
 
 const makeBinaryPathSetting = (fallback: string) =>
   TrimmedString.pipe(
@@ -148,26 +148,31 @@ const makeBinaryPathSetting = (fallback: string) =>
       }),
     ),
     Schema.withDecodingDefault(Effect.succeed(fallback)),
-  );
+  )
 
-export type ProviderSettingsFormControl = "text" | "password" | "textarea" | "switch";
+export type ProviderSettingsFormControl = 'text' | 'password' | 'textarea' | 'switch'
 
-export interface ProviderSettingsFormAnnotation {
-  readonly control?: ProviderSettingsFormControl | undefined;
-  readonly placeholder?: string | undefined;
-  readonly hidden?: boolean | undefined;
-  readonly clearWhenEmpty?: "omit" | "persist" | undefined;
+export interface ProviderSettingsFormAnnotation
+{
+  readonly control?: ProviderSettingsFormControl | undefined
+  readonly placeholder?: string | undefined
+  readonly hidden?: boolean | undefined
+  readonly clearWhenEmpty?: 'omit' | 'persist' | undefined
 }
 
-export interface ProviderSettingsFormSchemaAnnotation {
-  readonly order?: readonly string[] | undefined;
+export interface ProviderSettingsFormSchemaAnnotation
+{
+  readonly order?: readonly string[] | undefined
 }
 
-declare module "effect/Schema" {
-  namespace Annotations {
-    interface Annotations {
-      readonly providerSettingsForm?: ProviderSettingsFormAnnotation | undefined;
-      readonly providerSettingsFormSchema?: ProviderSettingsFormSchemaAnnotation | undefined;
+declare module 'effect/Schema'
+{
+  namespace Annotations
+  {
+    interface Annotations
+    {
+      readonly providerSettingsForm?: ProviderSettingsFormAnnotation | undefined
+      readonly providerSettingsFormSchema?: ProviderSettingsFormSchemaAnnotation | undefined
     }
   }
 }
@@ -175,20 +180,21 @@ declare module "effect/Schema" {
 export type ProviderSettingsOrder<Fields extends Schema.Struct.Fields> = readonly Extract<
   keyof Fields,
   string
->[];
+>[]
 
 export function makeProviderSettingsSchema<const Fields extends Schema.Struct.Fields>(
   fields: Fields,
   options?: {
-    readonly order?: ProviderSettingsOrder<Fields> | undefined;
+    readonly order?: ProviderSettingsOrder<Fields> | undefined
   },
-): Schema.Struct<Fields> {
+): Schema.Struct<Fields>
+{
   return Schema.Struct(fields).pipe(
     Schema.annotate({
       providerSettingsFormSchema:
         options?.order === undefined ? undefined : { order: options.order },
     }),
-  );
+  )
 }
 
 export const CodexSettings = makeProviderSettingsSchema(
@@ -197,41 +203,41 @@ export const CodexSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
-    binaryPath: makeBinaryPathSetting("codex").pipe(
+    binaryPath: makeBinaryPathSetting('codex').pipe(
       Schema.annotateKey({
-        title: "Binary path",
-        description: "Path to the Codex binary used by this instance.",
-        providerSettingsForm: { placeholder: "codex", clearWhenEmpty: "omit" },
+        title: 'Binary path',
+        description: 'Path to the Codex binary used by this instance.',
+        providerSettingsForm: { placeholder: 'codex', clearWhenEmpty: 'omit' },
       }),
     ),
     homePath: TrimmedString.pipe(
-      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: "CODEX_HOME path",
-        description: "Custom Codex home and config directory.",
+        title: 'CODEX_HOME path',
+        description: 'Custom Codex home and config directory.',
         providerSettingsForm: {
-          placeholder: "~/.codex",
-          clearWhenEmpty: "omit",
+          placeholder: '~/.codex',
+          clearWhenEmpty: 'omit',
         },
       }),
     ),
     shadowHomePath: TrimmedString.pipe(
-      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: "Shadow home path",
+        title: 'Shadow home path',
         description:
-          "Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.",
+          'Account-specific Codex home. Keeps auth.json separate while sharing state from CODEX_HOME.',
         providerSettingsForm: {
-          placeholder: "~/.codex-t3/personal",
-          clearWhenEmpty: "omit",
+          placeholder: '~/.codex-t3/personal',
+          clearWhenEmpty: 'omit',
         },
       }),
     ),
     launchArgs: TrimmedString.pipe(
-      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: "Launch arguments",
-        description: "Additional CLI arguments passed to codex app-server on session start.",
+        title: 'Launch arguments',
+        description: 'Additional CLI arguments passed to codex app-server on session start.',
       }),
     ),
     customModels: Schema.Array(Schema.String).pipe(
@@ -240,10 +246,10 @@ export const CodexSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["binaryPath", "homePath", "shadowHomePath", "launchArgs"],
+    order: ['binaryPath', 'homePath', 'shadowHomePath', 'launchArgs'],
   },
-);
-export type CodexSettings = typeof CodexSettings.Type;
+)
+export type CodexSettings = typeof CodexSettings.Type
 
 export const ClaudeSettings = makeProviderSettingsSchema(
   {
@@ -251,20 +257,20 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
-    binaryPath: makeBinaryPathSetting("claude").pipe(
+    binaryPath: makeBinaryPathSetting('claude').pipe(
       Schema.annotateKey({
-        title: "Binary path",
-        description: "Path to the Claude binary used by this instance.",
-        providerSettingsForm: { placeholder: "claude", clearWhenEmpty: "omit" },
+        title: 'Binary path',
+        description: 'Path to the Claude binary used by this instance.',
+        providerSettingsForm: { placeholder: 'claude', clearWhenEmpty: 'omit' },
       }),
     ),
     homePath: TrimmedString.pipe(
-      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: "CLAUDE_CONFIG_DIR path",
+        title: 'CLAUDE_CONFIG_DIR path',
         description:
-          "Custom Claude home and config directory. Keeps .claude.json and .claude separate.",
-        providerSettingsForm: { placeholder: "~/.claude", clearWhenEmpty: "omit" },
+          'Custom Claude home and config directory. Keeps .claude.json and .claude separate.',
+        providerSettingsForm: { placeholder: '~/.claude', clearWhenEmpty: 'omit' },
       }),
     ),
     customModels: Schema.Array(Schema.String).pipe(
@@ -272,22 +278,22 @@ export const ClaudeSettings = makeProviderSettingsSchema(
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
     launchArgs: Schema.String.pipe(
-      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: "Launch arguments",
-        description: "Additional CLI arguments passed on session start.",
+        title: 'Launch arguments',
+        description: 'Additional CLI arguments passed on session start.',
         providerSettingsForm: {
-          placeholder: "e.g. --chrome",
-          clearWhenEmpty: "omit",
+          placeholder: 'e.g. --chrome',
+          clearWhenEmpty: 'omit',
         },
       }),
     ),
   },
   {
-    order: ["binaryPath", "homePath", "launchArgs"],
+    order: ['binaryPath', 'homePath', 'launchArgs'],
   },
-);
-export type ClaudeSettings = typeof ClaudeSettings.Type;
+)
+export type ClaudeSettings = typeof ClaudeSettings.Type
 
 export const CursorSettings = makeProviderSettingsSchema(
   {
@@ -295,21 +301,21 @@ export const CursorSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed(false)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
-    binaryPath: makeBinaryPathSetting("cursor-agent").pipe(
+    binaryPath: makeBinaryPathSetting('cursor-agent').pipe(
       Schema.annotateKey({
-        title: "Binary path",
-        description: "Path to the Cursor agent binary.",
-        providerSettingsForm: { placeholder: "cursor-agent", clearWhenEmpty: "omit" },
+        title: 'Binary path',
+        description: 'Path to the Cursor agent binary.',
+        providerSettingsForm: { placeholder: 'cursor-agent', clearWhenEmpty: 'omit' },
       }),
     ),
     apiEndpoint: TrimmedString.pipe(
-      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: "API endpoint",
-        description: "Override the Cursor API endpoint for this instance.",
+        title: 'API endpoint',
+        description: 'Override the Cursor API endpoint for this instance.',
         providerSettingsForm: {
-          placeholder: "https://...",
-          clearWhenEmpty: "omit",
+          placeholder: 'https://...',
+          clearWhenEmpty: 'omit',
         },
       }),
     ),
@@ -319,10 +325,10 @@ export const CursorSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["binaryPath", "apiEndpoint"],
+    order: ['binaryPath', 'apiEndpoint'],
   },
-);
-export type CursorSettings = typeof CursorSettings.Type;
+)
+export type CursorSettings = typeof CursorSettings.Type
 
 export const GrokSettings = makeProviderSettingsSchema(
   {
@@ -330,11 +336,11 @@ export const GrokSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
-    binaryPath: makeBinaryPathSetting("grok").pipe(
+    binaryPath: makeBinaryPathSetting('grok').pipe(
       Schema.annotateKey({
-        title: "Binary path",
-        description: "Path to the Grok CLI binary.",
-        providerSettingsForm: { placeholder: "grok", clearWhenEmpty: "omit" },
+        title: 'Binary path',
+        description: 'Path to the Grok CLI binary.',
+        providerSettingsForm: { placeholder: 'grok', clearWhenEmpty: 'omit' },
       }),
     ),
     customModels: Schema.Array(Schema.String).pipe(
@@ -343,10 +349,10 @@ export const GrokSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["binaryPath"],
+    order: ['binaryPath'],
   },
-);
-export type GrokSettings = typeof GrokSettings.Type;
+)
+export type GrokSettings = typeof GrokSettings.Type
 
 export const OpenCodeSettings = makeProviderSettingsSchema(
   {
@@ -354,36 +360,36 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
       Schema.withDecodingDefault(Effect.succeed(true)),
       Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
     ),
-    binaryPath: makeBinaryPathSetting("opencode").pipe(
+    binaryPath: makeBinaryPathSetting('opencode').pipe(
       Schema.annotateKey({
-        title: "Binary path",
-        description: "Path to the OpenCode binary.",
+        title: 'Binary path',
+        description: 'Path to the OpenCode binary.',
         providerSettingsForm: {
-          placeholder: "opencode",
-          clearWhenEmpty: "omit",
+          placeholder: 'opencode',
+          clearWhenEmpty: 'omit',
         },
       }),
     ),
     serverUrl: TrimmedString.pipe(
-      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: "Server URL",
-        description: "Leave blank to let 456code spawn the server when needed.",
+        title: 'Server URL',
+        description: 'Leave blank to let 456code spawn the server when needed.',
         providerSettingsForm: {
-          placeholder: "http://127.0.0.1:4096",
-          clearWhenEmpty: "omit",
+          placeholder: 'http://127.0.0.1:4096',
+          clearWhenEmpty: 'omit',
         },
       }),
     ),
     serverPassword: TrimmedString.pipe(
-      Schema.withDecodingDefault(Effect.succeed("")),
+      Schema.withDecodingDefault(Effect.succeed('')),
       Schema.annotateKey({
-        title: "Server password",
-        description: "Stored in plain text on disk.",
+        title: 'Server password',
+        description: 'Stored in plain text on disk.',
         providerSettingsForm: {
-          control: "password",
-          placeholder: "Optional",
-          clearWhenEmpty: "omit",
+          control: 'password',
+          placeholder: 'Optional',
+          clearWhenEmpty: 'omit',
         },
       }),
     ),
@@ -393,36 +399,36 @@ export const OpenCodeSettings = makeProviderSettingsSchema(
     ),
   },
   {
-    order: ["binaryPath", "serverUrl", "serverPassword"],
+    order: ['binaryPath', 'serverUrl', 'serverPassword'],
   },
-);
-export type OpenCodeSettings = typeof OpenCodeSettings.Type;
+)
+export type OpenCodeSettings = typeof OpenCodeSettings.Type
 
 export const ObservabilitySettings = Schema.Struct({
-  otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-  otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
-});
-export type ObservabilitySettings = typeof ObservabilitySettings.Type;
+  otlpTracesUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(''))),
+  otlpMetricsUrl: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(''))),
+})
+export type ObservabilitySettings = typeof ObservabilitySettings.Type
 
 export const SourceControlWritingStyleMode = Schema.Literals([
-  "repo_conventions",
-  "conventional_commits",
-  "custom",
-]);
-export type SourceControlWritingStyleMode = typeof SourceControlWritingStyleMode.Type;
+  'repo_conventions',
+  'conventional_commits',
+  'custom',
+])
+export type SourceControlWritingStyleMode = typeof SourceControlWritingStyleMode.Type
 
 export const SourceControlWritingStyleSettings = Schema.Struct({
   mode: SourceControlWritingStyleMode.pipe(
-    Schema.withDecodingDefault(Effect.succeed("repo_conventions" as const)),
+    Schema.withDecodingDefault(Effect.succeed('repo_conventions' as const)),
   ),
-  customInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  customInstructions: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(''))),
   followChangeRequestTemplates: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
-});
-export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type;
+})
+export type SourceControlWritingStyleSettings = typeof SourceControlWritingStyleSettings.Type
 
-export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30);
+export const DEFAULT_AUTOMATIC_GIT_FETCH_INTERVAL = Duration.seconds(30)
 
 export const ServerSettings = Schema.Struct({
   enableAssistantStreaming: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -433,16 +439,16 @@ export const ServerSettings = Schema.Struct({
     ),
   ),
   defaultThreadEnvMode: ThreadEnvMode.pipe(
-    Schema.withDecodingDefault(Effect.succeed("local" as const satisfies ThreadEnvMode)),
+    Schema.withDecodingDefault(Effect.succeed('local' as const satisfies ThreadEnvMode)),
   ),
   newWorktreesStartFromOrigin: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(true)),
   ),
-  addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  addProjectBaseDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(''))),
   textGenerationModelSelection: ModelSelection.pipe(
     Schema.withDecodingDefault(
       Effect.succeed({
-        instanceId: ProviderInstanceId.make("codex"),
+        instanceId: ProviderInstanceId.make('codex'),
         model: DEFAULT_TEXT_GENERATION_MODEL,
       }),
     ),
@@ -454,7 +460,7 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
 
-  // Legacy single-instance-per-driver settings. Continues to be the source
+  // legacy single-instance-per-driver settings. Continues to be the source
   // of truth until `providerInstances` (below) lands per-driver migration
   // shims and the server starts hydrating instances from it. Driver-specific
   // schemas live here for the duration of the migration; once each driver
@@ -467,35 +473,35 @@ export const ServerSettings = Schema.Struct({
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
-  // New driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
+  // new driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
   // are `ProviderInstanceConfig` envelopes. The driver-specific config blob
   // is `Schema.Unknown` at this layer so envelopes with unknown drivers
   // (forks, downgrades, in-flight PR branches) round-trip without loss.
-  // See providerInstance.ts for the forward/backward compatibility invariant.
+  // see providerInstance.ts for the forward/backward compatibility invariant.
   providerInstances: Schema.Record(ProviderInstanceId, ProviderInstanceConfig).pipe(
     Schema.withDecodingDefault(Effect.succeed({})),
   ),
   observability: ObservabilitySettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
-});
-export type ServerSettings = typeof ServerSettings.Type;
+})
+export type ServerSettings = typeof ServerSettings.Type
 
-export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerSettings)({});
+export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerSettings)({})
 
 export const ServerSettingsOperation = Schema.Literals([
-  "normalize",
-  "check-exists",
-  "read-file",
-  "read-secret",
-  "remove-secret",
-  "remove-stale-secret",
-  "write-secret",
-  "write-file",
-  "prepare-directory",
-]);
-export type ServerSettingsOperation = typeof ServerSettingsOperation.Type;
+  'normalize',
+  'check-exists',
+  'read-file',
+  'read-secret',
+  'remove-secret',
+  'remove-stale-secret',
+  'write-secret',
+  'write-file',
+  'prepare-directory',
+])
+export type ServerSettingsOperation = typeof ServerSettingsOperation.Type
 
 export class ServerSettingsError extends Schema.TaggedErrorClass<ServerSettingsError>()(
-  "ServerSettingsError",
+  'ServerSettingsError',
   {
     settingsPath: Schema.String,
     operation: ServerSettingsOperation,
@@ -503,25 +509,27 @@ export class ServerSettingsError extends Schema.TaggedErrorClass<ServerSettingsE
     environmentVariable: Schema.optional(Schema.String),
     cause: Schema.Defect(),
   },
-) {
-  override get message(): string {
+)
+{
+  override get message(): string
+  {
     const provider =
-      this.providerInstanceId === undefined ? "" : ` for provider ${this.providerInstanceId}`;
+      this.providerInstanceId === undefined ? '' : ` for provider ${this.providerInstanceId}`
     const variable =
       this.environmentVariable === undefined
-        ? ""
-        : ` and environment variable ${this.environmentVariable}`;
-    return `Server settings ${this.operation} failed${provider}${variable} at ${this.settingsPath}.`;
+        ? ''
+        : ` and environment variable ${this.environmentVariable}`
+    return `Server settings ${this.operation} failed${provider}${variable} at ${this.settingsPath}.`
   }
 }
 
 // ── Unified type ─────────────────────────────────────────────────────
 
-export type UnifiedSettings = ServerSettings & ClientSettings;
+export type UnifiedSettings = ServerSettings & ClientSettings
 export const DEFAULT_UNIFIED_SETTINGS: UnifiedSettings = {
   ...DEFAULT_SERVER_SETTINGS,
   ...DEFAULT_CLIENT_SETTINGS,
-};
+}
 
 // ── Server Settings Patch (replace with a Schema.deepPartial if available) ──────────────────────────────────────────
 
@@ -529,7 +537,7 @@ const ModelSelectionPatch = Schema.Struct({
   instanceId: Schema.optionalKey(ProviderInstanceId),
   model: Schema.optionalKey(TrimmedNonEmptyString),
   options: Schema.optionalKey(ProviderOptionSelections),
-});
+})
 
 const CodexSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
@@ -538,7 +546,7 @@ const CodexSettingsPatch = Schema.Struct({
   shadowHomePath: Schema.optionalKey(TrimmedString),
   launchArgs: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
-});
+})
 
 const ClaudeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
@@ -546,20 +554,20 @@ const ClaudeSettingsPatch = Schema.Struct({
   homePath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
   launchArgs: Schema.optionalKey(TrimmedString),
-});
+})
 
 const CursorSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
   apiEndpoint: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
-});
+})
 
 const GrokSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
-});
+})
 
 const OpenCodeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
@@ -567,10 +575,10 @@ const OpenCodeSettingsPatch = Schema.Struct({
   serverUrl: Schema.optionalKey(TrimmedString),
   serverPassword: Schema.optionalKey(TrimmedString),
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
-});
+})
 
 export const ServerSettingsPatch = Schema.Struct({
-  // Server settings
+  // server settings
   enableAssistantStreaming: Schema.optionalKey(Schema.Boolean),
   enableProviderUpdateChecks: Schema.optionalKey(Schema.Boolean),
   automaticGitFetchInterval: Schema.optionalKey(Schema.DurationFromMillis),
@@ -601,13 +609,13 @@ export const ServerSettingsPatch = Schema.Struct({
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
     }),
   ),
-  // Whole-map replacement for the new instance config. Patching individual
+  // whole-map replacement for the new instance config. Patching individual
   // entries is intentionally out of scope: the map is small, and partial
   // patches risk leaving driver-specific config in a half-merged state.
-  // The web UI sends a fully-formed map every time it edits this field.
+  // the web UI sends a fully-formed map every time it edits this field.
   providerInstances: Schema.optionalKey(Schema.Record(ProviderInstanceId, ProviderInstanceConfig)),
-});
-export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
+})
+export type ServerSettingsPatch = typeof ServerSettingsPatch.Type
 
 export const ClientSettingsPatch = Schema.Struct({
   autoOpenPlanSidebar: Schema.optionalKey(Schema.Boolean),
@@ -648,5 +656,5 @@ export const ClientSettingsPatch = Schema.Struct({
   sidebarV2Enabled: Schema.optionalKey(Schema.Boolean),
   timestampFormat: Schema.optionalKey(TimestampFormat),
   wordWrap: Schema.optionalKey(Schema.Boolean),
-});
-export type ClientSettingsPatch = typeof ClientSettingsPatch.Type;
+})
+export type ClientSettingsPatch = typeof ClientSettingsPatch.Type

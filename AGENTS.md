@@ -22,6 +22,17 @@
 - `packages/shared`: Shared runtime utilities consumed by both server and client applications. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 - `packages/client-runtime`: Shared runtime package for sharing client code across web and mobile.
 
+## Documentation Ownership
+
+- Follow the tracked [formatting and comment style guide](docs/contributing/comment-style.md) for
+  every new, moved, or substantially revised owned source file.
+- `docs/` owns maintained public product, architecture, contributor, and operations documentation.
+- `.plans/` owns self-contained publishable implementation plans, decisions, checkpoints, and
+  closeout state. A tracked plan must not require ignored local evidence to be understood.
+- `dev-docs/` owns ignored local audits, speculative designs, raw evidence, and working notes. It is
+  not secret storage; promote durable active decisions into `docs/` or `.plans/` before relying on
+  them.
+
 ## Reference Repos
 
 - Open-source Codex repo: https://github.com/openai/codex

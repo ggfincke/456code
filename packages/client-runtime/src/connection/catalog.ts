@@ -1,6 +1,9 @@
-import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from "@t3tools/contracts";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
+// packages/client-runtime/src/connection/catalog.ts
+// implement bearer connection profile
+
+import { DesktopSshEnvironmentTargetSchema, EnvironmentId } from '@t3tools/contracts'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
 
 import {
   BearerConnectionTarget,
@@ -8,123 +11,132 @@ import {
   RelayConnectionTarget,
   SshConnectionTarget,
   type ConnectionTarget,
-} from "./model.ts";
+} from './model.ts'
 
 const ConnectionProfileBase = {
   connectionId: Schema.String,
   environmentId: EnvironmentId,
   label: Schema.String,
-};
+}
 
 export class BearerConnectionProfile extends Schema.TaggedClass<BearerConnectionProfile>()(
-  "BearerConnectionProfile",
+  'BearerConnectionProfile',
   {
     ...ConnectionProfileBase,
     httpBaseUrl: Schema.String,
     wsBaseUrl: Schema.String,
   },
-) {}
+)
+{}
 
 export class SshConnectionProfile extends Schema.TaggedClass<SshConnectionProfile>()(
-  "SshConnectionProfile",
+  'SshConnectionProfile',
   {
     ...ConnectionProfileBase,
     target: DesktopSshEnvironmentTargetSchema,
   },
-) {}
+)
+{}
 
-export const ConnectionProfile = Schema.Union([BearerConnectionProfile, SshConnectionProfile]);
-export type ConnectionProfile = typeof ConnectionProfile.Type;
+export const ConnectionProfile = Schema.Union([BearerConnectionProfile, SshConnectionProfile])
+export type ConnectionProfile = typeof ConnectionProfile.Type
 
-export interface ConnectionCatalogEntry {
-  readonly target: ConnectionTarget;
-  readonly profile: Option.Option<ConnectionProfile>;
+export interface ConnectionCatalogEntry
+{
+  readonly target: ConnectionTarget
+  readonly profile: Option.Option<ConnectionProfile>
 }
 
 export class BearerConnectionCredential extends Schema.TaggedClass<BearerConnectionCredential>()(
-  "BearerConnectionCredential",
+  'BearerConnectionCredential',
   {
     token: Schema.String,
   },
-) {}
+)
+{}
 
-export const ConnectionCredential = Schema.Union([BearerConnectionCredential]);
-export type ConnectionCredential = typeof ConnectionCredential.Type;
+export const ConnectionCredential = Schema.Union([BearerConnectionCredential])
+export type ConnectionCredential = typeof ConnectionCredential.Type
 
 export class PrimaryConnectionRegistration extends Schema.TaggedClass<PrimaryConnectionRegistration>()(
-  "PrimaryConnectionRegistration",
+  'PrimaryConnectionRegistration',
   {
     target: PrimaryConnectionTarget,
   },
-) {}
+)
+{}
 
 export class RelayConnectionRegistration extends Schema.TaggedClass<RelayConnectionRegistration>()(
-  "RelayConnectionRegistration",
+  'RelayConnectionRegistration',
   {
     target: RelayConnectionTarget,
   },
-) {}
+)
+{}
 
 export class BearerConnectionRegistration extends Schema.TaggedClass<BearerConnectionRegistration>()(
-  "BearerConnectionRegistration",
+  'BearerConnectionRegistration',
   {
     target: BearerConnectionTarget,
     profile: BearerConnectionProfile,
     credential: BearerConnectionCredential,
   },
-) {}
+)
+{}
 
 export class SshConnectionRegistration extends Schema.TaggedClass<SshConnectionRegistration>()(
-  "SshConnectionRegistration",
+  'SshConnectionRegistration',
   {
     target: SshConnectionTarget,
     profile: SshConnectionProfile,
   },
-) {}
+)
+{}
 
 export const ConnectionRegistration = Schema.Union([
   RelayConnectionRegistration,
   BearerConnectionRegistration,
   SshConnectionRegistration,
-]);
-export type ConnectionRegistration = typeof ConnectionRegistration.Type;
+])
+export type ConnectionRegistration = typeof ConnectionRegistration.Type
 
-/**
- * Platform-managed registrations are reconciled from the host (the desktop
- * bootstrap IPC) rather than persisted by the user. They cover the primary
- * local environment plus any additional desktop-local backends running
- * alongside it (e.g. a parallel WSL backend). The primary stays on same-origin
- * cookie auth (`PrimaryConnectionRegistration`); secondary local backends live
- * on a separate loopback origin and authenticate with a bearer token minted
- * from their bootstrap credential (`BearerConnectionRegistration`).
- */
+// platform-managed registrations are reconciled from the host (the desktop
+// bootstrap IPC) rather than persisted by the user. They cover the primary
+// local environment plus any additional desktop-local backends running
+// alongside it (e.g. a parallel WSL backend). The primary stays on same-origin
+// cookie auth (`PrimaryConnectionRegistration`); secondary local backends live
+// on a separate loopback origin and authenticate with a bearer token minted
+// from their bootstrap credential (`BearerConnectionRegistration`).
 export const PlatformConnectionRegistration = Schema.Union([
   PrimaryConnectionRegistration,
   BearerConnectionRegistration,
-]);
-export type PlatformConnectionRegistration = typeof PlatformConnectionRegistration.Type;
+])
+export type PlatformConnectionRegistration = typeof PlatformConnectionRegistration.Type
 
 export function connectionRegistrationTarget(
   registration: ConnectionRegistration | PrimaryConnectionRegistration,
-): ConnectionTarget {
-  return registration.target;
+): ConnectionTarget
+{
+  return registration.target
 }
 
 export function connectionRegistrationCatalogEntry(
   registration: ConnectionRegistration | PrimaryConnectionRegistration,
-): ConnectionCatalogEntry {
-  switch (registration._tag) {
-    case "PrimaryConnectionRegistration":
-    case "RelayConnectionRegistration":
+): ConnectionCatalogEntry
+{
+  switch (registration._tag)
+  {
+    case 'PrimaryConnectionRegistration':
+    case 'RelayConnectionRegistration':
       return {
         target: registration.target,
         profile: Option.none(),
-      };
-    case "BearerConnectionRegistration":
-    case "SshConnectionRegistration":
+      }
+    case 'BearerConnectionRegistration':
+    case 'SshConnectionRegistration':
       return {
         target: registration.target,
         profile: Option.some(registration.profile),
-      };
+      }
   }
 }

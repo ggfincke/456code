@@ -1,43 +1,49 @@
-import { useAtomValue } from "@effect/atom-react";
-import { useId } from "react";
+// apps/web/src/components/SidebarStageBackdrop.tsx
+// render sidebar stage backdrop
 
-import { APP_STAGE_LABEL } from "../branding";
-import { resolveServerBackedAppStageLabel } from "../branding.logic";
-import { primaryServerConfigAtom } from "../state/server";
+import { useAtomValue } from '@effect/atom-react'
+import { useId } from 'react'
 
-export type SidebarStageBackdropVariant = "nightly" | "dev" | "alpha";
+import { APP_STAGE_LABEL } from '../branding'
+import { resolveServerBackedAppStageLabel } from '../branding.logic'
+import { primaryServerConfigAtom } from '../state/server'
 
-// A wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
+export type SidebarStageBackdropVariant = 'nightly' | 'dev' | 'alpha'
+
+// a wide viewBox keeps the 96-unit art height at a fixed scale while sidebar resizing reveals
 // more horizontal canvas instead of zooming the scene.
-const STAGE_BACKDROP_VIEW_BOX = "0 0 8192 96";
+const STAGE_BACKDROP_VIEW_BOX = '0 0 8192 96'
 
 export function resolveSidebarStageBackdropVariant(
   stageLabel: string,
-): SidebarStageBackdropVariant | null {
-  const normalized = stageLabel.trim().toLowerCase();
-  if (normalized === "nightly") return "nightly";
-  if (normalized === "dev") return "dev";
-  if (normalized === "alpha") return "alpha";
-  return null;
+): SidebarStageBackdropVariant | null
+{
+  const normalized = stageLabel.trim().toLowerCase()
+  if (normalized === 'nightly') return 'nightly'
+  if (normalized === 'dev') return 'dev'
+  if (normalized === 'alpha') return 'alpha'
+  return null
 }
 
-export function useSidebarStageBackdropVariant(): SidebarStageBackdropVariant | null {
+export function useSidebarStageBackdropVariant(): SidebarStageBackdropVariant | null
+{
   const primaryServerVersion =
-    useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null;
+    useAtomValue(primaryServerConfigAtom)?.environment.serverVersion ?? null
 
   return resolveSidebarStageBackdropVariant(
     resolveServerBackedAppStageLabel({
       primaryServerVersion,
       fallbackStageLabel: APP_STAGE_LABEL,
     }),
-  );
+  )
 }
 
-/** Stage-channel header art; palettes mirror the per-channel app icons in `assets/`. */
-export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdropVariant }) {
-  // The nightly and dev art are atmospheric and read fine under the default fade. The wave is a
+// stage-channel header art; palettes mirror the per-channel app icons in `assets/`.
+export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdropVariant })
+{
+  // the nightly and dev art are atmospheric and read fine under the default fade. The wave is a
   // solid band on fincke.dev, and that fade desaturates it to grey, so it opts into a later one.
-  const fadeClassName = variant === "alpha" ? " sidebar-stage-backdrop-solid" : "";
+  const fadeClassName = variant === 'alpha' ? ' sidebar-stage-backdrop-solid' : ''
 
   return (
     <div
@@ -46,26 +52,28 @@ export function SidebarStageBackdrop({ variant }: { variant: SidebarStageBackdro
     >
       <StageBackdropArt variant={variant} />
     </div>
-  );
+  )
 }
 
-export function StageBackdropArt({ variant }: { variant: SidebarStageBackdropVariant }) {
-  if (variant === "nightly") return <NightlySkyArt />;
-  if (variant === "alpha") return <AlphaWaveArt />;
-  return <DevBlueprintArt />;
+export function StageBackdropArt({ variant }: { variant: SidebarStageBackdropVariant })
+{
+  if (variant === 'nightly') return <NightlySkyArt />
+  if (variant === 'alpha') return <AlphaWaveArt />
+  return <DevBlueprintArt />
 }
 
-export function StageBackdropButtonArt({ variant }: { variant: SidebarStageBackdropVariant }) {
-  if (variant === "nightly") return <NightlySkyArt compact />;
-  if (variant === "alpha") return <AlphaWaveArt compact />;
-  return <DevBlueprintArt compact />;
+export function StageBackdropButtonArt({ variant }: { variant: SidebarStageBackdropVariant })
+{
+  if (variant === 'nightly') return <NightlySkyArt compact />
+  if (variant === 'alpha') return <AlphaWaveArt compact />
+  return <DevBlueprintArt compact />
 }
 
 const NIGHTLY_STARS: ReadonlyArray<{
-  cx: number;
-  cy: number;
-  r: number;
-  opacity: number;
+  cx: number
+  cy: number
+  r: number
+  opacity: number
 }> = [
   { cx: 14, cy: 10, r: 0.6, opacity: 0.85 },
   { cx: 38, cy: 22, r: 0.4, opacity: 0.55 },
@@ -84,29 +92,30 @@ const NIGHTLY_STARS: ReadonlyArray<{
   { cx: 118, cy: 34, r: 0.4, opacity: 0.45 },
   { cx: 202, cy: 32, r: 0.4, opacity: 0.5 },
   { cx: 268, cy: 34, r: 0.4, opacity: 0.45 },
-];
+]
 
 const NIGHTLY_SPARKLES: ReadonlyArray<{ x: number; y: number }> = [
   { x: 70, y: 28 },
   { x: 160, y: 36 },
   { x: 246, y: 26 },
-];
+]
 
-function NightlySkyArt({ compact = false }: { compact?: boolean }) {
-  const idPrefix = useId().replaceAll(":", "");
-  const skyId = `${idPrefix}-stage-night-sky`;
-  const glowId = `${idPrefix}-stage-night-glow`;
-  const cloudId = `${idPrefix}-stage-night-cloud`;
-  const softId = `${idPrefix}-stage-night-soft`;
-  const starsId = `${idPrefix}-stage-night-stars`;
-  const glowsId = `${idPrefix}-stage-night-glows`;
+function NightlySkyArt({ compact = false }: { compact?: boolean })
+{
+  const idPrefix = useId().replaceAll(':', '')
+  const skyId = `${idPrefix}-stage-night-sky`
+  const glowId = `${idPrefix}-stage-night-glow`
+  const cloudId = `${idPrefix}-stage-night-cloud`
+  const softId = `${idPrefix}-stage-night-soft`
+  const starsId = `${idPrefix}-stage-night-stars`
+  const glowsId = `${idPrefix}-stage-night-glows`
 
   return (
     <svg
       className="h-full w-full"
       fill="none"
       preserveAspectRatio="xMinYMin slice"
-      viewBox={compact ? "96 0 8192 96" : STAGE_BACKDROP_VIEW_BOX}
+      viewBox={compact ? '96 0 8192 96' : STAGE_BACKDROP_VIEW_BOX}
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
@@ -187,41 +196,43 @@ function NightlySkyArt({ compact = false }: { compact?: boolean }) {
         />
       </g>
     </svg>
-  );
+  )
 }
 
-// Alpha art is the fincke.dev hero wave, taken as-is from that site's DecorativeWave component:
+// alpha art is the fincke.dev hero wave, taken as-is from that site's DecorativeWave component:
 // the same two ribbon paths, the same gradient geometry, and the same `preserveAspectRatio="none"`
 // stretch. Because the drawing stretches to fill rather than tiling, sidebar resizing widens the
 // ribbons instead of repeating them -- so there is no seam to hide and no generated waveform.
-// Both windows frame the drawing's opening S -- x=0 to ~470, where the front ribbon's top edge
+// both windows frame the drawing's opening S -- x=0 to ~470, where the front ribbon's top edge
 // falls from y=0 to y=72.5 with a horizontal tangent at each end. That gives the flat entry,
 // smooth descent, and flat run-out the wave is recognized by. Later stretches of the drawing are
 // either a crest (x=960) or a shallow tail, and reading either as "the wave" gets the shape wrong.
-// Height sets ribbon weight: each ribbon is ~30 units, so 150 over the 80px band puts them at
+// height sets ribbon weight: each ribbon is ~30 units, so 150 over the 80px band puts them at
 // ~16px. The art crosses the wordmark at this framing, which is why the brand renders in white.
-const FINCKE_WAVE_FIELD = { x: 0, y: -26, width: 470, height: 150 } as const;
+const FINCKE_WAVE_FIELD = { x: 0, y: -26, width: 470, height: 150 } as const
 
-// Same opening S, cropped tighter for the ~40px composer button, which has no text to clear.
-const FINCKE_WAVE_BUTTON_FIELD = { x: 40, y: -20, width: 420, height: 142 } as const;
+// same opening S, cropped tighter for the ~40px composer button, which has no text to clear.
+const FINCKE_WAVE_BUTTON_FIELD = { x: 40, y: -20, width: 420, height: 142 } as const
 
-type FinckeWaveField = typeof FINCKE_WAVE_FIELD | typeof FINCKE_WAVE_BUTTON_FIELD;
+type FinckeWaveField = typeof FINCKE_WAVE_FIELD | typeof FINCKE_WAVE_BUTTON_FIELD
 
-function waveViewBox(field: FinckeWaveField): string {
-  return `${field.x} ${field.y} ${field.width} ${field.height}`;
+function waveViewBox(field: FinckeWaveField): string
+{
+  return `${field.x} ${field.y} ${field.width} ${field.height}`
 }
 
 const FINCKE_WAVE_BACK =
-  "M462 101.335C228.6 101.335 143.4 28.1958 0 28.1958V58.6706C96 58.6706 253.8 131.81 462 131.81C670.2 131.81 869.4 101.335 960 101.335C1084.8 101.335 1330.2 144 1440 144V113.525C1330.2 113.525 1084.8 70.8605 960 70.8605C867 70.8605 624.6 101.335 462 101.335Z";
+  'M462 101.335C228.6 101.335 143.4 28.1958 0 28.1958V58.6706C96 58.6706 253.8 131.81 462 131.81C670.2 131.81 869.4 101.335 960 101.335C1084.8 101.335 1330.2 144 1440 144V113.525C1330.2 113.525 1084.8 70.8605 960 70.8605C867 70.8605 624.6 101.335 462 101.335Z'
 
 const FINCKE_WAVE_FRONT =
-  "M462 72.5035C228.6 72.5035 143.4 0 0 0V30.2098C96 30.2098 253.8 102.713 462 102.713C670.2 102.713 869.4 72.5035 960 72.5035C1084.8 72.5035 1330.2 114.797 1440 114.797V84.5874C1330.2 84.5874 1084.8 42.2937 960 42.2937C867 42.2937 624.6 72.5035 462 72.5035Z";
+  'M462 72.5035C228.6 72.5035 143.4 0 0 0V30.2098C96 30.2098 253.8 102.713 462 102.713C670.2 102.713 869.4 72.5035 960 72.5035C1084.8 72.5035 1330.2 114.797 1440 114.797V84.5874C1330.2 84.5874 1084.8 42.2937 960 42.2937C867 42.2937 624.6 72.5035 462 72.5035Z'
 
-function AlphaWaveArt({ compact = false }: { compact?: boolean }) {
-  const idPrefix = useId().replaceAll(":", "");
-  const backId = `${idPrefix}-stage-alpha-back`;
-  const frontId = `${idPrefix}-stage-alpha-front`;
-  const field = compact ? FINCKE_WAVE_BUTTON_FIELD : FINCKE_WAVE_FIELD;
+function AlphaWaveArt({ compact = false }: { compact?: boolean })
+{
+  const idPrefix = useId().replaceAll(':', '')
+  const backId = `${idPrefix}-stage-alpha-back`
+  const frontId = `${idPrefix}-stage-alpha-front`
+  const field = compact ? FINCKE_WAVE_BUTTON_FIELD : FINCKE_WAVE_FIELD
 
   return (
     <svg
@@ -240,8 +251,8 @@ function AlphaWaveArt({ compact = false }: { compact?: boolean }) {
           y2="310.697"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="0.1" style={{ stopColor: "var(--stage-wave-accent)" }} />
-          <stop offset="0.9" style={{ stopColor: "var(--stage-wave-field)" }} stopOpacity="0.15" />
+          <stop offset="0.1" style={{ stopColor: 'var(--stage-wave-accent)' }} />
+          <stop offset="0.9" style={{ stopColor: 'var(--stage-wave-field)' }} stopOpacity="0.15" />
         </linearGradient>
         <linearGradient
           id={frontId}
@@ -251,35 +262,36 @@ function AlphaWaveArt({ compact = false }: { compact?: boolean }) {
           y2="247.71"
           gradientUnits="userSpaceOnUse"
         >
-          <stop offset="1" style={{ stopColor: "var(--stage-wave-accent)" }} />
+          <stop offset="1" style={{ stopColor: 'var(--stage-wave-accent)' }} />
         </linearGradient>
       </defs>
 
-      <rect {...field} style={{ fill: "var(--stage-wave-field)" }} />
+      <rect {...field} style={{ fill: 'var(--stage-wave-field)' }} />
       <path d={FINCKE_WAVE_BACK} fill={`url(#${backId})`} />
       <path d={FINCKE_WAVE_FRONT} fill={`url(#${frontId})`} />
     </svg>
-  );
+  )
 }
 
-function DevBlueprintArt({ compact = false }: { compact?: boolean }) {
-  const idPrefix = useId().replaceAll(":", "");
-  const paperId = `${idPrefix}-stage-bp-paper`;
-  const glowId = `${idPrefix}-stage-bp-glow`;
-  const celesteGlowId = `${idPrefix}-stage-bp-glow-celeste`;
-  const violetGlowId = `${idPrefix}-stage-bp-glow-violet`;
-  const minorGridId = `${idPrefix}-stage-bp-grid-minor`;
-  const majorGridId = `${idPrefix}-stage-bp-grid-major`;
-  const rulerId = `${idPrefix}-stage-bp-ruler`;
-  const glowsId = `${idPrefix}-stage-bp-glows`;
-  const annotationsId = `${idPrefix}-stage-bp-annotations`;
+function DevBlueprintArt({ compact = false }: { compact?: boolean })
+{
+  const idPrefix = useId().replaceAll(':', '')
+  const paperId = `${idPrefix}-stage-bp-paper`
+  const glowId = `${idPrefix}-stage-bp-glow`
+  const celesteGlowId = `${idPrefix}-stage-bp-glow-celeste`
+  const violetGlowId = `${idPrefix}-stage-bp-glow-violet`
+  const minorGridId = `${idPrefix}-stage-bp-grid-minor`
+  const majorGridId = `${idPrefix}-stage-bp-grid-major`
+  const rulerId = `${idPrefix}-stage-bp-ruler`
+  const glowsId = `${idPrefix}-stage-bp-glows`
+  const annotationsId = `${idPrefix}-stage-bp-annotations`
 
   return (
     <svg
       className="stage-blueprint h-full w-full"
       fill="none"
       preserveAspectRatio="xMinYMin slice"
-      viewBox={compact ? "64 0 8192 96" : STAGE_BACKDROP_VIEW_BOX}
+      viewBox={compact ? '64 0 8192 96' : STAGE_BACKDROP_VIEW_BOX}
       xmlns="http://www.w3.org/2000/svg"
     >
       <defs>
@@ -292,9 +304,9 @@ function DevBlueprintArt({ compact = false }: { compact?: boolean }) {
           gradientUnits="userSpaceOnUse"
           spreadMethod="reflect"
         >
-          <stop style={{ stopColor: "var(--stage-bp-bottom)" }} />
-          <stop offset="0.5" style={{ stopColor: "var(--stage-bp-mid)" }} />
-          <stop offset="1" style={{ stopColor: "var(--stage-bp-top)" }} />
+          <stop style={{ stopColor: 'var(--stage-bp-bottom)' }} />
+          <stop offset="0.5" style={{ stopColor: 'var(--stage-bp-mid)' }} />
+          <stop offset="1" style={{ stopColor: 'var(--stage-bp-top)' }} />
         </linearGradient>
         <radialGradient
           id={glowId}
@@ -407,5 +419,5 @@ function DevBlueprintArt({ compact = false }: { compact?: boolean }) {
       <rect width="100%" height="6" fill={`url(#${rulerId})`} />
       <rect width="100%" height="96" fill={`url(#${annotationsId})`} />
     </svg>
-  );
+  )
 }

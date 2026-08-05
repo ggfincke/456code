@@ -1,14 +1,16 @@
-import type { ReactNode } from "react";
+// apps/web/src/components/auth/AuthSurfaceShell.tsx
+// render auth surface shell
 
-import { APP_DISPLAY_NAME, APP_STAGE_LABEL } from "../../branding";
-import { resolveSidebarStageBackdropVariant, StageBackdropArt } from "../SidebarStageBackdrop";
+import type { ReactNode } from 'react'
 
-/**
- * Full-screen card for standalone auth pages, mirroring the pairing surface's
- * treatment. Used by the CLI-connect authorize and callback surfaces.
- */
-export function AuthSurfaceShell({ children }: { readonly children: ReactNode }) {
-  const stageVariant = resolveSidebarStageBackdropVariant(APP_STAGE_LABEL);
+import { APP_DISPLAY_NAME, APP_STAGE_LABEL } from '../../branding'
+import { resolveSidebarStageBackdropVariant, StageBackdropArt } from '../SidebarStageBackdrop'
+
+// full-screen card for standalone auth pages, mirroring the pairing surface's
+// treatment. Used by the CLI-connect authorize and callback surfaces.
+export function AuthSurfaceShell({ children }: { readonly children: ReactNode })
+{
+  const stageVariant = resolveSidebarStageBackdropVariant(APP_STAGE_LABEL)
 
   return (
     <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-background px-4 py-10 text-foreground sm:px-6">
@@ -40,5 +42,5 @@ export function AuthSurfaceShell({ children }: { readonly children: ReactNode })
         <div className="p-6 sm:p-8">{children}</div>
       </section>
     </div>
-  );
+  )
 }

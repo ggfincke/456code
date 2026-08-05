@@ -1,13 +1,15 @@
-import type { ProviderDriverKind } from "@t3tools/contracts";
+// apps/web/src/components/chat/modelPickerModelHighlights.ts
+// determine whether model picker new model
 
-/**
- * Model slugs that show a gold "NEW" chip in the model picker list.
- * Add entries as `provider:slug` when you want to highlight freshly shipped models.
- */
+import type { ProviderDriverKind } from '@t3tools/contracts'
+
+// model slugs that show a gold "NEW" chip in the model picker list.
+// add entries as `provider:slug` when you want to highlight freshly shipped models.
 const NEW_MODEL_KEYS = new Set<string>([
-  // Example: "claudeAgent:claude-opus-4-7",
-]);
+  // example: "claudeAgent:claude-opus-4-7",
+])
 
-export function isModelPickerNewModel(provider: ProviderDriverKind, slug: string): boolean {
-  return NEW_MODEL_KEYS.has(`${provider}:${slug}`);
+export function isModelPickerNewModel(provider: ProviderDriverKind, slug: string): boolean
+{
+  return NEW_MODEL_KEYS.has(`${provider}:${slug}`)
 }

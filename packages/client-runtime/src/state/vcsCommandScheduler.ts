@@ -1,13 +1,16 @@
-import type { EnvironmentId } from "@t3tools/contracts";
+// packages/client-runtime/src/state/vcsCommandScheduler.ts
+// manage vcs command scheduler state
 
-import { createAtomCommandScheduler, type AtomCommandConcurrency } from "./runtime.ts";
+import type { EnvironmentId } from '@t3tools/contracts'
 
-export const vcsCommandScheduler = createAtomCommandScheduler();
+import { createAtomCommandScheduler, type AtomCommandConcurrency } from './runtime.ts'
+
+export const vcsCommandScheduler = createAtomCommandScheduler()
 
 export const vcsCommandConcurrency: AtomCommandConcurrency<{
-  readonly environmentId: EnvironmentId;
-  readonly input: { readonly cwd: string };
+  readonly environmentId: EnvironmentId
+  readonly input: { readonly cwd: string }
 }> = {
-  mode: "serial",
+  mode: 'serial',
   key: ({ environmentId, input }) => JSON.stringify([environmentId, input.cwd]),
-};
+}

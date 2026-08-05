@@ -1,15 +1,19 @@
-import type { ReactNode } from "react";
-import { View, type StyleProp, type ViewStyle } from "react-native";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useThemeColor } from "../lib/useThemeColor";
+// apps/mobile/src/components/GlassSafeAreaView.tsx
+// render glass safe area view
 
-import { GlassSurface } from "./GlassSurface";
+import type { ReactNode } from 'react'
+import { View, type StyleProp, type ViewStyle } from 'react-native'
+import { useSafeAreaInsets } from 'react-native-safe-area-context'
+import { useThemeColor } from '../lib/useThemeColor'
 
-export interface GlassSafeAreaViewProps {
-  readonly leftSlot?: ReactNode;
-  readonly centerSlot?: ReactNode;
-  readonly rightSlot?: ReactNode;
-  readonly style?: StyleProp<ViewStyle>;
+import { GlassSurface } from './GlassSurface'
+
+export interface GlassSafeAreaViewProps
+{
+  readonly leftSlot?: ReactNode
+  readonly centerSlot?: ReactNode
+  readonly rightSlot?: ReactNode
+  readonly style?: StyleProp<ViewStyle>
 }
 
 export function GlassSafeAreaView({
@@ -17,18 +21,19 @@ export function GlassSafeAreaView({
   centerSlot,
   rightSlot,
   style,
-}: GlassSafeAreaViewProps) {
-  const insets = useSafeAreaInsets();
-  const headerColor = useThemeColor("--color-header");
-  const headerBorderColor = useThemeColor("--color-header-border");
-  const glassTint = useThemeColor("--color-glass-tint");
-  const headerPaddingTop = insets.top + 16;
+}: GlassSafeAreaViewProps)
+{
+  const insets = useSafeAreaInsets()
+  const headerColor = useThemeColor('--color-header')
+  const headerBorderColor = useThemeColor('--color-header-border')
+  const glassTint = useThemeColor('--color-glass-tint')
+  const headerPaddingTop = insets.top + 16
   const surfaceStyle = {
     borderRadius: 0,
     backgroundColor: headerColor,
     borderBottomWidth: 1,
     borderBottomColor: headerBorderColor,
-  } as const;
+  } as const
 
   return (
     <View style={[surfaceStyle, style]}>
@@ -36,7 +41,7 @@ export function GlassSafeAreaView({
         chrome="none"
         glassEffectStyle="regular"
         tintColor={glassTint}
-        style={{ borderRadius: 0, backgroundColor: "transparent" }}
+        style={{ borderRadius: 0, backgroundColor: 'transparent' }}
       >
         <View
           className="flex-row items-center gap-2.5 px-5 pb-4"
@@ -48,5 +53,5 @@ export function GlassSafeAreaView({
         </View>
       </GlassSurface>
     </View>
-  );
+  )
 }

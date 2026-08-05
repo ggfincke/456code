@@ -1,10 +1,12 @@
+// apps/mobile/modules/code456-terminal/ios/Code456TerminalModule.swift
+// registers the iOS terminal module
 import ExpoModulesCore
 
 public class Code456TerminalModule: Module {
   public func definition() -> ModuleDefinition {
     Name("Code456TerminalSurface")
 
-    // Bumped when native hardware-keyboard handling changes; surfaced in the JS debug
+    // bumped when native hardware-keyboard handling changes; surfaced in the JS debug
     // logs so a stale native binary is distinguishable from a broken key pipeline.
     Constants([
       "hardwareKeyRevision": 3,

@@ -1,58 +1,63 @@
-import { useCallback, useEffect, useState } from "react";
-import { Modal, Pressable, View } from "react-native";
+// apps/mobile/src/components/ConfirmDialogHost.tsx
+// render confirm dialog host
 
-import { useThemeColor } from "../lib/useThemeColor";
-import { cn } from "../lib/cn";
-import { AppText } from "./AppText";
+import { useCallback, useEffect, useState } from 'react'
+import { Modal, Pressable, View } from 'react-native'
+
+import { useThemeColor } from '../lib/useThemeColor'
+import { cn } from '../lib/cn'
+import { AppText } from './AppText'
 
 export type ConfirmDialogRequest = {
-  readonly title: string;
-  readonly message?: string;
-  readonly cancelText?: string;
-  readonly confirmText: string;
-  readonly destructive?: boolean;
-  readonly onConfirm: () => void;
-  readonly onCancel?: () => void;
-};
-
-let presentRequest: ((request: ConfirmDialogRequest) => void) | null = null;
-
-/**
- * Imperative confirm dialog, Alert.alert-shaped. Native iOS alerts already
- * match the app (and support per-button destructive red), so this is for
- * Android, where the native dialog can only theme all confirm buttons at
- * once. Requires ConfirmDialogHost to be mounted at the app root.
- */
-export function showConfirmDialog(request: ConfirmDialogRequest): void {
-  presentRequest?.(request);
+  readonly title: string
+  readonly message?: string
+  readonly cancelText?: string
+  readonly confirmText: string
+  readonly destructive?: boolean
+  readonly onConfirm: () => void
+  readonly onCancel?: () => void
 }
 
-/**
- * Android-style alert dialog matching the native one themed by
- * withAndroidModernAlertDialog — left-aligned text, right-aligned text
- * buttons — with what the native theme can't do: a per-dialog destructive
- * button color and a dimmer message than the title.
- */
-export function ConfirmDialogHost() {
-  const [request, setRequest] = useState<ConfirmDialogRequest | null>(null);
-  const pressedOverlay = useThemeColor("--color-subtle");
+let presentRequest: ((request: ConfirmDialogRequest) => void) | null = null
 
-  useEffect(() => {
-    presentRequest = setRequest;
-    return () => {
-      presentRequest = null;
-    };
-  }, []);
+// imperative confirm dialog, Alert.alert-shaped. Native iOS alerts already
+// match the app (and support per-button destructive red), so this is for
+// android, where the native dialog can only theme all confirm buttons at
+// once. Requires ConfirmDialogHost to be mounted at the app root.
+export function showConfirmDialog(request: ConfirmDialogRequest): void
+{
+  presentRequest?.(request)
+}
 
-  const handleCancel = useCallback(() => {
-    request?.onCancel?.();
-    setRequest(null);
-  }, [request]);
+// android-style alert dialog matching the native one themed by
+// withAndroidModernAlertDialog — left-aligned text, right-aligned text
+// buttons — with what the native theme can't do: a per-dialog destructive
+// button color and a dimmer message than the title.
+export function ConfirmDialogHost()
+{
+  const [request, setRequest] = useState<ConfirmDialogRequest | null>(null)
+  const pressedOverlay = useThemeColor('--color-subtle')
 
-  const handleConfirm = useCallback(() => {
-    request?.onConfirm();
-    setRequest(null);
-  }, [request]);
+  useEffect(() =>
+  {
+    presentRequest = setRequest
+    return () =>
+    {
+      presentRequest = null
+    }
+  }, [])
+
+  const handleCancel = useCallback(() =>
+  {
+    request?.onCancel?.()
+    setRequest(null)
+  }, [request])
+
+  const handleConfirm = useCallback(() =>
+  {
+    request?.onConfirm()
+    setRequest(null)
+  }, [request])
 
   return (
     <Modal
@@ -81,7 +86,7 @@ export function ConfirmDialogHost() {
                   onPress={handleCancel}
                 >
                   <AppText className="text-base font-sans-medium">
-                    {request.cancelText ?? "Cancel"}
+                    {request.cancelText ?? 'Cancel'}
                   </AppText>
                 </Pressable>
               </View>
@@ -94,8 +99,8 @@ export function ConfirmDialogHost() {
                 >
                   <AppText
                     className={cn(
-                      "text-base font-sans-medium",
-                      request.destructive && "text-danger-foreground",
+                      'text-base font-sans-medium',
+                      request.destructive && 'text-danger-foreground',
                     )}
                   >
                     {request.confirmText}
@@ -107,5 +112,5 @@ export function ConfirmDialogHost() {
         </View>
       )}
     </Modal>
-  );
+  )
 }

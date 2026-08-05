@@ -1,10 +1,14 @@
-import { createContext, use } from "react";
-import type { ChatComposerHandle } from "./components/chat/ChatComposer";
+// apps/web/src/composerHandleContext.ts
+// define composer handle ref
 
-export type ComposerHandleRef = React.RefObject<ChatComposerHandle | null>;
+import { createContext, use } from 'react'
+import type { ChatComposerHandle } from './components/chat/ChatComposer'
 
-export const ComposerHandleContext = createContext<ComposerHandleRef | null>(null);
+export type ComposerHandleRef = React.RefObject<ChatComposerHandle | null>
 
-export function useComposerHandleContext(): ComposerHandleRef | null {
-  return use(ComposerHandleContext);
+export const ComposerHandleContext = createContext<ComposerHandleRef | null>(null)
+
+export function useComposerHandleContext(): ComposerHandleRef | null
+{
+  return use(ComposerHandleContext)
 }

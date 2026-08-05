@@ -1,32 +1,34 @@
-import * as Effect from "effect/Effect";
-import * as SqlClient from "effect/unstable/sql/SqlClient";
+// apps/server/src/persistence/Migrations/026_CanonicalizeModelSelectionOptions.ts
+// apply persistence migration 026 canonicalize model selection options
 
-/**
- * Canonicalize `modelSelection.options` / `defaultModelSelection.options` from
- * the legacy object shape (`{ effort: "max", fastMode: true, ... }`) to the
- * current array-of-selections shape (`[{ id: "effort", value: "max" }, ...]`).
- *
- * Migration 016 introduced `modelSelection` with `options` stored as a
- * per-provider object. Later the schema was reshaped so that options are a
- * generic `Array<{ id, value }>` of user-selected option entries. Stored rows
- * from before the reshape still have the object shape and fail to decode.
- *
- * For each value in the legacy object:
- *   - string values are kept if non-empty after trim
- *   - boolean values are always kept (true | false)
- *   - any other value type (number, null, nested object/array) is dropped,
- *     matching the permissive client-side normalizer in composerDraftStore.
- *
- * Touched storage:
- *   - `projection_threads.model_selection_json.options`
- *   - `projection_projects.default_model_selection_json.options`
- *   - `orchestration_events.payload_json.$.modelSelection.options`
- *     (thread.created | thread.meta-updated | thread.turn-start-requested)
- *   - `orchestration_events.payload_json.$.defaultModelSelection.options`
- *     (project.created | project.meta-updated)
- */
-export default Effect.gen(function* () {
-  const sql = yield* SqlClient.SqlClient;
+import * as Effect from 'effect/Effect'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
+
+// canonicalize `modelSelection.options` / `defaultModelSelection.options` from
+// the legacy object shape (`{ effort: "max", fastMode: true, ... }`) to the
+// current array-of-selections shape (`[{ id: "effort", value: "max" }, ...]`).
+//
+// migration 016 introduced `modelSelection` with `options` stored as a
+// per-provider object. Later the schema was reshaped so that options are a
+// generic `Array<{ id, value }>` of user-selected option entries. Stored rows
+// from before the reshape still have the object shape and fail to decode.
+//
+// for each value in the legacy object:
+//   - string values are kept if non-empty after trim
+//   - boolean values are always kept (true | false)
+//   - any other value type (number, null, nested object/array) is dropped,
+//     matching the permissive client-side normalizer in composerDraftStore.
+//
+// touched storage:
+//   - `projection_threads.model_selection_json.options`
+//   - `projection_projects.default_model_selection_json.options`
+//   - `orchestration_events.payload_json.$.modelSelection.options`
+//     (thread.created | thread.meta-updated | thread.turn-start-requested)
+//   - `orchestration_events.payload_json.$.defaultModelSelection.options`
+//     (project.created | project.meta-updated)
+export default Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
 
   yield* sql`
     UPDATE projection_threads
@@ -52,7 +54,7 @@ export default Effect.gen(function* () {
     )
     WHERE model_selection_json IS NOT NULL
       AND json_type(model_selection_json, '$.options') = 'object'
-  `;
+  `
 
   yield* sql`
     UPDATE projection_projects
@@ -78,7 +80,7 @@ export default Effect.gen(function* () {
     )
     WHERE default_model_selection_json IS NOT NULL
       AND json_type(default_model_selection_json, '$.options') = 'object'
-  `;
+  `
 
   yield* sql`
     UPDATE orchestration_events
@@ -108,7 +110,7 @@ export default Effect.gen(function* () {
       'thread.turn-start-requested'
     )
       AND json_type(payload_json, '$.modelSelection.options') = 'object'
-  `;
+  `
 
   yield* sql`
     UPDATE orchestration_events
@@ -134,5 +136,5 @@ export default Effect.gen(function* () {
     )
     WHERE event_type IN ('project.created', 'project.meta-updated')
       AND json_type(payload_json, '$.defaultModelSelection.options') = 'object'
-  `;
-});
+  `
+})

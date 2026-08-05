@@ -1,5 +1,8 @@
-import { createOrchestrationEnvironmentAtoms } from "@t3tools/client-runtime/state/orchestration";
+// apps/mobile/src/state/orchestration.ts
+// manage orchestration environment state
 
-import { connectionAtomRuntime } from "../connection/runtime";
+import { createOrchestrationEnvironmentAtoms } from '@t3tools/client-runtime/state/orchestration'
 
-export const orchestrationEnvironment = createOrchestrationEnvironmentAtoms(connectionAtomRuntime);
+import { connectionAtomRuntime } from '../connection/runtime'
+
+export const orchestrationEnvironment = createOrchestrationEnvironmentAtoms(connectionAtomRuntime)
