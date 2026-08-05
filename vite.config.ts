@@ -22,13 +22,14 @@ export default defineConfig({
   },
   staged: {
     // Formatter only for now — no lint or typecheck on commit.
-    '*': 'vp fmt',
+    '*': 'node scripts/format-repository.ts --staged',
   },
   fmt: {
     ignorePatterns: [
       '.reference',
       '.repos/**',
       '.plans',
+      'dev-docs',
       '.alchemy',
       'dist',
       'dist-electron',
@@ -42,6 +43,12 @@ export default defineConfig({
       'apps/web/src/lib/vendor/qrcodegen.ts',
       'apps/mobile/uniwind-types.d.ts',
       '*.icon/**',
+      '**/*.cjs',
+      '**/*.js',
+      '**/*.jsx',
+      '**/*.mjs',
+      '**/*.ts',
+      '**/*.tsx',
     ],
     sortPackageJson: {},
     overrides: [
