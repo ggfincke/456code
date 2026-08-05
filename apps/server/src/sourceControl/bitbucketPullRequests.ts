@@ -1,19 +1,20 @@
-import * as DateTime from "effect/DateTime";
-import * as Option from "effect/Option";
-import * as Schema from "effect/Schema";
-import { PositiveInt, TrimmedNonEmptyString } from "@t3tools/contracts";
+import * as DateTime from 'effect/DateTime'
+import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
+import { PositiveInt, TrimmedNonEmptyString } from '@t3tools/contracts'
 
-export interface NormalizedBitbucketPullRequestRecord {
-  readonly number: number;
-  readonly title: string;
-  readonly url: string;
-  readonly baseRefName: string;
-  readonly headRefName: string;
-  readonly state: "open" | "closed" | "merged";
-  readonly updatedAt: Option.Option<DateTime.Utc>;
-  readonly isCrossRepository?: boolean;
-  readonly headRepositoryNameWithOwner?: string | null;
-  readonly headRepositoryOwnerLogin?: string | null;
+export interface NormalizedBitbucketPullRequestRecord
+{
+  readonly number: number
+  readonly title: string
+  readonly url: string
+  readonly baseRefName: string
+  readonly headRefName: string
+  readonly state: 'open' | 'closed' | 'merged'
+  readonly updatedAt: Option.Option<DateTime.Utc>
+  readonly isCrossRepository?: boolean
+  readonly headRepositoryNameWithOwner?: string | null
+  readonly headRepositoryOwnerLogin?: string | null
 }
 
 export const BitbucketRepositoryRefSchema = Schema.Struct({
@@ -25,14 +26,14 @@ export const BitbucketRepositoryRefSchema = Schema.Struct({
       }),
     ),
   ),
-});
+})
 
 export const BitbucketPullRequestBranchSchema = Schema.Struct({
   repository: Schema.optional(Schema.NullOr(BitbucketRepositoryRefSchema)),
   branch: Schema.Struct({
     name: TrimmedNonEmptyString,
   }),
-});
+})
 
 export const BitbucketPullRequestSchema = Schema.Struct({
   id: PositiveInt,
@@ -46,50 +47,55 @@ export const BitbucketPullRequestSchema = Schema.Struct({
   }),
   source: BitbucketPullRequestBranchSchema,
   destination: BitbucketPullRequestBranchSchema,
-});
+})
 
 export const BitbucketPullRequestListSchema = Schema.Struct({
   values: Schema.Array(BitbucketPullRequestSchema),
   next: Schema.optional(TrimmedNonEmptyString),
-});
+})
 
-function trimOptionalString(value: string | null | undefined): string | null {
-  const trimmed = value?.trim() ?? "";
-  return trimmed.length > 0 ? trimmed : null;
+function trimOptionalString(value: string | null | undefined): string | null
+{
+  const trimmed = value?.trim() ?? ''
+  return trimmed.length > 0 ? trimmed : null
 }
 
-function repositoryOwner(repository: Schema.Schema.Type<typeof BitbucketRepositoryRefSchema>) {
+function repositoryOwner(repository: Schema.Schema.Type<typeof BitbucketRepositoryRefSchema>)
+{
   return (
     trimOptionalString(repository.workspace?.slug) ??
-    (repository.full_name?.includes("/") ? (repository.full_name.split("/")[0] ?? null) : null)
-  );
+    (repository.full_name?.includes('/') ? (repository.full_name.split('/')[0] ?? null) : null)
+  )
 }
 
-function normalizeBitbucketPullRequestState(state: string | null | undefined) {
-  switch (state?.trim().toUpperCase()) {
-    case "MERGED":
-      return "merged" as const;
-    case "DECLINED":
-    case "SUPERSEDED":
-      return "closed" as const;
-    case "OPEN":
+function normalizeBitbucketPullRequestState(state: string | null | undefined)
+{
+  switch (state?.trim().toUpperCase())
+  {
+    case 'MERGED':
+      return 'merged' as const
+    case 'DECLINED':
+    case 'SUPERSEDED':
+      return 'closed' as const
+    case 'OPEN':
     default:
-      return "open" as const;
+      return 'open' as const
   }
 }
 
 export function normalizeBitbucketPullRequestRecord(
   raw: Schema.Schema.Type<typeof BitbucketPullRequestSchema>,
-): NormalizedBitbucketPullRequestRecord {
-  const headRepositoryNameWithOwner = trimOptionalString(raw.source.repository?.full_name);
-  const baseRepositoryNameWithOwner = trimOptionalString(raw.destination.repository?.full_name);
+): NormalizedBitbucketPullRequestRecord
+{
+  const headRepositoryNameWithOwner = trimOptionalString(raw.source.repository?.full_name)
+  const baseRepositoryNameWithOwner = trimOptionalString(raw.destination.repository?.full_name)
   const headRepositoryOwnerLogin = raw.source.repository
     ? repositoryOwner(raw.source.repository)
-    : null;
+    : null
   const isCrossRepository =
     headRepositoryNameWithOwner !== null &&
     baseRepositoryNameWithOwner !== null &&
-    headRepositoryNameWithOwner !== baseRepositoryNameWithOwner;
+    headRepositoryNameWithOwner !== baseRepositoryNameWithOwner
 
   return {
     number: raw.id,
@@ -102,5 +108,5 @@ export function normalizeBitbucketPullRequestRecord(
     ...(isCrossRepository ? { isCrossRepository: true } : {}),
     ...(headRepositoryNameWithOwner ? { headRepositoryNameWithOwner } : {}),
     ...(headRepositoryOwnerLogin ? { headRepositoryOwnerLogin } : {}),
-  };
+  }
 }
