@@ -8,8 +8,13 @@ import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
 import { assert, it } from '@effect/vitest'
 
-const scriptPath = NodePath.resolve('scripts/check-directive-preservation.ts')
-const directive = '  // @effect-diagnostics-next-line preferSchemaOverJson:off'
+// resolve from this file, not the cwd: the suite runs from the scripts package
+const scriptPath = NodePath.resolve(
+  import.meta.dirname,
+  '../../scripts/check-directive-preservation.ts',
+)
+// ! split so the language service does not read this fixture text as a real directive
+const directive = '  // @effect-diagnostics' + '-next-line preferSchemaOverJson:off'
 
 function git(cwd: string, args: ReadonlyArray<string>): void
 {

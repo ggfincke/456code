@@ -29,10 +29,7 @@ jobs:
         run: vp run --filter @t3tools/desktop ensure:electron
 
       - name: Check Prettier formatting
-        run: pnpm run fmt:prettier:check
-
-      - name: Check comment style
-        run: pnpm run comments:all:check
+        run: node scripts/format-repository.ts --check --prettier-only
 
       - name: Check directive preservation
         run: |
