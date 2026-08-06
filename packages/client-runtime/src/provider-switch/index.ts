@@ -8,6 +8,32 @@ export type ProviderSwitchPhase = OrchestrationProviderSwitch['phase']
 export const PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND = 'provider.switch.completed'
 export const PROVIDER_SWITCH_FAILED_ACTIVITY_KIND = 'provider.switch.failed'
 
+export function providerSwitchBlockReason(input: {
+  readonly isSwitchingProvider: boolean
+  readonly isTurnRunning: boolean
+  readonly hasPendingApproval: boolean
+  readonly hasPendingUserInput: boolean
+}): string | null
+{
+  if (input.isSwitchingProvider)
+  {
+    return 'A provider handoff is already in progress.'
+  }
+  if (input.isTurnRunning)
+  {
+    return 'Wait for the current response to finish before switching providers.'
+  }
+  if (input.hasPendingApproval)
+  {
+    return 'Resolve the pending approval before switching providers.'
+  }
+  if (input.hasPendingUserInput)
+  {
+    return 'Answer the pending question before switching providers.'
+  }
+  return null
+}
+
 const PROVIDER_SWITCH_FAILURE_REASONS: Readonly<Record<string, string>> = {
   'compaction-timeout': 'the summary took too long',
   'compaction-failed': 'the summary could not be generated',

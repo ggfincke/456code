@@ -2,3 +2,4 @@
 // expose shared thread activity normalization
 
 export * from './worklogNormalization.ts'
+export * from './pendingRequests.ts'

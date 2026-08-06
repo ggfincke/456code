@@ -424,27 +424,32 @@ export function applyThreadDetailEvent(
         updatedAt: event.payload.updatedAt,
       }
 
-      const existingMessage = thread.messages.find((entry) => entry.id === message.id)
-      const messages = existingMessage
-        ? Arr.map(thread.messages, (entry) =>
-            entry.id !== message.id
-              ? entry
-              : {
-                  ...entry,
-                  text: message.streaming
-                    ? `${entry.text}${message.text}`
-                    : message.text.length > 0
-                      ? message.text
-                      : entry.text,
-                  streaming: message.streaming,
-                  ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
-                  ...(message.streaming ? {} : { updatedAt: message.updatedAt }),
-                  ...(message.attachments !== undefined
-                    ? { attachments: message.attachments }
-                    : {}),
-                },
-          )
-        : Arr.append(thread.messages, message)
+      const lastMessageIndex = thread.messages.length - 1
+      const existingMessageIndex =
+        thread.messages[lastMessageIndex]?.id === message.id
+          ? lastMessageIndex
+          : thread.messages.findIndex((entry) => entry.id === message.id)
+      const messages =
+        existingMessageIndex < 0
+          ? Arr.append(thread.messages, message)
+          : (() =>
+            {
+              const existingMessage = thread.messages[existingMessageIndex]!
+              const next = thread.messages.slice()
+              next[existingMessageIndex] = {
+                ...existingMessage,
+                text: message.streaming
+                  ? `${existingMessage.text}${message.text}`
+                  : message.text.length > 0
+                    ? message.text
+                    : existingMessage.text,
+                streaming: message.streaming,
+                ...(message.turnId !== undefined ? { turnId: message.turnId } : {}),
+                ...(message.streaming ? {} : { updatedAt: message.updatedAt }),
+                ...(message.attachments !== undefined ? { attachments: message.attachments } : {}),
+              }
+              return next
+            })()
       // update latestTurn for assistant messages bound to a turn. A completed
       // assistant message only settles the turn once the session is no longer
       // running it — providers may emit several assistant messages per turn

@@ -5,10 +5,8 @@ import type {
   EnvironmentId,
   OrchestrationMessage,
   OrchestrationProjectShell,
-  OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadShell,
-  ThreadId,
 } from '@t3tools/contracts'
 
 export interface EnvironmentProject extends OrchestrationProjectShell
@@ -50,14 +48,4 @@ export function scopeThread(
 ): EnvironmentThread
 {
   return { ...thread, environmentId }
-}
-
-export function selectEnvironmentThreadShell(
-  snapshot: OrchestrationShellSnapshot | null,
-  environmentId: EnvironmentId,
-  threadId: ThreadId,
-): EnvironmentThreadShell | null
-{
-  const thread = snapshot?.threads.find((candidate) => candidate.id === threadId) ?? null
-  return thread ? scopeThreadShell(environmentId, thread) : null
 }

@@ -61,37 +61,12 @@ export const VcsListRemotesResult = Schema.Struct({
 })
 export type VcsListRemotesResult = typeof VcsListRemotesResult.Type
 
-export interface VcsProcessErrorContext
-{
-  readonly operation: string
-  readonly command: string
-  readonly cwd: string
-  readonly argumentCount?: number
-}
-
-export interface VcsProcessSpawnFailure
-{
-  readonly cause: unknown
-}
-
-export interface VcsProcessTimeoutFailure
-{
-  readonly timeoutMs: number
-}
-
 export const VcsProcessExitFailureKind = Schema.Literals([
   'authentication',
   'not-found',
   'command-failed',
 ])
 export type VcsProcessExitFailureKind = typeof VcsProcessExitFailureKind.Type
-
-export interface VcsProcessExitFailure
-{
-  readonly exitCode: number
-  readonly stderr: string
-  readonly stderrTruncated: boolean
-}
 
 export class VcsProcessSpawnError extends Schema.TaggedErrorClass<VcsProcessSpawnError>()(
   'VcsProcessSpawnError',
@@ -107,14 +82,6 @@ export class VcsProcessSpawnError extends Schema.TaggedErrorClass<VcsProcessSpaw
   override get message(): string
   {
     return `VCS process failed to spawn in ${this.operation}: ${this.command} (${this.cwd})`
-  }
-
-  static fromProcessSpawnError(context: VcsProcessErrorContext, error: VcsProcessSpawnFailure)
-  {
-    return new VcsProcessSpawnError({
-      ...context,
-      cause: error.cause,
-    })
   }
 }
 
@@ -137,33 +104,6 @@ export class VcsProcessExitError extends Schema.TaggedErrorClass<VcsProcessExitE
   {
     return `VCS process failed in ${this.operation}: ${this.command} (${this.cwd}) exited with ${this.exitCode} - ${this.detail}`
   }
-
-  static fromProcessExit(
-    context: VcsProcessErrorContext,
-    error: VcsProcessExitFailure,
-    failureKind: VcsProcessExitFailureKind,
-  )
-  {
-    const detail =
-      failureKind === 'authentication'
-        ? 'Authentication failed.'
-        : failureKind === 'not-found'
-          ? context.command === 'glab'
-            ? 'Merge request not found.'
-            : context.command === 'gh' || context.command === 'az'
-              ? 'Pull request not found.'
-              : 'VCS resource not found.'
-          : 'Process exited with a non-zero status.'
-
-    return new VcsProcessExitError({
-      ...context,
-      exitCode: error.exitCode,
-      detail,
-      failureKind,
-      stderrLength: error.stderr.length,
-      stderrTruncated: error.stderrTruncated,
-    })
-  }
 }
 
 export class VcsProcessTimeoutError extends Schema.TaggedErrorClass<VcsProcessTimeoutError>()(
@@ -180,14 +120,6 @@ export class VcsProcessTimeoutError extends Schema.TaggedErrorClass<VcsProcessTi
   override get message(): string
   {
     return `VCS process timed out in ${this.operation}: ${this.command} (${this.cwd}) after ${this.timeoutMs}ms`
-  }
-
-  static fromProcessTimeoutError(context: VcsProcessErrorContext, error: VcsProcessTimeoutFailure)
-  {
-    return new VcsProcessTimeoutError({
-      ...context,
-      timeoutMs: error.timeoutMs,
-    })
   }
 }
 

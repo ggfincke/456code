@@ -51,20 +51,6 @@ export const ProjectEntriesFailure = Schema.Literals([
 ])
 export type ProjectEntriesFailure = typeof ProjectEntriesFailure.Type
 
-type ProjectEntriesFailureContext = {
-  readonly failure: ProjectEntriesFailure
-  readonly normalizedCwd?: string
-  readonly timeout?: string
-  readonly detail?: string
-  readonly cause?: unknown
-}
-
-function decodedProjectErrorMessage(props: object): string | undefined
-{
-  if (!('message' in props)) return undefined
-  return typeof props.message === 'string' ? props.message : undefined
-}
-
 export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSearchEntriesError>()(
   'ProjectSearchEntriesError',
   {
@@ -79,26 +65,7 @@ export class ProjectSearchEntriesError extends Schema.TaggedErrorClass<ProjectSe
     cause: Schema.optional(Schema.Defect()),
   },
 )
-{
-  // the structured fields are optional on the wire so newer peers can decode legacy message-only
-  // failures. New application code must provide them through this constructor.
-  // @effect-diagnostics-next-line overriddenSchemaConstructor:off
-  constructor(
-    props: ProjectEntriesFailureContext & {
-      readonly cwd: string
-      readonly queryLength: number
-      readonly limit: number
-    },
-  )
-  {
-    super({
-      ...props,
-      message:
-        decodedProjectErrorMessage(props) ??
-        `Failed to search workspace entries in '${props.cwd}'.`,
-    } as any)
-  }
-}
+{}
 
 export class ProjectListEntriesError extends Schema.TaggedErrorClass<ProjectListEntriesError>()(
   'ProjectListEntriesError',
@@ -112,17 +79,7 @@ export class ProjectListEntriesError extends Schema.TaggedErrorClass<ProjectList
     cause: Schema.optional(Schema.Defect()),
   },
 )
-{
-  // @effect-diagnostics-next-line overriddenSchemaConstructor:off
-  constructor(props: ProjectEntriesFailureContext & { readonly cwd: string })
-  {
-    super({
-      ...props,
-      message:
-        decodedProjectErrorMessage(props) ?? `Failed to list workspace entries in '${props.cwd}'.`,
-    } as any)
-  }
-}
+{}
 
 export const ProjectReadFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -159,17 +116,6 @@ export const ProjectFileOperation = Schema.Literals([
 ])
 export type ProjectFileOperation = typeof ProjectFileOperation.Type
 
-type ProjectFileFailureContext = {
-  readonly cwd: string
-  readonly relativePath: string
-  readonly failure: ProjectFileFailure
-  readonly resolvedPath?: string
-  readonly resolvedWorkspaceRoot?: string
-  readonly operation?: ProjectFileOperation
-  readonly operationPath?: string
-  readonly cause?: unknown
-}
-
 export class ProjectReadFileError extends Schema.TaggedErrorClass<ProjectReadFileError>()(
   'ProjectReadFileError',
   {
@@ -184,18 +130,7 @@ export class ProjectReadFileError extends Schema.TaggedErrorClass<ProjectReadFil
     cause: Schema.optional(Schema.Defect()),
   },
 )
-{
-  // @effect-diagnostics-next-line overriddenSchemaConstructor:off
-  constructor(props: ProjectFileFailureContext)
-  {
-    super({
-      ...props,
-      message:
-        decodedProjectErrorMessage(props) ??
-        `Failed to read workspace file '${props.relativePath}' in '${props.cwd}'.`,
-    } as any)
-  }
-}
+{}
 
 export const ProjectWriteFileInput = Schema.Struct({
   cwd: TrimmedNonEmptyString,
@@ -223,15 +158,4 @@ export class ProjectWriteFileError extends Schema.TaggedErrorClass<ProjectWriteF
     cause: Schema.optional(Schema.Defect()),
   },
 )
-{
-  // @effect-diagnostics-next-line overriddenSchemaConstructor:off
-  constructor(props: ProjectFileFailureContext)
-  {
-    super({
-      ...props,
-      message:
-        decodedProjectErrorMessage(props) ??
-        `Failed to write workspace file '${props.relativePath}' in '${props.cwd}'.`,
-    } as any)
-  }
-}
+{}
