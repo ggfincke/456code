@@ -112,7 +112,17 @@ function SidebarProvider({
 
   // this is the internal state of the sidebar.
   // we use openProp and setOpenProp for control from outside the component.
-  const [_open, _setOpen] = React.useState(defaultOpen)
+  // the persisted cookie is read back on mount so collapse state survives
+  // reloads; previously the cookie was write-only (megacore U-107)
+  const [_open, _setOpen] = React.useState(() =>
+  {
+    if (typeof document === 'undefined')
+    {
+      return defaultOpen
+    }
+    const match = document.cookie.match(new RegExp(`(?:^|; )${SIDEBAR_COOKIE_NAME}=([^;]*)`))
+    return match ? match[1] === 'true' : defaultOpen
+  })
   const open = openProp ?? _open
   const setOpen = React.useCallback(
     async (value: boolean | ((value: boolean) => boolean)) =>
