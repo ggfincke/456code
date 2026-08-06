@@ -1204,4 +1204,47 @@ describe('computeStableMessagesTimelineRows', () =>
     expect(reordered).not.toBe(initial)
     expect(reordered.result).toEqual([initial.result[1], initial.result[0]])
   })
+
+  it('replaces a same-ID assistant row when streaming content changes', () =>
+  {
+    const deriveRows = (text: string) =>
+      deriveMessagesTimelineRows({
+        timelineEntries: [
+          {
+            id: 'assistant-entry',
+            kind: 'message',
+            createdAt: '2026-01-01T00:00:00Z',
+            message: {
+              id: 'assistant-1' as never,
+              role: 'assistant',
+              text,
+              turnId: 'turn-1' as never,
+              createdAt: '2026-01-01T00:00:00Z',
+              updatedAt: '2026-01-01T00:00:01Z',
+              streaming: true,
+            },
+          },
+        ],
+        isWorking: true,
+        activeTurnStartedAt: null,
+        turnDiffSummaryByAssistantMessageId: new Map(),
+        revertTurnCountByUserMessageId: new Map(),
+      })
+    const initial = computeStableMessagesTimelineRows(deriveRows('partial'), {
+      byId: new Map(),
+      result: [],
+    })
+
+    const completed = computeStableMessagesTimelineRows(deriveRows('complete'), initial)
+
+    expect(completed).not.toBe(initial)
+    expect(completed.result[0]).not.toBe(initial.result[0])
+    expect(completed.result[0]).toMatchObject({
+      kind: 'message',
+      message: {
+        id: 'assistant-1',
+        text: 'complete',
+      },
+    })
+  })
 })

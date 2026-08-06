@@ -233,6 +233,48 @@ it.layer(TestLayer)('CheckpointStore.layer', (it) =>
     )
   })
 
+  describe('restoreCheckpoint', () =>
+  {
+    it.effect('falls back to HEAD only when requested for a missing checkpoint', () =>
+      Effect.gen(function* ()
+      {
+        const tmp = yield* makeTmpDir()
+        yield* initRepoWithCommit(tmp)
+        const checkpointStore = yield* CheckpointStore.CheckpointStore
+        const fileSystem = yield* FileSystem.FileSystem
+        const readmePath = NodePath.join(tmp, 'README.md')
+        const untrackedPath = NodePath.join(tmp, 'untracked.txt')
+        const missingCheckpointRef = checkpointRefForThreadTurn(
+          ThreadId.make('thread-missing-checkpoint'),
+          1,
+        )
+
+        yield* writeTextFile(readmePath, '# tracked mutation\n')
+        yield* writeTextFile(untrackedPath, 'untracked mutation\n')
+
+        expect(
+          yield* checkpointStore.restoreCheckpoint({
+            cwd: tmp,
+            checkpointRef: missingCheckpointRef,
+            fallbackToHead: false,
+          }),
+        ).toBe(false)
+        expect(yield* fileSystem.readFileString(readmePath)).toBe('# tracked mutation\n')
+
+        expect(
+          yield* checkpointStore.restoreCheckpoint({
+            cwd: tmp,
+            checkpointRef: missingCheckpointRef,
+            fallbackToHead: true,
+          }),
+        ).toBe(true)
+        expect(yield* fileSystem.readFileString(readmePath)).toBe('# test\n')
+        expect(yield* fileSystem.exists(untrackedPath)).toBe(false)
+        expect(yield* git(tmp, ['status', '--porcelain'])).toBe('')
+      }),
+    )
+  })
+
   describe('staged restore', () =>
   {
     it.effect(
