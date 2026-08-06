@@ -41,14 +41,12 @@ import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
-  ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from '../Errors.ts'
 import {
   acpPermissionOutcome,
   classifyAcpTermination,
   mapAcpToAdapterError,
-  type AcpTerminationClassification,
 } from '../acp/AcpAdapterSupport.ts'
 import type * as AcpSessionRuntime from '../acp/AcpSessionRuntime.ts'
 import {
@@ -75,9 +73,9 @@ import {
   extractTodosAsPlan,
 } from '../acp/CursorAcpExtension.ts'
 import { type CursorAdapterShape } from '../Services/CursorAdapter.ts'
+import { makeAcpAdapterSessionLifecycle } from './AcpAdapterSessionLifecycle.ts'
 import { resolveCursorAcpBaseModelId } from './CursorProvider.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
-import { makeKeyedSemaphore } from './KeyedSemaphore.ts'
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString)
 
 const PROVIDER = ProviderDriverKind.make('cursor')
@@ -369,8 +367,6 @@ export function makeCursorAdapter(
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined
     const makeAcpNativeLoggers = yield* makeAcpNativeLoggerFactory()
 
-    const sessions = new Map<ThreadId, CursorSessionContext>()
-    const threadLocks = yield* makeKeyedSemaphore<string>()
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>()
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
@@ -401,8 +397,42 @@ export function makeCursorAdapter(
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid)
 
-    const withThreadLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
-      threadLocks.withPermit(threadId, effect)
+    const sessionLifecycle = yield* makeAcpAdapterSessionLifecycle<
+      CursorSessionContext,
+      ProviderAdapterRequestError
+    >({
+      provider: PROVIDER,
+      enableAbnormalTermination: options?.enableAbnormalTermination === true,
+      settlePending: (context) =>
+        Effect.all([
+          settlePendingApprovalsAsCancelled(context.pendingApprovals),
+          settlePendingUserInputsAsEmptyAnswers(context.pendingUserInputs),
+        ]).pipe(Effect.asVoid),
+      emitSessionExited: (context, classification) =>
+        Effect.gen(function* ()
+        {
+          yield* offerRuntimeEvent({
+            type: 'session.exited',
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: context.threadId,
+            payload: {
+              exitKind: classification.exitKind,
+              reason: classification.reason,
+              recoverable: classification.recoverable,
+            },
+          })
+        }),
+    })
+    const {
+      sessions,
+      withThreadLock,
+      requireSession,
+      finalizeSessionLocked,
+      finalizeSession,
+      listSessions,
+      hasSession,
+    } = sessionLifecycle
 
     const logNative = (
       threadId: ThreadId,
@@ -465,71 +495,6 @@ export function makeCursorAdapter(
           }),
         )
       })
-
-    const requireSession = (
-      threadId: ThreadId,
-    ): Effect.Effect<CursorSessionContext, ProviderAdapterSessionNotFoundError> =>
-    {
-      const ctx = sessions.get(threadId)
-      if (!ctx || ctx.stopped)
-      {
-        return Effect.fail(
-          new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId }),
-        )
-      }
-      return Effect.succeed(ctx)
-    }
-
-    const finalizeSessionLocked = (
-      ctx: CursorSessionContext,
-      classification: AcpTerminationClassification,
-    ) =>
-      Effect.gen(function* ()
-      {
-        const claimed = yield* Ref.modify(ctx.finalizationState, (state) =>
-          state === 'open'
-            ? ([true, classification.finalization] as const)
-            : ([false, state] as const),
-        )
-        if (!claimed) return
-        ctx.stopped = true
-        yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals)
-        yield* settlePendingUserInputsAsEmptyAnswers(ctx.pendingUserInputs)
-        const liveCtx = sessions.get(ctx.threadId)
-        const isLiveGeneration = liveCtx === ctx && liveCtx.generationId === ctx.generationId
-        if (isLiveGeneration)
-        {
-          sessions.delete(ctx.threadId)
-        }
-        if (
-          isLiveGeneration &&
-          (classification.finalization === 'graceful' ||
-            options?.enableAbnormalTermination === true)
-        )
-        {
-          yield* offerRuntimeEvent({
-            type: 'session.exited',
-            ...(yield* makeEventStamp()),
-            provider: PROVIDER,
-            threadId: ctx.threadId,
-            payload: {
-              exitKind: classification.exitKind,
-              reason: classification.reason,
-              recoverable: classification.recoverable,
-            },
-          })
-        }
-        if (ctx.notificationFiber)
-        {
-          yield* Fiber.interrupt(ctx.notificationFiber)
-        }
-        yield* Effect.ignore(Scope.close(ctx.scope, Exit.void))
-      }).pipe(Effect.uninterruptible)
-
-    const finalizeSession = (
-      ctx: CursorSessionContext,
-      classification: AcpTerminationClassification,
-    ) => withThreadLock(ctx.threadId, finalizeSessionLocked(ctx, classification))
 
     const gracefulStop = classifyAcpTermination({ _tag: 'AdapterStop' })
 
@@ -1131,45 +1096,61 @@ export function makeCursorAdapter(
               ),
             )
 
-          const turnRecord = ctx.turns.find((turn) => turn.id === turnId)
-          if (turnRecord)
-          {
-            turnRecord.items.push({ prompt: promptParts, result })
-          }
-          else
-          {
-            ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] })
-          }
-          ctx.session = {
-            ...ctx.session,
-            activeTurnId: turnId,
-            updatedAt: yield* nowIso,
-            model: resolvedModel,
-          }
+          return yield* withThreadLock(
+            input.threadId,
+            Effect.gen(function* ()
+            {
+              const liveContext = yield* requireSession(input.threadId)
+              if (liveContext !== ctx || liveContext.generationId !== ctx.generationId)
+              {
+                return yield* new ProviderAdapterRequestError({
+                  provider: PROVIDER,
+                  method: 'session/prompt',
+                  detail: 'Cursor session changed before the turn completed.',
+                })
+              }
 
-          // only the last remaining prompt settles the turn — a steer-
-          // superseded prompt resolving (usually cancelled) while another is
-          // in flight or pending must leave the merged turn running.
-          if (ctx.promptsInFlight === 1)
-          {
-            yield* offerRuntimeEvent({
-              type: 'turn.completed',
-              ...(yield* makeEventStamp()),
-              provider: PROVIDER,
-              threadId: input.threadId,
-              turnId,
-              payload: {
-                state: result.stopReason === 'cancelled' ? 'cancelled' : 'completed',
-                stopReason: result.stopReason ?? null,
-              },
-            })
-          }
+              const turnRecord = ctx.turns.find((turn) => turn.id === turnId)
+              if (turnRecord)
+              {
+                turnRecord.items.push({ prompt: promptParts, result })
+              }
+              else
+              {
+                ctx.turns.push({ id: turnId, items: [{ prompt: promptParts, result }] })
+              }
+              ctx.session = {
+                ...ctx.session,
+                activeTurnId: turnId,
+                updatedAt: yield* nowIso,
+                model: resolvedModel,
+              }
 
-          return {
-            threadId: input.threadId,
-            turnId,
-            resumeCursor: ctx.session.resumeCursor,
-          }
+              // only the last remaining prompt settles the turn. A steer-
+              // superseded prompt resolving while another is in flight or
+              // pending must leave the merged turn running.
+              if (ctx.promptsInFlight === 1)
+              {
+                yield* offerRuntimeEvent({
+                  type: 'turn.completed',
+                  ...(yield* makeEventStamp()),
+                  provider: PROVIDER,
+                  threadId: input.threadId,
+                  turnId,
+                  payload: {
+                    state: result.stopReason === 'cancelled' ? 'cancelled' : 'completed',
+                    stopReason: result.stopReason ?? null,
+                  },
+                })
+              }
+
+              return {
+                threadId: input.threadId,
+                turnId,
+                resumeCursor: ctx.session.resumeCursor,
+              }
+            }),
+          )
         }).pipe(
           Effect.ensuring(
             Effect.sync(() =>
@@ -1260,29 +1241,9 @@ export function makeCursorAdapter(
       })
 
     const stopSession: CursorAdapterShape['stopSession'] = (threadId) =>
-      withThreadLock(
-        threadId,
-        Effect.gen(function* ()
-        {
-          const ctx = yield* requireSession(threadId)
-          yield* finalizeSessionLocked(ctx, gracefulStop)
-        }),
-      )
+      sessionLifecycle.stopSession(threadId, gracefulStop)
 
-    const listSessions: CursorAdapterShape['listSessions'] = () =>
-      Effect.sync(() => Array.from(sessions.values(), (c) => ({ ...c.session })))
-
-    const hasSession: CursorAdapterShape['hasSession'] = (threadId) =>
-      Effect.sync(() =>
-      {
-        const c = sessions.get(threadId)
-        return c !== undefined && !c.stopped
-      })
-
-    const stopAll: CursorAdapterShape['stopAll'] = () =>
-      Effect.forEach(Array.from(sessions.values()), (ctx) => finalizeSession(ctx, gracefulStop), {
-        discard: true,
-      })
+    const stopAll: CursorAdapterShape['stopAll'] = () => sessionLifecycle.stopAll(gracefulStop)
 
     yield* Effect.addFinalizer(() =>
       stopAll().pipe(

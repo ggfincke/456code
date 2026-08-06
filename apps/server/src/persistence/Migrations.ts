@@ -215,14 +215,36 @@ export const runMigrations = Effect.fn('runMigrations')(function* ({
   toMigrationInclusive,
 }: RunMigrationsOptions = {})
 {
-  const backfilled = yield* backfillSkippedMigrations(toMigrationInclusive)
-  const forward = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })
-  const executedMigrations = [...backfilled, ...forward]
-  const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`)
-  yield* migrations.length === 0
-    ? Effect.logDebug('Database schema is current')
-    : Effect.log('Migrations ran successfully').pipe(Effect.annotateLogs({ migrations }))
-  return executedMigrations
+  const sql = yield* SqlClient.SqlClient
+  yield* sql`PRAGMA busy_timeout = 60000`
+  yield* sql`
+    CREATE TABLE IF NOT EXISTS effect_sql_migrations (
+      migration_id integer PRIMARY KEY NOT NULL,
+      created_at datetime NOT NULL DEFAULT current_timestamp,
+      name VARCHAR(255) NOT NULL
+    )
+  `
+
+  return yield* sql.withTransaction(
+    Effect.gen(function* ()
+    {
+      // acquire SQLite's write lock before reading the migration ledger
+      yield* sql`
+        UPDATE effect_sql_migrations
+        SET name = name
+        WHERE migration_id = (SELECT MAX(migration_id) FROM effect_sql_migrations)
+      `
+
+      const backfilled = yield* backfillSkippedMigrations(toMigrationInclusive)
+      const forward = yield* run({ loader: makeMigrationLoader(toMigrationInclusive) })
+      const executedMigrations = [...backfilled, ...forward]
+      const migrations = executedMigrations.map(([id, name]) => `${id}_${name}`)
+      yield* migrations.length === 0
+        ? Effect.logDebug('Database schema is current')
+        : Effect.log('Migrations ran successfully').pipe(Effect.annotateLogs({ migrations }))
+      return executedMigrations
+    }),
+  )
 })
 
 // layer that runs migrations when the layer is built.

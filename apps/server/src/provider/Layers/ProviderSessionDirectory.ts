@@ -8,7 +8,7 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 
-import * as ProviderSessionRuntime from '../../persistence/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntime from '../../persistence/Services/ProviderSessionRuntime.ts'
 import { ProviderSessionDirectoryPersistenceError, ProviderValidationError } from '../Errors.ts'
 import {
   ProviderSessionDirectory,
@@ -16,6 +16,8 @@ import {
   type ProviderRuntimeBindingWithMetadata,
   type ProviderSessionDirectoryShape,
 } from '../Services/ProviderSessionDirectory.ts'
+import { makeKeyedSemaphore } from './KeyedSemaphore.ts'
+
 const decodeProviderDriverKindValue = Schema.decodeUnknownEffect(ProviderDriverKind)
 
 function toPersistenceError(operation: string)
@@ -96,6 +98,7 @@ function toRuntimeBinding(
 const makeProviderSessionDirectory = Effect.gen(function* ()
 {
   const repository = yield* ProviderSessionRuntime.ProviderSessionRuntimeRepository
+  const upsertLocks = yield* makeKeyedSemaphore<ThreadId>()
 
   const getBinding = (threadId: ThreadId) =>
     repository.getByThreadId({ threadId }).pipe(
@@ -113,64 +116,73 @@ const makeProviderSessionDirectory = Effect.gen(function* ()
 
   const upsert: ProviderSessionDirectoryShape['upsert'] = Effect.fn(function* (binding)
   {
-    const existing = yield* repository
-      .getByThreadId({ threadId: binding.threadId })
-      .pipe(Effect.mapError(toPersistenceError('ProviderSessionDirectory.upsert:getByThreadId')))
+    return yield* upsertLocks.withPermit(
+      binding.threadId,
+      Effect.gen(function* ()
+      {
+        const existing = yield* repository
+          .getByThreadId({ threadId: binding.threadId })
+          .pipe(
+            Effect.mapError(toPersistenceError('ProviderSessionDirectory.upsert:getByThreadId')),
+          )
 
-    const existingRuntime = Option.getOrUndefined(existing)
-    const resolvedThreadId = binding.threadId ?? existingRuntime?.threadId
-    if (!resolvedThreadId)
-    {
-      return yield* new ProviderValidationError({
-        operation: 'ProviderSessionDirectory.upsert',
-        issue: 'threadId must be a non-empty string.',
-      })
-    }
+        const existingRuntime = Option.getOrUndefined(existing)
+        const resolvedThreadId = binding.threadId ?? existingRuntime?.threadId
+        if (!resolvedThreadId)
+        {
+          return yield* new ProviderValidationError({
+            operation: 'ProviderSessionDirectory.upsert',
+            issue: 'threadId must be a non-empty string.',
+          })
+        }
 
-    const now = DateTime.formatIso(yield* DateTime.now)
-    const providerChanged =
-      existingRuntime !== undefined && existingRuntime.providerName !== binding.provider
-    const providerInstanceId =
-      binding.providerInstanceId ?? (!providerChanged ? existingRuntime?.providerInstanceId : null)
-    if (providerInstanceId === null || providerInstanceId === undefined)
-    {
-      return yield* new ProviderValidationError({
-        operation: 'ProviderSessionDirectory.upsert',
-        issue: 'providerInstanceId is required for provider session runtime bindings.',
-      })
-    }
-    const existingProviderInstanceId =
-      existingRuntime?.providerInstanceId ??
-      (existingRuntime === undefined ? undefined : defaultInstanceIdForDriver(binding.provider))
-    const providerInstanceChanged =
-      existingRuntime !== undefined && existingProviderInstanceId !== providerInstanceId
-    const routeChanged = providerChanged || providerInstanceChanged
-    yield* repository
-      .upsert({
-        threadId: resolvedThreadId,
-        providerName: binding.provider,
-        providerInstanceId,
-        adapterKey:
-          binding.adapterKey ??
-          (routeChanged ? binding.provider : (existingRuntime?.adapterKey ?? binding.provider)),
-        runtimeMode:
-          binding.runtimeMode ??
-          (routeChanged ? 'full-access' : (existingRuntime?.runtimeMode ?? 'full-access')),
-        status:
-          binding.status ?? (routeChanged ? 'running' : (existingRuntime?.status ?? 'running')),
-        lastSeenAt: now,
-        resumeCursor:
-          binding.resumeCursor !== undefined
-            ? binding.resumeCursor
-            : routeChanged
-              ? null
-              : (existingRuntime?.resumeCursor ?? null),
-        runtimePayload: mergeRuntimePayload(
-          routeChanged ? null : (existingRuntime?.runtimePayload ?? null),
-          binding.runtimePayload,
-        ),
-      })
-      .pipe(Effect.mapError(toPersistenceError('ProviderSessionDirectory.upsert:upsert')))
+        const now = DateTime.formatIso(yield* DateTime.now)
+        const providerChanged =
+          existingRuntime !== undefined && existingRuntime.providerName !== binding.provider
+        const providerInstanceId =
+          binding.providerInstanceId ??
+          (!providerChanged ? existingRuntime?.providerInstanceId : null)
+        if (providerInstanceId === null || providerInstanceId === undefined)
+        {
+          return yield* new ProviderValidationError({
+            operation: 'ProviderSessionDirectory.upsert',
+            issue: 'providerInstanceId is required for provider session runtime bindings.',
+          })
+        }
+        const existingProviderInstanceId =
+          existingRuntime?.providerInstanceId ??
+          (existingRuntime === undefined ? undefined : defaultInstanceIdForDriver(binding.provider))
+        const providerInstanceChanged =
+          existingRuntime !== undefined && existingProviderInstanceId !== providerInstanceId
+        const routeChanged = providerChanged || providerInstanceChanged
+        yield* repository
+          .upsert({
+            threadId: resolvedThreadId,
+            providerName: binding.provider,
+            providerInstanceId,
+            adapterKey:
+              binding.adapterKey ??
+              (routeChanged ? binding.provider : (existingRuntime?.adapterKey ?? binding.provider)),
+            runtimeMode:
+              binding.runtimeMode ??
+              (routeChanged ? 'full-access' : (existingRuntime?.runtimeMode ?? 'full-access')),
+            status:
+              binding.status ?? (routeChanged ? 'running' : (existingRuntime?.status ?? 'running')),
+            lastSeenAt: now,
+            resumeCursor:
+              binding.resumeCursor !== undefined
+                ? binding.resumeCursor
+                : routeChanged
+                  ? null
+                  : (existingRuntime?.resumeCursor ?? null),
+            runtimePayload: mergeRuntimePayload(
+              routeChanged ? null : (existingRuntime?.runtimePayload ?? null),
+              binding.runtimePayload,
+            ),
+          })
+          .pipe(Effect.mapError(toPersistenceError('ProviderSessionDirectory.upsert:upsert')))
+      }),
+    )
   })
 
   const getProvider: ProviderSessionDirectoryShape['getProvider'] = (threadId) =>
@@ -220,8 +232,3 @@ export const ProviderSessionDirectoryLive = Layer.effect(
   ProviderSessionDirectory,
   makeProviderSessionDirectory,
 )
-
-export function makeProviderSessionDirectoryLive()
-{
-  return Layer.effect(ProviderSessionDirectory, makeProviderSessionDirectory)
-}

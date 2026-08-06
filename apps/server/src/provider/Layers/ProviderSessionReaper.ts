@@ -81,25 +81,54 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue
         }
 
-        const reaped = yield* providerService.stopSession({ threadId: binding.threadId }).pipe(
-          Effect.tap(() =>
-            Effect.logInfo('provider.session.reaped', {
-              threadId: binding.threadId,
-              provider: binding.provider,
-              idleDurationMs,
-              reason: 'inactivity_threshold',
-            }),
-          ),
-          Effect.as(true),
-          Effect.catchCause((cause) =>
-            Effect.logWarning('provider.session.reaper.stop-failed', {
-              threadId: binding.threadId,
-              provider: binding.provider,
-              idleDurationMs,
-              cause,
-            }).pipe(Effect.as(false)),
-          ),
+        const latestBindings = yield* directory.listBindings()
+        const latestBinding = latestBindings.find(
+          (candidate) => candidate.threadId === binding.threadId,
         )
+        if (
+          latestBinding === undefined ||
+          latestBinding.status === 'stopped' ||
+          latestBinding.provider !== binding.provider ||
+          latestBinding.providerInstanceId !== binding.providerInstanceId
+        )
+        {
+          continue
+        }
+
+        const latestLastSeenMs = Date.parse(latestBinding.lastSeenAt)
+        if (
+          Number.isNaN(latestLastSeenMs) ||
+          latestBinding.lastSeenAt !== binding.lastSeenAt ||
+          now - latestLastSeenMs < inactivityThresholdMs
+        )
+        {
+          continue
+        }
+
+        const reaped = yield* providerService
+          .stopSession({
+            threadId: binding.threadId,
+            expectedProviderInstanceId: binding.providerInstanceId,
+          })
+          .pipe(
+            Effect.tap(() =>
+              Effect.logInfo('provider.session.reaped', {
+                threadId: binding.threadId,
+                provider: binding.provider,
+                idleDurationMs,
+                reason: 'inactivity_threshold',
+              }),
+            ),
+            Effect.as(true),
+            Effect.catchCause((cause) =>
+              Effect.logWarning('provider.session.reaper.stop-failed', {
+                threadId: binding.threadId,
+                provider: binding.provider,
+                idleDurationMs,
+                cause,
+              }).pipe(Effect.as(false)),
+            ),
+          )
 
         if (reaped)
         {
