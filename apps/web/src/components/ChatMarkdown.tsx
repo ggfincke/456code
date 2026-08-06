@@ -173,6 +173,82 @@ const highlightedCodeCache = new LRUCache<string>(
 )
 const highlighterPromiseCache = new Map<string, Promise<DiffsHighlighter>>()
 
+interface StreamingMarkdownSegments
+{
+  readonly completedPrefix: string
+  readonly activeTail: string
+}
+
+interface RootMarkdownFence
+{
+  readonly marker: '`' | '~'
+  readonly length: number
+}
+
+function readRootMarkdownFence(line: string): RootMarkdownFence | null
+{
+  const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line)
+  const run = match?.[1]
+  if (!run) return null
+  if (run[0] === '`' && (match?.[2] ?? '').includes('`')) return null
+  return { marker: run[0] as '`' | '~', length: run.length }
+}
+
+function closesRootMarkdownFence(line: string, fence: RootMarkdownFence): boolean
+{
+  const match = /^ {0,3}(`+|~+)[\t ]*$/.exec(line)
+  const run = match?.[1]
+  return Boolean(run && run[0] === fence.marker && run.length >= fence.length)
+}
+
+export function splitStreamingMarkdown(text: string): StreamingMarkdownSegments
+{
+  let completedPrefixEnd = 0
+  let openFence: RootMarkdownFence | null = null
+  let lineStart = 0
+
+  while (lineStart < text.length)
+  {
+    const lineFeed = text.indexOf('\n', lineStart)
+    const lineEnd = lineFeed === -1 ? text.length : lineFeed
+    const line = text.slice(lineStart, lineEnd).replace(/\r$/, '')
+    if (openFence)
+    {
+      if (closesRootMarkdownFence(line, openFence))
+      {
+        openFence = null
+        completedPrefixEnd = lineFeed === -1 ? lineEnd : lineFeed + 1
+      }
+    }
+    else
+    {
+      openFence = readRootMarkdownFence(line)
+    }
+
+    if (lineFeed === -1) break
+    lineStart = lineFeed + 1
+  }
+
+  return {
+    completedPrefix: text.slice(0, completedPrefixEnd),
+    activeTail: text.slice(completedPrefixEnd),
+  }
+}
+
+function useBatchedStreamingText(text: string, isStreaming: boolean): string
+{
+  const [batchedText, setBatchedText] = useState(text)
+  useEffect(() =>
+  {
+    if (!isStreaming || typeof window === 'undefined') return
+    const frame = window.requestAnimationFrame(() => setBatchedText(text))
+    return () => window.cancelAnimationFrame(frame)
+  }, [isStreaming, text])
+
+  if (!isStreaming || !text.startsWith(batchedText)) return text
+  return batchedText
+}
+
 function findTaskListMarkerOffset(markdown: string, listItemStart: number): number | null
 {
   const firstLineEnd = markdown.indexOf('\n', listItemStart)
@@ -217,6 +293,27 @@ const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions['rehypePlugins']>
+
+const MarkdownDocument = memo(function MarkdownDocument(props: {
+  readonly text: string
+  readonly components: Components
+  readonly lineBreaks: boolean
+  readonly urlTransform: NonNullable<ReactMarkdownOptions['urlTransform']>
+})
+{
+  return (
+    <ReactMarkdown
+      remarkPlugins={
+        props.lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS
+      }
+      rehypePlugins={CHAT_MARKDOWN_REHYPE_PLUGINS}
+      components={props.components}
+      urlTransform={props.urlTransform}
+    >
+      {props.text}
+    </ReactMarkdown>
+  )
+})
 
 function extractFenceLanguage(className: string | undefined): string
 {
@@ -738,19 +835,13 @@ interface SuspenseShikiCodeBlockProps
   className: string | undefined
   code: string
   themeName: DiffsThemeNames
-  isStreaming: boolean
 }
 
-function SuspenseShikiCodeBlock({
-  className,
-  code,
-  themeName,
-  isStreaming,
-}: SuspenseShikiCodeBlockProps)
+function SuspenseShikiCodeBlock({ className, code, themeName }: SuspenseShikiCodeBlockProps)
 {
   const language = extractFenceLanguage(className)
   const cacheKey = createHighlightCacheKey(code, language, themeName)
-  const cachedHighlightedHtml = !isStreaming ? highlightedCodeCache.get(cacheKey) : null
+  const cachedHighlightedHtml = highlightedCodeCache.get(cacheKey)
 
   if (cachedHighlightedHtml != null)
   {
@@ -768,7 +859,6 @@ function SuspenseShikiCodeBlock({
       language={language}
       themeName={themeName}
       cacheKey={cacheKey}
-      isStreaming={isStreaming}
     />
   )
 }
@@ -779,7 +869,6 @@ interface UncachedShikiCodeBlockProps
   language: string
   themeName: DiffsThemeNames
   cacheKey: string
-  isStreaming: boolean
 }
 
 function UncachedShikiCodeBlock({
@@ -787,7 +876,6 @@ function UncachedShikiCodeBlock({
   language,
   themeName,
   cacheKey,
-  isStreaming,
 }: UncachedShikiCodeBlockProps)
 {
   const highlighter = use(getHighlighterPromise(language))
@@ -811,15 +899,12 @@ function UncachedShikiCodeBlock({
 
   useEffect(() =>
   {
-    if (!isStreaming)
-    {
-      highlightedCodeCache.set(
-        cacheKey,
-        highlightedHtml,
-        estimateHighlightedSize(highlightedHtml, code),
-      )
-    }
-  }, [cacheKey, code, highlightedHtml, isStreaming])
+    highlightedCodeCache.set(
+      cacheKey,
+      highlightedHtml,
+      estimateHighlightedSize(highlightedHtml, code),
+    )
+  }, [cacheKey, code, highlightedHtml])
 
   return (
     <div className="chat-markdown-shiki" dangerouslySetInnerHTML={{ __html: highlightedHtml }} />
@@ -1426,6 +1511,14 @@ function ChatMarkdown({
   orchestratePlanActions,
 }: ChatMarkdownProps)
 {
+  const renderedText = useBatchedStreamingText(text, isStreaming)
+  const streamingSegments = useMemo(
+    () =>
+      isStreaming
+        ? splitStreamingMarkdown(renderedText)
+        : { completedPrefix: '', activeTail: renderedText },
+    [isStreaming, renderedText],
+  )
   const { resolvedTheme } = useTheme()
   const createAssetUrl = useAtomQueryRunner(assetEnvironment.createUrl, {
     reportFailure: false,
@@ -1441,13 +1534,21 @@ function ChatMarkdown({
     serverConfig?.availableEditors ?? [],
   )
   const codeThemeName: DiffsThemeNames = useSyntaxThemeName()
+  const markdownLinkHrefKey = useMemo(
+    () =>
+      JSON.stringify([
+        ...extractMarkdownLinkHrefs(renderedText),
+        ...extractInlineCodeFilePaths(renderedText),
+      ]),
+    [renderedText],
+  )
   const markdownFileLinkMetaByHref = useMemo(() =>
   {
     const metaByHref = new Map<
       string,
       NonNullable<ReturnType<typeof resolveMarkdownFileLinkMeta>>
     >()
-    const hrefs = [...extractMarkdownLinkHrefs(text), ...extractInlineCodeFilePaths(text)]
+    const hrefs = JSON.parse(markdownLinkHrefKey) as string[]
     for (const href of hrefs)
     {
       const normalizedHref = normalizeMarkdownLinkHrefKey(href)
@@ -1459,7 +1560,7 @@ function ChatMarkdown({
       }
     }
     return metaByHref
-  }, [cwd, text])
+  }, [cwd, markdownLinkHrefKey])
   const fileLinkParentSuffixByPath = useMemo(() =>
   {
     const filePaths = [...markdownFileLinkMetaByHref.values()].map((meta) => meta.filePath)
@@ -1525,8 +1626,8 @@ function ChatMarkdown({
     },
     [createAssetUrl, openPreview, preparedConnection, threadRef],
   )
-  const markdownComponents = useMemo<Components>(
-    () => ({
+  const createMarkdownComponents = useCallback(
+    (sourceText: string, sourceOffset: number, segmentIsStreaming: boolean): Components => ({
       p({ node: _node, children, ...props })
       {
         return <p {...props}>{renderSkillInlineMarkdownChildren(children, skills)}</p>
@@ -1535,9 +1636,16 @@ function ChatMarkdown({
       {
         const listItemStart = node?.position?.start.offset
         const markerOffset =
-          typeof listItemStart === 'number' ? findTaskListMarkerOffset(text, listItemStart) : null
+          typeof listItemStart === 'number'
+            ? findTaskListMarkerOffset(sourceText, listItemStart)
+            : null
         return (
-          <li {...props} data-task-marker-offset={markerOffset ?? undefined}>
+          <li
+            {...props}
+            data-task-marker-offset={
+              markerOffset === null ? undefined : markerOffset + sourceOffset
+            }
+          >
             {renderSkillInlineMarkdownChildren(children, skills)}
           </li>
         )
@@ -1723,7 +1831,7 @@ function ChatMarkdown({
         let orchestratePlanDiagnostic: string | null = null
         if (language === 'orchestrate-plan')
         {
-          const result = parseOrchestratePlanResult(codeBlock.code, !isStreaming)
+          const result = parseOrchestratePlanResult(codeBlock.code, !segmentIsStreaming)
           if (result.status === 'success' && orchestratePlanActions)
           {
             return <OrchestratePlanCard plan={result.plan} actions={orchestratePlanActions} />
@@ -1749,16 +1857,19 @@ function ChatMarkdown({
               fenceTitle={fenceTitle}
               theme={resolvedTheme}
             >
-              <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-                <Suspense fallback={<pre {...props}>{children}</pre>}>
-                  <SuspenseShikiCodeBlock
-                    className={codeBlock.className}
-                    code={codeBlock.code}
-                    themeName={codeThemeName}
-                    isStreaming={isStreaming}
-                  />
-                </Suspense>
-              </CodeHighlightErrorBoundary>
+              {segmentIsStreaming ? (
+                <pre {...props}>{children}</pre>
+              ) : (
+                <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+                  <Suspense fallback={<pre {...props}>{children}</pre>}>
+                    <SuspenseShikiCodeBlock
+                      className={codeBlock.className}
+                      code={codeBlock.code}
+                      themeName={codeThemeName}
+                    />
+                  </Suspense>
+                </CodeHighlightErrorBoundary>
+              )}
             </MarkdownCodeBlock>
           </>
         )
@@ -1767,7 +1878,6 @@ function ChatMarkdown({
     [
       codeThemeName,
       fileLinkParentSuffixByPath,
-      isStreaming,
       markdownFileLinkMetaByHref,
       onTaskListChange,
       orchestratePlanActions,
@@ -1776,8 +1886,25 @@ function ChatMarkdown({
       openMarkdownFileInPreview,
       resolvedTheme,
       skills,
-      text,
       threadRef,
+    ],
+  )
+  const completedMarkdownComponents = useMemo(
+    () => createMarkdownComponents(streamingSegments.completedPrefix, 0, false),
+    [createMarkdownComponents, streamingSegments.completedPrefix],
+  )
+  const activeMarkdownComponents = useMemo(
+    () =>
+      createMarkdownComponents(
+        streamingSegments.activeTail,
+        streamingSegments.completedPrefix.length,
+        isStreaming,
+      ),
+    [
+      createMarkdownComponents,
+      isStreaming,
+      streamingSegments.activeTail,
+      streamingSegments.completedPrefix.length,
     ],
   )
 
@@ -1789,16 +1916,22 @@ function ChatMarkdown({
       )}
       onCopy={handleCopy}
     >
-      <ReactMarkdown
-        remarkPlugins={
-          lineBreaks ? CHAT_MARKDOWN_REMARK_PLUGINS_WITH_BREAKS : CHAT_MARKDOWN_REMARK_PLUGINS
-        }
-        rehypePlugins={CHAT_MARKDOWN_REHYPE_PLUGINS}
-        components={markdownComponents}
-        urlTransform={markdownUrlTransform}
-      >
-        {text}
-      </ReactMarkdown>
+      {streamingSegments.completedPrefix ? (
+        <MarkdownDocument
+          text={streamingSegments.completedPrefix}
+          components={completedMarkdownComponents}
+          lineBreaks={lineBreaks}
+          urlTransform={markdownUrlTransform}
+        />
+      ) : null}
+      {streamingSegments.activeTail ? (
+        <MarkdownDocument
+          text={streamingSegments.activeTail}
+          components={activeMarkdownComponents}
+          lineBreaks={lineBreaks}
+          urlTransform={markdownUrlTransform}
+        />
+      ) : null}
     </div>
   )
 }

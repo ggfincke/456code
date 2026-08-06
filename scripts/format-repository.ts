@@ -95,7 +95,7 @@ const runOxfmt = (check: boolean, files?: ReadonlyArray<string>): void =>
   ])
 }
 
-const runStaged = (check: boolean, values: ReadonlyArray<string>): void =>
+const runStaged = (check: boolean, prettierOnly: boolean, values: ReadonlyArray<string>): void =>
 {
   const files = values.flatMap((value) =>
   {
@@ -103,7 +103,9 @@ const runStaged = (check: boolean, values: ReadonlyArray<string>): void =>
     return file === undefined ? [] : [file]
   })
   const prettierFiles = files.filter((file) => prettierExtensions.has(NodePath.extname(file)))
-  const oxfmtFiles = files.filter((file) => !prettierExtensions.has(NodePath.extname(file)))
+  const oxfmtFiles = prettierOnly
+    ? []
+    : files.filter((file) => !prettierExtensions.has(NodePath.extname(file)))
 
   if (prettierFiles.length > 0) runPrettier(check, prettierFiles)
   if (oxfmtFiles.length > 0) runOxfmt(check, oxfmtFiles)
@@ -116,7 +118,7 @@ const stagedIndex = args.indexOf('--staged')
 
 if (stagedIndex !== -1)
 {
-  runStaged(check, args.slice(stagedIndex + 1))
+  runStaged(check, prettierOnly, args.slice(stagedIndex + 1))
 }
 else
 {

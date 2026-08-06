@@ -10,6 +10,7 @@ import {
   defaultInstanceIdForDriver,
   PROVIDER_DISPLAY_NAMES,
   ProviderDriverKind,
+  type ServerSettingsPatch,
   type ProviderInstanceConfig,
   type ProviderInstanceId,
 } from '@t3tools/contracts'
@@ -18,7 +19,7 @@ import * as Arr from 'effect/Array'
 import * as Equal from 'effect/Equal'
 import * as Result from 'effect/Result'
 import { LoaderIcon, PlusIcon, RefreshCwIcon } from 'lucide-react'
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { usePrimarySettings, useUpdatePrimarySettings } from '../../../hooks/useSettings'
 import { resolveAppModelSelectionState } from '../../../modelSelection'
 import { usePrimaryEnvironment } from '../../../state/environments'
@@ -109,6 +110,9 @@ export function ProviderSettingsPanel()
   const updateProvider = useAtomCommand(serverEnvironment.updateProvider, {
     reportFailure: false,
   })
+  const persistProviderSettings = useAtomCommand(serverEnvironment.updateSettings, {
+    reportFailure: false,
+  })
   const [isRefreshingProviders, setIsRefreshingProviders] = useState(false)
   const [isAddInstanceDialogOpen, setIsAddInstanceDialogOpen] = useState(false)
   const [updatingProviderDrivers, setUpdatingProviderDrivers] = useState<
@@ -116,6 +120,50 @@ export function ProviderSettingsPanel()
   >(() => new Set())
   const [openInstanceDetails, setOpenInstanceDetails] = useState<Record<string, boolean>>({})
   const refreshingRef = useRef(false)
+  const providerInstancesRef = useRef(settings.providerInstances)
+
+  useEffect(() =>
+  {
+    providerInstancesRef.current = settings.providerInstances
+  }, [settings.providerInstances])
+
+  const updateProviderSettings = useCallback(
+    async (patch: ServerSettingsPatch): Promise<void> =>
+    {
+      const previousProviderInstances = providerInstancesRef.current
+      const nextProviderInstances = patch.providerInstances
+      if (nextProviderInstances)
+      {
+        providerInstancesRef.current = nextProviderInstances
+      }
+      if (!primaryEnvironment)
+      {
+        providerInstancesRef.current = previousProviderInstances
+        throw new Error('The primary environment is not connected.')
+      }
+      const result = await persistProviderSettings({
+        environmentId: primaryEnvironment.environmentId,
+        input: { patch },
+      })
+      if (result._tag === 'Failure')
+      {
+        if (providerInstancesRef.current === nextProviderInstances)
+        {
+          providerInstancesRef.current = previousProviderInstances
+        }
+        throw squashAtomCommandFailure(result)
+      }
+    },
+    [persistProviderSettings, primaryEnvironment],
+  )
+  const reportProviderSettingsFailure = (error: unknown) =>
+  {
+    toastManager.add({
+      type: 'error',
+      title: 'Could not update provider settings',
+      description: error instanceof Error ? error.message : 'Update failed.',
+    })
+  }
 
   const providerUpdateCandidates = useMemo(
     () => collectProviderUpdateCandidates(serverProviders),
@@ -320,26 +368,42 @@ export function ProviderSettingsPanel()
     },
   ) =>
   {
-    updateSettings(
-      buildProviderInstanceUpdatePatch({
-        settings,
-        instanceId: row.instanceId,
-        instance: next,
-        driver: row.driver,
-        isDefault: row.isDefault,
-        textGenerationModelSelection: options?.textGenerationModelSelection,
-      }),
-    )
+    const patch = buildProviderInstanceUpdatePatch({
+      settings: {
+        providers: settings.providers,
+        providerInstances: providerInstancesRef.current,
+      },
+      instanceId: row.instanceId,
+      instance: next,
+      driver: row.driver,
+      isDefault: row.isDefault,
+      textGenerationModelSelection: options?.textGenerationModelSelection,
+    })
+    void updateProviderSettings(patch).catch(reportProviderSettingsFailure)
   }
 
   const deleteProviderInstance = (id: ProviderInstanceId) =>
   {
+    const providerInstances = withoutProviderInstanceKey(providerInstancesRef.current, id)
+    void updateProviderSettings({ providerInstances }).catch(reportProviderSettingsFailure)
     updateSettings({
-      providerInstances: withoutProviderInstanceKey(settings.providerInstances, id),
       providerModelPreferences: withoutProviderInstanceKey(settings.providerModelPreferences, id),
       favorites: withoutProviderInstanceFavorites(settings.favorites ?? [], id),
     })
   }
+
+  const addProviderInstance = useCallback(
+    async (instanceId: ProviderInstanceId, instance: ProviderInstanceConfig) =>
+    {
+      await updateProviderSettings({
+        providerInstances: {
+          ...providerInstancesRef.current,
+          [instanceId]: instance,
+        },
+      })
+    },
+    [updateProviderSettings],
+  )
 
   const updateProviderModelPreferences = (
     instanceId: ProviderInstanceId,
@@ -567,7 +631,11 @@ export function ProviderSettingsPanel()
       </SettingsSection>
 
       {isAddInstanceDialogOpen ? (
-        <AddProviderInstanceDialog open onOpenChange={setIsAddInstanceDialogOpen} />
+        <AddProviderInstanceDialog
+          open
+          onOpenChange={setIsAddInstanceDialogOpen}
+          onAdd={addProviderInstance}
+        />
       ) : null}
     </SettingsPageContainer>
   )

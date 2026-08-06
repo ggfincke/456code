@@ -85,11 +85,13 @@ export interface BuildNativeReviewDiffDataInput
 {
   readonly parsedDiff: ReviewParsedDiff
   readonly comments?: ReadonlyArray<ReviewInlineComment>
+  readonly revealedLargeFileIds?: ReadonlyArray<string>
 }
 
 interface CachedNativeReviewDiffData
 {
   readonly commentsKey: string
+  readonly revealedLargeFileIdsKey: string
   readonly data: NativeReviewDiffData
 }
 
@@ -393,6 +395,7 @@ function mapFileRows(
   comments: ReadonlyArray<ReviewInlineComment>,
   commentTargetsByRowId: Map<string, NativeReviewDiffCommentTarget>,
   rowIdByCommentLineId: Map<string, string>,
+  revealedLargeFileIds: ReadonlySet<string>,
 ): ReadonlyArray<NativeReviewDiffRow>
 {
   const rows: NativeReviewDiffRow[] = [
@@ -407,6 +410,17 @@ function mapFileRows(
       deletions: file.deletions,
     },
   ]
+
+  const previewState = getReviewFilePreviewState(file)
+  if (
+    previewState.kind === 'suppressed' &&
+    previewState.reason === 'large' &&
+    !revealedLargeFileIds.has(file.id)
+  )
+  {
+    rows.push(createNoticeRow(file.id, 'large', previewState.message))
+    return rows
+  }
 
   const lineRows = file.rows.filter((row): row is ReviewRenderableLineRow => row.kind === 'line')
   const commentsByEndIndex = new Map<number, ReviewInlineComment[]>()
@@ -481,6 +495,9 @@ export function buildNativeReviewDiffData(
 {
   const parsedDiff = 'parsedDiff' in input ? input.parsedDiff : input
   const comments = 'parsedDiff' in input ? (input.comments ?? []) : []
+  const revealedLargeFileIds = new Set(
+    'parsedDiff' in input ? (input.revealedLargeFileIds ?? []) : [],
+  )
   if (parsedDiff.kind !== 'files')
   {
     return {
@@ -504,7 +521,13 @@ export function buildNativeReviewDiffData(
   const rowIdByCommentLineId = new Map<string, string>()
   const rows = addNativeWordDiffRanges(
     Arr.flatMap(parsedDiff.files, (file) =>
-      mapFileRows(file, comments, commentTargetsByRowId, rowIdByCommentLineId),
+      mapFileRows(
+        file,
+        comments,
+        commentTargetsByRowId,
+        rowIdByCommentLineId,
+        revealedLargeFileIds,
+      ),
     ),
   )
 
@@ -527,8 +550,12 @@ export function getCachedNativeReviewDiffData(
 {
   const comments = input.comments ?? []
   const commentsKey = buildReviewCommentsCacheKey(comments)
+  const revealedLargeFileIdsKey = [...(input.revealedLargeFileIds ?? [])].sort().join('\u001f')
   const cached = nativeReviewDiffDataCache.get(input.parsedDiff)
-  if (cached?.commentsKey === commentsKey)
+  if (
+    cached?.commentsKey === commentsKey &&
+    cached.revealedLargeFileIdsKey === revealedLargeFileIdsKey
+  )
   {
     return cached.data
   }
@@ -536,7 +563,12 @@ export function getCachedNativeReviewDiffData(
   const data = buildNativeReviewDiffData({
     parsedDiff: input.parsedDiff,
     comments,
+    revealedLargeFileIds: input.revealedLargeFileIds,
   })
-  nativeReviewDiffDataCache.set(input.parsedDiff, { commentsKey, data })
+  nativeReviewDiffDataCache.set(input.parsedDiff, {
+    commentsKey,
+    revealedLargeFileIdsKey,
+    data,
+  })
   return data
 }

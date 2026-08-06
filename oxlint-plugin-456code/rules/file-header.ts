@@ -73,9 +73,10 @@ export default defineRule({
           return
         }
         const purpose = description.value.trim()
+        const startsUppercase = /^[A-Z]/u.test(purpose)
         if (!/^[a-z0-9]/u.test(purpose))
         {
-          if (/^[A-Z]/u.test(purpose))
+          if (startsUppercase)
           {
             context.report({
               node: description,
@@ -83,7 +84,7 @@ export default defineRule({
               fix: (fixer) =>
                 fixer.replaceText(
                   description,
-                  `// ${purpose[0]?.toLowerCase()}${purpose.slice(1)}`,
+                  `// ${purpose[0]?.toLowerCase()}${purpose.slice(1).replace(/\.$/u, '')}`,
                 ),
             })
           }
@@ -97,11 +98,21 @@ export default defineRule({
         }
         if (purpose.endsWith('.'))
         {
-          context.report({
-            node: description,
-            message: 'File header purpose must not end with a period.',
-            fix: (fixer) => fixer.replaceText(description, `// ${purpose.slice(0, -1)}`),
-          })
+          if (startsUppercase)
+          {
+            context.report({
+              node: description,
+              message: 'File header purpose must not end with a period.',
+            })
+          }
+          else
+          {
+            context.report({
+              node: description,
+              message: 'File header purpose must not end with a period.',
+              fix: (fixer) => fixer.replaceText(description, `// ${purpose.slice(0, -1)}`),
+            })
+          }
         }
         if (taggedDescription.test(purpose))
         {

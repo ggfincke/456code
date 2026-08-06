@@ -12,9 +12,9 @@ import type {
   OrchestrationThreadShell,
   ProviderApprovalDecision,
   ProviderInteractionMode,
+  ProviderUserInputAnswers,
   RuntimeMode,
   ServerConfig,
-  ThreadId,
 } from '@t3tools/contracts'
 import * as Haptics from 'expo-haptics'
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
@@ -28,12 +28,7 @@ import type { StatusTone } from '../../components/StatusPill'
 import type { DraftComposerImageAttachment } from '../../lib/composerImages'
 import { CHAT_CONTENT_MAX_WIDTH, type LayoutVariant } from '../../lib/layout'
 import { scopedThreadKey } from '../../lib/scopedEntities'
-import type {
-  PendingApproval,
-  PendingUserInput,
-  PendingUserInputDraftAnswer,
-  ThreadFeedEntry,
-} from '../../lib/threadActivity'
+import type { PendingApproval, PendingUserInput, ThreadFeedEntry } from '../../lib/threadActivity'
 import type { ThreadProviderSwitchNotice } from '../../lib/thread-activity/provider-switch'
 import { PendingApprovalCard } from './PendingApprovalCard'
 import { PendingUserInputCard } from './PendingUserInputCard'
@@ -44,6 +39,7 @@ import {
 } from './ThreadComposer'
 import { ThreadFeed } from './ThreadFeed'
 import type { ThreadContentPresentation } from './threadContentPresentation'
+import type { MobilePendingUserInputDraftAnswer } from './use-thread-requests'
 
 export interface ThreadDetailScreenProps
 {
@@ -57,8 +53,8 @@ export interface ThreadDetailScreenProps
   readonly activePendingApproval: PendingApproval | null
   readonly respondingApprovalId: ApprovalRequestId | null
   readonly activePendingUserInput: PendingUserInput | null
-  readonly activePendingUserInputDrafts: Record<string, PendingUserInputDraftAnswer>
-  readonly activePendingUserInputAnswers: Record<string, string> | null
+  readonly activePendingUserInputDrafts: Record<string, MobilePendingUserInputDraftAnswer>
+  readonly activePendingUserInputAnswers: ProviderUserInputAnswers | null
   readonly respondingUserInputId: ApprovalRequestId | null
   readonly draftMessage: string
   readonly draftAttachments: ReadonlyArray<DraftComposerImageAttachment>
@@ -108,6 +104,7 @@ export interface ThreadDetailScreenProps
   ) => void
   readonly onSubmitUserInput: () => Promise<unknown>
   readonly showContent?: boolean
+  readonly showComposer?: boolean
 }
 
 function latestStreamingAssistantMessage(
@@ -134,7 +131,7 @@ function latestStreamingAssistantMessage(
   return null
 }
 
-function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedEntry>)
+function useStreamingHaptics(threadKey: string, feed: ReadonlyArray<ThreadFeedEntry>)
 {
   const lastStreamingAssistantRef = useRef<{
     readonly id: string
@@ -142,13 +139,13 @@ function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedE
   } | null>(null)
   const lastStreamHapticAtRef = useRef(0)
   const hydratedRef = useRef(false)
-  const previousThreadIdRef = useRef(threadId)
+  const previousThreadKeyRef = useRef(threadKey)
 
   useEffect(() =>
   {
-    if (previousThreadIdRef.current !== threadId)
+    if (previousThreadKeyRef.current !== threadKey)
     {
-      previousThreadIdRef.current = threadId
+      previousThreadKeyRef.current = threadKey
       hydratedRef.current = false
     }
 
@@ -188,7 +185,7 @@ function useStreamingHaptics(threadId: ThreadId, feed: ReadonlyArray<ThreadFeedE
 
     lastStreamHapticAtRef.current = now
     void Haptics.selectionAsync()
-  }, [threadId, feed])
+  }, [feed, threadKey])
 }
 
 export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: ThreadDetailScreenProps)
@@ -225,10 +222,12 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
         return null
     }
   })()
+  const showContent = props.showContent ?? true
+  const showComposer = props.showComposer ?? showContent
   const selectedThreadFeed = props.selectedThreadFeed
   const composerChrome = composerExpanded ? COMPOSER_EXPANDED_CHROME : COMPOSER_COLLAPSED_CHROME
   const composerOverlapHeight = composerChrome + composerBottomInset
-  const estimatedOverlayHeight = composerOverlapHeight
+  const estimatedOverlayHeight = showComposer ? composerOverlapHeight : 0
   // the overlay's measured height includes the home-indicator inset (the
   // composer pads it), but contentInsetAdjustmentBehavior="automatic" makes
   // UIKit add the safe-area bottom to the content inset AGAIN — leaving a
@@ -237,7 +236,9 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
   // hands LegendList the same delta via contentInsetEndStaticAdjustment so
   // its end-scroll math matches the real resting position.
   const nativeInsetOvercount =
-    props.usesAutomaticContentInsets === true && Platform.OS === 'ios' ? insets.bottom : 0
+    showComposer && props.usesAutomaticContentInsets === true && Platform.OS === 'ios'
+      ? insets.bottom
+      : 0
   const { contentInsetEndAdjustment, onComposerLayout } = useKeyboardChatComposerInset(
     listRef,
     composerOverlayRef,
@@ -245,12 +246,11 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
     -nativeInsetOvercount,
   )
   const { freeze, scrollMessageToEnd } = useKeyboardScrollToEnd({ listRef })
-  const showContent = props.showContent ?? true
   const layoutVariant = props.layoutVariant ?? 'compact'
   const isSplitLayout = layoutVariant === 'split'
   const contentMaxWidth = isSplitLayout ? CHAT_CONTENT_MAX_WIDTH : undefined
   const selectedInstanceId = props.selectedThread.modelSelection.instanceId
-  useStreamingHaptics(props.selectedThread.id, props.selectedThreadFeed)
+  useStreamingHaptics(selectedThreadKey, props.selectedThreadFeed)
   const selectedProviderSkills = useMemo(
     () =>
       props.serverConfig?.providers.find((provider) => provider.instanceId === selectedInstanceId)
@@ -397,7 +397,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
           onTouchCancel={handleFeedTouchCancel}
         >
           <ThreadFeed
-            key={props.selectedThread.id}
+            key={selectedThreadKey}
             environmentId={props.environmentId}
             threadId={props.selectedThread.id}
             workspaceRoot={props.threadCwd}
@@ -424,7 +424,7 @@ export const ThreadDetailScreen = memo(function ThreadDetailScreen(props: Thread
       )}
 
       {/* Floating composer — sticks to keyboard via KeyboardStickyView */}
-      {showContent ? (
+      {showComposer ? (
         <KeyboardStickyView
           style={{ position: 'absolute', bottom: 0, left: 0, right: 0 }}
           offset={{ closed: 0, opened: 0 }}

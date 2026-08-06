@@ -1,18 +1,19 @@
 // apps/mobile/src/features/threads/PendingUserInputCard.tsx
 // render pending user input card
 
-import type { ApprovalRequestId } from '@t3tools/contracts'
+import type { ApprovalRequestId, ProviderUserInputAnswers } from '@t3tools/contracts'
 import { Pressable, View } from 'react-native'
 
 import { AppText as Text, AppTextInput as TextInput } from '../../components/AppText'
 import { cn } from '../../lib/cn'
-import type { PendingUserInput, PendingUserInputDraftAnswer } from '../../lib/threadActivity'
+import type { PendingUserInput } from '../../lib/threadActivity'
+import type { MobilePendingUserInputDraftAnswer } from './use-thread-requests'
 
 export interface PendingUserInputCardProps
 {
   readonly pendingUserInput: PendingUserInput
-  readonly drafts: Record<string, PendingUserInputDraftAnswer>
-  readonly answers: Record<string, string> | null
+  readonly drafts: Record<string, MobilePendingUserInputDraftAnswer>
+  readonly answers: ProviderUserInputAnswers | null
   readonly respondingUserInputId: ApprovalRequestId | null
   readonly onSelectOption: (requestId: ApprovalRequestId, questionId: string, label: string) => void
   readonly onChangeCustomAnswer: (
@@ -48,7 +49,8 @@ export function PendingUserInputCard(props: PendingUserInputCardProps)
               {question.options.map((option) =>
               {
                 const selected =
-                  draft?.selectedOptionLabel === option.label && !draft.customAnswer?.trim().length
+                  draft?.selectedOptionLabels?.includes(option.label) === true &&
+                  !draft.customAnswer?.trim().length
                 return (
                   <Pressable
                     key={option.label}

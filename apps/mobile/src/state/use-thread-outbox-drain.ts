@@ -12,7 +12,6 @@ import {
   type MessageId,
 } from '@t3tools/contracts'
 import { buildTemporaryWorktreeBranchName } from '@t3tools/shared/git'
-import { Atom } from 'effect/unstable/reactivity'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { scopedThreadKey } from '../lib/scopedEntities'
@@ -21,8 +20,10 @@ import { randomHex } from '../lib/uuid'
 import { appAtomRegistry } from './atom-registry'
 import { useProjects, useThreadShells } from './entities'
 import {
-  confirmThreadOutboxMessageQueued,
+  claimThreadOutboxMessageDelivery,
+  dispatchingThreadOutboxMessageIdAtom,
   ensureThreadOutboxLoaded,
+  releaseThreadOutboxMessageDelivery,
   removeThreadOutboxMessage,
   updateThreadOutboxMessage,
 } from './thread-outbox'
@@ -49,22 +50,6 @@ import {
   useThreadOutboxShellStatuses,
 } from './use-thread-outbox'
 import { useRemoteConnectionStatus } from './use-remote-environment-registry'
-
-export const dispatchingQueuedMessageIdAtom = Atom.make<MessageId | null>(null).pipe(
-  Atom.keepAlive,
-  Atom.withLabel('mobile:thread-outbox:dispatching-message-id'),
-)
-
-function beginDispatchingQueuedMessage(queuedMessageId: MessageId): void
-{
-  appAtomRegistry.set(dispatchingQueuedMessageIdAtom, queuedMessageId)
-}
-
-function finishDispatchingQueuedMessage(queuedMessageId: MessageId): void
-{
-  const current = appAtomRegistry.get(dispatchingQueuedMessageIdAtom)
-  appAtomRegistry.set(dispatchingQueuedMessageIdAtom, current === queuedMessageId ? null : current)
-}
 
 function findThread(
   threads: ReadonlyArray<EnvironmentThreadShell>,
@@ -109,7 +94,7 @@ export function useThreadOutboxDrain(): void
   const setThreadInteractionMode = useAtomCommand(threadEnvironment.setInteractionMode, {
     reportFailure: false,
   })
-  const dispatchingQueuedMessageId = useAtomValue(dispatchingQueuedMessageIdAtom)
+  const dispatchingQueuedMessageId = useAtomValue(dispatchingThreadOutboxMessageIdAtom)
   const editingQueuedMessageIds = useAtomValue(editingQueuedMessageIdsAtom)
   const queuedMessagesByThreadKey = useThreadOutboxMessages()
   const shellStatuses = useThreadOutboxShellStatuses()
@@ -249,7 +234,6 @@ export function useThreadOutboxDrain(): void
         }
       }
 
-      beginDispatchingQueuedMessage(nextQueuedMessage.messageId)
       const delivery: Promise<ThreadOutboxDrainOutcome> =
         creation === undefined
           ? drainExistingQueuedThreadMessage({
@@ -259,9 +243,11 @@ export function useThreadOutboxDrain(): void
                 shellStatus,
                 environmentConnected: environment?.connectionState === 'connected',
               },
-              confirmQueued: async (message) =>
-                (await confirmThreadOutboxMessageQueued(message)) &&
-                !appAtomRegistry.get(editingQueuedMessageIdsAtom)[message.messageId],
+              confirmQueued: (message) =>
+                claimThreadOutboxMessageDelivery(
+                  message,
+                  () => !appAtomRegistry.get(editingQueuedMessageIdsAtom)[message.messageId],
+                ),
               readState: () => ({
                 thread: findThread(
                   appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
@@ -287,9 +273,11 @@ export function useThreadOutboxDrain(): void
                 shellStatus,
                 environmentConnected: environment?.connectionState === 'connected',
               },
-              confirmQueued: async (message) =>
-                (await confirmThreadOutboxMessageQueued(message)) &&
-                !appAtomRegistry.get(editingQueuedMessageIdsAtom)[message.messageId],
+              confirmQueued: (message) =>
+                claimThreadOutboxMessageDelivery(
+                  message,
+                  () => !appAtomRegistry.get(editingQueuedMessageIdsAtom)[message.messageId],
+                ),
               readState: () => ({
                 thread: findThread(
                   appAtomRegistry.get(environmentThreadShells.threadShellsAtom),
@@ -343,7 +331,7 @@ export function useThreadOutboxDrain(): void
         })
         .finally(() =>
         {
-          finishDispatchingQueuedMessage(nextQueuedMessage.messageId)
+          releaseThreadOutboxMessageDelivery(nextQueuedMessage)
         })
       return
     }

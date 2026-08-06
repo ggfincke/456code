@@ -86,9 +86,10 @@ export function resolveCloudPublicConfig(extra: ExpoExtra = Constants.expoConfig
   } satisfies CloudPublicConfig
 }
 
-export function hasCloudPublicConfig(): boolean
+export function hasCloudPublicConfig(
+  config: CloudPublicConfig = resolveCloudPublicConfig(),
+): boolean
 {
-  const config = resolveCloudPublicConfig()
   return Boolean(config.clerk.publishableKey && config.clerk.jwtTemplate && config.relay.url)
 }
 

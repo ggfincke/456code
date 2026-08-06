@@ -62,11 +62,13 @@ const isStaticSchemaReference = (node: unknown): boolean =>
 
   if (expression.value.type === 'Identifier')
   {
-    const [firstChar] = expression.value.name
-    return firstChar !== undefined && firstChar.toUpperCase() === firstChar
+    return /^[A-Z]/u.test(expression.value.name)
   }
 
-  return expression.value.type === 'MemberExpression'
+  if (expression.value.type !== 'MemberExpression') return false
+  if ('computed' in expression.value && expression.value.computed) return false
+  if (Option.isNone(getPropertyName(expression.value.property))) return false
+  return isStaticSchemaReference(expression.value.object)
 }
 
 const isNestedStaticSchemaCall = (node: unknown): boolean =>
@@ -88,22 +90,6 @@ const isNestedStaticSchemaCall = (node: unknown): boolean =>
   }
 
   return true
-}
-
-const isImmediatelyInvoked = (node: unknown): boolean =>
-{
-  const expression = unwrapExpression(node)
-  if (Option.isNone(expression)) return false
-
-  const parent =
-    'parent' in expression.value ? unwrapExpression(expression.value.parent) : Option.none()
-  return (
-    Option.isSome(parent) &&
-    parent.value.type === 'CallExpression' &&
-    unwrapExpression(parent.value.callee).pipe(
-      Option.exists((callee) => callee === expression.value),
-    )
-  )
 }
 
 const messageHigh = (method: string) =>
@@ -153,7 +139,6 @@ export default defineRule({
 
         const method = getSchemaCompilerMethod(node.callee)
         if (Option.isNone(method)) return
-        if (!isImmediatelyInvoked(node)) return
 
         const firstArg = node.arguments[0]
         const high = firstArg && isNestedStaticSchemaCall(firstArg)

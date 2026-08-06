@@ -499,6 +499,10 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       ),
     [selectedProviderStatus],
   )
+  const modelOptions = useMemo(
+    () => buildModelOptions(props.serverConfig, currentModelSelection),
+    [props.serverConfig, currentModelSelection],
+  )
 
   // ── Trigger detection ────────────────────────────────────
   const [composerSelection, setComposerSelection] = useState(() => ({
@@ -601,6 +605,20 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       return [...builtIn, ...providerCommands, ...skillItems]
     }
 
+    if (composerTrigger.kind === 'slash-model')
+    {
+      const query = composerTrigger.query.toLowerCase()
+      return modelOptions
+        .filter((option) => `${option.label} ${option.providerLabel}`.toLowerCase().includes(query))
+        .map((option) => ({
+          id: `model:${option.key}`,
+          type: 'model' as const,
+          selection: option.selection,
+          label: option.label,
+          description: option.providerLabel,
+        }))
+    }
+
     if (composerTrigger.kind === 'skill')
     {
       return searchMobileComposerSkills(providerSkills, composerTrigger.query)
@@ -623,10 +641,16 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
 
     return []
-  }, [composerTrigger, pathSearch.entries, providerSkills, selectedProviderStatus])
+  }, [composerTrigger, modelOptions, pathSearch.entries, providerSkills, selectedProviderStatus])
 
   // ── Handle command selection ──────────────────────────────
-  const { onChangeDraftMessage, onUpdateInteractionMode, draftMessage, onSendMessage } = props
+  const {
+    onChangeDraftMessage,
+    onUpdateInteractionMode,
+    onUpdateModelSelection,
+    draftMessage,
+    onSendMessage,
+  } = props
 
   const handleSend = useCallback(async () =>
   {
@@ -662,6 +686,20 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     (item: ComposerCommandItem) =>
     {
       if (!composerTrigger) return
+
+      if (item.type === 'model')
+      {
+        const result = replaceTextRange(
+          draftMessage,
+          composerTrigger.rangeStart,
+          composerTrigger.rangeEnd,
+          '',
+        )
+        setComposerSelection({ start: result.cursor, end: result.cursor })
+        onChangeDraftMessage(result.text)
+        onUpdateModelSelection(item.selection)
+        return
+      }
 
       if (
         item.type === 'slash-command' &&
@@ -707,14 +745,16 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       setComposerSelection({ start: result.cursor, end: result.cursor })
       onChangeDraftMessage(result.text)
     },
-    [composerTrigger, draftMessage, onChangeDraftMessage, onUpdateInteractionMode],
+    [
+      composerTrigger,
+      draftMessage,
+      onChangeDraftMessage,
+      onUpdateInteractionMode,
+      onUpdateModelSelection,
+    ],
   )
 
   // ── Model menu ───────────────────────────────────────────
-  const modelOptions = useMemo(
-    () => buildModelOptions(props.serverConfig, currentModelSelection),
-    [props.serverConfig, currentModelSelection],
-  )
   const providerGroups = useMemo(() => groupByProvider(modelOptions), [modelOptions])
   const currentModelOption =
     modelOptions.find(

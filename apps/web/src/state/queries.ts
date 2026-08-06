@@ -215,6 +215,10 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget)
     [target.cwd, target.environmentId, target.query],
   )
   const debouncedTarget = useDebouncedValue(normalizedTarget, COMPOSER_PATH_SEARCH_DEBOUNCE_MS)
+  const targetIsDebouncing =
+    normalizedTarget.environmentId !== debouncedTarget.environmentId ||
+    normalizedTarget.cwd !== debouncedTarget.cwd ||
+    normalizedTarget.query !== debouncedTarget.query
   const result = useEnvironmentQuery(
     debouncedTarget.environmentId !== null &&
       debouncedTarget.cwd !== null &&
@@ -231,9 +235,9 @@ export function useComposerPathSearch(target: ComposerPathSearchTarget)
   )
 
   return {
-    entries: result.data?.entries ?? [],
+    entries: targetIsDebouncing ? [] : (result.data?.entries ?? []),
     error: result.error,
-    isPending: normalizedTarget.query !== debouncedTarget.query || result.isPending,
+    isPending: targetIsDebouncing || result.isPending,
     refresh: result.refresh,
   }
 }

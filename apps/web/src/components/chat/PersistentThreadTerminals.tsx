@@ -200,6 +200,15 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
   const storeSetActiveTerminal = useTerminalUiStateStore((state) => state.setActiveTerminal)
   const storeCloseTerminal = useTerminalUiStateStore((state) => state.closeTerminal)
   const reconcileTerminalIds = useTerminalUiStateStore((state) => state.reconcileTerminalIds)
+  const allocateTerminalId = useCallback(() =>
+  {
+    const currentTerminalIds = selectThreadTerminalUiState(
+      useTerminalUiStateStore.getState().terminalUiStateByThreadKey,
+      threadRef,
+    ).terminalIds
+    const knownTerminalIds = knownTerminalSessions.map((session) => session.target.terminalId)
+    return nextTerminalId([...knownTerminalIds, ...currentTerminalIds])
+  }, [knownTerminalSessions, threadRef])
 
   useEffect(() =>
   {
@@ -270,7 +279,7 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
     {
       return
     }
-    const terminalId = nextTerminalId(serverOrderedTerminalIds)
+    const terminalId = allocateTerminalId()
     storeSplitTerminal(threadRef, terminalId)
     bumpFocusRequestId()
     void openTerminal({
@@ -284,11 +293,11 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
       },
     })
   }, [
+    allocateTerminalId,
     bumpFocusRequestId,
     cwd,
     effectiveWorktreePath,
     runtimeEnv,
-    serverOrderedTerminalIds,
     storeSplitTerminal,
     threadId,
     threadRef,
@@ -300,7 +309,7 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
     {
       return
     }
-    const terminalId = nextTerminalId(serverOrderedTerminalIds)
+    const terminalId = allocateTerminalId()
     storeSplitTerminalVertical(threadRef, terminalId)
     bumpFocusRequestId()
     void openTerminal({
@@ -314,12 +323,12 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
       },
     })
   }, [
+    allocateTerminalId,
     bumpFocusRequestId,
     cwd,
     effectiveWorktreePath,
     openTerminal,
     runtimeEnv,
-    serverOrderedTerminalIds,
     storeSplitTerminalVertical,
     threadId,
     threadRef,
@@ -331,7 +340,7 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
     {
       return
     }
-    const terminalId = nextTerminalId(serverOrderedTerminalIds)
+    const terminalId = allocateTerminalId()
     storeNewTerminal(threadRef, terminalId)
     bumpFocusRequestId()
     void openTerminal({
@@ -345,11 +354,11 @@ export const PersistentThreadTerminalDrawer = memo(function PersistentThreadTerm
       },
     })
   }, [
+    allocateTerminalId,
     bumpFocusRequestId,
     cwd,
     effectiveWorktreePath,
     runtimeEnv,
-    serverOrderedTerminalIds,
     storeNewTerminal,
     threadId,
     threadRef,

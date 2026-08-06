@@ -1,5 +1,5 @@
 // apps/web/src/lib/projectPaths.ts
-// append browse path segment
+// provide the stable web facade for shared project path helpers
 
 export {
   appendBrowsePathSegment,

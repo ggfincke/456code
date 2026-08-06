@@ -3,7 +3,11 @@
 
 import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
 import type { ComposerTriggerKind } from '@t3tools/shared/composerTrigger'
-import type { ServerProviderSkill, ServerProviderSlashCommand } from '@t3tools/contracts'
+import type {
+  ModelSelection,
+  ServerProviderSkill,
+  ServerProviderSlashCommand,
+} from '@t3tools/contracts'
 import { SymbolView } from '../../components/AppSymbol'
 import { memo, useMemo } from 'react'
 import { Pressable, ScrollView, useColorScheme, View, type ViewStyle } from 'react-native'
@@ -30,6 +34,13 @@ export type ComposerCommandItem =
       readonly id: string
       readonly type: 'provider-slash-command'
       readonly command: ServerProviderSlashCommand
+      readonly label: string
+      readonly description: string
+    }
+  | {
+      readonly id: string
+      readonly type: 'model'
+      readonly selection: ModelSelection
       readonly label: string
       readonly description: string
     }
@@ -104,6 +115,7 @@ function itemIcon(item: ComposerCommandItem)
   {
     case 'slash-command':
     case 'provider-slash-command':
+    case 'model':
       return 'terminal' as const
     case 'skill':
       return 'cube' as const
@@ -125,7 +137,11 @@ function groupCommandItems(
   {
     return items.length > 0 ? [{ id: 'files', label: 'Files', items }] : []
   }
-  if (triggerKind !== 'slash-command' && triggerKind !== 'slash-model')
+  if (triggerKind === 'slash-model')
+  {
+    return items.length > 0 ? [{ id: 'models', label: 'Models', items }] : []
+  }
+  if (triggerKind !== 'slash-command')
   {
     return items.length > 0 ? [{ id: 'default', label: null, items }] : []
   }

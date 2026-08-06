@@ -92,6 +92,11 @@ export interface PreviewTabState
   updatedAt: string
 }
 
+interface PreviewTabRecord extends PreviewTabState
+{
+  readonly lifecycleGeneration: number
+}
+
 // discrete zoom levels mirroring Chrome's preset list.
 const ZOOM_LEVELS: ReadonlyArray<number> = [
   0.25, 0.33, 0.5, 0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0, 4.0, 5.0,
@@ -434,7 +439,10 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
 
   const annotationThemeRef = yield* Ref.make(DEFAULT_ANNOTATION_THEME)
   const mainWindowRef = yield* Ref.make<Option.Option<BrowserWindow>>(Option.none())
-  const tabsRef = yield* SynchronizedRef.make<ReadonlyMap<string, PreviewTabState>>(new Map())
+  const tabsRef = yield* SynchronizedRef.make<ReadonlyMap<string, PreviewTabRecord>>(new Map())
+  const tabLifecycleSemaphoresRef = yield* SynchronizedRef.make<
+    ReadonlyMap<string, Semaphore.Semaphore>
+  >(new Map())
   const attachedRef = yield* Ref.make<ReadonlyMap<number, ManagedListeners>>(new Map())
   const listenersRef = yield* Ref.make<ReadonlySet<Listener>>(new Set())
   const pointerEventListenersRef = yield* Ref.make<ReadonlySet<PointerEventListener>>(new Set())
@@ -452,9 +460,11 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     ReadonlyMap<string, ReadonlyArray<PreviewAutomationActionEvent>>
   >(new Map())
   const actionSequenceRef = yield* Ref.make(0)
+  const artifactSequenceRef = yield* Ref.make(0)
   const pointerSequenceRef = yield* Ref.make(0)
   const pickSequenceRef = yield* Ref.make(0)
   const recordingSequenceRef = yield* Ref.make(0)
+  const tabGenerationSequenceRef = yield* Ref.make(0)
   const recordingOwnerRef = yield* Ref.make<Option.Option<RecordingOwner>>(Option.none())
 
   const attempt = <A>(errorContext: PreviewOperationContext, evaluate: () => A) =>
@@ -478,6 +488,27 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     )
   const nextCounter = (ref: Ref.Ref<number>) =>
     Ref.modify(ref, (value) => [value, value + 1] as const)
+  const withTabLifecycle = <A, E, R>(
+    tabId: string,
+    effect: Effect.Effect<A, E, R>,
+  ): Effect.Effect<A, E, R> =>
+    SynchronizedRef.modifyEffect(tabLifecycleSemaphoresRef, (semaphores) =>
+    {
+      const existing = semaphores.get(tabId)
+      if (existing) return Effect.succeed([existing, semaphores] as const)
+      return Semaphore.make(1).pipe(
+        Effect.map(
+          (semaphore) =>
+            [
+              semaphore,
+              replaceMap(semaphores, (copy) =>
+              {
+                copy.set(tabId, semaphore)
+              }),
+            ] as const,
+        ),
+      )
+    }).pipe(Effect.flatMap((semaphore) => semaphore.withPermit(effect)))
   const replaceMap = <K, V>(
     source: ReadonlyMap<K, V>,
     update: (copy: Map<K, V>) => void,
@@ -505,12 +536,25 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       ),
     )
 
+  const toPreviewTabState = (state: PreviewTabState): PreviewTabState => ({
+    tabId: state.tabId,
+    webContentsId: state.webContentsId,
+    navStatus: state.navStatus,
+    canGoBack: state.canGoBack,
+    canGoForward: state.canGoForward,
+    zoomFactor: state.zoomFactor,
+    colorScheme: state.colorScheme,
+    controller: state.controller,
+    updatedAt: state.updatedAt,
+  })
+
   const emit = Effect.fn('PreviewManager.emit')(function* (tabId: string, state: PreviewTabState)
   {
     const listeners = yield* Ref.get(listenersRef)
+    const publicState = toPreviewTabState(state)
     yield* Effect.forEach(
       listeners,
-      (listener) => deliverEvent('state-change', tabId, () => listener(tabId, state)),
+      (listener) => deliverEvent('state-change', tabId, () => listener(tabId, publicState)),
       { discard: true },
     )
   })
@@ -518,14 +562,21 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
   const update = Effect.fn('PreviewManager.update')(function* (
     tabId: string,
     patch: Partial<PreviewTabState>,
+    lifecycleGeneration?: number,
   )
   {
     const updatedAt = yield* currentIso
     const next = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
     {
       const current = tabs.get(tabId)
-      if (!current) return [Option.none<PreviewTabState>(), tabs] as const
-      const state: PreviewTabState = { ...current, ...patch, updatedAt }
+      if (
+        !current ||
+        (lifecycleGeneration !== undefined && current.lifecycleGeneration !== lifecycleGeneration)
+      )
+      {
+        return [Option.none<PreviewTabRecord>(), tabs] as const
+      }
+      const state: PreviewTabRecord = { ...current, ...patch, updatedAt }
       return [
         Option.some(state),
         replaceMap(tabs, (copy) =>
@@ -986,16 +1037,41 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       startedAt,
     }
     yield* pushAction(tabId, actionEvent)
+    const lifecycleGeneration = (yield* SynchronizedRef.get(tabsRef)).get(
+      tabId,
+    )?.lifecycleGeneration
+    if (lifecycleGeneration === undefined)
+    {
+      return yield* new PreviewTabNotFoundError({ tabId })
+    }
     const epoch = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0
     const control = yield* ensureControlSession(wc)
+    const currentAfterControl = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+    if (
+      currentAfterControl?.lifecycleGeneration !== lifecycleGeneration ||
+      currentAfterControl.webContentsId !== wc.id
+    )
+    {
+      yield* detachControlSession(wc.id)
+      return yield* new PreviewAutomationControlInterruptedError({
+        operation: action,
+        tabId,
+        webContentsId: wc.id,
+      })
+    }
     const execute = Effect.fn('PreviewManager.executeControlAction')(function* ()
     {
-      yield* update(tabId, { controller: 'agent' })
+      yield* update(tabId, { controller: 'agent' }, lifecycleGeneration)
       const send: SendCommand = Effect.fn('PreviewManager.sendCommand')(
         function* (method, commandParams)
         {
           const before = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0
-          if (before !== epoch)
+          const currentBefore = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+          if (
+            before !== epoch ||
+            currentBefore?.lifecycleGeneration !== lifecycleGeneration ||
+            currentBefore.webContentsId !== wc.id
+          )
           {
             return yield* new PreviewAutomationControlInterruptedError({
               operation: action,
@@ -1008,7 +1084,12 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
             () => wc.debugger.sendCommand(method, commandParams),
           )
           const after = (yield* Ref.get(controlEpochRef)).get(tabId) ?? 0
-          if (after !== epoch)
+          const currentAfter = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+          if (
+            after !== epoch ||
+            currentAfter?.lifecycleGeneration !== lifecycleGeneration ||
+            currentAfter.webContentsId !== wc.id
+          )
           {
             return yield* new PreviewAutomationControlInterruptedError({
               operation: action,
@@ -1071,7 +1152,11 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         })
       }
       const tabs = yield* SynchronizedRef.get(tabsRef)
-      if (tabs.has(tabId)) yield* update(tabId, { controller: 'none' })
+      const current = tabs.get(tabId)
+      if (current?.lifecycleGeneration === lifecycleGeneration && current.webContentsId === wc.id)
+      {
+        yield* update(tabId, { controller: 'none' }, lifecycleGeneration)
+      }
     })
     return yield* control.semaphore.withPermit(execute().pipe(Effect.onExit(finalize)))
   })
@@ -1244,6 +1329,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
   const attachListeners = Effect.fn('PreviewManager.attachListeners')(function* (
     tabId: string,
     wc: Electron.WebContents,
+    lifecycleGeneration: number,
   )
   {
     const scope = yield* Scope.fork(parentScope, 'sequential')
@@ -1263,7 +1349,14 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       const next = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
       {
         const current = tabs.get(tabId)
-        if (!current) return [Option.none<PreviewTabState>(), tabs] as const
+        if (
+          !current ||
+          current.lifecycleGeneration !== lifecycleGeneration ||
+          current.webContentsId !== wc.id
+        )
+        {
+          return [Option.none<PreviewTabRecord>(), tabs] as const
+        }
         // electron emits did-stop-loading after did-fail-load. At that point the
         // failed guest is no longer "loading", but it has not successfully
         // navigated anywhere. Keep the failure until a new load actually starts.
@@ -1273,7 +1366,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           computedNavStatus.kind === 'Success'
             ? current.navStatus
             : computedNavStatus
-        const state: PreviewTabState = {
+        const state: PreviewTabRecord = {
           ...current,
           navStatus,
           canGoBack,
@@ -1303,21 +1396,30 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       if (code === -3 || !isMainFrame) return
       runFork(
-        update(tabId, {
-          navStatus: {
-            kind: 'LoadFailed',
-            url: validatedUrl || wc.getURL(),
-            title: wc.getTitle(),
-            code,
-            description,
+        update(
+          tabId,
+          {
+            navStatus: {
+              kind: 'LoadFailed',
+              url: validatedUrl || wc.getURL(),
+              title: wc.getTitle(),
+              code,
+              description,
+            },
           },
-        }),
+          lifecycleGeneration,
+        ),
       )
     }
     const handleHumanInput = Effect.fn('PreviewManager.handleHumanInput')(function* (
       rawSignal?: unknown,
     )
     {
+      const current = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
+      if (current?.lifecycleGeneration !== lifecycleGeneration || current.webContentsId !== wc.id)
+      {
+        return
+      }
       if (isPreviewInputSignal(rawSignal) && (yield* consumeExpectedAgentInput(tabId, rawSignal)))
       {
         return
@@ -1328,12 +1430,17 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
           copy.set(tabId, (epochs.get(tabId) ?? 0) + 1)
         }),
       )
-      yield* update(tabId, { controller: 'human' })
+      yield* update(tabId, { controller: 'human' }, lifecycleGeneration)
       yield* Effect.sleep(750)
       const tabs = yield* SynchronizedRef.get(tabsRef)
-      if (tabs.get(tabId)?.controller === 'human')
+      const latest = tabs.get(tabId)
+      if (
+        latest?.lifecycleGeneration === lifecycleGeneration &&
+        latest.webContentsId === wc.id &&
+        latest.controller === 'human'
+      )
       {
-        yield* update(tabId, { controller: 'none' })
+        yield* update(tabId, { controller: 'none' }, lifecycleGeneration)
       }
     })
     const humanInput = (_event: unknown, rawSignal?: unknown): void =>
@@ -1419,14 +1526,15 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     yield* Ref.set(mainWindowRef, Option.some(window))
   })
 
-  const createTab = Effect.fn('PreviewManager.createTab')(function* (tabId: string)
+  const createTabUnlocked = Effect.fn('PreviewManager.createTab')(function* (tabId: string)
   {
+    const lifecycleGeneration = yield* nextCounter(tabGenerationSequenceRef)
     const updatedAt = yield* currentIso
     const state = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
     {
       const existing = tabs.get(tabId)
       if (existing) return [existing, tabs] as const
-      const initial: PreviewTabState = {
+      const initial: PreviewTabRecord = {
         tabId,
         webContentsId: null,
         navStatus: { kind: 'Idle' },
@@ -1436,6 +1544,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         colorScheme: 'system',
         controller: 'none',
         updatedAt,
+        lifecycleGeneration,
       }
       return [
         initial,
@@ -1446,10 +1555,10 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       ] as const
     })
     yield* emit(tabId, state)
-    return state
+    return toPreviewTabState(state)
   })
 
-  const closeTab = Effect.fn('PreviewManager.closeTab')(function* (tabId: string)
+  const closeTabUnlocked = Effect.fn('PreviewManager.closeTab')(function* (tabId: string)
   {
     const tab = (yield* SynchronizedRef.get(tabsRef)).get(tabId)
     if (!tab) return
@@ -1482,7 +1591,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     yield* emit(tabId, closed)
   })
 
-  const registerWebview = Effect.fn('PreviewManager.registerWebview')(function* (
+  const registerWebviewUnlocked = Effect.fn('PreviewManager.registerWebview')(function* (
     tabId: string,
     webContentsId: number,
   )
@@ -1542,8 +1651,8 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         : yield* attempt({ operation: 'registerWebview.getZoomFactor', tabId, webContentsId }, () =>
             wc.getZoomFactor(),
           )
-    yield* attachListeners(tabId, wc)
-    runFork(restoreControlSession(tabId, wc))
+    const lifecycleGeneration = yield* nextCounter(tabGenerationSequenceRef)
+    yield* attachListeners(tabId, wc, lifecycleGeneration)
     const registeredAt = yield* currentIso
     const registration = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
     {
@@ -1551,12 +1660,12 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       if (!current)
       {
         return [
-          Option.none<{ readonly state: PreviewTabState; readonly pendingUrl: string | null }>(),
+          Option.none<{ readonly state: PreviewTabRecord; readonly pendingUrl: string | null }>(),
           tabs,
         ] as const
       }
       const pendingUrl = current.navStatus.kind === 'Loading' ? current.navStatus.url : null
-      const next: PreviewTabState = {
+      const next: PreviewTabRecord = {
         ...current,
         webContentsId,
         navStatus: pendingUrl === null ? computeNavStatus(wc) : current.navStatus,
@@ -1564,6 +1673,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         canGoForward: wc.navigationHistory.canGoForward(),
         zoomFactor,
         updatedAt: registeredAt,
+        lifecycleGeneration,
       }
       return [
         Option.some({
@@ -1578,9 +1688,14 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     })
     if (Option.isNone(registration))
     {
+      yield* Effect.all([detachControlSession(wc.id), detachListeners(wc.id)], {
+        concurrency: 2,
+        discard: true,
+      })
       return yield* new PreviewTabNotFoundError({ tabId })
     }
     const { state: registered, pendingUrl } = registration.value
+    runFork(restoreControlSession(tabId, wc))
     yield* emit(tabId, registered)
     yield* attempt({ operation: 'registerWebview.sendTheme', tabId, webContentsId }, () =>
       wc.send(ANNOTATION_THEME_CHANNEL, annotationTheme),
@@ -1601,16 +1716,20 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     }
   })
 
-  const navigate = Effect.fn('PreviewManager.navigate')(function* (tabId: string, rawUrl: string)
+  const navigateUnlocked = Effect.fn('PreviewManager.navigate')(function* (
+    tabId: string,
+    rawUrl: string,
+  )
   {
     const url = yield* attempt({ operation: 'navigate.normalizeUrl', tabId }, () =>
       normalizePreviewUrl(rawUrl),
     )
+    const lifecycleGeneration = yield* nextCounter(tabGenerationSequenceRef)
     const updatedAt = yield* currentIso
     const pending = yield* SynchronizedRef.modify(tabsRef, (tabs) =>
     {
       const current = tabs.get(tabId)
-      const next: PreviewTabState = {
+      const next: PreviewTabRecord = {
         tabId,
         webContentsId: current?.webContentsId ?? null,
         navStatus: {
@@ -1624,6 +1743,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         colorScheme: current?.colorScheme ?? 'system',
         controller: current?.controller ?? 'none',
         updatedAt,
+        lifecycleGeneration: current?.lifecycleGeneration ?? lifecycleGeneration,
       }
       return [
         next,
@@ -1661,6 +1781,13 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
       wc.loadURL(url),
     )
   })
+
+  const createTab = (tabId: string) => withTabLifecycle(tabId, createTabUnlocked(tabId))
+  const closeTab = (tabId: string) => withTabLifecycle(tabId, closeTabUnlocked(tabId))
+  const registerWebview = (tabId: string, webContentsId: number) =>
+    withTabLifecycle(tabId, registerWebviewUnlocked(tabId, webContentsId))
+  const navigate = (tabId: string, rawUrl: string) =>
+    withTabLifecycle(tabId, navigateUnlocked(tabId, rawUrl))
 
   const withWebContents = Effect.fn('PreviewManager.withWebContents')(function* (
     operation: string,
@@ -1701,7 +1828,10 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     {
       wc.once('devtools-closed', () =>
       {
-        if (!wc.isDestroyed()) runFork(restoreControlSession(tabId, wc))
+        if (!wc.isDestroyed())
+        {
+          runFork(withTabLifecycle(tabId, restoreControlSession(tabId, wc)))
+        }
       })
       wc.openDevTools({ mode: 'detach' })
     })
@@ -1914,12 +2044,28 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
   // session attaches so a concurrent setColorScheme is not overwritten with
   // a stale snapshot.
   const restoreControlSession = (tabId: string, wc: Electron.WebContents) =>
-    ensureControlSession(wc).pipe(
-      Effect.andThen(SynchronizedRef.get(tabsRef)),
+    SynchronizedRef.get(tabsRef).pipe(
       Effect.flatMap((tabs) =>
       {
-        const colorScheme = tabs.get(tabId)?.colorScheme ?? 'system'
-        return colorScheme === 'system' ? Effect.void : applyColorScheme(tabId, wc, colorScheme)
+        const tab = tabs.get(tabId)
+        if (tab?.webContentsId !== wc.id) return Effect.void
+        return ensureControlSession(wc).pipe(
+          Effect.andThen(SynchronizedRef.get(tabsRef)),
+          Effect.flatMap((latestTabs) =>
+          {
+            const latest = latestTabs.get(tabId)
+            if (
+              latest?.lifecycleGeneration !== tab.lifecycleGeneration ||
+              latest.webContentsId !== wc.id
+            )
+            {
+              return detachControlSession(wc.id)
+            }
+            return latest.colorScheme === 'system'
+              ? Effect.void
+              : applyColorScheme(tabId, wc, latest.colorScheme)
+          }),
+        )
       }),
       Effect.ignore,
     )
@@ -1955,9 +2101,10 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
   )
   {
     const wc = yield* requireWebContents(tabId)
-    const [createdAt, millis, image] = yield* Effect.all([
+    const [createdAt, millis, sequence, image] = yield* Effect.all([
       currentIso,
       currentMillis,
+      nextCounter(artifactSequenceRef),
       attemptPromise(
         {
           operation: 'captureScreenshot.capturePage',
@@ -1967,7 +2114,7 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
         () => wc.capturePage(),
       ),
     ])
-    const id = `browser-screenshot-${artifactSiteSlug(wc.getURL())}-${millis.toString(36)}`
+    const id = `browser-screenshot-${artifactSiteSlug(wc.getURL())}-${millis.toString(36)}-${sequence.toString(36)}`
     const artifactPath = path.join(resolvedArtifactDirectory, `${id}.png`)
     const data = image.toPNG()
     yield* fileSystem.makeDirectory(resolvedArtifactDirectory, { recursive: true }).pipe(
@@ -2073,8 +2220,12 @@ const makeNativeOperations = Effect.fn('PreviewManager.makeOperations')(function
     data: Uint8Array,
   )
   {
-    const [createdAt, millis] = yield* Effect.all([currentIso, currentMillis])
-    const id = `browser-recording-${millis.toString(36)}`
+    const [createdAt, millis, sequence] = yield* Effect.all([
+      currentIso,
+      currentMillis,
+      nextCounter(artifactSequenceRef),
+    ])
+    const id = `browser-recording-${millis.toString(36)}-${sequence.toString(36)}`
     const extension = mimeType.includes('mp4') ? 'mp4' : 'webm'
     const artifactPath = path.join(resolvedArtifactDirectory, `${id}.${extension}`)
     yield* fileSystem.makeDirectory(resolvedArtifactDirectory, { recursive: true }).pipe(

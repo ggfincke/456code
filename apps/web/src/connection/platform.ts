@@ -151,9 +151,10 @@ function sshPreparationError(cause: unknown)
   })
 }
 
-export const provisionDesktopSshEnvironment = Effect.fn(
-  'web.connectionPlatform.ssh.provisionDesktop',
-)(function* (bridge: DesktopBridge, target: DesktopSshEnvironmentTarget)
+const ensureDesktopSshPairing = Effect.fn('web.connectionPlatform.ssh.ensurePairing')(function* (
+  bridge: DesktopBridge,
+  target: DesktopSshEnvironmentTarget,
+)
 {
   const bootstrap = yield* Effect.tryPromise({
     try: () =>
@@ -162,27 +163,42 @@ export const provisionDesktopSshEnvironment = Effect.fn(
       }),
     catch: sshPreparationError,
   })
-  const pairingToken = bootstrap.pairingToken
-  if (pairingToken === null)
+  if (bootstrap.pairingToken === null)
   {
     return yield* new ConnectionBlockedError({
       reason: 'authentication',
       detail: 'The SSH environment did not issue a pairing credential.',
     })
   }
+  return { bootstrap, pairingToken: bootstrap.pairingToken }
+})
+
+const bootstrapDesktopSshBearer = Effect.fn('web.connectionPlatform.ssh.bootstrapBearer')(
+  function* (bridge: DesktopBridge, httpBaseUrl: string, pairingToken: string)
+  {
+    const access = yield* Effect.tryPromise({
+      try: () => bridge.bootstrapSshBearerSession(httpBaseUrl, pairingToken),
+      catch: sshPreparationError,
+    })
+    return access.access_token
+  },
+)
+
+export const provisionDesktopSshEnvironment = Effect.fn(
+  'web.connectionPlatform.ssh.provisionDesktop',
+)(function* (bridge: DesktopBridge, target: DesktopSshEnvironmentTarget)
+{
+  const { bootstrap, pairingToken } = yield* ensureDesktopSshPairing(bridge, target)
   const descriptor = yield* Effect.tryPromise({
     try: () => bridge.fetchSshEnvironmentDescriptor(bootstrap.httpBaseUrl),
     catch: sshPreparationError,
   })
-  const access = yield* Effect.tryPromise({
-    try: () => bridge.bootstrapSshBearerSession(bootstrap.httpBaseUrl, pairingToken),
-    catch: sshPreparationError,
-  })
+  const bearerToken = yield* bootstrapDesktopSshBearer(bridge, bootstrap.httpBaseUrl, pairingToken)
   return {
     environmentId: descriptor.environmentId,
     label: descriptor.label,
     bootstrap,
-    bearerToken: access.access_token,
+    bearerToken,
   }
 })
 
@@ -259,28 +275,15 @@ const capabilitiesLayer = Layer.effectContext(
             detail: 'SSH environments are only available in the desktop app.',
           })
         }
-        const bootstrap = yield* Effect.tryPromise({
-          try: () =>
-            bridge.ensureSshEnvironment(input.target, {
-              issuePairingToken: true,
-            }),
-          catch: sshPreparationError,
-        })
-        if (bootstrap.pairingToken === null)
-        {
-          return yield* new ConnectionBlockedError({
-            reason: 'authentication',
-            detail: 'The SSH environment did not issue a pairing credential.',
-          })
-        }
-        const access = yield* Effect.tryPromise({
-          try: () =>
-            bridge.bootstrapSshBearerSession(bootstrap.httpBaseUrl, bootstrap.pairingToken!),
-          catch: sshPreparationError,
-        })
+        const { bootstrap, pairingToken } = yield* ensureDesktopSshPairing(bridge, input.target)
+        const bearerToken = yield* bootstrapDesktopSshBearer(
+          bridge,
+          bootstrap.httpBaseUrl,
+          pairingToken,
+        )
         return {
           bootstrap,
-          bearerToken: access.access_token,
+          bearerToken,
         }
       }),
       disconnect: Effect.fn('web.connectionPlatform.ssh.disconnect')(function* (target)

@@ -122,11 +122,8 @@ export function useReviewSections(input: {
     selectedSectionIdExists,
   ])
 
-  let activeCheckpoint = readyCheckpoints[0] ?? null
-  if (selectedSection?.kind === 'turn')
-  {
-    activeCheckpoint = checkpointBySectionId[selectedSection.id] ?? activeCheckpoint
-  }
+  const activeCheckpoint =
+    selectedSection?.kind === 'turn' ? (checkpointBySectionId[selectedSection.id] ?? null) : null
   const activeSectionId = activeCheckpoint
     ? getReviewSectionIdForCheckpoint(activeCheckpoint)
     : null
@@ -141,11 +138,16 @@ export function useReviewSections(input: {
 
   useEffect(() =>
   {
-    if (!reviewCache.threadKey || !activeSectionId)
+    const threadKey = reviewCache.threadKey
+    if (!threadKey || !activeSectionId)
     {
       return
     }
-    setReviewTurnDiffLoading(reviewCache.threadKey, activeSectionId, activeTurnDiff.isPending)
+    setReviewTurnDiffLoading(threadKey, activeSectionId, activeTurnDiff.isPending)
+    return () =>
+    {
+      setReviewTurnDiffLoading(threadKey, activeSectionId, false)
+    }
   }, [activeSectionId, activeTurnDiff.isPending, reviewCache.threadKey])
 
   useEffect(() =>
@@ -160,11 +162,11 @@ export function useReviewSections(input: {
 
   useEffect(() =>
   {
-    if (reviewCache.threadKey && activeTurnDiff.error)
+    if (reviewCache.threadKey && activeSectionId && activeTurnDiff.error)
     {
       setReviewAsyncError(reviewCache.threadKey, activeTurnDiff.error)
     }
-  }, [activeTurnDiff.error, reviewCache.threadKey])
+  }, [activeSectionId, activeTurnDiff.error, reviewCache.threadKey])
 
   const refreshSelectedSection = useCallback(async () =>
   {
@@ -192,7 +194,10 @@ export function useReviewSections(input: {
   )
 
   return {
-    error: diffPreview.error ?? activeTurnDiff.error ?? reviewCache.asyncState.error,
+    error:
+      selectedSection?.kind === 'turn'
+        ? (activeTurnDiff.error ?? reviewCache.asyncState.error)
+        : diffPreview.error,
     loadingGitDiffs: diffPreview.isPending,
     loadingTurnIds,
     reviewSections,

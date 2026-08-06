@@ -137,15 +137,26 @@ def discover_paths(values: list[Path]) -> list[Path]:
         path = path.resolve()
         if not is_within(path, ROOT):
             raise ValueError(f"{path} is outside --root {ROOT}")
-        if path.is_file() and path.suffix in SUPPORTED_SUFFIXES:
-            found.add(path)
+        if not path.exists():
+            raise ValueError(f"{path} does not exist")
+        if path.is_file():
+            if path.suffix not in SUPPORTED_SUFFIXES:
+                raise ValueError(f"{path} is not a supported source file")
+            candidates = [path]
         elif path.is_dir():
-            found.update(
+            candidates = [
                 candidate
                 for candidate in path.rglob("*")
                 if candidate.is_file() and candidate.suffix in SUPPORTED_SUFFIXES
-            )
-    return sorted(path for path in found if not is_exempt(path))
+            ]
+        else:
+            raise ValueError(f"{path} is not a file or directory")
+
+        eligible = [candidate for candidate in candidates if not is_exempt(candidate)]
+        if not eligible:
+            raise ValueError(f"{path} has no supported source files")
+        found.update(eligible)
+    return sorted(found)
 
 
 def prelude_length(path: Path, lines: list[str]) -> int:

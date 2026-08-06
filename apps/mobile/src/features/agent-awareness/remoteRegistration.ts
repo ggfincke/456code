@@ -143,6 +143,14 @@ interface RegisterDeviceInput extends DeviceRegistrationInput
   readonly preferencesOverride?: Partial<Preferences>
 }
 
+function isCurrentRelayTokenProvider(
+  provider: () => Promise<string | null>,
+  generation: number,
+): boolean
+{
+  return relayTokenProvider === provider && deviceRegistrationGeneration === generation
+}
+
 export function mergeAgentAwarenessRegistrationPreferences(
   stored: Preferences,
   override: Partial<Preferences> | undefined,
@@ -511,7 +519,9 @@ export function armAgentAwarenessLiveActivityForLocalWork(input: {
   readonly projectTitle: string
 }): void
 {
-  if (!canRegisterRemoteLiveActivities() || !relayTokenProvider)
+  const provider = relayTokenProvider
+  const generation = deviceRegistrationGeneration
+  if (!canRegisterRemoteLiveActivities() || !provider)
   {
     return
   }
@@ -523,18 +533,29 @@ export function armAgentAwarenessLiveActivityForLocalWork(input: {
       {
         return
       }
-      armAgentAwarenessLiveActivityForLocalWorkNow(input)
+      if (!isCurrentRelayTokenProvider(provider, generation))
+      {
+        return
+      }
+      armAgentAwarenessLiveActivityForLocalWorkNow(input, provider, generation)
     })
 }
 
-function armAgentAwarenessLiveActivityForLocalWorkNow(input: {
-  readonly threadTitle: string
-  readonly projectTitle: string
-}): void
+function armAgentAwarenessLiveActivityForLocalWorkNow(
+  input: {
+    readonly threadTitle: string
+    readonly projectTitle: string
+  },
+  provider: () => Promise<string | null>,
+  generation: number,
+): void
 {
   try
   {
-    if (AgentActivity.getInstances().length > 0)
+    if (
+      AgentActivity.getInstances().length > 0 ||
+      !isCurrentRelayTokenProvider(provider, generation)
+    )
     {
       return
     }
@@ -558,6 +579,14 @@ function armAgentAwarenessLiveActivityForLocalWorkNow(input: {
         },
       ],
     })
+    if (!isCurrentRelayTokenProvider(provider, generation))
+    {
+      activity.end('immediate').catch((error: unknown) =>
+      {
+        logRegistrationError('stale live activity cleanup failed', error)
+      })
+      return
+    }
     logRegistrationDebug('live activity card armed for local work', {
       threadTitle: input.threadTitle,
     })
@@ -1146,7 +1175,9 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
 {
   return Effect.gen(function* ()
   {
-    if (!canRegisterRemoteLiveActivities() || !relayTokenProvider)
+    const provider = relayTokenProvider
+    const generation = deviceRegistrationGeneration
+    if (!canRegisterRemoteLiveActivities() || !provider)
     {
       return
     }
@@ -1216,6 +1247,10 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
         }
         else if (snapshot?.aggregate && snapshot.aggregate.activeCount > 0)
         {
+          if (!isCurrentRelayTokenProvider(provider, generation))
+          {
+            return
+          }
           const aggregate = snapshot.aggregate
           const primed = yield* Effect.try({
             try: () =>
@@ -1242,6 +1277,14 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
           )
           if (primed)
           {
+            if (!isCurrentRelayTokenProvider(provider, generation))
+            {
+              primed.end('immediate').catch((error: unknown) =>
+              {
+                logRegistrationError('stale live activity cleanup failed', error)
+              })
+              return
+            }
             logRegistrationDebug('live activity card primed', {
               activeCount: aggregate.activeCount,
             })
@@ -1251,6 +1294,10 @@ export function refreshActiveLiveActivityRemoteRegistration(): Effect.Effect<
       }
     }
 
+    if (!isCurrentRelayTokenProvider(provider, generation))
+    {
+      return
+    }
     const registrationResults = yield* Effect.forEach(activities, (activity) =>
       registerLiveActivityPushToken({ activity }).pipe(
         Effect.map((registered) => !registered),

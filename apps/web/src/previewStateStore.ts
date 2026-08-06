@@ -201,6 +201,8 @@ export function applyPreviewServerEvent(ref: ScopedThreadRef, event: PreviewEven
       {
         const snapshot = event.snapshot
         if (current.suppressedTabIds.has(snapshot.tabId)) return current
+        const existing = current.sessions[snapshot.tabId]
+        if (existing && existing.updatedAt > snapshot.updatedAt) return current
         const recentlySeenUrls =
           snapshot.navStatus._tag === 'Idle'
             ? current.recentlySeenUrls
@@ -221,6 +223,7 @@ export function applyPreviewServerEvent(ref: ScopedThreadRef, event: PreviewEven
       {
         const existing = current.sessions[event.tabId]
         if (!existing) return current
+        if (existing.updatedAt > event.createdAt) return current
         const failedSnapshot = {
           ...existing,
           navStatus: {
@@ -237,10 +240,15 @@ export function applyPreviewServerEvent(ref: ScopedThreadRef, event: PreviewEven
           ...current,
           sessions,
           snapshot: current.activeTabId === event.tabId ? failedSnapshot : current.snapshot,
+          recentlySeenUrls: dedupeRecentUrls(current.recentlySeenUrls, event.url),
         }
       }
       case 'closed':
+      {
+        const existing = current.sessions[event.tabId]
+        if (existing && existing.updatedAt > event.createdAt) return current
         return removeSession(current, event.tabId)
+      }
     }
   })
 }

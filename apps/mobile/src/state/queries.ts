@@ -1,72 +1,15 @@
 // apps/mobile/src/state/queries.ts
 // manage thread detail view state
 
-import type { EnvironmentId, OrchestrationThread, ThreadId } from '@t3tools/contracts'
-import * as Option from 'effect/Option'
-import { useEffect, useMemo, useState } from 'react'
+import type { EnvironmentId } from '@t3tools/contracts'
+import { useMemo } from 'react'
 
 import { orchestrationEnvironment } from './orchestration'
-import { projectEnvironment } from './projects'
 import { useEnvironmentQuery } from './query'
-import { useEnvironmentThread } from './threads'
 import { vcsEnvironment } from './vcs'
-import {
-  buildCheckpointDiffTargets,
-  normalizeComposerPathSearchQuery,
-  type CheckpointDiffTarget,
-} from './queryTargets'
+import { buildCheckpointDiffTargets, type CheckpointDiffTarget } from './queryTargets'
 
-const COMPOSER_PATH_SEARCH_DEBOUNCE_MS = 200
-const COMPOSER_PATH_SEARCH_LIMIT = 20
 const VCS_REF_LIST_LIMIT = 100
-
-export interface ThreadDetailView
-{
-  readonly data: OrchestrationThread | null
-  readonly error: string | null
-  readonly isPending: boolean
-  readonly isDeleted: boolean
-}
-
-export interface ComposerPathSearchTarget
-{
-  readonly environmentId: EnvironmentId | null
-  readonly cwd: string | null
-  readonly query: string | null
-}
-
-function useDebouncedValue<A>(value: A, delayMs: number): A
-{
-  const [debounced, setDebounced] = useState(value)
-
-  useEffect(() =>
-  {
-    const timer = setTimeout(() =>
-    {
-      setDebounced(value)
-    }, delayMs)
-    return () =>
-    {
-      clearTimeout(timer)
-    }
-  }, [delayMs, value])
-
-  return debounced
-}
-
-export function useThreadDetail(
-  environmentId: EnvironmentId | null,
-  threadId: ThreadId | null,
-): ThreadDetailView
-{
-  const state = useEnvironmentThread(environmentId, threadId)
-  return {
-    data: Option.getOrNull(state.data),
-    error: Option.getOrNull(state.error),
-    isPending: state.status === 'synchronizing',
-    isDeleted: state.status === 'deleted',
-  }
-}
 
 export function useBranches(input: {
   readonly environmentId: EnvironmentId | null
@@ -87,40 +30,6 @@ export function useBranches(input: {
         })
       : null,
   )
-}
-
-export function useComposerPathSearch(target: ComposerPathSearchTarget)
-{
-  const normalizedTarget = useMemo(
-    () => ({
-      environmentId: target.environmentId,
-      cwd: target.cwd,
-      query: normalizeComposerPathSearchQuery(target.query),
-    }),
-    [target.cwd, target.environmentId, target.query],
-  )
-  const debouncedTarget = useDebouncedValue(normalizedTarget, COMPOSER_PATH_SEARCH_DEBOUNCE_MS)
-  const result = useEnvironmentQuery(
-    debouncedTarget.environmentId !== null &&
-      debouncedTarget.cwd !== null &&
-      debouncedTarget.query.length > 0
-      ? projectEnvironment.searchEntries({
-          environmentId: debouncedTarget.environmentId,
-          input: {
-            cwd: debouncedTarget.cwd,
-            query: debouncedTarget.query,
-            limit: COMPOSER_PATH_SEARCH_LIMIT,
-          },
-        })
-      : null,
-  )
-
-  return {
-    entries: result.data?.entries ?? [],
-    error: result.error,
-    isPending: normalizedTarget.query !== debouncedTarget.query || result.isPending,
-    refresh: result.refresh,
-  }
 }
 
 export function useCheckpointDiff(target: CheckpointDiffTarget)

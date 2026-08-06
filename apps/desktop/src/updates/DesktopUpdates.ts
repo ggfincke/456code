@@ -290,6 +290,7 @@ export const make = Effect.gen(function* ()
   const updateInstallInFlightRef = yield* Ref.make(false)
   const updaterConfiguredRef = yield* Ref.make(false)
   const lastLoggedDownloadMilestoneRef = yield* Ref.make(-1)
+  let pendingCheckEvent = Promise.resolve()
   const updateStateRef = yield* Ref.make<DesktopUpdateState>(
     createInitialDesktopUpdateState(
       environment.appVersion,
@@ -399,6 +400,7 @@ export const make = Effect.gen(function* ()
     }
 
     yield* Ref.set(updateCheckInFlightRef, true)
+    pendingCheckEvent = Promise.resolve()
     const checkedAt = yield* currentIsoTimestamp
     yield* setState(reduceDesktopUpdateStateOnCheckStart(state, checkedAt))
     yield* logUpdaterInfo('checking for updates', { reason })
@@ -421,7 +423,11 @@ export const make = Effect.gen(function* ()
           return true
         }),
       }),
-      Effect.ensuring(Ref.set(updateCheckInFlightRef, false)),
+      Effect.ensuring(
+        Effect.promise(() => pendingCheckEvent).pipe(
+          Effect.andThen(Ref.set(updateCheckInFlightRef, false)),
+        ),
+      ),
     )
   })
 
@@ -805,7 +811,9 @@ export const make = Effect.gen(function* ()
       const context = yield* Effect.context<never>()
       const runEffect = (effect: Effect.Effect<void>) =>
       {
-        void Effect.runPromiseWith(context)(effect)
+        const running = Effect.runPromiseWith(context)(effect)
+        void running
+        return running
       }
 
       const appUpdateYmlConfig = yield* readAppUpdateYml
@@ -852,15 +860,15 @@ export const make = Effect.gen(function* ()
       })
       yield* electronUpdater.on('update-available', (info: unknown) =>
       {
-        runEffect(handleUpdateAvailable(info))
+        pendingCheckEvent = runEffect(handleUpdateAvailable(info))
       })
       yield* electronUpdater.on('update-not-available', () =>
       {
-        runEffect(handleUpdateNotAvailable)
+        pendingCheckEvent = runEffect(handleUpdateNotAvailable)
       })
       yield* electronUpdater.on('error', (error: unknown) =>
       {
-        runEffect(handleUpdaterError(error))
+        pendingCheckEvent = runEffect(handleUpdaterError(error))
       })
       yield* electronUpdater.on('download-progress', (progress: unknown) =>
       {

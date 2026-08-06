@@ -120,7 +120,11 @@ function matchesShortcut(
   platform = navigator.platform,
 ): boolean
 {
-  if (!matchesShortcutModifiers(event, shortcut, platform)) return false
+  const modifierEvent =
+    event.key === '+' && shortcut.key === '+' && !shortcut.shiftKey
+      ? { ...event, shiftKey: false }
+      : event
+  if (!matchesShortcutModifiers(modifierEvent, shortcut, platform)) return false
   return resolveEventKeys(event).has(shortcut.key)
 }
 

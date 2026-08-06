@@ -107,6 +107,7 @@ async function applyClientTracingConfig(config: ClientTracingConfig): Promise<vo
 
     if (generation === configurationGeneration)
     {
+      activeConfigKey = null
       const error = squashAtomCommandFailure(delegateResult)
       const tracesUrl = new URL(otlpTracesUrl)
       console.warn('Failed to configure client tracing exporter', {

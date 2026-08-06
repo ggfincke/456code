@@ -2,7 +2,13 @@
 // manage use resizable width options through a React hook
 
 import * as Schema from 'effect/Schema'
-import { type PointerEvent as ReactPointerEvent, useCallback, useRef, useState } from 'react'
+import {
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+} from 'react'
 
 import { getLocalStorageItem, setLocalStorageItem } from './useLocalStorage'
 
@@ -102,6 +108,18 @@ export function useResizableWidth(options: UseResizableWidthOptions): {
     document.body.style.removeProperty('user-select')
     dragStateRef.current = null
   }, [])
+
+  useEffect(
+    () => () =>
+    {
+      const state = dragStateRef.current
+      if (state !== null)
+      {
+        releasePointer(state.pointerId)
+      }
+    },
+    [releasePointer],
+  )
 
   const onPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLElement>) =>

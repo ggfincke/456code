@@ -1,16 +1,9 @@
 // apps/web/src/components/chat/ComposerPendingElementContexts.tsx
 // render composer pending element contexts
 
-import { MousePointerClick, X } from 'lucide-react'
+import { MousePointerClick } from 'lucide-react'
 
-import {
-  COMPOSER_INLINE_CHIP_CLASS_NAME,
-  COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME,
-  COMPOSER_INLINE_CHIP_ICON_CLASS_NAME,
-  COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME,
-} from '../composerInlineChip'
-import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
-import { cn } from '~/lib/utils'
+import { ComposerRemovableChip, ComposerRemovableChipList } from './ComposerRemovableChip'
 import {
   type ElementContextDraft,
   formatElementContextLabel,
@@ -54,37 +47,20 @@ export function ComposerPendingElementContextChip({
   const label = formatElementContextLabel(context)
   const sourceLabel = formatElementContextSourceLabel(context)
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <span className={cn(COMPOSER_INLINE_CHIP_CLASS_NAME, 'pr-1')}>
-            <MousePointerClick className={cn(COMPOSER_INLINE_CHIP_ICON_CLASS_NAME, 'size-3.5')} />
-            <span className={COMPOSER_INLINE_CHIP_LABEL_CLASS_NAME}>{label}</span>
-            {sourceLabel ? (
-              <span className="select-none text-[10px] font-normal leading-tight text-muted-foreground/85">
-                {sourceLabel}
-              </span>
-            ) : null}
-            <button
-              type="button"
-              aria-label={`Remove ${label}`}
-              className={COMPOSER_INLINE_CHIP_DISMISS_BUTTON_CLASS_NAME}
-              onClick={(event) =>
-              {
-                event.preventDefault()
-                event.stopPropagation()
-                onRemove(context.id)
-              }}
-            >
-              <X className="size-3" aria-hidden />
-            </button>
+    <ComposerRemovableChip
+      icon={MousePointerClick}
+      label={label}
+      metadata={
+        sourceLabel ? (
+          <span className="select-none text-[10px] font-normal leading-tight text-muted-foreground/85">
+            {sourceLabel}
           </span>
-        }
-      />
-      <TooltipPopup side="top" className="max-w-96 whitespace-pre-wrap leading-tight">
-        {buildTooltipContent(context)}
-      </TooltipPopup>
-    </Tooltip>
+        ) : null
+      }
+      removeLabel={`Remove ${label}`}
+      tooltip={buildTooltipContent(context)}
+      onRemove={() => onRemove(context.id)}
+    />
   )
 }
 
@@ -96,10 +72,10 @@ export function ComposerPendingElementContexts({
 {
   if (contexts.length === 0) return null
   return (
-    <div className={cn('flex flex-wrap gap-1.5', className)}>
+    <ComposerRemovableChipList className={className}>
       {contexts.map((context) => (
         <ComposerPendingElementContextChip key={context.id} context={context} onRemove={onRemove} />
       ))}
-    </div>
+    </ComposerRemovableChipList>
   )
 }

@@ -30,7 +30,11 @@ export function scopeThreadRef(
 export function scopedRefKey(ref: ScopedProjectRef | ScopedThreadRef): string
 {
   const localId = 'projectId' in ref ? ref.projectId : ref.threadId
-  return `${ref.environmentId}:${localId}`
+  if (!ref.environmentId.includes(':') && !localId.includes(':'))
+  {
+    return `${ref.environmentId}:${localId}`
+  }
+  return `v1:${encodeURIComponent(ref.environmentId)}:${encodeURIComponent(localId)}`
 }
 
 export function scopedProjectKey(ref: ScopedProjectRef): string
@@ -45,6 +49,26 @@ export function scopedThreadKey(ref: ScopedThreadRef): string
 
 function parseScopedKey(key: string): { environmentId: EnvironmentIdType; localId: string } | null
 {
+  if (key.startsWith('v1:'))
+  {
+    const parts = key.split(':')
+    if (parts.length !== 3 || parts[1]?.length === 0 || parts[2]?.length === 0)
+    {
+      return null
+    }
+    try
+    {
+      return {
+        environmentId: EnvironmentId.make(decodeURIComponent(parts[1]!)),
+        localId: decodeURIComponent(parts[2]!),
+      }
+    }
+    catch
+    {
+      return null
+    }
+  }
+
   const separatorIndex = key.indexOf(':')
   if (separatorIndex <= 0 || separatorIndex >= key.length - 1)
   {

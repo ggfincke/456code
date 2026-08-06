@@ -12,7 +12,7 @@ import {
   type ProviderInstanceConfig,
 } from '@t3tools/contracts'
 
-import { usePrimarySettings, useUpdatePrimarySettings } from '../../hooks/useSettings'
+import { usePrimarySettings } from '../../hooks/useSettings'
 import { cn } from '../../lib/utils'
 import { normalizeProviderAccentColor } from '../../providerInstances'
 import { Button } from '../ui/button'
@@ -122,12 +122,16 @@ interface AddProviderInstanceDialogProps
 {
   open: boolean
   onOpenChange: (open: boolean) => void
+  onAdd: (instanceId: ProviderInstanceId, instance: ProviderInstanceConfig) => Promise<void>
 }
 
-export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderInstanceDialogProps)
+export function AddProviderInstanceDialog({
+  open,
+  onOpenChange,
+  onAdd,
+}: AddProviderInstanceDialogProps)
 {
   const settings = usePrimarySettings()
-  const updateSettings = useUpdatePrimarySettings()
 
   const [wizardStep, setWizardStep] = useState(0)
   const [driver, setDriver] = useState<ProviderDriverKind>(DEFAULT_DRIVER_KIND)
@@ -140,6 +144,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
   // errors are suppressed until the user has tried to submit once. After that
   // they update live so fixing the problem clears the message in place.
   const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false)
+  const [isSaving, setIsSaving] = useState(false)
 
   const existingIds = useMemo(
     () => new Set(Object.keys(settings.providerInstances ?? {})),
@@ -193,43 +198,41 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
     )
   }
 
-  const handleSave = () =>
+  const handleSave = async () =>
   {
     setHasAttemptedSubmit(true)
-    if (instanceIdError !== null) return
+    if (instanceIdError !== null || isSaving) return
 
-    const config = configByDriver[driver] ?? {}
-    const hasConfig = Object.keys(config).length > 0
-    const normalizedAccentColor = normalizeProviderAccentColor(accentColor)
-
-    const nextInstance: ProviderInstanceConfig = {
-      driver,
-      enabled: true,
-      ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
-      ...(normalizedAccentColor ? { accentColor: normalizedAccentColor } : {}),
-      ...(hasConfig ? { config } : {}),
-    }
-    // `ProviderInstanceId.make` revalidates the slug; we've already checked
-    // it via `validateInstanceId`, but going through the brand constructor
-    // keeps the type boundary honest and guards against any future drift in
-    // the slug rules.
-    const brandedId = ProviderInstanceId.make(instanceId)
-    const nextMap = {
-      ...settings.providerInstances,
-      [brandedId]: nextInstance,
-    }
+    setIsSaving(true)
     try
     {
-      updateSettings({ providerInstances: nextMap })
+      const config = configByDriver[driver] ?? {}
+      const hasConfig = Object.keys(config).length > 0
+      const normalizedAccentColor = normalizeProviderAccentColor(accentColor)
+
+      const nextInstance: ProviderInstanceConfig = {
+        driver,
+        enabled: true,
+        ...(label.trim().length > 0 ? { displayName: label.trim() } : {}),
+        ...(normalizedAccentColor ? { accentColor: normalizedAccentColor } : {}),
+        ...(hasConfig ? { config } : {}),
+      }
+      // `ProviderInstanceId.make` revalidates the slug; we've already checked
+      // it via `validateInstanceId`, but going through the brand constructor
+      // keeps the type boundary honest and guards against future rule drift.
+      const brandedId = ProviderInstanceId.make(instanceId)
+      await onAdd(brandedId, nextInstance)
       toastManager.add({
         type: 'success',
         title: 'Provider instance added',
         description: `${driverOption.label} instance '${instanceId}' was added.`,
       })
+      setIsSaving(false)
       onOpenChange(false)
     }
     catch (error)
     {
+      setIsSaving(false)
       toastManager.add({
         type: 'error',
         title: 'Could not add provider instance',
@@ -432,6 +435,7 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
             <Button
               variant="outline"
               size="sm"
+              disabled={isSaving}
               onClick={() =>
               {
                 if (wizardStep === 0)
@@ -449,8 +453,8 @@ export function AddProviderInstanceDialog({ open, onOpenChange }: AddProviderIns
                 Next
               </Button>
             ) : (
-              <Button size="sm" onClick={handleSave}>
-                Add instance
+              <Button size="sm" disabled={isSaving} onClick={() => void handleSave()}>
+                {isSaving ? 'Adding...' : 'Add instance'}
               </Button>
             )}
           </DialogFooter>

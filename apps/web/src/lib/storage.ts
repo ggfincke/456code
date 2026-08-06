@@ -55,28 +55,47 @@ export function createDebouncedStorage(
 ): DebouncedStorage
 {
   const resolvedStorage = resolveStorage(baseStorage)
-  const debouncedSetItem = new Debouncer(
-    (name: string, value: string) =>
+  const debouncedSetItems = new Map<string, Debouncer<(value: string) => void>>()
+  const getDebouncedSetItem = (name: string) =>
+  {
+    const existing = debouncedSetItems.get(name)
+    if (existing !== undefined)
     {
-      resolvedStorage.setItem(name, value)
-    },
-    { wait: debounceMs },
-  )
+      return existing
+    }
+    const created: Debouncer<(value: string) => void> = new Debouncer(
+      (value: string) =>
+      {
+        resolvedStorage.setItem(name, value)
+        if (debouncedSetItems.get(name) === created)
+        {
+          debouncedSetItems.delete(name)
+        }
+      },
+      { wait: debounceMs },
+    )
+    debouncedSetItems.set(name, created)
+    return created
+  }
 
   return {
     getItem: (name) => resolvedStorage.getItem(name),
     setItem: (name, value) =>
     {
-      debouncedSetItem.maybeExecute(name, value)
+      getDebouncedSetItem(name).maybeExecute(value)
     },
     removeItem: (name) =>
     {
-      debouncedSetItem.cancel()
+      debouncedSetItems.get(name)?.cancel()
+      debouncedSetItems.delete(name)
       resolvedStorage.removeItem(name)
     },
     flush: () =>
     {
-      debouncedSetItem.flush()
+      for (const debouncedSetItem of debouncedSetItems.values())
+      {
+        debouncedSetItem.flush()
+      }
     },
   }
 }

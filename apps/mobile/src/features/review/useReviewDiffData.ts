@@ -52,9 +52,10 @@ export function useReviewDiffData(input: {
   readonly threadKey: string | null
   readonly selectedSection: ReviewSectionItem | null
   readonly draftMessage: string
+  readonly revealedLargeFileIds: ReadonlyArray<string>
 })
 {
-  const { draftMessage, selectedSection, threadKey } = input
+  const { draftMessage, revealedLargeFileIds, selectedSection, threadKey } = input
   const selectedSectionId = selectedSection?.id ?? null
   const parsedDiff = useMemo(
     () =>
@@ -86,9 +87,10 @@ export function useReviewDiffData(input: {
         getCachedNativeReviewDiffData({
           parsedDiff,
           comments: selectedSectionInlineComments,
+          revealedLargeFileIds,
         }),
       ),
-    [parsedDiff, selectedSectionInlineComments],
+    [parsedDiff, revealedLargeFileIds, selectedSectionInlineComments],
   )
   const pendingReviewCommentCount = useMemo(
     () => countReviewCommentContexts(draftMessage),

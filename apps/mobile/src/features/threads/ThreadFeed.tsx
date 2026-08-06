@@ -44,6 +44,7 @@ import { type SelectableMarkdownSkill } from '../../native/SelectableMarkdownTex
 import { resolveMarkdownLinkPresentation } from '@t3tools/mobile-markdown-text/links'
 import { scaledTypographyLineHeight } from '../../lib/appearancePreferences'
 import { deriveCenteredContentHorizontalPadding, type LayoutVariant } from '../../lib/layout'
+import { scopedThreadKey } from '../../lib/scopedEntities'
 import {
   deriveThreadFeedPresentation,
   type ThreadFeedEntry,
@@ -270,7 +271,7 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
   useEffect(() =>
   {
     reportHeaderMaterialVisibility(false)
-  }, [props.threadId, reportHeaderMaterialVisibility])
+  }, [props.environmentId, props.threadId, reportHeaderMaterialVisibility])
 
   const expandedWorkGroupIds = useMemo(() =>
   {
@@ -309,7 +310,9 @@ export const ThreadFeed = memo(function ThreadFeed(props: ThreadFeedProps)
   // initial scroll-to-end computes with a zero end inset and rests one
   // composer-height short of the end. Layout effect: it must land before the
   // list's first positioning tick or the one-shot initial scroll misses it.
-  const listMountKey = `${props.threadId}:${props.feed.length === 0 ? 'empty' : 'filled'}`
+  const listMountKey = `${scopedThreadKey(props.environmentId, props.threadId)}:${
+    props.feed.length === 0 ? 'empty' : 'filled'
+  }`
   useLayoutEffect(() =>
   {
     const bottom = props.contentInsetEndAdjustment.value

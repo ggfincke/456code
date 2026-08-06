@@ -29,12 +29,22 @@ if (!Number.isInteger(port) || port <= 0)
 const requiredFiles = [
   'dist-electron/main.cjs',
   'dist-electron/preload.cjs',
+  'dist-electron/preview-pick-preload.cjs',
   '../server/dist/bin.mjs',
 ]
 const watchedDirectories = [
-  { directory: 'dist-electron', files: new Set(['main.cjs', 'preload.cjs']) },
+  {
+    directory: 'dist-electron',
+    files: new Set(['main.cjs', 'preload.cjs', 'preview-pick-preload.cjs']),
+  },
   { directory: '../server/dist', files: new Set(['bin.mjs']) },
 ]
+const annotationSourceFiles = new Set(['Annotation.css', 'PickPreload.ts'])
+const annotationBuildScript = NodePath.join(
+  desktopDir,
+  'scripts',
+  'build-preview-annotation-css.mjs',
+)
 const forcedShutdownTimeoutMs = 1_500
 const restartDebounceMs = 120
 const childTreeGracePeriodMs = 1_200
@@ -60,8 +70,10 @@ if (devProtocolClient)
 
 let shuttingDown = false
 let restartTimer = null
+let annotationBuildTimer = null
 let currentApp = null
 let restartQueue = Promise.resolve()
+let annotationBuildQueue = Promise.resolve()
 const expectedExits = new WeakSet()
 const watchers = []
 
@@ -209,6 +221,46 @@ function scheduleRestart()
   }, restartDebounceMs)
 }
 
+function buildAnnotationStyles()
+{
+  return new Promise((resolve, reject) =>
+  {
+    const builder = NodeChildProcess.spawn(process.execPath, [annotationBuildScript], {
+      cwd: desktopDir,
+      stdio: 'inherit',
+    })
+    builder.once('error', reject)
+    builder.once('exit', (code) =>
+    {
+      if (code === 0)
+      {
+        resolve()
+        return
+      }
+      reject(new Error(`Preview annotation CSS build exited with code ${String(code)}.`))
+    })
+  })
+}
+
+function scheduleAnnotationStylesBuild()
+{
+  if (annotationBuildTimer)
+  {
+    clearTimeout(annotationBuildTimer)
+  }
+  annotationBuildTimer = setTimeout(() =>
+  {
+    annotationBuildTimer = null
+    annotationBuildQueue = annotationBuildQueue
+      .catch(() => undefined)
+      .then(buildAnnotationStyles)
+      .catch((error) =>
+      {
+        console.error('Preview annotation CSS build failed.', error)
+      })
+  }, restartDebounceMs)
+}
+
 function startWatchers()
 {
   for (const { directory, files } of watchedDirectories)
@@ -229,6 +281,19 @@ function startWatchers()
 
     watchers.push(watcher)
   }
+
+  const annotationSourceWatcher = NodeFS.watch(
+    NodePath.join(desktopDir, 'src', 'preview'),
+    { persistent: true },
+    (_eventType, filename) =>
+    {
+      if (typeof filename === 'string' && annotationSourceFiles.has(filename))
+      {
+        scheduleAnnotationStylesBuild()
+      }
+    },
+  )
+  watchers.push(annotationSourceWatcher)
 }
 
 function killChildTree(signal)
@@ -253,6 +318,12 @@ async function shutdown(exitCode)
   {
     clearTimeout(restartTimer)
     restartTimer = null
+  }
+
+  if (annotationBuildTimer)
+  {
+    clearTimeout(annotationBuildTimer)
+    annotationBuildTimer = null
   }
 
   for (const watcher of watchers)

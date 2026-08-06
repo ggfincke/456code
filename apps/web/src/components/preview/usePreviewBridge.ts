@@ -23,6 +23,7 @@ import { previewBridge } from './previewBridge'
 export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: string }): void
 {
   const { threadRef, tabId } = input
+  const { environmentId, threadId } = threadRef
   const clearBrowserPointer = useBrowserPointerStore((state) => state.clear)
   const reportStatus = useAtomCommand(previewEnvironment.reportStatus, 'preview status report')
   const bridge = previewBridge
@@ -31,12 +32,18 @@ export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: str
   // server) so the desktop bridge keeps a single listener entry per tab.
   const lastReportedUrl = useRef<string | null>(null)
   const lastReportedKind = useRef<DesktopPreviewTabState['navStatus']['kind'] | null>(null)
+  const lastReportedTitle = useRef<string | null>(null)
+  const lastReportedCanGoBack = useRef<boolean | null>(null)
+  const lastReportedCanGoForward = useRef<boolean | null>(null)
   const lastDesktopNavStatus = useRef<DesktopPreviewTabState['navStatus'] | null>(null)
   useEffect(() =>
   {
     if (!bridge || typeof window === 'undefined') return
     lastReportedUrl.current = null
     lastReportedKind.current = null
+    lastReportedTitle.current = null
+    lastReportedCanGoBack.current = null
+    lastReportedCanGoForward.current = null
     lastDesktopNavStatus.current = null
     const unsubscribe = bridge.onStateChange((changedTabId, state) =>
     {
@@ -46,24 +53,30 @@ export function usePreviewBridge(input: { threadRef: ScopedThreadRef; tabId: str
         clearBrowserPointer(tabId)
       }
       lastDesktopNavStatus.current = state.navStatus
-      applyPreviewDesktopState(threadRef, tabId, projectDesktopState(state))
+      applyPreviewDesktopState({ environmentId, threadId }, tabId, projectDesktopState(state))
       const reported = buildReportInput({
-        threadId: threadRef.threadId,
+        threadId,
         tabId,
         state,
         lastReportedUrl: lastReportedUrl.current,
         lastReportedKind: lastReportedKind.current,
+        lastReportedTitle: lastReportedTitle.current,
+        lastReportedCanGoBack: lastReportedCanGoBack.current,
+        lastReportedCanGoForward: lastReportedCanGoForward.current,
       })
       if (!reported) return
       lastReportedUrl.current = reported.lastReportedUrl
       lastReportedKind.current = reported.lastReportedKind
+      lastReportedTitle.current = reported.lastReportedTitle
+      lastReportedCanGoBack.current = reported.lastReportedCanGoBack
+      lastReportedCanGoForward.current = reported.lastReportedCanGoForward
       void reportStatus({
-        environmentId: threadRef.environmentId,
+        environmentId,
         input: reported.input,
       })
     })
     return unsubscribe
-  }, [bridge, clearBrowserPointer, reportStatus, tabId, threadRef])
+  }, [bridge, clearBrowserPointer, environmentId, reportStatus, tabId, threadId])
 }
 
 function shouldClearBrowserPointer(
@@ -94,8 +107,7 @@ function projectDesktopState(state: DesktopPreviewTabState): DesktopPreviewOverl
 //
 // - Idle never reports — the tab is post-close or pre-load and the server
 //   already knows the canonical state from `open` / `closed`.
-// - We dedupe on (kind, url): consecutive Loading->Loading->Loading for the
-//   same URL collapses to a single RPC, ditto Success.
+// - We dedupe identical navigation, title, and history state.
 // - LoadFailed always reports (the server uses it to emit `failed`).
 function buildReportInput(args: {
   readonly threadId: ThreadId
@@ -103,13 +115,28 @@ function buildReportInput(args: {
   readonly state: DesktopPreviewTabState
   readonly lastReportedUrl: string | null
   readonly lastReportedKind: DesktopPreviewTabState['navStatus']['kind'] | null
+  readonly lastReportedTitle: string | null
+  readonly lastReportedCanGoBack: boolean | null
+  readonly lastReportedCanGoForward: boolean | null
 }): {
   readonly input: PreviewReportStatusInput
   readonly lastReportedUrl: string
   readonly lastReportedKind: DesktopPreviewTabState['navStatus']['kind']
+  readonly lastReportedTitle: string
+  readonly lastReportedCanGoBack: boolean
+  readonly lastReportedCanGoForward: boolean
 } | null
 {
-  const { threadId, tabId, state, lastReportedUrl, lastReportedKind } = args
+  const {
+    threadId,
+    tabId,
+    state,
+    lastReportedUrl,
+    lastReportedKind,
+    lastReportedTitle,
+    lastReportedCanGoBack,
+    lastReportedCanGoForward,
+  } = args
   const status = state.navStatus
   if (status.kind === 'Idle') return null
 
@@ -118,7 +145,10 @@ function buildReportInput(args: {
   const sameAsLast =
     status.kind !== 'LoadFailed' &&
     status.kind === lastReportedKind &&
-    status.url === lastReportedUrl
+    status.url === lastReportedUrl &&
+    status.title === lastReportedTitle &&
+    state.canGoBack === lastReportedCanGoBack &&
+    state.canGoForward === lastReportedCanGoForward
   if (sameAsLast) return null
 
   const base = {
@@ -142,6 +172,9 @@ function buildReportInput(args: {
       },
       lastReportedUrl: status.url,
       lastReportedKind: 'LoadFailed',
+      lastReportedTitle: status.title,
+      lastReportedCanGoBack: state.canGoBack,
+      lastReportedCanGoForward: state.canGoForward,
     }
   }
   return {
@@ -151,5 +184,8 @@ function buildReportInput(args: {
     },
     lastReportedUrl: status.url,
     lastReportedKind: status.kind,
+    lastReportedTitle: status.title,
+    lastReportedCanGoBack: state.canGoBack,
+    lastReportedCanGoForward: state.canGoForward,
   }
 }

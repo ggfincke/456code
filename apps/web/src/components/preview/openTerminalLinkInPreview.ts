@@ -6,6 +6,7 @@ import { isAtomCommandInterrupted } from '@t3tools/client-runtime/state/runtime'
 import { isPreviewableUrl } from '@t3tools/shared/preview'
 import * as Schema from 'effect/Schema'
 
+import { resolveBrowserNavigationTarget } from '~/browser/browserTargetResolver'
 import type { OpenPreviewMutation } from '~/browser/openFileInPreview'
 import { applyPreviewServerSnapshot, isPreviewSupportedInRuntime } from '~/previewStateStore'
 import { useRightPanelStore } from '~/rightPanelStore'
@@ -95,9 +96,28 @@ export async function openTerminalLinkInPreview<E>(
 
   if (choice === 'open-in-preview')
   {
+    let resolvedUrl: string
+    try
+    {
+      resolvedUrl = resolveBrowserNavigationTarget(input.threadRef.environmentId, {
+        kind: 'url',
+        url: input.url,
+      }).resolvedUrl
+    }
+    catch (cause)
+    {
+      console.error(
+        new TerminalLinkPreviewOpenError({
+          ...errorContext,
+          cause,
+        }),
+      )
+      input.fallbackToBrowser()
+      return
+    }
     const result = await input.openPreview({
       environmentId: input.threadRef.environmentId,
-      input: { threadId: input.threadRef.threadId, url: input.url },
+      input: { threadId: input.threadRef.threadId, url: resolvedUrl },
     })
     if (result._tag === 'Failure')
     {

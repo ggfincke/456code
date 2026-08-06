@@ -1,7 +1,7 @@
 // apps/mobile/src/features/layout/workspace-pane-divider.tsx
 // render workspace pane divider
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useState } from 'react'
 import {
   Platform,
   PlatformColor,
@@ -10,66 +10,26 @@ import {
   View,
   type AccessibilityActionEvent,
 } from 'react-native'
-import { Gesture, GestureDetector } from 'react-native-gesture-handler'
-import { runOnJS } from 'react-native-reanimated'
+import { GestureDetector, type GestureType } from 'react-native-gesture-handler'
 
 const ACCESSIBILITY_RESIZE_STEP = 24
 
 interface WorkspacePaneDividerProps
 {
   readonly accessibilityLabel: string
+  readonly active: boolean
   readonly currentWidth: number
-  // 1 when dragging right grows the pane, -1 when dragging left grows it.
-  readonly resizeDirection: 1 | -1
-  readonly onResizeStart?: () => void
+  readonly gesture: GestureType
   readonly onResizeBy: (delta: number) => void
-  readonly onResizeEnd?: () => void
 }
 
 // a forgiving divider target for touch, pointer, and VoiceOver users.
 export function WorkspacePaneDivider(props: WorkspacePaneDividerProps)
 {
-  const latestProps = useRef(props)
-  latestProps.current = props
   const [hovered, setHovered] = useState(false)
-  const [dragging, setDragging] = useState(false)
-  const handleResizeStart = useCallback(() =>
-  {
-    setDragging(true)
-    latestProps.current.onResizeStart?.()
-  }, [])
-  const handleResize = useCallback((translationX: number) =>
-  {
-    latestProps.current.onResizeBy(translationX * latestProps.current.resizeDirection)
-  }, [])
-  const handleResizeEnd = useCallback(() =>
-  {
-    setDragging(false)
-    latestProps.current.onResizeEnd?.()
-  }, [])
-  const resizeGesture = useMemo(
-    () =>
-      Gesture.Pan()
-        .activeOffsetX([-4, 4])
-        .failOffsetY([-24, 24])
-        .onStart(() =>
-        {
-          runOnJS(handleResizeStart)()
-        })
-        .onUpdate((event) =>
-        {
-          runOnJS(handleResize)(event.translationX)
-        })
-        .onFinalize(() =>
-        {
-          runOnJS(handleResizeEnd)()
-        }),
-    [handleResize, handleResizeEnd, handleResizeStart],
-  )
 
   const handleAccessibilityAction = (event: AccessibilityActionEvent) =>
   {
-    props.onResizeStart?.()
     if (event.nativeEvent.actionName === 'increment')
     {
       props.onResizeBy(ACCESSIBILITY_RESIZE_STEP)
@@ -78,11 +38,10 @@ export function WorkspacePaneDivider(props: WorkspacePaneDividerProps)
     {
       props.onResizeBy(-ACCESSIBILITY_RESIZE_STEP)
     }
-    props.onResizeEnd?.()
   }
 
   return (
-    <GestureDetector gesture={resizeGesture}>
+    <GestureDetector gesture={props.gesture}>
       <Pressable
         className="relative z-[100] -mx-[22px] w-11 self-stretch cursor-pointer justify-center"
         accessibilityActions={[
@@ -99,7 +58,7 @@ export function WorkspacePaneDivider(props: WorkspacePaneDividerProps)
         onHoverIn={() => setHovered(true)}
         onHoverOut={() => setHovered(false)}
       >
-        <View style={[styles.line, (hovered || dragging) && styles.activeLine]} />
+        <View style={[styles.line, (hovered || props.active) && styles.activeLine]} />
       </Pressable>
     </GestureDetector>
   )

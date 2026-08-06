@@ -1,5 +1,5 @@
 // apps/web/src/lib/threadSort.ts
-// resolve latest thread for project
+// provide the stable web facade for shared thread sort helpers
 
 export {
   getLatestThreadForProject,

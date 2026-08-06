@@ -752,7 +752,7 @@ async function warmMetroBundle(
   config: ShowcaseConfig,
 ): Promise<void>
 {
-  const url = `http://${host}:${config.metroPort}/apps/mobile/index.bundle?platform=${platform}&dev=true&minify=false`
+  const url = `http://${host}:${config.metroPort}/index.bundle?platform=${platform}&dev=true&minify=false`
   await runCommand('curl', ['--fail', '--silent', '--show-error', '--output', '/dev/null', url])
 }
 

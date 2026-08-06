@@ -50,9 +50,25 @@ export type ThreadOutboxEnvironmentCleanupResult =
 
 export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
 {
-  const queuedMessagesByThreadKeyAtom = Atom.make<
+  const storedMessagesByThreadKeyAtom = Atom.make<
     Record<string, ReadonlyArray<QueuedThreadMessage>>
-  >({}).pipe(Atom.keepAlive, Atom.withLabel('mobile:thread-outbox:queued-messages'))
+  >({}).pipe(Atom.keepAlive, Atom.withLabel('mobile:thread-outbox:stored-messages'))
+  const dispatchingMessageIdAtom = Atom.make<MessageId | null>(null).pipe(
+    Atom.keepAlive,
+    Atom.withLabel('mobile:thread-outbox:dispatching-message-id'),
+  )
+  const queuedMessagesByThreadKeyAtom = Atom.make((get) =>
+  {
+    const messagesByThreadKey = get(storedMessagesByThreadKeyAtom)
+    const dispatchingMessageId = get(dispatchingMessageIdAtom)
+    return dispatchingMessageId === null
+      ? messagesByThreadKey
+      : groupQueuedThreadMessages(
+          flattenQueuedThreadMessages(messagesByThreadKey).filter(
+            (message) => message.messageId !== dispatchingMessageId,
+          ),
+        )
+  }).pipe(Atom.withLabel('mobile:thread-outbox:queued-messages'))
   const warn =
     options.warn ??
     ((message: string, error: unknown) =>
@@ -75,11 +91,11 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
   }
 
   const currentMessages = (): ReadonlyArray<QueuedThreadMessage> =>
-    flattenQueuedThreadMessages(options.registry.get(queuedMessagesByThreadKeyAtom))
+    flattenQueuedThreadMessages(options.registry.get(storedMessagesByThreadKeyAtom))
 
   const setMessages = (messages: ReadonlyArray<QueuedThreadMessage>): void =>
   {
-    options.registry.set(queuedMessagesByThreadKeyAtom, groupQueuedThreadMessages(messages))
+    options.registry.set(storedMessagesByThreadKeyAtom, groupQueuedThreadMessages(messages))
   }
 
   const load = (): Promise<void> =>
@@ -160,6 +176,30 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
   // wait for pending writes before confirming delivery eligibility
   const confirmQueued = (message: QueuedThreadMessage): Promise<boolean> =>
     serialize(async () => currentMessages().some((candidate) => candidate === message))
+
+  // hide a claimed message from editors before dispatch begins.
+  const claimDelivery = (message: QueuedThreadMessage, canClaim: () => boolean): Promise<boolean> =>
+    serialize(async () =>
+    {
+      if (
+        options.registry.get(dispatchingMessageIdAtom) !== null ||
+        !currentMessages().some((candidate) => candidate === message) ||
+        !canClaim()
+      )
+      {
+        return false
+      }
+      options.registry.set(dispatchingMessageIdAtom, message.messageId)
+      return true
+    })
+
+  const releaseDelivery = (message: QueuedThreadMessage): void =>
+  {
+    if (options.registry.get(dispatchingMessageIdAtom) === message.messageId)
+    {
+      options.registry.set(dispatchingMessageIdAtom, null)
+    }
+  }
 
   // rewrites an already-queued message. A no-op when the message has been
   // removed in the meantime (e.g. deleted or delivered), so a trailing editor
@@ -294,10 +334,13 @@ export function createThreadOutboxManager(options: ThreadOutboxManagerOptions)
 
   return {
     queuedMessagesByThreadKeyAtom,
+    dispatchingMessageIdAtom,
     serialize,
     load,
     enqueue,
     confirmQueued,
+    claimDelivery,
+    releaseDelivery,
     update,
     remove,
     clearEnvironment,

@@ -74,7 +74,7 @@ import { useReviewCommentSelectionController } from './useReviewCommentSelection
 import { resolveReviewAvailability } from './reviewAvailability'
 import { resolveSelectedReviewFileId } from './reviewPaneSelection'
 import { buildReviewSectionMenu } from './review-section-menu'
-import type { ReviewSectionItem } from './reviewModel'
+import { getReviewFilePreviewState, type ReviewSectionItem } from './reviewModel'
 import { markNativeShowcaseReady } from '../showcase/nativeShowcaseScene'
 
 const REVIEW_HEADER_SPACING = 0
@@ -403,6 +403,9 @@ export function ReviewSheet(props: ReviewSheetProps)
       threadId,
       reviewCache,
     })
+  const revealedLargeFileIds = selectedSection?.id
+    ? (reviewCache.revealedLargeFileIdsBySection[selectedSection.id] ?? [])
+    : []
   useReviewDiffPrewarming({
     threadKey: reviewCache.threadKey,
     sections: reviewSections,
@@ -413,8 +416,9 @@ export function ReviewSheet(props: ReviewSheetProps)
       threadKey: reviewCache.threadKey,
       selectedSection,
       draftMessage,
+      revealedLargeFileIds,
     })
-  const NativeReviewDiffView = resolveNativeReviewDiffView()!
+  const NativeReviewDiffView = resolveNativeReviewDiffView()
   const nativeReviewDiffViewRef = useRef<NativeReviewDiffViewHandle>(null)
   const showcasedReviewDrawRef = useRef<string | null>(null)
   // native pull-to-refresh on the diff surface (replaces the old Refresh menu item).
@@ -440,11 +444,37 @@ export function ReviewSheet(props: ReviewSheetProps)
     cachedExpandedFileIds: selectedSection?.id
       ? reviewCache.expandedFileIdsBySection[selectedSection.id]
       : undefined,
+    cachedRevealedLargeFileIds: selectedSection?.id
+      ? reviewCache.revealedLargeFileIdsBySection[selectedSection.id]
+      : undefined,
     cachedViewedFileIds: selectedSection?.id
       ? reviewCache.viewedFileIdsBySection[selectedSection.id]
       : undefined,
   })
-  const { collapsedFileIds, toggleExpandedFile, toggleViewedFile, viewedFileIds } = fileVisibility
+  const {
+    collapsedFileIds,
+    revealLargeFile,
+    revealedLargeFileIds: validRevealedLargeFileIds,
+    toggleExpandedFile,
+    toggleViewedFile,
+    viewedFileIds,
+  } = fileVisibility
+  const suppressedLargeFiles = useMemo(() =>
+  {
+    if (parsedDiff.kind !== 'files')
+    {
+      return []
+    }
+    return parsedDiff.files.filter((file) =>
+    {
+      const previewState = getReviewFilePreviewState(file)
+      return (
+        previewState.kind === 'suppressed' &&
+        previewState.reason === 'large' &&
+        !validRevealedLargeFileIds.includes(file.id)
+      )
+    })
+  }, [parsedDiff, validRevealedLargeFileIds])
   const commentSelection = useReviewCommentSelectionController({
     environmentId,
     threadId,
@@ -639,7 +669,10 @@ export function ReviewSheet(props: ReviewSheetProps)
   // the changed-files navigator lives in the workspace inspector column —
   // the single right-hand pane per route — instead of an in-screen panel.
   const showChangedFilesPane =
-    !showConnectionNotice && selectedSection !== null && parsedDiff.kind === 'files'
+    NativeReviewDiffView !== null &&
+    !showConnectionNotice &&
+    selectedSection !== null &&
+    parsedDiff.kind === 'files'
   useRegisterWorkspaceInspector(showChangedFilesPane ? renderInspector : undefined)
 
   const listHeader = useMemo(() =>
@@ -661,13 +694,34 @@ export function ReviewSheet(props: ReviewSheetProps)
       children.push(<ReviewNotice key="review-notice" notice={parsedDiffNotice} />)
     }
 
+    for (const file of suppressedLargeFiles)
+    {
+      children.push(
+        <View key={`large-diff:${file.id}`} className="border-b border-border bg-card px-4 py-3">
+          <Text className="text-xs font-sans-bold text-foreground" numberOfLines={1}>
+            {file.path}
+          </Text>
+          <Text className="pt-1 text-xs leading-normal text-foreground-muted">
+            Large diffs are not rendered by default.
+          </Text>
+          <Pressable
+            accessibilityRole="button"
+            className="mt-2 self-start rounded-full bg-primary px-3 py-2"
+            onPress={() => revealLargeFile(file.id)}
+          >
+            <Text className="text-xs font-sans-bold text-primary-foreground">Load diff</Text>
+          </Pressable>
+        </View>,
+      )
+    }
+
     if (children.length === 0)
     {
       return null
     }
 
     return <>{children}</>
-  }, [error, parsedDiffNotice])
+  }, [error, parsedDiffNotice, revealLargeFile, suppressedLargeFiles])
   const headerSubtitle = [
     headerDiffSummary.additions,
     headerDiffSummary.deletions,
@@ -830,7 +884,7 @@ export function ReviewSheet(props: ReviewSheetProps)
               onRetry={handleRetryEnvironment}
             />
           </View>
-        ) : selectedSection && parsedDiff.kind === 'files' ? (
+        ) : selectedSection && parsedDiff.kind === 'files' && NativeReviewDiffView ? (
           <View
             className="flex-1"
             style={{
@@ -913,6 +967,17 @@ export function ReviewSheet(props: ReviewSheetProps)
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
                   <Text selectable className="font-mono text-xs leading-relaxed text-foreground">
                     {parsedDiff.text}
+                  </Text>
+                </ScrollView>
+              </View>
+            ) : parsedDiff.kind === 'files' ? (
+              <View className="gap-3 border-b border-border bg-card px-4 py-4">
+                <Text className="text-xs leading-normal text-foreground-muted">
+                  The native diff view is unavailable. Showing the raw diff instead.
+                </Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false}>
+                  <Text selectable className="font-mono text-xs leading-relaxed text-foreground">
+                    {selectedSection.diff ?? ''}
                   </Text>
                 </ScrollView>
               </View>

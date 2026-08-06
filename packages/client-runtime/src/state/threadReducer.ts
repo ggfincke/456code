@@ -557,21 +557,7 @@ export function applyThreadDetailEvent(
     }
 
     case 'thread.session-stop-requested':
-      return thread.session === null
-        ? { kind: 'unchanged' }
-        : {
-            kind: 'updated',
-            thread: {
-              ...thread,
-              session: {
-                ...thread.session,
-                status: 'stopped',
-                activeTurnId: null,
-                updatedAt: event.payload.createdAt,
-              },
-              updatedAt: event.occurredAt,
-            },
-          }
+      return { kind: 'unchanged' }
 
     // ── Proposed plans ──────────────────────────────────────────────
     case 'thread.proposed-plan-upserted':
@@ -655,9 +641,17 @@ export function applyThreadDetailEvent(
       )
 
       const retainedTurnIds = new Set(Arr.map(checkpoints, (entry) => entry.turnId))
-      const messages = retainMessagesAfterRevert(thread.messages, retainedTurnIds)
+      const messages = retainMessagesAfterRevert(
+        thread.messages,
+        retainedTurnIds,
+        event.payload.turnCount,
+      )
       const proposedPlans = pipe(
         thread.proposedPlans,
+        Arr.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId)),
+      )
+      const orchestratePlans = pipe(
+        thread.orchestratePlans,
         Arr.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId)),
       )
       const activities = pipe(
@@ -673,6 +667,7 @@ export function applyThreadDetailEvent(
           checkpoints,
           messages,
           proposedPlans,
+          orchestratePlans,
           activities,
           latestTurn:
             latestCheckpoint === null
@@ -755,37 +750,39 @@ export function applyThreadDetailEvent(
     // ── Orchestrate plans ───────────────────────────────────────────
     // mirror the server projection so live subscribers see plan revisions
     // and status flips without waiting for a fresh snapshot
-    case "thread.orchestrate-plan-upserted": {
-      const incoming = event.payload.plan;
+    case 'thread.orchestrate-plan-upserted':
+    {
+      const incoming = event.payload.plan
       const orchestratePlans = pipe(
         thread.orchestratePlans,
         Arr.filter(
           (plan) => !(plan.runId === incoming.runId && plan.revision === incoming.revision),
         ),
         Arr.map((plan) =>
-          plan.runId === incoming.runId && plan.status === "pending"
-            ? { ...plan, status: "superseded" as const, updatedAt: event.occurredAt }
+          plan.runId === incoming.runId && plan.status === 'pending'
+            ? { ...plan, status: 'superseded' as const, updatedAt: event.occurredAt }
             : plan,
         ),
         Arr.append(incoming),
-      );
+      )
       return {
-        kind: "updated",
+        kind: 'updated',
         thread: { ...thread, orchestratePlans, updatedAt: event.occurredAt },
-      };
+      }
     }
-    case "thread.orchestrate-plan-response-requested": {
-      if (event.payload.decision === "discuss") return { kind: "unchanged" };
-      const nextStatus = event.payload.decision === "approve" ? "approved" : "rejected";
+    case 'thread.orchestrate-plan-response-requested':
+    {
+      if (event.payload.decision === 'discuss') return { kind: 'unchanged' }
+      const nextStatus = event.payload.decision === 'approve' ? 'approved' : 'rejected'
       const orchestratePlans = thread.orchestratePlans.map((plan) =>
         plan.runId === event.payload.runId && plan.revision === event.payload.revision
-          ? { ...plan, status: nextStatus as "approved" | "rejected", updatedAt: event.occurredAt }
+          ? { ...plan, status: nextStatus as 'approved' | 'rejected', updatedAt: event.occurredAt }
           : plan,
-      );
+      )
       return {
-        kind: "updated",
+        kind: 'updated',
         thread: { ...thread, orchestratePlans, updatedAt: event.occurredAt },
-      };
+      }
     }
 
     // ── Events that don't mutate thread state directly ──────────────
@@ -834,7 +831,7 @@ function checkpointStatusToTurnState(
     case 'error':
       return 'error'
     case 'missing':
-      return 'completed'
+      return 'interrupted'
   }
 }
 
@@ -852,20 +849,49 @@ function rebindCheckpointAssistantMessage(
 function retainMessagesAfterRevert(
   messages: ReadonlyArray<OrchestrationMessage>,
   retainedTurnIds: ReadonlySet<string>,
+  turnCount: number,
 ): OrchestrationMessage[]
 {
-  // keep messages that belong to a retained turn, plus system messages and
-  // messages without a turn binding (pre-turn-0 user messages).
-  return Arr.filter(messages, (message) =>
+  const retainedMessageIds = new Set<MessageId>()
+  for (const message of messages)
   {
-    if (message.role === 'system')
+    if (
+      message.role === 'system' ||
+      (message.turnId !== null && retainedTurnIds.has(message.turnId))
+    )
     {
-      return true
+      retainedMessageIds.add(message.id)
     }
-    if (message.turnId === null)
+  }
+
+  for (const role of ['user', 'assistant'] as const)
+  {
+    const retainedCount = messages.filter(
+      (message) => message.role === role && retainedMessageIds.has(message.id),
+    ).length
+    const missingCount = Math.max(0, turnCount - retainedCount)
+    if (missingCount === 0)
     {
-      return true
+      continue
     }
-    return retainedTurnIds.has(message.turnId)
-  })
+
+    const fallbackMessages = messages
+      .filter(
+        (message) =>
+          message.role === role &&
+          !retainedMessageIds.has(message.id) &&
+          (message.turnId === null || retainedTurnIds.has(message.turnId)),
+      )
+      .toSorted(
+        (left, right) =>
+          left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
+      )
+      .slice(0, missingCount)
+    for (const message of fallbackMessages)
+    {
+      retainedMessageIds.add(message.id)
+    }
+  }
+
+  return messages.filter((message) => retainedMessageIds.has(message.id))
 }

@@ -22,6 +22,8 @@ import type { ReviewSectionItem } from './reviewModel'
 
 interface PendingNativeCommentSelection extends NativeReviewDiffCommentTarget
 {
+  readonly environmentId: EnvironmentId
+  readonly threadId: ThreadId
   readonly sectionId: string
   readonly sectionTitle: string
   readonly rowId: string
@@ -39,6 +41,20 @@ export function useReviewCommentSelectionController(input: {
   const activeCommentTarget = useReviewCommentTarget()
   const [pendingNativeCommentSelection, setPendingNativeCommentSelection] =
     useState<PendingNativeCommentSelection | null>(null)
+  const activeRouteCommentTarget =
+    activeCommentTarget &&
+    activeCommentTarget.environmentId === environmentId &&
+    activeCommentTarget.threadId === threadId &&
+    activeCommentTarget.sectionId === selectedSection?.id
+      ? activeCommentTarget
+      : null
+  const pendingRouteCommentSelection =
+    pendingNativeCommentSelection &&
+    pendingNativeCommentSelection.environmentId === environmentId &&
+    pendingNativeCommentSelection.threadId === threadId &&
+    pendingNativeCommentSelection.sectionId === selectedSection?.id
+      ? pendingNativeCommentSelection
+      : null
 
   const openReviewCommentSheet = useCallback(() =>
   {
@@ -56,13 +72,12 @@ export function useReviewCommentSelectionController(input: {
   const selectedRowIds = useMemo(() =>
   {
     if (
-      activeCommentTarget &&
-      activeCommentTarget.sectionTitle === selectedSection?.title &&
-      activeCommentTarget.startIndex !== activeCommentTarget.endIndex
+      activeRouteCommentTarget &&
+      activeRouteCommentTarget.startIndex !== activeRouteCommentTarget.endIndex
     )
     {
       return pipe(
-        getSelectedReviewCommentLines(activeCommentTarget),
+        getSelectedReviewCommentLines(activeRouteCommentTarget),
         Arr.filterMap((line) =>
         {
           const rowId = nativeReviewDiffData.rowIdByCommentLineId.get(line.id)
@@ -71,32 +86,27 @@ export function useReviewCommentSelectionController(input: {
       )
     }
 
-    return pendingNativeCommentSelection ? [pendingNativeCommentSelection.rowId] : []
+    return pendingRouteCommentSelection ? [pendingRouteCommentSelection.rowId] : []
   }, [
-    activeCommentTarget,
+    activeRouteCommentTarget,
     nativeReviewDiffData.rowIdByCommentLineId,
-    pendingNativeCommentSelection,
-    selectedSection?.title,
+    pendingRouteCommentSelection,
   ])
 
   const selectionAction = useMemo(() =>
   {
     if (
-      activeCommentTarget &&
-      activeCommentTarget.sectionTitle === selectedSection?.title &&
-      activeCommentTarget.startIndex !== activeCommentTarget.endIndex
+      activeRouteCommentTarget &&
+      activeRouteCommentTarget.startIndex !== activeRouteCommentTarget.endIndex
     )
     {
       return {
-        title: `Comment on ${formatReviewSelectedRangeLabel(activeCommentTarget)}`,
+        title: `Comment on ${formatReviewSelectedRangeLabel(activeRouteCommentTarget)}`,
         onOpenComment: openReviewCommentSheet,
       }
     }
 
-    if (
-      pendingNativeCommentSelection &&
-      pendingNativeCommentSelection.sectionTitle === selectedSection?.title
-    )
+    if (pendingRouteCommentSelection)
     {
       return {
         title: 'Select range end',
@@ -105,18 +115,13 @@ export function useReviewCommentSelectionController(input: {
     }
 
     return null
-  }, [
-    activeCommentTarget,
-    openReviewCommentSheet,
-    pendingNativeCommentSelection,
-    selectedSection?.title,
-  ])
+  }, [activeRouteCommentTarget, openReviewCommentSheet, pendingRouteCommentSelection])
 
   useEffect(() =>
   {
     clearReviewCommentTarget()
     setPendingNativeCommentSelection(null)
-  }, [selectedSection?.id])
+  }, [environmentId, selectedSection?.id, threadId])
 
   useEffect(() =>
   {
@@ -134,7 +139,7 @@ export function useReviewCommentSelectionController(input: {
       }>,
     ) =>
     {
-      if (!selectedSection)
+      if (!environmentId || !selectedSection || !threadId)
       {
         return
       }
@@ -156,6 +161,8 @@ export function useReviewCommentSelectionController(input: {
         clearReviewCommentTarget()
         setPendingNativeCommentSelection({
           ...target,
+          environmentId,
+          threadId,
           sectionId: selectedSection.id,
           sectionTitle: selectedSection.title,
           rowId,
@@ -164,20 +171,21 @@ export function useReviewCommentSelectionController(input: {
       }
 
       if (
-        pendingNativeCommentSelection &&
-        pendingNativeCommentSelection.sectionTitle === selectedSection.title &&
-        pendingNativeCommentSelection.filePath === target.filePath
+        pendingRouteCommentSelection &&
+        pendingRouteCommentSelection.filePath === target.filePath
       )
       {
         setReviewCommentTarget(
           buildReviewCommentTarget(
             {
-              sectionTitle: pendingNativeCommentSelection.sectionTitle,
-              sectionId: pendingNativeCommentSelection.sectionId,
-              filePath: pendingNativeCommentSelection.filePath,
-              lines: pendingNativeCommentSelection.lines,
+              environmentId: pendingRouteCommentSelection.environmentId,
+              threadId: pendingRouteCommentSelection.threadId,
+              sectionTitle: pendingRouteCommentSelection.sectionTitle,
+              sectionId: pendingRouteCommentSelection.sectionId,
+              filePath: pendingRouteCommentSelection.filePath,
+              lines: pendingRouteCommentSelection.lines,
             },
-            pendingNativeCommentSelection.lineIndex,
+            pendingRouteCommentSelection.lineIndex,
             target.lineIndex,
           ),
         )
@@ -186,6 +194,8 @@ export function useReviewCommentSelectionController(input: {
 
       setPendingNativeCommentSelection(null)
       setReviewCommentTarget({
+        environmentId,
+        threadId,
         sectionTitle: selectedSection.title,
         sectionId: selectedSection.id,
         filePath: target.filePath,
@@ -197,9 +207,11 @@ export function useReviewCommentSelectionController(input: {
     },
     [
       nativeReviewDiffData.commentTargetsByRowId,
+      environmentId,
       openReviewCommentSheet,
-      pendingNativeCommentSelection,
+      pendingRouteCommentSelection,
       selectedSection,
+      threadId,
     ],
   )
 
