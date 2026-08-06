@@ -12,6 +12,8 @@ import {
   ThreadRuntimeModeSetPayload as ContractsThreadRuntimeModeSetPayloadSchema,
   ThreadInteractionModeSetPayload as ContractsThreadInteractionModeSetPayloadSchema,
   ThreadProviderSwitchRequestedPayload as ContractsThreadProviderSwitchRequestedPayloadSchema,
+  ThreadProviderSwitchProgressedPayload as ContractsThreadProviderSwitchProgressedPayloadSchema,
+  ThreadProviderSwitchFailedPayload as ContractsThreadProviderSwitchFailedPayloadSchema,
   ThreadProviderSwitchedPayload as ContractsThreadProviderSwitchedPayloadSchema,
   ThreadHandoffClearedPayload as ContractsThreadHandoffClearedPayloadSchema,
   ThreadDeletedPayload as ContractsThreadDeletedPayloadSchema,
@@ -32,7 +34,7 @@ import {
   ThreadSessionStopRequestedPayload as ContractsThreadSessionStopRequestedPayloadSchema,
 } from '@t3tools/contracts'
 
-// Server-internal alias surface, backed by contract schemas as the source of truth.
+// server-internal alias surface, backed by contract schemas as the source of truth.
 export const ProjectCreatedPayload = ContractsProjectCreatedPayloadSchema
 export const ProjectMetaUpdatedPayload = ContractsProjectMetaUpdatedPayloadSchema
 export const ProjectDeletedPayload = ContractsProjectDeletedPayloadSchema
@@ -45,6 +47,9 @@ export const ThreadRuntimeModeSetPayload = ContractsThreadRuntimeModeSetPayloadS
 export const ThreadInteractionModeSetPayload = ContractsThreadInteractionModeSetPayloadSchema
 export const ThreadProviderSwitchRequestedPayload =
   ContractsThreadProviderSwitchRequestedPayloadSchema
+export const ThreadProviderSwitchProgressedPayload =
+  ContractsThreadProviderSwitchProgressedPayloadSchema
+export const ThreadProviderSwitchFailedPayload = ContractsThreadProviderSwitchFailedPayloadSchema
 export const ThreadProviderSwitchedPayload = ContractsThreadProviderSwitchedPayloadSchema
 export const ThreadHandoffClearedPayload = ContractsThreadHandoffClearedPayloadSchema
 export const ThreadDeletedPayload = ContractsThreadDeletedPayloadSchema

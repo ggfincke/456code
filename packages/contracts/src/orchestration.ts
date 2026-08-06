@@ -118,28 +118,26 @@ export const ProviderSandboxMode = Schema.Literals([
 ])
 export type ProviderSandboxMode = typeof ProviderSandboxMode.Type
 
-/**
- * `ModelSelection` — selection of a model on a configured provider instance.
- *
- * The routing key is `instanceId` (a user-defined slug identifying one
- * configured provider instance). Drivers, credentials, working-directory
- * bindings, and any other per-instance state are recovered from the
- * runtime registry via the instance id.
- *
- * Wire legacy: persisted selections produced before the driver/instance
- * split carried a `provider: <driver-id>` field instead. The schema absorbs
- * that shape via a pre-decoding transform — `{provider, model}` is promoted
- * to `{instanceId: defaultInstanceIdForDriver(provider), model}`. No
- * post-decode compatibility code lives in the runtime; the transform is the
- * only compat surface.
- */
+// `ModelSelection` — selection of a model on a configured provider instance.
+//
+// the routing key is `instanceId` (a user-defined slug identifying one
+// configured provider instance). Drivers, credentials, working-directory
+// bindings, and any other per-instance state are recovered from the
+// runtime registry via the instance id.
+//
+// wire legacy: persisted selections produced before the driver/instance
+// split carried a `provider: <driver-id>` field instead. The schema absorbs
+// that shape via a pre-decoding transform — `{provider, model}` is promoted
+// to `{instanceId: defaultInstanceIdForDriver(provider), model}`. No
+// post-decode compatibility code lives in the runtime; the transform is the
+// only compat surface.
 const ModelSelectionWire = Schema.Struct({
   instanceId: ProviderInstanceId,
   model: TrimmedNonEmptyString,
   options: Schema.optionalKey(ProviderOptionSelections),
 })
 
-// Source shape for persisted legacy payloads. Fields are typed as
+// source shape for persisted legacy payloads. Fields are typed as
 // `Schema.Unknown` so malformed drafts still make it into the transform and
 // fail validation through the target schema (with proper error messages)
 // rather than at the source-struct layer where the error is less actionable.
@@ -156,7 +154,7 @@ export const ModelSelection = ModelSelectionSource.pipe(
     SchemaTransformation.transformOrFail({
       decode: (raw) =>
       {
-        // Resolve the routing key: prefer an explicit `instanceId`; fall
+        // resolve the routing key: prefer an explicit `instanceId`; fall
         // back to promoting the legacy `provider` slug (the canonical
         // `defaultInstanceIdForDriver` mapping) so persisted rollout-era
         // payloads decode without data loss. The target schema brands the
@@ -218,7 +216,7 @@ export const PROVIDER_SEND_TURN_MAX_ATTACHMENTS = 8
 export const PROVIDER_SEND_TURN_MAX_IMAGE_BYTES = 10 * 1024 * 1024
 const PROVIDER_SEND_TURN_MAX_IMAGE_DATA_URL_CHARS = 14_000_000
 const CHAT_ATTACHMENT_ID_MAX_CHARS = 128
-// Correlation id is command id by design in this model.
+// correlation id is command id by design in this model.
 export const CorrelationId = CommandId
 export type CorrelationId = typeof CorrelationId.Type
 
@@ -269,16 +267,12 @@ export const ProjectScript = Schema.Struct({
   command: TrimmedNonEmptyString,
   icon: ProjectScriptIcon,
   runOnWorktreeCreate: Schema.Boolean,
-  /**
-   * URL to open in the in-app browser preview when this script runs (or
-   * when the user explicitly requests a preview). Optional; only honored on
-   * the desktop build.
-   */
+  // URL to open in the in-app browser preview when this script runs (or
+  // when the user explicitly requests a preview). Optional; only honored on
+  // the desktop build.
   previewUrl: Schema.optional(TrimmedNonEmptyString),
-  /**
-   * When true, automatically open the preview panel pointed at `previewUrl`
-   * the moment this script starts. Ignored without `previewUrl` or on web.
-   */
+  // when true, automatically open the preview panel pointed at `previewUrl`
+  // the moment this script starts. Ignored without `previewUrl` or on web.
   autoOpenPreview: Schema.optional(Schema.Boolean),
 })
 export type ProjectScript = typeof ProjectScript.Type
@@ -424,6 +418,48 @@ export const OrchestrationPendingHandoff = Schema.Struct({
 })
 export type OrchestrationPendingHandoff = typeof OrchestrationPendingHandoff.Type
 
+export const OrchestrationProviderSwitch = Schema.Struct({
+  phase: Schema.Literals(['pending', 'compacting', 'finalizing']),
+  targetInstanceId: ProviderInstanceId,
+  targetModel: Schema.NullOr(TrimmedNonEmptyString),
+  requestedAt: IsoDateTime,
+  requestId: Schema.optional(EventId),
+  requestSequence: Schema.optional(NonNegativeInt),
+  sourceModelSelection: Schema.optional(ModelSelection),
+})
+export type OrchestrationProviderSwitch = typeof OrchestrationProviderSwitch.Type
+
+// approval outcome lifecycle: user intent (responding) is distinct from provider
+// acceptance; only provider evidence or explicit stale classification closes an
+// approval. legacy pending|resolved rows remain the compatibility surface.
+export const ApprovalOutcomeStatus = Schema.Literals([
+  'pending',
+  'responding',
+  'accepted',
+  'stale-terminal',
+  'unknown',
+])
+export type ApprovalOutcomeStatus = typeof ApprovalOutcomeStatus.Type
+
+export const ApprovalAcceptanceEvidence = Schema.Struct({
+  providerEventId: Schema.optional(Schema.String),
+  provider: Schema.optional(Schema.String),
+  providerRequestId: Schema.optional(Schema.String),
+})
+export type ApprovalAcceptanceEvidence = typeof ApprovalAcceptanceEvidence.Type
+
+export const ApprovalOutcome = Schema.Struct({
+  requestId: ApprovalRequestId,
+  status: ApprovalOutcomeStatus,
+  requestedDecision: Schema.optional(ProviderApprovalDecision),
+  decision: Schema.optional(Schema.NullOr(ProviderApprovalDecision)),
+  detail: Schema.optional(Schema.String),
+  actionId: Schema.optional(Schema.String),
+  acceptanceEvidence: Schema.optional(ApprovalAcceptanceEvidence),
+  updatedAt: IsoDateTime,
+})
+export type ApprovalOutcome = typeof ApprovalOutcome.Type
+
 export const OrchestrationThread = Schema.Struct({
   id: ThreadId,
   projectId: ProjectId,
@@ -437,6 +473,9 @@ export const OrchestrationThread = Schema.Struct({
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
   pendingHandoff: Schema.optional(Schema.NullOr(OrchestrationPendingHandoff)),
+  providerSwitch: Schema.NullOr(OrchestrationProviderSwitch).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -445,10 +484,10 @@ export const OrchestrationThread = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
   settledAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
-  // Snooze is an overlay on the active lifecycle, not a fourth destination:
+  // snooze is an overlay on the active lifecycle, not a fourth destination:
   // a snoozed thread stays "active" in the model and is only suppressed from
   // the inbox until snoozedUntil passes (or the thread raises its hand).
-  // Optional so payloads from pre-snooze servers still decode.
+  // optional so payloads from pre-snooze servers still decode.
   snoozedUntil: Schema.optional(Schema.NullOr(IsoDateTime)),
   snoozedAt: Schema.optional(Schema.NullOr(IsoDateTime)),
   deletedAt: Schema.NullOr(IsoDateTime),
@@ -459,6 +498,8 @@ export const OrchestrationThread = Schema.Struct({
   activities: Schema.Array(OrchestrationThreadActivity),
   checkpoints: Schema.Array(OrchestrationCheckpointSummary),
   session: Schema.NullOr(OrchestrationSession),
+  // optional so payloads from pre-outcome servers still decode
+  approvalOutcomes: Schema.optional(Schema.Array(ApprovalOutcome)),
 })
 export type OrchestrationThread = typeof OrchestrationThread.Type
 
@@ -494,6 +535,9 @@ export const OrchestrationThreadShell = Schema.Struct({
   branch: Schema.NullOr(TrimmedNonEmptyString),
   worktreePath: Schema.NullOr(TrimmedNonEmptyString),
   latestTurn: Schema.NullOr(OrchestrationLatestTurn),
+  providerSwitch: Schema.NullOr(OrchestrationProviderSwitch).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   createdAt: IsoDateTime,
   updatedAt: IsoDateTime,
   archivedAt: Schema.NullOr(IsoDateTime).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -509,6 +553,8 @@ export const OrchestrationThreadShell = Schema.Struct({
   hasPendingApprovals: Schema.Boolean,
   hasPendingUserInput: Schema.Boolean,
   hasActionableProposedPlan: Schema.Boolean,
+  // optional so payloads from pre-outcome servers still decode
+  approvalOutcomes: Schema.optional(Schema.Array(ApprovalOutcome)),
 })
 export type OrchestrationThreadShell = typeof OrchestrationThreadShell.Type
 
@@ -557,37 +603,29 @@ export const OrchestrationShellStreamItem = Schema.Union([
 export type OrchestrationShellStreamItem = typeof OrchestrationShellStreamItem.Type
 
 export const OrchestrationSubscribeShellInput = Schema.Struct({
-  /**
-   * When provided, the server skips the initial full shell snapshot and instead
-   * replays shell events after this sequence before streaming live events.
-   * Clients that already hold a cached (or HTTP-loaded) shell snapshot pass its
-   * sequence here so the subscription resumes without re-sending the entire
-   * projects/threads list (overlapping events are deduped by sequence on the
-   * client).
-   */
+  // when provided, the server skips the initial full shell snapshot and instead
+  // replays shell events after this sequence before streaming live events.
+  // clients that already hold a cached (or HTTP-loaded) shell snapshot pass its
+  // sequence here so the subscription resumes without re-sending the entire
+  // projects/threads list (overlapping events are deduped by sequence on the
+  // client).
   afterSequence: Schema.optionalKey(NonNegativeInt),
-  /**
-   * Requests an explicit marker after the subscription has emitted its initial
-   * snapshot or catch-up replay and before it begins emitting live events.
-   */
+  // requests an explicit marker after the subscription has emitted its initial
+  // snapshot or catch-up replay and before it begins emitting live events.
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
 })
 export type OrchestrationSubscribeShellInput = typeof OrchestrationSubscribeShellInput.Type
 
 export const OrchestrationSubscribeThreadInput = Schema.Struct({
   threadId: ThreadId,
-  /**
-   * When provided, the server skips the initial snapshot frame and instead
-   * replays events after this sequence before streaming live events. Clients
-   * that load the snapshot over HTTP pass the snapshot's sequence here so the
-   * live subscription resumes without a gap (overlapping events are deduped by
-   * sequence on the client).
-   */
+  // when provided, the server skips the initial snapshot frame and instead
+  // replays events after this sequence before streaming live events. Clients
+  // that load the snapshot over HTTP pass the snapshot's sequence here so the
+  // live subscription resumes without a gap (overlapping events are deduped by
+  // sequence on the client).
   afterSequence: Schema.optionalKey(NonNegativeInt),
-  /**
-   * Requests an explicit marker after the subscription has emitted its initial
-   * snapshot or catch-up replay and before it begins emitting live events.
-   */
+  // requests an explicit marker after the subscription has emitted its initial
+  // snapshot or catch-up replay and before it begins emitting live events.
   requestCompletionMarker: Schema.optionalKey(Schema.Boolean),
 })
 export type OrchestrationSubscribeThreadInput = typeof OrchestrationSubscribeThreadInput.Type
@@ -687,7 +725,7 @@ const ThreadUnsettleCommand = Schema.Struct({
   type: Schema.Literal('thread.unsettle'),
   commandId: CommandId,
   threadId: ThreadId,
-  // Commands only carry "user": activity un-settles are decided server-side
+  // commands only carry "user": activity un-settles are decided server-side
   // (the decider emits thread.unsettled(reason: "activity") events directly,
   // never through this command), so a client cannot forge the neutral reset.
   reason: Schema.Literal('user'),
@@ -697,7 +735,7 @@ const ThreadSnoozeCommand = Schema.Struct({
   type: Schema.Literal('thread.snooze'),
   commandId: CommandId,
   threadId: ThreadId,
-  // The wake time. Event-based wake conditions (PR merged, review posted)
+  // the wake time. Event-based wake conditions (PR merged, review posted)
   // will arrive as an optional condition field alongside this; time-based
   // snooze is just the first kind of condition.
   snoozedUntil: IsoDateTime,
@@ -707,7 +745,7 @@ const ThreadUnsnoozeCommand = Schema.Struct({
   type: Schema.Literal('thread.unsnooze'),
   commandId: CommandId,
   threadId: ThreadId,
-  // Commands only carry "user": activity wakes are decided server-side (the
+  // commands only carry "user": activity wakes are decided server-side (the
   // decider emits thread.unsnoozed(reason: "activity") directly), and timer
   // wakes need no event at all — clients derive visibility from snoozedUntil,
   // so a passed wake time simply stops classifying as snoozed.
@@ -746,7 +784,7 @@ export const ThreadProviderSwitchCommand = Schema.Struct({
   commandId: CommandId,
   threadId: ThreadId,
   targetModelSelection: ModelSelection,
-  expectedCurrentInstanceId: Schema.optional(ProviderInstanceId),
+  expectedCurrentInstanceId: ProviderInstanceId,
 })
 export type ThreadProviderSwitchCommand = typeof ThreadProviderSwitchCommand.Type
 
@@ -918,10 +956,34 @@ const ThreadSessionSetCommand = Schema.Struct({
   createdAt: IsoDateTime,
 })
 
+const ThreadProviderSwitchProgressCommand = Schema.Struct({
+  type: Schema.Literal('thread.provider.switch.progress'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  expectedRequestedAt: Schema.optional(IsoDateTime),
+  phase: Schema.Literals(['compacting', 'finalizing']),
+})
+
+const ThreadProviderSwitchFailCommand = Schema.Struct({
+  type: Schema.Literal('thread.provider.switch.fail'),
+  commandId: CommandId,
+  threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  expectedRequestedAt: Schema.optional(IsoDateTime),
+  sourceModelSelection: Schema.optional(ModelSelection),
+  targetModelSelection: Schema.optional(ModelSelection),
+  reasonCode: TrimmedNonEmptyString,
+  detail: Schema.String,
+})
+
 export const ThreadProviderSwitchCompleteCommand = Schema.Struct({
   type: Schema.Literal('thread.provider.switch.complete'),
   commandId: CommandId,
   threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  expectedRequestedAt: Schema.optional(IsoDateTime),
+  sourceModelSelection: Schema.optional(ModelSelection),
   modelSelection: ModelSelection,
   fromInstanceId: Schema.NullOr(ProviderInstanceId),
   handoffText: Schema.String,
@@ -1012,6 +1074,8 @@ const ThreadRevertCompleteCommand = Schema.Struct({
 
 const InternalOrchestrationCommand = Schema.Union([
   ThreadSessionSetCommand,
+  ThreadProviderSwitchProgressCommand,
+  ThreadProviderSwitchFailCommand,
   ThreadProviderSwitchCompleteCommand,
   ThreadHandoffClearCommand,
   ThreadMessageAssistantDeltaCommand,
@@ -1046,6 +1110,8 @@ export const OrchestrationEventType = Schema.Literals([
   'thread.runtime-mode-set',
   'thread.interaction-mode-set',
   'thread.provider-switch-requested',
+  'thread.provider-switch-progressed',
+  'thread.provider-switch-failed',
   'thread.provider-switched',
   'thread.handoff-cleared',
   'thread.message-sent',
@@ -1181,10 +1247,33 @@ export const ThreadProviderSwitchRequestedPayload = Schema.Struct({
   threadId: ThreadId,
   targetModelSelection: ModelSelection,
   expectedCurrentInstanceId: Schema.NullOr(ProviderInstanceId),
+  sourceModelSelection: Schema.optional(ModelSelection),
 })
 export type ThreadProviderSwitchRequestedPayload = typeof ThreadProviderSwitchRequestedPayload.Type
 
+export const ThreadProviderSwitchProgressedPayload = Schema.Struct({
+  threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  phase: Schema.Literals(['compacting', 'finalizing']),
+})
+export type ThreadProviderSwitchProgressedPayload =
+  typeof ThreadProviderSwitchProgressedPayload.Type
+
+export const ThreadProviderSwitchFailedPayload = Schema.Struct({
+  threadId: ThreadId,
+  requestId: Schema.optional(EventId),
+  sourceModelSelection: Schema.optional(ModelSelection),
+  targetModelSelection: Schema.optional(ModelSelection),
+  activityVersion: Schema.optional(Schema.Literal(1)),
+  reasonCode: TrimmedNonEmptyString,
+  detail: Schema.String,
+})
+export type ThreadProviderSwitchFailedPayload = typeof ThreadProviderSwitchFailedPayload.Type
+
 export const ThreadProviderSwitchedPayload = Schema.Struct({
+  requestId: Schema.optional(EventId),
+  sourceModelSelection: Schema.optional(ModelSelection),
+  activityVersion: Schema.optional(Schema.Literal(1)),
   modelSelection: ModelSelection,
   fromInstanceId: Schema.NullOr(ProviderInstanceId),
   fromModel: Schema.optional(TrimmedNonEmptyString),
@@ -1238,6 +1327,8 @@ export const ThreadApprovalResponseRequestedPayload = Schema.Struct({
   requestId: ApprovalRequestId,
   decision: ProviderApprovalDecision,
   createdAt: IsoDateTime,
+  // additive: live clients can render responding state without waiting for projection
+  approvalOutcome: Schema.optional(ApprovalOutcome),
 })
 
 const ThreadUserInputResponseRequestedPayload = Schema.Struct({
@@ -1310,7 +1401,7 @@ const EventBaseFields = {
   metadata: OrchestrationEventMetadata,
 } as const
 
-export const OrchestrationEvent = Schema.Union([
+const knownOrchestrationEventMembers = [
   Schema.Struct({
     ...EventBaseFields,
     type: Schema.Literal('project.created'),
@@ -1388,6 +1479,16 @@ export const OrchestrationEvent = Schema.Union([
   }),
   Schema.Struct({
     ...EventBaseFields,
+    type: Schema.Literal('thread.provider-switch-progressed'),
+    payload: ThreadProviderSwitchProgressedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
+    type: Schema.Literal('thread.provider-switch-failed'),
+    payload: ThreadProviderSwitchFailedPayload,
+  }),
+  Schema.Struct({
+    ...EventBaseFields,
     type: Schema.Literal('thread.provider-switched'),
     payload: ThreadProviderSwitchedPayload,
   }),
@@ -1456,6 +1557,94 @@ export const OrchestrationEvent = Schema.Union([
     type: Schema.Literal('thread.activity-appended'),
     payload: ThreadActivityAppendedPayload,
   }),
+] as const
+
+type KnownOrchestrationEventType = (typeof knownOrchestrationEventMembers)[number]['Type']['type']
+
+// wire tolerance: the event union used to be closed, so an event type added by
+// a newer server failed the whole batch decode on older clients — RpcClient
+// decodes stream chunks behind Effect.orDie, so one unknown event killed the
+// thread subscription fiber with no retry — and blocked event-store replay on
+// downgraded servers. Unknown types now decode into a sentinel member that
+// consumers ignore through their existing forward-compatible defaults. The
+// sentinel keeps a distinct literal `type` so discriminated narrowing over the
+// known members is unaffected, and it encodes back to the original wire shape
+// losslessly.
+// * known types with malformed payloads still fail loudly: the sentinel's
+//   source filter rejects every type in the known list.
+export const UNKNOWN_ORCHESTRATION_EVENT_TYPE = 'orchestration.unknown-event'
+
+// compile-time drift guards: `OrchestrationEventType`'s literal list and the
+// union's members must stay in lockstep in both directions
+type EventTypeMissingFromLiterals = Exclude<KnownOrchestrationEventType, OrchestrationEventType>
+type LiteralMissingFromUnion = Exclude<OrchestrationEventType, KnownOrchestrationEventType>
+const _orchestrationEventTypeListsMatch: [
+  EventTypeMissingFromLiterals | LiteralMissingFromUnion,
+] extends [never]
+  ? true
+  : never = true
+void _orchestrationEventTypeListsMatch
+
+const KNOWN_ORCHESTRATION_EVENT_TYPES: ReadonlySet<string> = new Set(
+  OrchestrationEventType.literals,
+)
+
+const unknownOrchestrationEventTypeFilter = Schema.makeFilter(
+  (type: string) =>
+    !KNOWN_ORCHESTRATION_EVENT_TYPES.has(type) ||
+    'Known event types must decode through their own union member.',
+)
+
+// source shape mirrors EventBaseFields loosely (like ModelSelectionSource) so
+// base-field validation happens once, in the sentinel target, with actionable
+// errors
+const UnknownOrchestrationEventSource = Schema.Struct({
+  sequence: Schema.Unknown,
+  eventId: Schema.Unknown,
+  aggregateKind: Schema.Unknown,
+  aggregateId: Schema.Unknown,
+  occurredAt: Schema.Unknown,
+  commandId: Schema.Unknown,
+  causationEventId: Schema.Unknown,
+  correlationId: Schema.Unknown,
+  metadata: Schema.Unknown,
+  type: Schema.String.check(unknownOrchestrationEventTypeFilter),
+  payload: Schema.Unknown,
+})
+
+const UnknownOrchestrationEventSentinel = Schema.Struct({
+  ...EventBaseFields,
+  type: Schema.Literal(UNKNOWN_ORCHESTRATION_EVENT_TYPE),
+  originalType: Schema.String,
+  payload: Schema.Unknown,
+})
+
+export const UnknownOrchestrationEvent = UnknownOrchestrationEventSource.pipe(
+  Schema.decodeTo(
+    UnknownOrchestrationEventSentinel,
+    SchemaTransformation.transform({
+      decode: (raw) =>
+        ({
+          ...raw,
+          type: UNKNOWN_ORCHESTRATION_EVENT_TYPE,
+          originalType: raw.type,
+        }) as typeof UnknownOrchestrationEventSentinel.Encoded,
+      encode: (sentinel) =>
+      {
+        const { originalType, ...rest } = sentinel
+        return {
+          ...rest,
+          type: originalType,
+        } as typeof UnknownOrchestrationEventSource.Encoded
+      },
+    }),
+  ),
+)
+export type UnknownOrchestrationEvent = typeof UnknownOrchestrationEvent.Type
+
+export const OrchestrationEvent = Schema.Union([
+  ...knownOrchestrationEventMembers,
+  UnknownOrchestrationEvent,
 ])
 export type OrchestrationEvent = typeof OrchestrationEvent.Type
 
@@ -1698,6 +1887,7 @@ export class OrchestrationDispatchCommandError extends Schema.TaggedErrorClass<O
   'OrchestrationDispatchCommandError',
   {
     message: TrimmedNonEmptyString,
+    code: Schema.optional(TrimmedNonEmptyString),
     cause: Schema.optional(Schema.Defect()),
   },
 )

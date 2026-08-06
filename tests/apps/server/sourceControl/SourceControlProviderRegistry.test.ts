@@ -1,3 +1,5 @@
+// tests/apps/server/sourceControl/SourceControlProviderRegistry.test.ts
+// verifies source control provider registration and lookup
 import { assert, it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as DateTime from 'effect/DateTime'
@@ -11,10 +13,10 @@ import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import type * as VcsDriver from '../../../../apps/server/src/vcs/VcsDriver.ts'
 import * as VcsDriverRegistry from '../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
 import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
-import * as AzureDevOpsCli from '../../../../apps/server/src/sourceControl/AzureDevOpsCli.ts'
-import * as BitbucketApi from '../../../../apps/server/src/sourceControl/BitbucketApi.ts'
-import * as GitHubCli from '../../../../apps/server/src/sourceControl/GitHubCli.ts'
-import * as GitLabCli from '../../../../apps/server/src/sourceControl/GitLabCli.ts'
+import * as AzureDevOpsCli from '../../../../apps/server/src/sourceControl/AzureDevOps/AzureDevOpsCli.ts'
+import * as BitbucketApi from '../../../../apps/server/src/sourceControl/Bitbucket/BitbucketApi.ts'
+import * as GitHubCli from '../../../../apps/server/src/sourceControl/GitHub/GitHubCli.ts'
+import * as GitLabCli from '../../../../apps/server/src/sourceControl/GitLab/GitLabCli.ts'
 import * as SourceControlProviderRegistry from '../../../../apps/server/src/sourceControl/SourceControlProviderRegistry.ts'
 
 const TEST_EPOCH = DateTime.makeUnsafe('1970-01-01T00:00:00.000Z')
@@ -101,16 +103,37 @@ function makeRegistry(input: {
   )
 }
 
-it.effect('routes GitHub remotes to the GitHub provider', () =>
+it.effect.each([
+  {
+    name: 'GitHub',
+    url: 'git@github.com:pingdotgg/t3code.git',
+    kind: 'github' as const,
+  },
+  {
+    name: 'GitLab',
+    url: 'git@gitlab.com:group/project.git',
+    kind: 'gitlab' as const,
+  },
+  {
+    name: 'Bitbucket',
+    url: 'git@bitbucket.org:pingdotgg/t3code.git',
+    kind: 'bitbucket' as const,
+  },
+  {
+    name: 'Azure DevOps',
+    url: 'https://dev.azure.com/acme/project/_git/repo',
+    kind: 'azure-devops' as const,
+  },
+])('routes $name remotes to the $name provider', ({ url, kind }) =>
   Effect.gen(function* ()
   {
     const registry = yield* makeRegistry({
-      remotes: [{ name: 'origin', url: 'git@github.com:pingdotgg/t3code.git' }],
+      remotes: [{ name: 'origin', url }],
     })
 
     const provider = yield* registry.resolve({ cwd: '/repo' })
 
-    assert.strictEqual(provider.kind, 'github')
+    assert.strictEqual(provider.kind, kind)
   }),
 )
 
@@ -169,24 +192,16 @@ it.effect('retains VCS detection failures with structured cwd context', () =>
   }),
 )
 
-it.effect('routes GitLab remotes to the GitLab provider', () =>
-  Effect.gen(function* ()
-  {
-    const registry = yield* makeRegistry({
-      remotes: [{ name: 'origin', url: 'git@gitlab.com:group/project.git' }],
-    })
-
-    const provider = yield* registry.resolve({ cwd: '/repo' })
-
-    assert.strictEqual(provider.kind, 'gitlab')
-  }),
-)
-
 it.effect('routes authenticated self-hosted GitLab remotes without relying on host naming', () =>
   Effect.gen(function* ()
   {
     const registry = yield* makeRegistry({
-      remotes: [{ name: 'origin', url: 'https://self-hosted.example.test/group/project.git' }],
+      remotes: [
+        {
+          name: 'origin',
+          url: 'https://self-hosted.example.test/group/project.git',
+        },
+      ],
       process: {
         run: () =>
           Effect.succeed(
@@ -214,7 +229,12 @@ it.effect('routes authenticated self-hosted GitLab remotes on non-standard ports
   Effect.gen(function* ()
   {
     const registry = yield* makeRegistry({
-      remotes: [{ name: 'origin', url: 'https://self-hosted.example.test:8443/group/project.git' }],
+      remotes: [
+        {
+          name: 'origin',
+          url: 'https://self-hosted.example.test:8443/group/project.git',
+        },
+      ],
       process: {
         run: () =>
           Effect.succeed(
@@ -234,37 +254,16 @@ it.effect('routes authenticated self-hosted GitLab remotes on non-standard ports
   }),
 )
 
-it.effect('routes Bitbucket remotes to the Bitbucket provider', () =>
-  Effect.gen(function* ()
-  {
-    const registry = yield* makeRegistry({
-      remotes: [{ name: 'origin', url: 'git@bitbucket.org:pingdotgg/t3code.git' }],
-    })
-
-    const provider = yield* registry.resolve({ cwd: '/repo' })
-
-    assert.strictEqual(provider.kind, 'bitbucket')
-  }),
-)
-
-it.effect('routes Azure DevOps remotes to the Azure DevOps provider', () =>
-  Effect.gen(function* ()
-  {
-    const registry = yield* makeRegistry({
-      remotes: [{ name: 'origin', url: 'https://dev.azure.com/acme/project/_git/repo' }],
-    })
-
-    const provider = yield* registry.resolve({ cwd: '/repo' })
-
-    assert.strictEqual(provider.kind, 'azure-devops')
-  }),
-)
-
 it.effect('falls back to a non-origin remote when origin is not configured', () =>
   Effect.gen(function* ()
   {
     const registry = yield* makeRegistry({
-      remotes: [{ name: 'upstream', url: 'https://dev.azure.com/acme/project/_git/repo' }],
+      remotes: [
+        {
+          name: 'upstream',
+          url: 'https://dev.azure.com/acme/project/_git/repo',
+        },
+      ],
     })
 
     const provider = yield* registry.resolve({ cwd: '/repo' })

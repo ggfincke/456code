@@ -24,6 +24,7 @@ function makeEvent(input: {
   aggregateKind: OrchestrationEvent['aggregateKind']
   aggregateId: string
   commandId: string | null
+  causationEventId?: string
   payload: unknown
 }): OrchestrationEvent
 {
@@ -38,7 +39,8 @@ function makeEvent(input: {
         : ThreadId.make(input.aggregateId),
     occurredAt: input.occurredAt,
     commandId: input.commandId === null ? null : CommandId.make(input.commandId),
-    causationEventId: null,
+    causationEventId:
+      input.causationEventId === undefined ? null : EventId.make(input.causationEventId),
     correlationId: null,
     metadata: {},
     payload: input.payload as never,
@@ -96,6 +98,7 @@ describe('orchestration projector', () =>
         worktreePath: null,
         latestTurn: null,
         pendingHandoff: null,
+        providerSwitch: null,
         createdAt: now,
         updatedAt: now,
         archivedAt: null,
@@ -109,10 +112,217 @@ describe('orchestration projector', () =>
         proposedPlans: [],
         activities: [],
         checkpoints: [],
+        approvalOutcomes: [],
         session: null,
       },
     ])
   })
+
+  it.effect('projects provider switch outcomes from their terminal events', () =>
+    Effect.gen(function* ()
+    {
+      const now = '2026-01-01T00:00:00.000Z'
+      const threadId = 'thread-provider-switch-outcomes'
+      let model = yield* projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: 'thread.created',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-create-provider-switch-outcomes',
+          payload: {
+            threadId,
+            projectId: 'project-1',
+            title: 'Provider switch outcomes',
+            modelSelection: { instanceId: 'codex', model: 'gpt-5-codex' },
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            branch: null,
+            worktreePath: null,
+            origin: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: 'thread.provider-switch-requested',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-request-provider-switch-failure',
+          payload: {
+            threadId,
+            targetModelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+            expectedCurrentInstanceId: 'codex',
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 3,
+          type: 'thread.provider-switch-failed',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-fail-provider-switch',
+          payload: {
+            threadId,
+            reasonCode: 'compaction-failed',
+            detail: 'Compaction failed.',
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 4,
+          type: 'thread.provider-switch-requested',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-request-provider-switch-completion',
+          payload: {
+            threadId,
+            targetModelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+            expectedCurrentInstanceId: 'codex',
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 5,
+          type: 'thread.provider-switched',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-complete-provider-switch',
+          payload: {
+            modelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+            fromInstanceId: 'codex',
+            fromModel: 'gpt-5-codex',
+            handoffText: 'Durable handoff.',
+          },
+        }),
+      )
+
+      const thread = model.threads[0]
+      expect(thread?.providerSwitch).toBeNull()
+      expect(thread?.pendingHandoff?.text).toBe('Durable handoff.')
+      expect(thread?.activities).toMatchObject([
+        {
+          id: 'event-3',
+          kind: 'provider.switch.failed',
+          payload: {
+            reasonCode: 'compaction-failed',
+            retryTargetModelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+          },
+        },
+        {
+          id: 'event-5',
+          kind: 'provider.switch.completed',
+          payload: {
+            targetModelSelection: { instanceId: 'claudeAgent', model: 'sonnet' },
+          },
+        },
+      ])
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 6,
+          type: 'thread.activity-appended',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-record-provider-handoff-delivery',
+          payload: {
+            threadId,
+            activity: {
+              id: 'provider-handoff-delivered',
+              tone: 'info',
+              kind: 'provider.handoff.delivered',
+              summary: 'Provider handoff delivered',
+              payload: {
+                type: 'provider.handoff.delivered',
+                handoffKey: 'durable-handoff-key',
+                providerSessionIdentity: 'provider-session-1',
+              },
+              turnId: null,
+              createdAt: now,
+            },
+          },
+        }),
+      )
+      expect(model.threads[0]?.pendingHandoff).toBeNull()
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 7,
+          type: 'thread.activity-appended',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-append-historical-failure-activity',
+          payload: {
+            threadId,
+            activity: {
+              id: 'historical-provider-switch-failed',
+              tone: 'error',
+              kind: 'provider.switch.failed',
+              summary: 'Provider switch failed',
+              payload: { detail: 'Compaction failed.' },
+              turnId: null,
+              sequence: 3,
+              createdAt: now,
+            },
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 8,
+          type: 'thread.activity-appended',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-append-historical-completion-activity',
+          payload: {
+            threadId,
+            activity: {
+              id: 'historical-provider-switch-completed',
+              tone: 'info',
+              kind: 'provider.switch.completed',
+              summary: 'Provider switch completed',
+              payload: {
+                fromInstanceId: 'codex',
+                fromModel: 'gpt-5-codex',
+                toInstanceId: 'claudeAgent',
+                toModel: 'sonnet',
+              },
+              turnId: null,
+              sequence: 5,
+              createdAt: now,
+            },
+          },
+        }),
+      )
+      expect(model.threads[0]?.activities.map((activity) => activity.id)).toEqual([
+        'historical-provider-switch-failed',
+        'historical-provider-switch-completed',
+        'provider-handoff-delivered',
+      ])
+    }),
+  )
 
   it.effect('keeps imported history before continued native activities', () =>
     Effect.gen(function* ()
@@ -734,7 +944,7 @@ describe('orchestration projector', () =>
     expect(thread?.latestTurn?.turnId).toBe('turn-1')
     expect(thread?.session?.status).toBe('running')
 
-    // Leaving the "running" session status settles the running turn with the
+    // leaving the "running" session status settles the running turn with the
     // session timestamp as the turn end.
     const settledThread = afterReady.threads[0]
     expect(settledThread?.latestTurn?.turnId).toBe('turn-1')
@@ -1360,4 +1570,321 @@ describe('orchestration projector', () =>
     expect(thread?.checkpoints[0]?.turnId).toBe('turn-100')
     expect(thread?.checkpoints.at(-1)?.turnId).toBe('turn-599')
   })
+
+  it.effect('projects settled lifecycle events', () =>
+    Effect.gen(function* ()
+    {
+      const now = '2026-01-01T00:00:00.000Z'
+      const created = yield* projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: 'thread.created',
+          aggregateKind: 'thread',
+          aggregateId: 'thread-1',
+          occurredAt: now,
+          commandId: 'command-1',
+          payload: {
+            threadId: ThreadId.make('thread-1'),
+            projectId: ProjectId.make('project-1'),
+            title: 'Thread',
+            modelSelection: { provider: 'codex', model: 'gpt-5.4' },
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            branch: null,
+            worktreePath: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      )
+      const settled = yield* projectEvent(
+        created,
+        makeEvent({
+          sequence: 2,
+          type: 'thread.settled',
+          aggregateKind: 'thread',
+          aggregateId: 'thread-1',
+          occurredAt: now,
+          commandId: 'command-2',
+          payload: { threadId: ThreadId.make('thread-1'), settledAt: now, updatedAt: now },
+        }),
+      )
+      expect(settled.threads[0]?.settledOverride).toBe('settled')
+      expect(settled.threads[0]?.settledAt).toBe(now)
+
+      const userUnsettled = yield* projectEvent(
+        settled,
+        makeEvent({
+          sequence: 3,
+          type: 'thread.unsettled',
+          aggregateKind: 'thread',
+          aggregateId: 'thread-1',
+          occurredAt: now,
+          commandId: 'command-3',
+          payload: { threadId: ThreadId.make('thread-1'), reason: 'user', updatedAt: now },
+        }),
+      )
+      expect(userUnsettled.threads[0]?.settledOverride).toBe('active')
+      expect(userUnsettled.threads[0]?.settledAt).toBeNull()
+
+      const activityUnsettled = yield* projectEvent(
+        userUnsettled,
+        makeEvent({
+          sequence: 4,
+          type: 'thread.unsettled',
+          aggregateKind: 'thread',
+          aggregateId: 'thread-1',
+          occurredAt: now,
+          commandId: 'command-4',
+          payload: { threadId: ThreadId.make('thread-1'), reason: 'activity', updatedAt: now },
+        }),
+      )
+      expect(activityUnsettled.threads[0]?.settledOverride).toBeNull()
+      expect(activityUnsettled.threads[0]?.settledAt).toBeNull()
+    }),
+  )
+
+  it.effect('projects provider-switch request progress failure and handoff clear', () =>
+    Effect.gen(function* ()
+    {
+      const now = '2026-01-01T00:00:00.000Z'
+      const threadId = 'thread-switch-lifecycle'
+      const currentModelSelection = { instanceId: 'codex', model: 'gpt-5.6-luna' }
+      const targetModelSelection = { instanceId: 'claude', model: 'sonnet' }
+
+      let model = yield* projectEvent(
+        createEmptyReadModel(now),
+        makeEvent({
+          sequence: 1,
+          type: 'thread.created',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-create-switch-lifecycle',
+          payload: {
+            threadId,
+            projectId: 'project-1',
+            title: 'Switch lifecycle',
+            modelSelection: currentModelSelection,
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            branch: null,
+            worktreePath: null,
+            origin: null,
+            createdAt: now,
+            updatedAt: now,
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: 'thread.provider-switch-requested',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-request-switch-lifecycle',
+          payload: {
+            threadId,
+            targetModelSelection,
+            expectedCurrentInstanceId: currentModelSelection.instanceId,
+          },
+        }),
+      )
+      expect(model.threads[0]?.providerSwitch).toEqual({
+        phase: 'pending',
+        targetInstanceId: targetModelSelection.instanceId,
+        targetModel: targetModelSelection.model,
+        requestedAt: now,
+        requestId: EventId.make('event-2'),
+        requestSequence: 2,
+        sourceModelSelection: currentModelSelection,
+      })
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 3,
+          type: 'thread.provider-switch-progressed',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-progress-switch-lifecycle',
+          payload: { threadId, phase: 'compacting' },
+        }),
+      )
+      expect(model.threads[0]?.providerSwitch?.phase).toBe('compacting')
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 4,
+          type: 'thread.provider-switch-progressed',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-finalize-switch-lifecycle',
+          payload: { threadId, phase: 'finalizing' },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 5,
+          type: 'thread.provider-switched',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-complete-switch-lifecycle',
+          payload: {
+            modelSelection: targetModelSelection,
+            fromInstanceId: currentModelSelection.instanceId,
+            fromModel: currentModelSelection.model,
+            handoffText: 'Completed the server workflow.',
+          },
+        }),
+      )
+      expect(model.threads[0]?.modelSelection).toEqual(targetModelSelection)
+      expect(model.threads[0]?.pendingHandoff).toEqual({
+        text: 'Completed the server workflow.',
+        fromInstanceId: currentModelSelection.instanceId,
+        fromModel: currentModelSelection.model,
+        createdAt: now,
+      })
+      expect(model.threads[0]?.providerSwitch).toBeNull()
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 6,
+          type: 'thread.handoff-cleared',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-clear-handoff-lifecycle',
+          payload: { threadId },
+        }),
+      )
+      expect(model.threads[0]?.pendingHandoff).toBeNull()
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 7,
+          type: 'thread.provider-switch-requested',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-request-switch-fail-lifecycle',
+          payload: {
+            threadId,
+            targetModelSelection,
+            expectedCurrentInstanceId: targetModelSelection.instanceId,
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 8,
+          type: 'thread.provider-switch-failed',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: 'cmd-fail-switch-lifecycle',
+          payload: {
+            threadId,
+            reasonCode: 'compaction-failed',
+            detail: 'Compaction failed.',
+          },
+        }),
+      )
+      expect(model.threads[0]?.providerSwitch).toBeNull()
+    }),
+  )
+
+  it.effect('preserves an unconsumed handoff when the next switch has no context', () =>
+    Effect.gen(function* ()
+    {
+      const createdAt = '2026-01-01T00:00:00.000Z'
+      const firstSwitchAt = '2026-01-01T00:01:00.000Z'
+      const secondSwitchAt = '2026-01-01T00:02:00.000Z'
+      const threadId = 'thread-switch-handoff-preservation'
+      const firstModelSelection = { instanceId: 'provider-a', model: 'model-a' }
+      const secondModelSelection = { instanceId: 'provider-b', model: 'model-b' }
+      const thirdModelSelection = { instanceId: 'provider-c', model: 'model-c' }
+
+      let model = yield* projectEvent(
+        createEmptyReadModel(createdAt),
+        makeEvent({
+          sequence: 1,
+          type: 'thread.created',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: createdAt,
+          commandId: 'cmd-create-handoff-preservation',
+          payload: {
+            threadId,
+            projectId: 'project-1',
+            title: 'Handoff preservation',
+            modelSelection: firstModelSelection,
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            branch: null,
+            worktreePath: null,
+            origin: null,
+            createdAt,
+            updatedAt: createdAt,
+          },
+        }),
+      )
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 2,
+          type: 'thread.provider-switched',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: firstSwitchAt,
+          commandId: 'cmd-switch-a-to-b',
+          payload: {
+            modelSelection: secondModelSelection,
+            fromInstanceId: firstModelSelection.instanceId,
+            fromModel: firstModelSelection.model,
+            handoffText: 'Continue from the first provider handoff.',
+          },
+        }),
+      )
+      const pendingHandoff = {
+        text: 'Continue from the first provider handoff.',
+        fromInstanceId: firstModelSelection.instanceId,
+        fromModel: firstModelSelection.model,
+        createdAt: firstSwitchAt,
+      }
+      expect(model.threads[0]?.pendingHandoff).toEqual(pendingHandoff)
+
+      model = yield* projectEvent(
+        model,
+        makeEvent({
+          sequence: 3,
+          type: 'thread.provider-switched',
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: secondSwitchAt,
+          commandId: 'cmd-switch-b-to-c-without-context',
+          payload: {
+            modelSelection: thirdModelSelection,
+            fromInstanceId: secondModelSelection.instanceId,
+            fromModel: secondModelSelection.model,
+            handoffText: '',
+          },
+        }),
+      )
+
+      expect(model.threads[0]?.modelSelection).toEqual(thirdModelSelection)
+      expect(model.threads[0]?.pendingHandoff).toEqual(pendingHandoff)
+    }),
+  )
 })

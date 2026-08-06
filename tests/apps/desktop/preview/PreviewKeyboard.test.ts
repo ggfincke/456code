@@ -1,3 +1,6 @@
+// tests/apps/desktop/preview/PreviewKeyboard.test.ts
+// verify preview keyboard packets behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { makePreviewAutomationKeySequence } from '../../../../apps/desktop/src/preview/PreviewKeyboard.ts'
@@ -71,26 +74,23 @@ describe('preview keyboard packets', () =>
     ).not.toHaveProperty('commands')
   })
 
-  it('resolves shifted printable keys to their browser values', () =>
+  it('resolves shifted printable keys and suppresses text on modified chords', () =>
   {
-    const sequence = makePreviewAutomationKeySequence({ key: '1', modifiers: ['Shift'] })
-    expect(sequence.keyDown).toMatchObject({
+    const shifted = makePreviewAutomationKeySequence({ key: '1', modifiers: ['Shift'] })
+    expect(shifted.keyDown).toMatchObject({
       key: '!',
       code: 'Digit1',
       modifiers: 8,
       windowsVirtualKeyCode: 49,
       text: '!',
     })
-    expect(sequence.signal).toEqual({ kind: 'key', key: '!', code: 'Digit1' })
-  })
+    expect(shifted.signal).toEqual({ kind: 'key', key: '!', code: 'Digit1' })
 
-  it('keeps shifted key values while suppressing text for modified chords', () =>
-  {
-    const sequence = makePreviewAutomationKeySequence({
+    const chord = makePreviewAutomationKeySequence({
       key: '1',
       modifiers: ['Control', 'Shift'],
     })
-    expect(sequence.keyDown).toEqual({
+    expect(chord.keyDown).toEqual({
       type: 'rawKeyDown',
       key: '!',
       code: 'Digit1',
@@ -99,6 +99,6 @@ describe('preview keyboard packets', () =>
       location: 0,
       isKeypad: false,
     })
-    expect(sequence.signal).toEqual({ kind: 'key', key: '!', code: 'Digit1' })
+    expect(chord.signal).toEqual({ kind: 'key', key: '!', code: 'Digit1' })
   })
 })

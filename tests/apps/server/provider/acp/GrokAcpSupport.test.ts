@@ -1,3 +1,6 @@
+// tests/apps/server/provider/acp/GrokAcpSupport.test.ts
+// verify resolve grok acp base model id behavior
+
 import { describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as EffectAcpErrors from 'effect-acp/errors'
@@ -71,29 +74,23 @@ describe('applyGrokAcpModelSelection', () =>
     }),
   )
 
-  it.effect('skips set_model when requested matches current', () =>
+  it.effect.each([
+    {
+      name: 'requested matches current',
+      requestedModelId: 'grok-build' as string | undefined,
+    },
+    {
+      name: 'no model is requested',
+      requestedModelId: undefined as string | undefined,
+    },
+  ])('skips set_model when $name', ({ requestedModelId }) =>
     Effect.gen(function* ()
     {
       const { runtime, modelCalls } = makeRecordingRuntime()
       const result = yield* applyGrokAcpModelSelection({
         runtime,
         currentModelId: 'grok-build',
-        requestedModelId: 'grok-build',
-        mapError: (cause) => cause.message,
-      })
-      expect(modelCalls).toEqual([])
-      expect(result).toBe('grok-build')
-    }),
-  )
-
-  it.effect('skips set_model when no model is requested', () =>
-    Effect.gen(function* ()
-    {
-      const { runtime, modelCalls } = makeRecordingRuntime()
-      const result = yield* applyGrokAcpModelSelection({
-        runtime,
-        currentModelId: 'grok-build',
-        requestedModelId: undefined,
+        requestedModelId,
         mapError: (cause) => cause.message,
       })
       expect(modelCalls).toEqual([])

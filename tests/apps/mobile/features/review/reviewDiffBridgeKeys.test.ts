@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/reviewDiffBridgeKeys.test.ts
+// verify native review diff bridge behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import {
@@ -18,7 +21,6 @@ describe('native review diff bridge', () =>
       rowCount: 4,
     }
 
-    expect(buildNativeReviewTokensResetKey(input)).toBe(buildNativeReviewTokensResetKey(input))
     expect(buildNativeReviewTokensResetKey({ ...input, rowCount: 5 })).not.toBe(
       buildNativeReviewTokensResetKey(input),
     )

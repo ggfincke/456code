@@ -10,6 +10,7 @@ import {
   ThreadImportContinuationActivityPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
 } from '@t3tools/contracts'
+import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
 import * as DateTime from 'effect/DateTime'
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
@@ -38,11 +39,26 @@ import { projectEvent } from './projector.ts'
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 
-// Session adoption takes seconds; a user message still unadopted after this
+// session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
 // QUEUED_TURN_START_GRACE_MS in client-runtime threadSettled.ts.
 const QUEUED_TURN_START_GRACE_MS = 2 * 60 * 1_000
 const isThreadImportContinuationActivityPayload = Schema.is(ThreadImportContinuationActivityPayload)
+
+function providerSwitchRequestMatches(
+  providerSwitch: OrchestrationThread['providerSwitch'],
+  requestId: EventId | undefined,
+  expectedRequestedAt: string | undefined,
+): boolean
+{
+  if (providerSwitch === null)
+  {
+    return false
+  }
+  return requestId !== undefined
+    ? providerSwitch.requestId === requestId
+    : expectedRequestedAt !== undefined && providerSwitch.requestedAt === expectedRequestedAt
+}
 
 type LatestImportContinuationActivity =
   | { readonly state: 'missing' | 'invalid' }
@@ -112,32 +128,14 @@ function importContinuationConsentMatches(
   )
 }
 
-/**
- * Blocked-on-you work derived from the thread's retained activities: an
- * approval or user-input request with no later resolution for the same
- * requestId. The server-side twin of the shell's hasPendingApprovals /
- * hasPendingUserInput flags, which the decider read model does not carry.
- * The clearing rules MUST match ProjectionPipeline's pending accounting —
- * resolved activities always clear, respond.failed clears only when the
- * failure detail marks the request stale/unknown — or settle would be
- * rejected on threads whose shell flags read as clear.
- */
-function isStaleRequestFailureDetail(payload: Record<string, unknown> | null): boolean
-{
-  const detail = typeof payload?.detail === 'string' ? payload.detail.toLowerCase() : null
-  if (detail === null) return false
-  return (
-    detail.includes('stale pending approval request') ||
-    detail.includes('unknown pending approval request') ||
-    detail.includes('unknown pending permission request') ||
-    detail.includes('stale pending user-input request') ||
-    detail.includes('unknown pending user-input request') ||
-    detail.includes('unknown pending user input request') ||
-    detail.includes('unknown pending codex user input request')
-  )
-}
+// blocked-on-you work derived from the thread's retained activities: an
+// approval or user-input request with no later resolution for the same
+// requestId. The server-side twin of the shell's hasPendingApprovals /
+// hasPendingUserInput flags, which the decider read model does not carry.
+// the clearing rules MUST match ProjectionPipeline's pending accounting;
+// classifyApprovalFailure is the shared source of truth for failures.
 
-// Scans the read model's activities, which the projector caps at the most
+// scans the read model's activities, which the projector caps at the most
 // recent 500. That bound is safe here: an OPEN approval/user-input request
 // blocks its turn, so the thread cannot accumulate hundreds of later
 // activities while one is outstanding — a request that has scrolled out of
@@ -167,7 +165,7 @@ function hasOpenBlockingRequest(thread: {
     }
     else if (
       isBlockingRequestFailureActivityKind(activity.kind) &&
-      isStaleRequestFailureDetail(payload)
+      classifyApprovalFailure(payload).clearsBlockingRequest
     )
     {
       openRequestIds.delete(requestId)
@@ -176,24 +174,22 @@ function hasOpenBlockingRequest(thread: {
   return openRequestIds.size > 0
 }
 
-/**
- * A queued turn start — a user message no turn has picked up yet — is work
- * in flight even though session is still null (turn.start emits
- * message-sent + turn-start-requested; the session arrives later). Detection
- * mirrors the client's hasQueuedTurnStart: the newest user message is
- * strictly newer than every latestTurn timestamp (adoption stamps the new
- * turn's requestedAt with the message time, clearing this), and only within
- * the adoption grace window — historical threads whose last user message
- * postdates their turn timestamps (older-server data, mid-turn messages)
- * must not be blocked forever. A failed session start (status "error")
- * clears the block immediately.
- *
- * The age check is bounded on BOTH sides: message timestamps are
- * client-supplied, so a client clock ahead of the server yields a negative
- * age. Without the lower bound that negative age satisfies `<= grace` for
- * as long as the skew lasts, extending the block far past the intended two
- * minutes.
- */
+// a queued turn start — a user message no turn has picked up yet — is work
+// in flight even though session is still null (turn.start emits
+// message-sent + turn-start-requested; the session arrives later). Detection
+// mirrors the client's hasQueuedTurnStart: the newest user message is
+// strictly newer than every latestTurn timestamp (adoption stamps the new
+// turn's requestedAt with the message time, clearing this), and only within
+// the adoption grace window — historical threads whose last user message
+// postdates their turn timestamps (older-server data, mid-turn messages)
+// must not be blocked forever. A failed session start (status "error")
+// clears the block immediately.
+//
+// the age check is bounded on BOTH sides: message timestamps are
+// client-supplied, so a client clock ahead of the server yields a negative
+// age. Without the lower bound that negative age satisfies `<= grace` for
+// as long as the skew lasts, extending the block far past the intended two
+// minutes.
 function threadHasQueuedTurnStart(
   thread: {
     readonly messages: ReadonlyArray<{ readonly role: string; readonly createdAt: string }>
@@ -559,7 +555,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
-      // Server-side twin of the client's canSettle session check: a stale
+      // server-side twin of the client's canSettle session check: a stale
       // or raced client must not settle a thread whose session is coming
       // alive or working.
       if (thread.session?.status === 'starting' || thread.session?.status === 'running')
@@ -571,7 +567,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // Pending approval / user-input requests are blocked-on-you work: a
+      // pending approval / user-input requests are blocked-on-you work: a
       // raced or stale client must not park them behind a settled override
       // that would surface only after the request resolves.
       if (hasOpenBlockingRequest(thread))
@@ -584,7 +580,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         )
       }
       const occurredAt = yield* nowIso
-      // Settling inside the adoption window would hide just-requested work.
+      // settling inside the adoption window would hide just-requested work.
       if (threadHasQueuedTurnStart(thread, occurredAt))
       {
         return yield* Effect.fail(
@@ -594,7 +590,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // Settling an already-settled thread re-emits with the original
+      // settling an already-settled thread re-emits with the original
       // settledAt: the engine rejects zero-event commands, and bulk-settle /
       // double-click must stay silent no-ops rather than surface errors.
       const alreadySettled = thread.settledOverride === 'settled' && thread.settledAt !== null
@@ -609,7 +605,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         payload: {
           threadId: command.threadId,
           settledAt: alreadySettled ? thread.settledAt : occurredAt,
-          // A re-emission is a projected no-op: keep the existing updatedAt
+          // a re-emission is a projected no-op: keep the existing updatedAt
           // so duplicate settles neither rewind nor churn ordering. A fresh
           // settle stamps the command time.
           updatedAt: alreadySettled ? thread.updatedAt : occurredAt,
@@ -624,7 +620,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
-      // Idempotent by re-emission (see thread.settle): reducing the event a
+      // idempotent by re-emission (see thread.settle): reducing the event a
       // second time lands on the same override state. A re-emission keeps
       // the existing updatedAt so duplicates do not churn ordering.
       const alreadyPinnedActive = thread.settledOverride === 'active'
@@ -653,7 +649,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         threadId: command.threadId,
       })
       const occurredAt = yield* nowIso
-      // A wake time in the past would create a thread that is snoozed and
+      // a wake time in the past would create a thread that is snoozed and
       // woken at once — the row would never leave the inbox but still carry
       // snooze state. Reject instead of silently normalizing. The negated
       // comparison also catches unparseable wake times (IsoDateTime is
@@ -668,7 +664,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // Blocked-on-you work must not be snoozed away: a pending approval or
+      // blocked-on-you work must not be snoozed away: a pending approval or
       // user-input request is the agent waiting on the user, and hiding it
       // defeats the request. (A running session IS snoozable — snooze only
       // affects visibility, never the agent.)
@@ -681,7 +677,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // A queued turn start — a user message no turn has adopted yet — is
+      // a queued turn start — a user message no turn has adopted yet — is
       // invisible pending work: no session, no pending flags. Snoozing in
       // that window would hide a just-requested turn exactly the way settle
       // would.
@@ -694,7 +690,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           }),
         )
       }
-      // Re-snoozing an already-snoozed thread to the SAME wake time is a
+      // re-snoozing an already-snoozed thread to the SAME wake time is a
       // duplicate (double-click, raced clients): re-emit with the original
       // timestamps so the projection is a no-op. A different wake time is a
       // real change and stamps fresh.
@@ -726,7 +722,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
-      // Idempotent by re-emission (see thread.settle): waking a thread that
+      // idempotent by re-emission (see thread.settle): waking a thread that
       // is not snoozed lands on the same null state without churning
       // updatedAt.
       const alreadyAwake = thread.snoozedUntil == null
@@ -853,13 +849,19 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
-      if (
-        command.expectedCurrentInstanceId !== undefined &&
-        command.expectedCurrentInstanceId !== thread.modelSelection.instanceId
-      )
+      if (thread.providerSwitch !== null)
       {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-in-progress',
+          detail: `Thread '${command.threadId}' already has a provider switch in progress.`,
+        })
+      }
+      if (command.expectedCurrentInstanceId !== thread.modelSelection.instanceId)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'switch-instance-mismatch',
           detail: `Thread '${command.threadId}' is bound to provider instance '${thread.modelSelection.instanceId}', not expected instance '${command.expectedCurrentInstanceId}'.`,
         })
       }
@@ -870,6 +872,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         // resume cursor and double-inject context alongside the handoff
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-same-instance',
           detail: `Thread '${command.threadId}' is already bound to provider instance '${thread.modelSelection.instanceId}'; provider switch requires a different instance.`,
         })
       }
@@ -880,6 +883,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-running-turn',
           detail: `Thread '${command.threadId}' has a running turn and cannot switch providers.`,
         })
       }
@@ -888,6 +892,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-queued-turn',
           detail: `Thread '${command.threadId}' has a queued turn start and cannot switch providers.`,
         })
       }
@@ -895,22 +900,25 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       {
         return yield* new OrchestrationCommandInvariantError({
           commandType: command.type,
+          code: 'switch-blocking-request',
           detail: `Thread '${command.threadId}' has a pending approval or user-input request and cannot switch providers.`,
         })
       }
       const occurredAt = yield* nowIso
+      const eventBase = yield* withEventBase({
+        aggregateKind: 'thread',
+        aggregateId: command.threadId,
+        occurredAt,
+        commandId: command.commandId,
+      })
       return {
-        ...(yield* withEventBase({
-          aggregateKind: 'thread',
-          aggregateId: command.threadId,
-          occurredAt,
-          commandId: command.commandId,
-        })),
+        ...eventBase,
         type: 'thread.provider-switch-requested',
         payload: {
           threadId: command.threadId,
           targetModelSelection: command.targetModelSelection,
-          expectedCurrentInstanceId: command.expectedCurrentInstanceId ?? null,
+          expectedCurrentInstanceId: command.expectedCurrentInstanceId,
+          sourceModelSelection: thread.modelSelection,
         },
       }
     }
@@ -922,6 +930,14 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         command,
         threadId: command.threadId,
       })
+      if (targetThread.providerSwitch !== null)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'turn-start-during-switch',
+          detail: `Thread '${command.threadId}' cannot start a turn while a provider switch is in progress.`,
+        })
+      }
       const requiresImportContinuationConsent =
         targetThread.origin !== null && targetThread.latestTurn === null
       if (
@@ -1013,10 +1029,10 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           createdAt: command.createdAt,
         },
       }
-      // Real activity resets ANY override: it wakes an explicitly settled
+      // real activity resets ANY override: it wakes an explicitly settled
       // thread, and it clears a keep-active pin back to neutral so the
       // thread can auto-settle again after this burst of work goes stale.
-      // A snooze clears the same way — sending a message to a snoozed
+      // a snooze clears the same way — sending a message to a snoozed
       // thread is the user re-engaging, so the return ticket is spent.
       const lifecycleResetEvents: Array<Omit<OrchestrationEvent, 'sequence'>> = []
       if (targetThread.settledOverride !== null)
@@ -1102,6 +1118,12 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           requestId: command.requestId,
           decision: command.decision,
           createdAt: command.createdAt,
+          approvalOutcome: {
+            requestId: command.requestId,
+            status: 'responding',
+            requestedDecision: command.decision,
+            updatedAt: command.createdAt,
+          },
         },
       }
     }
@@ -1285,7 +1307,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           session: command.session,
         },
       }
-      // Only a session coming alive is activity worth waking a settled thread
+      // only a session coming alive is activity worth waking a settled thread
       // for — status writes like ready/stopped/error arrive after the fact and
       // must not fight a user's explicit settle. Snooze is deliberately NOT
       // cleared here: snooze never pauses the agent, so its session starting
@@ -1295,7 +1317,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       // as snoozed, without spending the return ticket.
       const isSessionActivity =
         command.session.status === 'starting' || command.session.status === 'running'
-      // Real activity resets ANY override (settled wakes, active unpins).
+      // real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !isSessionActivity)
       {
         return sessionSetEvent
@@ -1317,13 +1339,157 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       return [unsettledEvent, sessionSetEvent]
     }
 
-    case 'thread.provider.switch.complete':
+    case 'thread.provider.switch.progress':
     {
-      yield* requireThread({
+      const thread = yield* requireThread({
         readModel,
         command,
         threadId: command.threadId,
       })
+      if (
+        !providerSwitchRequestMatches(
+          thread.providerSwitch,
+          command.requestId,
+          command.expectedRequestedAt,
+        )
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'stale-provider-switch-request',
+          detail: `Provider switch request '${command.requestId}' no longer owns thread '${command.threadId}'.`,
+        })
+      }
+      const occurredAt = yield* nowIso
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.provider-switch-progressed',
+        payload: {
+          threadId: command.threadId,
+          requestId: command.requestId,
+          phase: command.phase,
+        },
+      }
+    }
+
+    case 'thread.provider.switch.fail':
+    {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      if (
+        !providerSwitchRequestMatches(
+          thread.providerSwitch,
+          command.requestId,
+          command.expectedRequestedAt,
+        )
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'stale-provider-switch-request',
+          detail: `Provider switch request '${command.requestId}' no longer owns thread '${command.threadId}'.`,
+        })
+      }
+      const sourceModelSelection =
+        thread.providerSwitch?.sourceModelSelection ??
+        command.sourceModelSelection ??
+        thread.modelSelection
+      const targetModelSelection =
+        thread.providerSwitch === null || thread.providerSwitch.targetModel === null
+          ? command.targetModelSelection
+          : {
+              instanceId: thread.providerSwitch.targetInstanceId,
+              model: thread.providerSwitch.targetModel,
+            }
+      const occurredAt = yield* nowIso
+      const failureEvent: Omit<OrchestrationEvent, 'sequence'> = {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.provider-switch-failed',
+        payload: {
+          threadId: command.threadId,
+          requestId: command.requestId,
+          sourceModelSelection,
+          ...(targetModelSelection === undefined ? {} : { targetModelSelection }),
+          activityVersion: 1,
+          reasonCode: command.reasonCode,
+          detail: command.detail,
+        },
+      }
+      const session = thread.session
+      if (
+        session?.status !== 'running' ||
+        session.activeTurnId !== null ||
+        session.providerInstanceId !== thread.modelSelection.instanceId
+      )
+      {
+        return failureEvent
+      }
+      const sessionRepairEvent: Omit<OrchestrationEvent, 'sequence'> = {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.session-set',
+        payload: {
+          threadId: command.threadId,
+          session: {
+            ...session,
+            status: 'ready',
+            updatedAt: occurredAt,
+          },
+        },
+      }
+      return [failureEvent, sessionRepairEvent]
+    }
+
+    case 'thread.provider.switch.complete':
+    {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      if (
+        !providerSwitchRequestMatches(
+          thread.providerSwitch,
+          command.requestId,
+          command.expectedRequestedAt,
+        )
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'stale-provider-switch-request',
+          detail: `Provider switch request '${command.requestId}' no longer owns thread '${command.threadId}'.`,
+        })
+      }
+      if (
+        thread.providerSwitch !== null &&
+        (thread.providerSwitch.targetInstanceId !== command.modelSelection.instanceId ||
+          thread.providerSwitch.targetModel !== command.modelSelection.model)
+      )
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          code: 'stale-provider-switch-target',
+          detail: `Provider switch request '${command.requestId}' does not own target '${command.modelSelection.instanceId}'.`,
+        })
+      }
       const occurredAt = yield* nowIso
       return {
         ...(yield* withEventBase({
@@ -1334,6 +1500,12 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         })),
         type: 'thread.provider-switched',
         payload: {
+          requestId: command.requestId,
+          sourceModelSelection:
+            thread.providerSwitch?.sourceModelSelection ??
+            command.sourceModelSelection ??
+            thread.modelSelection,
+          activityVersion: 1,
           modelSelection: command.modelSelection,
           fromInstanceId: command.fromInstanceId,
           ...(command.fromModel !== undefined ? { fromModel: command.fromModel } : {}),
@@ -1523,10 +1695,10 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
           activity: command.activity,
         },
       }
-      // An approval or user-input request is blocked-on-you work — it must
+      // an approval or user-input request is blocked-on-you work — it must
       // never stay hidden inside a settled slim row.
       const wakesSettledThread = isBlockingRequestActivityKind(command.activity.kind)
-      // Real activity resets ANY override (settled wakes, active unpins).
+      // real activity resets ANY override (settled wakes, active unpins).
       if (thread.settledOverride === null || !wakesSettledThread)
       {
         return activityAppendedEvent

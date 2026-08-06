@@ -79,6 +79,7 @@ import {
   insertInlineTerminalContextPlaceholder,
   removeInlineTerminalContextPlaceholder,
 } from '../../lib/terminalContext'
+import { type ComposerProviderSwitchState } from '../../providerSwitchPresentation'
 import { useComposerPathSearch } from '../../lib/composerPathSearchState'
 import { type ElementContextDraft } from '../../lib/elementContext'
 import { ComposerPendingElementContexts } from './ComposerPendingElementContexts'
@@ -177,6 +178,7 @@ import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../
 import { Tooltip, TooltipPopup, TooltipTrigger } from '../ui/tooltip'
 import { toastManager } from '../ui/toast'
 import {
+  ArrowRightLeftIcon,
   BotIcon,
   CircleAlertIcon,
   ListTodoIcon,
@@ -206,10 +208,11 @@ import type { UnifiedSettings } from '@t3tools/contracts/settings'
 import type { SessionPhase, Thread } from '../../types'
 import type { PendingUserInputDraftAnswer } from '../../pendingUserInput'
 import type { PendingApproval, PendingUserInput } from '../../session-logic'
+import { formatProviderDisplayName } from '../../lib/contextWindow'
 import {
-  deriveLatestContextWindowSnapshot,
-  formatProviderDisplayName,
-} from '../../lib/contextWindow'
+  selectThreadContextWindowSnapshot,
+  type ThreadContextWindowSelection,
+} from './composerContextWindow'
 import { formatProviderSkillDisplayName } from '../../providerSkillPresentation'
 import { searchProviderSkills } from '../../providerSkillSearch'
 import { buildComposerSlashMenuItems, composerSkillInsertionText } from './composerSlashMenuItems'
@@ -509,7 +512,7 @@ const ComposerFooterModeControls = memo(function ComposerFooterModeControls(prop
 
 const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(props: {
   compact: boolean
-  activeContextWindow: ReturnType<typeof deriveLatestContextWindowSnapshot>
+  activeContextWindow: ThreadContextWindowSelection
   accountUsage: ServerProvider['accountUsage']
   usageProviderDisplayName: string | null
   isPreparingWorktree: boolean
@@ -565,9 +568,7 @@ const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryActions(
   )
 })
 
-// --------------------------------------------------------------------------
-// Handle exposed to ChatView
-// --------------------------------------------------------------------------
+// handle exposed to ChatView
 
 export interface ChatComposerHandle
 {
@@ -583,15 +584,15 @@ export interface ChatComposerHandle
     expandedCursor: number
     terminalContextIds: string[]
   }
-  /** Reset composer cursor/trigger/highlight after external prompt mutations (e.g. onSend). */
+  // reset composer cursor/trigger/highlight after external prompt mutations (e.g. onSend).
   resetCursorState: (options?: {
     cursor?: number
     prompt?: string
     detectTrigger?: boolean
   }) => void
-  /** Insert a terminal context from the terminal drawer. */
+  // insert a terminal context from the terminal drawer.
   addTerminalContext: (selection: TerminalContextSelection) => void
-  /** Get the current prompt/effort/model state for use in send. */
+  // get the current prompt/effort/model state for use in send.
   getSendContext: () => {
     prompt: string
     images: ComposerImageAttachment[]
@@ -609,9 +610,7 @@ export interface ChatComposerHandle
   }
 }
 
-// --------------------------------------------------------------------------
-// Props
-// --------------------------------------------------------------------------
+// props
 
 export interface ChatComposerProps
 {
@@ -621,7 +620,7 @@ export interface ChatComposerProps
   routeThreadRef: ScopedThreadRef
   draftId: DraftId | null
 
-  // Thread context
+  // thread context
   activeThreadId: ThreadId | null
   activeThreadEnvironmentId: EnvironmentId | undefined
   activeThread: Thread | undefined
@@ -630,11 +629,13 @@ export interface ChatComposerProps
   forceExpandedOnMobile: boolean
   projectSelectionRequired: boolean
 
-  // Session phase
+  // session phase
   phase: SessionPhase
   isConnecting: boolean
   isSendBusy: boolean
   sendDisabledReason: string | null
+  // non-null only while this thread has a provider switch in flight
+  providerSwitch: ComposerProviderSwitchState | null
   isPreparingWorktree: boolean
   importContinuationSendBlocked: boolean
   environmentUnavailable: {
@@ -642,7 +643,7 @@ export interface ChatComposerProps
     readonly connection: EnvironmentConnectionPresentation
   } | null
 
-  // Pending approvals / inputs
+  // pending approvals / inputs
   activePendingApproval: PendingApproval | null
   pendingApprovals: PendingApproval[]
   pendingUserInputs: PendingUserInput[]
@@ -659,7 +660,7 @@ export interface ChatComposerProps
   activePendingQuestionIndex: number
   respondingRequestIds: ApprovalRequestId[]
 
-  // Plan
+  // plan
   showPlanFollowUpPrompt: boolean
   activeProposedPlan: Thread['proposedPlans'][number] | null
   activePlan: { turnId?: TurnId } | null
@@ -667,34 +668,34 @@ export interface ChatComposerProps
   planSidebarLabel: string
   planSidebarOpen: boolean
 
-  // Mode
+  // mode
   runtimeMode: RuntimeMode
   interactionMode: ProviderInteractionMode
 
-  // Provider / model
+  // provider / model
   lockedProvider: ProviderDriverKind | null
   providerStatuses: ServerProvider[]
   activeProjectDefaultModelSelection: ModelSelection | null | undefined
   activeThreadModelSelection: ModelSelection | null | undefined
 
-  // Context window
+  // context window
   activeThreadActivities: Thread['activities'] | undefined
 
-  // Misc
+  // misc
   resolvedTheme: 'light' | 'dark'
   settings: UnifiedSettings
   keybindings: ResolvedKeybindingsConfig
   terminalOpen: boolean
   gitCwd: string | null
 
-  // Refs the parent needs kept in sync
+  // refs the parent needs kept in sync
   promptRef: React.RefObject<string>
   composerImagesRef: React.RefObject<ComposerImageAttachment[]>
   composerTerminalContextsRef: React.RefObject<TerminalContextDraft[]>
   composerElementContextsRef: React.RefObject<ElementContextDraft[]>
   composerRef: React.RefObject<ChatComposerHandle | null>
 
-  // Callbacks
+  // callbacks
   onSend: (e?: { preventDefault: () => void }) => void
   onInterrupt: () => void
   onImplementPlanInNewThread: () => void
@@ -726,9 +727,7 @@ export interface ChatComposerProps
   onExpandImage: (preview: ExpandedImagePreview) => void
 }
 
-// --------------------------------------------------------------------------
-// Component
-// --------------------------------------------------------------------------
+// component
 
 export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 {
@@ -749,6 +748,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     isConnecting,
     isSendBusy,
     sendDisabledReason,
+    providerSwitch,
     isPreparingWorktree,
     importContinuationSendBlocked,
     environmentUnavailable,
@@ -803,9 +803,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setThreadError,
     onExpandImage,
   } = props
-  // ------------------------------------------------------------------
-  // Store subscriptions (prompt / images / terminal contexts)
-  // ------------------------------------------------------------------
+  // store subscriptions (prompt / images / terminal contexts)
   const composerDraft = useComposerThreadDraft(composerDraftTarget)
   const prompt = composerDraft.prompt
   const composerImages = composerDraft.images
@@ -849,10 +847,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   )
   const getComposerDraft = useComposerDraftStore((store) => store.getComposerDraft)
 
-  // ------------------------------------------------------------------
-  // Model state
-  // ------------------------------------------------------------------
-  // Instance-aware projection of the wire provider list. One entry per
+  // model state
+  // instance-aware projection of the wire provider list. One entry per
   // configured instance (default built-in + any custom `providerInstances.*`),
   // sorted default-first per driver kind for a stable picker order.
   const providerInstanceEntries = useMemo<ReadonlyArray<ProviderInstanceEntry>>(
@@ -900,8 +896,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       ? (activeThread?.modelSelection.instanceId ?? null)
       : null
 
-  // Resolve which configured instance the composer is currently targeting.
-  // Priority:
+  // resolve which configured instance the composer is currently targeting.
+  // priority:
   //   1. The composer draft's `activeProvider` — the user's unsaved pick
   //      from the model picker (must win, otherwise the UI appears to
   //      ignore picker selections).
@@ -926,7 +922,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       )
       if (match)
       {
-        // When locked to a specific driver kind, ignore persisted instance
+        // when locked to a specific driver kind, ignore persisted instance
         // ids from a different kind or continuation group.
         if (lockedProvider && match.driverKind !== lockedProvider) continue
         if (
@@ -963,7 +959,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     requestedDriverKind,
   ])
 
-  // Resolve the active instance's snapshot by `instanceId` so a custom
+  // resolve the active instance's snapshot by `instanceId` so a custom
   // instance gets its own slash commands, skills, and model list — not
   // the first snapshot for the same driver kind.
   const selectedProviderEntry = useMemo(
@@ -971,7 +967,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [providerInstanceEntries, selectedInstanceId],
   )
   const noProviderAvailable = selectedProviderEntry === undefined
-  // The driver kind follows the instance that will actually run the turn,
+  // the driver kind follows the instance that will actually run the turn,
   // which can differ from the persisted selection when that selection is
   // disabled.
   const selectedProvider: ProviderDriverKind =
@@ -1075,7 +1071,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     [selectedInstanceId, selectedModel, selectedModelOptionsForDispatch],
   )
   const selectedModelForPicker = selectedModel
-  // Instance-keyed option list so the picker can show each configured
+  // instance-keyed option list so the picker can show each configured
   // instance (built-in + custom) as a first-class sidebar entry. The
   // options are server-reported models plus that exact instance's
   // configured custom models; selected slugs are not injected into lists.
@@ -1098,12 +1094,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       : (normalizeModelSlug(selectedModelForPicker, selectedProvider) ?? selectedModelForPicker)
   }, [modelOptionsByInstance, selectedInstanceId, selectedModelForPicker, selectedProvider])
 
-  // ------------------------------------------------------------------
-  // Context window
-  // ------------------------------------------------------------------
+  // context window
+  // the meter is labelled with the instance the composer is targeting, so the
+  // snapshot it renders has to come from that same instance — a thread that
+  // switched providers still carries the old instance's activities.
   const activeContextWindow = useMemo(
-    () => deriveLatestContextWindowSnapshot(activeThreadActivities ?? []),
-    [activeThreadActivities],
+    () =>
+      selectThreadContextWindowSnapshot({
+        activities: activeThreadActivities ?? [],
+        currentProviderInstanceId:
+          selectedProviderEntry?.instanceId ?? activeThreadModelSelection?.instanceId ?? null,
+      }),
+    [activeThreadActivities, activeThreadModelSelection?.instanceId, selectedProviderEntry],
   )
   const activeThreadProviderDisplayName = useMemo(() =>
   {
@@ -1120,9 +1122,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const usageProviderDisplayName =
     selectedProviderEntry?.displayName ?? activeThreadProviderDisplayName
 
-  // ------------------------------------------------------------------
-  // Composer-local state
-  // ------------------------------------------------------------------
+  // composer-local state
   const [composerCursor, setComposerCursor] = useState(() =>
     collapseExpandedComposerCursor(prompt, prompt.length),
   )
@@ -1147,9 +1147,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const isMobileViewport = useMediaQuery('max-sm')
   const isComposerCollapsedMobile = isMobileViewport && !forceExpandedOnMobile && !isComposerFocused
 
-  // ------------------------------------------------------------------
-  // Refs
-  // ------------------------------------------------------------------
+  // refs
   const composerEditorRef = useRef<ComposerPromptEditorHandle>(null)
   const composerFormRef = useRef<HTMLFormElement>(null)
   const composerSurfaceRef = useRef<HTMLDivElement>(null)
@@ -1164,18 +1162,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const dragDepthRef = useRef(0)
   const stashPulseKeyRef = useRef(0)
   const stashPulseTimeoutRef = useRef<number | null>(null)
-  /**
-   * Snapshots currently being encoded, keyed by target+prompt+image ids.
-   * Keyed rather than boolean so a genuinely different prompt (or a different
-   * thread) can still be stashed while an earlier encode is running.
-   */
+  // snapshots currently being encoded, keyed by target+prompt+image ids.
+  // keyed rather than boolean so a genuinely different prompt (or a different
+  // thread) can still be stashed while an earlier encode is running.
   const stashInFlightRef = useRef<Set<string>>(new Set())
   // reserve attachment slots per thread while pasted images compress
   const pendingImageCompressionsRef = useRef<Map<ThreadId, number>>(new Map())
 
-  // ------------------------------------------------------------------
-  // Derived: composer send state
-  // ------------------------------------------------------------------
+  // derived: composer send state
   const composerSendState = useMemo(
     () =>
       deriveComposerSendState({
@@ -1197,9 +1191,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   )
 
-  // ------------------------------------------------------------------
-  // Derived: composer trigger / menu
-  // ------------------------------------------------------------------
+  // derived: composer trigger / menu
   const composerTriggerKind = composerTrigger?.kind ?? null
   const pathTriggerQuery = composerTrigger?.kind === 'path' ? composerTrigger.query : ''
   const isPathTrigger = composerTriggerKind === 'path'
@@ -1363,9 +1355,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return composerTriggerKind === 'path' ? 'No matching files or folders.' : 'No matching command.'
   }, [composerTriggerKind])
 
-  // ------------------------------------------------------------------
-  // Provider traits UI
-  // ------------------------------------------------------------------
+  // provider traits UI
   const setPromptFromTraits = useCallback(
     (nextPrompt: string) =>
     {
@@ -1432,9 +1422,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const showMobilePendingAnswerActions =
     isMobileViewport && !isComposerCollapsedMobile && pendingPrimaryAction !== null
 
-  // ------------------------------------------------------------------
-  // Prompt helpers
-  // ------------------------------------------------------------------
+  // prompt helpers
   const setPrompt = useCallback(
     (nextPrompt: string) =>
     {
@@ -1489,9 +1477,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   )
 
-  // ------------------------------------------------------------------
-  // Sync refs back to parent
-  // ------------------------------------------------------------------
+  // sync refs back to parent
   useEffect(() =>
   {
     promptRef.current = prompt
@@ -1513,9 +1499,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     composerElementContextsRef.current = composerElementContexts
   }, [composerElementContexts, composerElementContextsRef])
 
-  // ------------------------------------------------------------------
-  // Composer menu highlight sync
-  // ------------------------------------------------------------------
+  // composer menu highlight sync
   useEffect(() =>
   {
     if (!composerMenuOpen)
@@ -1584,9 +1568,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     promptRef,
   ])
 
-  // ------------------------------------------------------------------
-  // Reset compositor state on thread/draft change
-  // ------------------------------------------------------------------
+  // reset compositor state on thread/draft change
   useEffect(() =>
   {
     setComposerHighlightedItemId(null)
@@ -1596,9 +1578,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsDragOverComposer(false)
   }, [draftId, activeThreadId, promptRef])
 
-  // ------------------------------------------------------------------
-  // Footer compact layout observation
-  // ------------------------------------------------------------------
+  // footer compact layout observation
   useLayoutEffect(() =>
   {
     const composerForm = composerFormRef.current
@@ -1646,9 +1626,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   }, [activeThreadId, composerFooterActionLayoutKey, composerFooterHasWideActions])
 
-  // ------------------------------------------------------------------
-  // Image persist effect
-  // ------------------------------------------------------------------
+  // image persist effect
   useEffect(() =>
   {
     let cancelled = false
@@ -1728,9 +1706,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     syncComposerDraftPersistedAttachments,
   ])
 
-  // ------------------------------------------------------------------
-  // Callbacks: prompt change
-  // ------------------------------------------------------------------
+  // callbacks: prompt change
   const onPromptChange = useCallback(
     (
       nextPrompt: string,
@@ -1781,9 +1757,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   )
 
-  // ------------------------------------------------------------------
-  // Callbacks: prompt replacement / menu
-  // ------------------------------------------------------------------
+  // callbacks: prompt replacement / menu
   const applyPromptReplacement = useCallback(
     (
       rangeStart: number,
@@ -2114,9 +2088,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     })
   }, [])
 
-  // ------------------------------------------------------------------
-  // Callbacks: command key
-  // ------------------------------------------------------------------
+  // callbacks: command key
   const onComposerCommandKey = (
     key: 'ArrowDown' | 'ArrowUp' | 'Enter' | 'Tab',
     event: KeyboardEvent,
@@ -2160,9 +2132,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     return false
   }
 
-  // ------------------------------------------------------------------
-  // Prompt stash (⌘S)
-  // ------------------------------------------------------------------
+  // prompt stash (⌘S)
   const stashScopeInstanceId = noProviderAvailable ? null : selectedInstanceId
   const stashScope = promptStashScopeKey(stashScopeInstanceId)
   const stashQueue = usePromptStashStore(
@@ -2192,7 +2162,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   }, [])
 
-  /** Briefly highlight the badge so the save registers without a flourish. */
+  // briefly highlight the badge so the save registers without a flourish.
   const pulseStashBadge = useCallback(() =>
   {
     stashPulseKeyRef.current += 1
@@ -2211,7 +2181,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
   const restoreStashEntry = useCallback(
     (entry: PromptStashEntry) =>
     {
-      // Remove first so a double activation (click + Enter) can't restore twice.
+      // remove first so a double activation (click + Enter) can't restore twice.
       const { entry: taken, durable } = takeStashEntry(
         promptStashScopeKey(entry.providerInstanceId),
         entry.id,
@@ -2230,7 +2200,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setIsStashMenuOpen(false)
 
       const currentPrompt = promptRef.current
-      // An image-only stash must not append blank lines to whatever is
+      // an image-only stash must not append blank lines to whatever is
       // already in the composer.
       const nextPrompt =
         entry.prompt.length === 0
@@ -2251,7 +2221,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       if (entry.attachments.length > 0)
       {
         const existingIds = new Set(composerImagesRef.current.map((image) => image.id))
-        // The draft store also dedupes by mimeType+sizeBytes+name, so filter
+        // the draft store also dedupes by mimeType+sizeBytes+name, so filter
         // on the same key here. Counting a duplicate against capacity would
         // burn a slot the store then refuses to fill, pushing a genuinely
         // unique image into the overflow list for nothing.
@@ -2271,7 +2241,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
               `${attachment.mimeType} ${attachment.sizeBytes} ${attachment.name}`,
             ),
         )
-        // Anything past the attachment limit cannot be restored. The entry is
+        // anything past the attachment limit cannot be restored. The entry is
         // already out of the queue, so report the overflow by name instead of
         // discarding it silently.
         unrestoredImageNames = pending.slice(capacity).map((attachment) => attachment.name)
@@ -2299,7 +2269,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         })
       }
 
-      // Each cause gets its own sentence so "too large" is never blamed for a
+      // each cause gets its own sentence so "too large" is never blamed for a
       // file that actually failed to decode, or for one the composer simply
       // had no room to take back.
       const missingImageReasons: string[] = []
@@ -2330,7 +2300,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         })
       }
 
-      // Only yank the caret to the end when text was actually inserted;
+      // only yank the caret to the end when text was actually inserted;
       // restoring images alone should leave the user where they were typing.
       if (promptChanged)
       {
@@ -2372,7 +2342,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
 
   const stashCurrentPrompt = useCallback(async () =>
   {
-    // Terminal-context placeholders reference live sessions the stash can't
+    // terminal-context placeholders reference live sessions the stash can't
     // round-trip, so they are stripped from the stashed prompt.
     const prompt = promptRef.current.split(INLINE_TERMINAL_CONTEXT_PLACEHOLDER).join('').trim()
     const images = [...composerImagesRef.current]
@@ -2381,7 +2351,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       setIsStashMenuOpen((open) => !open)
       return
     }
-    // A repeat ⌘S on the *same* still-unencoded snapshot would stash it
+    // a repeat ⌘S on the *same* still-unencoded snapshot would stash it
     // twice. Guard on the snapshot itself rather than a bare boolean: once
     // the composer has been cleared the user can type something genuinely
     // new (or switch threads) while encoding continues, and that deserves its
@@ -2397,11 +2367,11 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     const scopeKey = promptStashScopeKey(stashScopeInstanceId)
     try
     {
-      // Persist the text-only entry *first*, then clear. Ordering matters in
+      // persist the text-only entry *first*, then clear. Ordering matters in
       // both directions: writing before clearing means a crash or closed tab
       // mid-encode still leaves the prompt recoverable, while clearing before
       // the async image work means edits typed during encoding are not wiped.
-      // Images are appended to the stored entry as they finish encoding.
+      // images are appended to the stored entry as they finish encoding.
       const { evicted, durable } = stashEntryToQueue({
         id: entryId,
         createdAt: new Date().toISOString(),
@@ -2414,7 +2384,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         pendingImageCount: images.length,
       })
 
-      // Clearing the composer is only safe once the entry is durable. If the
+      // clearing the composer is only safe once the entry is durable. If the
       // write was rejected (quota, blocked storage) the store has already
       // rolled itself back, so leave the composer untouched rather than
       // making it the second casualty of a reload.
@@ -2430,7 +2400,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         return
       }
 
-      // Only the prompt and images are cleared — terminal/element contexts,
+      // only the prompt and images are cleared — terminal/element contexts,
       // preview annotations, and review comments are not stashable, so
       // destroying them here would be unrecoverable.
       promptRef.current = ''
@@ -2449,7 +2419,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         })
       }
 
-      // Images are re-encoded for the stash rather than stored verbatim: the
+      // images are re-encoded for the stash rather than stored verbatim: the
       // composer allows up to 10MB per image, but localStorage gives the whole
       // origin ~5MB. Only the stashed copy shrinks; the live attachment (and
       // anything sent without stashing) keeps the original file.
@@ -2485,7 +2455,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       })
       if (attached)
       {
-        // The second phase can be rejected on its own: the text-only entry
+        // the second phase can be rejected on its own: the text-only entry
         // fit, but adding image payloads pushed past the quota. Disk would
         // then still hold the phase-one entry with pendingImageCount set,
         // which reads as an orphan after reload — so say so now.
@@ -2502,7 +2472,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       }
       else if (kept.length > 0)
       {
-        // The entry was restored or deleted before its images finished
+        // the entry was restored or deleted before its images finished
         // encoding, so they have nowhere to land. Say so rather than letting
         // them evaporate.
         toastManager.add({
@@ -2515,7 +2485,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
     finally
     {
-      // Must clear on every path: a throw that left this set would wedge this
+      // must clear on every path: a throw that left this set would wedge this
       // snapshot's ⌘S until the composer remounts.
       stashInFlightRef.current.delete(snapshotKey)
     }
@@ -2538,7 +2508,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsStashMenuOpen((open) => !open)
   }, [])
 
-  // Close the stash menu whenever the trigger-driven command menu opens so
+  // close the stash menu whenever the trigger-driven command menu opens so
   // the two popovers never stack in the same layer, and when the user
   // resumes typing (the menu is a transient picker, not a panel).
   useEffect(() =>
@@ -2565,7 +2535,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
         },
       })
       if (command !== 'composer.stash') return
-      // Always claim the shortcut so the browser save dialog never opens,
+      // always claim the shortcut so the browser save dialog never opens,
       // even when the composer is in a state that can't stash.
       event.preventDefault()
       event.stopPropagation()
@@ -2594,9 +2564,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     terminalOpen,
   ])
 
-  // ------------------------------------------------------------------
-  // Callbacks: images
-  // ------------------------------------------------------------------
+  // callbacks: images
   const addComposerImages = async (files: File[]) =>
   {
     if (!activeThreadId || files.length === 0) return
@@ -2697,9 +2665,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     removeComposerImageFromDraft(imageId)
   }
 
-  // ------------------------------------------------------------------
-  // Callbacks: paste / drag
-  // ------------------------------------------------------------------
+  // callbacks: paste / drag
   const onComposerPaste = (event: React.ClipboardEvent<HTMLElement>) =>
   {
     const files = Array.from(event.clipboardData.files)
@@ -2775,7 +2741,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     )
   }
 
-  // File-tree drags land as mentions. Handled in the capture phase so the
+  // file-tree drags land as mentions. Handled in the capture phase so the
   // editor never sees the drop; the load-bearing rules (native stop, "move"
   // effect, no eager focus) live in makeComposerMentionDragHandlers.
   const composerMentionDragHandlers = makeComposerMentionDragHandlers({
@@ -2800,7 +2766,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     setIsDragOverComposer(false)
   }
 
-  // A cancelled drag (Escape) can end without a dragleave on the hovered
+  // a cancelled drag (Escape) can end without a dragleave on the hovered
   // target, which would leave the drop highlight stuck. dragend always fires
   // on the in-page drag source and bubbles to window, so it is the reset of
   // last resort while the highlight is up.
@@ -2881,9 +2847,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     }
   }, [])
 
-  // ------------------------------------------------------------------
-  // Imperative handle
-  // ------------------------------------------------------------------
+  // imperative handle
   useImperativeHandle(
     composerRef,
     () => ({
@@ -3010,8 +2974,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     ],
   )
 
-  // Render
-  // ------------------------------------------------------------------
+  // render
   return (
     <form
       ref={composerFormRef}
@@ -3512,6 +3475,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                     modelOptionsByInstance={modelOptionsByInstance}
                     switchableThreadProviderInstanceId={switchableThreadProviderInstanceId}
                     terminalOpen={terminalOpen}
+                    disabled={providerSwitch !== null}
                     open={isComposerModelPickerOpen}
                     {...(composerProviderState.modelPickerIconClassName
                       ? {
@@ -3563,6 +3527,18 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   </>
                 )}
 
+                {providerSwitch === null ? null : (
+                  <span
+                    role="status"
+                    data-chat-provider-switch-notice="true"
+                    title={providerSwitch.notice}
+                    className="flex min-w-0 shrink-0 items-center gap-1.5 rounded-md bg-muted/60 px-2 py-1 text-muted-foreground text-xs"
+                  >
+                    <ArrowRightLeftIcon aria-hidden="true" className="size-3.5 shrink-0" />
+                    <span className="max-w-56 truncate">{providerSwitch.notice}</span>
+                  </span>
+                )}
+
                 {brokerNotReadyMessage === null ? null : (
                   <span
                     role="status"
@@ -3590,7 +3566,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                   accountUsage={selectedProviderStatus?.accountUsage}
                   usageProviderDisplayName={usageProviderDisplayName}
                   pendingAction={pendingPrimaryAction}
-                  isRunning={phase === 'running'}
+                  isRunning={phase === 'running' && providerSwitch?.hidesRunningTurn !== true}
                   showPlanFollowUpPrompt={pendingUserInputs.length === 0 && showPlanFollowUpPrompt}
                   promptHasText={prompt.trim().length > 0}
                   isSendBusy={isSendBusy}

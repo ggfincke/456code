@@ -2,6 +2,9 @@
 // loads orchestration projection snapshots
 
 import {
+  ApprovalAcceptanceEvidence,
+  ApprovalOutcomeStatus,
+  ApprovalRequestId,
   ChatAttachment,
   CheckpointRef,
   IsoDateTime,
@@ -10,6 +13,7 @@ import {
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationPendingHandoff,
+  OrchestrationProviderSwitch,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
@@ -28,7 +32,9 @@ import {
   type OrchestrationThreadShell,
   ModelSelection,
   ProjectId,
+  ProviderApprovalDecision,
   ThreadId,
+  type ApprovalOutcome,
 } from '@t3tools/contracts'
 import * as Arr from 'effect/Array'
 import * as Effect from 'effect/Effect'
@@ -89,6 +95,7 @@ const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
     pendingHandoff: Schema.NullOr(Schema.fromJsonString(OrchestrationPendingHandoff)),
+    providerSwitch: Schema.NullOr(Schema.fromJsonString(OrchestrationProviderSwitch)),
     originJson: Schema.NullOr(Schema.fromJsonString(ThreadOrigin)),
   }),
 )
@@ -133,6 +140,18 @@ const ProjectionImportThreadRowSchema = Schema.Struct({
 })
 const ProjectionThreadImportFinalizedRowSchema = Schema.Struct({
   isFinalized: Schema.Number,
+})
+const ProjectionApprovalOutcomeDbRowSchema = Schema.Struct({
+  requestId: ApprovalRequestId,
+  threadId: ThreadId,
+  status: ApprovalOutcomeStatus,
+  requestedDecision: Schema.NullOr(ProviderApprovalDecision),
+  decision: Schema.NullOr(ProviderApprovalDecision),
+  detail: Schema.NullOr(Schema.String),
+  actionId: Schema.NullOr(Schema.String),
+  acceptanceEvidence: Schema.NullOr(Schema.fromJsonString(ApprovalAcceptanceEvidence)),
+  updatedAt: Schema.NullOr(IsoDateTime),
+  createdAt: IsoDateTime,
 })
 const WorkspaceRootLookupInput = Schema.Struct({
   workspaceRoot: Schema.String,
@@ -421,6 +440,22 @@ function mapProposedPlanRow(
   }
 }
 
+function mapApprovalOutcomeRow(
+  row: Schema.Schema.Type<typeof ProjectionApprovalOutcomeDbRowSchema>,
+): ApprovalOutcome
+{
+  return {
+    requestId: row.requestId,
+    status: row.status,
+    ...(row.requestedDecision === null ? {} : { requestedDecision: row.requestedDecision }),
+    ...(row.decision === null ? {} : { decision: row.decision }),
+    ...(row.detail === null ? {} : { detail: row.detail }),
+    ...(row.actionId === null ? {} : { actionId: row.actionId }),
+    ...(row.acceptanceEvidence === null ? {} : { acceptanceEvidence: row.acceptanceEvidence }),
+    updatedAt: row.updatedAt ?? row.createdAt,
+  }
+}
+
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)
 {
   return (cause: unknown): ProjectionRepositoryError =>
@@ -497,6 +532,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           title,
           model_selection_json AS "modelSelection",
           pending_handoff_json AS "pendingHandoff",
+          provider_switch_json AS "providerSwitch",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -517,6 +553,54 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           deleted_at AS "deletedAt"
         FROM projection_threads
         ORDER BY created_at ASC, thread_id ASC
+      `,
+  })
+
+  // both queries deliberately ship every outcome status: terminal rows
+  // (accepted / stale-terminal) clear optimistic approval cards on snapshot
+  // consumers, so filtering them out silently breaks approval resolution.
+  // bounding snapshot growth needs a retention policy instead (see the
+  // mega-review 2026-08-02 P2 I follow-up)
+  const listApprovalOutcomeRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionApprovalOutcomeDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          request_id AS "requestId",
+          thread_id AS "threadId",
+          outcome_status AS "status",
+          outcome_requested_decision AS "requestedDecision",
+          outcome_decision AS "decision",
+          outcome_detail AS "detail",
+          outcome_action_id AS "actionId",
+          outcome_acceptance_evidence AS "acceptanceEvidence",
+          outcome_updated_at AS "updatedAt",
+          created_at AS "createdAt"
+        FROM projection_pending_approvals
+        ORDER BY thread_id ASC, created_at ASC, request_id ASC
+      `,
+  })
+
+  const listApprovalOutcomeRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionApprovalOutcomeDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          request_id AS "requestId",
+          thread_id AS "threadId",
+          outcome_status AS "status",
+          outcome_requested_decision AS "requestedDecision",
+          outcome_decision AS "decision",
+          outcome_detail AS "detail",
+          outcome_action_id AS "actionId",
+          outcome_acceptance_evidence AS "acceptanceEvidence",
+          outcome_updated_at AS "updatedAt",
+          created_at AS "createdAt"
+        FROM projection_pending_approvals
+        WHERE thread_id = ${threadId}
+        ORDER BY created_at ASC, request_id ASC
       `,
   })
 
@@ -563,6 +647,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           title,
           model_selection_json AS "modelSelection",
           pending_handoff_json AS "pendingHandoff",
+          provider_switch_json AS "providerSwitch",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -599,6 +684,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           title,
           model_selection_json AS "modelSelection",
           pending_handoff_json AS "pendingHandoff",
+          provider_switch_json AS "providerSwitch",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -982,6 +1068,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           title,
           model_selection_json AS "modelSelection",
           pending_handoff_json AS "pendingHandoff",
+          provider_switch_json AS "providerSwitch",
           runtime_mode AS "runtimeMode",
           interaction_mode AS "interactionMode",
           branch,
@@ -1280,6 +1367,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               ),
             ),
           ),
+          listApprovalOutcomeRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                'ProjectionSnapshotQuery.getSnapshot:listApprovalOutcomes:query',
+                'ProjectionSnapshotQuery.getSnapshot:listApprovalOutcomes:decodeRows',
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -1294,6 +1389,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             checkpointRows,
             latestTurnRows,
             stateRows,
+            approvalOutcomeRows,
           ]) =>
             Effect.gen(function* ()
             {
@@ -1303,6 +1399,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>()
               const sessionsByThread = new Map<string, OrchestrationSession>()
               const latestTurnByThread = new Map<string, OrchestrationLatestTurn>()
+              const approvalOutcomesByThread = new Map<string, Array<ApprovalOutcome>>()
 
               let updatedAt: string | null = null
 
@@ -1442,6 +1539,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 })
               }
 
+              for (const row of approvalOutcomeRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt ?? row.createdAt)
+                const outcomes = approvalOutcomesByThread.get(row.threadId) ?? []
+                outcomes.push(mapApprovalOutcomeRow(row))
+                approvalOutcomesByThread.set(row.threadId, outcomes)
+              }
+
               const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(
                 projectRows,
                 { includeDeleted: true },
@@ -1465,6 +1570,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 title: row.title,
                 modelSelection: row.modelSelection,
                 pendingHandoff: row.pendingHandoff,
+                providerSwitch: row.providerSwitch,
                 runtimeMode: row.runtimeMode,
                 interactionMode: row.interactionMode,
                 branch: row.branch,
@@ -1484,6 +1590,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 activities: activitiesByThread.get(row.threadId) ?? [],
                 checkpoints: checkpointsByThread.get(row.threadId) ?? [],
                 session: sessionsByThread.get(row.threadId) ?? null,
+                approvalOutcomes: approvalOutcomesByThread.get(row.threadId) ?? [],
               }))
 
               const snapshot = {
@@ -1570,6 +1677,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               ),
             ),
           ),
+          listApprovalOutcomeRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                'ProjectionSnapshotQuery.getCommandReadModel:listApprovalOutcomes:query',
+                'ProjectionSnapshotQuery.getCommandReadModel:listApprovalOutcomes:decodeRows',
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
@@ -1582,6 +1697,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             sessionRows,
             latestTurnRows,
             stateRows,
+            approvalOutcomeRows,
           ]) =>
             Effect.sync(() =>
             {
@@ -1687,6 +1803,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 Array<OrchestrationThreadActivity>
               >()
               const sessionByThread = new Map<string, OrchestrationSession>()
+              const approvalOutcomesByThread = new Map<string, Array<ApprovalOutcome>>()
 
               for (let index = 0; index < sessionRows.length; index += 1)
               {
@@ -1696,6 +1813,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                   continue
                 }
                 sessionByThread.set(row.threadId, mapSessionRow(row))
+              }
+
+              for (const row of approvalOutcomeRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt ?? row.createdAt)
+                const outcomes = approvalOutcomesByThread.get(row.threadId) ?? []
+                outcomes.push(mapApprovalOutcomeRow(row))
+                approvalOutcomesByThread.set(row.threadId, outcomes)
               }
 
               for (let index = 0; index < proposedPlanRows.length; index += 1)
@@ -1743,6 +1868,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                   title: row.title,
                   modelSelection: row.modelSelection,
                   pendingHandoff: row.pendingHandoff,
+                  providerSwitch: row.providerSwitch,
                   runtimeMode: row.runtimeMode,
                   interactionMode: row.interactionMode,
                   branch: row.branch,
@@ -1762,6 +1888,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                   activities: commandActivitiesByThread.get(row.threadId) ?? [],
                   checkpoints: [],
                   session: sessionByThread.get(row.threadId) ?? null,
+                  approvalOutcomes: approvalOutcomesByThread.get(row.threadId) ?? [],
                 })
               }
 
@@ -1827,98 +1954,124 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               ),
             ),
           ),
+          listApprovalOutcomeRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                'ProjectionSnapshotQuery.getShellSnapshot:listApprovalOutcomes:query',
+                'ProjectionSnapshotQuery.getShellSnapshot:listApprovalOutcomes:decodeRows',
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
-        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
-          Effect.gen(function* ()
-          {
-            let updatedAt: string | null = null
-            for (const row of projectRows)
+        Effect.flatMap(
+          ([
+            projectRows,
+            threadRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+            approvalOutcomeRows,
+          ]) =>
+            Effect.gen(function* ()
             {
-              updatedAt = maxIso(updatedAt, row.updatedAt)
-            }
-            for (const row of threadRows)
-            {
-              updatedAt = maxIso(updatedAt, row.updatedAt)
-            }
-            for (const row of sessionRows)
-            {
-              updatedAt = maxIso(updatedAt, row.updatedAt)
-            }
-            for (const row of latestTurnRows)
-            {
-              updatedAt = maxIso(updatedAt, row.requestedAt)
-              if (row.startedAt !== null)
+              let updatedAt: string | null = null
+              for (const row of projectRows)
               {
-                updatedAt = maxIso(updatedAt, row.startedAt)
+                updatedAt = maxIso(updatedAt, row.updatedAt)
               }
-              if (row.completedAt !== null)
+              for (const row of threadRows)
               {
-                updatedAt = maxIso(updatedAt, row.completedAt)
+                updatedAt = maxIso(updatedAt, row.updatedAt)
               }
-            }
-            for (const row of stateRows)
-            {
-              updatedAt = maxIso(updatedAt, row.updatedAt)
-            }
+              for (const row of sessionRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt)
+              }
+              for (const row of latestTurnRows)
+              {
+                updatedAt = maxIso(updatedAt, row.requestedAt)
+                if (row.startedAt !== null)
+                {
+                  updatedAt = maxIso(updatedAt, row.startedAt)
+                }
+                if (row.completedAt !== null)
+                {
+                  updatedAt = maxIso(updatedAt, row.completedAt)
+                }
+              }
+              for (const row of stateRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt)
+              }
 
-            const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(projectRows)
-            const latestTurnByThread = new Map(
-              latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
-            )
-            const sessionByThread = new Map(
-              sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
-            )
+              const repositoryIdentities =
+                yield* resolveRepositoryIdentitiesForProjects(projectRows)
+              const latestTurnByThread = new Map(
+                latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
+              )
+              const sessionByThread = new Map(
+                sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
+              )
+              const approvalOutcomesByThread = new Map<string, Array<ApprovalOutcome>>()
+              for (const row of approvalOutcomeRows)
+              {
+                const outcomes = approvalOutcomesByThread.get(row.threadId) ?? []
+                outcomes.push(mapApprovalOutcomeRow(row))
+                approvalOutcomesByThread.set(row.threadId, outcomes)
+              }
 
-            const snapshot = {
-              snapshotSequence: computeSnapshotSequence(stateRows),
-              projects: Arr.filterMap(projectRows, (row) =>
-                row.deletedAt === null
-                  ? Result.succeed(
-                      mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
-                    )
-                  : Result.failVoid,
-              ),
-              threads: Arr.filterMap(threadRows, (row) =>
-                row.deletedAt === null
-                  ? Result.succeed({
-                      id: row.threadId,
-                      projectId: row.projectId,
-                      title: row.title,
-                      modelSelection: row.modelSelection,
-                      runtimeMode: row.runtimeMode,
-                      interactionMode: row.interactionMode,
-                      branch: row.branch,
-                      worktreePath: row.worktreePath,
-                      origin: row.originJson,
-                      latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                      createdAt: row.createdAt,
-                      updatedAt: row.updatedAt,
-                      archivedAt: row.archivedAt,
-                      settledOverride: row.settledOverride,
-                      settledAt: row.settledAt,
-                      snoozedUntil: row.snoozedUntil,
-                      snoozedAt: row.snoozedAt,
-                      session: sessionByThread.get(row.threadId) ?? null,
-                      latestUserMessageAt: row.latestUserMessageAt,
-                      hasPendingApprovals: row.pendingApprovalCount > 0,
-                      hasPendingUserInput: row.pendingUserInputCount > 0,
-                      hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
-                    } satisfies OrchestrationThreadShell)
-                  : Result.failVoid,
-              ),
-              updatedAt: updatedAt ?? '1970-01-01T00:00:00.000Z',
-            }
-
-            return yield* decodeShellSnapshot(snapshot).pipe(
-              Effect.mapError(
-                toPersistenceDecodeError(
-                  'ProjectionSnapshotQuery.getShellSnapshot:decodeShellSnapshot',
+              const snapshot = {
+                snapshotSequence: computeSnapshotSequence(stateRows),
+                projects: Arr.filterMap(projectRows, (row) =>
+                  row.deletedAt === null
+                    ? Result.succeed(
+                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                      )
+                    : Result.failVoid,
                 ),
-              ),
-            )
-          }),
+                threads: Arr.filterMap(threadRows, (row) =>
+                  row.deletedAt === null
+                    ? Result.succeed({
+                        id: row.threadId,
+                        projectId: row.projectId,
+                        title: row.title,
+                        modelSelection: row.modelSelection,
+                        providerSwitch: row.providerSwitch,
+                        runtimeMode: row.runtimeMode,
+                        interactionMode: row.interactionMode,
+                        branch: row.branch,
+                        worktreePath: row.worktreePath,
+                        origin: row.originJson,
+                        latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                        createdAt: row.createdAt,
+                        updatedAt: row.updatedAt,
+                        archivedAt: row.archivedAt,
+                        settledOverride: row.settledOverride,
+                        settledAt: row.settledAt,
+                        snoozedUntil: row.snoozedUntil,
+                        snoozedAt: row.snoozedAt,
+                        session: sessionByThread.get(row.threadId) ?? null,
+                        latestUserMessageAt: row.latestUserMessageAt,
+                        hasPendingApprovals: row.pendingApprovalCount > 0,
+                        hasPendingUserInput: row.pendingUserInputCount > 0,
+                        hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                        approvalOutcomes: approvalOutcomesByThread.get(row.threadId) ?? [],
+                      } satisfies OrchestrationThreadShell)
+                    : Result.failVoid,
+                ),
+                updatedAt: updatedAt ?? '1970-01-01T00:00:00.000Z',
+              }
+
+              return yield* decodeShellSnapshot(snapshot).pipe(
+                Effect.mapError(
+                  toPersistenceDecodeError(
+                    'ProjectionSnapshotQuery.getShellSnapshot:decodeShellSnapshot',
+                  ),
+                ),
+              )
+            }),
         ),
         Effect.mapError((error) =>
         {
@@ -1974,97 +2127,122 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               ),
             ),
           ),
+          listApprovalOutcomeRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                'ProjectionSnapshotQuery.getArchivedShellSnapshot:listApprovalOutcomes:query',
+                'ProjectionSnapshotQuery.getArchivedShellSnapshot:listApprovalOutcomes:decodeRows',
+              ),
+            ),
+          ),
         ]),
       )
       .pipe(
-        Effect.flatMap(([projectRows, threadRows, sessionRows, latestTurnRows, stateRows]) =>
-          Effect.gen(function* ()
-          {
-            let updatedAt: string | null = null
-            for (const row of projectRows)
+        Effect.flatMap(
+          ([
+            projectRows,
+            threadRows,
+            sessionRows,
+            latestTurnRows,
+            stateRows,
+            approvalOutcomeRows,
+          ]) =>
+            Effect.gen(function* ()
             {
-              updatedAt = maxIso(updatedAt, row.updatedAt)
-            }
-            for (const row of threadRows)
-            {
-              updatedAt = maxIso(updatedAt, row.updatedAt)
-            }
-            for (const row of sessionRows)
-            {
-              updatedAt = maxIso(updatedAt, row.updatedAt)
-            }
-            for (const row of latestTurnRows)
-            {
-              updatedAt = maxIso(updatedAt, row.requestedAt)
-              if (row.startedAt !== null)
+              let updatedAt: string | null = null
+              for (const row of projectRows)
               {
-                updatedAt = maxIso(updatedAt, row.startedAt)
+                updatedAt = maxIso(updatedAt, row.updatedAt)
               }
-              if (row.completedAt !== null)
+              for (const row of threadRows)
               {
-                updatedAt = maxIso(updatedAt, row.completedAt)
+                updatedAt = maxIso(updatedAt, row.updatedAt)
               }
-            }
-            for (const row of stateRows)
-            {
-              updatedAt = maxIso(updatedAt, row.updatedAt)
-            }
+              for (const row of sessionRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt)
+              }
+              for (const row of latestTurnRows)
+              {
+                updatedAt = maxIso(updatedAt, row.requestedAt)
+                if (row.startedAt !== null)
+                {
+                  updatedAt = maxIso(updatedAt, row.startedAt)
+                }
+                if (row.completedAt !== null)
+                {
+                  updatedAt = maxIso(updatedAt, row.completedAt)
+                }
+              }
+              for (const row of stateRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt)
+              }
 
-            const activeProjectIds = new Set(threadRows.map((row) => row.projectId))
-            const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(
-              projectRows.filter((row) => activeProjectIds.has(row.projectId)),
-            )
-            const latestTurnByThread = new Map(
-              latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
-            )
-            const sessionByThread = new Map(
-              sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
-            )
+              const activeProjectIds = new Set(threadRows.map((row) => row.projectId))
+              const repositoryIdentities = yield* resolveRepositoryIdentitiesForProjects(
+                projectRows.filter((row) => activeProjectIds.has(row.projectId)),
+              )
+              const latestTurnByThread = new Map(
+                latestTurnRows.map((row) => [row.threadId, mapLatestTurn(row)] as const),
+              )
+              const sessionByThread = new Map(
+                sessionRows.map((row) => [row.threadId, mapSessionRow(row)] as const),
+              )
+              const approvalOutcomesByThread = new Map<string, Array<ApprovalOutcome>>()
+              for (const row of approvalOutcomeRows)
+              {
+                const outcomes = approvalOutcomesByThread.get(row.threadId) ?? []
+                outcomes.push(mapApprovalOutcomeRow(row))
+                approvalOutcomesByThread.set(row.threadId, outcomes)
+              }
 
-            const snapshot = {
-              snapshotSequence: computeSnapshotSequence(stateRows),
-              projects: Arr.filterMap(projectRows, (row) =>
-                row.deletedAt === null && activeProjectIds.has(row.projectId)
-                  ? Result.succeed(
-                      mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
-                    )
-                  : Result.failVoid,
-              ),
-              threads: threadRows.map((row): OrchestrationThreadShell => ({
-                id: row.threadId,
-                projectId: row.projectId,
-                title: row.title,
-                modelSelection: row.modelSelection,
-                runtimeMode: row.runtimeMode,
-                interactionMode: row.interactionMode,
-                branch: row.branch,
-                worktreePath: row.worktreePath,
-                origin: row.originJson,
-                latestTurn: latestTurnByThread.get(row.threadId) ?? null,
-                createdAt: row.createdAt,
-                updatedAt: row.updatedAt,
-                archivedAt: row.archivedAt,
-                settledOverride: row.settledOverride,
-                settledAt: row.settledAt,
-                snoozedUntil: row.snoozedUntil,
-                snoozedAt: row.snoozedAt,
-                session: sessionByThread.get(row.threadId) ?? null,
-                latestUserMessageAt: row.latestUserMessageAt,
-                hasPendingApprovals: row.pendingApprovalCount > 0,
-                hasPendingUserInput: row.pendingUserInputCount > 0,
-                hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
-              })),
-              updatedAt: updatedAt ?? '1970-01-01T00:00:00.000Z',
-            }
-
-            return yield* decodeShellSnapshot(snapshot).pipe(
-              Effect.mapError(
-                toPersistenceDecodeError(
-                  'ProjectionSnapshotQuery.getArchivedShellSnapshot:decodeShellSnapshot',
+              const snapshot = {
+                snapshotSequence: computeSnapshotSequence(stateRows),
+                projects: Arr.filterMap(projectRows, (row) =>
+                  row.deletedAt === null && activeProjectIds.has(row.projectId)
+                    ? Result.succeed(
+                        mapProjectShellRow(row, repositoryIdentities.get(row.projectId) ?? null),
+                      )
+                    : Result.failVoid,
                 ),
-              ),
-            )
-          }),
+                threads: threadRows.map((row): OrchestrationThreadShell => ({
+                  id: row.threadId,
+                  projectId: row.projectId,
+                  title: row.title,
+                  modelSelection: row.modelSelection,
+                  providerSwitch: row.providerSwitch,
+                  runtimeMode: row.runtimeMode,
+                  interactionMode: row.interactionMode,
+                  branch: row.branch,
+                  worktreePath: row.worktreePath,
+                  origin: row.originJson,
+                  latestTurn: latestTurnByThread.get(row.threadId) ?? null,
+                  createdAt: row.createdAt,
+                  updatedAt: row.updatedAt,
+                  archivedAt: row.archivedAt,
+                  settledOverride: row.settledOverride,
+                  settledAt: row.settledAt,
+                  snoozedUntil: row.snoozedUntil,
+                  snoozedAt: row.snoozedAt,
+                  session: sessionByThread.get(row.threadId) ?? null,
+                  latestUserMessageAt: row.latestUserMessageAt,
+                  hasPendingApprovals: row.pendingApprovalCount > 0,
+                  hasPendingUserInput: row.pendingUserInputCount > 0,
+                  hasActionableProposedPlan: row.hasActionableProposedPlan > 0,
+                  approvalOutcomes: approvalOutcomesByThread.get(row.threadId) ?? [],
+                })),
+                updatedAt: updatedAt ?? '1970-01-01T00:00:00.000Z',
+              }
+
+              return yield* decodeShellSnapshot(snapshot).pipe(
+                Effect.mapError(
+                  toPersistenceDecodeError(
+                    'ProjectionSnapshotQuery.getArchivedShellSnapshot:decodeShellSnapshot',
+                  ),
+                ),
+              )
+            }),
         ),
         Effect.mapError((error) =>
         {
@@ -2289,7 +2467,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
   const getThreadShellById: ProjectionSnapshotQueryShape['getThreadShellById'] = (threadId) =>
     Effect.gen(function* ()
     {
-      const [threadRow, latestTurnRow, sessionRow] = yield* Effect.all([
+      const [threadRow, latestTurnRow, sessionRow, approvalOutcomeRows] = yield* Effect.all([
         getActiveThreadRowById({ threadId }).pipe(
           Effect.mapError(
             toPersistenceSqlOrDecodeError(
@@ -2314,6 +2492,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             ),
           ),
         ),
+        listApprovalOutcomeRowsByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              'ProjectionSnapshotQuery.getThreadShellById:listApprovalOutcomes:query',
+              'ProjectionSnapshotQuery.getThreadShellById:listApprovalOutcomes:decodeRows',
+            ),
+          ),
+        ),
       ])
 
       if (Option.isNone(threadRow))
@@ -2326,6 +2512,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         projectId: threadRow.value.projectId,
         title: threadRow.value.title,
         modelSelection: threadRow.value.modelSelection,
+        providerSwitch: threadRow.value.providerSwitch,
         runtimeMode: threadRow.value.runtimeMode,
         interactionMode: threadRow.value.interactionMode,
         branch: threadRow.value.branch,
@@ -2344,6 +2531,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         hasPendingApprovals: threadRow.value.pendingApprovalCount > 0,
         hasPendingUserInput: threadRow.value.pendingUserInputCount > 0,
         hasActionableProposedPlan: threadRow.value.hasActionableProposedPlan > 0,
+        approvalOutcomes: approvalOutcomeRows.map(mapApprovalOutcomeRow),
       } satisfies OrchestrationThreadShell)
     })
 
@@ -2371,6 +2559,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         checkpointRows,
         latestTurnRow,
         sessionRow,
+        approvalOutcomeRows,
       ] = yield* Effect.all([
         getActiveThreadRowById({ threadId }).pipe(
           Effect.mapError(
@@ -2428,6 +2617,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             ),
           ),
         ),
+        listApprovalOutcomeRowsByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              'ProjectionSnapshotQuery.getThreadDetailById:listApprovalOutcomes:query',
+              'ProjectionSnapshotQuery.getThreadDetailById:listApprovalOutcomes:decodeRows',
+            ),
+          ),
+        ),
       ])
 
       if (Option.isNone(threadRow))
@@ -2441,6 +2638,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         title: threadRow.value.title,
         modelSelection: threadRow.value.modelSelection,
         pendingHandoff: threadRow.value.pendingHandoff,
+        providerSwitch: threadRow.value.providerSwitch,
         runtimeMode: threadRow.value.runtimeMode,
         interactionMode: threadRow.value.interactionMode,
         branch: threadRow.value.branch,
@@ -2500,6 +2698,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           completedAt: row.completedAt,
         })),
         session: Option.isSome(sessionRow) ? mapSessionRow(sessionRow.value) : null,
+        approvalOutcomes: approvalOutcomeRows.map(mapApprovalOutcomeRow),
       }
 
       return Option.some(
@@ -2514,7 +2713,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
   const getThreadDetailSnapshot: ProjectionSnapshotQueryShape['getThreadDetailSnapshot'] = (
     threadId,
   ) =>
-    // Read the thread detail and the snapshot sequence within a single
+    // read the thread detail and the snapshot sequence within a single
     // transaction so the sequence is consistent with the returned state; a
     // projector update landing between two separate reads could otherwise return
     // a sequence ahead of the thread detail, causing the client to resume from

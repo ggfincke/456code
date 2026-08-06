@@ -4,6 +4,8 @@
 import {
   ClientPresentation,
   CloudSession,
+  ConnectionPersistenceError,
+  EnvironmentCacheStore,
   EnvironmentOwnedDataCleanup,
   PlatformConnectionSource,
   PrimaryEnvironmentAuth,
@@ -30,11 +32,13 @@ import { AppState } from 'react-native'
 import { authClientMetadata } from '../lib/authClientMetadata'
 import * as Runtime from '../lib/runtime'
 import * as MobileStorage from '../persistence/mobile-storage'
+import * as MobileDatabase from '../persistence/mobile-database'
 import { appAtomRegistry } from '../state/atom-registry'
 import { clearThreadOutboxEnvironment } from '../state/thread-outbox'
 import { clearComposerDraftsEnvironment } from '../state/use-composer-drafts'
 import { mobileApplicationActiveWakeup } from './app-state-wakeups'
 import { connectionStorageLayer } from './storage'
+import { createEnvironmentCleanup } from './environment-cleanup'
 
 function networkStatus(state: Network.NetworkState): 'unknown' | 'offline' | 'online'
 {
@@ -227,25 +231,68 @@ const providedConnectionStorageLayer = connectionStorageLayer.pipe(
 )
 const providedCapabilitiesLayer = capabilitiesLayer.pipe(Layer.provide(Runtime.runtimeContextLayer))
 
-const environmentOwnedDataCleanupLayer = Layer.succeed(
+const environmentOwnedDataCleanupLayer = Layer.effect(
   EnvironmentOwnedDataCleanup,
-  EnvironmentOwnedDataCleanup.of({
-    clear: (environmentId) =>
-      Effect.all(
-        [
-          Effect.promise(() => clearThreadOutboxEnvironment(environmentId)),
-          Effect.promise(() => clearComposerDraftsEnvironment(environmentId)),
-        ],
-        { concurrency: 'unbounded', discard: true },
-      ).pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning('Could not clear mobile environment-owned data.', {
-            environmentId,
-            cause,
-          }),
+  Effect.gen(function* ()
+  {
+    const database = yield* MobileDatabase.MobileDatabase
+    const cache = yield* EnvironmentCacheStore
+    const cleanup = createEnvironmentCleanup(database, {
+      cache: cache.clear,
+      outbox: (environmentId) =>
+        Effect.tryPromise({
+          try: () => clearThreadOutboxEnvironment(environmentId),
+          catch: (cause) => cause,
+        }),
+      drafts: (environmentId) =>
+        Effect.tryPromise({
+          try: () => clearComposerDraftsEnvironment(environmentId),
+          catch: (cause) => cause,
+        }),
+    })
+
+    const ignoreCleanupFailure = (environmentId: string, operation: string) =>
+      Effect.catch((cause: unknown) =>
+        Effect.logWarning('Could not persist mobile environment cleanup progress.', {
+          environmentId,
+          operation,
+          cause,
+        }),
+      )
+
+    return EnvironmentOwnedDataCleanup.of({
+      prepare: (environmentId) =>
+        cleanup.prepare(environmentId).pipe(
+          Effect.asVoid,
+          Effect.mapError(
+            (cause) =>
+              new ConnectionPersistenceError({
+                operation: 'clear-environment',
+                message: cause.message,
+              }),
+          ),
         ),
-      ),
+      markComplete: (environmentId, resource) =>
+        cleanup
+          .markCurrentComplete(environmentId, resource)
+          .pipe(ignoreCleanupFailure(environmentId, `mark-${resource}`)),
+      clear: (environmentId) =>
+        cleanup
+          .clear(environmentId)
+          .pipe(Effect.asVoid, ignoreCleanupFailure(environmentId, 'clear-owned-data')),
+      retry: (activeEnvironmentIds, lease) =>
+        cleanup.retry(activeEnvironmentIds, lease).pipe(
+          Effect.asVoid,
+          Effect.catch((cause) =>
+            Effect.logWarning('Could not retry mobile environment cleanup.', { cause }),
+          ),
+        ),
+    })
   }),
+)
+
+const providedEnvironmentOwnedDataCleanupLayer = environmentOwnedDataCleanupLayer.pipe(
+  Layer.provide(Runtime.runtimeContextLayer),
 )
 
 type ConnectionPlatformLayerSource =
@@ -255,7 +302,7 @@ type ConnectionPlatformLayerSource =
   | typeof wakeupsLayer
   | typeof providedCapabilitiesLayer
   | typeof platformConnectionSourceLayer
-  | typeof environmentOwnedDataCleanupLayer
+  | typeof providedEnvironmentOwnedDataCleanupLayer
 
 export const connectionPlatformLayer: Layer.Layer<
   Layer.Success<ConnectionPlatformLayerSource>,
@@ -268,5 +315,5 @@ export const connectionPlatformLayer: Layer.Layer<
   wakeupsLayer,
   providedCapabilitiesLayer,
   platformConnectionSourceLayer,
-  environmentOwnedDataCleanupLayer,
+  providedEnvironmentOwnedDataCleanupLayer,
 )

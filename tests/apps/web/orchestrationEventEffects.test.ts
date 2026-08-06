@@ -9,19 +9,24 @@ import {
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  UNKNOWN_ORCHESTRATION_EVENT_TYPE,
   type OrchestrationEvent,
 } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { deriveOrchestrationBatchEffects } from '../../../apps/web/src/orchestrationEventEffects'
 
-function makeEvent<T extends OrchestrationEvent['type']>(
+// the unknown-event sentinel's `payload: unknown` would erase the object
+// union this helper relies on, so constrain T to the known member types
+function makeEvent<
+  T extends Exclude<OrchestrationEvent['type'], typeof UNKNOWN_ORCHESTRATION_EVENT_TYPE>,
+>(
   type: T,
   payload: Extract<OrchestrationEvent, { type: T }>['payload'],
   overrides: Partial<Extract<OrchestrationEvent, { type: T }>> = {},
 ): Extract<OrchestrationEvent, { type: T }>
 {
-  const sequence = overrides.sequence ?? 1
+  const sequence = (overrides as { sequence?: number }).sequence ?? 1
   return {
     sequence,
     eventId: EventId.make(`event-${sequence}`),

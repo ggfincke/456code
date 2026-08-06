@@ -1,5 +1,7 @@
 // tests/apps/server/provider/Layers/GrokAdapter.test.ts
 // verifies Grok ACP session behavior
+
+// @effect-diagnostics globalTimers:off - session-drop polls need wall-clock waits; the test clock freezes Effect.sleep
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodePath from 'node:path'
 import * as NodeOS from 'node:os'
@@ -18,9 +20,20 @@ import * as Stream from 'effect/Stream'
 import * as TestClock from 'effect/testing/TestClock'
 
 import {
+  STRICT_IMPORT_RESUME_CURSOR,
   assertActiveImportedSessionBlocksFreshStart,
+  assertInvalidStrictMarkerPreservesActive,
+  assertMalformedStrictImportRejected,
   assertMissingImportedSessionRejected,
+  assertStrictImportMarkerPreserved,
 } from './acpImportLineageTestHelpers.ts'
+import {
+  assertAbnormalChildExitFinalizesOnce,
+  assertAbnormalExitDisabledByDefault,
+  assertOneExitWhenStopRacesTermination,
+  assertStopClosesAcpChild,
+  waitForAcpSessionDrop,
+} from './acpLifecycleTestHelpers.ts'
 import {
   ApprovalRequestId,
   GrokSettings,
@@ -111,6 +124,14 @@ const grokAdapterTestLayer = ServerConfig.layerTest(process.cwd(), {
 const makeTestAdapter = (binaryPath: string, options?: Parameters<typeof makeGrokAdapter>[1]) =>
   makeGrokAdapter(decodeGrokSettings({ binaryPath }), options).pipe(Effect.orDie)
 
+function waitForGrokSessionDrop(
+  adapter: Effect.Success<ReturnType<typeof makeTestAdapter>>,
+  threadId: ThreadId,
+): Effect.Effect<void>
+{
+  return waitForAcpSessionDrop(adapter, threadId, 'Grok')
+}
+
 it('requires a settlement to match the live Grok turn', () =>
 {
   const staleTurnId = TurnId.make('stale-turn')
@@ -163,11 +184,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
           instanceId: ProviderInstanceId.make('grok'),
           model: 'grok-build',
         },
-        resumeCursor: {
-          schemaVersion: 1,
-          sessionId: 'mock-session-1',
-          requireExisting: true,
-        },
+        resumeCursor: STRICT_IMPORT_RESUME_CURSOR,
       })
       const turn = yield* adapter.sendTurn({
         threadId,
@@ -176,14 +193,11 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
       })
       const listed = (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId)
 
-      const expectedCursor = {
-        schemaVersion: 1,
-        sessionId: 'mock-session-1',
-        requireExisting: true,
-      }
-      assert.deepStrictEqual(session.resumeCursor, expectedCursor)
-      assert.deepStrictEqual(turn.resumeCursor, expectedCursor)
-      assert.deepStrictEqual(listed?.resumeCursor, expectedCursor)
+      assertStrictImportMarkerPreserved({
+        sessionResumeCursor: session.resumeCursor,
+        turnResumeCursor: turn.resumeCursor,
+        listedResumeCursor: listed?.resumeCursor,
+      })
 
       yield* adapter.stopSession(threadId)
     }),
@@ -213,9 +227,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         }),
       )
 
-      assert.equal(error._tag, 'ProviderAdapterValidationError')
-      assert.include(error.message, 'valid existing native session id')
-      assert.isFalse(yield* adapter.hasSession(threadId))
+      yield* assertMalformedStrictImportRejected(adapter, threadId, error)
     }),
   )
 
@@ -254,12 +266,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         }),
       )
 
-      assert.equal(error._tag, 'ProviderAdapterValidationError')
-      assert.isTrue(yield* adapter.hasSession(threadId))
-      assert.deepStrictEqual(
-        (yield* adapter.listSessions()).find((entry) => entry.threadId === threadId)?.resumeCursor,
-        active.resumeCursor,
-      )
+      yield* assertInvalidStrictMarkerPreservesActive(adapter, threadId, error, active.resumeCursor)
 
       yield* adapter.stopSession(threadId)
     }),
@@ -312,11 +319,7 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
           instanceId: ProviderInstanceId.make('grok'),
           model: 'grok-build',
         },
-        resumeCursor: {
-          schemaVersion: 1,
-          sessionId: 'mock-session-1',
-          requireExisting: true,
-        },
+        resumeCursor: STRICT_IMPORT_RESUME_CURSOR,
       })
       const error = yield* Effect.flip(
         adapter.startSession({
@@ -413,31 +416,78 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
   it.effect('closes the ACP child process when a session stops', () =>
     Effect.gen(function* ()
     {
-      const threadId = ThreadId.make('grok-stop-session-close')
       const tempDir = yield* Effect.promise(() =>
         NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), 'grok-adapter-exit-log-')),
       )
       const exitLogPath = NodePath.join(tempDir, 'exit.log')
-
       const wrapperPath = yield* Effect.promise(() =>
-        makeMockGrokWrapper({
-          T3_ACP_EXIT_LOG_PATH: exitLogPath,
-        }),
+        makeMockGrokWrapper({ T3_ACP_EXIT_LOG_PATH: exitLogPath }),
       )
       const adapter = yield* makeTestAdapter(wrapperPath)
 
-      yield* adapter.startSession({
-        threadId,
+      yield* assertStopClosesAcpChild(adapter, {
+        threadId: ThreadId.make('grok-stop-session-close'),
         provider: ProviderDriverKind.make('grok'),
-        cwd: process.cwd(),
-        runtimeMode: 'full-access',
         modelSelection: { instanceId: ProviderInstanceId.make('grok'), model: 'grok-build' },
+        readExitLog: waitForFileContent(exitLogPath),
+      })
+    }),
+  )
+
+  it.effect('finalizes an active Grok session once when its ACP child exits', () =>
+    Effect.gen(function* ()
+    {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({
+          T3_ACP_EMIT_TOOL_CALLS: '1',
+          T3_ACP_EXIT_DURING_PROMPT_CODE: '9',
+          T3_ACP_EXIT_DURING_PROMPT_DELAY_MS: '100',
+        }),
+      )
+      const adapter = yield* makeTestAdapter(wrapperPath, {
+        enableAbnormalTermination: true,
       })
 
-      yield* adapter.stopSession(threadId)
+      yield* assertAbnormalChildExitFinalizesOnce(adapter, {
+        threadId: ThreadId.make('grok-abnormal-child-exit'),
+        provider: ProviderDriverKind.make('grok'),
+        label: 'Grok',
+        promptInFlight: 'race-session-drop',
+      })
+    }),
+  )
 
-      const exitLog = yield* waitForFileContent(exitLogPath)
-      assert.include(exitLog, 'SIGTERM')
+  it.effect('keeps abnormal Grok exit emission disabled by default', () =>
+    Effect.gen(function* ()
+    {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_EXIT_DURING_PROMPT_CODE: '9' }),
+      )
+      const adapter = yield* makeTestAdapter(wrapperPath)
+
+      yield* assertAbnormalExitDisabledByDefault(adapter, {
+        threadId: ThreadId.make('grok-abnormal-child-exit-disabled'),
+        provider: ProviderDriverKind.make('grok'),
+        label: 'Grok',
+      })
+    }),
+  )
+
+  it.effect('emits one Grok exit when graceful stop races ACP termination', () =>
+    Effect.gen(function* ()
+    {
+      const wrapperPath = yield* Effect.promise(() =>
+        makeMockGrokWrapper({ T3_ACP_EXIT_DURING_PROMPT_CODE: '9' }),
+      )
+      const adapter = yield* makeTestAdapter(wrapperPath, {
+        enableAbnormalTermination: true,
+      })
+
+      yield* assertOneExitWhenStopRacesTermination(adapter, {
+        threadId: ThreadId.make('grok-stop-termination-race'),
+        provider: ProviderDriverKind.make('grok'),
+        label: 'Grok',
+      })
     }),
   )
 
@@ -453,6 +503,10 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
         makeMockGrokWrapper({ T3_ACP_EXIT_LOG_PATH: exitLogPath }, { initialDelaySeconds: 0.2 }),
       )
       const adapter = yield* makeTestAdapter(wrapperPath)
+      const events: Array<ProviderRuntimeEvent> = []
+      yield* Stream.runForEach(adapter.streamEvents, (event) =>
+        Effect.sync(() => events.push(event)),
+      ).pipe(Effect.forkChild)
       const startInput = {
         threadId,
         provider: ProviderDriverKind.make('grok'),
@@ -471,8 +525,14 @@ it.layer(grokAdapterTestLayer)('GrokAdapterLive', (it) =>
 
       assert.equal(firstSession.threadId, threadId)
       assert.equal(secondSession.threadId, threadId)
+      yield* Effect.yieldNow
+      assert.isTrue(yield* adapter.hasSession(threadId))
+      assert.equal((yield* adapter.listSessions()).length, 1)
+      assert.equal(events.filter((event) => event.type === 'session.exited').length, 1)
 
       yield* adapter.stopSession(threadId)
+      yield* Effect.yieldNow
+      assert.equal(events.filter((event) => event.type === 'session.exited').length, 2)
 
       const exitLog = yield* waitForFileContent(exitLogPath)
       assert.equal(exitLog.match(/SIGTERM/g)?.length ?? 0, 2)

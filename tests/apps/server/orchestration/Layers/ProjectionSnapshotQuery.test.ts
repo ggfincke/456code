@@ -316,6 +316,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           worktreePath: null,
           origin: null,
           pendingHandoff: null,
+          providerSwitch: null,
           latestTurn: {
             turnId: asTurnId('turn-1'),
             state: 'completed',
@@ -380,6 +381,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
               completedAt: '2026-02-24T00:00:08.000Z',
             },
           ],
+          approvalOutcomes: [],
           session: {
             threadId: ThreadId.make('thread-1'),
             status: 'running',
@@ -431,6 +433,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           branch: null,
           worktreePath: null,
           origin: null,
+          providerSwitch: null,
           latestTurn: {
             turnId: asTurnId('turn-1'),
             state: 'completed',
@@ -463,6 +466,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           hasPendingApprovals: true,
           hasPendingUserInput: false,
           hasActionableProposedPlan: false,
+          approvalOutcomes: [],
         },
       ])
 
@@ -902,7 +906,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           (${ORCHESTRATION_PROJECTOR_NAMES.checkpoints}, 4, '2026-04-06T00:00:07.000Z')
       `
 
-      // Settled ≠ archived: the thread must appear in the LIVE shell
+      // settled ≠ archived: the thread must appear in the LIVE shell
       // snapshot, carrying its settlement fields through the row aliases.
       const shellSnapshot = yield* snapshotQuery.getShellSnapshot()
       assert.deepEqual(
@@ -912,7 +916,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
       assert.equal(shellSnapshot.threads[0]?.settledOverride, 'settled')
       assert.equal(shellSnapshot.threads[0]?.settledAt, '2026-04-06T00:00:04.000Z')
 
-      // And the full command read model carries them too.
+      // and the full command read model carries them too.
       const readModel = yield* snapshotQuery.getCommandReadModel()
       const thread = readModel.threads.find(
         (candidate) => candidate.id === ThreadId.make('thread-settled'),

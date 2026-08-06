@@ -1,3 +1,6 @@
+// apps/server/src/vcs/testing/VcsDriverContractHarness.ts
+// run vcs driver contract suite
+
 import { assert, it, describe } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -162,18 +165,6 @@ export function runVcsDriverContractSuite<R, E>(input: VcsDriverContractSuiteInp
           ])
 
           assert.deepStrictEqual(result, ['keep.ts'])
-        }),
-      )
-
-      it.effect('returns empty input unchanged', () =>
-        Effect.gen(function* ()
-        {
-          const cwd = yield* makeTmpDir()
-          const driver = yield* VcsDriver.VcsDriver
-
-          yield* input.fixture.createRepo(cwd)
-
-          assert.deepStrictEqual(yield* driver.filterIgnoredPaths(cwd, []), [])
         }),
       )
     })

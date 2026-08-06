@@ -33,7 +33,7 @@ import { useClientSettings } from './useSettings'
 export function useNewThreadHandler()
 {
   const projects = useProjects()
-  // New-thread defaults are a user preference, and the settings UI only ever
+  // new-thread defaults are a user preference, and the settings UI only ever
   // edits the primary environment's settings.json. Reading the target
   // environment's own settings here would silently reset remote projects to
   // the decoded defaults ("local" mode, current branch), since nothing can
@@ -70,7 +70,7 @@ export function useNewThreadHandler()
         setModelSelection,
       } = useComposerDraftStore.getState()
       const currentRouteTarget = getCurrentRouteTarget()
-      // A new thread carries the user's *working mode* from the thread being
+      // a new thread carries the user's *working mode* from the thread being
       // viewed: model (including options like reasoning effort and context
       // window), permission mode, and interaction mode. Branch, worktree, and
       // env mode never carry implicitly — those come from the configured
@@ -79,7 +79,7 @@ export function useNewThreadHandler()
         currentRouteTarget?.kind === 'server' ? readThreadShell(currentRouteTarget.threadRef) : null
       const carrySourceDraft =
         currentRouteTarget?.kind === 'draft' ? getDraftSession(currentRouteTarget.draftId) : null
-      // Composer overrides win over the persisted thread state — they are
+      // composer overrides win over the persisted thread state — they are
       // what the user currently sees in the composer controls.
       const carrySourceComposer = currentRouteTarget
         ? getComposerDraft(
@@ -141,7 +141,7 @@ export function useNewThreadHandler()
             currentRouteTarget.draftId === reusableStoredDraftThread.draftId
           const hasExplicitWorkspaceOption =
             hasBranchOption || hasWorktreePathOption || hasEnvModeOption || hasStartFromOriginOption
-          // Resurrecting a stored draft must not resurrect its stale context:
+          // resurrecting a stored draft must not resurrect its stale context:
           // explicit workspace options win outright; otherwise the env context
           // resets to the configured defaults so drafts seeded before a
           // defaults change (or by the old carry-over behavior) stop landing
@@ -177,7 +177,7 @@ export function useNewThreadHandler()
             })
             if (carryModelSelection)
             {
-              // The carried selection is a complete snapshot of the viewed
+              // the carried selection is a complete snapshot of the viewed
               // thread's model state: absent options mean "no options", not
               // "keep the stale draft's options".
               setModelSelection(reusableStoredDraftThread.draftId, carryModelSelection, {
@@ -192,7 +192,7 @@ export function useNewThreadHandler()
             reusableStoredDraftThread.draftId,
             {
               threadId: reusableStoredDraftThread.threadId,
-              ...(workspaceContext ?? {}),
+              ...workspaceContext,
               ...(carryRuntimeMode ? { runtimeMode: carryRuntimeMode } : {}),
               ...(carryInteractionMode ? { interactionMode: carryInteractionMode } : {}),
             },
@@ -270,7 +270,7 @@ export function useNewThreadHandler()
         applyStickyState(draftId)
         if (carryModelSelection)
         {
-          // After sticky state so the viewed thread's exact selection
+          // after sticky state so the viewed thread's exact selection
           // (model + options like effort and context window) wins over the
           // globally sticky one. replaceOptions: the carried selection is a
           // complete snapshot — absent options mean "no options", not "keep

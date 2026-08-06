@@ -1,3 +1,6 @@
+// apps/server/src/serverRuntimeStartup.ts
+// run cartographer embed reconciliation
+
 import {
   CommandId,
   DEFAULT_MODEL,
@@ -23,6 +26,7 @@ import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 
 import * as ServerConfig from './config.ts'
+import * as CartographerEmbedBroker from './cartographer/CartographerEmbedBroker.ts'
 import * as Keybindings from './keybindings.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import * as OrchestrationEngine from './orchestration/Services/OrchestrationEngine.ts'
@@ -34,6 +38,7 @@ import * as AnalyticsService from './telemetry/AnalyticsService.ts'
 import * as ServerEnvironment from './environment/ServerEnvironment.ts'
 import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
 import * as ProviderSessionReaper from './provider/Services/ProviderSessionReaper.ts'
+import * as ProposalRetainedRefReconciler from './proposal/ProposalRetainedRefReconciler.ts'
 import {
   formatHeadlessServeOutput,
   formatHostForUrl,
@@ -57,6 +62,24 @@ export class ServerRuntimeStartupError extends Schema.TaggedErrorClass<ServerRun
   }
 }
 
+export class ServerRuntimeCommandTimeoutError extends Schema.TaggedErrorClass<ServerRuntimeCommandTimeoutError>()(
+  'ServerRuntimeCommandTimeoutError',
+  {
+    timeoutMs: Schema.Number,
+  },
+)
+{
+  override get message(): string
+  {
+    return `Server runtime command timed out after ${this.timeoutMs}ms.`
+  }
+}
+
+// allow long provider deliveries while still releasing a permanently blocked queue
+export const COMMAND_EXECUTION_TIMEOUT_MS = 120_000
+
+type CommandGateError = ServerRuntimeStartupError | ServerRuntimeCommandTimeoutError
+
 export class ServerRuntimeStartup extends Context.Service<
   ServerRuntimeStartup,
   {
@@ -64,7 +87,7 @@ export class ServerRuntimeStartup extends Context.Service<
     readonly markHttpListening: Effect.Effect<void>
     readonly enqueueCommand: <A, E>(
       effect: Effect.Effect<A, E>,
-    ) => Effect.Effect<A, E | ServerRuntimeStartupError>
+    ) => Effect.Effect<A, E | CommandGateError>
   }
 >()('456code/serverRuntimeStartup')
 {}
@@ -72,6 +95,7 @@ export class ServerRuntimeStartup extends Context.Service<
 interface QueuedCommand
 {
   readonly run: Effect.Effect<void, never>
+  readonly fail: (error: CommandGateError) => Effect.Effect<void>
 }
 
 type CommandReadinessState = 'pending' | 'ready' | ServerRuntimeStartupError
@@ -83,7 +107,7 @@ interface CommandGate
   readonly failCommandReady: (error: ServerRuntimeStartupError) => Effect.Effect<void>
   readonly enqueueCommand: <A, E>(
     effect: Effect.Effect<A, E>,
-  ) => Effect.Effect<A, E | ServerRuntimeStartupError>
+  ) => Effect.Effect<A, E | CommandGateError>
 }
 
 const settleQueuedCommand = <A, E>(deferred: Deferred.Deferred<A, E>, exit: Exit.Exit<A, E>) =>
@@ -98,7 +122,27 @@ export const makeCommandGate = Effect.gen(function* ()
   const commandReadinessState = yield* Ref.make<CommandReadinessState>('pending')
 
   const commandWorker = Effect.forever(
-    Queue.take(commandQueue).pipe(Effect.flatMap((command) => command.run)),
+    Queue.take(commandQueue).pipe(
+      Effect.flatMap((command) =>
+        Deferred.await(commandReady).pipe(
+          Effect.matchEffect({
+            onFailure: command.fail,
+            onSuccess: () =>
+              command.run.pipe(
+                Effect.timeoutOrElse({
+                  duration: COMMAND_EXECUTION_TIMEOUT_MS,
+                  orElse: () =>
+                    command.fail(
+                      new ServerRuntimeCommandTimeoutError({
+                        timeoutMs: COMMAND_EXECUTION_TIMEOUT_MS,
+                      }),
+                    ),
+                }),
+              ),
+          }),
+        ),
+      ),
+    ),
   )
   yield* Effect.forkScoped(commandWorker)
 
@@ -128,13 +172,13 @@ export const makeCommandGate = Effect.gen(function* ()
           return yield* readinessState
         }
 
-        const result = yield* Deferred.make<A, E | ServerRuntimeStartupError>()
+        const result = yield* Deferred.make<A, E | CommandGateError>()
         yield* Queue.offer(commandQueue, {
-          run: Deferred.await(commandReady).pipe(
-            Effect.flatMap(() => effect),
+          run: effect.pipe(
             Effect.exit,
             Effect.flatMap((exit) => settleQueuedCommand(result, exit)),
           ),
+          fail: (error) => Deferred.fail(result, error).pipe(Effect.asVoid),
         })
         return yield* Deferred.await(result)
       }),
@@ -313,6 +357,67 @@ const runStartupPhase = <A, E, R>(phase: string, effect: Effect.Effect<A, E, R>)
     Effect.withSpan(`server.startup.${phase}`),
   )
 
+export const runCartographerEmbedReconciliation = (
+  reconciliation: Effect.Effect<CartographerEmbedBroker.CartographerEmbedReconciliationReport>,
+) =>
+  runStartupPhase(
+    'cartographer.embed.reconcile',
+    reconciliation.pipe(
+      Effect.timeoutOption(250),
+      Effect.flatMap(
+        Option.match({
+          onNone: () =>
+            Effect.logWarning('cartographer embed restart reconciliation exceeded its budget', {
+              owner: 'cartographer-embed',
+              budgetMs: 250,
+            }),
+          onSome: (report) =>
+            report.budgetExceeded
+              ? Effect.logWarning('cartographer embed restart reconciliation budget exceeded', {
+                  owner: 'cartographer-embed',
+                  report,
+                })
+              : Effect.logInfo('cartographer embed restart reconciliation completed', {
+                  owner: 'cartographer-embed',
+                  report,
+                }),
+        }),
+      ),
+      Effect.catchCause((cause) =>
+        Effect.logWarning('cartographer embed restart reconciliation failed', {
+          owner: 'cartographer-embed',
+          cause,
+        }),
+      ),
+    ),
+  )
+
+export const runProposalRetainedRefReconciliation = Effect.gen(function* ()
+{
+  const config = yield* ServerConfig.ServerConfig
+  if (config.proposalReconciliationMode === 'off') return
+
+  const reconciler = yield* ProposalRetainedRefReconciler.ProposalRetainedRefReconciler
+  if (
+    config.proposalReconciliationMode === 'delete' &&
+    config.proposalReconciliationDeleteEnabled
+  )
+  {
+    yield* Effect.logWarning(
+      'proposal retained-ref deletion is gated off in this report-only release',
+    )
+  }
+  const report = yield* reconciler.reconcile.pipe(Effect.timeoutOption(600))
+  yield* Option.match(report, {
+    onNone: () => Effect.logWarning('proposal retained-ref reconciliation exceeded its budget'),
+    onSome: (value) => Effect.logInfo('proposal retained-ref reconciliation report', value),
+  })
+}).pipe(
+  Effect.catchCause((cause) =>
+    Effect.logWarning('proposal retained-ref reconciliation failed', { cause }),
+  ),
+)
+
 export const make = Effect.gen(function* ()
 {
   const serverConfig = yield* ServerConfig.ServerConfig
@@ -323,6 +428,7 @@ export const make = Effect.gen(function* ()
   const serverSettings = yield* ServerSettings.ServerSettingsService
   const serverEnvironment = yield* ServerEnvironment.ServerEnvironment
   const crypto = yield* Crypto.Crypto
+  const cartographerEmbedBroker = yield* CartographerEmbedBroker.CartographerEmbedBroker
 
   const commandGate = yield* makeCommandGate
   const httpListening = yield* Deferred.make<void>()
@@ -373,6 +479,9 @@ export const make = Effect.gen(function* ()
         yield* providerSessionReaper.start().pipe(Scope.provide(reactorScope))
       }),
     )
+
+    yield* Effect.logDebug('startup phase: reconciling proposal retained refs')
+    yield* runStartupPhase('proposal-retained-refs.reconcile', runProposalRetainedRefReconciliation)
 
     const welcomeBase = yield* resolveWelcomeBase
     const environment = yield* serverEnvironment.getDescriptor
@@ -435,6 +544,9 @@ export const make = Effect.gen(function* ()
         ),
       )
     }
+
+    yield* Effect.logDebug('startup phase: reconciling cartographer embed roots')
+    yield* runCartographerEmbedReconciliation(cartographerEmbedBroker.reconcileEmbedRoots)
   }).pipe(
     Effect.annotateSpans({
       'server.mode': serverConfig.mode,

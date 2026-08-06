@@ -1,10 +1,10 @@
+// tests/apps/web/browser/BrowserDeviceToolbar.test.ts
+// verify commit viewport and aspect ratio behavior
+
 import type { PreviewViewportSetting } from '@t3tools/contracts'
 import { describe, expect, it, vi } from 'vite-plus/test'
 
-import {
-  commitViewportAndAspectRatio,
-  reconcileLockedAspectRatio,
-} from '../../../../apps/web/src/browser/browserDeviceToolbarState'
+import { commitViewportAndAspectRatio } from '../../../../apps/web/src/browser/browserDeviceToolbarState'
 
 describe('commitViewportAndAspectRatio', () =>
 {
@@ -41,15 +41,5 @@ describe('commitViewportAndAspectRatio', () =>
       ),
     ).rejects.toThrow('resize failed')
     expect(onAspectRatioChange).not.toHaveBeenCalled()
-  })
-})
-
-describe('reconcileLockedAspectRatio', () =>
-{
-  it('tracks external viewport ratios only while the lock remains active', () =>
-  {
-    expect(reconcileLockedAspectRatio(1.5, 16 / 9)).toBe(16 / 9)
-    expect(reconcileLockedAspectRatio(null, 16 / 9)).toBeNull()
-    expect(reconcileLockedAspectRatio(1.5, null)).toBeNull()
   })
 })

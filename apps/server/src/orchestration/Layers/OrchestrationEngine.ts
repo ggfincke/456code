@@ -1,3 +1,6 @@
+// apps/server/src/orchestration/Layers/OrchestrationEngine.ts
+// assemble orchestration engine Effect layer
+
 import type {
   OrchestrationEvent,
   OrchestrationReadModel,
@@ -29,6 +32,8 @@ import {
   orchestrationCommandDuration,
 } from '../../observability/Metrics.ts'
 import { toPersistenceSqlError } from '../../persistence/Errors.ts'
+import { AttachmentLifecycleRepository } from '../../persistence/Services/AttachmentLifecycle.ts'
+import { CheckpointRevertOperations } from '../../persistence/Services/CheckpointRevertOperations.ts'
 import { OrchestrationEventStore } from '../../persistence/Services/OrchestrationEventStore.ts'
 import { OrchestrationCommandReceiptRepository } from '../../persistence/Services/OrchestrationCommandReceipts.ts'
 import {
@@ -49,6 +54,21 @@ const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
 )
 const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError)
+// every phase that still owns checkpoint refs or the stage directory: a turn
+// started here would capture against refs the revert is about to delete, so
+// post-restore bookkeeping phases stay closed until cleanup is verified
+const checkpointRevertGateClosedPhases = new Set([
+  'admitted',
+  'target-staged',
+  'restore-ready',
+  'restore-started',
+  'filesystem-restored',
+  'provider-pending',
+  'provider-outcome-recorded',
+  'projection-finalized',
+  'cleanup-pending',
+  'manual-required',
+])
 
 interface CommandEnvelope
 {
@@ -84,6 +104,8 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   const sql = yield* SqlClient.SqlClient
   const eventStore = yield* OrchestrationEventStore
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository
+  const attachmentLifecycle = yield* AttachmentLifecycleRepository
+  const checkpointRevertOperations = yield* CheckpointRevertOperations
   const projectionPipeline = yield* OrchestrationProjectionPipeline
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
   const crypto = yield* Crypto.Crypto
@@ -160,29 +182,53 @@ const makeOrchestrationEngine = Effect.gen(function* ()
           return yield* new OrchestrationCommandPreviouslyRejectedError({
             commandId: envelope.command.commandId,
             detail: existingReceipt.value.error ?? 'Previously rejected.',
+            ...(existingReceipt.value.errorCode === null
+              ? {}
+              : { code: existingReceipt.value.errorCode }),
           })
         }
 
-        const eventBase = yield* decideOrchestrationCommand({
-          command: envelope.command,
-          readModel: commandReadModel,
-        }).pipe(
-          Effect.provideService(Crypto.Crypto, crypto),
-          Effect.mapError((cause) =>
-            isOrchestrationCommandInvariantError(cause)
-              ? cause
-              : new OrchestrationCommandInvariantError({
-                  commandType: envelope.command.type,
-                  detail: 'Failed to generate an event identifier.',
-                  cause,
-                }),
-          ),
-        )
-        const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase]
         const committedCommand = yield* sql
           .withTransaction(
             Effect.gen(function* ()
             {
+              if (envelope.command.type === 'thread.turn.start')
+              {
+                const activeRevert = yield* checkpointRevertOperations.getActiveByThread(
+                  envelope.command.threadId,
+                )
+                if (
+                  Option.isSome(activeRevert) &&
+                  checkpointRevertGateClosedPhases.has(activeRevert.value.phase)
+                )
+                {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: envelope.command.type,
+                    code: 'checkpoint-revert-in-progress',
+                    detail:
+                      `Checkpoint revert '${activeRevert.value.operationId}' is in progress ` +
+                      `for thread '${envelope.command.threadId}' ` +
+                      `(phase '${activeRevert.value.phase}').`,
+                  })
+                }
+              }
+
+              const eventBase = yield* decideOrchestrationCommand({
+                command: envelope.command,
+                readModel: commandReadModel,
+              }).pipe(
+                Effect.provideService(Crypto.Crypto, crypto),
+                Effect.mapError((cause) =>
+                  isOrchestrationCommandInvariantError(cause)
+                    ? cause
+                    : new OrchestrationCommandInvariantError({
+                        commandType: envelope.command.type,
+                        detail: 'Failed to generate an event identifier.',
+                        cause,
+                      }),
+                ),
+              )
+              const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase]
               const committedEvents: OrchestrationEvent[] = []
               let nextCommandReadModel = commandReadModel
 
@@ -192,6 +238,16 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent)
                 yield* projectionPipeline.projectEvent(savedEvent)
                 committedEvents.push(savedEvent)
+
+                if (savedEvent.type === 'thread.message-sent')
+                {
+                  yield* attachmentLifecycle.associateAccepted({
+                    commandId: envelope.command.commandId,
+                    ownerSequence: savedEvent.sequence,
+                    ownerEventType: savedEvent.type,
+                    now: savedEvent.occurredAt,
+                  })
+                }
               }
 
               const lastSavedEvent = committedEvents.at(-1) ?? null
@@ -211,6 +267,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 resultSequence: lastSavedEvent.sequence,
                 status: 'accepted',
                 error: null,
+                errorCode: null,
               })
 
               return {
@@ -308,6 +365,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                   resultSequence: commandReadModel.snapshotSequence,
                   status: 'rejected',
                   error: error.message,
+                  errorCode: error.code ?? null,
                 })
                 .pipe(Effect.catch(() => Effect.void))
             }
@@ -346,14 +404,14 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   return {
     readEvents,
     dispatch,
-    // Each access creates a fresh PubSub subscription so that multiple
+    // each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.
     get streamDomainEvents(): OrchestrationEngineShape['streamDomainEvents']
     {
       return Stream.fromPubSub(eventPubSub)
     },
-    // The command read model's snapshotSequence tracks the latest committed
+    // the command read model's snapshotSequence tracks the latest committed
     // event sequence (updated on the worker fiber). A plain property read is a
     // consistent, committed value — reassignment of `commandReadModel` is
     // atomic on the single-threaded event loop.

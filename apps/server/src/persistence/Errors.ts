@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Errors.ts
+// define persistence errors
+
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
 
@@ -17,9 +20,7 @@ function summarizeSchemaIssue(issue: SchemaIssue.Issue): string
   }
 }
 
-// ===============================
-// Core Persistence Errors
-// ===============================
+// core Persistence Errors
 
 export const PersistenceErrorCorrelation = Schema.Union([
   Schema.Struct({ sessionId: Schema.String }),
@@ -44,6 +45,20 @@ export class PersistenceSqlError extends Schema.TaggedErrorClass<PersistenceSqlE
     return this.detail === undefined
       ? `SQL error in ${this.operation}`
       : `SQL error in ${this.operation}: ${this.detail}`
+  }
+}
+
+export class ReactorDeliveryError extends Schema.TaggedErrorClass<ReactorDeliveryError>()(
+  'ReactorDeliveryError',
+  {
+    operation: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return `Reactor delivery error in ${this.operation}`
   }
 }
 
@@ -78,8 +93,9 @@ export class PersistenceDecodeError extends Schema.TaggedErrorClass<PersistenceD
 }
 const isPersistenceSqlError = Schema.is(PersistenceSqlError)
 const isPersistenceDecodeError = Schema.is(PersistenceDecodeError)
+const isReactorDeliveryError = Schema.is(ReactorDeliveryError)
 
-// Kept for orchestration/projection call sites, which are being revamped separately.
+// kept for orchestration/projection call sites, which are being revamped separately.
 export function toPersistenceSqlError(operation: string)
 {
   return (cause: unknown): PersistenceSqlError =>
@@ -90,7 +106,7 @@ export function toPersistenceSqlError(operation: string)
     })
 }
 
-// Kept for orchestration/projection call sites, which are being revamped separately.
+// kept for orchestration/projection call sites, which are being revamped separately.
 export function toPersistenceDecodeError(operation: string)
 {
   return (cause: Schema.SchemaError): PersistenceDecodeError =>
@@ -98,11 +114,9 @@ export function toPersistenceDecodeError(operation: string)
 }
 
 export const isPersistenceError = (u: unknown) =>
-  isPersistenceSqlError(u) || isPersistenceDecodeError(u)
+  isPersistenceSqlError(u) || isPersistenceDecodeError(u) || isReactorDeliveryError(u)
 
-// ===============================
-// Provider Session Repository Errors
-// ===============================
+// provider Session Repository Errors
 
 export class ProviderSessionRepositoryValidationError extends Schema.TaggedErrorClass<ProviderSessionRepositoryValidationError>()(
   'ProviderSessionRepositoryValidationError',

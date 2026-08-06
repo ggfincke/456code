@@ -38,6 +38,7 @@ function makeProject(id: string, title: string): EnvironmentProject
 function makeThread(id: string, projectId: ProjectId): EnvironmentThreadShell
 {
   return {
+    providerSwitch: null,
     environmentId,
     id: ThreadId.make(id),
     projectId,
@@ -75,7 +76,7 @@ function makeGroup(key: string, threadCount: number): HomeThreadGroup
     projects: [project],
     pendingTasks: [],
     threads,
-    // All threads inside the recency window, so the baseline stays at the
+    // all threads inside the recency window, so the baseline stays at the
     // initial page size and the pagination expectations below hold.
     recentThreads: threads,
     newThreadTarget: project,
@@ -123,7 +124,7 @@ describe('buildHomeListLayout', () =>
       hiddenCount: 133 - HOME_INITIAL_VISIBLE_THREADS,
       canShowLess: false,
     })
-    // The show-more row takes over the last slot, so no thread is marked last.
+    // the show-more row takes over the last slot, so no thread is marked last.
     expect(threadItems.every((item) => item.type === 'thread' && !item.isLast)).toBe(true)
   })
 
@@ -174,7 +175,7 @@ describe('buildHomeListLayout', () =>
 
   it('offers show-less after expanding a stale group whose baseline is below the page size', () =>
   {
-    // Stale project: 10 threads total but only 3 within the recency window.
+    // stale project: 10 threads total but only 3 within the recency window.
     const project = makeProject('stale', 'stale')
     const threads = Array.from({ length: 10 }, (_, index) =>
       makeThread(`stale-thread-${index}`, project.id),

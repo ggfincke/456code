@@ -1,3 +1,6 @@
+// tests/apps/server/checkpointing/CheckpointDiffQuery.test.ts
+// verify checkpoint diff query layer behavior
+
 import { CheckpointRef, ProjectId, ThreadId, TurnId } from '@t3tools/contracts'
 import { it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -11,6 +14,27 @@ import * as CheckpointDiffQuery from '../../../../apps/server/src/checkpointing/
 import * as CheckpointStore from '../../../../apps/server/src/checkpointing/CheckpointStore.ts'
 import { CheckpointThreadNotFoundError } from '../../../../apps/server/src/checkpointing/Errors.ts'
 import { makeProjectionSnapshotQueryStub } from '../projectionSnapshotQueryTestHelpers.ts'
+
+function unusedCheckpointStoreCall<A>(): Effect.Effect<A>
+{
+  return Effect.die(new Error('Unsupported checkpoint store call in test'))
+}
+
+// the diff query only reaches for lookups and diffs; the rest of the service
+// shape is filled in so each test only states the behavior it asserts on
+const baseCheckpointStoreStub = {
+  isGitRepository: () => Effect.succeed(true),
+  captureCheckpoint: () =>
+    Effect.succeed({ outcome: 'published', commitOid: 'checkpoint-commit' } as const),
+  hasCheckpointRef: () => Effect.succeed(true),
+  restoreCheckpoint: () => Effect.succeed(true),
+  stageCheckpointTree: unusedCheckpointStoreCall,
+  verifyRestorePreconditions: unusedCheckpointStoreCall,
+  applyStagedRestore: unusedCheckpointStoreCall,
+  postVerifyRestore: unusedCheckpointStoreCall,
+  diffCheckpoints: () => Effect.succeed(''),
+  deleteCheckpointRefs: () => Effect.void,
+}
 
 function makeThreadCheckpointContext(input: {
   readonly projectId: ProjectId
@@ -58,10 +82,7 @@ describe('CheckpointDiffQuery.layer', () =>
       }> = []
 
       const checkpointStore: CheckpointStore.CheckpointStore['Service'] = {
-        isGitRepository: () => Effect.succeed(true),
-        captureCheckpoint: () => Effect.void,
-        hasCheckpointRef: () => Effect.succeed(true),
-        restoreCheckpoint: () => Effect.succeed(true),
+        ...baseCheckpointStoreStub,
         diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, ignoreWhitespace }) =>
           Effect.sync(() =>
           {
@@ -73,7 +94,6 @@ describe('CheckpointDiffQuery.layer', () =>
             })
             return 'full thread diff patch'
           }),
-        deleteCheckpointRefs: () => Effect.void,
       }
 
       const layer = CheckpointDiffQuery.layer.pipe(
@@ -158,10 +178,7 @@ describe('CheckpointDiffQuery.layer', () =>
       })
 
       const checkpointStore: CheckpointStore.CheckpointStore['Service'] = {
-        isGitRepository: () => Effect.succeed(true),
-        captureCheckpoint: () => Effect.void,
-        hasCheckpointRef: () => Effect.succeed(true),
-        restoreCheckpoint: () => Effect.succeed(true),
+        ...baseCheckpointStoreStub,
         diffCheckpoints: ({ fromCheckpointRef, toCheckpointRef, cwd, ignoreWhitespace }) =>
           Effect.sync(() =>
           {
@@ -173,7 +190,6 @@ describe('CheckpointDiffQuery.layer', () =>
             })
             return 'diff patch'
           }),
-        deleteCheckpointRefs: () => Effect.void,
       }
 
       const layer = CheckpointDiffQuery.layer.pipe(
@@ -192,87 +208,36 @@ describe('CheckpointDiffQuery.layer', () =>
       const result = yield* Effect.gen(function* ()
       {
         const query = yield* CheckpointDiffQuery.CheckpointDiffQuery
-        return yield* query.getTurnDiff({
+        const explicit = yield* query.getTurnDiff({
           threadId,
           fromTurnCount: 0,
           toTurnCount: 1,
           ignoreWhitespace: true,
         })
+        // omitted ignoreWhitespace must still default to true
+        const defaulted = yield* query.getTurnDiff({
+          threadId,
+          fromTurnCount: 0,
+          toTurnCount: 1,
+        })
+        return { explicit, defaulted }
       }).pipe(Effect.provide(layer))
 
       const expectedFromRef = checkpointRefForThreadTurn(threadId, 0)
-      expect(diffCheckpointsCalls).toEqual([
-        {
-          cwd: '/tmp/workspace',
-          fromCheckpointRef: expectedFromRef,
-          toCheckpointRef,
-          ignoreWhitespace: true,
-        },
-      ])
-      expect(result).toEqual({
+      const expectedCall = {
+        cwd: '/tmp/workspace',
+        fromCheckpointRef: expectedFromRef,
+        toCheckpointRef,
+        ignoreWhitespace: true,
+      }
+      expect(diffCheckpointsCalls).toEqual([expectedCall, expectedCall])
+      expect(result.explicit).toEqual({
         threadId,
         fromTurnCount: 0,
         toTurnCount: 1,
         diff: 'diff patch',
       })
-    }),
-  )
-
-  it.effect('defaults to hide whitespace changes', () =>
-    Effect.gen(function* ()
-    {
-      const projectId = ProjectId.make('project-default-whitespace')
-      const threadId = ThreadId.make('thread-default-whitespace')
-      const toCheckpointRef = checkpointRefForThreadTurn(threadId, 1)
-      const diffCheckpointsCalls: Array<{ readonly ignoreWhitespace: boolean }> = []
-
-      const threadCheckpointContext = makeThreadCheckpointContext({
-        projectId,
-        threadId,
-        workspaceRoot: '/tmp/workspace',
-        worktreePath: null,
-        checkpointTurnCount: 1,
-        checkpointRef: toCheckpointRef,
-      })
-
-      const checkpointStore: CheckpointStore.CheckpointStore['Service'] = {
-        isGitRepository: () => Effect.succeed(true),
-        captureCheckpoint: () => Effect.void,
-        hasCheckpointRef: () => Effect.succeed(true),
-        restoreCheckpoint: () => Effect.succeed(true),
-        diffCheckpoints: ({ ignoreWhitespace }) =>
-          Effect.sync(() =>
-          {
-            diffCheckpointsCalls.push({ ignoreWhitespace })
-            return 'diff patch'
-          }),
-        deleteCheckpointRefs: () => Effect.void,
-      }
-
-      const layer = CheckpointDiffQuery.layer.pipe(
-        Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
-        Layer.provideMerge(
-          Layer.succeed(
-            ProjectionSnapshotQuery.ProjectionSnapshotQuery,
-            makeProjectionSnapshotQueryStub({
-              getThreadCheckpointContext: () =>
-                Effect.succeed(Option.some(threadCheckpointContext)),
-            }),
-          ),
-        ),
-      )
-
-      yield* Effect.gen(function* ()
-      {
-        const query = yield* CheckpointDiffQuery.CheckpointDiffQuery
-        return yield* query.getTurnDiff({
-          threadId,
-          fromTurnCount: 0,
-          toTurnCount: 1,
-        })
-      }).pipe(Effect.provide(layer))
-
-      expect(diffCheckpointsCalls).toEqual([{ ignoreWhitespace: true }])
+      expect(result.defaulted).toEqual(result.explicit)
     }),
   )
 
@@ -294,17 +259,14 @@ describe('CheckpointDiffQuery.layer', () =>
       })
 
       const checkpointStore: CheckpointStore.CheckpointStore['Service'] = {
-        isGitRepository: () => Effect.succeed(true),
-        captureCheckpoint: () => Effect.void,
+        ...baseCheckpointStoreStub,
         hasCheckpointRef: () =>
           Effect.sync(() =>
           {
             hasCheckpointRefCallCount += 1
             return true
           }),
-        restoreCheckpoint: () => Effect.succeed(true),
         diffCheckpoints: () => Effect.succeed('diff patch'),
-        deleteCheckpointRefs: () => Effect.void,
       }
 
       const layer = CheckpointDiffQuery.layer.pipe(
@@ -340,14 +302,7 @@ describe('CheckpointDiffQuery.layer', () =>
     {
       const threadId = ThreadId.make('thread-missing')
 
-      const checkpointStore: CheckpointStore.CheckpointStore['Service'] = {
-        isGitRepository: () => Effect.succeed(true),
-        captureCheckpoint: () => Effect.void,
-        hasCheckpointRef: () => Effect.succeed(true),
-        restoreCheckpoint: () => Effect.succeed(true),
-        diffCheckpoints: () => Effect.succeed(''),
-        deleteCheckpointRefs: () => Effect.void,
-      }
+      const checkpointStore: CheckpointStore.CheckpointStore['Service'] = baseCheckpointStoreStub
 
       const layer = CheckpointDiffQuery.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),

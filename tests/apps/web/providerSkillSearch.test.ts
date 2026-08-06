@@ -1,7 +1,11 @@
+// tests/apps/web/providerSkillSearch.test.ts
+// verify search provider skills and install-source presentation
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import type { ServerProviderSkill } from '@t3tools/contracts'
 
+import { formatProviderSkillInstallSource } from '../../../apps/web/src/providerSkillPresentation'
 import { searchProviderSkills } from '../../../apps/web/src/providerSkillSearch'
 
 function makeSkill(input: Partial<ServerProviderSkill> & Pick<ServerProviderSkill, 'name'>)
@@ -60,5 +64,18 @@ describe('searchProviderSkills', () =>
     ]
 
     expect(searchProviderSkills(skills, 'ui').map((skill) => skill.name)).toEqual([])
+  })
+})
+
+describe('formatProviderSkillInstallSource', () =>
+{
+  it('marks plugin-backed skills as app installs', () =>
+  {
+    expect(
+      formatProviderSkillInstallSource({
+        path: '/Users/julius/.codex/plugins/cache/openai-curated/github/skills/gh-fix-ci/SKILL.md',
+        scope: 'user',
+      }),
+    ).toBe('App')
   })
 })

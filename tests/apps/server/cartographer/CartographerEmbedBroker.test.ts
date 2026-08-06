@@ -1,5 +1,6 @@
 // tests/apps/server/cartographer/CartographerEmbedBroker.test.ts
 // verifies one-time embed authorization and one supervised sidecar per thread
+
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off
 
 import * as NodeChildProcess from 'node:child_process'
@@ -423,110 +424,83 @@ describe('CartographerEmbedBroker', () =>
     }),
   )
 
-  it.effect('rejects a configured relative Cartographer CLI path before creating artifacts', () =>
-    Effect.gen(function* ()
+  it.effect.each([
     {
-      const workspaceRoot = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(
-          NodePath.join(NodeOS.tmpdir(), '456code-cartographer-relative-cli-workspace-'),
-        ),
-      )
-      const baseDir = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-cartographer-relative-cli-state-')),
-      )
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() =>
-          Promise.all([
-            NodeFSP.rm(workspaceRoot, { recursive: true, force: true }),
-            NodeFSP.rm(baseDir, { recursive: true, force: true }),
-          ]),
-        ).pipe(Effect.ignore),
-      )
-      yield* useEnvironment({
-        T3CODE_CARTOGRAPHER_CLI: 'relative/cartographer.mjs',
-        T3CODE_CARTOGRAPHER_NODE: process.execPath,
-      })
-
-      const TestLayer = CartographerEmbedBroker.layer.pipe(
-        Layer.provide(ServerConfig.layerTest(workspaceRoot, baseDir)),
-        Layer.provideMerge(NodeServices.layer),
-      )
-      yield* Effect.gen(function* ()
-      {
-        const broker = yield* CartographerEmbedBroker.CartographerEmbedBroker
-        const failure = yield* broker
-          .issue({
-            threadId: ThreadId.make('thread-cartographer-relative-cli'),
-            workspaceRoot,
-            parentOrigin: 'https://example.com',
-            theme: 'light',
-          })
-          .pipe(Effect.flip)
-
-        expect(failure.failure).toBe('unsupported')
-        expect(failure.message).toContain('CLI path must be absolute')
-        expect(
-          yield* Effect.promise(() =>
-            pathExists(NodePath.join(baseDir, 'userdata', 'cartographer', 'embed')),
-          ),
-        ).toBe(false)
-      }).pipe(Effect.provide(TestLayer))
-    }),
-  )
-
-  it.effect('rejects a configured relative Cartographer Node path before creating artifacts', () =>
-    Effect.gen(function* ()
+      name: 'CLI',
+      kind: 'cli' as const,
+      messageFragment: 'CLI path must be absolute',
+    },
     {
-      const workspaceRoot = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(
-          NodePath.join(NodeOS.tmpdir(), '456code-cartographer-relative-node-workspace-'),
-        ),
-      )
-      const baseDir = yield* Effect.promise(() =>
-        NodeFSP.mkdtemp(
-          NodePath.join(NodeOS.tmpdir(), '456code-cartographer-relative-node-state-'),
-        ),
-      )
-      yield* Effect.addFinalizer(() =>
-        Effect.promise(() =>
-          Promise.all([
-            NodeFSP.rm(workspaceRoot, { recursive: true, force: true }),
-            NodeFSP.rm(baseDir, { recursive: true, force: true }),
-          ]),
-        ).pipe(Effect.ignore),
-      )
-      const cliPath = NodePath.join(baseDir, 'cartographer.mjs')
-      yield* Effect.promise(() => NodeFSP.writeFile(cliPath, ''))
-      yield* useEnvironment({
-        T3CODE_CARTOGRAPHER_CLI: cliPath,
-        T3CODE_CARTOGRAPHER_NODE: 'relative/node',
-      })
-
-      const TestLayer = CartographerEmbedBroker.layer.pipe(
-        Layer.provide(ServerConfig.layerTest(workspaceRoot, baseDir)),
-        Layer.provideMerge(NodeServices.layer),
-      )
-      yield* Effect.gen(function* ()
+      name: 'Node',
+      kind: 'node' as const,
+      messageFragment: 'Node executable path must be absolute',
+    },
+  ])(
+    'rejects a configured relative Cartographer $name path before creating artifacts',
+    ({ kind, messageFragment }) =>
+      Effect.gen(function* ()
       {
-        const broker = yield* CartographerEmbedBroker.CartographerEmbedBroker
-        const failure = yield* broker
-          .issue({
-            threadId: ThreadId.make('thread-cartographer-relative-node'),
-            workspaceRoot,
-            parentOrigin: 'https://example.com',
-            theme: 'light',
-          })
-          .pipe(Effect.flip)
-
-        expect(failure.failure).toBe('unsupported')
-        expect(failure.message).toContain('Node executable path must be absolute')
-        expect(
-          yield* Effect.promise(() =>
-            pathExists(NodePath.join(baseDir, 'userdata', 'cartographer', 'embed')),
+        const workspaceRoot = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(
+            NodePath.join(NodeOS.tmpdir(), `456code-cartographer-relative-${kind}-workspace-`),
           ),
-        ).toBe(false)
-      }).pipe(Effect.provide(TestLayer))
-    }),
+        )
+        const baseDir = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(
+            NodePath.join(NodeOS.tmpdir(), `456code-cartographer-relative-${kind}-state-`),
+          ),
+        )
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() =>
+            Promise.all([
+              NodeFSP.rm(workspaceRoot, { recursive: true, force: true }),
+              NodeFSP.rm(baseDir, { recursive: true, force: true }),
+            ]),
+          ).pipe(Effect.ignore),
+        )
+
+        if (kind === 'cli')
+        {
+          yield* useEnvironment({
+            T3CODE_CARTOGRAPHER_CLI: 'relative/cartographer.mjs',
+            T3CODE_CARTOGRAPHER_NODE: process.execPath,
+          })
+        }
+        else
+        {
+          const cliPath = NodePath.join(baseDir, 'cartographer.mjs')
+          yield* Effect.promise(() => NodeFSP.writeFile(cliPath, ''))
+          yield* useEnvironment({
+            T3CODE_CARTOGRAPHER_CLI: cliPath,
+            T3CODE_CARTOGRAPHER_NODE: 'relative/node',
+          })
+        }
+
+        const TestLayer = CartographerEmbedBroker.layer.pipe(
+          Layer.provide(ServerConfig.layerTest(workspaceRoot, baseDir)),
+          Layer.provideMerge(NodeServices.layer),
+        )
+        yield* Effect.gen(function* ()
+        {
+          const broker = yield* CartographerEmbedBroker.CartographerEmbedBroker
+          const failure = yield* broker
+            .issue({
+              threadId: ThreadId.make(`thread-cartographer-relative-${kind}`),
+              workspaceRoot,
+              parentOrigin: 'https://example.com',
+              theme: 'light',
+            })
+            .pipe(Effect.flip)
+
+          expect(failure.failure).toBe('unsupported')
+          expect(failure.message).toContain(messageFragment)
+          expect(
+            yield* Effect.promise(() =>
+              pathExists(NodePath.join(baseDir, 'userdata', 'cartographer', 'embed')),
+            ),
+          ).toBe(false)
+        }).pipe(Effect.provide(TestLayer))
+      }),
   )
 
   it.effect('stops the child and removes artifacts when readiness is interrupted', () =>

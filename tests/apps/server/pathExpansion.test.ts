@@ -1,3 +1,6 @@
+// tests/apps/server/pathExpansion.test.ts
+// verify expand home path behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
@@ -7,22 +10,22 @@ import { expandHomePath } from '../../../apps/server/src/pathExpansion.ts'
 
 describe('expandHomePath', () =>
 {
-  it('leaves empty and non-tilde paths unchanged', () =>
+  it.each([
+    ['', ''],
+    ['/absolute/path', '/absolute/path'],
+    ['relative/path', 'relative/path'],
+    ['~alice/foo', '~alice/foo'],
+  ] as const)('leaves %s unchanged', (input, expected) =>
   {
-    expect(expandHomePath('')).toBe('')
-    expect(expandHomePath('/absolute/path')).toBe('/absolute/path')
-    expect(expandHomePath('relative/path')).toBe('relative/path')
+    expect(expandHomePath(input)).toBe(expected)
   })
 
-  it('expands ~/ and ~\\ home prefixes', () =>
+  it.each([
+    ['~', NodeOS.homedir()],
+    ['~/.codex-work', NodePath.join(NodeOS.homedir(), '.codex-work')],
+    ['~\\.codex', NodePath.join(NodeOS.homedir(), '.codex')],
+  ] as const)('expands home prefix %s', (input, expected) =>
   {
-    expect(expandHomePath('~')).toBe(NodeOS.homedir())
-    expect(expandHomePath('~/.codex-work')).toBe(NodePath.join(NodeOS.homedir(), '.codex-work'))
-    expect(expandHomePath('~\\.codex')).toBe(NodePath.join(NodeOS.homedir(), '.codex'))
-  })
-
-  it('does not expand ~user paths', () =>
-  {
-    expect(expandHomePath('~alice/foo')).toBe('~alice/foo')
+    expect(expandHomePath(input)).toBe(expected)
   })
 })

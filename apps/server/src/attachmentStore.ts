@@ -1,3 +1,6 @@
+// apps/server/src/attachmentStore.ts
+// derives and resolves managed attachment identities and paths
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeCrypto from 'node:crypto'
 import * as NodeFS from 'node:fs'
@@ -18,6 +21,27 @@ const ATTACHMENT_ID_PATTERN = new RegExp(
   `^(${ATTACHMENT_ID_THREAD_SEGMENT_PATTERN})-(${ATTACHMENT_ID_UUID_PATTERN})$`,
   'i',
 )
+const ATTACHMENT_STAGING_KEY_PATTERN = /^[0-9a-f]{64}$/
+
+export function deriveAttachmentStagingKey(input: {
+  readonly commandId: string
+  readonly messageId: string
+  readonly attachmentIndex: number
+}): string
+{
+  return NodeCrypto.createHash('sha256')
+    .update(input.commandId)
+    .update('\0')
+    .update(input.messageId)
+    .update('\0')
+    .update(String(input.attachmentIndex))
+    .digest('hex')
+}
+
+export function attachmentContentDigest(bytes: Uint8Array): string
+{
+  return NodeCrypto.createHash('sha256').update(bytes).digest('hex')
+}
 
 export function toSafeThreadAttachmentSegment(threadId: string): string | null
 {
@@ -74,6 +98,30 @@ export function attachmentRelativePath(attachment: ChatAttachment): string
       return `${attachment.id}${extension}`
     }
   }
+}
+
+export function attachmentStagingRelativePath(input: {
+  readonly stagingKey: string
+  readonly attachment: ChatAttachment
+}): string
+{
+  return `.staging/${input.stagingKey}/${attachmentRelativePath(input.attachment)}`
+}
+
+export function resolveAttachmentStagingPath(input: {
+  readonly attachmentsDir: string
+  readonly stagingKey: string
+  readonly attachment: ChatAttachment
+}): string | null
+{
+  if (!ATTACHMENT_STAGING_KEY_PATTERN.test(input.stagingKey))
+  {
+    return null
+  }
+  return resolveAttachmentRelativePath({
+    attachmentsDir: input.attachmentsDir,
+    relativePath: attachmentStagingRelativePath(input),
+  })
 }
 
 export function resolveAttachmentPath(input: {

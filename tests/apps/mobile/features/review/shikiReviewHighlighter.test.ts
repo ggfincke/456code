@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/review/shikiReviewHighlighter.test.ts
+// verify highlight review file behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import type { ReviewRenderableFile } from '../../../../../apps/mobile/src/features/review/reviewModel'
@@ -42,18 +45,10 @@ describe('highlightReviewFile', () =>
     const highlighted = await highlightReviewFile(file, 'light')
 
     expect(highlighted.additionLines).toHaveLength(file.additionLines.length)
-    expect(highlighted.additionLines[0]?.map((token) => token.content).join('')).toBe(
-      file.additionLines[0],
-    )
-    expect(highlighted.additionLines[1]?.map((token) => token.content).join('')).toBe(
-      file.additionLines[1],
-    )
-    expect(highlighted.additionLines[2]?.map((token) => token.content).join('')).toBe(
-      file.additionLines[2],
-    )
-    expect(highlighted.additionLines[3]?.map((token) => token.content).join('')).toBe(
-      file.additionLines[3],
-    )
+    for (const [index, line] of file.additionLines.entries())
+    {
+      expect(highlighted.additionLines[index]?.map((token) => token.content).join('')).toBe(line)
+    }
   })
 
   it('adds word-alt diff emphasis for paired deletion and addition lines', async () =>

@@ -2,6 +2,7 @@
 // manages mobile thread composer drafts and guarded message enqueueing
 import { useAtomValue } from '@effect/atom-react'
 import { useCallback, useEffect, useMemo } from 'react'
+import { Alert } from 'react-native'
 
 import {
   CommandId,
@@ -40,8 +41,9 @@ import {
 } from './use-composer-drafts'
 import { setPendingConnectionError } from '../state/use-remote-environment-registry'
 import { useSelectedThreadDetail } from '../state/use-thread-detail'
+import { useThreadProviderSwitch } from '../state/use-thread-provider-switch'
 import { useThreadSelection } from '../state/use-thread-selection'
-import { enqueueThreadOutboxMessage } from './thread-outbox'
+import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from './thread-outbox'
 import { requiresWebImportContinuation } from './thread-outbox-model'
 import { useThreadOutboxMessages } from './use-thread-outbox'
 
@@ -85,6 +87,7 @@ export function useThreadComposerState()
   const selectedThreadDetail = useSelectedThreadDetail()
   const composerDrafts = useAtomValue(composerDraftsAtom)
   const queuedMessagesByThreadKey = useThreadOutboxMessages()
+  const providerSwitch = useThreadProviderSwitch()
 
   useEffect(() =>
   {
@@ -107,6 +110,9 @@ export function useThreadComposerState()
   const draftMessage = selectedDraft?.text ?? ''
   const draftAttachments = selectedDraft?.attachments ?? []
   const selectedThreadQueueCount = selectedThreadQueuedMessages.length
+  const selectedThreadFailedQueuedMessage = selectedThreadQueuedMessages.find(
+    (message) => message.failure !== undefined,
+  )
   const selectedThread = selectedThreadDetail ?? selectedThreadShell
   const modelSelection = selectedDraft?.modelSelection ?? selectedThread?.modelSelection ?? null
   const runtimeMode = selectedDraft?.runtimeMode ?? selectedThread?.runtimeMode ?? null
@@ -137,9 +143,13 @@ export function useThreadComposerState()
     return deriveActiveWorkStartedAt(selectedThread.latestTurn, selectedThreadSessionActivity, null)
   }, [selectedThreadDetail, selectedThreadSessionActivity, selectedThreadShell])
 
+  // an in-flight switch is busy work the user cannot stop, so it queues sends
+  // exactly like a running turn does.
   const activeThreadBusy =
-    !!selectedThread &&
-    (selectedThread.session?.status === 'running' || selectedThread.session?.status === 'starting')
+    providerSwitch.active ||
+    (!!selectedThread &&
+      (selectedThread.session?.status === 'running' ||
+        selectedThread.session?.status === 'starting'))
   const sendBlockedReason = requiresWebImportContinuation(selectedThreadShell)
     ? 'Continue this imported session in the web app after reviewing its provider continuation.'
     : null
@@ -286,6 +296,36 @@ export function useThreadComposerState()
     [composerDrafts, selectedThreadShell],
   )
 
+  const onDiscardFailedQueuedMessage = useCallback(() =>
+  {
+    if (!selectedThreadFailedQueuedMessage)
+    {
+      return
+    }
+    Alert.alert(
+      'Discard queued message?',
+      'This message could not be sent and will be removed from the outbox.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Discard',
+          style: 'destructive',
+          onPress: () =>
+          {
+            void removeThreadOutboxMessage(selectedThreadFailedQueuedMessage).catch((error) =>
+            {
+              setPendingConnectionError(
+                error instanceof Error
+                  ? error.message
+                  : 'The queued message could not be discarded.',
+              )
+            })
+          },
+        },
+      ],
+    )
+  }, [selectedThreadFailedQueuedMessage])
+
   const onRemoveDraftImage = useCallback(
     (imageId: string) =>
     {
@@ -300,6 +340,9 @@ export function useThreadComposerState()
     [selectedThreadShell],
   )
 
+  // picking another provider instance on a started thread is a handoff, not a
+  // draft edit: it goes through an explicit confirmation and switch command,
+  // and the draft is left untouched either way.
   const onUpdateModelSelection = useCallback(
     (value: ModelSelection) =>
     {
@@ -307,9 +350,13 @@ export function useThreadComposerState()
       {
         return
       }
+      if (providerSwitch.requestProviderSwitch(value))
+      {
+        return
+      }
       updateComposerDraftSettings(selectedThreadKey, { modelSelection: value })
     },
-    [selectedThreadKey],
+    [providerSwitch, selectedThreadKey],
   )
 
   const onUpdateRuntimeMode = useCallback(
@@ -339,6 +386,7 @@ export function useThreadComposerState()
   return {
     selectedThreadFeed,
     selectedThreadQueueCount,
+    selectedThreadQueueFailureReason: selectedThreadFailedQueuedMessage?.failure?.reason ?? null,
     activeWorkStartedAt,
     draftMessage,
     draftAttachments,
@@ -347,12 +395,17 @@ export function useThreadComposerState()
     interactionMode,
     activeThreadBusy,
     sendBlockedReason,
+    providerSwitchActive: providerSwitch.active,
+    providerSwitchNotice: providerSwitch.notice,
+    onDismissProviderSwitchNotice: providerSwitch.onDismissNotice,
+    onRetryProviderSwitch: providerSwitch.onRetry,
     onChangeDraftMessage,
     onPickDraftImages,
     onPasteIntoDraft,
     onNativePasteImages,
     onRemoveDraftImage,
     onSendMessage,
+    onDiscardFailedQueuedMessage,
     onUpdateModelSelection,
     onUpdateRuntimeMode,
     onUpdateInteractionMode,

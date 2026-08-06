@@ -4,11 +4,16 @@
 import {
   ApprovalRequestId,
   type ChatAttachment,
+  type ApprovalOutcomeStatus,
+  type ProviderApprovalDecision,
+  type ModelSelection,
   type OrchestrationEvent,
   type OrchestrationSessionStatus,
   ThreadId,
   ThreadOrigin,
 } from '@t3tools/contracts'
+import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
+import { isAdjacentProviderSwitchActivity } from '@t3tools/shared/providerSwitchActivity'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
@@ -19,6 +24,8 @@ import * as Stream from 'effect/Stream'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 import { toPersistenceSqlError, type ProjectionRepositoryError } from '../../persistence/Errors.ts'
+import { AttachmentLifecycleRepositoryLive } from '../../persistence/Layers/AttachmentLifecycle.ts'
+import { AttachmentLifecycleRepository } from '../../persistence/Services/AttachmentLifecycle.ts'
 import { OrchestrationEventStore } from '../../persistence/Services/OrchestrationEventStore.ts'
 import { ProjectionPendingApprovalRepository } from '../../persistence/Services/ProjectionPendingApprovals.ts'
 import { ProjectionProjectRepository } from '../../persistence/Services/ProjectionProjects.ts'
@@ -73,15 +80,14 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
 } as const
 
 const encodeThreadOriginJson = Schema.encodeSync(Schema.fromJsonString(ThreadOrigin))
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
 
 type ProjectorName =
   (typeof ORCHESTRATION_PROJECTOR_NAMES)[keyof typeof ORCHESTRATION_PROJECTOR_NAMES]
 
-/**
- * Turn state to settle still-running turns with when their session leaves the
- * "running" status, or null while the session is (re)starting or running and
- * turns must stay unsettled.
- */
+// turn state to settle still-running turns with when their session leaves the
+// "running" status, or null while the session is (re)starting or running and
+// turns must stay unsettled.
 function settledTurnStateForSessionStatus(
   status: OrchestrationSessionStatus,
 ): 'completed' | 'interrupted' | 'error' | null
@@ -107,14 +113,30 @@ interface ProjectorDefinition
   readonly name: ProjectorName
   readonly apply: (
     event: OrchestrationEvent,
-    attachmentSideEffects: AttachmentSideEffects,
+    attachmentCleanupIntents: AttachmentCleanupIntents,
   ) => Effect.Effect<void, ProjectionRepositoryError>
 }
 
-interface AttachmentSideEffects
+interface AttachmentCleanupIntents
+{
+  readonly deletedThreads: Map<string, string>
+  readonly removedRelativePaths: Set<string>
+}
+
+interface DirectAttachmentSideEffects
 {
   readonly deletedThreadIds: Set<string>
   readonly prunedThreadRelativePaths: Map<string, Set<string>>
+}
+
+interface LegacyProviderSwitchReplayState
+{
+  readonly currentModelSelection: ModelSelection | null
+  readonly pendingSwitch: {
+    readonly requestId: string
+    readonly sourceModelSelection: ModelSelection | null
+    readonly targetModelSelection: ModelSelection
+  } | null
 }
 
 const materializeAttachmentsForProjection = Effect.fn('materializeAttachmentsForProjection')(
@@ -130,19 +152,6 @@ function extractActivityRequestId(payload: unknown): ApprovalRequestId | null
   }
   const requestId = (payload as Record<string, unknown>).requestId
   return typeof requestId === 'string' ? ApprovalRequestId.make(requestId) : null
-}
-
-function isStalePendingApprovalFailureDetail(detail: string | null): boolean
-{
-  if (detail === null)
-  {
-    return false
-  }
-  return (
-    detail.includes('stale pending approval request') ||
-    detail.includes('unknown pending approval request') ||
-    detail.includes('unknown pending permission request')
-  )
 }
 
 function derivePendingUserInputCountFromActivities(
@@ -398,7 +407,7 @@ function collectThreadAttachmentRelativePaths(
 }
 
 const runAttachmentSideEffects = Effect.fn('runAttachmentSideEffects')(function* (
-  sideEffects: AttachmentSideEffects,
+  sideEffects: DirectAttachmentSideEffects,
 )
 {
   const serverConfig = yield* Effect.service(ServerConfig)
@@ -529,6 +538,38 @@ const runAttachmentSideEffects = Effect.fn('runAttachmentSideEffects')(function*
   )
 })
 
+const listThreadAttachmentRelativePaths = Effect.fn('listThreadAttachmentRelativePaths')(function* (
+  threadId: string,
+)
+{
+  const serverConfig = yield* Effect.service(ServerConfig)
+  const fileSystem = yield* Effect.service(FileSystem.FileSystem)
+  const threadSegment = toSafeThreadAttachmentSegment(threadId)
+  if (!threadSegment)
+  {
+    return yield* Effect.die(new Error(`Unsafe thread id '${threadId}' for attachment lookup`))
+  }
+  if (!(yield* fileSystem.exists(serverConfig.attachmentsDir)))
+  {
+    return []
+  }
+  const entries = yield* fileSystem.readDirectory(serverConfig.attachmentsDir, {
+    recursive: false,
+  })
+  return entries
+    .flatMap((entry) =>
+    {
+      const relativePath = entry.replace(/^[/\\]+/, '').replace(/\\/g, '/')
+      if (relativePath.length === 0 || relativePath.includes('/')) return []
+      const attachmentId = parseAttachmentIdFromRelativePath(relativePath)
+      if (!attachmentId) return []
+      return parseThreadSegmentFromAttachmentId(attachmentId) === threadSegment
+        ? [relativePath]
+        : []
+    })
+    .toSorted()
+})
+
 const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjectionPipeline')(
   function* ()
   {
@@ -543,6 +584,106 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     const projectionThreadSessionRepository = yield* ProjectionThreadSessionRepository
     const projectionTurnRepository = yield* ProjectionTurnRepository
     const projectionPendingApprovalRepository = yield* ProjectionPendingApprovalRepository
+    const attachmentLifecycleRepository = yield* AttachmentLifecycleRepository
+
+    const recoverLegacyProviderSwitchSelections = Effect.fn(
+      'recoverLegacyProviderSwitchSelections',
+    )(function* (
+      terminalEvent: Extract<OrchestrationEvent, { type: 'thread.provider-switch-failed' }>,
+    )
+    {
+      const threadId = terminalEvent.payload.threadId
+      const replayState = yield* eventStore.readFromSequence(0).pipe(
+        Stream.takeWhile((event) => event.sequence < terminalEvent.sequence),
+        Stream.runFold(
+          (): LegacyProviderSwitchReplayState => ({
+            currentModelSelection: null,
+            pendingSwitch: null,
+          }),
+          (state, event): LegacyProviderSwitchReplayState =>
+          {
+            if (event.aggregateKind !== 'thread' || event.aggregateId !== threadId)
+            {
+              return state
+            }
+            switch (event.type)
+            {
+              case 'thread.created':
+                return {
+                  currentModelSelection: event.payload.modelSelection,
+                  pendingSwitch: null,
+                }
+              case 'thread.meta-updated':
+                return event.payload.modelSelection === undefined
+                  ? state
+                  : { ...state, currentModelSelection: event.payload.modelSelection }
+              case 'thread.provider-switch-requested':
+                return {
+                  ...state,
+                  pendingSwitch: {
+                    requestId: event.eventId,
+                    sourceModelSelection:
+                      event.payload.sourceModelSelection ?? state.currentModelSelection,
+                    targetModelSelection: event.payload.targetModelSelection,
+                  },
+                }
+              case 'thread.provider-switch-failed':
+                return event.payload.requestId !== undefined &&
+                  state.pendingSwitch?.requestId !== event.payload.requestId
+                  ? state
+                  : { ...state, pendingSwitch: null }
+              case 'thread.provider-switched':
+                return event.payload.requestId !== undefined &&
+                  state.pendingSwitch?.requestId !== event.payload.requestId
+                  ? state
+                  : {
+                      currentModelSelection: event.payload.modelSelection,
+                      pendingSwitch: null,
+                    }
+              default:
+                return state
+            }
+          },
+        ),
+      )
+      if (
+        terminalEvent.payload.requestId !== undefined &&
+        replayState.pendingSwitch?.requestId !== terminalEvent.payload.requestId
+      )
+      {
+        return null
+      }
+      return replayState.pendingSwitch
+    })
+
+    const updateApprovalOutcome = (input: {
+      readonly requestId: ApprovalRequestId
+      readonly status: ApprovalOutcomeStatus
+      readonly requestedDecision: ProviderApprovalDecision | null
+      readonly decision: ProviderApprovalDecision | null
+      readonly detail: string | null
+      readonly actionId: string | null
+      readonly acceptanceEvidence: string | null
+      readonly updatedAt: string
+    }) =>
+      sql`
+        UPDATE projection_pending_approvals
+        SET
+          outcome_status = ${input.status},
+          outcome_requested_decision = ${input.requestedDecision},
+          outcome_decision = ${input.decision},
+          outcome_detail = ${input.detail},
+          outcome_action_id = ${input.actionId},
+          outcome_acceptance_evidence = ${input.acceptanceEvidence},
+          outcome_updated_at = ${input.updatedAt}
+        WHERE request_id = ${input.requestId}
+          AND (
+            outcome_status NOT IN ('accepted', 'stale-terminal')
+            OR outcome_status = ${input.status}
+          )
+      `.pipe(
+        Effect.mapError(toPersistenceSqlError('ProjectionPipeline.updateApprovalOutcome:query')),
+      )
 
     const fileSystem = yield* FileSystem.FileSystem
     const path = yield* Path.Path
@@ -664,7 +805,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
     const applyThreadsProjection: ProjectorDefinition['apply'] = Effect.fn(
       'applyThreadsProjection',
-    )(function* (event, attachmentSideEffects)
+    )(function* (event, attachmentCleanupIntents)
     {
       switch (event.type)
       {
@@ -675,6 +816,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             title: event.payload.title,
             modelSelection: event.payload.modelSelection,
             pendingHandoff: null,
+            providerSwitch: null,
             runtimeMode: event.payload.runtimeMode,
             interactionMode: event.payload.interactionMode,
             branch: event.payload.branch,
@@ -861,6 +1003,81 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           return
         }
 
+        case 'thread.provider-switch-requested':
+        {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          })
+          if (Option.isNone(existingRow))
+          {
+            return
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            providerSwitch: {
+              phase: 'pending',
+              targetInstanceId: event.payload.targetModelSelection.instanceId,
+              targetModel: event.payload.targetModelSelection.model,
+              requestedAt: event.occurredAt,
+              requestId: event.eventId,
+              requestSequence: event.sequence,
+              sourceModelSelection:
+                event.payload.sourceModelSelection ?? existingRow.value.modelSelection,
+            },
+            updatedAt: event.occurredAt,
+          })
+          return
+        }
+
+        case 'thread.provider-switch-progressed':
+        {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          })
+          if (
+            Option.isNone(existingRow) ||
+            existingRow.value.providerSwitch === null ||
+            (event.payload.requestId !== undefined &&
+              existingRow.value.providerSwitch.requestId !== event.payload.requestId)
+          )
+          {
+            return
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            providerSwitch: {
+              ...existingRow.value.providerSwitch,
+              phase: event.payload.phase,
+            },
+            updatedAt: event.occurredAt,
+          })
+          return
+        }
+
+        case 'thread.provider-switch-failed':
+        {
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          })
+          if (Option.isNone(existingRow))
+          {
+            return
+          }
+          if (
+            event.payload.requestId !== undefined &&
+            existingRow.value.providerSwitch?.requestId !== event.payload.requestId
+          )
+          {
+            return
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            providerSwitch: null,
+            updatedAt: event.occurredAt,
+          })
+          return
+        }
+
         case 'thread.provider-switched':
         {
           const existingRow = yield* projectionThreadRepository.getById({
@@ -870,9 +1087,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           {
             return
           }
+          if (
+            event.payload.requestId !== undefined &&
+            existingRow.value.providerSwitch?.requestId !== event.payload.requestId
+          )
+          {
+            return
+          }
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             modelSelection: event.payload.modelSelection,
+            providerSwitch: null,
             pendingHandoff:
               event.payload.handoffText.trim().length > 0
                 ? {
@@ -883,7 +1108,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                       : {}),
                     createdAt: event.occurredAt,
                   }
-                : null,
+                : existingRow.value.pendingHandoff,
             updatedAt: event.occurredAt,
           })
           return
@@ -908,7 +1133,17 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
         case 'thread.deleted':
         {
-          attachmentSideEffects.deletedThreadIds.add(event.payload.threadId)
+          const threadSegment = toSafeThreadAttachmentSegment(event.payload.threadId)
+          if (threadSegment !== null)
+          {
+            attachmentCleanupIntents.deletedThreads.set(event.payload.threadId, threadSegment)
+          }
+          else
+          {
+            yield* Effect.logWarning('skipping attachment cleanup intent for unsafe thread id', {
+              threadId: event.payload.threadId,
+            })
+          }
           const existingRow = yield* projectionThreadRepository.getById({
             threadId: event.payload.threadId,
           })
@@ -977,6 +1212,10 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             event.payload.activity.sequence !== undefined
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
+            pendingHandoff:
+              event.payload.activity.kind === 'provider.handoff.delivered'
+                ? null
+                : existingRow.value.pendingHandoff,
             updatedAt: event.occurredAt,
           })
           if (!isImportedTranscriptActivity)
@@ -1096,7 +1335,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
     const applyThreadMessagesProjection: ProjectorDefinition['apply'] = Effect.fn(
       'applyThreadMessagesProjection',
-    )(function* (event, attachmentSideEffects)
+    )(function* (event, attachmentCleanupIntents)
     {
       switch (event.type)
       {
@@ -1127,6 +1366,23 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                   attachments: event.payload.attachments,
                 })
               : previousMessage?.attachments
+          if (previousMessage !== undefined && event.payload.attachments !== undefined)
+          {
+            const previousRelativePaths = collectThreadAttachmentRelativePaths(
+              event.payload.threadId,
+              [previousMessage],
+            )
+            const nextRelativePaths = collectThreadAttachmentRelativePaths(event.payload.threadId, [
+              { ...previousMessage, attachments: nextAttachments ?? [] },
+            ])
+            for (const relativePath of previousRelativePaths)
+            {
+              if (!nextRelativePaths.has(relativePath))
+              {
+                attachmentCleanupIntents.removedRelativePaths.add(relativePath)
+              }
+            }
+          }
           yield* projectionThreadMessageRepository.upsert({
             messageId: event.payload.messageId,
             threadId: event.payload.threadId,
@@ -1170,10 +1426,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           yield* Effect.forEach(keptRows, projectionThreadMessageRepository.upsert, {
             concurrency: 1,
           }).pipe(Effect.asVoid)
-          attachmentSideEffects.prunedThreadRelativePaths.set(
+          const existingRelativePaths = collectThreadAttachmentRelativePaths(
             event.payload.threadId,
-            collectThreadAttachmentRelativePaths(event.payload.threadId, keptRows),
+            existingRows,
           )
+          const keptRelativePaths = collectThreadAttachmentRelativePaths(
+            event.payload.threadId,
+            keptRows,
+          )
+          for (const relativePath of existingRelativePaths)
+          {
+            if (!keptRelativePaths.has(relativePath))
+            {
+              attachmentCleanupIntents.removedRelativePaths.add(relativePath)
+            }
+          }
           return
         }
 
@@ -1244,8 +1511,121 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       switch (event.type)
       {
+        case 'thread.provider-switch-failed':
+        {
+          const sourceModelSelection = event.payload.sourceModelSelection
+          const targetModelSelection = event.payload.targetModelSelection
+          const thread =
+            sourceModelSelection === undefined || targetModelSelection === undefined
+              ? yield* projectionThreadRepository.getById({ threadId: event.payload.threadId })
+              : Option.none()
+          const legacyThread = Option.getOrUndefined(thread)
+          const target = legacyThread?.providerSwitch ?? null
+          const liveTargetModelSelection =
+            target === null
+              ? undefined
+              : { instanceId: target.targetInstanceId, model: target.targetModel }
+          const recovered =
+            target === null &&
+            (sourceModelSelection === undefined || targetModelSelection === undefined)
+              ? yield* recoverLegacyProviderSwitchSelections(event)
+              : null
+          const source =
+            sourceModelSelection ??
+            (target === null
+              ? (recovered?.sourceModelSelection ?? legacyThread?.modelSelection)
+              : legacyThread?.modelSelection)
+          const resolvedTargetModelSelection =
+            targetModelSelection ?? liveTargetModelSelection ?? recovered?.targetModelSelection
+          const activity: ProjectionThreadActivity = {
+            activityId: event.eventId,
+            threadId: event.payload.threadId,
+            turnId: null,
+            tone: 'error',
+            kind: 'provider.switch.failed',
+            summary: 'Provider switch failed',
+            payload: {
+              reasonCode: event.payload.reasonCode,
+              detail: event.payload.detail,
+              ...(source === undefined
+                ? {}
+                : {
+                    fromInstanceId: source.instanceId,
+                    fromModel: source.model,
+                  }),
+              ...(resolvedTargetModelSelection === undefined
+                ? {}
+                : {
+                    toInstanceId: resolvedTargetModelSelection.instanceId,
+                    toModel: resolvedTargetModelSelection.model,
+                    retryTargetModelSelection: resolvedTargetModelSelection,
+                  }),
+            },
+            sequence: event.sequence,
+            createdAt: event.occurredAt,
+          }
+          if (event.payload.activityVersion === undefined)
+          {
+            const existingRows = yield* projectionThreadActivityRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            })
+            if (existingRows.some((row) => isAdjacentProviderSwitchActivity(row, activity)))
+            {
+              return
+            }
+          }
+          yield* projectionThreadActivityRepository.upsert(activity)
+          return
+        }
+
+        case 'thread.provider-switched':
+        {
+          const threadId = ThreadId.make(event.aggregateId)
+          const sourceModelSelection = event.payload.sourceModelSelection ?? {
+            instanceId: event.payload.fromInstanceId,
+            ...(event.payload.fromModel === undefined ? {} : { model: event.payload.fromModel }),
+          }
+          const activity: ProjectionThreadActivity = {
+            activityId: event.eventId,
+            threadId,
+            turnId: null,
+            tone: 'info',
+            kind: 'provider.switch.completed',
+            summary: `Switched from ${
+              sourceModelSelection.model ?? sourceModelSelection.instanceId ?? 'prior provider'
+            } to ${event.payload.modelSelection.model || event.payload.modelSelection.instanceId}`,
+            payload: {
+              fromInstanceId: sourceModelSelection.instanceId,
+              ...(sourceModelSelection.model === undefined
+                ? {}
+                : { fromModel: sourceModelSelection.model }),
+              toInstanceId: event.payload.modelSelection.instanceId,
+              toModel: event.payload.modelSelection.model,
+              targetModelSelection: event.payload.modelSelection,
+            },
+            sequence: event.sequence,
+            createdAt: event.occurredAt,
+          }
+          if (event.payload.activityVersion === undefined)
+          {
+            const existingRows = yield* projectionThreadActivityRepository.listByThreadId({
+              threadId,
+            })
+            if (existingRows.some((row) => isAdjacentProviderSwitchActivity(row, activity)))
+            {
+              return
+            }
+          }
+          yield* projectionThreadActivityRepository.upsert(activity)
+          return
+        }
+
         case 'thread.activity-appended':
-          yield* projectionThreadActivityRepository.upsert({
+        {
+          const isProviderSwitchActivity =
+            event.payload.activity.kind === 'provider.switch.failed' ||
+            event.payload.activity.kind === 'provider.switch.completed'
+          const activity: ProjectionThreadActivity = {
             activityId: event.payload.activity.id,
             threadId: event.payload.threadId,
             turnId: event.payload.activity.turnId,
@@ -1255,10 +1635,36 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             payload: event.payload.activity.payload,
             ...(event.payload.activity.sequence !== undefined
               ? { sequence: event.payload.activity.sequence }
-              : {}),
+              : isProviderSwitchActivity
+                ? { sequence: event.sequence }
+                : {}),
             createdAt: event.payload.activity.createdAt,
-          })
+          }
+          if (isProviderSwitchActivity)
+          {
+            const existingRows = yield* projectionThreadActivityRepository.listByThreadId({
+              threadId: event.payload.threadId,
+            })
+            const replacedActivityId = existingRows.findLast(
+              (row) =>
+                event.causationEventId === row.activityId ||
+                isAdjacentProviderSwitchActivity(row, activity),
+            )?.activityId
+            if (replacedActivityId !== undefined)
+            {
+              yield* projectionThreadActivityRepository.deleteByThreadId({
+                threadId: event.payload.threadId,
+              })
+              yield* Effect.forEach(
+                existingRows.filter((row) => row.activityId !== replacedActivityId),
+                projectionThreadActivityRepository.upsert,
+                { concurrency: 1, discard: true },
+              )
+            }
+          }
+          yield* projectionThreadActivityRepository.upsert(activity)
           return
+        }
 
         case 'thread.reverted':
         {
@@ -1348,7 +1754,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                 threadId: event.payload.threadId,
               })
             }
-            // Leaving the "running" session status is the turn-end signal:
+            // leaving the "running" session status is the turn-end signal:
             // settle still-running turns so their duration reflects the whole
             // turn rather than the last assistant message.
             const settledTurnState = settledTurnStateForSessionStatus(event.payload.session.status)
@@ -1368,7 +1774,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                       ...turn,
                       turnId: turn.turnId,
                       state: settledTurnState,
-                      // A running turn's completedAt can only hold a mid-turn
+                      // a running turn's completedAt can only hold a mid-turn
                       // placeholder checkpoint timestamp — the session leaving
                       // "running" is the authoritative turn end.
                       completedAt: event.payload.session.updatedAt,
@@ -1378,7 +1784,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             return
           }
 
-          // A new active turn supersedes any still-running turn on the same
+          // a new active turn supersedes any still-running turn on the same
           // thread — steering can open a new turn without the provider ever
           // completing the previous one.
           const otherRunningTurns = yield* projectionTurnRepository.listByThreadId({
@@ -1483,7 +1889,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           {
             return
           }
-          // A completed assistant message only settles the turn once the
+          // a completed assistant message only settles the turn once the
           // session is no longer running it — providers may emit several
           // assistant messages per turn (commentary between tool calls), and
           // the turn must stay unsettled until the provider reports turn end
@@ -1581,7 +1987,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
 
         case 'thread.turn-diff-completed':
         {
-          // Mid-turn diff updates produce placeholder checkpoints; record the
+          // mid-turn diff updates produce placeholder checkpoints; record the
           // checkpoint, but don't settle a turn its session is still running.
           const session = yield* projectionThreadSessionRepository.getByThreadId({
             threadId: event.payload.threadId,
@@ -1720,6 +2126,31 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
                 : event.payload.activity.createdAt,
               resolvedAt: event.payload.activity.createdAt,
             })
+            const payload =
+              typeof event.payload.activity.payload === 'object' &&
+              event.payload.activity.payload !== null
+                ? (event.payload.activity.payload as Record<string, unknown>)
+                : null
+            const evidence =
+              typeof payload?.acceptanceEvidence === 'object' && payload.acceptanceEvidence !== null
+                ? encodeUnknownJsonString(payload.acceptanceEvidence)
+                : encodeUnknownJsonString({ providerEventId: event.payload.activity.id })
+            yield* updateApprovalOutcome({
+              requestId,
+              status: 'accepted',
+              requestedDecision:
+                payload?.requestedDecision === 'accept' ||
+                payload?.requestedDecision === 'acceptForSession' ||
+                payload?.requestedDecision === 'decline' ||
+                payload?.requestedDecision === 'cancel'
+                  ? payload.requestedDecision
+                  : resolvedDecision,
+              decision: resolvedDecision,
+              detail: null,
+              actionId: typeof payload?.actionId === 'string' ? payload.actionId : null,
+              acceptanceEvidence: evidence,
+              updatedAt: event.payload.activity.createdAt,
+            })
             return
           }
           if (event.payload.activity.kind === 'provider.approval.respond.failed')
@@ -1729,31 +2160,49 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               event.payload.activity.payload !== null
                 ? (event.payload.activity.payload as Record<string, unknown>)
                 : null
-            const detail = typeof payload?.detail === 'string' ? payload.detail.toLowerCase() : null
-            if (isStalePendingApprovalFailureDetail(detail))
+            const rawDetail = typeof payload?.detail === 'string' ? payload.detail : null
+            const embeddedOutcome =
+              typeof payload?.approvalOutcome === 'object' && payload.approvalOutcome !== null
+                ? (payload.approvalOutcome as Record<string, unknown>)
+                : null
+            const classification = classifyApprovalFailure(payload)
+            const outcomeStatus = classification.status
+            if (Option.isNone(existingRow))
             {
-              if (Option.isNone(existingRow))
-              {
-                return
-              }
-              if (existingRow.value.status === 'resolved')
-              {
-                return
-              }
-              yield* projectionPendingApprovalRepository.upsert({
-                requestId,
-                threadId: existingRow.value.threadId,
-                turnId: existingRow.value.turnId,
-                status: 'resolved',
-                decision: null,
-                createdAt: existingRow.value.createdAt,
-                resolvedAt: event.payload.activity.createdAt,
-              })
               return
             }
+            yield* projectionPendingApprovalRepository.upsert({
+              requestId,
+              threadId: existingRow.value.threadId,
+              turnId: existingRow.value.turnId,
+              status: classification.clearsBlockingRequest ? 'resolved' : 'pending',
+              decision: null,
+              createdAt: existingRow.value.createdAt,
+              resolvedAt: classification.clearsBlockingRequest
+                ? event.payload.activity.createdAt
+                : null,
+            })
+            yield* updateApprovalOutcome({
+              requestId,
+              status: outcomeStatus,
+              requestedDecision:
+                embeddedOutcome?.requestedDecision === 'accept' ||
+                embeddedOutcome?.requestedDecision === 'acceptForSession' ||
+                embeddedOutcome?.requestedDecision === 'decline' ||
+                embeddedOutcome?.requestedDecision === 'cancel'
+                  ? embeddedOutcome.requestedDecision
+                  : existingRow.value.decision,
+              decision: null,
+              detail:
+                typeof embeddedOutcome?.detail === 'string' ? embeddedOutcome.detail : rawDetail,
+              actionId:
+                typeof embeddedOutcome?.actionId === 'string' ? embeddedOutcome.actionId : null,
+              acceptanceEvidence: null,
+              updatedAt: event.payload.activity.createdAt,
+            })
             return
           }
-          // Only approval-requested activities should create pending-approval
+          // only approval-requested activities should create pending-approval
           // rows.  Other activity kinds that happen to carry a requestId
           // (e.g. user-input.requested / user-input.resolved) must not
           // pollute this projection — they have their own accounting via
@@ -1777,6 +2226,16 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               : event.payload.activity.createdAt,
             resolvedAt: null,
           })
+          yield* updateApprovalOutcome({
+            requestId,
+            status: 'pending',
+            requestedDecision: null,
+            decision: null,
+            detail: null,
+            actionId: null,
+            acceptanceEvidence: null,
+            updatedAt: event.payload.activity.createdAt,
+          })
           return
         }
 
@@ -1791,12 +2250,22 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               ? existingRow.value.threadId
               : event.payload.threadId,
             turnId: Option.isSome(existingRow) ? existingRow.value.turnId : null,
-            status: 'resolved',
-            decision: event.payload.decision,
+            status: 'pending',
+            decision: null,
             createdAt: Option.isSome(existingRow)
               ? existingRow.value.createdAt
               : event.payload.createdAt,
-            resolvedAt: event.payload.createdAt,
+            resolvedAt: null,
+          })
+          yield* updateApprovalOutcome({
+            requestId: event.payload.requestId,
+            status: 'responding',
+            requestedDecision: event.payload.decision,
+            decision: null,
+            detail: null,
+            actionId: event.payload.approvalOutcome?.actionId ?? null,
+            acceptanceEvidence: null,
+            updatedAt: event.payload.createdAt,
           })
           return
         }
@@ -1850,32 +2319,48 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       event: OrchestrationEvent,
     )
     {
-      const attachmentSideEffects: AttachmentSideEffects = {
-        deletedThreadIds: new Set<string>(),
-        prunedThreadRelativePaths: new Map<string, Set<string>>(),
+      const attachmentCleanupIntents: AttachmentCleanupIntents = {
+        deletedThreads: new Map<string, string>(),
+        removedRelativePaths: new Set<string>(),
       }
 
       yield* sql.withTransaction(
-        projector.apply(event, attachmentSideEffects).pipe(
-          Effect.flatMap(() =>
-            projectionStateRepository.upsert({
-              projector: projector.name,
-              lastAppliedSequence: event.sequence,
-              updatedAt: event.occurredAt,
-            }),
-          ),
-        ),
-      )
-
-      yield* runAttachmentSideEffects(attachmentSideEffects).pipe(
-        Effect.catch((cause) =>
-          Effect.logWarning('failed to apply projected attachment side-effects', {
+        Effect.gen(function* ()
+        {
+          yield* projector.apply(event, attachmentCleanupIntents)
+          yield* Effect.forEach(
+            attachmentCleanupIntents.removedRelativePaths,
+            (relativePath) =>
+              attachmentLifecycleRepository.enqueuePathCleanup({
+                cleanupKey: `projection:${projector.name}:${event.sequence}:path:${relativePath}`,
+                stagingKey: null,
+                relativePath,
+                stagingRelativePath: null,
+                reason: `projection removed attachment reference during ${event.type}`,
+                sourceSequence: event.sequence,
+                now: event.occurredAt,
+              }),
+            { concurrency: 1 },
+          )
+          yield* Effect.forEach(
+            attachmentCleanupIntents.deletedThreads,
+            ([threadId, threadSegment]) =>
+              attachmentLifecycleRepository.enqueueThreadCleanup({
+                cleanupKey: `projection:${projector.name}:${event.sequence}:thread:${threadSegment}`,
+                threadId: ThreadId.make(threadId),
+                threadSegment,
+                reason: 'projection deleted thread attachments',
+                sourceSequence: event.sequence,
+                now: event.occurredAt,
+              }),
+            { concurrency: 1 },
+          )
+          yield* projectionStateRepository.upsert({
             projector: projector.name,
-            sequence: event.sequence,
-            eventType: event.type,
-            cause,
-          }),
-        ),
+            lastAppliedSequence: event.sequence,
+            updatedAt: event.occurredAt,
+          })
+        }),
       )
     })
 
@@ -1927,9 +2412,52 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       ),
     )
 
+    const provideAttachmentOwnerServices = <A, E>(
+      effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path | ServerConfig>,
+    ) =>
+      effect.pipe(
+        Effect.provideService(FileSystem.FileSystem, fileSystem),
+        Effect.provideService(Path.Path, path),
+        Effect.provideService(ServerConfig, serverConfig),
+      )
+
+    const verifyThreadAttachmentSet: NonNullable<
+      OrchestrationProjectionPipelineShape['verifyThreadAttachmentSet']
+    > = (input) =>
+      provideAttachmentOwnerServices(listThreadAttachmentRelativePaths(input.threadId)).pipe(
+        Effect.map((actualRelativePaths) =>
+        {
+          const expectedRelativePaths = [...input.expectedRelativePaths].toSorted()
+          return {
+            complete:
+              actualRelativePaths.length === expectedRelativePaths.length &&
+              actualRelativePaths.every((value, index) => value === expectedRelativePaths[index]),
+            actualRelativePaths,
+          }
+        }),
+      )
+
+    const cleanupDeletedThreadAttachments: NonNullable<
+      OrchestrationProjectionPipelineShape['cleanupDeletedThreadAttachments']
+    > = (threadId) =>
+      provideAttachmentOwnerServices(
+        runAttachmentSideEffects({
+          deletedThreadIds: new Set([threadId]),
+          prunedThreadRelativePaths: new Map(),
+        }).pipe(
+          Effect.andThen(listThreadAttachmentRelativePaths(threadId)),
+          Effect.map((remainingRelativePaths) => ({
+            complete: remainingRelativePaths.length === 0,
+            remainingRelativePaths,
+          })),
+        ),
+      )
+
     return {
       bootstrap,
       projectEvent,
+      verifyThreadAttachmentSet,
+      cleanupDeletedThreadAttachments,
     } satisfies OrchestrationProjectionPipelineShape
   },
 )
@@ -1947,4 +2475,5 @@ export const OrchestrationProjectionPipelineLive = Layer.effect(
   Layer.provideMerge(ProjectionTurnRepositoryLive),
   Layer.provideMerge(ProjectionPendingApprovalRepositoryLive),
   Layer.provideMerge(ProjectionStateRepositoryLive),
+  Layer.provideMerge(AttachmentLifecycleRepositoryLive),
 )

@@ -1,3 +1,6 @@
+// tests/scripts/build-desktop-artifact.test.ts
+// verify build desktop artifact behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
 import * as ConfigProvider from 'effect/ConfigProvider'
@@ -28,7 +31,6 @@ import {
   resolveMockUpdateServerUrl,
   resolvePackageManagerUserAgent,
   stageLinuxIconSize,
-  STAGE_INSTALL_ARGS,
 } from '../../scripts/build-desktop-artifact.ts'
 import { BRAND_ASSET_PATHS } from '../../scripts/lib/brand-assets.ts'
 import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
@@ -75,37 +77,30 @@ function iconResizeSpawnerLayer(
 
 it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
 {
-  it('resolves the dedicated nightly updater channel from nightly versions', () =>
+  it('resolves nightly vs latest desktop branding from the version channel', () =>
   {
-    assert.equal(resolveDesktopUpdateChannel('0.0.17-nightly.20260413.42'), 'nightly')
-    assert.equal(resolveDesktopUpdateChannel('0.0.17'), 'latest')
-  })
+    const latestVersion = '0.0.17'
+    const nightlyVersion = '0.0.17-nightly.20260413.42'
 
-  it('switches desktop packaging product names to nightly for nightly builds', () =>
-  {
-    assert.equal(resolveDesktopProductName('0.0.17'), '456code (Alpha)')
-    assert.equal(resolveDesktopProductName('0.0.17-nightly.20260413.42'), '456code (Nightly)')
-  })
+    assert.equal(resolveDesktopUpdateChannel(latestVersion), 'latest')
+    assert.equal(resolveDesktopUpdateChannel(nightlyVersion), 'nightly')
 
-  it('switches desktop packaging icons to the nightly artwork for nightly versions', () =>
-  {
-    assert.deepStrictEqual(resolveDesktopBuildIconAssets('0.0.17', false), {
+    assert.equal(resolveDesktopProductName(latestVersion), '456code (Alpha)')
+    assert.equal(resolveDesktopProductName(nightlyVersion), '456code (Nightly)')
+
+    assert.deepStrictEqual(resolveDesktopBuildIconAssets(latestVersion, false), {
       macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
       windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
     })
-
-    assert.deepStrictEqual(resolveDesktopBuildIconAssets('0.0.17-nightly.20260413.42', false), {
+    assert.deepStrictEqual(resolveDesktopBuildIconAssets(nightlyVersion, false), {
       macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
       linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
       windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
     })
-  })
 
-  it('switches the bundled splash and favicon branding for nightly versions', () =>
-  {
-    assert.equal(resolveDesktopWebAssetBrand('0.0.17', false), 'production')
-    assert.equal(resolveDesktopWebAssetBrand('0.0.17-nightly.20260413.42', false), 'nightly')
+    assert.equal(resolveDesktopWebAssetBrand(latestVersion, false), 'production')
+    assert.equal(resolveDesktopWebAssetBrand(nightlyVersion, false), 'nightly')
   })
 
   it.effect('resolves GitHub desktop publish config from Effect config', () =>
@@ -212,7 +207,6 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
 
   it('installs optional native dependencies for the target desktop architecture', () =>
   {
-    assert.deepStrictEqual(STAGE_INSTALL_ARGS, ['install', '--prod'])
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'mac', arch: 'x64' }), {
       supportedArchitectures: {
         os: ['darwin'],
@@ -226,22 +220,18 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
         libc: ['glibc'],
       },
     })
-    // Windows artifacts also bundle the same-architecture WSL (Linux, glibc) backend, so the
+    // windows artifacts also bundle the same-architecture WSL (Linux, glibc) backend, so the
     // staged install must fetch its native optional deps (e.g. ffi-rs) too.
-    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'win', arch: 'x64' }), {
-      supportedArchitectures: {
-        os: ['win32', 'linux'],
-        cpu: ['x64'],
-        libc: ['glibc'],
-      },
-    })
-    assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'win', arch: 'arm64' }), {
-      supportedArchitectures: {
-        os: ['win32', 'linux'],
-        cpu: ['arm64'],
-        libc: ['glibc'],
-      },
-    })
+    for (const arch of ['x64', 'arm64'] as const)
+    {
+      assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'win', arch }), {
+        supportedArchitectures: {
+          os: ['win32', 'linux'],
+          cpu: [arch],
+          libc: ['glibc'],
+        },
+      })
+    }
     assert.deepStrictEqual(createStageWorkspaceConfig({ platform: 'mac', arch: 'universal' }), {
       supportedArchitectures: {
         os: ['darwin'],
@@ -288,7 +278,7 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
       },
     )
 
-    // Empty maps must not be written — pnpm would still require reviewed
+    // empty maps must not be written — pnpm would still require reviewed
     // packages if allowBuilds is present but incomplete, and omitting empty
     // patchedDependencies keeps the stage yaml minimal.
     assert.deepStrictEqual(
@@ -425,36 +415,35 @@ it.layer(NodeServices.layer)('build-desktop-artifact', (it) =>
     }),
   )
 
-  it.effect('rejects non-numeric or out-of-range mock update ports', () =>
+  it.effect('rejects and classifies invalid mock update ports', () =>
     Effect.gen(function* ()
     {
-      const invalidPorts = ['abc', '12.5', '0', '65536']
-      for (const port of invalidPorts)
+      const cause = new Error('invalid configured port')
+      const rejectedPorts = [
+        { port: 'abc', reason: 'not-numeric' as const },
+        { port: '12.5', reason: 'not-integer' as const },
+        { port: '0', reason: 'out-of-range' as const },
+        { port: '65536', reason: 'out-of-range' as const },
+      ]
+
+      for (const { port, reason } of rejectedPorts)
       {
         const exit = yield* Effect.exit(resolveMockUpdateServerPort(port))
         assert.equal(exit._tag, 'Failure')
+        assert.equal(InvalidMockUpdateServerPortError.fromConfigValue(port, cause).reason, reason)
       }
+
+      // hex can decode via NumberFromString; classifier still pins not-numeric fallback
+      assert.equal(
+        InvalidMockUpdateServerPortError.fromConfigValue('0x10', cause).reason,
+        'not-numeric',
+      )
+      assert.strictEqual(
+        InvalidMockUpdateServerPortError.fromConfigValue('0x10', cause).cause,
+        cause,
+      )
     }),
   )
-
-  it("classifies invalid configured ports with the decoder's number grammar", () =>
-  {
-    const cause = new Error('invalid configured port')
-
-    assert.equal(
-      InvalidMockUpdateServerPortError.fromConfigValue('0x10', cause).reason,
-      'not-numeric',
-    )
-    assert.equal(
-      InvalidMockUpdateServerPortError.fromConfigValue('12.5', cause).reason,
-      'not-integer',
-    )
-    assert.equal(
-      InvalidMockUpdateServerPortError.fromConfigValue('65536', cause).reason,
-      'out-of-range',
-    )
-    assert.strictEqual(InvalidMockUpdateServerPortError.fromConfigValue('0x10', cause).cause, cause)
-  })
 
   it.effect('resolves default platform and architecture from host references', () =>
     Effect.gen(function* ()

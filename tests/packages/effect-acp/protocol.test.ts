@@ -265,87 +265,78 @@ it.layer(NodeServices.layer)('effect-acp protocol', (it) =>
     }),
   )
 
-  it.effect('accepts exact-limit frames and resets the byte count after each newline', () =>
-    Effect.gen(function* ()
+  it.effect.each([
     {
-      const { stdio, input } = yield* makeInMemoryStdio()
-      const encoded = yield* encodeJsonl(SessionUpdateNotification, {
-        jsonrpc: '2.0',
-        method: 'session/update',
-        params: {
-          sessionId: 'session-exact-limit',
-          update: {
-            sessionUpdate: 'plan',
-            entries: [
-              {
-                content: 'Inspect framing',
-                priority: 'high',
-                status: 'in_progress',
-              },
-            ],
-          },
+      label: 'per-frame limit resets after each newline',
+      sessionId: 'session-exact-limit',
+      entries: [
+        {
+          content: 'Inspect framing',
+          priority: 'high' as const,
+          status: 'in_progress' as const,
         },
-      })
-      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
-        stdio,
-        maximumIncomingFrameBytes: encoded.byteLength - 1,
-        serverRequestMethods: new Set(),
-      })
-      const notifications =
-        yield* Deferred.make<ReadonlyArray<AcpProtocol.AcpIncomingNotification>>()
-      yield* transport.incoming.pipe(
-        Stream.take(2),
-        Stream.runCollect,
-        Effect.flatMap((items) => Deferred.succeed(notifications, items)),
-        Effect.forkScoped,
-      )
-
-      yield* Queue.offer(input, encoded)
-      yield* Queue.offer(input, encoded)
-
-      const received = yield* Deferred.await(notifications)
-      assert.deepEqual(
-        received.map((notification) => notification._tag),
-        ['SessionUpdate', 'SessionUpdate'],
-      )
-    }),
-  )
-
-  it.effect('accepts frames whose cumulative wire bytes exactly fill the connection limit', () =>
-    Effect.gen(function* ()
+      ],
+      connectionLimitMultiplier: undefined as number | undefined,
+      assertTags: true,
+    },
     {
-      const { stdio, input } = yield* makeInMemoryStdio()
-      const encoded = yield* encodeJsonl(SessionUpdateNotification, {
-        jsonrpc: '2.0',
-        method: 'session/update',
-        params: {
-          sessionId: 'session-exact-connection-limit',
-          update: {
-            sessionUpdate: 'plan',
-            entries: [],
+      label: 'cumulative wire bytes exactly fill the connection limit',
+      sessionId: 'session-exact-connection-limit',
+      entries: [] as Array<{
+        content: string
+        priority: 'high'
+        status: 'in_progress'
+      }>,
+      connectionLimitMultiplier: 2,
+      assertTags: false,
+    },
+  ])(
+    'accepts exact-limit frames ($label)',
+    ({ sessionId, entries, connectionLimitMultiplier, assertTags }) =>
+      Effect.gen(function* ()
+      {
+        const { stdio, input } = yield* makeInMemoryStdio()
+        const encoded = yield* encodeJsonl(SessionUpdateNotification, {
+          jsonrpc: '2.0',
+          method: 'session/update',
+          params: {
+            sessionId,
+            update: {
+              sessionUpdate: 'plan',
+              entries,
+            },
           },
-        },
-      })
-      const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
-        stdio,
-        maximumIncomingConnectionBytes: encoded.byteLength * 2,
-        maximumIncomingFrameBytes: encoded.byteLength - 1,
-        serverRequestMethods: new Set(),
-      })
-      const notifications =
-        yield* Deferred.make<ReadonlyArray<AcpProtocol.AcpIncomingNotification>>()
-      yield* transport.incoming.pipe(
-        Stream.take(2),
-        Stream.runCollect,
-        Effect.flatMap((items) => Deferred.succeed(notifications, items)),
-        Effect.forkScoped,
-      )
+        })
+        const transport = yield* AcpProtocol.makeAcpPatchedProtocol({
+          stdio,
+          ...(connectionLimitMultiplier === undefined
+            ? {}
+            : { maximumIncomingConnectionBytes: encoded.byteLength * connectionLimitMultiplier }),
+          maximumIncomingFrameBytes: encoded.byteLength - 1,
+          serverRequestMethods: new Set(),
+        })
+        const notifications =
+          yield* Deferred.make<ReadonlyArray<AcpProtocol.AcpIncomingNotification>>()
+        yield* transport.incoming.pipe(
+          Stream.take(2),
+          Stream.runCollect,
+          Effect.flatMap((items) => Deferred.succeed(notifications, items)),
+          Effect.forkScoped,
+        )
 
-      yield* Queue.offer(input, encoded)
-      yield* Queue.offer(input, encoded)
+        yield* Queue.offer(input, encoded)
+        yield* Queue.offer(input, encoded)
 
-      assert.lengthOf(yield* Deferred.await(notifications), 2)
-    }),
+        const received = yield* Deferred.await(notifications)
+        assert.lengthOf(received, 2)
+        if (assertTags)
+        {
+          assert.deepEqual(
+            received.map((notification) => notification._tag),
+            ['SessionUpdate', 'SessionUpdate'],
+          )
+        }
+      }),
   )
 
   it.effect('rejects cumulative wire overflow before logging or decoding the overflow frame', () =>

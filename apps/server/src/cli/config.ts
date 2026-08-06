@@ -1,3 +1,6 @@
+// apps/server/src/cli/config.ts
+// resolve server config
+
 import * as NetService from '@t3tools/shared/Net'
 import { parsePersistedServerObservabilitySettings } from '@t3tools/shared/serverSettings'
 import { DesktopBackendBootstrap, PortSchema } from '@t3tools/contracts'
@@ -129,6 +132,23 @@ const EnvServerConfig = Config.all({
   tailscaleServePort: Config.port('T3CODE_TAILSCALE_SERVE_PORT').pipe(
     Config.option,
     Config.map(Option.getOrUndefined),
+  ),
+  cartographerReconciliationMode: Config.schema(
+    ServerConfig.CartographerReconciliationMode,
+    'T3CODE_CARTOGRAPHER_RECONCILIATION_MODE',
+  ).pipe(Config.withDefault('report')),
+  cartographerReconciliationDeleteEnabled: Config.int(
+    'T3CODE_CARTOGRAPHER_RECONCILIATION_DELETE',
+  ).pipe(
+    Config.withDefault(0),
+    Config.map((value) => value === 1),
+  ),
+  proposalReconciliationMode: Config.schema(
+    ServerConfig.ProposalReconciliationMode,
+    'T3CODE_PROPOSAL_RECONCILIATION_MODE',
+  ).pipe(Config.withDefault('report')),
+  proposalReconciliationDeleteEnabled: Config.boolean('T3CODE_PROPOSAL_RECONCILIATION_DELETE').pipe(
+    Config.withDefault(false),
   ),
 })
 
@@ -377,6 +397,10 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
+      cartographerReconciliationMode: env.cartographerReconciliationMode,
+      cartographerReconciliationDeleteEnabled: env.cartographerReconciliationDeleteEnabled,
+      proposalReconciliationMode: env.proposalReconciliationMode,
+      proposalReconciliationDeleteEnabled: env.proposalReconciliationDeleteEnabled,
     }
 
     return config

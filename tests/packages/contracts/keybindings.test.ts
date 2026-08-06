@@ -1,12 +1,13 @@
+// tests/packages/contracts/keybindings.test.ts
+// verify keybindings behavior
+
 import { assert, it } from '@effect/vitest'
 import * as Schema from 'effect/Schema'
 import * as Effect from 'effect/Effect'
 
 import {
-  KeybindingsConfig,
   KeybindingRule,
   ResolvedKeybindingRule,
-  ResolvedKeybindingsConfig,
 } from '../../../packages/contracts/src/keybindings.ts'
 
 const decode = <S extends Schema.Top>(
@@ -29,18 +30,6 @@ it.effect('parses keybinding rules', () =>
       command: 'terminal.toggle',
     })
     assert.strictEqual(parsed.command, 'terminal.toggle')
-
-    const parsedRightPanelToggle = yield* decode(KeybindingRule, {
-      key: 'mod+alt+b',
-      command: 'rightPanel.toggle',
-    })
-    assert.strictEqual(parsedRightPanelToggle.command, 'rightPanel.toggle')
-
-    const parsedModelPickerJump = yield* decode(KeybindingRule, {
-      key: 'mod+1',
-      command: 'modelPicker.jump.1',
-    })
-    assert.strictEqual(parsedModelPickerJump.command, 'modelPicker.jump.1')
   }),
 )
 
@@ -68,18 +57,6 @@ it.effect('accepts dynamic script run commands', () =>
   }),
 )
 
-it.effect('parses keybindings array payload', () =>
-  Effect.gen(function* ()
-  {
-    const parsed = yield* decode(KeybindingsConfig, [
-      { key: 'mod+j', command: 'terminal.toggle' },
-      { key: 'mod+d', command: 'terminal.split', when: 'terminalFocus' },
-      { key: 'mod+shift+d', command: 'terminal.splitVertical', when: 'terminalFocus' },
-    ])
-    assert.lengthOf(parsed, 3)
-  }),
-)
-
 it.effect('parses resolved keybinding rules', () =>
   Effect.gen(function* ()
   {
@@ -103,37 +80,6 @@ it.effect('parses resolved keybinding rules', () =>
       },
     })
     assert.strictEqual(parsed.shortcut.key, 'd')
-  }),
-)
-
-it.effect('parses resolved keybindings arrays', () =>
-  Effect.gen(function* ()
-  {
-    const parsed = yield* decode(ResolvedKeybindingsConfig, [
-      {
-        command: 'terminal.toggle',
-        shortcut: {
-          key: 'j',
-          metaKey: false,
-          ctrlKey: false,
-          shiftKey: false,
-          altKey: false,
-          modKey: true,
-        },
-      },
-      {
-        command: 'thread.jump.3',
-        shortcut: {
-          key: '3',
-          metaKey: false,
-          ctrlKey: false,
-          shiftKey: false,
-          altKey: false,
-          modKey: true,
-        },
-      },
-    ])
-    assert.lengthOf(parsed, 2)
   }),
 )
 

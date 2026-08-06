@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPendingApprovalPanel.tsx
+// render composer pending approval panel
+
 import { memo } from 'react'
 import { type PendingApproval } from '../../session-logic'
 
@@ -5,6 +8,23 @@ interface ComposerPendingApprovalPanelProps
 {
   approval: PendingApproval
   pendingCount: number
+}
+
+function requestedDecisionLabel(approval: PendingApproval): string | null
+{
+  switch (approval.requestedDecision)
+  {
+    case 'accept':
+      return 'Approve once'
+    case 'acceptForSession':
+      return 'Always allow this session'
+    case 'decline':
+      return 'Decline'
+    case 'cancel':
+      return 'Cancel turn'
+    default:
+      return null
+  }
 }
 
 export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprovalPanel({
@@ -24,6 +44,15 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
       : approval.requestKind === 'file-read'
         ? 'File to read'
         : 'File change'
+  const decisionLabel = requestedDecisionLabel(approval)
+  const lifecycleLine =
+    approval.status === 'responding'
+      ? decisionLabel
+        ? `${decisionLabel} sent. Waiting for provider confirmation.`
+        : 'Response sent. Waiting for provider confirmation.'
+      : approval.status === 'unknown'
+        ? 'Response status is unknown. Refresh, or restart the turn before responding again.'
+        : null
 
   return (
     <div className="px-4 py-3.5 sm:px-5 sm:py-4">
@@ -34,6 +63,11 @@ export const ComposerPendingApprovalPanel = memo(function ComposerPendingApprova
           <span className="text-xs text-muted-foreground">1/{pendingCount}</span>
         ) : null}
       </div>
+      {lifecycleLine ? (
+        <p className="mt-2 text-sm text-muted-foreground" role="status">
+          {lifecycleLine}
+        </p>
+      ) : null}
       {approval.detail ? (
         <div className="mt-3 rounded-lg border border-border/65 bg-background/70 p-3">
           <p className="text-xs font-medium text-muted-foreground">{detailLabel}</p>

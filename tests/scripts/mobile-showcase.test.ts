@@ -1,3 +1,6 @@
+// tests/scripts/mobile-showcase.test.ts
+// verify mobile showcase behavior
+
 import { assert, it } from '@effect/vitest'
 import { PNG } from 'pngjs'
 
@@ -76,12 +79,14 @@ it('parses repeatable capture filters', () =>
     '--appearance',
     'both',
     '--skip-build',
+    '--validate-only',
   ])
   assert.deepStrictEqual([...options.platforms], ['ios'])
   assert.deepStrictEqual([...options.deviceIds], ['phone'])
   assert.deepStrictEqual([...options.scenes], ['review'])
   assert.deepStrictEqual([...options.appearances], ['light', 'dark'])
   assert.equal(options.skipBuild, true)
+  assert.equal(options.validateOnly, true)
 })
 
 it('rejects unsupported system appearances', () =>
@@ -90,11 +95,6 @@ it('rejects unsupported system appearances', () =>
     () => parseShowcaseCliArgs(['--appearance', 'sepia']),
     /Unsupported appearance 'sepia'/u,
   )
-})
-
-it('parses validation-only mode', () =>
-{
-  assert.equal(parseShowcaseCliArgs(['--validate-only']).validateOnly, true)
 })
 
 it('selects an explicit CI Android ABI without changing the local default', () =>

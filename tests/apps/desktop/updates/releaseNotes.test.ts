@@ -1,3 +1,6 @@
+// tests/apps/desktop/updates/releaseNotes.test.ts
+// verify normalize desktop update release notes behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { normalizeDesktopUpdateReleaseNotes } from '../../../../apps/desktop/src/updates/releaseNotes.ts'
@@ -63,11 +66,8 @@ describe('normalizeDesktopUpdateReleaseNotes', () =>
     expect(notes).toEqual([{ version: '1.3.2', items: ['Older but real change'] }])
   })
 
-  it('does not throw on out-of-range numeric entities and keeps the literal', () =>
+  it('keeps out-of-range numeric entities as literals', () =>
   {
-    expect(() =>
-      normalizeDesktopUpdateReleaseNotes('- Broken entity &#9999999999;', '1.0.0'),
-    ).not.toThrow()
     const notes = normalizeDesktopUpdateReleaseNotes('- Broken entity &#9999999999;', '1.0.0')
     expect(notes).toEqual([{ version: '1.0.0', items: ['Broken entity &#9999999999;'] }])
   })

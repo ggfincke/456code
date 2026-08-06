@@ -1,5 +1,6 @@
 // apps/server/integration/OrchestrationEngineHarness.integration.ts
 // provides a persisted orchestration runtime harness for integration tests
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeChildProcess from 'node:child_process'
 
@@ -27,6 +28,7 @@ import * as Stream from 'effect/Stream'
 import * as CheckpointStore from '../src/checkpointing/CheckpointStore.ts'
 import { TextGeneration, type TextGenerationShape } from '../src/textGeneration/TextGeneration.ts'
 import { OrchestrationCommandReceiptRepositoryLive } from '../src/persistence/Layers/OrchestrationCommandReceipts.ts'
+import { ImportReplacementIntentRepositoryLive } from '../src/persistence/Layers/ImportReplacementIntents.ts'
 import { OrchestrationEventStoreLive } from '../src/persistence/Layers/OrchestrationEventStore.ts'
 import { ProjectionCheckpointRepositoryLive } from '../src/persistence/Layers/ProjectionCheckpoints.ts'
 import { ProjectionPendingApprovalRepositoryLive } from '../src/persistence/Layers/ProjectionPendingApprovals.ts'
@@ -34,6 +36,7 @@ import { ProviderSessionRuntimeRepositoryLive } from '../src/persistence/Layers/
 import { makeSqlitePersistenceLive } from '../src/persistence/Layers/Sqlite.ts'
 import { ProjectionCheckpointRepository } from '../src/persistence/Services/ProjectionCheckpoints.ts'
 import { ProjectionPendingApprovalRepository } from '../src/persistence/Services/ProjectionPendingApprovals.ts'
+import { ImportReplacementIntentRepository } from '../src/persistence/Services/ImportReplacementIntents.ts'
 import { makeAdapterRegistryMock } from '../src/provider/testUtils/providerAdapterRegistryMock.ts'
 import { ProviderAdapterRegistry } from '../src/provider/Services/ProviderAdapterRegistry.ts'
 import { makeProviderRegistryLayer } from '../src/provider/testUtils/providerRegistryMock.ts'
@@ -50,6 +53,7 @@ import { AnalyticsService } from '../src/telemetry/Services/AnalyticsService.ts'
 import { CheckpointReactorLive } from '../src/orchestration/Layers/CheckpointReactor.ts'
 import * as RepositoryIdentityResolver from '../src/project/RepositoryIdentityResolver.ts'
 import { OrchestrationEngineLive } from '../src/orchestration/Layers/OrchestrationEngine.ts'
+import { CheckpointRevertOperationsLive } from '../src/persistence/Layers/CheckpointRevertOperations.ts'
 import { OrchestrationProjectionPipelineLive } from '../src/orchestration/Layers/ProjectionPipeline.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { RuntimeReceiptBusTest } from '../src/orchestration/Layers/RuntimeReceiptBus.ts'
@@ -190,6 +194,7 @@ export interface OrchestrationIntegrationHarness
   readonly adapterHarness: TestProviderAdapterHarness | null
   readonly engine: OrchestrationEngineShape
   readonly snapshotQuery: ProjectionSnapshotQuery['Service']
+  readonly importReplacementIntents: ImportReplacementIntentRepository['Service']
   readonly providerService: ProviderService['Service']
   readonly checkpointStore: CheckpointStore.CheckpointStore['Service']
   readonly checkpointRepository: ProjectionCheckpointRepository['Service']
@@ -279,6 +284,7 @@ export const makeOrchestrationIntegrationHarness = (
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath)
     const orchestrationLayer = OrchestrationEngineLive.pipe(
+      Layer.provide(CheckpointRevertOperationsLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
@@ -327,6 +333,7 @@ export const makeOrchestrationIntegrationHarness = (
       checkpointStoreLayer,
       providerLayer,
       RuntimeReceiptBusTest,
+      ImportReplacementIntentRepositoryLive,
     )
     const serverSettingsLayer = ServerSettingsService.layerTest()
     const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
@@ -351,6 +358,7 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(serverSettingsLayer),
     )
     const checkpointReactorLayer = CheckpointReactorLive.pipe(
+      Layer.provideMerge(CheckpointRevertOperationsLive),
       Layer.provideMerge(runtimeServicesLayer),
       Layer.provideMerge(
         Layer.succeed(VcsStatusBroadcaster, {
@@ -409,6 +417,10 @@ export const makeOrchestrationIntegrationHarness = (
     ).pipe(Effect.orDie)
     const snapshotQuery = yield* tryRuntimePromise('load ProjectionSnapshotQuery service', () =>
       runtime.runPromise(Effect.service(ProjectionSnapshotQuery)),
+    ).pipe(Effect.orDie)
+    const importReplacementIntents = yield* tryRuntimePromise(
+      'load ImportReplacementIntentRepository service',
+      () => runtime.runPromise(Effect.service(ImportReplacementIntentRepository)),
     ).pipe(Effect.orDie)
     const providerService = yield* tryRuntimePromise('load ProviderService service', () =>
       runtime.runPromise(Effect.service(ProviderService)),
@@ -571,6 +583,7 @@ export const makeOrchestrationIntegrationHarness = (
       adapterHarness,
       engine,
       snapshotQuery,
+      importReplacementIntents,
       providerService,
       checkpointStore,
       checkpointRepository,

@@ -1,6 +1,7 @@
 // tests/apps/web/session-logic.test.ts
 // verifies orchestration activities, work logs, and timeline derivation
 import {
+  ApprovalRequestId,
   EventId,
   MessageId,
   ThreadId,
@@ -182,6 +183,160 @@ describe('derivePendingApprovals', () =>
     ]
 
     expect(derivePendingApprovals(activities)).toEqual([])
+  })
+
+  it('keeps non-stale activity-only response failures open', () =>
+  {
+    const activities: OrchestrationThreadActivity[] = [
+      makeActivity({
+        id: 'approval-open-delivery-failure',
+        kind: 'approval.requested',
+        tone: 'approval',
+        payload: {
+          requestId: 'req-delivery-failure',
+          requestKind: 'command',
+          detail: 'bun run lint',
+        },
+      }),
+      makeActivity({
+        id: 'approval-delivery-failure',
+        createdAt: '2026-02-23T00:00:02.000Z',
+        kind: 'provider.approval.respond.failed',
+        tone: 'error',
+        payload: {
+          requestId: 'req-delivery-failure',
+          detail: 'Provider transport failed before delivery.',
+        },
+      }),
+    ]
+
+    expect(derivePendingApprovals(activities)).toEqual([
+      {
+        requestId: 'req-delivery-failure',
+        requestKind: 'command',
+        createdAt: '2026-02-23T00:00:00.000Z',
+        detail: 'bun run lint',
+      },
+    ])
+  })
+
+  it('projects responding outcome fields over activity-derived request metadata', () =>
+  {
+    const activities = [
+      makeActivity({
+        kind: 'approval.requested',
+        tone: 'approval',
+        payload: {
+          requestId: 'req-responding',
+          requestKind: 'file-change',
+          detail: 'src/index.ts',
+        },
+      }),
+    ]
+
+    expect(
+      derivePendingApprovals(activities, [
+        {
+          requestId: ApprovalRequestId.make('req-responding'),
+          status: 'responding',
+          requestedDecision: 'accept',
+          decision: null,
+          detail: 'Submitting approval response.',
+          actionId: 'action-1',
+          updatedAt: '2026-02-23T00:00:01.000Z',
+        },
+      ]),
+    ).toEqual([
+      {
+        requestId: 'req-responding',
+        requestKind: 'file-change',
+        createdAt: '2026-02-23T00:00:00.000Z',
+        status: 'responding',
+        requestedDecision: 'accept',
+        detail: 'Submitting approval response.',
+        actionId: 'action-1',
+      },
+    ])
+  })
+
+  it('keeps unknown outcomes blocking and never presents them as accepted', () =>
+  {
+    const activities = [
+      makeActivity({
+        kind: 'approval.requested',
+        tone: 'approval',
+        payload: {
+          requestId: 'req-unknown',
+          requestKind: 'command',
+        },
+      }),
+    ]
+    const pending = derivePendingApprovals(activities, [
+      {
+        requestId: ApprovalRequestId.make('req-unknown'),
+        status: 'unknown',
+        requestedDecision: 'decline',
+        decision: null,
+        detail: 'Delivery could not be determined.',
+        updatedAt: '2026-02-23T00:00:01.000Z',
+      },
+    ])
+
+    expect(pending).toHaveLength(1)
+    expect(pending[0]).toMatchObject({
+      requestId: 'req-unknown',
+      status: 'unknown',
+      requestedDecision: 'decline',
+    })
+    expect(pending[0]?.status).not.toBe('accepted')
+  })
+
+  it('keeps pending after a determinate failure and prefers its outcome detail', () =>
+  {
+    const activities = [
+      makeActivity({
+        kind: 'approval.requested',
+        tone: 'approval',
+        payload: {
+          requestId: 'req-retry',
+          requestKind: 'command',
+          detail: 'bun run lint',
+        },
+      }),
+      makeActivity({
+        createdAt: '2026-02-23T00:00:01.000Z',
+        kind: 'provider.approval.respond.failed',
+        tone: 'error',
+        payload: {
+          requestId: 'req-retry',
+          detail: 'Response failed before provider delivery.',
+        },
+      }),
+    ]
+
+    expect(
+      derivePendingApprovals(activities, [
+        {
+          requestId: ApprovalRequestId.make('req-retry'),
+          status: 'pending',
+          requestedDecision: 'accept',
+          decision: null,
+          detail: 'Response was not sent. Try again.',
+          actionId: 'action-retry',
+          updatedAt: '2026-02-23T00:00:02.000Z',
+        },
+      ]),
+    ).toEqual([
+      {
+        requestId: 'req-retry',
+        requestKind: 'command',
+        createdAt: '2026-02-23T00:00:00.000Z',
+        status: 'pending',
+        requestedDecision: 'accept',
+        detail: 'Response was not sent. Try again.',
+        actionId: 'action-retry',
+      },
+    ])
   })
 })
 
@@ -375,7 +530,7 @@ describe('deriveActivePlanState', () =>
       }),
     ]
 
-    // Current turn is turn-2, which has no plan activity — should fall back to turn-1's plan
+    // current turn is turn-2, which has no plan activity — should fall back to turn-1's plan
     const result = deriveActivePlanState(activities, TurnId.make('turn-2'))
     expect(result).toEqual({
       createdAt: '2026-02-23T00:00:01.000Z',

@@ -18,7 +18,7 @@ import * as Effect from 'effect/Effect'
 import { decideOrchestrationCommand } from '../../../../apps/server/src/orchestration/decider.ts'
 
 const NOW = '2026-01-01T00:00:00.000Z'
-// The decider's clock is the Effect test clock, pinned to the epoch, so
+// the decider's clock is the Effect test clock, pinned to the epoch, so
 // "future" wake times are relative to 1970-01-01T00:00:00.000Z.
 const FUTURE_WAKE = '1970-01-02T09:00:00.000Z'
 const PAST_WAKE = '1969-12-31T09:00:00.000Z'
@@ -46,6 +46,7 @@ function makeReadModel(input: {
         branch: null,
         worktreePath: null,
         latestTurn: null,
+        providerSwitch: null,
         createdAt: NOW,
         updatedAt: NOW,
         archivedAt: input.archivedAt ?? null,
@@ -166,7 +167,7 @@ it.layer(NodeServices.layer)('snoozed thread decider', (it) =>
       expect(events).toHaveLength(1)
       if (events[0]?.type === 'thread.snoozed')
       {
-        // Original snoozedAt preserved; updatedAt must not churn.
+        // original snoozedAt preserved; updatedAt must not churn.
         expect(events[0].payload.snoozedAt).toBe(SNOOZED_AT)
         expect(events[0].payload.updatedAt).toBe(NOW)
       }
@@ -227,7 +228,7 @@ it.layer(NodeServices.layer)('snoozed thread decider', (it) =>
       expect(awakeEvents[0]?.type).toBe('thread.unsnoozed')
       if (awakeEvents[0]?.type === 'thread.unsnoozed')
       {
-        // No state change — keep the existing updatedAt.
+        // no state change — keep the existing updatedAt.
         expect(awakeEvents[0].payload.updatedAt).toBe(NOW)
       }
     }),
@@ -236,7 +237,7 @@ it.layer(NodeServices.layer)('snoozed thread decider', (it) =>
   it.effect('rejects snoozing a thread with a queued turn start', () =>
     Effect.gen(function* ()
     {
-      // The decider clock is the Effect test clock pinned to the epoch: a
+      // the decider clock is the Effect test clock pinned to the epoch: a
       // user message 30s before it with no adopting turn is queued work.
       const queuedMessage = {
         id: MessageId.make('message-queued'),

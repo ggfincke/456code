@@ -10,7 +10,7 @@ import type {
   ThreadId,
   TurnId,
 } from '@t3tools/contracts'
-import { ProviderInstanceId } from '@t3tools/contracts'
+import { ApprovalRequestId, ProviderInstanceId } from '@t3tools/contracts'
 
 import { projectThreadAwareness } from '../../../packages/shared/src/agentAwareness.ts'
 
@@ -30,6 +30,7 @@ function thread(
   | 'session'
   | 'latestTurn'
   | 'updatedAt'
+  | 'approvalOutcomes'
   | 'hasPendingApprovals'
   | 'hasPendingUserInput'
 >
@@ -110,6 +111,75 @@ describe('projectThreadAwareness', () =>
     })
   })
 
+  it('keeps responding outcomes in an in-flight approval state when the legacy flag is clear', () =>
+  {
+    const state = projectThreadAwareness({
+      environmentId: 'env-1' as EnvironmentId,
+      project,
+      thread: thread({
+        approvalOutcomes: [
+          {
+            requestId: ApprovalRequestId.make('approval-responding'),
+            status: 'responding',
+            requestedDecision: 'accept',
+            decision: null,
+            updatedAt: NOW,
+          },
+        ],
+        latestTurn: {
+          turnId: 'turn-1' as TurnId,
+          state: 'completed',
+          requestedAt: NOW,
+          startedAt: NOW,
+          completedAt: NOW,
+          assistantMessageId: null,
+        },
+      }),
+    })
+
+    expect(state).toMatchObject({
+      phase: 'waiting_for_approval',
+      headline: 'Approval response pending',
+      detail: 'Waiting for the provider to confirm the approval response.',
+    })
+  })
+
+  it('projects unknown outcomes as explicit manual-recovery approval state', () =>
+  {
+    const state = projectThreadAwareness({
+      environmentId: 'env-1' as EnvironmentId,
+      project,
+      thread: thread({
+        approvalOutcomes: [
+          {
+            requestId: ApprovalRequestId.make('approval-unknown'),
+            status: 'unknown',
+            decision: null,
+            detail: 'Provider delivery could not be confirmed.',
+            updatedAt: NOW,
+          },
+        ],
+        session: {
+          threadId: 'thread-1' as ThreadId,
+          status: 'ready',
+          providerName: 'Codex',
+          runtimeMode: 'full-access',
+          activeTurnId: null,
+          lastError: null,
+          updatedAt: NOW,
+        },
+      }),
+    })
+
+    expect(state).toMatchObject({
+      phase: 'waiting_for_approval',
+      headline: 'Approval status unknown',
+    })
+    expect(state?.detail).toContain('Provider delivery could not be confirmed.')
+    expect(state?.detail).toContain('Refresh status or restart the turn')
+    expect(state?.phase).not.toBe('completed')
+  })
+
   it('projects completed turns as completed even when teardown settled them as interrupted', () =>
   {
     const finishedTurn = {
@@ -126,7 +196,7 @@ describe('projectThreadAwareness', () =>
       thread: thread({ latestTurn: finishedTurn }),
     })
 
-    // Session teardown settles still-running turns by session status, and
+    // session teardown settles still-running turns by session status, and
     // that write can race turn.completed; the completion timestamp is the
     // durable signal. Without this the thread resolves to null persistently
     // and gets tombstoned off the lock-screen card instead of showing Done.

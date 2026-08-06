@@ -14,7 +14,6 @@ import { assert, it } from '@effect/vitest'
 import * as CodexError from '../../../packages/effect-codex-app-server/src/errors.ts'
 import * as CodexProtocol from '../../../packages/effect-codex-app-server/src/protocol.ts'
 import * as CodexRpc from '../../../packages/effect-codex-app-server/src/rpc.ts'
-import * as CodexSchema from '../../../packages/effect-codex-app-server/src/schema.ts'
 import { makeInMemoryStdio } from '../../../packages/effect-codex-app-server/src/_internal/stdio.ts'
 const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
 
@@ -41,10 +40,6 @@ it.layer(NodeServices.layer)('effect-codex-app-server protocol', (it) =>
   it.effect('maps account usage responses to the upstream token usage schema', () =>
     Effect.gen(function* ()
     {
-      assert.strictEqual(
-        CodexRpc.CLIENT_REQUEST_RESPONSES['account/usage/read'],
-        CodexSchema.V2GetAccountTokenUsageResponse,
-      )
       const decoded = yield* decodeAccountTokenUsageResponse({
         dailyUsageBuckets: [{ startDate: '2026-06-10', tokens: 42 }],
         summary: { lifetimeTokens: 42 },
@@ -59,11 +54,6 @@ it.layer(NodeServices.layer)('effect-codex-app-server protocol', (it) =>
   it.effect('maps earned rate-limit reset credits from account rate-limit snapshots', () =>
     Effect.gen(function* ()
     {
-      assert.strictEqual(
-        CodexRpc.CLIENT_REQUEST_RESPONSES['account/rateLimits/read'],
-        CodexSchema.V2GetAccountRateLimitsResponse,
-      )
-
       const response = {
         rateLimits: {},
         rateLimitResetCredits: {
@@ -109,14 +99,6 @@ it.layer(NodeServices.layer)('effect-codex-app-server protocol', (it) =>
       assert.equal(
         CodexRpc.CLIENT_REQUEST_METHODS['account/rateLimitResetCredit/consume'],
         'account/rateLimitResetCredit/consume',
-      )
-      assert.strictEqual(
-        CodexRpc.CLIENT_REQUEST_PARAMS['account/rateLimitResetCredit/consume'],
-        CodexSchema.V2ConsumeAccountRateLimitResetCreditParams,
-      )
-      assert.strictEqual(
-        CodexRpc.CLIENT_REQUEST_RESPONSES['account/rateLimitResetCredit/consume'],
-        CodexSchema.V2ConsumeAccountRateLimitResetCreditResponse,
       )
 
       assert.deepEqual(

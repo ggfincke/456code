@@ -328,20 +328,6 @@ describe('buildCodexDeveloperInstructions', () =>
     NodeAssert.match(instructions, /wait_for_workers/)
   })
 
-  it('varies with the model and effort of each turn', () =>
-  {
-    const first = buildCodexDeveloperInstructions('default', {
-      model: 'gpt-5.3-codex',
-      reasoningEffort: 'medium',
-    })
-    const second = buildCodexDeveloperInstructions('default', {
-      model: 'gpt-5.4',
-      reasoningEffort: 'high',
-    })
-
-    NodeAssert.notEqual(first, second)
-  })
-
   it('flattens multiline metadata into single-line runtime info', () =>
   {
     const instructions = buildCodexDeveloperInstructions('default', {

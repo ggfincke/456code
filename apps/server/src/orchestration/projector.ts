@@ -3,13 +3,17 @@
 
 import type { OrchestrationEvent, OrchestrationReadModel } from '@t3tools/contracts'
 import {
+  ApprovalOutcome,
+  ApprovalRequestId,
   OrchestrationCheckpointSummary,
   OrchestrationMessage,
   OrchestrationSession,
   OrchestrationThread,
   ThreadId,
 } from '@t3tools/contracts'
+import { classifyApprovalFailure } from '@t3tools/shared/approvalOutcomeClassifier'
 import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
+import { isAdjacentProviderSwitchActivity } from '@t3tools/shared/providerSwitchActivity'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 
@@ -31,6 +35,9 @@ import {
   ThreadHandoffClearedPayload,
   ThreadMetaUpdatedPayload,
   ThreadProviderSwitchedPayload,
+  ThreadProviderSwitchFailedPayload,
+  ThreadProviderSwitchProgressedPayload,
+  ThreadProviderSwitchRequestedPayload,
   ThreadProposedPlanUpsertedPayload,
   ThreadRuntimeModeSetPayload,
   ThreadSettledPayload,
@@ -39,6 +46,7 @@ import {
   ThreadUnsettledPayload,
   ThreadUnsnoozedPayload,
   ThreadRevertedPayload,
+  ThreadApprovalResponseRequestedPayload,
   ThreadSessionSetPayload,
   ThreadTurnDiffCompletedPayload,
 } from './Schemas.ts'
@@ -46,6 +54,91 @@ import {
 type ThreadPatch = Partial<Omit<OrchestrationThread, 'id' | 'projectId'>>
 const MAX_THREAD_MESSAGES = 2_000
 const MAX_THREAD_CHECKPOINTS = 500
+const isApprovalOutcome = Schema.is(ApprovalOutcome)
+
+function upsertApprovalOutcome(
+  outcomes: OrchestrationThread['approvalOutcomes'],
+  outcome: ApprovalOutcome,
+): ReadonlyArray<ApprovalOutcome>
+{
+  const current = outcomes ?? []
+  const existing = current.find((entry) => entry.requestId === outcome.requestId)
+  if (
+    existing !== undefined &&
+    (existing.status === 'accepted' || existing.status === 'stale-terminal') &&
+    existing.status !== outcome.status
+  )
+  {
+    return current
+  }
+  return [...current.filter((entry) => entry.requestId !== outcome.requestId), outcome]
+}
+
+function approvalOutcomeFromActivity(
+  activity: OrchestrationThread['activities'][number],
+): ApprovalOutcome | null
+{
+  const payload =
+    typeof activity.payload === 'object' && activity.payload !== null
+      ? (activity.payload as Record<string, unknown>)
+      : null
+  const embedded = payload?.approvalOutcome
+  if (activity.kind === 'provider.approval.respond.failed')
+  {
+    const classification = classifyApprovalFailure(payload)
+    if (isApprovalOutcome(embedded))
+    {
+      return { ...embedded, status: classification.status }
+    }
+    const requestId = typeof payload?.requestId === 'string' ? payload.requestId : null
+    if (requestId === null)
+    {
+      return null
+    }
+    const detail =
+      typeof payload?.detail === 'string' ? payload.detail : 'Provider response failed.'
+    return {
+      requestId: ApprovalRequestId.make(requestId),
+      status: classification.status,
+      detail,
+      updatedAt: activity.createdAt,
+    }
+  }
+  if (isApprovalOutcome(embedded))
+  {
+    return embedded
+  }
+  const requestId = typeof payload?.requestId === 'string' ? payload.requestId : null
+  if (requestId === null)
+  {
+    return null
+  }
+  if (activity.kind === 'approval.requested')
+  {
+    return {
+      requestId: ApprovalRequestId.make(requestId),
+      status: 'pending',
+      updatedAt: activity.createdAt,
+    }
+  }
+  if (activity.kind === 'approval.resolved')
+  {
+    const decision =
+      payload?.decision === 'accept' ||
+      payload?.decision === 'acceptForSession' ||
+      payload?.decision === 'decline' ||
+      payload?.decision === 'cancel'
+        ? payload.decision
+        : null
+    return {
+      requestId: ApprovalRequestId.make(requestId),
+      status: 'accepted',
+      decision,
+      updatedAt: activity.createdAt,
+    }
+  }
+  return null
+}
 
 function checkpointStatusToLatestTurnState(status: 'ready' | 'missing' | 'error')
 {
@@ -54,11 +147,9 @@ function checkpointStatusToLatestTurnState(status: 'ready' | 'missing' | 'error'
   return 'completed' as const
 }
 
-/**
- * Turn state to settle a still-running latest turn with when its session
- * leaves the "running" status, or null while the session is (re)starting or
- * running and the turn must stay unsettled.
- */
+// turn state to settle a still-running latest turn with when its session
+// leaves the "running" status, or null while the session is (re)starting or
+// running and the turn must stay unsettled.
 function settledTurnStateForSessionStatus(
   status: OrchestrationSession['status'],
 ): 'completed' | 'interrupted' | 'error' | null
@@ -215,6 +306,18 @@ function retainThreadActivities(
   )
 }
 
+function appendProjectedActivity(
+  activities: ReadonlyArray<OrchestrationThread['activities'][number]>,
+  activity: OrchestrationThread['activities'][number],
+): ReadonlyArray<OrchestrationThread['activities'][number]>
+{
+  return retainThreadActivities(
+    [...activities.filter((entry) => entry.id !== activity.id), activity].toSorted(
+      compareOrchestrationThreadActivities,
+    ),
+  )
+}
+
 function compactFinalizedImportActivities(
   activities: ReadonlyArray<OrchestrationThread['activities'][number]>,
 ): ReadonlyArray<OrchestrationThread['activities'][number]>
@@ -343,6 +446,7 @@ export function projectEvent(
             worktreePath: payload.worktreePath,
             latestTurn: null,
             pendingHandoff: null,
+            providerSwitch: null,
             createdAt: payload.createdAt,
             updatedAt: payload.updatedAt,
             archivedAt: null,
@@ -356,6 +460,7 @@ export function projectEvent(
             activities: [],
             checkpoints: [],
             session: null,
+            approvalOutcomes: [],
           },
           event.type,
           'thread',
@@ -494,7 +599,117 @@ export function projectEvent(
       )
 
     case 'thread.provider-switch-requested':
-      return Effect.succeed(nextBase)
+      return decodeForEvent(
+        ThreadProviderSwitchRequestedPayload,
+        event.payload,
+        event.type,
+        'payload',
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: updateThread(nextBase.threads, payload.threadId, {
+            providerSwitch: {
+              phase: 'pending',
+              targetInstanceId: payload.targetModelSelection.instanceId,
+              targetModel: payload.targetModelSelection.model,
+              requestedAt: event.occurredAt,
+              requestId: event.eventId,
+              requestSequence: event.sequence,
+              sourceModelSelection:
+                payload.sourceModelSelection ??
+                nextBase.threads.find((thread) => thread.id === payload.threadId)?.modelSelection,
+            },
+            updatedAt: event.occurredAt,
+          }),
+        })),
+      )
+
+    case 'thread.provider-switch-progressed':
+      return decodeForEvent(
+        ThreadProviderSwitchProgressedPayload,
+        event.payload,
+        event.type,
+        'payload',
+      ).pipe(
+        Effect.map((payload) => ({
+          ...nextBase,
+          threads: nextBase.threads.map((thread) =>
+            thread.id === payload.threadId &&
+            thread.providerSwitch !== null &&
+            (payload.requestId === undefined ||
+              thread.providerSwitch.requestId === payload.requestId)
+              ? {
+                  ...thread,
+                  providerSwitch: { ...thread.providerSwitch, phase: payload.phase },
+                  updatedAt: event.occurredAt,
+                }
+              : thread,
+          ),
+        })),
+      )
+
+    case 'thread.provider-switch-failed':
+      return decodeForEvent(
+        ThreadProviderSwitchFailedPayload,
+        event.payload,
+        event.type,
+        'payload',
+      ).pipe(
+        Effect.map((payload) =>
+        {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
+          if (!thread)
+          {
+            return nextBase
+          }
+          const target = thread.providerSwitch
+          if (payload.requestId !== undefined && target?.requestId !== payload.requestId)
+          {
+            return nextBase
+          }
+          const sourceModelSelection = payload.sourceModelSelection ?? thread.modelSelection
+          const targetModelSelection =
+            payload.targetModelSelection ??
+            (target === null
+              ? undefined
+              : { instanceId: target.targetInstanceId, model: target.targetModel })
+          const activity: OrchestrationThread['activities'][number] = {
+            id: event.eventId,
+            tone: 'error',
+            kind: 'provider.switch.failed',
+            summary: 'Provider switch failed',
+            payload: {
+              reasonCode: payload.reasonCode,
+              detail: payload.detail,
+              fromInstanceId: sourceModelSelection.instanceId,
+              fromModel: sourceModelSelection.model,
+              ...(targetModelSelection === undefined
+                ? {}
+                : {
+                    toInstanceId: targetModelSelection.instanceId,
+                    toModel: targetModelSelection.model,
+                    retryTargetModelSelection: targetModelSelection,
+                  }),
+            },
+            turnId: null,
+            sequence: event.sequence,
+            createdAt: event.occurredAt,
+          }
+          const hasHistoricalActivity =
+            payload.activityVersion === undefined &&
+            thread.activities.some((entry) => isAdjacentProviderSwitchActivity(entry, activity))
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              providerSwitch: null,
+              activities: hasHistoricalActivity
+                ? thread.activities
+                : appendProjectedActivity(thread.activities, activity),
+              updatedAt: event.occurredAt,
+            }),
+          }
+        }),
+      )
 
     case 'thread.provider-switched':
       return decodeForEvent(
@@ -503,24 +718,69 @@ export function projectEvent(
         event.type,
         'payload',
       ).pipe(
-        Effect.map((payload) => ({
-          ...nextBase,
-          threads: updateThread(nextBase.threads, ThreadId.make(event.aggregateId), {
-            modelSelection: payload.modelSelection,
-            // a switch with no outgoing context completes with empty text;
-            // project null so clients do not advertise a handoff
-            pendingHandoff:
-              payload.handoffText.trim().length > 0
-                ? {
-                    text: payload.handoffText,
-                    fromInstanceId: payload.fromInstanceId,
-                    ...(payload.fromModel !== undefined ? { fromModel: payload.fromModel } : {}),
-                    createdAt: event.occurredAt,
-                  }
-                : null,
-            updatedAt: event.occurredAt,
-          }),
-        })),
+        Effect.map((payload) =>
+        {
+          const threadId = ThreadId.make(event.aggregateId)
+          const thread = nextBase.threads.find((entry) => entry.id === threadId)
+          if (!thread)
+          {
+            return nextBase
+          }
+          if (
+            payload.requestId !== undefined &&
+            thread.providerSwitch?.requestId !== payload.requestId
+          )
+          {
+            return nextBase
+          }
+          const sourceModelSelection = payload.sourceModelSelection ?? {
+            instanceId: payload.fromInstanceId ?? thread.modelSelection.instanceId,
+            model: payload.fromModel ?? thread.modelSelection.model,
+          }
+          const activity: OrchestrationThread['activities'][number] = {
+            id: event.eventId,
+            tone: 'info',
+            kind: 'provider.switch.completed',
+            summary: `Switched from ${
+              sourceModelSelection.model ?? sourceModelSelection.instanceId ?? 'prior provider'
+            } to ${payload.modelSelection.model || payload.modelSelection.instanceId}`,
+            payload: {
+              fromInstanceId: sourceModelSelection.instanceId,
+              fromModel: sourceModelSelection.model,
+              toInstanceId: payload.modelSelection.instanceId,
+              toModel: payload.modelSelection.model,
+              targetModelSelection: payload.modelSelection,
+            },
+            turnId: null,
+            sequence: event.sequence,
+            createdAt: event.occurredAt,
+          }
+          const hasHistoricalActivity =
+            payload.activityVersion === undefined &&
+            thread.activities.some((entry) => isAdjacentProviderSwitchActivity(entry, activity))
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, threadId, {
+              modelSelection: payload.modelSelection,
+              providerSwitch: null,
+              // empty text contributes no new context, so preserve any
+              // unconsumed handoff until delivery or explicit clearing
+              pendingHandoff:
+                payload.handoffText.trim().length > 0
+                  ? {
+                      text: payload.handoffText,
+                      fromInstanceId: payload.fromInstanceId,
+                      ...(payload.fromModel !== undefined ? { fromModel: payload.fromModel } : {}),
+                      createdAt: event.occurredAt,
+                    }
+                  : thread.pendingHandoff,
+              activities: hasHistoricalActivity
+                ? thread.activities
+                : appendProjectedActivity(thread.activities, activity),
+              updatedAt: event.occurredAt,
+            }),
+          }
+        }),
       )
 
     case 'thread.handoff-cleared':
@@ -619,7 +879,7 @@ export function projectEvent(
           'session',
         )
 
-        // Leaving the "running" session status is the turn-end signal: settle
+        // leaving the "running" session status is the turn-end signal: settle
         // a still-running latest turn so its duration reflects the whole turn.
         const settledTurnState = settledTurnStateForSessionStatus(session.status)
         return {
@@ -651,7 +911,7 @@ export function projectEvent(
                   ? {
                       ...thread.latestTurn,
                       state: settledTurnState,
-                      // A running turn's completedAt can only hold a mid-turn
+                      // a running turn's completedAt can only hold a mid-turn
                       // placeholder checkpoint timestamp — the session leaving
                       // "running" is the authoritative turn end.
                       completedAt: session.updatedAt,
@@ -726,7 +986,7 @@ export function projectEvent(
           'checkpoint',
         )
 
-        // Do not let a placeholder (status "missing") overwrite a checkpoint
+        // do not let a placeholder (status "missing") overwrite a checkpoint
         // that has already been captured with a real git ref (status "ready").
         // ProviderRuntimeIngestion may fire multiple turn.diff.updated events
         // per turn; without this guard later placeholders would clobber the
@@ -744,7 +1004,7 @@ export function projectEvent(
           .toSorted((left, right) => left.checkpointTurnCount - right.checkpointTurnCount)
           .slice(-MAX_THREAD_CHECKPOINTS)
 
-        // Mid-turn diff updates produce placeholder checkpoints; record the
+        // mid-turn diff updates produce placeholder checkpoints; record the
         // checkpoint, but don't settle a turn its session is still running.
         const turnStillRunning =
           thread.session?.status === 'running' && thread.session.activeTurnId === payload.turnId
@@ -842,14 +1102,31 @@ export function projectEvent(
             return nextBase
           }
 
+          const isProviderSwitchActivity =
+            payload.activity.kind === 'provider.switch.failed' ||
+            payload.activity.kind === 'provider.switch.completed'
+          const activity =
+            isProviderSwitchActivity && payload.activity.sequence === undefined
+              ? { ...payload.activity, sequence: event.sequence }
+              : payload.activity
+          const replacedActivityId = isProviderSwitchActivity
+            ? thread.activities.findLast(
+                (entry) =>
+                  event.causationEventId === entry.id ||
+                  isAdjacentProviderSwitchActivity(entry, activity),
+              )?.id
+            : undefined
           const activities = [
-            ...thread.activities.filter((entry) => entry.id !== payload.activity.id),
-            payload.activity,
+            ...thread.activities.filter(
+              (entry) => entry.id !== activity.id && entry.id !== replacedActivityId,
+            ),
+            activity,
           ].toSorted(compareOrchestrationThreadActivities)
           const importFinalized =
             thread.origin !== null &&
             thread.latestTurn === null &&
-            isImportContinuationActivity(payload.activity)
+            isImportContinuationActivity(activity)
+          const approvalOutcome = approvalOutcomeFromActivity(activity)
 
           return {
             ...nextBase,
@@ -857,12 +1134,52 @@ export function projectEvent(
               activities: importFinalized
                 ? compactFinalizedImportActivities(activities)
                 : retainThreadActivities(activities),
+              pendingHandoff:
+                activity.kind === 'provider.handoff.delivered' ? null : thread.pendingHandoff,
+              ...(approvalOutcome === null
+                ? {}
+                : {
+                    approvalOutcomes: upsertApprovalOutcome(
+                      thread.approvalOutcomes,
+                      approvalOutcome,
+                    ),
+                  }),
               ...(importFinalized
                 ? {
                     messages: [],
                     checkpoints: [],
                   }
                 : {}),
+              updatedAt: event.occurredAt,
+            }),
+          }
+        }),
+      )
+
+    case 'thread.approval-response-requested':
+      return decodeForEvent(
+        ThreadApprovalResponseRequestedPayload,
+        event.payload,
+        event.type,
+        'payload',
+      ).pipe(
+        Effect.map((payload) =>
+        {
+          const thread = nextBase.threads.find((entry) => entry.id === payload.threadId)
+          if (!thread)
+          {
+            return nextBase
+          }
+          const outcome = payload.approvalOutcome ?? {
+            requestId: payload.requestId,
+            status: 'responding' as const,
+            requestedDecision: payload.decision,
+            updatedAt: payload.createdAt,
+          }
+          return {
+            ...nextBase,
+            threads: updateThread(nextBase.threads, payload.threadId, {
+              approvalOutcomes: upsertApprovalOutcome(thread.approvalOutcomes, outcome),
               updatedAt: event.occurredAt,
             }),
           }

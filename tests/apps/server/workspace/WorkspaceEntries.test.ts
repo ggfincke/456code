@@ -1,3 +1,6 @@
+// tests/apps/server/workspace/WorkspaceEntries.test.ts
+// verify workspace entries list behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeServices from '@effect/platform-node/NodeServices'
@@ -106,11 +109,14 @@ it.layer(TestLayer, { excludeTestServices: true })('WorkspaceEntries', (it) =>
       {
         const cwd = yield* makeTempDir()
         yield* writeTextFile(cwd, 'src/components/Composer.tsx')
+        yield* writeTextFile(cwd, 'src/index.ts')
         yield* writeTextFile(cwd, 'README.md')
+        yield* writeTextFile(cwd, '.git/HEAD')
         yield* writeTextFile(cwd, 'node_modules/pkg/index.js')
 
         const workspaceEntries = yield* WorkspaceEntries.WorkspaceEntries
         const result = yield* workspaceEntries.list({ cwd })
+        const paths = result.entries.map((entry) => entry.path)
 
         expect(result.entries).toEqual(
           expect.arrayContaining([
@@ -123,37 +129,21 @@ it.layer(TestLayer, { excludeTestServices: true })('WorkspaceEntries', (it) =>
             { path: 'README.md', kind: 'file' },
           ]),
         )
-        expect(result.entries.some((entry) => entry.path.startsWith('node_modules'))).toBe(false)
+        expect(paths).toContain('src/index.ts')
+        expect(paths.some((entryPath) => entryPath.startsWith('.git'))).toBe(false)
+        expect(paths.some((entryPath) => entryPath.startsWith('node_modules'))).toBe(false)
         expect(result.truncated).toBe(false)
+
+        // empty-query search shares the same index/ignore surface as list
+        const emptySearch = yield* searchWorkspaceEntries({ cwd, query: '', limit: 100 })
+        expect(emptySearch.entries.map((entry) => entry.path).sort()).toEqual([...paths].sort())
+        expect(emptySearch.truncated).toBe(false)
       }),
     )
   })
 
   describe('search', () =>
   {
-    it.effect('returns files and directories relative to cwd', () =>
-      Effect.gen(function* ()
-      {
-        const cwd = yield* makeTempDir()
-        yield* writeTextFile(cwd, 'src/components/Composer.tsx')
-        yield* writeTextFile(cwd, 'src/index.ts')
-        yield* writeTextFile(cwd, 'README.md')
-        yield* writeTextFile(cwd, '.git/HEAD')
-        yield* writeTextFile(cwd, 'node_modules/pkg/index.js')
-
-        const result = yield* searchWorkspaceEntries({ cwd, query: '', limit: 100 })
-        const paths = result.entries.map((entry) => entry.path)
-
-        expect(paths).toContain('src')
-        expect(paths).toContain('src/components')
-        expect(paths).toContain('src/components/Composer.tsx')
-        expect(paths).toContain('README.md')
-        expect(paths.some((entryPath) => entryPath.startsWith('.git'))).toBe(false)
-        expect(paths.some((entryPath) => entryPath.startsWith('node_modules'))).toBe(false)
-        expect(result.truncated).toBe(false)
-      }),
-    )
-
     it.effect('filters and ranks entries by query', () =>
       Effect.gen(function* ()
       {

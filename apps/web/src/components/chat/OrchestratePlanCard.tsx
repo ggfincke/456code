@@ -89,6 +89,13 @@ function isNonNegativeInteger(value: unknown): value is number
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
+function valueType(value: unknown): string
+{
+  if (value === null) return 'null'
+  if (Array.isArray(value)) return 'array'
+  return typeof value
+}
+
 // emitters are language models -> be liberal on descriptive fields, strict on
 // the safety-critical ones (mode, worker counts, model identity)
 function toScopeText(value: unknown): string | null
@@ -101,31 +108,92 @@ function toScopeText(value: unknown): string | null
   return null
 }
 
-function parseStage(value: unknown): OrchestratePlanStage | null
+type OrchestratePlanStageParseResult =
+  { status: 'success'; stage: OrchestratePlanStage } | { status: 'error'; diagnostic: string }
+
+function parseStage(value: unknown, index: number): OrchestratePlanStageParseResult
 {
-  if (!isRecord(value)) return null
-  const scope = toScopeText(value.scope) ?? ''
-  if (
-    typeof value.id !== 'string' ||
-    typeof value.provider !== 'string' ||
-    (value.model !== null && value.model !== undefined && typeof value.model !== 'string') ||
-    (value.mode !== 'read' && value.mode !== 'edit') ||
-    !isNonNegativeInteger(value.workers)
-  )
+  const path = `stages[${index}]`
+  if (!isRecord(value))
   {
-    return null
+    return {
+      status: 'error',
+      diagnostic: `${path} must be an object (got ${valueType(value)})`,
+    }
   }
+  if (value.id === undefined)
+  {
+    return { status: 'error', diagnostic: `missing ${path}.id` }
+  }
+  if (typeof value.id !== 'string')
+  {
+    return {
+      status: 'error',
+      diagnostic: `${path}.id must be a string (got ${valueType(value.id)})`,
+    }
+  }
+  if (value.provider === undefined)
+  {
+    return { status: 'error', diagnostic: `missing ${path}.provider` }
+  }
+  if (typeof value.provider !== 'string')
+  {
+    return {
+      status: 'error',
+      diagnostic: `${path}.provider must be a string (got ${valueType(value.provider)})`,
+    }
+  }
+  if (value.model !== null && value.model !== undefined && typeof value.model !== 'string')
+  {
+    return {
+      status: 'error',
+      diagnostic: `${path}.model must be a string or null (got ${valueType(value.model)})`,
+    }
+  }
+  if (value.mode === undefined)
+  {
+    return { status: 'error', diagnostic: `missing ${path}.mode` }
+  }
+  if (value.mode !== 'read' && value.mode !== 'edit')
+  {
+    return {
+      status: 'error',
+      diagnostic: `${path}.mode must be "read" or "edit" (got ${valueType(value.mode)})`,
+    }
+  }
+  if (value.workers === undefined)
+  {
+    return { status: 'error', diagnostic: `missing ${path}.workers` }
+  }
+  if (typeof value.workers !== 'number' || !Number.isSafeInteger(value.workers))
+  {
+    return {
+      status: 'error',
+      diagnostic: `${path}.workers must be an integer (got ${valueType(value.workers)})`,
+    }
+  }
+  if (value.workers < 0)
+  {
+    return {
+      status: 'error',
+      diagnostic: `${path}.workers must be non-negative (got ${value.workers})`,
+    }
+  }
+  const scope = toScopeText(value.scope) ?? ''
 
   return {
-    id: value.id,
-    provider: value.provider,
-    // null/absent model -> provider default; shown as an empty picker state
-    model: typeof value.model === 'string' ? value.model : '',
-    ...(typeof value.effort === 'string' && value.effort !== '' ? { effort: value.effort } : {}),
-    mode: value.mode,
-    workers: value.workers,
-    scope,
-    ...(typeof value.phase === 'string' && value.phase !== '' ? { phase: value.phase } : {}),
+    status: 'success',
+    stage: {
+      id: value.id,
+      provider: value.provider,
+      // null/absent model -> provider default; shown as an empty picker state
+      model: typeof value.model === 'string' ? value.model : '',
+      ...(typeof value.effort === 'string' && value.effort !== '' ? { effort: value.effort } : {}),
+      mode: value.mode,
+      workers: value.workers,
+      scope,
+      ...(typeof value.phase === 'string' && value.phase !== '' ? { phase: value.phase } : {}),
+    },
   }
 }
 
@@ -190,34 +258,85 @@ function groupRowsByPhase(
   return groups
 }
 
-export function parseOrchestratePlan(value: string): OrchestratePlan | null
+export type OrchestratePlanParseResult =
+  | { status: 'success'; plan: OrchestratePlan }
+  | { status: 'error'; diagnostic: string }
+  | { status: 'incomplete' }
+
+export function parseOrchestratePlanResult(
+  value: string,
+  complete = true,
+): OrchestratePlanParseResult
 {
+  const invalid = (diagnostic: string): OrchestratePlanParseResult =>
+    complete ? { status: 'error', diagnostic } : { status: 'incomplete' }
+
+  let parsed: unknown
   try
   {
-    const parsed: unknown = JSON.parse(value)
-    if (!isRecord(parsed) || typeof parsed.workflow !== 'string' || !Array.isArray(parsed.stages))
+    parsed = JSON.parse(value)
+  }
+  catch (error)
+  {
+    const message =
+      error instanceof Error ? (error.message.split('\n')[0] ?? error.message) : String(error)
+    return invalid(`invalid JSON: ${message}`)
+  }
+
+  if (!isRecord(parsed))
+  {
+    return invalid(`plan must be an object (got ${valueType(parsed)})`)
+  }
+  if (parsed.workflow === undefined)
+  {
+    return invalid('missing workflow')
+  }
+  if (typeof parsed.workflow !== 'string')
+  {
+    return invalid(`workflow must be a string (got ${valueType(parsed.workflow)})`)
+  }
+  if (parsed.stages === undefined)
+  {
+    return invalid('missing stages')
+  }
+  if (!Array.isArray(parsed.stages))
+  {
+    return invalid(`stages must be an array (got ${valueType(parsed.stages)})`)
+  }
+  if (parsed.stages.length === 0)
+  {
+    return invalid('stages must contain at least one stage')
+  }
+
+  const stages: OrchestratePlanStage[] = []
+  for (const [index, value] of parsed.stages.entries())
+  {
+    const stageResult = parseStage(value, index)
+    if (stageResult.status === 'error')
     {
-      return null
+      return invalid(stageResult.diagnostic)
     }
-    const stages = parsed.stages.map(parseStage)
-    if (stages.length === 0 || stages.some((stage) => stage === null)) return null
-    const validStages = stages as OrchestratePlanStage[]
-    const stageIds = new Set<string>()
-    const duplicateStageId = validStages.find((stage) =>
-    {
-      if (stageIds.has(stage.id)) return true
-      stageIds.add(stage.id)
-      return false
-    })?.id
+    stages.push(stageResult.stage)
+  }
 
-    const workerSum = validStages.reduce((sum, stage) => sum + stage.workers, 0)
-    const totalWorkers = isNonNegativeInteger(parsed.totalWorkers) ? parsed.totalWorkers : workerSum
-    const maxWorkers = isNonNegativeInteger(parsed.maxWorkers) ? parsed.maxWorkers : totalWorkers
+  const stageIds = new Set<string>()
+  const duplicateStageId = stages.find((stage) =>
+  {
+    if (stageIds.has(stage.id)) return true
+    stageIds.add(stage.id)
+    return false
+  })?.id
 
-    return {
+  const workerSum = stages.reduce((sum, stage) => sum + stage.workers, 0)
+  const totalWorkers = isNonNegativeInteger(parsed.totalWorkers) ? parsed.totalWorkers : workerSum
+  const maxWorkers = isNonNegativeInteger(parsed.maxWorkers) ? parsed.maxWorkers : totalWorkers
+
+  return {
+    status: 'success',
+    plan: {
       workflow: parsed.workflow,
       task: typeof parsed.task === 'string' ? parsed.task : '',
-      stages: validStages,
+      stages,
       totalWorkers,
       maxWorkers,
       ...(typeof parsed.runId === 'string' && parsed.runId !== '' ? { runId: parsed.runId } : {}),
@@ -225,12 +344,14 @@ export function parseOrchestratePlan(value: string): OrchestratePlan | null
         duplicateStageId === undefined
           ? null
           : `Duplicate stage ID "${duplicateStageId}". Stage IDs must be unique before approval.`,
-    }
+    },
   }
-  catch
-  {
-    return null
-  }
+}
+
+export function parseOrchestratePlan(value: string): OrchestratePlan | null
+{
+  const result = parseOrchestratePlanResult(value)
+  return result.status === 'success' ? result.plan : null
 }
 
 // canonical text distinguishes content revisions within one streamed message

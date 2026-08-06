@@ -1,3 +1,6 @@
+// apps/mobile/src/features/threads/thread-list-items.tsx
+// render thread list items
+
 import { useRecyclingState } from '@legendapp/list/react-native'
 import type {
   EnvironmentProject,
@@ -17,20 +20,19 @@ import { cn } from '../../lib/cn'
 import { relativeTime } from '../../lib/time'
 import { useThemeColor } from '../../lib/useThemeColor'
 import type { PendingNewTask } from '../../state/use-pending-new-tasks'
+import { useThreadOutboxFailureReason } from '../../state/use-thread-outbox'
 import { useThreadPr, type ThreadPr } from '../../state/use-thread-pr'
 import type { HomeGroupDisplayAction } from '../home/homeListItems'
 import { ThreadSwipeable } from '../home/thread-swipe-actions'
 import { resolveThreadStatus } from './threadPresentation'
 
-/**
- * Shared presentation for the thread lists: the compact (phone) Home list and
- * the iPad sidebar render the SAME items — group headers with collapse,
- * thread rows with status/PR/subtitle, and show-more rows — differing only in
- * metrics and chrome via `variant`.
- */
+// shared presentation for the thread lists: the compact (phone) Home list and
+// the iPad sidebar render the SAME items — group headers with collapse,
+// thread rows with status/PR/subtitle, and show-more rows — differing only in
+// metrics and chrome via `variant`.
 export type ThreadListVariant = 'compact' | 'sidebar'
 
-/** Left inset that aligns compact secondary rows with the title column. */
+// left inset that aligns compact secondary rows with the title column.
 export const THREAD_LIST_COMPACT_INSET = 20
 const SIDEBAR_ROW_RADIUS = 12
 
@@ -72,7 +74,7 @@ function PullRequestIcon(props: { readonly size: number; readonly color: string 
   )
 }
 
-/* ─── Project group header ───────────────────────────────────────────── */
+// ─── Project group header ─────────────────────────────────────────────
 
 export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: {
   readonly variant: ThreadListVariant
@@ -83,7 +85,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   readonly isFirst: boolean
   readonly groupKey: string
   readonly onGroupAction: (key: string, action: HomeGroupDisplayAction) => void
-  /** Project a quick new thread should target; null hides the button. */
+  // project a quick new thread should target; null hides the button.
   readonly newThreadTarget?: EnvironmentProject | null
   readonly onNewThread?: (project: EnvironmentProject) => void
 })
@@ -105,7 +107,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   }, [newThreadTarget, onNewThread])
   const showNewThreadButton = onNewThread !== undefined && newThreadTarget !== null
 
-  // The new-thread button is a SIBLING of the collapse toggle, not a child:
+  // the new-thread button is a SIBLING of the collapse toggle, not a child:
   // nested touchables are unreachable to VoiceOver/TalkBack (the parent
   // swallows focus). Row padding lives on the container (explicit styles —
   // dynamic padding classes on Pressable did not apply reliably) so both
@@ -117,7 +119,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
       style={{
         minHeight: compact ? 44 : 36,
         paddingLeft: compact ? 20 : 12,
-        // Compact right padding centers the 20pt plus glyph on the thread
+        // compact right padding centers the 20pt plus glyph on the thread
         // rows' trailing chevron column (18 + 13/2 ≈ 24.5 from the edge).
         paddingRight: compact ? 14 : 12,
         paddingBottom: compact ? 12 : 8,
@@ -183,7 +185,7 @@ export const ThreadListGroupHeader = memo(function ThreadListGroupHeader(props: 
   )
 })
 
-/* ─── Show more / show less row ──────────────────────────────────────── */
+// ─── Show more / show less row ────────────────────────────────────────
 
 export const ThreadListShowMoreRow = memo(function ThreadListShowMoreRow(props: {
   readonly variant: ThreadListVariant
@@ -258,17 +260,82 @@ export const ThreadListShowMoreRow = memo(function ThreadListShowMoreRow(props: 
   )
 })
 
-/* ─── Pending task row ───────────────────────────────────────────────── */
+// ─── Queued delivery failure ──────────────────────────────────────────
+
+// one presentation for queued work that gave up: a failed pending task and a
+// thread holding a failed queued message read the same way in the list.
+function QueuedFailurePill()
+{
+  return (
+    <View className="rounded-full bg-rose-500/12 px-1.5 py-0.5 dark:bg-rose-500/16">
+      <Text className="text-3xs font-sans-bold text-rose-700 dark:text-rose-300">Failed</Text>
+    </View>
+  )
+}
+
+// the failure reason replaces the row subtitle: it is the one thing the user
+// needs before deciding to edit, retry, or delete the row.
+function QueuedFailureSubtitle(props: { readonly compact: boolean; readonly reason: string })
+{
+  const dangerColor = useThemeColor('--color-danger-foreground')
+  return (
+    <View className="mt-px flex-row items-center gap-1.5">
+      <SymbolView
+        name="exclamationmark.triangle"
+        size={10}
+        tintColor={dangerColor}
+        type="monochrome"
+      />
+      <Text
+        className={cn('shrink text-danger-foreground', props.compact ? 'text-sm' : 'text-xs')}
+        numberOfLines={1}
+      >
+        {props.reason}
+      </Text>
+    </View>
+  )
+}
+
+// ─── Pending task row ─────────────────────────────────────────────────
 
 const PENDING_TASK_MENU_ACTIONS: MenuAction[] = [
   { id: 'delete', title: 'Delete', image: 'trash', attributes: { destructive: true } },
 ]
 
-/**
- * A queued new task waiting in the outbox for its environment to reconnect.
- * Tapping reopens the new-task composer with everything prefilled; the row
- * disappears once the task is delivered and the real thread arrives.
- */
+// how a queued creation reads in the list. A row that exhausted delivery is the
+// only place the outbox surfaces that outcome, and "Pending" there reads as
+// "still on its way" — so a failed row is labelled as failed, carries its
+// reason, and says both in the accessible name.
+export function describePendingTaskStatus(pendingTask: PendingNewTask): {
+  readonly failed: boolean
+  readonly badge: string
+  readonly reason: string | null
+  readonly accessibilityLabel: string
+}
+{
+  const failure = pendingTask.message.failure
+  if (failure === undefined)
+  {
+    return {
+      failed: false,
+      badge: 'Pending',
+      reason: null,
+      accessibilityLabel: `${pendingTask.title}, pending`,
+    }
+  }
+  const reason = failure.reason.trim()
+  const resolvedReason = reason.length > 0 ? reason : 'The queued task could not be created.'
+  return {
+    failed: true,
+    badge: 'Failed',
+    reason: resolvedReason,
+    accessibilityLabel: `${pendingTask.title}, failed: ${resolvedReason}`,
+  }
+}
+
+// a queued new task waiting in the outbox for its environment to reconnect.
+// tapping reopens the new-task composer with everything prefilled; the row
+// disappears once the task is delivered and the real thread arrives.
 export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
   readonly variant: ThreadListVariant
   readonly pendingTask: PendingNewTask
@@ -286,9 +353,13 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
 
   const { pendingTask, onSelectPendingTask, onDeletePendingTask } = props
   const timestamp = relativeTime(pendingTask.message.createdAt)
+  const status = describePendingTaskStatus(pendingTask)
   const subtitleParts = [props.environmentLabel, pendingTask.creation.branch].filter(
     (part): part is string => Boolean(part),
   )
+  const accessibilityHint = status.failed
+    ? 'Opens the failed task for editing, or long press to delete it'
+    : 'Opens the queued task for editing'
 
   const handleMenuAction = useCallback(
     ({ nativeEvent }: { readonly nativeEvent: { readonly event: string } }) =>
@@ -298,38 +369,41 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
     [onDeletePendingTask, pendingTask],
   )
 
-  const statusPill = (
+  const statusPill = status.failed ? (
+    <QueuedFailurePill />
+  ) : (
     <View className="rounded-full bg-zinc-500/12 px-1.5 py-0.5 dark:bg-zinc-500/16">
-      <Text className="text-3xs font-sans-bold text-zinc-600 dark:text-zinc-300">Pending</Text>
+      <Text className="text-3xs font-sans-bold text-zinc-600 dark:text-zinc-300">
+        {status.badge}
+      </Text>
     </View>
   )
 
-  const subtitleRow =
-    subtitleParts.length > 0 ? (
-      <View className="mt-px flex-row items-center gap-1.5">
-        <SymbolView
-          name="tray.and.arrow.up"
-          size={10}
-          tintColor={compact ? iconSubtleColor : mutedColor}
-          type="monochrome"
-        />
-        <Text
-          className={
-            compact
-              ? 'shrink text-sm text-foreground-muted'
-              : 'shrink text-xs text-foreground-muted'
-          }
-          numberOfLines={1}
-        >
-          {subtitleParts.join(' · ')}
-        </Text>
-      </View>
-    ) : null
+  const subtitleRow = status.reason ? (
+    <QueuedFailureSubtitle compact={compact} reason={status.reason} />
+  ) : subtitleParts.length > 0 ? (
+    <View className="mt-px flex-row items-center gap-1.5">
+      <SymbolView
+        name="tray.and.arrow.up"
+        size={10}
+        tintColor={compact ? iconSubtleColor : mutedColor}
+        type="monochrome"
+      />
+      <Text
+        className={
+          compact ? 'shrink text-sm text-foreground-muted' : 'shrink text-xs text-foreground-muted'
+        }
+        numberOfLines={1}
+      >
+        {subtitleParts.join(' · ')}
+      </Text>
+    </View>
+  ) : null
 
   const rowContent = compact ? (
     <Pressable
-      accessibilityHint="Opens the queued task for editing"
-      accessibilityLabel={pendingTask.title}
+      accessibilityHint={accessibilityHint}
+      accessibilityLabel={status.accessibilityLabel}
       accessibilityRole="button"
       className="bg-screen"
       onPress={() => onSelectPendingTask(pendingTask)}
@@ -371,8 +445,8 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
     </Pressable>
   ) : (
     <Pressable
-      accessibilityHint="Opens the queued task for editing"
-      accessibilityLabel={pendingTask.title}
+      accessibilityHint={accessibilityHint}
+      accessibilityLabel={status.accessibilityLabel}
       accessibilityRole="button"
       onPress={() => onSelectPendingTask(pendingTask)}
       style={({ pressed }) => ({
@@ -413,7 +487,7 @@ export const PendingTaskListRow = memo(function PendingTaskListRow(props: {
   )
 })
 
-/* ─── Thread row ─────────────────────────────────────────────────────── */
+// ─── Thread row ───────────────────────────────────────────────────────
 
 const THREAD_ROW_MENU_ACTIONS: MenuAction[] = [
   { id: 'archive', title: 'Archive', image: 'archivebox' },
@@ -426,9 +500,9 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   readonly environmentLabel: string | null
   readonly projectCwd: string | null
   readonly isLast: boolean
-  /** Sidebar only: the thread currently open in the detail pane. */
+  // sidebar only: the thread currently open in the detail pane.
   readonly selected?: boolean
-  /** Defaults to window width minus compact margins. */
+  // defaults to window width minus compact margins.
   readonly fullSwipeWidth?: number
   readonly onSelectThread: (thread: EnvironmentThreadShell) => void
   readonly onArchiveThread: (thread: EnvironmentThreadShell) => void
@@ -444,7 +518,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const colorScheme = useColorScheme()
   const compact = props.variant === 'compact'
   const selected = props.selected === true
-  // Recycling-safe: resets when the list container is reused for another
+  // recycling-safe: resets when the list container is reused for another
   // thread, so a hover highlight can't leak across rows.
   const [hovered, setHovered] = useRecyclingState(false)
 
@@ -458,8 +532,15 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const { thread, onSelectThread, onArchiveThread, onDeleteThread } = props
   const status = resolveThreadStatus(thread)
   const pr = useThreadPr(thread, props.projectCwd)
+  // a queued message that exhausted delivery reports here: the thread may never
+  // be opened, and the composer detail surface is only visible once it is.
+  const queuedFailureReason = useThreadOutboxFailureReason(thread.environmentId, thread.id)
   const timestamp = relativeTime(thread.latestUserMessageAt ?? thread.updatedAt ?? thread.createdAt)
-  const threadAccessibilityLabel = pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title
+  const prAccessibilityLabel = pr ? `${thread.title}, ${pr.accessibilityLabel}` : thread.title
+  const threadAccessibilityLabel =
+    queuedFailureReason === null
+      ? prAccessibilityLabel
+      : `${prAccessibilityLabel}, failed: ${queuedFailureReason}`
   const subtitleParts = [props.environmentLabel, thread.branch].filter((part): part is string =>
     Boolean(part),
   )
@@ -491,16 +572,23 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
     [handleArchive, handleDelete],
   )
 
-  const statusPill = effectiveStatus ? (
-    <View className={`${effectiveStatus.pillClassName} rounded-full px-1.5 py-0.5`}>
-      <Text className={`text-3xs font-sans-bold ${effectiveStatus.textClassName}`}>
-        {effectiveStatus.label}
-      </Text>
-    </View>
-  ) : null
+  // a failed queued message outranks the live status pill: it is the state the
+  // user has to act on, and the row is the only place it is announced.
+  const statusPill =
+    queuedFailureReason !== null ? (
+      <QueuedFailurePill />
+    ) : effectiveStatus ? (
+      <View className={`${effectiveStatus.pillClassName} rounded-full px-1.5 py-0.5`}>
+        <Text className={`text-3xs font-sans-bold ${effectiveStatus.textClassName}`}>
+          {effectiveStatus.label}
+        </Text>
+      </View>
+    ) : null
 
   const subtitleRow =
-    subtitleParts.length > 0 || pr !== null ? (
+    queuedFailureReason !== null ? (
+      <QueuedFailureSubtitle compact={compact} reason={queuedFailureReason} />
+    ) : subtitleParts.length > 0 || pr !== null ? (
       <View className="mt-px flex-row items-center gap-1.5">
         {subtitleParts.length > 0 ? (
           <>
@@ -656,7 +744,7 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
       threadTitle={thread.title}
     >
       {(close) => (
-        // Messages-style row actions on long-press. iOS: a real
+        // messages-style row actions on long-press. iOS: a real
         // UIContextMenuInteraction with the row as the zoom preview (needs the
         // patched @react-native-menu, see
         // patches/@react-native-menu__menu@2.0.0.patch — in long-press mode the

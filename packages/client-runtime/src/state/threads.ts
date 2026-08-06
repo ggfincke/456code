@@ -81,12 +81,17 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
     status: statusWithoutLiveData(cachedThread),
     error: Option.none(),
   })
-  // Seed the resume cursor from the cached snapshot so a warm cache can catch up
+  // seed the resume cursor from the cached snapshot so a warm cache can catch up
   // via `afterSequence` instead of re-downloading the full thread body.
   const lastSequence = yield* SubscriptionRef.make(
     Option.match(cached, { onNone: () => 0, onSome: (snapshot) => snapshot.snapshotSequence }),
   )
   const awaitingCompletion = yield* Ref.make(false)
+  // a server without the completion marker delivers catch-up events with no
+  // boundary the client can recognize, so a resumed subscription cannot tell
+  // replayed history from live activity. Such a session asks for a full
+  // snapshot instead and stays out of `live` until that snapshot lands.
+  const awaitingFreshSnapshot = yield* Ref.make(false)
   const persistence = yield* Queue.sliding<OrchestrationThreadDetailSnapshot>(1)
 
   const persist = Effect.fn('EnvironmentThreadState.persist')(function* (
@@ -133,6 +138,7 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
   const setDisconnected = Effect.gen(function* ()
   {
     yield* Ref.set(awaitingCompletion, false)
+    yield* Ref.set(awaitingFreshSnapshot, false)
     yield* SubscriptionRef.update(state, (current) => ({
       ...current,
       status: current.status === 'deleted' ? current.status : statusWithoutLiveData(current.data),
@@ -140,6 +146,7 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
   })
   const setStreamError = (cause: Cause.Cause<unknown>) =>
     Ref.set(awaitingCompletion, false).pipe(
+      Effect.andThen(Ref.set(awaitingFreshSnapshot, false)),
       Effect.andThen(
         SubscriptionRef.update(state, (current) => ({
           ...current,
@@ -154,13 +161,13 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
     thread: OrchestrationThread,
   )
   {
-    const waiting = yield* Ref.get(awaitingCompletion)
+    const waiting = (yield* Ref.get(awaitingCompletion)) || (yield* Ref.get(awaitingFreshSnapshot))
     yield* SubscriptionRef.set(state, {
       data: Option.some(thread),
       status: waiting ? 'synchronizing' : 'live',
       error: Option.none(),
     })
-    // Active threads can update many times per second and retain large tool
+    // active threads can update many times per second and retain large tool
     // payloads. The server remains the source of truth while a turn is active;
     // persist once it settles so cache encoding stays off the streaming path.
     if (shouldPersistThread(thread))
@@ -173,6 +180,7 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
   const setDeleted = Effect.fn('EnvironmentThreadState.setDeleted')(function* ()
   {
     yield* Ref.set(awaitingCompletion, false)
+    yield* Ref.set(awaitingFreshSnapshot, false)
     yield* SubscriptionRef.set(state, {
       data: Option.none(),
       status: 'deleted',
@@ -208,6 +216,9 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
 
     if (item.kind === 'snapshot')
     {
+      // a full snapshot is complete by construction, so it is the boundary a
+      // marker-less session was waiting for
+      yield* Ref.set(awaitingFreshSnapshot, false)
       yield* SubscriptionRef.set(lastSequence, item.snapshot.snapshotSequence)
       yield* setThread(item.snapshot.thread)
       return
@@ -276,6 +287,9 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
         yield* setSynchronizing
 
         let current = yield* SubscriptionRef.get(state)
+        // a snapshot fetched inside this attempt is as trustworthy a boundary
+        // as the completion marker, so it keeps the resume cursor usable
+        let seededFromFreshSnapshot = false
         if (Option.isNone(current.data) && current.status !== 'deleted')
         {
           const prepared = yield* SubscriptionRef.get(supervisor.prepared).pipe(
@@ -297,19 +311,18 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
           {
             yield* applyItem({ kind: 'snapshot', snapshot: httpSnapshot.value })
             current = yield* SubscriptionRef.get(state)
+            seededFromFreshSnapshot = true
           }
         }
 
         const sequence = yield* SubscriptionRef.get(lastSequence)
-        const canResume = Option.isSome(current.data)
-        if (!supportsCompletionMarker && canResume)
-        {
-          yield* SubscriptionRef.update(state, (value) => ({
-            ...value,
-            status: value.status === 'deleted' ? value.status : ('live' as const),
-            error: Option.none(),
-          }))
-        }
+        // resuming a marker-less session from a cached cursor would replay
+        // history the client cannot separate from live activity — outcomes that
+        // already happened would surface as if they had just landed. Ask for the
+        // full snapshot instead and stay `synchronizing` until it arrives.
+        const canResume =
+          Option.isSome(current.data) && (supportsCompletionMarker || seededFromFreshSnapshot)
+        yield* Ref.set(awaitingFreshSnapshot, !supportsCompletionMarker && !canResume)
 
         return {
           threadId,

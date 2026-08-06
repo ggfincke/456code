@@ -1,5 +1,6 @@
 // apps/server/src/vcs/ExactGitSnapshot.ts
 // captures and materializes bounded Git trees without content filters
+
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off
 
 import * as NodeChildProcess from 'node:child_process'
@@ -26,6 +27,7 @@ export type ExactGitSnapshotErrorCode =
   | 'invalid-input'
   | 'limit-exceeded'
   | 'unsupported-entry'
+  | 'verification-failed'
 
 export class ExactGitSnapshotError extends Error
 {
@@ -90,6 +92,52 @@ export interface ExactGitTreeRestore
   readonly treeOid: string
   readonly fileCount: number
   readonly byteCount: number
+}
+
+export interface VerifyExactGitTreeInput
+{
+  readonly repositoryRoot: string
+  readonly treeOid: string
+  readonly rootPath: string
+  readonly signal: AbortSignal
+  readonly limits?: ExactGitSnapshotLimits
+}
+
+export interface PreflightExactGitTreeRestoreInput
+{
+  readonly repositoryRoot: string
+  readonly treeOid: string
+  readonly signal: AbortSignal
+  readonly limits?: ExactGitSnapshotLimits
+}
+
+export interface ApplyStagedExactGitTreeRestoreInput
+{
+  readonly repositoryRoot: string
+  readonly treeOid: string
+  readonly stageRoot: string
+  readonly signal: AbortSignal
+  readonly limits?: ExactGitSnapshotLimits
+}
+
+export interface ExactGitTreeVerification
+{
+  readonly treeOid: string
+  readonly verified: true
+  readonly fileCount: number
+  readonly byteCount: number
+  readonly regularFileCount: number
+  readonly symlinkCount: number
+  readonly gitlinkCount: number
+}
+
+export interface ExactGitTreeRestorePreflight
+{
+  readonly treeOid: string
+  readonly fileCount: number
+  readonly byteCount: number
+  readonly removableLeafCount: number
+  readonly pruneDirectoryCount: number
 }
 
 interface GitResult
@@ -1582,6 +1630,351 @@ async function clearRestoreInventory(
       }
     }
   }
+}
+
+async function verifyLoadedTreeAtRoot(
+  rootPath: string,
+  loaded: LoadedExactGitTree,
+  treeOid: string,
+  signal: AbortSignal,
+  rejectUnexpectedPaths: boolean,
+): Promise<ExactGitTreeVerification>
+{
+  const expectedPaths = new Set<string>()
+  const expectedDirectories = new Set<string>()
+  let regularFileCount = 0
+  let symlinkCount = 0
+  let gitlinkCount = 0
+
+  for (const entry of loaded.entries)
+  {
+    expectedPaths.add(entry.path)
+    for (const parent of pathParents(entry.path)) expectedDirectories.add(parent)
+    if (entry.type === 'commit') expectedDirectories.add(entry.path)
+  }
+  for (const directory of expectedDirectories)
+  {
+    throwIfCancelled(signal)
+    const absoluteDirectory = destinationPath(rootPath, directory)
+    let stat: NodeFS.Stats
+    try
+    {
+      stat = await NodeFSP.lstat(absoluteDirectory)
+    }
+    catch (cause)
+    {
+      throw exactError(
+        'verification-failed',
+        `Verified tree is missing directory '${directory}'.`,
+        cause,
+      )
+    }
+    if (!stat.isDirectory() || stat.isSymbolicLink())
+    {
+      throw exactError(
+        'verification-failed',
+        `Verified tree directory '${directory}' is not a real directory.`,
+      )
+    }
+  }
+
+  for (const entry of loaded.entries)
+  {
+    throwIfCancelled(signal)
+    const absolutePath = destinationPath(rootPath, entry.path)
+    let stat: NodeFS.Stats
+    try
+    {
+      stat = await NodeFSP.lstat(absolutePath)
+    }
+    catch (cause)
+    {
+      throw exactError('verification-failed', `Verified tree is missing '${entry.path}'.`, cause)
+    }
+
+    if (entry.type === 'commit')
+    {
+      gitlinkCount += 1
+      if (!stat.isDirectory() || stat.isSymbolicLink())
+      {
+        throw exactError(
+          'verification-failed',
+          `Verified gitlink '${entry.path}' is not a real directory.`,
+        )
+      }
+      continue
+    }
+
+    const expectedContent = loaded.blobs.get(entry.oid)
+    if (expectedContent === undefined)
+    {
+      throw exactError('git-failed', `Git blob content is missing for '${entry.path}'.`)
+    }
+    if (entry.mode === '120000')
+    {
+      symlinkCount += 1
+      if (!stat.isSymbolicLink())
+      {
+        throw exactError('verification-failed', `Verified path '${entry.path}' is not a symlink.`)
+      }
+      const target = await NodeFSP.readlink(absolutePath, { encoding: 'buffer' })
+      if (!target.equals(expectedContent))
+      {
+        throw exactError(
+          'verification-failed',
+          `Verified symlink '${entry.path}' has the wrong target.`,
+        )
+      }
+      continue
+    }
+
+    regularFileCount += 1
+    if (!stat.isFile() || stat.isSymbolicLink())
+    {
+      throw exactError('verification-failed', `Verified path '${entry.path}' is not a file.`)
+    }
+    const executable = (stat.mode & 0o111) !== 0
+    if (executable !== (entry.mode === '100755'))
+    {
+      throw exactError('verification-failed', `Verified file '${entry.path}' has the wrong mode.`)
+    }
+    const content = await NodeFSP.readFile(absolutePath)
+    if (!content.equals(expectedContent))
+    {
+      throw exactError('verification-failed', `Verified file '${entry.path}' has wrong content.`)
+    }
+  }
+
+  if (rejectUnexpectedPaths)
+  {
+    const visit = async (absoluteDirectory: string, relativeDirectory: string): Promise<void> =>
+    {
+      for (const directoryEntry of await NodeFSP.readdir(absoluteDirectory, {
+        withFileTypes: true,
+      }))
+      {
+        throwIfCancelled(signal)
+        const relativePath =
+          relativeDirectory.length === 0
+            ? directoryEntry.name
+            : `${relativeDirectory}/${directoryEntry.name}`
+        if (!expectedPaths.has(relativePath) && !expectedDirectories.has(relativePath))
+        {
+          throw exactError(
+            'verification-failed',
+            `Verified tree contains unexpected path '${relativePath}'.`,
+          )
+        }
+        if (directoryEntry.isDirectory() && expectedDirectories.has(relativePath))
+        {
+          await visit(NodePath.join(absoluteDirectory, directoryEntry.name), relativePath)
+        }
+      }
+    }
+    await visit(rootPath, '')
+  }
+
+  return {
+    treeOid,
+    verified: true,
+    fileCount: loaded.fileCount,
+    byteCount: loaded.byteCount,
+    regularFileCount,
+    symlinkCount,
+    gitlinkCount,
+  }
+}
+
+async function writeStagedTree(
+  repositoryRoot: string,
+  entries: ReadonlyArray<MaterializedTreeEntry>,
+  stagedContent: ReadonlyMap<string, Buffer>,
+  signal: AbortSignal,
+): Promise<void>
+{
+  const directories = new Set<string>()
+  for (const entry of entries)
+  {
+    for (const parent of pathParents(entry.path)) directories.add(parent)
+    if (entry.type === 'commit') directories.add(entry.path)
+  }
+  const sortedDirectories = [...directories].sort((left, right) =>
+  {
+    const depth = left.split('/').length - right.split('/').length
+    return depth !== 0
+      ? depth
+      : Buffer.compare(Buffer.from(left, 'utf8'), Buffer.from(right, 'utf8'))
+  })
+  for (const directory of sortedDirectories)
+  {
+    throwIfCancelled(signal)
+    await NodeFSP.mkdir(destinationPath(repositoryRoot, directory), {
+      mode: 0o755,
+      recursive: true,
+    })
+  }
+
+  for (const entry of entries)
+  {
+    if (entry.type === 'commit') continue
+    throwIfCancelled(signal)
+    const destination = destinationPath(repositoryRoot, entry.path)
+    const content = stagedContent.get(entry.path)
+    if (content === undefined)
+    {
+      throw exactError('verification-failed', `Staged content is missing for '${entry.path}'.`)
+    }
+    if (entry.mode === '120000')
+    {
+      await NodeFSP.symlink(content, destination)
+    }
+    else
+    {
+      await writeExclusiveFile(destination, content, entry.mode === '100755')
+    }
+  }
+}
+
+async function readVerifiedStagedContent(
+  stageRoot: string,
+  loaded: LoadedExactGitTree,
+  signal: AbortSignal,
+): Promise<ReadonlyMap<string, Buffer>>
+{
+  const stagedContent = new Map<string, Buffer>()
+  for (const entry of loaded.entries)
+  {
+    if (entry.type === 'commit') continue
+    throwIfCancelled(signal)
+    const path = destinationPath(stageRoot, entry.path)
+    const content =
+      entry.mode === '120000'
+        ? await NodeFSP.readlink(path, { encoding: 'buffer' })
+        : await NodeFSP.readFile(path)
+    const expected = loaded.blobs.get(entry.oid)
+    if (expected === undefined || !content.equals(expected))
+    {
+      throw exactError(
+        'verification-failed',
+        `Staged content changed while reading '${entry.path}'.`,
+      )
+    }
+    stagedContent.set(entry.path, content)
+  }
+  return stagedContent
+}
+
+export async function verifyExactGitTreeMaterialization(
+  input: VerifyExactGitTreeInput,
+): Promise<ExactGitTreeVerification>
+{
+  const limits = validatedLimits(input.limits)
+  throwIfCancelled(input.signal)
+  if (!OBJECT_ID.test(input.treeOid))
+  {
+    throw exactError('invalid-input', 'Verification requires a full Git tree object ID.')
+  }
+  const repositoryRoot = await validateRepositoryRoot(input.repositoryRoot, input.signal)
+  const rootPath = await canonicalDirectory(input.rootPath, 'Verification root')
+  if (isWithin(repositoryRoot, rootPath))
+  {
+    throw exactError(
+      'invalid-input',
+      'Materialization verification root must be outside the worktree.',
+    )
+  }
+  const loaded = await loadExactGitTree(repositoryRoot, input.treeOid, input.signal, limits)
+  return verifyLoadedTreeAtRoot(rootPath, loaded, input.treeOid, input.signal, true)
+}
+
+export async function preflightExactGitTreeRestore(
+  input: PreflightExactGitTreeRestoreInput,
+): Promise<ExactGitTreeRestorePreflight>
+{
+  const limits = validatedLimits(input.limits)
+  throwIfCancelled(input.signal)
+  if (!OBJECT_ID.test(input.treeOid))
+  {
+    throw exactError('invalid-input', 'Restore preflight requires a full Git tree object ID.')
+  }
+  const repositoryRoot = await validateRepositoryRoot(input.repositoryRoot, input.signal)
+  const loaded = await loadExactGitTree(repositoryRoot, input.treeOid, input.signal, limits)
+  const inventory = await collectRestoreInventory(repositoryRoot, loaded.entries, input.signal)
+  return {
+    treeOid: input.treeOid,
+    fileCount: loaded.fileCount,
+    byteCount: loaded.byteCount,
+    removableLeafCount: inventory.removableLeaves.length,
+    pruneDirectoryCount: inventory.pruneDirectories.length,
+  }
+}
+
+export async function applyStagedExactGitTreeRestore(
+  input: ApplyStagedExactGitTreeRestoreInput,
+): Promise<ExactGitTreeRestore>
+{
+  const limits = validatedLimits(input.limits)
+  throwIfCancelled(input.signal)
+  if (!OBJECT_ID.test(input.treeOid))
+  {
+    throw exactError('invalid-input', 'Staged restore requires a full Git tree object ID.')
+  }
+  const repositoryRoot = await validateRepositoryRoot(input.repositoryRoot, input.signal)
+  const stageRoot = await canonicalDirectory(input.stageRoot, 'Staged restore root')
+  if (isWithin(repositoryRoot, stageRoot))
+  {
+    throw exactError('invalid-input', 'Staged restore root must be outside the worktree.')
+  }
+
+  try
+  {
+    const loaded = await loadExactGitTree(repositoryRoot, input.treeOid, input.signal, limits)
+    await verifyLoadedTreeAtRoot(stageRoot, loaded, input.treeOid, input.signal, true)
+    const stagedContent = await readVerifiedStagedContent(stageRoot, loaded, input.signal)
+    const inventory = await collectRestoreInventory(repositoryRoot, loaded.entries, input.signal)
+    throwIfCancelled(input.signal)
+    await clearRestoreInventory(repositoryRoot, inventory, input.signal)
+    await writeStagedTree(repositoryRoot, loaded.entries, stagedContent, input.signal)
+    return {
+      treeOid: input.treeOid,
+      fileCount: loaded.fileCount,
+      byteCount: loaded.byteCount,
+    }
+  }
+  catch (cause)
+  {
+    if (cause instanceof ExactGitSnapshotError) throw cause
+    if (input.signal.aborted)
+    {
+      throw exactError('cancelled', 'Exact Git snapshot operation was cancelled.', cause)
+    }
+    throw exactError('git-failed', 'Staged exact Git worktree restore failed.', cause)
+  }
+}
+
+export async function verifyExactGitTreeRestore(
+  input: Omit<VerifyExactGitTreeInput, 'rootPath'>,
+): Promise<ExactGitTreeVerification>
+{
+  const limits = validatedLimits(input.limits)
+  throwIfCancelled(input.signal)
+  if (!OBJECT_ID.test(input.treeOid))
+  {
+    throw exactError('invalid-input', 'Restore verification requires a full Git tree object ID.')
+  }
+  const repositoryRoot = await validateRepositoryRoot(input.repositoryRoot, input.signal)
+  const loaded = await loadExactGitTree(repositoryRoot, input.treeOid, input.signal, limits)
+  const inventory = await collectRestoreInventory(repositoryRoot, loaded.entries, input.signal)
+  const expectedLeaves = new Set(loaded.entries.map((entry) => entry.path))
+  const unexpectedLeaves = inventory.removableLeaves.filter((path) => !expectedLeaves.has(path))
+  if (unexpectedLeaves.length > 0)
+  {
+    throw exactError(
+      'verification-failed',
+      `Restored worktree contains unexpected path '${unexpectedLeaves[0]}'.`,
+    )
+  }
+  return verifyLoadedTreeAtRoot(repositoryRoot, loaded, input.treeOid, input.signal, false)
 }
 
 export async function restoreExactGitTree(

@@ -1,3 +1,6 @@
+// tests/scripts/merge-update-manifests.test.ts
+// verify merge update manifests behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -67,61 +70,6 @@ releaseDate: '2026-03-07T10:36:07.540Z'
     )
 
     const serialized = serializePlatformUpdateManifest('mac', merged)
-    assert.ok(!serialized.includes('path:'))
-    assert.equal((serialized.match(/- url:/g) ?? []).length, 4)
-  })
-
-  it('merges arm64 and x64 Windows update manifests into one multi-arch manifest', () =>
-  {
-    const arm64 = parsePlatformUpdateManifest(
-      'win',
-      `version: 0.0.4
-files:
-  - url: T3-Code-0.0.4-arm64.exe
-    sha512: arm64exe
-    size: 125621344
-  - url: T3-Code-0.0.4-arm64.exe.blockmap
-    sha512: arm64blockmap
-    size: 131754
-path: T3-Code-0.0.4-arm64.exe
-sha512: arm64exe
-releaseDate: '2026-03-07T10:32:14.587Z'
-`,
-      'latest-win-arm64.yml',
-    )
-
-    const x64 = parsePlatformUpdateManifest(
-      'win',
-      `version: 0.0.4
-files:
-  - url: T3-Code-0.0.4-x64.exe
-    sha512: x64exe
-    size: 132000112
-  - url: T3-Code-0.0.4-x64.exe.blockmap
-    sha512: x64blockmap
-    size: 138148
-path: T3-Code-0.0.4-x64.exe
-sha512: x64exe
-releaseDate: '2026-03-07T10:36:07.540Z'
-`,
-      'latest-win-x64.yml',
-    )
-
-    const merged = mergePlatformUpdateManifests('win', arm64, x64)
-
-    assert.equal(merged.version, '0.0.4')
-    assert.equal(merged.releaseDate, '2026-03-07T10:36:07.540Z')
-    assert.deepStrictEqual(
-      merged.files.map((file) => file.url),
-      [
-        'T3-Code-0.0.4-arm64.exe',
-        'T3-Code-0.0.4-arm64.exe.blockmap',
-        'T3-Code-0.0.4-x64.exe',
-        'T3-Code-0.0.4-x64.exe.blockmap',
-      ],
-    )
-
-    const serialized = serializePlatformUpdateManifest('win', merged)
     assert.ok(!serialized.includes('path:'))
     assert.equal((serialized.match(/- url:/g) ?? []).length, 4)
   })

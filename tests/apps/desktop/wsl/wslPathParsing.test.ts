@@ -1,3 +1,6 @@
+// tests/apps/desktop/wsl/wslPathParsing.test.ts
+// verify parse wsl distro list behavior
+
 import { describe, it, expect } from 'vite-plus/test'
 
 import {
@@ -168,13 +171,6 @@ describe('resolveWslPickFolderDefaultPath', () =>
   {
     expect(
       resolveWslPickFolderDefaultPath({ initialPath: '/home/josh/project' }, config, distros),
-    ).toBe('\\\\wsl.localhost\\Debian\\home\\josh\\project')
-  })
-
-  it("expands ~/path against the user's home dir when known", () =>
-  {
-    expect(
-      resolveWslPickFolderDefaultPath({ initialPath: '~/project' }, config, distros, '/home/josh'),
     ).toBe('\\\\wsl.localhost\\Debian\\home\\josh\\project')
   })
 

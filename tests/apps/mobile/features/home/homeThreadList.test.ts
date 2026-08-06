@@ -34,6 +34,7 @@ function makeThread(
 ): EnvironmentThreadShell
 {
   return {
+    providerSwitch: null,
     modelSelection: { instanceId: ProviderInstanceId.make('codex'), model: 'gpt-5.4' },
     runtimeMode: 'full-access',
     interactionMode: 'default',
@@ -619,7 +620,7 @@ describe('buildHomeThreadGroups', () =>
     ]
 
     const group = buildGroups([project], threads)[0]
-    // Default view trims to recent threads...
+    // default view trims to recent threads...
     expect(group?.recentThreads.map((thread) => thread.id)).toEqual(['recent-1', 'recent-2'])
     // ...while full history stays available for the expanded view.
     expect(group?.threads.map((thread) => thread.id)).toEqual(['recent-1', 'recent-2', 'old'])
@@ -673,7 +674,7 @@ describe('buildHomeThreadGroups', () =>
     )
 
     const group = buildGroups([project], threads, { searchQuery: '456code' })[0]
-    // Search reaches the full history rather than the 3-thread fallback.
+    // search reaches the full history rather than the 3-thread fallback.
     expect(group?.recentThreads).toHaveLength(5)
     expect(group?.recentThreads.map((thread) => thread.id)).toEqual(
       group?.threads.map((thread) => thread.id),
@@ -721,7 +722,7 @@ describe('buildHomeThreadGroups', () =>
       }),
     ]
 
-    // Aggregated into one group by repository; the quick new-thread target
+    // aggregated into one group by repository; the quick new-thread target
     // must follow the newest thread (desktop), not the arbitrary first member.
     const groups = buildGroups([laptopProject, desktopProject], threads)
     expect(groups).toHaveLength(1)

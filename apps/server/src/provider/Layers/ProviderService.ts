@@ -1,16 +1,15 @@
 // apps/server/src/provider/Layers/ProviderService.ts
 // implements dynamic provider routing and session recovery
-/**
- * ProviderServiceLive - Cross-provider orchestration layer.
- *
- * Routes validated transport/API calls to provider adapters through
- * `ProviderAdapterRegistry` and `ProviderSessionDirectory`, and exposes a
- * unified provider event stream for subscribers.
- *
- * It does not implement provider protocol details (adapter concern).
- *
- * @module ProviderServiceLive
- */
+
+// ProviderServiceLive - Cross-provider orchestration layer.
+//
+// routes validated transport/API calls to provider adapters through
+// `ProviderAdapterRegistry` and `ProviderSessionDirectory`, and exposes a
+// unified provider event stream for subscribers.
+//
+// it does not implement provider protocol details (adapter concern).
+//
+// @module ProviderServiceLive
 import {
   ModelSelection,
   NonNegativeInt,
@@ -50,7 +49,7 @@ import {
   withMetrics,
 } from '../../observability/Metrics.ts'
 import { type ProviderAdapterError, ProviderValidationError } from '../Errors.ts'
-import type { ProviderAdapterShape } from '../Services/ProviderAdapter.ts'
+import type { ProviderAdapterShape, ProviderEffectContext } from '../Services/ProviderAdapter.ts'
 import * as ProviderAdapterRegistry from '../Services/ProviderAdapterRegistry.ts'
 import * as ProviderService from '../Services/ProviderService.ts'
 import * as ProviderSessionDirectory from '../Services/ProviderSessionDirectory.ts'
@@ -252,7 +251,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
 {
   const analytics = yield* Effect.service(AnalyticsService.AnalyticsService)
   const eventLoggers = yield* ProviderEventLoggers.ProviderEventLoggers
-  // Options-provided logger wins (test overrides); otherwise we take whatever
+  // options-provided logger wins (test overrides); otherwise we take whatever
   // the `ProviderEventLoggers` tag exposes — `undefined` means "no canonical
   // log writer is attached", which downstream code already handles as a
   // no-op.
@@ -465,7 +464,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     Effect.map((map) => Array.from(map.entries())),
   )
 
-  // Rebuild the map of id → adapter from the registry and fork a new event
+  // rebuild the map of id -> adapter from the registry and fork a new event
   // subscription for every instance that is either brand new or whose adapter
   // identity changed (indicating the underlying `ProviderInstance` was torn
   // down and rebuilt by `ProviderInstanceRegistry.reconcile`). Orphaned
@@ -512,6 +511,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     readonly binding: ProviderSessionDirectory.ProviderRuntimeBinding
     readonly operation: string
     readonly routingAuthority?: ProviderService.ProviderRoutingAuthority
+    readonly context?: ProviderEffectContext
   })
   {
     const bindingInstanceId = yield* requireBindingInstanceId(input.operation, input.binding)
@@ -581,17 +581,22 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload)
 
       yield* prepareMcpSession(input.binding.threadId, bindingInstanceId)
-      const resumed = yield* input.route.adapter
-        .startSession({
-          threadId: input.binding.threadId,
-          provider: input.binding.provider,
-          providerInstanceId: bindingInstanceId,
-          ...(persistedCwd ? { cwd: persistedCwd } : {}),
-          ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
-          ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
-          runtimeMode: input.binding.runtimeMode ?? 'full-access',
-        })
-        .pipe(Effect.onError(() => clearMcpSession(input.binding.threadId)))
+      const resumeInput = {
+        threadId: input.binding.threadId,
+        provider: input.binding.provider,
+        providerInstanceId: bindingInstanceId,
+        ...(persistedCwd ? { cwd: persistedCwd } : {}),
+        ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+        ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
+        runtimeMode: input.binding.runtimeMode ?? 'full-access',
+      } satisfies typeof ProviderSessionStartInput.Type
+      const resume =
+        input.context === undefined
+          ? input.route.adapter.startSession(resumeInput)
+          : input.route.adapter.startSession(resumeInput, input.context)
+      const resumed = yield* resume.pipe(
+        Effect.onError(() => clearMcpSession(input.binding.threadId)),
+      )
       if (resumed.provider !== input.route.adapter.provider)
       {
         yield* clearMcpSession(input.binding.threadId)
@@ -627,6 +632,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     readonly operation: string
     readonly allowRecovery: boolean
     readonly routingAuthority?: ProviderService.ProviderRoutingAuthority
+    readonly context?: ProviderEffectContext
   })
   {
     const bindingOption = yield* directory.getBinding(input.threadId)
@@ -676,6 +682,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       binding,
       operation: input.operation,
       ...(input.routingAuthority !== undefined ? { routingAuthority: input.routingAuthority } : {}),
+      ...(input.context !== undefined ? { context: input.context } : {}),
     })
     return {
       adapter: recovered.adapter,
@@ -688,6 +695,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   const stopStaleSessionsForThread = Effect.fn('stopStaleSessionsForThread')(function* (input: {
     readonly threadId: ThreadId
     readonly currentInstanceId: ProviderInstanceId
+    readonly context?: ProviderEffectContext
   })
   {
     const currentAdapters = yield* getAdapterEntries
@@ -704,7 +712,11 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                 return
               }
 
-              yield* adapter.stopSession(input.threadId).pipe(
+              const stop =
+                input.context === undefined
+                  ? adapter.stopSession(input.threadId)
+                  : adapter.stopSession(input.threadId, input.context)
+              yield* stop.pipe(
                 Effect.tap(() =>
                   analytics.record('provider.session.stopped', {
                     provider: adapter.provider,
@@ -724,7 +736,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   })
 
   const startSession: ProviderServiceMethod<'startSession'> = Effect.fn('startSession')(
-    function* (threadId, rawInput, routingAuthority)
+    function* (threadId, rawInput, routingAuthority, context)
     {
       const parsed = yield* decodeInputOrValidationError({
         operation: 'ProviderService.startSession',
@@ -822,14 +834,17 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         })
         const adapter = route.adapter
         yield* prepareMcpSession(threadId, resolvedInstanceId)
-        const session = yield* adapter
-          .startSession({
-            ...input,
-            providerInstanceId: resolvedInstanceId,
-            ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
-            ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
-          })
-          .pipe(Effect.onError(() => clearMcpSession(threadId)))
+        const adapterInput = {
+          ...input,
+          providerInstanceId: resolvedInstanceId,
+          ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
+          ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
+        }
+        const start =
+          context === undefined
+            ? adapter.startSession(adapterInput)
+            : adapter.startSession(adapterInput, context)
+        const session = yield* start.pipe(Effect.onError(() => clearMcpSession(threadId)))
 
         if (session.provider !== adapter.provider)
         {
@@ -847,6 +862,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         yield* stopStaleSessionsForThread({
           threadId,
           currentInstanceId: resolvedInstanceId,
+          ...(context !== undefined ? { context } : {}),
         })
         yield* upsertSessionBinding(sessionWithInstance, threadId, {
           continuationIdentity: route.info.continuationIdentity,
@@ -876,7 +892,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   )
 
   const sendTurn: ProviderServiceMethod<'sendTurn'> = Effect.fn('sendTurn')(
-    function* (rawInput, routingAuthority)
+    function* (rawInput, routingAuthority, context)
     {
       const parsed = yield* decodeInputOrValidationError({
         operation: 'ProviderService.sendTurn',
@@ -910,6 +926,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           operation: 'ProviderService.sendTurn',
           allowRecovery: true,
           ...(routingAuthority !== undefined ? { routingAuthority } : {}),
+          ...(context !== undefined ? { context } : {}),
         })
         metricProvider = routed.adapter.provider
         metricModel = input.modelSelection?.model
@@ -923,7 +940,9 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         yield* McpSessionRegistry.bindActiveMcpTurn(input.threadId)
         const adapterInput =
           routed.adapter.provider === 'codex' ? input : applyOrchestrateModeInstructions(input)
-        const turn = yield* routed.adapter.sendTurn(adapterInput)
+        const turn = yield* context === undefined
+          ? routed.adapter.sendTurn(adapterInput)
+          : routed.adapter.sendTurn(adapterInput, context)
         yield* McpSessionRegistry.bindActiveMcpTurn(input.threadId, turn.turnId)
         yield* directory.upsert({
           threadId: input.threadId,
@@ -964,7 +983,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   )
 
   const interruptTurn: ProviderServiceMethod<'interruptTurn'> = Effect.fn('interruptTurn')(
-    function* (rawInput)
+    function* (rawInput, context)
     {
       const input = yield* decodeInputOrValidationError({
         operation: 'ProviderService.interruptTurn',
@@ -978,6 +997,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           threadId: input.threadId,
           operation: 'ProviderService.interruptTurn',
           allowRecovery: true,
+          ...(context !== undefined ? { context } : {}),
         })
         metricProvider = routed.adapter.provider
         yield* Effect.annotateCurrentSpan({
@@ -986,7 +1006,9 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           'provider.thread_id': input.threadId,
           'provider.turn_id': input.turnId,
         })
-        yield* routed.adapter.interruptTurn(routed.threadId, input.turnId)
+        yield* context === undefined
+          ? routed.adapter.interruptTurn(routed.threadId, input.turnId)
+          : routed.adapter.interruptTurn(routed.threadId, input.turnId, context)
         yield* analytics.record('provider.turn.interrupted', {
           provider: routed.adapter.provider,
         })
@@ -1003,7 +1025,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   )
 
   const respondToRequest: ProviderServiceMethod<'respondToRequest'> = Effect.fn('respondToRequest')(
-    function* (rawInput)
+    function* (rawInput, context)
     {
       const input = yield* decodeInputOrValidationError({
         operation: 'ProviderService.respondToRequest',
@@ -1017,6 +1039,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           threadId: input.threadId,
           operation: 'ProviderService.respondToRequest',
           allowRecovery: true,
+          ...(context !== undefined ? { context } : {}),
         })
         metricProvider = routed.adapter.provider
         yield* Effect.annotateCurrentSpan({
@@ -1025,7 +1048,14 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           'provider.thread_id': input.threadId,
           'provider.request_id': input.requestId,
         })
-        yield* routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision)
+        yield* context === undefined
+          ? routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision)
+          : routed.adapter.respondToRequest(
+              routed.threadId,
+              input.requestId,
+              input.decision,
+              context,
+            )
         yield* analytics.record('provider.request.responded', {
           provider: routed.adapter.provider,
           decision: input.decision,
@@ -1044,7 +1074,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
 
   const respondToUserInput: ProviderServiceMethod<'respondToUserInput'> = Effect.fn(
     'respondToUserInput',
-  )(function* (rawInput)
+  )(function* (rawInput, context)
   {
     const input = yield* decodeInputOrValidationError({
       operation: 'ProviderService.respondToUserInput',
@@ -1058,6 +1088,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         threadId: input.threadId,
         operation: 'ProviderService.respondToUserInput',
         allowRecovery: true,
+        ...(context !== undefined ? { context } : {}),
       })
       metricProvider = routed.adapter.provider
       yield* Effect.annotateCurrentSpan({
@@ -1066,7 +1097,14 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         'provider.thread_id': input.threadId,
         'provider.request_id': input.requestId,
       })
-      yield* routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers)
+      yield* context === undefined
+        ? routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers)
+        : routed.adapter.respondToUserInput(
+            routed.threadId,
+            input.requestId,
+            input.answers,
+            context,
+          )
     }).pipe(
       withMetrics({
         counter: providerTurnsTotal,
@@ -1079,7 +1117,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   })
 
   const stopSession: ProviderServiceMethod<'stopSession'> = Effect.fn('stopSession')(
-    function* (rawInput)
+    function* (rawInput, context)
     {
       const input = yield* decodeInputOrValidationError({
         operation: 'ProviderService.stopSession',
@@ -1093,7 +1131,15 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           threadId: input.threadId,
           operation: 'ProviderService.stopSession',
           allowRecovery: false,
+          ...(context !== undefined ? { context } : {}),
         })
+        if (
+          input.expectedProviderInstanceId !== undefined &&
+          routed.instanceId !== input.expectedProviderInstanceId
+        )
+        {
+          return
+        }
         metricProvider = routed.adapter.provider
         yield* Effect.annotateCurrentSpan({
           'provider.operation': 'stop-session',
@@ -1102,7 +1148,9 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         })
         if (routed.isActive)
         {
-          yield* routed.adapter.stopSession(routed.threadId)
+          yield* context === undefined
+            ? routed.adapter.stopSession(routed.threadId)
+            : routed.adapter.stopSession(routed.threadId, context)
         }
         yield* clearMcpSession(input.threadId)
         yield* directory.upsert({
@@ -1250,7 +1298,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
 
   const rollbackConversation: ProviderServiceMethod<'rollbackConversation'> = Effect.fn(
     'rollbackConversation',
-  )(function* (rawInput)
+  )(function* (rawInput, context)
   {
     const input = yield* decodeInputOrValidationError({
       operation: 'ProviderService.rollbackConversation',
@@ -1268,6 +1316,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         threadId: input.threadId,
         operation: 'ProviderService.rollbackConversation',
         allowRecovery: true,
+        ...(context !== undefined ? { context } : {}),
       })
       metricProvider = routed.adapter.provider
       yield* Effect.annotateCurrentSpan({
@@ -1276,7 +1325,9 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         'provider.thread_id': input.threadId,
         'provider.rollback_turns': input.numTurns,
       })
-      yield* routed.adapter.rollbackThread(routed.threadId, input.numTurns)
+      yield* context === undefined
+        ? routed.adapter.rollbackThread(routed.threadId, input.numTurns)
+        : routed.adapter.rollbackThread(routed.threadId, input.numTurns, context)
       yield* analytics.record('provider.conversation.rolled_back', {
         provider: routed.adapter.provider,
         turns: input.numTurns,
@@ -1363,7 +1414,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     getInstanceInfo,
     hasRecoverableSession,
     rollbackConversation,
-    // Each access creates a fresh PubSub subscription so that multiple
+    // each access creates a fresh PubSub subscription so that multiple
     // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
     // independently receive all runtime events.
     get streamEvents(): ProviderServiceMethod<'streamEvents'>

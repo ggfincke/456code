@@ -1,3 +1,6 @@
+// tests/apps/server/auth/EnvironmentAuthPolicy.test.ts
+// verify environment auth policy behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
@@ -85,36 +88,33 @@ it.layer(NodeServices.layer)('EnvironmentAuthPolicy.layer', (it) =>
     ),
   )
 
-  it.effect('uses remote-reachable policy for wildcard web hosts', () =>
+  it.effect.each([
+    {
+      name: 'wildcard web hosts',
+      host: '0.0.0.0',
+      assertBootstrapMethods: true,
+    },
+    {
+      name: 'non-loopback web hosts',
+      host: '192.168.1.50',
+      assertBootstrapMethods: false,
+    },
+  ])('uses remote-reachable policy for $name', ({ host, assertBootstrapMethods }) =>
     Effect.gen(function* ()
     {
       const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy
       const descriptor = yield* policy.getDescriptor()
 
       expect(descriptor.policy).toBe('remote-reachable')
-      expect(descriptor.bootstrapMethods).toEqual(['one-time-token'])
+      if (assertBootstrapMethods)
+      {
+        expect(descriptor.bootstrapMethods).toEqual(['one-time-token'])
+      }
     }).pipe(
       Effect.provide(
         makeEnvironmentAuthPolicyLayer({
           mode: 'web',
-          host: '0.0.0.0',
-        }),
-      ),
-    ),
-  )
-
-  it.effect('uses remote-reachable policy for non-loopback web hosts', () =>
-    Effect.gen(function* ()
-    {
-      const policy = yield* EnvironmentAuthPolicy.EnvironmentAuthPolicy
-      const descriptor = yield* policy.getDescriptor()
-
-      expect(descriptor.policy).toBe('remote-reachable')
-    }).pipe(
-      Effect.provide(
-        makeEnvironmentAuthPolicyLayer({
-          mode: 'web',
-          host: '192.168.1.50',
+          host,
         }),
       ),
     ),

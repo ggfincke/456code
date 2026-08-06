@@ -1,3 +1,6 @@
+// apps/mobile/src/native/ComposerEditor.tsx
+// provide the fallback composer editor and its capabilities
+
 import { TextInputWrapper } from 'expo-paste-input'
 import { useImperativeHandle, useRef } from 'react'
 import { TextInput, type TextInput as RNTextInput } from 'react-native'
@@ -7,6 +10,9 @@ import { useFontFamily } from '../lib/useFontFamily'
 import { useScaledTextRole } from '../features/settings/appearance/useScaledTextRole'
 import { useNativePaste } from '../lib/useNativePaste'
 import type { ComposerEditorProps } from './ComposerEditor.types'
+import { resolveComposerEditorCapabilities } from './composerEditorCapabilities'
+
+export const composerEditorCapabilities = resolveComposerEditorCapabilities('fallback')
 
 export function ComposerEditor({
   ref,
@@ -64,6 +70,7 @@ export function ComposerEditor({
 }
 
 export type {
+  ComposerEditorCapabilities,
   ComposerEditorHandle,
   ComposerEditorProps,
   ComposerEditorSelection,

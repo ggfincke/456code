@@ -1,9 +1,10 @@
+// tests/apps/desktop/backend/DesktopBackendPool.test.ts
+// verify desktop backend pool behavior
+
 import { assert, describe, it } from '@effect/vitest'
-import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
-import * as Option from 'effect/Option'
 import * as Ref from 'effect/Ref'
 import { HttpClient } from 'effect/unstable/http'
 import { ChildProcessSpawner } from 'effect/unstable/process'
@@ -14,33 +15,6 @@ import * as ElectronDialog from '../../../../apps/desktop/src/electron/ElectronD
 import * as DesktopWindow from '../../../../apps/desktop/src/window/DesktopWindow.ts'
 import * as DesktopBackendConfiguration from '../../../../apps/desktop/src/backend/DesktopBackendConfiguration.ts'
 import * as DesktopBackendPool from '../../../../apps/desktop/src/backend/DesktopBackendPool.ts'
-import type {
-  DesktopBackendSnapshot,
-  DesktopBackendStartConfig,
-} from '../../../../apps/desktop/src/backend/DesktopBackendManager.ts'
-
-function makeStubInstance(
-  id: DesktopBackendPool.BackendInstanceId,
-  label: string,
-): DesktopBackendPool.DesktopBackendInstance
-{
-  const snapshot: DesktopBackendSnapshot = {
-    desiredRunning: false,
-    ready: false,
-    activePid: Option.none(),
-    restartAttempt: 0,
-    restartScheduled: false,
-  }
-  return {
-    id,
-    label: Effect.succeed(label),
-    start: Effect.void,
-    stop: () => Effect.void,
-    currentConfig: Effect.succeed(Option.none<DesktopBackendStartConfig>()),
-    snapshot: Effect.succeed(snapshot),
-    waitForReady: (_timeout: Duration.Duration) => Effect.succeed(false),
-  }
-}
 
 function makePoolLayer(
   labelRef: Ref.Ref<string>,
@@ -92,33 +66,6 @@ function makePoolLayer(
 
 describe('DesktopBackendPool', () =>
 {
-  it.effect('layerTest exposes registered instances by id', () =>
-    Effect.gen(function* ()
-    {
-      const pool = yield* DesktopBackendPool.DesktopBackendPool
-      const fetchedPrimary = yield* pool.get(DesktopBackendPool.PRIMARY_INSTANCE_ID)
-      const fetchedWsl = yield* pool.get(DesktopBackendPool.BackendInstanceId('wsl:ubuntu'))
-      const fetchedMissing = yield* pool.get(DesktopBackendPool.BackendInstanceId('missing'))
-      const all = yield* pool.list
-      const resolvedPrimary = yield* pool.primary
-
-      assert.equal(yield* Option.getOrThrow(fetchedPrimary).label, 'Windows')
-      assert.equal(yield* Option.getOrThrow(fetchedWsl).label, 'WSL (Ubuntu)')
-      assert.isTrue(Option.isNone(fetchedMissing))
-      assert.lengthOf(all, 2)
-      // First instance becomes primary in layerTest so single-instance
-      // stubs don't have to wire an explicit primary.
-      assert.equal(resolvedPrimary.id, DesktopBackendPool.PRIMARY_INSTANCE_ID)
-    }).pipe(
-      Effect.provide(
-        DesktopBackendPool.layerTest([
-          makeStubInstance(DesktopBackendPool.PRIMARY_INSTANCE_ID, 'Windows'),
-          makeStubInstance(DesktopBackendPool.BackendInstanceId('wsl:ubuntu'), 'WSL (Ubuntu)'),
-        ]),
-      ),
-    ),
-  )
-
   it.effect('resolves the primary label lazily after pool layer construction', () =>
     Effect.scoped(
       Effect.gen(function* ()

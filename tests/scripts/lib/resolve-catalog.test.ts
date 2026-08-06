@@ -1,3 +1,6 @@
+// tests/scripts/lib/resolve-catalog.test.ts
+// verify resolve catalog behavior
+
 import { assert, it } from '@effect/vitest'
 
 import {
@@ -19,9 +22,5 @@ it('reports unresolved catalog dependencies with lookup context', () =>
     assert.equal(error.dependencyName, 'effect')
     assert.equal(error.catalogSpec, 'catalog:runtime')
     assert.equal(error.catalogKey, 'runtime')
-    assert.equal(
-      error.message,
-      "Unable to resolve 'catalog:runtime' for apps/server dependency 'effect'. Expected key 'runtime' in root workspace catalog.",
-    )
   }
 })

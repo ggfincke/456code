@@ -19,22 +19,38 @@ import * as ManagedRuntime from 'effect/ManagedRuntime'
 import * as Metric from 'effect/Metric'
 import * as Option from 'effect/Option'
 import * as Queue from 'effect/Queue'
+import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { describe, expect, it } from 'vite-plus/test'
 
 import { PersistenceSqlError } from '../../../../../apps/server/src/persistence/Errors.ts'
+import {
+  AttachmentLifecycleRepository,
+  type AttachmentLifecycleRepositoryShape,
+} from '../../../../../apps/server/src/persistence/Services/AttachmentLifecycle.ts'
+import {
+  CheckpointRevertOperations,
+  type CheckpointRevertOperation,
+  type CheckpointRevertOperationsShape,
+} from '../../../../../apps/server/src/persistence/Services/CheckpointRevertOperations.ts'
 import { OrchestrationCommandReceiptRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts'
 import { OrchestrationEventStoreLive } from '../../../../../apps/server/src/persistence/Layers/OrchestrationEventStore.ts'
 import { SqlitePersistenceMemory } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
+import { AttachmentLifecycleRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/AttachmentLifecycle.ts'
 import {
   OrchestrationEventStore,
   type OrchestrationEventStoreShape,
 } from '../../../../../apps/server/src/persistence/Services/OrchestrationEventStore.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
+import {
+  OrchestrationCommandInvariantError,
+  OrchestrationCommandPreviouslyRejectedError,
+} from '../../../../../apps/server/src/orchestration/Errors.ts'
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { OrchestrationEngineService } from '../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
+import { dispatchWithAttachmentLifecycle } from '../../../../../apps/server/src/orchestration/dispatchWithAttachmentLifecycle.ts'
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -47,14 +63,56 @@ const asProjectId = (value: string): ProjectId => ProjectId.make(value)
 const asMessageId = (value: string): MessageId => MessageId.make(value)
 const asTurnId = (value: string): TurnId => TurnId.make(value)
 const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(value)
+const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError)
+const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
+  OrchestrationCommandPreviouslyRejectedError,
+)
 
-async function createOrchestrationSystem()
+function makeEngineAuxiliaryLayer(
+  options: {
+    readonly getActiveRevert?: (threadId: string) => Option.Option<CheckpointRevertOperation>
+    readonly associateAccepted?: AttachmentLifecycleRepositoryShape['associateAccepted']
+  } = {},
+)
+{
+  // real persistence-backed repo by default so row-level tests can stage and
+  // read back; only an explicit associateAccepted override swaps in a stub
+  const attachmentLayer =
+    options.associateAccepted === undefined
+      ? AttachmentLifecycleRepositoryLive
+      : Layer.succeed(
+          AttachmentLifecycleRepository,
+          AttachmentLifecycleRepository.of({
+            associateAccepted: options.associateAccepted,
+          } as AttachmentLifecycleRepositoryShape),
+        )
+  const checkpointReverts = CheckpointRevertOperations.of({
+    getActiveByThread: (threadId: string) =>
+      Effect.succeed(options.getActiveRevert?.(threadId) ?? Option.none()),
+  } as unknown as CheckpointRevertOperationsShape)
+  return Layer.mergeAll(
+    attachmentLayer,
+    Layer.succeed(CheckpointRevertOperations, checkpointReverts),
+  )
+}
+
+async function createOrchestrationSystem(
+  options: {
+    readonly getActiveRevert?: (threadId: string) => Option.Option<CheckpointRevertOperation>
+    readonly associateAccepted?: AttachmentLifecycleRepositoryShape['associateAccepted']
+  } = {},
+)
 {
   const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
     prefix: 't3-orchestration-engine-test-',
   })
+  // one layer value reused so both positions memoize to a single instance;
+  // it binds closest to the engine because OrchestrationProjectionPipelineLive
+  // re-exports AttachmentLifecycleRepositoryLive and would otherwise shadow it
+  const auxiliaryLayer = makeEngineAuxiliaryLayer(options)
   const orchestrationLayer = Layer.mergeAll(
     OrchestrationEngineLive.pipe(
+      Layer.provide(auxiliaryLayer),
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
     ),
@@ -62,6 +120,7 @@ async function createOrchestrationSystem()
   ).pipe(
     Layer.provide(OrchestrationEventStoreLive),
     Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+    Layer.provideMerge(auxiliaryLayer),
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provide(SqlitePersistenceMemory),
     Layer.provideMerge(ServerConfigLayer),
@@ -73,6 +132,7 @@ async function createOrchestrationSystem()
   return {
     engine,
     readModel: () => runtime.runPromise(snapshotQuery.getSnapshot()),
+    attachmentLifecycle: () => runtime.runPromise(Effect.service(AttachmentLifecycleRepository)),
     run: <A, E>(effect: Effect.Effect<A, E>) => runtime.runPromise(effect),
     dispose: () => runtime.dispose(),
   }
@@ -96,6 +156,172 @@ const hasMetricSnapshot = (
 
 describe('OrchestrationEngine', () =>
 {
+  it('gates turn starts until a checkpoint revert finishes cleanup', async () =>
+  {
+    const phases = new Map<string, CheckpointRevertOperation['phase']>([
+      ['thread-gate-admitted', 'admitted'],
+      ['thread-gate-started', 'restore-started'],
+      ['thread-gate-manual', 'manual-required'],
+      ['thread-gate-projected', 'projection-finalized'],
+      ['thread-gate-cleanup', 'cleanup-pending'],
+      ['thread-gate-completed', 'completed'],
+    ])
+    const associations: string[] = []
+    const system = await createOrchestrationSystem({
+      getActiveRevert: (threadId) =>
+      {
+        const phase = phases.get(threadId)
+        return phase === undefined
+          ? Option.none()
+          : Option.some({
+              operationId: `operation-${threadId}`,
+              threadId,
+              targetRef: `refs/t3/checkpoints/${threadId}/1`,
+              targetTurnCount: 1,
+              targetTree: null,
+              cwd: '/tmp/worktree',
+              repositoryCommonDir: null,
+              stagePath: null,
+              phase,
+              attemptCount: 0,
+              lastError: null,
+              providerInstanceId: null,
+              providerSessionId: null,
+              providerThreadId: null,
+              providerOutcome: null,
+              providerOutcomeJson: null,
+              projectionStatus: null,
+              staleRefsJson: null,
+              cleanupStatus: null,
+              manualResumePhase: phase === 'manual-required' ? 'restore-started' : null,
+              createdAt: now(),
+              updatedAt: now(),
+            })
+      },
+      associateAccepted: (input) =>
+        Effect.sync(() =>
+        {
+          associations.push(input.commandId)
+        }),
+    })
+    const { engine } = system
+    const projectId = asProjectId('project-revert-gate')
+    await system.run(
+      engine.dispatch({
+        type: 'project.create',
+        commandId: CommandId.make('cmd-revert-gate-project'),
+        projectId,
+        title: 'Revert Gate Project',
+        workspaceRoot: '/tmp/revert-gate',
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5-codex',
+        },
+        createdAt: now(),
+      }),
+    )
+
+    for (const threadId of phases.keys())
+    {
+      await system.run(
+        engine.dispatch({
+          type: 'thread.create',
+          commandId: CommandId.make(`cmd-create-${threadId}`),
+          threadId: ThreadId.make(threadId),
+          projectId,
+          title: threadId,
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5-codex',
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          branch: null,
+          worktreePath: null,
+          createdAt: now(),
+        }),
+      )
+    }
+
+    const blockedPhases = [
+      ['admitted', 'admitted'],
+      ['restore-started', 'started'],
+      ['manual-required', 'manual'],
+      ['projection-finalized', 'projected'],
+      ['cleanup-pending', 'cleanup'],
+    ] as const
+
+    for (const [phase, phaseSuffix] of blockedPhases)
+    {
+      const threadId = `thread-gate-${phaseSuffix}`
+      const dispatchTurn = () =>
+        engine.dispatch({
+          type: 'thread.turn.start',
+          commandId: CommandId.make(`cmd-turn-${phase}`),
+          threadId: ThreadId.make(threadId),
+          message: {
+            messageId: asMessageId(`message-${phase}`),
+            role: 'user',
+            text: 'blocked',
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          createdAt: now(),
+        })
+      const result = await system.run(Effect.result(dispatchTurn()))
+      expect(result._tag).toBe('Failure')
+      if (result._tag === 'Failure')
+      {
+        expect(isOrchestrationCommandInvariantError(result.failure)).toBe(true)
+        expect(result.failure).toMatchObject({
+          code: 'checkpoint-revert-in-progress',
+        })
+        expect(result.failure.message).toContain(`phase '${phase}'`)
+      }
+
+      const replay = await system.run(Effect.result(dispatchTurn()))
+      expect(replay._tag).toBe('Failure')
+      if (replay._tag === 'Failure')
+      {
+        expect(isOrchestrationCommandPreviouslyRejectedError(replay.failure)).toBe(true)
+        expect(replay.failure).toMatchObject({
+          code: 'checkpoint-revert-in-progress',
+        })
+      }
+    }
+
+    await system.run(
+      engine.dispatch({
+        type: 'thread.meta.update',
+        commandId: CommandId.make('cmd-meta-while-revert-active'),
+        threadId: ThreadId.make('thread-gate-admitted'),
+        title: 'Non-turn command allowed',
+      }),
+    )
+    for (const suffix of ['completed'] as const)
+    {
+      await system.run(
+        engine.dispatch({
+          type: 'thread.turn.start',
+          commandId: CommandId.make(`cmd-turn-${suffix}`),
+          threadId: ThreadId.make(`thread-gate-${suffix}`),
+          message: {
+            messageId: asMessageId(`message-${suffix}`),
+            role: 'user',
+            text: 'allowed',
+            attachments: [],
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          createdAt: now(),
+        }),
+      )
+    }
+    expect(associations).toEqual(['cmd-turn-completed'])
+    await system.dispose()
+  })
+
   it('bootstraps command handling from persisted projections without reading the full snapshot', async () =>
   {
     let nextSequence = 8
@@ -152,6 +378,7 @@ describe('OrchestrationEngine', () =>
           branch: null,
           worktreePath: null,
           latestTurn: null,
+          providerSwitch: null,
           createdAt: '2026-03-03T00:00:02.000Z',
           updatedAt: '2026-03-03T00:00:03.000Z',
           archivedAt: null,
@@ -202,6 +429,7 @@ describe('OrchestrationEngine', () =>
       ),
       Layer.provide(Layer.succeed(OrchestrationEventStore, eventStore)),
       Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+      Layer.provideMerge(makeEngineAuxiliaryLayer()),
       Layer.provide(SqlitePersistenceMemory),
       Layer.provideMerge(NodeServices.layer),
     )
@@ -284,6 +512,116 @@ describe('OrchestrationEngine', () =>
     const readModelA = await system.readModel()
     const readModelB = await system.readModel()
     expect(readModelB).toEqual(readModelA)
+    await system.dispose()
+  })
+
+  it('owns staged attachments with the appended message event sequence', async () =>
+  {
+    const createdAt = now()
+    const system = await createOrchestrationSystem()
+    const { engine } = system
+    const commandId = CommandId.make('cmd-turn-attachment')
+    const threadId = ThreadId.make('thread-attachment')
+    const messageId = asMessageId('message-attachment')
+
+    await system.run(
+      engine.dispatch({
+        type: 'project.create',
+        commandId: CommandId.make('cmd-project-attachment-create'),
+        projectId: asProjectId('project-attachment'),
+        title: 'Attachment Project',
+        workspaceRoot: '/tmp/project-attachment',
+        defaultModelSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5-codex',
+        },
+        createdAt,
+      }),
+    )
+    await system.run(
+      engine.dispatch({
+        type: 'thread.create',
+        commandId: CommandId.make('cmd-thread-attachment-create'),
+        threadId,
+        projectId: asProjectId('project-attachment'),
+        title: 'Attachment Thread',
+        modelSelection: {
+          instanceId: ProviderInstanceId.make('codex'),
+          model: 'gpt-5-codex',
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        branch: null,
+        worktreePath: null,
+        createdAt,
+      }),
+    )
+
+    const attachmentLifecycle = await system.attachmentLifecycle()
+    await system.run(
+      attachmentLifecycle.stage({
+        stagingKey: 'engine-staging-key',
+        commandId,
+        threadId,
+        messageId,
+        attachmentIndex: 0,
+        attachmentId: 'thread-attachment-00000000-0000-4000-8000-000000000001',
+        stagingRelativePath: '.staging/engine-staging-key/attachment.png',
+        relativePath: 'attachment.png',
+        mimeType: 'image/png',
+        byteCount: 4,
+        contentDigest: 'abcd',
+        now: createdAt,
+      }),
+    )
+
+    const command = {
+      type: 'thread.turn.start' as const,
+      commandId,
+      threadId,
+      message: {
+        messageId,
+        role: 'user' as const,
+        text: 'inspect this image',
+        attachments: [
+          {
+            type: 'image' as const,
+            id: 'thread-attachment-00000000-0000-4000-8000-000000000001',
+            name: 'attachment.png',
+            mimeType: 'image/png',
+            sizeBytes: 4,
+          },
+        ],
+      },
+      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+      runtimeMode: 'approval-required' as const,
+      createdAt,
+    }
+    const result = await system.run(engine.dispatch(command))
+    const events = await system.run(
+      Stream.runCollect(engine.readEvents(0)).pipe(
+        Effect.map((chunk): OrchestrationEvent[] => Array.from(chunk)),
+      ),
+    )
+    const messageEvent = events.find(
+      (event) => event.commandId === commandId && event.type === 'thread.message-sent',
+    )
+    expect(messageEvent).toBeDefined()
+    expect(messageEvent?.sequence).not.toBe(result.sequence)
+
+    const row = await system.run(
+      attachmentLifecycle.getByStagingKey('engine-staging-key').pipe(Effect.map(Option.getOrThrow)),
+    )
+    expect(row.state).toBe('owned')
+    expect(row.ownerSequence).toBe(messageEvent?.sequence)
+    expect(row.ownerEventType).toBe('thread.message-sent')
+
+    const duplicate = await system.run(engine.dispatch(command))
+    expect(duplicate.sequence).toBe(result.sequence)
+    const duplicateRow = await system.run(
+      attachmentLifecycle.getByStagingKey('engine-staging-key').pipe(Effect.map(Option.getOrThrow)),
+    )
+    expect(duplicateRow.ownerSequence).toBe(messageEvent?.sequence)
     await system.dispose()
   })
 
@@ -795,6 +1133,7 @@ describe('OrchestrationEngine', () =>
         Layer.provide(OrchestrationProjectionPipelineLive),
         Layer.provide(Layer.succeed(OrchestrationEventStore, flakyStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provideMerge(makeEngineAuxiliaryLayer()),
         Layer.provide(RepositoryIdentityResolver.layer),
         Layer.provide(SqlitePersistenceMemory),
         Layer.provideMerge(ServerConfigLayer),
@@ -903,6 +1242,7 @@ describe('OrchestrationEngine', () =>
         Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, flakyProjectionPipeline)),
         Layer.provide(OrchestrationEventStoreLive),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provideMerge(makeEngineAuxiliaryLayer()),
         Layer.provide(RepositoryIdentityResolver.layer),
         Layer.provide(SqlitePersistenceMemory),
         Layer.provide(NodeServices.layer),
@@ -952,16 +1292,53 @@ describe('OrchestrationEngine', () =>
         messageId: asMessageId('msg-atomic-1'),
         role: 'user' as const,
         text: 'hello',
-        attachments: [],
+        attachments: [
+          {
+            type: 'image' as const,
+            id: 'thread-atomic-00000000-0000-4000-8000-000000000001',
+            name: 'attachment.png',
+            mimeType: 'image/png',
+            sizeBytes: 4,
+          },
+        ],
       },
       interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
       runtimeMode: 'approval-required' as const,
       createdAt,
     }
 
-    await expect(runtime.runPromise(engine.dispatch(turnStartCommand))).rejects.toThrow(
-      'projection failed',
+    const attachmentLifecycle = await runtime.runPromise(
+      Effect.service(AttachmentLifecycleRepository),
     )
+    const stageInput = {
+      stagingKey: 'atomic-staging-key',
+      commandId: turnStartCommand.commandId,
+      threadId: turnStartCommand.threadId,
+      messageId: turnStartCommand.message.messageId,
+      attachmentIndex: 0,
+      attachmentId: turnStartCommand.message.attachments[0]!.id,
+      stagingRelativePath: '.staging/atomic-staging-key/attachment.png',
+      relativePath: 'atomic-attachment.png',
+      mimeType: 'image/png',
+      byteCount: 4,
+      contentDigest: 'abcd',
+      now: createdAt,
+    } as const
+    await runtime.runPromise(attachmentLifecycle.stage(stageInput))
+
+    await expect(
+      runtime.runPromise(
+        dispatchWithAttachmentLifecycle(turnStartCommand, engine.dispatch(turnStartCommand)),
+      ),
+    ).rejects.toThrow('projection failed')
+
+    const failedAttachment = await runtime.runPromise(
+      attachmentLifecycle
+        .getByStagingKey(stageInput.stagingKey)
+        .pipe(Effect.map(Option.getOrThrow)),
+    )
+    expect(failedAttachment.state).toBe('cleanup_pending')
+    expect(failedAttachment.ownerSequence).toBeNull()
 
     const eventsAfterFailure = await runtime.runPromise(
       Stream.runCollect(engine.readEvents(0)).pipe(
@@ -973,6 +1350,7 @@ describe('OrchestrationEngine', () =>
       'thread.created',
     ])
 
+    await runtime.runPromise(attachmentLifecycle.stage(stageInput))
     const retryResult = await runtime.runPromise(engine.dispatch(turnStartCommand))
     expect(retryResult.sequence).toBe(4)
 
@@ -990,6 +1368,17 @@ describe('OrchestrationEngine', () =>
     expect(
       eventsAfterRetry.filter((event) => event.commandId === turnStartCommand.commandId),
     ).toHaveLength(2)
+    const ownedAttachment = await runtime.runPromise(
+      attachmentLifecycle
+        .getByStagingKey(stageInput.stagingKey)
+        .pipe(Effect.map(Option.getOrThrow)),
+    )
+    const retryMessageEvent = eventsAfterRetry.find(
+      (event) =>
+        event.commandId === turnStartCommand.commandId && event.type === 'thread.message-sent',
+    )
+    expect(ownedAttachment.state).toBe('owned')
+    expect(ownedAttachment.ownerSequence).toBe(retryMessageEvent?.sequence)
 
     await runtime.dispose()
   })
@@ -1052,6 +1441,7 @@ describe('OrchestrationEngine', () =>
         Layer.provide(Layer.succeed(OrchestrationProjectionPipeline, flakyProjectionPipeline)),
         Layer.provide(Layer.succeed(OrchestrationEventStore, nonTransactionalStore)),
         Layer.provide(OrchestrationCommandReceiptRepositoryLive),
+        Layer.provideMerge(makeEngineAuxiliaryLayer()),
         Layer.provide(RepositoryIdentityResolver.layer),
         Layer.provide(SqlitePersistenceMemory),
         Layer.provide(NodeServices.layer),

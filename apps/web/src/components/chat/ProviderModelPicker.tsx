@@ -22,15 +22,13 @@ import {
 import type { ProviderInstanceEntry } from '../../providerInstances'
 
 export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
-  /**
-   * The instance currently selected in the composer. Drives the trigger
-   * icon, label and the default-highlighted combobox row.
-   */
+  // the instance currently selected in the composer. Drives the trigger
+  // icon, label and the default-highlighted combobox row.
   activeInstanceId: ProviderInstanceId
   model: string
   lockedProvider: ProviderDriverKind | null
   lockedContinuationGroupKey?: string | null
-  /** Instance entries rendered in the sidebar + used to resolve display name. */
+  // instance entries rendered in the sidebar + used to resolve display name.
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>
   keybindings?: ResolvedKeybindingsConfig
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<ModelEsque>>
@@ -51,7 +49,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
   const [uncontrolledIsMenuOpen, setUncontrolledIsMenuOpen] = useState(false)
   const isMenuOpen = props.open ?? uncontrolledIsMenuOpen
 
-  // Resolve the active instance entry by exact routing key. The composer
+  // resolve the active instance entry by exact routing key. The composer
   // resolves fallbacks before rendering this component; if the selected
   // instance disappears, do not infer a replacement from its driver kind.
   const activeEntry = useMemo(() =>
@@ -63,7 +61,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
 
   const activeInstanceId = props.activeInstanceId
   const selectedInstanceOptions = props.modelOptionsByInstance.get(activeInstanceId) ?? []
-  // If the current slug belongs to a different instance (for example after
+  // if the current slug belongs to a different instance (for example after
   // a provider switch or disable), prefer the active instance's first
   // option so the trigger icon and label stay in sync instead of showing
   // a stale foreign slug.
@@ -76,6 +74,13 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
     (entry) => activeEntry !== null && entry.driverKind === activeEntry.driverKind,
   ).length
   const showInstanceBadge = Boolean(activeEntry?.accentColor) || duplicateDriverCount > 1
+  // the trigger shows the instance as an icon and the model as text, so without
+  // a name of its own it announces a model with no provider behind it
+  const triggerAriaLabel =
+    props.triggerAriaLabel ??
+    (activeEntry
+      ? `Change provider and model — currently ${activeEntry.displayName}, ${triggerTitle}`
+      : `Change provider and model — currently ${triggerTitle}`)
 
   const setIsMenuOpen = (open: boolean) =>
   {
@@ -166,7 +171,7 @@ export const ProviderModelPicker = memo(function ProviderModelPicker(props: {
       <PopoverTrigger
         render={
           <Button
-            aria-label={props.triggerAriaLabel}
+            aria-label={triggerAriaLabel}
             size="sm"
             variant={props.triggerVariant ?? 'ghost'}
             data-chat-provider-model-picker="true"

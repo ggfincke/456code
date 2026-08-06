@@ -1,3 +1,6 @@
+// tests/apps/mobile/lib/storage.test.ts
+// verify mobile connection storage behavior
+
 import { EnvironmentId } from '@t3tools/contracts'
 import { beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
@@ -46,6 +49,13 @@ const mocks = vi.hoisted(() =>
       withExclusiveTransactionAsync: vi.fn(
         (run: (transaction: { execAsync: () => Promise<void> }) => Promise<void>) =>
           run({ execAsync: () => Promise.resolve() }),
+      ),
+      // migrate probes the cleanup-intents shape; report the generation
+      // column as present so the fake skips the ALTER TABLE arm
+      getAllAsync: vi.fn((sql: string) =>
+        sql.includes('PRAGMA table_info')
+          ? Promise.resolve([{ name: 'generation' }])
+          : Promise.resolve([]),
       ),
       getFirstAsync: vi.fn((sql: string) =>
       {

@@ -125,14 +125,10 @@ describe('ssh tunnel scripts', () =>
     assert.include(script, 'nvm use --silent default')
     assert.include(script, 'for T3_NODE_BIN in "$NVM_DIR"/versions/node/*/bin')
     assert.notInclude(script, 'ensure $NVM_DIR/nvm.sh is available')
-  })
 
-  it('does not hard-code a remote node engine range', () =>
-  {
-    const script = buildRemoteT3RunnerScript()
-
-    assert.include(script, "T3_NODE_ENGINE_RANGE=''")
-    assert.notInclude(script, TEST_NODE_ENGINE_RANGE)
+    const defaultScript = buildRemoteT3RunnerScript()
+    assert.include(defaultScript, "T3_NODE_ENGINE_RANGE=''")
+    assert.notInclude(defaultScript, TEST_NODE_ENGINE_RANGE)
   })
 
   it('shell-quotes package specs in the remote t3 runner', () =>
@@ -316,46 +312,21 @@ describe('ssh tunnel scripts', () =>
     )
   })
 
-  it.effect('accepts pretty-printed pairing JSON from the remote CLI', () =>
-  {
-    const target = {
-      alias: 'devbox',
-      hostname: 'devbox.example.com',
-      username: 'julius',
-      port: 2222,
-    } as const
-    const spawner = ChildProcessSpawner.make(() =>
-      Effect.succeed(
-        makeSuccessfulProcess(`{
+  it.effect.each([
+    {
+      label: 'from the remote CLI',
+      stdout: `{
   "id": "88941235-6ed5-4184-a2ff-5339e2075958",
   "credential": "LCL4R2TPHDKQ",
   "scopes": ["orchestration:read"],
   "expiresAt": "2026-04-29T01:01:20.994Z"
 }
 
-`),
-      ),
-    )
-    const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)
-    const processLayer = Layer.merge(NodeServices.layer, spawnerLayer)
-    return Effect.gen(function* ()
+`,
+    },
     {
-      const result = yield* issueRemotePairingToken(target)
-      assert.equal(result.credential, 'LCL4R2TPHDKQ')
-    }).pipe(Effect.provide(processLayer))
-  })
-
-  it.effect('accepts pretty-printed pairing JSON after remote shell startup noise', () =>
-  {
-    const target = {
-      alias: 'devbox',
-      hostname: 'devbox.example.com',
-      username: 'julius',
-      port: 2222,
-    } as const
-    const spawner = ChildProcessSpawner.make(() =>
-      Effect.succeed(
-        makeSuccessfulProcess(`loaded nvm default
+      label: 'after remote shell startup noise',
+      stdout: `loaded nvm default
 {
   "id": "88941235-6ed5-4184-a2ff-5339e2075958",
   "credential": "LCL4R2TPHDKQ",
@@ -363,9 +334,17 @@ describe('ssh tunnel scripts', () =>
   "expiresAt": "2026-04-29T01:01:20.994Z"
 }
 
-`),
-      ),
-    )
+`,
+    },
+  ])('accepts pretty-printed pairing JSON $label', ({ stdout }) =>
+  {
+    const target = {
+      alias: 'devbox',
+      hostname: 'devbox.example.com',
+      username: 'julius',
+      port: 2222,
+    } as const
+    const spawner = ChildProcessSpawner.make(() => Effect.succeed(makeSuccessfulProcess(stdout)))
     const spawnerLayer = Layer.succeed(ChildProcessSpawner.ChildProcessSpawner, spawner)
     const processLayer = Layer.merge(NodeServices.layer, spawnerLayer)
     return Effect.gen(function* ()

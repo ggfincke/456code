@@ -1,3 +1,6 @@
+// tests/apps/server/provider/acp/CursorAcpSupport.test.ts
+// verify build cursor acp spawn input behavior
+
 import * as Effect from 'effect/Effect'
 import type * as EffectAcpSchema from 'effect-acp/schema'
 import { describe, expect, it } from 'vite-plus/test'
@@ -55,30 +58,31 @@ const parameterizedGpt54ConfigOptions: ReadonlyArray<EffectAcpSchema.SessionConf
 
 describe('buildCursorAcpSpawnInput', () =>
 {
-  it('builds the default Cursor ACP command', () =>
+  it.each([
+    {
+      name: 'default Cursor ACP command',
+      settings: undefined,
+      expected: {
+        command: 'cursor-agent',
+        args: ['acp'],
+        cwd: '/tmp/project',
+      },
+    },
+    {
+      name: 'configured api endpoint',
+      settings: {
+        binaryPath: '/usr/local/bin/agent',
+        apiEndpoint: 'http://localhost:3000',
+      },
+      expected: {
+        command: '/usr/local/bin/agent',
+        args: ['-e', 'http://localhost:3000', 'acp'],
+        cwd: '/tmp/project',
+      },
+    },
+  ])('builds $name', ({ settings, expected }) =>
   {
-    expect(buildCursorAcpSpawnInput(undefined, '/tmp/project')).toEqual({
-      command: 'cursor-agent',
-      args: ['acp'],
-      cwd: '/tmp/project',
-    })
-  })
-
-  it('includes the configured api endpoint when present', () =>
-  {
-    expect(
-      buildCursorAcpSpawnInput(
-        {
-          binaryPath: '/usr/local/bin/agent',
-          apiEndpoint: 'http://localhost:3000',
-        },
-        '/tmp/project',
-      ),
-    ).toEqual({
-      command: '/usr/local/bin/agent',
-      args: ['-e', 'http://localhost:3000', 'acp'],
-      cwd: '/tmp/project',
-    })
+    expect(buildCursorAcpSpawnInput(settings, '/tmp/project')).toEqual(expected)
   })
 })
 

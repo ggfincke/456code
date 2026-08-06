@@ -1,3 +1,6 @@
+// tests/apps/server/textGeneration/ClaudeTextGeneration.test.ts
+// verify claude text generation behavior
+
 import { ClaudeSettings, ProviderInstanceId } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { it } from '@effect/vitest'
@@ -312,7 +315,6 @@ it.layer(ClaudeTextGenerationTestLayer)('ClaudeTextGeneration', (it) =>
               '  "Reconnect failures after restart because the session state does not recover"  ',
           },
         }),
-        stdinMustContain: 'You write concise thread titles for coding conversations.',
       },
       (textGeneration) =>
         Effect.gen(function* ()

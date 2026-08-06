@@ -1,3 +1,6 @@
+// packages/client-runtime/src/state/threadCommands.ts
+// manage create thread environment atoms state
+
 import * as Crypto from 'effect/Crypto'
 import { Atom } from 'effect/unstable/reactivity'
 
@@ -16,6 +19,7 @@ import {
   type SnoozeThreadInput,
   type StartThreadTurnInput,
   type StopThreadSessionInput,
+  type SwitchThreadProviderInput,
   type UnarchiveThreadInput,
   type UnsettleThreadInput,
   type UnsnoozeThreadInput,
@@ -33,6 +37,7 @@ import {
   snoozeThread,
   startThreadTurn,
   stopThreadSession,
+  switchThreadProvider,
   unarchiveThread,
   unsettleThread,
   unsnoozeThread,
@@ -54,6 +59,7 @@ export type {
   SnoozeThreadInput,
   StartThreadTurnInput,
   StopThreadSessionInput,
+  SwitchThreadProviderInput,
   UnarchiveThreadInput,
   UnsettleThreadInput,
   UnsnoozeThreadInput,
@@ -170,6 +176,14 @@ export function createThreadEnvironmentAtoms<R, E>(
     stopSession: createEnvironmentCommand(runtime, {
       label: 'environment-data:commands:thread:stop-session',
       execute: (input: StopThreadSessionInput) => stopThreadSession(input),
+      scheduler,
+      concurrency,
+    }),
+    // shares the per-thread serial key with the other thread commands so a
+    // switch cannot interleave with a queued turn on the same thread.
+    switchProvider: createEnvironmentCommand(runtime, {
+      label: 'environment-data:commands:thread:switch-provider',
+      execute: (input: SwitchThreadProviderInput) => switchThreadProvider(input),
       scheduler,
       concurrency,
     }),

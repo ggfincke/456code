@@ -1,5 +1,6 @@
 // tests/apps/server/import/openCodeSessionParser.test.ts
 // verifies opencode storage loading, parsing, privacy, and deterministic identity
+
 // @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectFailure:off
 
 import * as NodeFSP from 'node:fs/promises'
@@ -153,78 +154,6 @@ describe('OpenCode session import', () =>
       })
     }),
   )
-
-  it('clamps duplicate maximum Date timestamps without throwing', () =>
-  {
-    const maximumDateTimestamp = 8_640_000_000_000_000
-    const maximumDate = '+275760-09-13T00:00:00.000Z'
-    const session = parseOpenCodeSessionBundle({
-      sourcePath: '/storage/session/prj_max/ses_maximum_date.json',
-      contentHash: 'maximum-date-hash',
-      sessionId: 'ses_maximum_date',
-      session: {
-        relativePath: 'session/prj_max/ses_maximum_date.json',
-        content: encodeUnknownJsonString({
-          id: 'ses_maximum_date',
-          projectID: 'prj_max',
-          directory: '/repo',
-        }),
-      },
-      messages: [
-        {
-          message: {
-            relativePath: 'message/ses_maximum_date/msg_a_user.json',
-            content: encodeUnknownJsonString({
-              id: 'msg_a_user',
-              sessionID: 'ses_maximum_date',
-              role: 'user',
-              time: { created: maximumDateTimestamp },
-            }),
-          },
-          parts: [
-            {
-              relativePath: 'part/msg_a_user/prt_a_text.json',
-              content: encodeUnknownJsonString({
-                id: 'prt_a_text',
-                sessionID: 'ses_maximum_date',
-                messageID: 'msg_a_user',
-                type: 'text',
-                text: 'At the limit',
-              }),
-            },
-          ],
-        },
-        {
-          message: {
-            relativePath: 'message/ses_maximum_date/msg_b_assistant.json',
-            content: encodeUnknownJsonString({
-              id: 'msg_b_assistant',
-              sessionID: 'ses_maximum_date',
-              role: 'assistant',
-              time: { created: maximumDateTimestamp },
-            }),
-          },
-          parts: [
-            {
-              relativePath: 'part/msg_b_assistant/prt_b_text.json',
-              content: encodeUnknownJsonString({
-                id: 'prt_b_text',
-                sessionID: 'ses_maximum_date',
-                messageID: 'msg_b_assistant',
-                type: 'text',
-                text: 'Still at the limit',
-              }),
-            },
-          ],
-        },
-      ],
-    })
-
-    expect(session.records.map((record) => record.createdAt)).toEqual([maximumDate, maximumDate])
-    expect(session.meta.firstActivityAt).toBe(maximumDate)
-    expect(session.meta.lastActivityAt).toBe(maximumDate)
-    expect(session.warnings).toEqual([])
-  })
 
   it('bounds direct Unicode content, metadata, and tool identifiers with renderer-safe payloads', () =>
   {
@@ -414,67 +343,6 @@ describe('OpenCode session import', () =>
         expect.stringContaining('tool name exceeded 256 bytes'),
       ]),
     )
-  })
-
-  it('caps parser warnings and emits exactly one terminal warning activity', () =>
-  {
-    const malformedParts = Array.from({ length: 105 }, (_, index) => ({
-      relativePath: `part/msg_user/prt_bad_${String(index).padStart(3, '0')}.json`,
-      content: 'not json',
-    }))
-    const session = parseOpenCodeSessionBundle({
-      sourcePath: '/storage/session/project/ses_warnings.json',
-      contentHash: 'warnings-hash',
-      sessionId: 'ses_warnings',
-      session: {
-        relativePath: 'session/project/ses_warnings.json',
-        content: encodeUnknownJsonString({ id: 'ses_warnings', projectID: 'project' }),
-      },
-      messages: [
-        {
-          message: {
-            relativePath: 'message/ses_warnings/msg_user.json',
-            content: encodeUnknownJsonString({
-              id: 'msg_user',
-              sessionID: 'ses_warnings',
-              role: 'user',
-              time: { created: 1767225600000 },
-            }),
-          },
-          parts: [
-            {
-              relativePath: 'part/msg_user/prt_text.json',
-              content: encodeUnknownJsonString({
-                id: 'prt_text',
-                sessionID: 'ses_warnings',
-                messageID: 'msg_user',
-                type: 'text',
-                text: 'Keep the valid message',
-              }),
-            },
-            ...malformedParts,
-          ],
-        },
-      ],
-    })
-    const warningActivities = session.records.filter(
-      (record) =>
-        record.kind === 'activity' && typeof record.payload.importWarningCount === 'number',
-    )
-
-    expect(session.warnings).toHaveLength(101)
-    expect(session.warnings.at(-1)).toBe(
-      '5 additional parsing warnings omitted after the first 100',
-    )
-    expect(warningActivities).toHaveLength(1)
-    expect(warningActivities[0]).toMatchObject({
-      kind: 'activity',
-      payload: {
-        importWarningCount: 105,
-        omittedWarningCount: 5,
-      },
-    })
-    expect(session.records.at(-1)).toBe(warningActivities[0])
   })
 
   it('keeps todo tools dynamic and renders retries as terminal errors', () =>

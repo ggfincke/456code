@@ -1,5 +1,6 @@
 // tests/apps/server/provider/Layers/ProviderService.test.ts
 // verifies provider routing, lazy recovery, persistence, and runtime lifecycle behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'
@@ -44,7 +45,10 @@ import {
   ProviderValidationError,
   type ProviderAdapterError,
 } from '../../../../../apps/server/src/provider/Errors.ts'
-import type { ProviderAdapterShape } from '../../../../../apps/server/src/provider/Services/ProviderAdapter.ts'
+import type {
+  ProviderAdapterShape,
+  ProviderEffectContext,
+} from '../../../../../apps/server/src/provider/Services/ProviderAdapter.ts'
 import * as ProviderAdapterRegistry from '../../../../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts'
 import * as ProviderService from '../../../../../apps/server/src/provider/Services/ProviderService.ts'
 import * as ProviderSessionDirectory from '../../../../../apps/server/src/provider/Services/ProviderSessionDirectory.ts'
@@ -93,7 +97,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
   const sessions = new Map<ThreadId, ProviderSession>()
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>())
 
-  const startSession = vi.fn((input: ProviderSessionStartInput) =>
+  const startSession = vi.fn((input: ProviderSessionStartInput, _context?: ProviderEffectContext) =>
     Effect.sync(() =>
     {
       const now = '2026-01-01T00:00:00.000Z'
@@ -120,6 +124,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
   const sendTurn = vi.fn(
     (
       input: ProviderSendTurnInput,
+      _context?: ProviderEffectContext,
     ): Effect.Effect<ProviderTurnStartResult, ProviderAdapterError> =>
     {
       if (!sessions.has(input.threadId))
@@ -140,8 +145,11 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
   )
 
   const interruptTurn = vi.fn(
-    (_threadId: ThreadId, _turnId?: TurnId): Effect.Effect<void, ProviderAdapterError> =>
-      Effect.void,
+    (
+      _threadId: ThreadId,
+      _turnId?: TurnId,
+      _context?: ProviderEffectContext,
+    ): Effect.Effect<void, ProviderAdapterError> => Effect.void,
   )
 
   const respondToRequest = vi.fn(
@@ -149,6 +157,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
       _threadId: ThreadId,
       _requestId: string,
       _decision: ProviderApprovalDecision,
+      _context?: ProviderEffectContext,
     ): Effect.Effect<void, ProviderAdapterError> => Effect.void,
   )
 
@@ -157,14 +166,19 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
       _threadId: ThreadId,
       _requestId: string,
       _answers: Record<string, unknown>,
+      _context?: ProviderEffectContext,
     ): Effect.Effect<void, ProviderAdapterError> => Effect.void,
   )
 
-  const stopSession = vi.fn((threadId: ThreadId): Effect.Effect<void, ProviderAdapterError> =>
-    Effect.sync(() =>
-    {
-      sessions.delete(threadId)
-    }),
+  const stopSession = vi.fn(
+    (
+      threadId: ThreadId,
+      _context?: ProviderEffectContext,
+    ): Effect.Effect<void, ProviderAdapterError> =>
+      Effect.sync(() =>
+      {
+        sessions.delete(threadId)
+      }),
   )
 
   const listSessions = vi.fn((): Effect.Effect<ReadonlyArray<ProviderSession>> =>
@@ -195,6 +209,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
     (
       threadId: ThreadId,
       _numTurns: number,
+      _context?: ProviderEffectContext,
     ): Effect.Effect<{ threadId: ThreadId; turns: readonly [] }, ProviderAdapterError> =>
       Effect.succeed({ threadId, turns: [] }),
   )
@@ -1395,6 +1410,60 @@ routing.layer('ProviderServiceLive routing', (it) =>
         assert.equal(startPayload.threadId, session.threadId)
       }
       assert.equal(routing.codex.sendTurn.mock.calls.length, 1)
+    }),
+  )
+
+  it.effect('propagates durable provider effect context without changing adapter behavior', () =>
+    Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      const threadId = asThreadId('thread-provider-effect-context')
+      const context = {
+        actionId: 'provider-action-1',
+        idempotencyKey: 'provider-action-1',
+        sourceSequence: 42,
+        operationVersion: 1,
+      }
+
+      yield* provider.startSession(
+        threadId,
+        {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: 'full-access',
+        },
+        undefined,
+        context,
+      )
+      yield* provider.sendTurn(
+        { threadId, input: 'context turn', attachments: [] },
+        undefined,
+        context,
+      )
+      yield* provider.interruptTurn({ threadId }, context)
+      yield* provider.respondToRequest(
+        { threadId, requestId: asRequestId('context-request'), decision: 'accept' },
+        context,
+      )
+      yield* provider.respondToUserInput(
+        {
+          threadId,
+          requestId: asRequestId('context-input'),
+          answers: { sandbox_mode: 'workspace-write' },
+        },
+        context,
+      )
+      yield* provider.rollbackConversation({ threadId, numTurns: 1 }, context)
+      yield* provider.stopSession({ threadId }, context)
+
+      assert.deepEqual(routing.codex.startSession.mock.calls.at(-1)?.[1], context)
+      assert.deepEqual(routing.codex.sendTurn.mock.calls.at(-1)?.[1], context)
+      assert.deepEqual(routing.codex.interruptTurn.mock.calls.at(-1)?.[2], context)
+      assert.deepEqual(routing.codex.respondToRequest.mock.calls.at(-1)?.[3], context)
+      assert.deepEqual(routing.codex.respondToUserInput.mock.calls.at(-1)?.[3], context)
+      assert.deepEqual(routing.codex.rollbackThread.mock.calls.at(-1)?.[2], context)
+      assert.deepEqual(routing.codex.stopSession.mock.calls.at(-1)?.[1], context)
     }),
   )
 

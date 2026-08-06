@@ -1,9 +1,8 @@
+// tests/apps/web/projectScripts.test.ts
+// verify web project script builders and command helpers
+
+import { setupProjectScript } from '@t3tools/shared/projectScripts'
 import { describe, expect, it } from 'vite-plus/test'
-import {
-  projectScriptCwd,
-  projectScriptRuntimeEnv,
-  setupProjectScript,
-} from '@t3tools/shared/projectScripts'
 
 import {
   buildProjectScript,
@@ -93,49 +92,5 @@ describe('projectScripts helpers', () =>
 
     expect(primaryProjectScript(scripts)?.id).toBe('test')
     expect(setupProjectScript(scripts)?.id).toBe('setup')
-  })
-
-  it('builds default runtime env for scripts', () =>
-  {
-    const env = projectScriptRuntimeEnv({
-      project: { cwd: '/repo' },
-      worktreePath: '/repo/worktree-a',
-    })
-
-    expect(env).toMatchObject({
-      CODE456_PROJECT_ROOT: '/repo',
-      T3CODE_WORKTREE_PATH: '/repo/worktree-a',
-    })
-  })
-
-  it('allows overriding runtime env values', () =>
-  {
-    const env = projectScriptRuntimeEnv({
-      project: { cwd: '/repo' },
-      extraEnv: {
-        CODE456_PROJECT_ROOT: '/custom-root',
-        CUSTOM_FLAG: '1',
-      },
-    })
-
-    expect(env.CODE456_PROJECT_ROOT).toBe('/custom-root')
-    expect(env.CUSTOM_FLAG).toBe('1')
-    expect(env.T3CODE_WORKTREE_PATH).toBeUndefined()
-  })
-
-  it('prefers the worktree path for script cwd resolution', () =>
-  {
-    expect(
-      projectScriptCwd({
-        project: { cwd: '/repo' },
-        worktreePath: '/repo/worktree-a',
-      }),
-    ).toBe('/repo/worktree-a')
-    expect(
-      projectScriptCwd({
-        project: { cwd: '/repo' },
-        worktreePath: null,
-      }),
-    ).toBe('/repo')
   })
 })

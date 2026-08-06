@@ -1,5 +1,6 @@
 // apps/server/src/proposal/ProposalService.ts
 // exposes immutable proposal revision creation and exact diff queries
+
 // @effect-diagnostics nodeBuiltinImport:off globalDate:off
 
 import * as NodeCrypto from 'node:crypto'
@@ -33,6 +34,7 @@ import * as Layer from 'effect/Layer'
 
 import * as ProposalGitEngine from './ProposalGitEngine.ts'
 import * as ProposalRepository from './ProposalRepository.ts'
+import * as ProposalRetainedRefAttemptStore from './ProposalRetainedRefAttemptStore.ts'
 
 export interface ProposalUpsertRequest
 {
@@ -113,6 +115,7 @@ export const make = Effect.gen(function* ()
 {
   const gitEngine = yield* ProposalGitEngine.ProposalGitEngine
   const repository = yield* ProposalRepository.ProposalRepository
+  const attemptStore = yield* ProposalRetainedRefAttemptStore.ProposalRetainedRefAttemptStore
 
   const upsert: ProposalService['Service']['upsert'] = Effect.fn('ProposalService.upsert')(
     function* (input)
@@ -155,15 +158,33 @@ export const make = Effect.gen(function* ()
         baseRetainedRef: prepared.baseRetainedRef,
         proposedRetainedRef: prepared.proposedRetainedRef,
       })
+      const refToken = ProposalGitEngine.proposalRetainedRefPairToken(
+        prepared.baseRetainedRef,
+        prepared.proposedRetainedRef,
+      )
+      if (refToken === null)
+      {
+        return yield* proposalError(
+          'ProposalService.upsert',
+          'persistence-failed',
+          'Prepared proposal retained refs did not form a canonical pair.',
+          proposalId,
+        )
+      }
+      const deletePreparedRefsAndAttempt = deletePreparedRefs.pipe(
+        Effect.ensuring(attemptStore.remove(refToken).pipe(Effect.ignore)),
+      )
       const deletePreparedRefsIfUncommitted = repository.get(proposalId).pipe(
         Effect.matchEffect({
-          onFailure: (error) => (error.code === 'not-found' ? deletePreparedRefs : Effect.void),
+          onFailure: (error) =>
+            error.code === 'not-found' ? deletePreparedRefsAndAttempt : Effect.void,
           onSuccess: (stored) =>
             stored.revisions.some((revision) => revision.revisionId === revisionId)
               ? Effect.void
-              : deletePreparedRefs,
+              : deletePreparedRefsAndAttempt,
         }),
       )
+      const createdAt = DateTime.formatIso(yield* DateTime.now)
       const stored = yield* repository
         .append({
           proposalId,
@@ -178,11 +199,21 @@ export const make = Effect.gen(function* ()
           ...(input.planMarkdownSha256 === undefined
             ? {}
             : { planMarkdownSha256: input.planMarkdownSha256 }),
-          createdAt: DateTime.formatIso(yield* DateTime.now),
+          createdAt,
         })
         .pipe(
           Effect.onExit((exit) =>
             Exit.isFailure(exit) ? deletePreparedRefsIfUncommitted : Effect.void,
+          ),
+        )
+      yield* attemptStore
+        .finalize({ refToken, durableAt: DateTime.formatIso(yield* DateTime.now) })
+        .pipe(
+          Effect.catch((cause) =>
+            Effect.logWarning('failed to finalize a durable proposal retained-ref attempt', {
+              refToken,
+              cause,
+            }),
           ),
         )
       return stored.revision
@@ -287,4 +318,5 @@ export const make = Effect.gen(function* ()
 export const layer = Layer.effect(ProposalService, make).pipe(
   Layer.provide(ProposalGitEngine.layer),
   Layer.provide(ProposalRepository.layer),
+  Layer.provide(ProposalRetainedRefAttemptStore.layer),
 )

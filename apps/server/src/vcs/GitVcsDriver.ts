@@ -1,5 +1,6 @@
 // apps/server/src/vcs/GitVcsDriver.ts
 // implements Git-backed workspace, ref, worktree, commit, and checkpoint operations
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeFSP from 'node:fs/promises'
@@ -31,12 +32,21 @@ import {
   type VcsRemoveWorktreeInput,
   type VcsStatusInput,
   type VcsStatusResult,
+  type VcsError,
 } from '@t3tools/contracts'
 import {
+  applyStagedExactGitTreeRestore,
   captureExactGitSnapshot,
   EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,
   EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT,
+  materializeExactGitTree,
+  preflightExactGitTreeRestore,
   restoreExactGitTree,
+  verifyExactGitTreeMaterialization,
+  verifyExactGitTreeRestore,
+  type ExactGitTreeRestore,
+  type ExactGitTreeRestorePreflight,
+  type ExactGitTreeVerification,
 } from './ExactGitSnapshot.ts'
 import { makeGitVcsDriverCore } from './GitVcsDriverCore.ts'
 import * as VcsDriver from './VcsDriver.ts'
@@ -219,6 +229,40 @@ export interface GitRemoteStatusOptions
   readonly refreshUpstream?: boolean
 }
 
+export interface GitStageCheckpointTreeInput
+{
+  readonly cwd: string
+  readonly ref: string
+  readonly stagePath: string
+}
+
+export interface GitCheckpointRestoreInput
+{
+  readonly cwd: string
+  readonly ref: string
+}
+
+export interface GitApplyStagedCheckpointRestoreInput extends GitCheckpointRestoreInput
+{
+  readonly stagePath: string
+}
+
+export interface GitStagedCheckpointOps
+{
+  readonly stageCheckpointTree: (
+    input: GitStageCheckpointTreeInput,
+  ) => Effect.Effect<ExactGitTreeVerification, VcsError>
+  readonly verifyRestorePreconditions: (
+    input: GitCheckpointRestoreInput,
+  ) => Effect.Effect<ExactGitTreeRestorePreflight, VcsError>
+  readonly applyStagedRestore: (
+    input: GitApplyStagedCheckpointRestoreInput,
+  ) => Effect.Effect<ExactGitTreeRestore, VcsError>
+  readonly postVerifyRestore: (
+    input: GitCheckpointRestoreInput,
+  ) => Effect.Effect<ExactGitTreeVerification, VcsError>
+}
+
 export class GitVcsDriver extends Context.Service<
   GitVcsDriver,
   {
@@ -306,6 +350,44 @@ const WORKSPACE_GIT_HARDENED_CONFIG_ARGS = [
   '-c',
   'core.untrackedCache=false',
 ] as const
+
+// git rejects a compare-and-swap by refusing the ref lock and naming the
+// mismatch; any other nonzero exit is a real driver failure, not a lost race
+const CHECKPOINT_REF_RACE_MARKERS = [
+  'reference already exists',
+  'but expected',
+  'unable to resolve reference',
+] as const
+
+// `update-ref -d` already exits 0 for an absent ref, but ref backends report
+// the miss differently, so treat an explicit "not there" as cleanup success
+const CHECKPOINT_REF_ABSENT_MARKERS = [
+  'unable to resolve reference',
+  'no such ref',
+  'does not exist',
+] as const
+
+function matchesGitRefMarker(stderr: string, markers: ReadonlyArray<string>): boolean
+{
+  const detail = stderr.toLowerCase()
+  return markers.some((marker) => detail.includes(marker))
+}
+
+// builds the `update-ref --stdin` transaction that publishes a checkpoint
+// commit only when the ref still matches the expectation the caller captured
+// against: `create` for an absent ref, `update` w/ an expected old oid otherwise
+function checkpointPublicationTransaction(
+  checkpointRef: string,
+  commitOid: string,
+  expected: VcsDriver.VcsCheckpointRefExpectation,
+): string
+{
+  const operation =
+    expected.kind === 'absent'
+      ? `create ${checkpointRef} ${commitOid}`
+      : `update ${checkpointRef} ${commitOid} ${expected.commitOid}`
+  return ['start', operation, 'prepare', 'commit', ''].join('\n')
+}
 
 const nowFreshness = Effect.fn('GitVcsDriver.nowFreshness')(function* ()
 {
@@ -719,7 +801,52 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
       }),
     )
 
-  const checkpoints: VcsDriver.VcsCheckpointOps = {
+  const resolveRequiredCheckpointTarget = Effect.fn(
+    'GitVcsDriver.checkpoints.resolveRequiredCheckpointTarget',
+  )(function* (cwd: string, checkpointRef: string, operation: string)
+  {
+    const commitOid = yield* resolveCheckpointCommit(cwd, checkpointRef)
+    if (commitOid === null)
+    {
+      return yield* new VcsProcessExitError({
+        operation,
+        command: 'git rev-parse',
+        cwd,
+        exitCode: 1,
+        detail: `Checkpoint ref '${checkpointRef}' is unavailable.`,
+      })
+    }
+    const treeResult = yield* execute({
+      operation,
+      cwd,
+      args: ['rev-parse', '--verify', `${commitOid}^{tree}`],
+    })
+    return {
+      commitOid,
+      treeOid: treeResult.stdout.trim(),
+      worktreeRoot: yield* resolveWorktreeRoot(cwd),
+    }
+  })
+
+  const exactCheckpointOperation = <A>(
+    operation: string,
+    cwd: string,
+    command: string,
+    run: (signal: AbortSignal) => Promise<A>,
+  ): Effect.Effect<A, VcsError> =>
+    Effect.tryPromise({
+      try: run,
+      catch: (cause) =>
+        new VcsProcessExitError({
+          operation,
+          command,
+          cwd,
+          exitCode: 1,
+          detail: cause instanceof Error ? cause.message : `${command} failed.`,
+        }),
+    })
+
+  const checkpoints: VcsDriver.VcsCheckpointOps & GitStagedCheckpointOps = {
     captureCheckpoint: Effect.fn('GitVcsDriver.checkpoints.captureCheckpoint')(function* (input)
     {
       const operation = 'GitVcsDriver.checkpoints.captureCheckpoint'
@@ -750,8 +877,18 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
         catch: () => undefined,
       }).pipe(Effect.ignore)
 
-      yield* Effect.gen(function* ()
+      return yield* Effect.gen(function* ()
       {
+        // read the ref before snapshotting so an unqualified capture publishes
+        // against the state it actually captured from
+        const expected: VcsDriver.VcsCheckpointRefExpectation =
+          input.expected ??
+          (yield* resolveCheckpointCommit(input.cwd, input.checkpointRef).pipe(
+            Effect.map((commitOid): VcsDriver.VcsCheckpointRefExpectation =>
+              commitOid === null ? { kind: 'absent' } : { kind: 'commit', commitOid },
+            ),
+          ))
+
         const snapshot = yield* Effect.tryPromise({
           try: (signal) =>
             captureExactGitSnapshot({
@@ -793,11 +930,34 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
           })
         }
 
-        yield* execute({
+        const publication = yield* execute({
           operation,
           cwd: input.cwd,
-          args: ['update-ref', input.checkpointRef, commitOid],
+          args: ['update-ref', '--stdin'],
+          stdin: checkpointPublicationTransaction(input.checkpointRef, commitOid, expected),
+          allowNonZeroExit: true,
         })
+        if (publication.exitCode !== 0)
+        {
+          if (matchesGitRefMarker(publication.stderr, CHECKPOINT_REF_RACE_MARKERS))
+          {
+            return {
+              outcome: 'lost-race',
+              commitOid,
+            } satisfies VcsDriver.VcsCaptureCheckpointResult
+          }
+          return yield* new VcsProcessExitError({
+            operation,
+            command: 'git update-ref --stdin',
+            cwd: input.cwd,
+            exitCode: publication.exitCode,
+            detail:
+              publication.stderr.trim() ||
+              `Could not publish checkpoint ref '${input.checkpointRef}'.`,
+          })
+        }
+
+        return { outcome: 'published', commitOid } satisfies VcsDriver.VcsCaptureCheckpointResult
       }).pipe(Effect.ensuring(cleanupTempDirectory))
     }),
 
@@ -963,19 +1123,174 @@ export const makeVcsDriverShape = Effect.fn('makeGitVcsDriverShape')(function* (
     deleteCheckpointRefs: Effect.fn('GitVcsDriver.checkpoints.deleteCheckpointRefs')(
       function* (input)
       {
+        const operation = 'GitVcsDriver.checkpoints.deleteCheckpointRefs'
+        // a ref that survives deletion is stale state the caller must retry on,
+        // so only an already-absent ref is allowed to pass
         yield* Effect.forEach(
           input.checkpointRefs,
           (checkpointRef) =>
             execute({
-              operation: 'GitVcsDriver.checkpoints.deleteCheckpointRefs',
+              operation,
               cwd: input.cwd,
               args: ['update-ref', '-d', checkpointRef],
               allowNonZeroExit: true,
-            }),
+            }).pipe(
+              Effect.flatMap((result) =>
+                result.exitCode === 0 ||
+                matchesGitRefMarker(result.stderr, CHECKPOINT_REF_ABSENT_MARKERS)
+                  ? Effect.void
+                  : new VcsProcessExitError({
+                      operation,
+                      command: 'git update-ref -d',
+                      cwd: input.cwd,
+                      exitCode: result.exitCode,
+                      detail:
+                        result.stderr.trim() ||
+                        `Could not delete checkpoint ref '${checkpointRef}'.`,
+                    }),
+              ),
+            ),
           { discard: true },
         )
       },
     ),
+
+    stageCheckpointTree: Effect.fn('GitVcsDriver.checkpoints.stageCheckpointTree')(
+      function* (input)
+      {
+        const operation = 'GitVcsDriver.checkpoints.stageCheckpointTree'
+        const target = yield* resolveRequiredCheckpointTarget(input.cwd, input.ref, operation)
+        yield* exactCheckpointOperation(
+          operation,
+          input.cwd,
+          'materialize exact Git checkpoint tree',
+          (signal) =>
+            materializeExactGitTree({
+              repositoryRoot: target.worktreeRoot,
+              treeOid: target.treeOid,
+              destinationRoot: input.stagePath,
+              signal,
+            }),
+        )
+        return yield* exactCheckpointOperation(
+          operation,
+          input.cwd,
+          'verify exact Git checkpoint stage',
+          (signal) =>
+            verifyExactGitTreeMaterialization({
+              repositoryRoot: target.worktreeRoot,
+              treeOid: target.treeOid,
+              rootPath: input.stagePath,
+              signal,
+            }),
+        )
+      },
+    ),
+
+    verifyRestorePreconditions: Effect.fn('GitVcsDriver.checkpoints.verifyRestorePreconditions')(
+      function* (input)
+      {
+        const operation = 'GitVcsDriver.checkpoints.verifyRestorePreconditions'
+        const target = yield* resolveRequiredCheckpointTarget(input.cwd, input.ref, operation)
+        return yield* exactCheckpointOperation(
+          operation,
+          input.cwd,
+          'preflight exact Git checkpoint restore',
+          (signal) =>
+            preflightExactGitTreeRestore({
+              repositoryRoot: target.worktreeRoot,
+              treeOid: target.treeOid,
+              signal,
+            }),
+        )
+      },
+    ),
+
+    applyStagedRestore: Effect.fn('GitVcsDriver.checkpoints.applyStagedRestore')(function* (input)
+    {
+      const operation = 'GitVcsDriver.checkpoints.applyStagedRestore'
+      const target = yield* resolveRequiredCheckpointTarget(input.cwd, input.ref, operation)
+      const restored = yield* exactCheckpointOperation(
+        operation,
+        input.cwd,
+        'apply staged exact Git checkpoint restore',
+        (signal) =>
+          applyStagedExactGitTreeRestore({
+            repositoryRoot: target.worktreeRoot,
+            treeOid: target.treeOid,
+            stageRoot: input.stagePath,
+            signal,
+          }),
+      )
+
+      const headExists = yield* hasHeadCommit(input.cwd)
+      yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: headExists ? ['read-tree', 'HEAD'] : ['read-tree', target.commitOid],
+      })
+      return restored
+    }),
+
+    postVerifyRestore: Effect.fn('GitVcsDriver.checkpoints.postVerifyRestore')(function* (input)
+    {
+      const operation = 'GitVcsDriver.checkpoints.postVerifyRestore'
+      const target = yield* resolveRequiredCheckpointTarget(input.cwd, input.ref, operation)
+      const verification = yield* exactCheckpointOperation(
+        operation,
+        input.cwd,
+        'verify exact Git checkpoint restore',
+        (signal) =>
+          verifyExactGitTreeRestore({
+            repositoryRoot: target.worktreeRoot,
+            treeOid: target.treeOid,
+            signal,
+          }),
+      )
+      const unmerged = yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: ['ls-files', '--unmerged'],
+      })
+      if (unmerged.stdout.trim().length > 0)
+      {
+        return yield* new VcsProcessExitError({
+          operation,
+          command: 'git ls-files --unmerged',
+          cwd: input.cwd,
+          exitCode: 1,
+          detail: 'Restored checkpoint index contains unmerged entries.',
+        })
+      }
+      const headExists = yield* hasHeadCommit(input.cwd)
+      const indexDiff = yield* execute({
+        operation,
+        cwd: input.cwd,
+        args: headExists
+          ? ['diff', '--cached', '--quiet', '--no-ext-diff', '--no-textconv', 'HEAD', '--']
+          : [
+              'diff',
+              '--cached',
+              '--quiet',
+              '--no-ext-diff',
+              '--no-textconv',
+              target.commitOid,
+              '--',
+            ],
+        allowNonZeroExit: true,
+      })
+      if (indexDiff.exitCode !== 0)
+      {
+        return yield* new VcsProcessExitError({
+          operation,
+          command: 'git diff --cached --quiet',
+          cwd: input.cwd,
+          exitCode: indexDiff.exitCode,
+          detail: indexDiff.stderr.trim() || 'Restored checkpoint index does not match policy.',
+        })
+      }
+      return verification
+    }),
   }
 
   return {

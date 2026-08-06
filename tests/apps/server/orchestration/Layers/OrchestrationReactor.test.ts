@@ -1,3 +1,6 @@
+// tests/apps/server/orchestration/Layers/OrchestrationReactor.test.ts
+// verify orchestration reactor behavior
+
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
@@ -9,6 +12,7 @@ import { CheckpointReactor } from '../../../../../apps/server/src/orchestration/
 import { ProviderCommandReactor } from '../../../../../apps/server/src/orchestration/Services/ProviderCommandReactor.ts'
 import { ProviderRuntimeIngestionService } from '../../../../../apps/server/src/orchestration/Services/ProviderRuntimeIngestion.ts'
 import { ThreadDeletionReactor } from '../../../../../apps/server/src/orchestration/Services/ThreadDeletionReactor.ts'
+import { AttachmentCleanupReactor } from '../../../../../apps/server/src/orchestration/Services/AttachmentCleanupReactor.ts'
 import { OrchestrationReactor } from '../../../../../apps/server/src/orchestration/Services/OrchestrationReactor.ts'
 import { makeOrchestrationReactor } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationReactor.ts'
 
@@ -25,7 +29,7 @@ describe('OrchestrationReactor', () =>
     runtime = null
   })
 
-  it('starts provider ingestion, provider command, checkpoint, and thread deletion reactors', async () =>
+  it('starts each hot or durable effect owner exactly once in dependency order', async () =>
   {
     const started: string[] = []
 
@@ -55,7 +59,7 @@ describe('OrchestrationReactor', () =>
           Layer.succeed(CheckpointReactor, {
             start: () =>
             {
-              started.push('checkpoint-reactor')
+              started.push('checkpoint-domain-durable-owner')
               return Effect.void
             },
             drain: Effect.void,
@@ -65,7 +69,17 @@ describe('OrchestrationReactor', () =>
           Layer.succeed(ThreadDeletionReactor, {
             start: () =>
             {
-              started.push('thread-deletion-reactor')
+              started.push('thread-deletion-durable-owner')
+              return Effect.void
+            },
+            drain: Effect.void,
+          }),
+        ),
+        Layer.provideMerge(
+          Layer.succeed(AttachmentCleanupReactor, {
+            start: () =>
+            {
+              started.push('attachment-cleanup')
               return Effect.void
             },
             drain: Effect.void,
@@ -81,9 +95,11 @@ describe('OrchestrationReactor', () =>
     expect(started).toEqual([
       'provider-runtime-ingestion',
       'provider-command-reactor',
-      'checkpoint-reactor',
-      'thread-deletion-reactor',
+      'checkpoint-domain-durable-owner',
+      'thread-deletion-durable-owner',
+      'attachment-cleanup',
     ])
+    expect(new Set(started).size).toBe(started.length)
 
     await Effect.runPromise(Scope.close(scope, Exit.void))
   })

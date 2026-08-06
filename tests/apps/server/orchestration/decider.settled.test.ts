@@ -43,6 +43,7 @@ function makeReadModel(
         branch: null,
         worktreePath: null,
         latestTurn: null,
+        providerSwitch: null,
         createdAt: NOW,
         updatedAt: NOW,
         archivedAt,
@@ -95,7 +96,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
         expect(events[0].payload.settledAt).toBe(events[0].payload.updatedAt)
       }
 
-      // Already settled: the engine rejects zero-event commands, so idempotency
+      // already settled: the engine rejects zero-event commands, so idempotency
       // is by re-emission — preserving the original settledAt.
       const reEmit = yield* decideOrchestrationCommand({
         command: {
@@ -133,7 +134,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
         }).pipe(Effect.flip)
         expect(error._tag).toBe('OrchestrationCommandInvariantError')
       }
-      // Stopped/error sessions are settleable — only live work is protected.
+      // stopped/error sessions are settleable — only live work is protected.
       const settled = yield* decideOrchestrationCommand({
         command: {
           type: 'thread.settle',
@@ -161,7 +162,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
           createdAt: at,
         }) as OrchestrationThread['activities'][number]
 
-      // Open approval request: settle rejected.
+      // open approval request: settle rejected.
       const openError = yield* decideOrchestrationCommand({
         command: {
           type: 'thread.settle',
@@ -174,7 +175,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
       }).pipe(Effect.flip)
       expect(openError._tag).toBe('OrchestrationCommandInvariantError')
 
-      // Same request later resolved: settleable again.
+      // same request later resolved: settleable again.
       const settled = yield* decideOrchestrationCommand({
         command: {
           type: 'thread.settle',
@@ -189,7 +190,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
       const settledEvents = Array.isArray(settled) ? settled : [settled]
       expect(settledEvents[0]?.type).toBe('thread.settled')
 
-      // Open user-input request: also rejected.
+      // open user-input request: also rejected.
       const inputError = yield* decideOrchestrationCommand({
         command: {
           type: 'thread.settle',
@@ -222,7 +223,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
           createdAt: NOW,
         }) as OrchestrationThread['activities'][number]
 
-      // Stale-failure detail clears the request — mirrors the projection's
+      // stale-failure detail clears the request — mirrors the projection's
       // pending accounting, which is what the client's canSettle sees.
       const settled = yield* decideOrchestrationCommand({
         command: {
@@ -244,7 +245,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
       const settledEvents = Array.isArray(settled) ? settled : [settled]
       expect(settledEvents[0]?.type).toBe('thread.settled')
 
-      // A non-stale respond failure (transient provider error) keeps the
+      // a non-stale respond failure (transient provider error) keeps the
       // request open: the user can retry, so it is still blocked-on-you.
       const stillOpen = yield* decideOrchestrationCommand({
         command: {
@@ -276,10 +277,10 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
         updatedAt: createdAt,
       })
 
-      // The decider's clock is the Effect test clock, pinned to the epoch:
+      // the decider's clock is the Effect test clock, pinned to the epoch:
       // timestamps here are relative to 1970-01-01T00:00:00.000Z.
 
-      // Within the grace window: genuinely queued, settle rejected.
+      // within the grace window: genuinely queued, settle rejected.
       const queuedError = yield* decideOrchestrationCommand({
         command: {
           type: 'thread.settle',
@@ -290,7 +291,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
       }).pipe(Effect.flip)
       expect(queuedError._tag).toBe('OrchestrationCommandInvariantError')
 
-      // Message timestamp far in the FUTURE (client clock ahead of server):
+      // message timestamp far in the FUTURE (client clock ahead of server):
       // a negative age must not read as queued forever — past the grace
       // bound in either direction the thread is settleable.
       const skewed = yield* decideOrchestrationCommand({
@@ -352,7 +353,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
         expect(userEvents[0].payload.reason).toBe('user')
       }
 
-      // Re-dispatching against the already-reached state re-emits rather than
+      // re-dispatching against the already-reached state re-emits rather than
       // producing zero events (the engine rejects empty commands).
       const userAgain = yield* decideOrchestrationCommand({
         command: {
@@ -404,7 +405,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
           session: makeSession('running'),
           createdAt: NOW,
         },
-        // A keep-active pin is also an override: real activity clears it
+        // a keep-active pin is also an override: real activity clears it
         // back to neutral so auto-settle can apply again later.
         readModel: makeReadModel('active'),
       })
@@ -437,7 +438,7 @@ it.layer(NodeServices.layer)('settled thread decider', (it) =>
         readModel: makeReadModel('active'),
       })
       const turnEvents = Array.isArray(turnResult) ? turnResult : [turnResult]
-      // The pin exists to suppress AUTO-settle, not to survive real work:
+      // the pin exists to suppress AUTO-settle, not to survive real work:
       // activity resets it to neutral, restoring the default lifecycle.
       expect(turnEvents.map((event) => event.type)).toEqual([
         'thread.unsettled',

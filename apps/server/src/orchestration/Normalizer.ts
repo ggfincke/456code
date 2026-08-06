@@ -3,6 +3,7 @@
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
+import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import {
   type ClientOrchestrationCommand,
@@ -12,9 +13,18 @@ import {
   PROVIDER_SEND_TURN_MAX_IMAGE_BYTES,
 } from '@t3tools/contracts'
 
-import { createAttachmentId, resolveAttachmentPath } from '../attachmentStore.ts'
+import {
+  attachmentContentDigest,
+  attachmentRelativePath,
+  attachmentStagingRelativePath,
+  createAttachmentId,
+  deriveAttachmentStagingKey,
+  resolveAttachmentPath,
+  resolveAttachmentStagingPath,
+} from '../attachmentStore.ts'
 import { ServerConfig } from '../config.ts'
 import { parseBase64DataUrl } from '../imageMime.ts'
+import { AttachmentLifecycleRepository } from '../persistence/Services/AttachmentLifecycle.ts'
 import * as WorkspacePaths from '../workspace/WorkspacePaths.ts'
 
 export const canonicalizeClientCommandTimestamps = (
@@ -120,9 +130,10 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
       return canonicalCommand as OrchestrationCommand
     }
 
-    const normalizedAttachments = yield* Effect.forEach(
+    const attachmentLifecycle = yield* AttachmentLifecycleRepository
+    const preparedAttachments = yield* Effect.forEach(
       canonicalCommand.message.attachments,
-      (attachment) =>
+      (attachment, attachmentIndex) =>
         Effect.gen(function* ()
         {
           const parsed = parseBase64DataUrl(attachment.dataUrl)
@@ -141,7 +152,31 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
             })
           }
 
-          const attachmentId = createAttachmentId(canonicalCommand.threadId)
+          return {
+            attachment,
+            attachmentIndex,
+            bytes,
+            contentDigest: attachmentContentDigest(bytes),
+            mimeType: parsed.mimeType.toLowerCase(),
+            stagingKey: deriveAttachmentStagingKey({
+              commandId: canonicalCommand.commandId,
+              messageId: canonicalCommand.message.messageId,
+              attachmentIndex,
+            }),
+          }
+        }),
+      { concurrency: 1 },
+    )
+
+    const stagedAttachments = yield* Effect.forEach(
+      preparedAttachments,
+      (prepared) =>
+        Effect.gen(function* ()
+        {
+          const existing = yield* attachmentLifecycle.getByStagingKey(prepared.stagingKey)
+          const attachmentId = Option.isSome(existing)
+            ? existing.value.attachmentId
+            : createAttachmentId(canonicalCommand.threadId)
           if (!attachmentId)
           {
             return yield* new OrchestrationDispatchCommandError({
@@ -152,49 +187,174 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           const persistedAttachment = {
             type: 'image' as const,
             id: attachmentId,
-            name: attachment.name,
-            mimeType: parsed.mimeType.toLowerCase(),
-            sizeBytes: bytes.byteLength,
+            name: prepared.attachment.name,
+            mimeType: prepared.mimeType,
+            sizeBytes: prepared.bytes.byteLength,
           }
-
           const attachmentPath = resolveAttachmentPath({
             attachmentsDir: serverConfig.attachmentsDir,
             attachment: persistedAttachment,
           })
-          if (!attachmentPath)
+          const stagingPath = resolveAttachmentStagingPath({
+            attachmentsDir: serverConfig.attachmentsDir,
+            stagingKey: prepared.stagingKey,
+            attachment: persistedAttachment,
+          })
+          if (!attachmentPath || !stagingPath)
           {
             return yield* new OrchestrationDispatchCommandError({
-              message: `Failed to resolve persisted path for '${attachment.name}'.`,
+              message: `Failed to resolve persisted path for '${prepared.attachment.name}'.`,
             })
           }
 
-          yield* fileSystem.makeDirectory(path.dirname(attachmentPath), { recursive: true }).pipe(
-            Effect.mapError(
-              () =>
-                new OrchestrationDispatchCommandError({
-                  message: `Failed to create attachment directory for '${attachment.name}'.`,
-                }),
-            ),
-          )
-          yield* fileSystem.writeFile(attachmentPath, bytes).pipe(
-            Effect.mapError(
-              () =>
-                new OrchestrationDispatchCommandError({
-                  message: `Failed to persist attachment '${attachment.name}'.`,
-                }),
-            ),
-          )
+          const row = yield* attachmentLifecycle
+            .stage({
+              stagingKey: prepared.stagingKey,
+              commandId: canonicalCommand.commandId,
+              threadId: canonicalCommand.threadId,
+              messageId: canonicalCommand.message.messageId,
+              attachmentIndex: prepared.attachmentIndex,
+              attachmentId,
+              stagingRelativePath: attachmentStagingRelativePath({
+                stagingKey: prepared.stagingKey,
+                attachment: persistedAttachment,
+              }),
+              relativePath: attachmentRelativePath(persistedAttachment),
+              mimeType: prepared.mimeType,
+              byteCount: prepared.bytes.byteLength,
+              contentDigest: prepared.contentDigest,
+              now: receivedAt,
+            })
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new OrchestrationDispatchCommandError({
+                    message: `Failed to stage attachment '${prepared.attachment.name}'.`,
+                    cause,
+                  }),
+              ),
+            )
 
-          return persistedAttachment
+          return { ...prepared, persistedAttachment, attachmentPath, stagingPath, row }
         }),
       { concurrency: 1 },
+    ).pipe(
+      Effect.catch((cause) =>
+        attachmentLifecycle
+          .markDispatchFailure({
+            commandId: canonicalCommand.commandId,
+            reason: 'attachment_staging_failed',
+            now: receivedAt,
+          })
+          .pipe(Effect.andThen(Effect.fail(cause))),
+      ),
+    )
+
+    const fileMatches = (filePath: string, expectedDigest: string, expectedSize: number) =>
+      fileSystem
+        .exists(filePath)
+        .pipe(
+          Effect.flatMap((exists) =>
+            exists
+              ? fileSystem
+                  .readFile(filePath)
+                  .pipe(
+                    Effect.map(
+                      (contents) =>
+                        contents.byteLength === expectedSize &&
+                        attachmentContentDigest(contents) === expectedDigest,
+                    ),
+                  )
+              : Effect.succeed(false),
+          ),
+        )
+
+    const promoteAttachments = Effect.forEach(
+      stagedAttachments,
+      (staged) =>
+        Effect.gen(function* ()
+        {
+          if (staged.row.state === 'owned')
+          {
+            return
+          }
+          if (
+            yield* fileMatches(staged.attachmentPath, staged.contentDigest, staged.bytes.byteLength)
+          )
+          {
+            yield* attachmentLifecycle.markPromoted({
+              stagingKey: staged.stagingKey,
+              now: receivedAt,
+            })
+            return
+          }
+
+          yield* fileSystem.makeDirectory(path.dirname(staged.stagingPath), { recursive: true })
+          if (
+            !(yield* fileMatches(staged.stagingPath, staged.contentDigest, staged.bytes.byteLength))
+          )
+          {
+            yield* fileSystem.writeFile(staged.stagingPath, staged.bytes)
+          }
+          yield* fileSystem.makeDirectory(path.dirname(staged.attachmentPath), { recursive: true })
+          yield* fileSystem.copyFile(staged.stagingPath, staged.attachmentPath)
+          if (
+            !(yield* fileMatches(
+              staged.attachmentPath,
+              staged.contentDigest,
+              staged.bytes.byteLength,
+            ))
+          )
+          {
+            return yield* new OrchestrationDispatchCommandError({
+              message: `Failed to verify persisted attachment '${staged.attachment.name}'.`,
+            })
+          }
+          yield* attachmentLifecycle.markPromoted({
+            stagingKey: staged.stagingKey,
+            now: receivedAt,
+          })
+        }),
+      { concurrency: 1, discard: true },
+    )
+
+    yield* promoteAttachments.pipe(
+      Effect.mapError(
+        (cause) =>
+          new OrchestrationDispatchCommandError({
+            message: 'Failed to persist one or more attachments.',
+            cause,
+          }),
+      ),
+      Effect.catch((cause) =>
+        attachmentLifecycle
+          .markDispatchFailure({
+            commandId: canonicalCommand.commandId,
+            reason: 'attachment_filesystem_failed',
+            now: receivedAt,
+          })
+          .pipe(
+            Effect.andThen(
+              Effect.forEach(
+                stagedAttachments.filter((staged) => staged.row.state !== 'owned'),
+                (staged) =>
+                  Effect.all([
+                    fileSystem.remove(staged.stagingPath, { force: true }),
+                    fileSystem.remove(staged.attachmentPath, { force: true }),
+                  ]).pipe(Effect.ignore),
+                { concurrency: 1, discard: true },
+              ),
+            ),
+            Effect.andThen(Effect.fail(cause)),
+          ),
+      ),
     )
 
     return {
       ...canonicalCommand,
       message: {
         ...canonicalCommand.message,
-        attachments: normalizedAttachments,
+        attachments: stagedAttachments.map((staged) => staged.persistedAttachment),
       },
     } satisfies OrchestrationCommand
   })

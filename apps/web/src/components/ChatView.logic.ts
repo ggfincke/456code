@@ -366,6 +366,7 @@ export function buildLocalDraftThread(
     deletedAt: null,
     origin: null,
     latestTurn: null,
+    providerSwitch: null,
     branch: draftThread.branch,
     worktreePath: draftThread.worktreePath,
     checkpoints: [],
@@ -384,6 +385,22 @@ export function buildLoadingThreadFromShell(shell: ThreadShell): Thread
     checkpoints: [],
     deletedAt: null,
   }
+}
+
+// errors surface through two maps (draft-keyed and thread-keyed) whose entries
+// can race around promotion, so each write carries its time to let the latest
+// one win when they collide.
+export interface LocalThreadErrorEntry
+{
+  readonly message: string | null
+  readonly at: number
+}
+
+// every chat action toast needs the same non-Error guard; the fallback stays a
+// caller argument so each site keeps its own copy.
+export function chatActionErrorMessage(error: unknown, fallback = 'An error occurred.'): string
+{
+  return error instanceof Error ? error.message : fallback
 }
 
 export function shouldWriteThreadErrorToCurrentServerThread(input: {
@@ -570,11 +587,9 @@ export function deriveComposerSendState(options: {
   prompt: string
   imageCount: number
   terminalContexts: ReadonlyArray<TerminalContextDraft>
-  /**
-   * Optional element-pick attachment count. Element contexts contribute to
-   * "sendable content" exactly like images and (text-bearing) terminal
-   * contexts do: a prompt of just element chips is still a valid send.
-   */
+  // optional element-pick attachment count. Element contexts contribute to
+  // "sendable content" exactly like images and (text-bearing) terminal
+  // contexts do: a prompt of just element chips is still a valid send.
   elementContextCount?: number
 }): {
   trimmedPrompt: string
@@ -632,7 +647,7 @@ export function branchMismatchKey(
   return `${threadId}:${mismatch.threadBranch}:${mismatch.currentBranch}`
 }
 
-// The mismatch banner only matters when the user is about to send: passive
+// the mismatch banner only matters when the user is about to send: passive
 // reading of an old thread carries no risk (the branch picker tint already
 // covers ambient awareness). Draft content is the intent signal — composer
 // focus is useless here because ChatView autofocuses the composer on every
@@ -652,7 +667,7 @@ export function shouldShowBranchMismatchBanner(input: {
   return input.composerHasContent || input.wasShownForCurrentMismatch
 }
 
-// Session-scoped (module-level so it survives ChatView remounts, e.g. route
+// session-scoped (module-level so it survives ChatView remounts, e.g. route
 // changes). Durable cross-device dismissal is planned as a server-side ack.
 const sessionDismissedBranchMismatchKeys = new Set<string>()
 
@@ -670,6 +685,96 @@ export function threadHasStarted(thread: Thread | null | undefined): boolean
 {
   return Boolean(
     thread && (thread.latestTurn !== null || thread.messages.length > 0 || thread.session !== null),
+  )
+}
+
+// option selections are order-independent on the wire, so compare them as a
+// set of id/value pairs rather than by array position.
+function modelSelectionOptionsKey(selection: ModelSelection): string
+{
+  const options = selection.options ?? []
+  return [...options]
+    .map((option) => `${option.id}=${JSON.stringify(option.value)}`)
+    .sort()
+    .join('\u0000')
+}
+
+export function modelSelectionsEqual(left: ModelSelection, right: ModelSelection): boolean
+{
+  return (
+    left.instanceId === right.instanceId &&
+    left.model === right.model &&
+    modelSelectionOptionsKey(left) === modelSelectionOptionsKey(right)
+  )
+}
+
+// a composer selection the user picked directly, paired with the projection it
+// replaced at that moment. A user pick is model-only — the draft keeps its own
+// options — so the selection identifies the instance and model, not the options.
+export interface UserSetComposerModelSelection
+{
+  readonly threadKey: string
+  readonly selection: ModelSelection
+  readonly supersededProjection: ModelSelection
+}
+
+// the draft still holds what the user picked when the instance and model match;
+// options are draft-owned and merge independently of the pick.
+function composerHoldsUserSetSelection(
+  userSet: UserSetComposerModelSelection,
+  composerSelection: ModelSelection | null,
+  threadKey: string,
+): boolean
+{
+  return (
+    userSet.threadKey === threadKey &&
+    composerSelection !== null &&
+    userSet.selection.instanceId === composerSelection.instanceId &&
+    userSet.selection.model === composerSelection.model
+  )
+}
+
+// decide whether the composer draft must adopt the thread's projected selection.
+//
+// * adoption is one-directional in time: the projection may only overwrite a
+//   selection the user set if the projection has itself moved past the value
+//   that selection replaced. Otherwise the projection is the older truth (it
+//   lags a just-accepted pick) and re-applying it would silently revert the
+//   user. A draft the user never touched still adopts every projection it
+//   differs from.
+// * the comparison is on the complete selection, not just the instance: a stale
+//   model or option set on the same instance would otherwise survive bootstrap
+//   and send the next turn against something the thread no longer projects.
+export function shouldReconcileComposerDraftModelSelection(input: {
+  composerSelection: ModelSelection | null
+  hasStarted: boolean
+  previousProjection: {
+    threadKey: string
+    selection: ModelSelection
+  } | null
+  projectedSelection: ModelSelection
+  threadKey: string
+  userSetSelection?: UserSetComposerModelSelection | null
+}): boolean
+{
+  const userSet = input.userSetSelection ?? null
+  if (
+    userSet !== null &&
+    composerHoldsUserSetSelection(userSet, input.composerSelection, input.threadKey)
+  )
+  {
+    return !modelSelectionsEqual(userSet.supersededProjection, input.projectedSelection)
+  }
+
+  const observedLiveTransition =
+    input.previousProjection?.threadKey === input.threadKey &&
+    !modelSelectionsEqual(input.previousProjection.selection, input.projectedSelection)
+
+  return (
+    observedLiveTransition ||
+    (input.hasStarted &&
+      input.composerSelection !== null &&
+      !modelSelectionsEqual(input.composerSelection, input.projectedSelection))
   )
 }
 
@@ -884,7 +989,7 @@ export function hasServerAcknowledgedLocalDispatch(input: {
 
   if (input.phase === 'running')
   {
-    // Steering adds a user message to the current running turn without
+    // steering adds a user message to the current running turn without
     // necessarily changing any of the turn timestamps. Treat that projected
     // message as the server acknowledgment so the composer does not remain
     // stuck in its local "Sending" state until the turn settles.

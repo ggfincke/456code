@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/shortcuts/appShortcuts.test.ts
+// verify with recent thread shortcut behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 import type { NavigationState } from '@react-navigation/native'
 
@@ -10,6 +13,7 @@ import {
   shortcutHref,
   withRecentThreadShortcut,
 } from '../../../../../apps/mobile/src/features/shortcuts/appShortcuts'
+import { REJECTED_THREAD_DEEP_LINKS } from '../../lib/rejectedThreadDeepLinks'
 
 function navState(route: { name: string; params?: unknown }): NavigationState
 {
@@ -107,17 +111,7 @@ describe('shortcutHref', () =>
 
   it('rejects everything else', () =>
   {
-    for (const href of [
-      'https://evil.example',
-      '//evil.example',
-      '/settings',
-      '/threads/only-one-segment',
-      '/threads/a/b/c',
-      '/threads//x',
-      '/threads/a/b?x=1',
-      '/threads/a/b#frag',
-      '/new/extra',
-    ])
+    for (const href of [...REJECTED_THREAD_DEEP_LINKS, '/new/extra'])
     {
       expect(shortcutHref({ id: 'x', title: 'x', params: { href } })).toBe(null)
     }

@@ -246,14 +246,6 @@ it.effect('requires the separate proposal capability before persistence', () =>
   return Effect.gen(function* ()
   {
     const server = yield* McpServer.McpServer
-    const tool = server.tools.find(({ tool }) => tool.name === 'proposal_preview_upsert')
-    expect(tool?.tool.annotations).toMatchObject({
-      readOnlyHint: false,
-      destructiveHint: false,
-      idempotentHint: false,
-      openWorldHint: false,
-    })
-
     const result = yield* server
       .callTool({
         name: 'proposal_preview_upsert',

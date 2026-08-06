@@ -1,19 +1,18 @@
 // apps/server/src/persistence/Services/ProjectionThreads.ts
 // defines the projected thread repository service
 
-/**
- * ProjectionThreadRepository - Projection repository interface for threads.
- *
- * Owns persistence operations for projected thread records in the
- * orchestration read model.
- *
- * @module ProjectionThreadRepository
- */
+// ProjectionThreadRepository - Projection repository interface for threads.
+//
+// owns persistence operations for projected thread records in the
+// orchestration read model.
+//
+// @module ProjectionThreadRepository
 import {
   IsoDateTime,
   ModelSelection,
   NonNegativeInt,
   OrchestrationPendingHandoff,
+  OrchestrationProviderSwitch,
   ProjectId,
   ProviderInteractionMode,
   RuntimeMode,
@@ -33,6 +32,7 @@ export const ProjectionThread = Schema.Struct({
   title: Schema.String,
   modelSelection: ModelSelection,
   pendingHandoff: Schema.NullOr(OrchestrationPendingHandoff),
+  providerSwitch: Schema.NullOr(OrchestrationProviderSwitch),
   runtimeMode: RuntimeMode,
   interactionMode: ProviderInteractionMode,
   branch: Schema.NullOr(Schema.String),
@@ -74,32 +74,24 @@ export type ListProjectionThreadsByProjectInput = typeof ListProjectionThreadsBy
  */
 export interface ProjectionThreadRepositoryShape
 {
-  /**
-   * Insert or replace a projected thread row.
-   *
-   * Upserts by `threadId`.
-   */
+  // insert or replace a projected thread row.
+  //
+  // upserts by `threadId`.
   readonly upsert: (thread: ProjectionThread) => Effect.Effect<void, ProjectionRepositoryError>
 
-  /**
-   * Read a projected thread row by id.
-   */
+  // read a projected thread row by id.
   readonly getById: (
     input: GetProjectionThreadInput,
   ) => Effect.Effect<Option.Option<ProjectionThread>, ProjectionRepositoryError>
 
-  /**
-   * List projected threads for a project.
-   *
-   * Returned in deterministic creation order.
-   */
+  // list projected threads for a project.
+  //
+  // returned in deterministic creation order.
   readonly listByProjectId: (
     input: ListProjectionThreadsByProjectInput,
   ) => Effect.Effect<ReadonlyArray<ProjectionThread>, ProjectionRepositoryError>
 
-  /**
-   * Soft-delete a projected thread row by id.
-   */
+  // soft-delete a projected thread row by id.
   readonly deleteById: (
     input: DeleteProjectionThreadInput,
   ) => Effect.Effect<void, ProjectionRepositoryError>

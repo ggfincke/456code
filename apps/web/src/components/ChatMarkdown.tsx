@@ -10,6 +10,7 @@ import {
 import {
   CheckIcon,
   ChevronRightIcon,
+  CircleAlertIcon,
   CopyIcon,
   GlobeIcon,
   Maximize2Icon,
@@ -50,7 +51,7 @@ import { renderSkillInlineMarkdownChildren } from './chat/SkillInlineText'
 import {
   OrchestratePlanCard,
   type OrchestratePlanActions,
-  parseOrchestratePlan,
+  parseOrchestratePlanResult,
 } from './chat/OrchestratePlanCard'
 import { CHAT_FILE_TAG_CHIP_CLASS_NAME, FileTagChipContent } from './chat/FileTagChip'
 import { PierreEntryIcon } from './chat/PierreEntryIcon'
@@ -60,6 +61,7 @@ import {
 } from './chat/externalLinkContextMenu'
 import { hasSpecificPierreIconForFileName, syntheticFileNameForLanguageId } from '../pierre-icons'
 import { Tooltip, TooltipPopup, TooltipTrigger } from './ui/tooltip'
+import { Alert, AlertDescription, AlertTitle } from './ui/alert'
 import { Button } from './ui/button'
 import { Collapsible, CollapsiblePanel, CollapsibleTrigger } from './ui/collapsible'
 import { ScrollArea } from './ui/scroll-area'
@@ -139,7 +141,7 @@ interface ChatMarkdownProps
   isStreaming?: boolean
   skills?: ReadonlyArray<Pick<ServerProviderSkill, 'name' | 'displayName'>>
   className?: string
-  /** Treat single newlines as hard breaks — chat-style user input. */
+  // treat single newlines as hard breaks — chat-style user input.
   lineBreaks?: boolean
   orchestratePlanActions?: OrchestratePlanActions | undefined
 }
@@ -220,14 +222,14 @@ function extractFenceLanguage(className: string | undefined): string
 {
   const match = className?.match(CODE_FENCE_LANGUAGE_REGEX)
   const raw = match?.[1] ?? 'text'
-  // Shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
+  // shiki doesn't bundle a gitignore grammar; ini is a close match (#685)
   return raw === 'gitignore' ? 'ini' : raw
 }
 
 const FENCE_TITLE_ATTR_REGEX = /(?:^|\s)(?:title|file(?:name)?)=(?:"([^"]+)"|'([^']+)'|(\S+))/i
 const FENCE_FILENAME_TOKEN_REGEX = /^[\w@][\w@./-]*\.[A-Za-z0-9]+$/
 
-/** Pulls a filename out of fence meta: ```ts title="x.ts" / ```ts src/main.ts */
+// pulls a filename out of fence meta: ```ts title="x.ts" / ```ts src/main.ts
 function extractFenceTitle(meta: string | undefined): string | null
 {
   if (!meta) return null
@@ -361,7 +363,7 @@ function getHighlighterPromise(language: string): Promise<DiffsHighlighter>
       // "text" itself failed — Shiki cannot initialize at all, surface the error
       throw err
     }
-    // Language not supported by Shiki — fall back to "text"
+    // language not supported by Shiki — fall back to "text"
     return getHighlighterPromise('text')
   })
   highlighterPromiseCache.set(language, promise)
@@ -566,11 +568,9 @@ function MarkdownDetails({
   )
 }
 
-/**
- * Filename titles render icon + text; language-only titles render just the
- * icon (redundant next to its own name) and fall back to the language text
- * when no specific icon exists or it fails to load.
- */
+// filename titles render icon + text; language-only titles render just the
+// icon (redundant next to its own name) and fall back to the language text
+// when no specific icon exists or it fails to load.
 function MarkdownCodeBlockTitleContent({
   fenceTitle,
   language,
@@ -799,12 +799,12 @@ function UncachedShikiCodeBlock({
     }
     catch (error)
     {
-      // Log highlighting failures for debugging while falling back to plain text
+      // log highlighting failures for debugging while falling back to plain text
       console.warn(
         `Code highlighting failed for language "${language}", falling back to plain text.`,
         error instanceof Error ? error.message : error,
       )
-      // If highlighting fails for this language, render as plain text
+      // if highlighting fails for this language, render as plain text
       return highlighter.codeToHtml(code, { lang: 'text', theme: themeName })
     }
   }, [code, highlighter, language, themeName])
@@ -957,7 +957,7 @@ function normalizeMarkdownLinkHrefKey(href: string): string
 
 const MARKDOWN_LINK_FAVICON_CLASS_NAME = 'block size-full shrink-0 select-none'
 
-/** Hosts whose favicon request already failed this session — skip straight to the globe. */
+// hosts whose favicon request already failed this session — skip straight to the globe.
 const failedFaviconHosts = new Set<string>()
 
 const MarkdownLinkFavicon = memo(function MarkdownLinkFavicon({ host }: { host: string })
@@ -1469,7 +1469,7 @@ function ChatMarkdown({
   {
     return rewriteMarkdownFileUriHref(href) ?? defaultUrlTransform(href)
   }, [])
-  // Re-emit highlighted content as markdown so copying out of the rendered
+  // re-emit highlighted content as markdown so copying out of the rendered
   // view keeps links, emphasis, lists, and code fences intact.
   const handleCopy = useCallback((event: ReactClipboardEvent<HTMLDivElement>) =>
   {
@@ -1720,33 +1720,47 @@ function ChatMarkdown({
         }
 
         const language = extractFenceLanguage(codeBlock.className)
-        if (language === 'orchestrate-plan' && orchestratePlanActions)
+        let orchestratePlanDiagnostic: string | null = null
+        if (language === 'orchestrate-plan')
         {
-          const plan = parseOrchestratePlan(codeBlock.code)
-          if (plan)
+          const result = parseOrchestratePlanResult(codeBlock.code, !isStreaming)
+          if (result.status === 'success' && orchestratePlanActions)
           {
-            return <OrchestratePlanCard plan={plan} actions={orchestratePlanActions} />
+            return <OrchestratePlanCard plan={result.plan} actions={orchestratePlanActions} />
+          }
+          if (result.status === 'error')
+          {
+            orchestratePlanDiagnostic = result.diagnostic
           }
         }
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node))
         return (
-          <MarkdownCodeBlock
-            code={codeBlock.code}
-            language={language}
-            fenceTitle={fenceTitle}
-            theme={resolvedTheme}
-          >
-            <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
-              <Suspense fallback={<pre {...props}>{children}</pre>}>
-                <SuspenseShikiCodeBlock
-                  className={codeBlock.className}
-                  code={codeBlock.code}
-                  themeName={codeThemeName}
-                  isStreaming={isStreaming}
-                />
-              </Suspense>
-            </CodeHighlightErrorBoundary>
-          </MarkdownCodeBlock>
+          <>
+            {orchestratePlanDiagnostic ? (
+              <Alert variant="error" className="mb-2">
+                <CircleAlertIcon />
+                <AlertTitle>Plan card could not be rendered</AlertTitle>
+                <AlertDescription>{orchestratePlanDiagnostic}</AlertDescription>
+              </Alert>
+            ) : null}
+            <MarkdownCodeBlock
+              code={codeBlock.code}
+              language={language}
+              fenceTitle={fenceTitle}
+              theme={resolvedTheme}
+            >
+              <CodeHighlightErrorBoundary fallback={<pre {...props}>{children}</pre>}>
+                <Suspense fallback={<pre {...props}>{children}</pre>}>
+                  <SuspenseShikiCodeBlock
+                    className={codeBlock.className}
+                    code={codeBlock.code}
+                    themeName={codeThemeName}
+                    isStreaming={isStreaming}
+                  />
+                </Suspense>
+              </CodeHighlightErrorBoundary>
+            </MarkdownCodeBlock>
+          </>
         )
       },
     }),

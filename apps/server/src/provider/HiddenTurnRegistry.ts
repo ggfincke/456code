@@ -51,9 +51,12 @@ interface HiddenTurnWaiter
 
 const WAIT_TIMEOUT = Duration.seconds(120)
 const INTERRUPT_GRACE_TIMEOUT = Duration.seconds(10)
+const CLEANUP_RETRY_DELAY = Duration.seconds(5)
 const pendingWaitersBySession = new Map<string, HiddenTurnWaiter>()
 const waitersByTurn = new Map<string, HiddenTurnWaiter>()
+const hiddenTurnTombstones = new Set<string>()
 const hiddenEvents = new WeakSet<ProviderRuntimeEvent>()
+const MAX_HIDDEN_TURN_TOMBSTONES = 10_000
 
 const sessionKey = (providerInstanceId: ProviderInstanceId, threadId: ThreadId) =>
   JSON.stringify([providerInstanceId, threadId])
@@ -110,10 +113,16 @@ export const observeHiddenTurnRuntimeEvent = Effect.fn('observeHiddenTurnRuntime
     return
   }
   const key = sessionKey(providerInstanceId, event.threadId)
-  let waiter =
+  const eventTurnKey =
     event.turnId === undefined
       ? undefined
-      : waitersByTurn.get(turnKey(providerInstanceId, event.threadId, event.turnId))
+      : turnKey(providerInstanceId, event.threadId, event.turnId)
+  if (eventTurnKey !== undefined && hiddenTurnTombstones.has(eventTurnKey))
+  {
+    markEventHidden(event)
+    return
+  }
+  let waiter = eventTurnKey === undefined ? undefined : waitersByTurn.get(eventTurnKey)
   if (waiter === undefined && event.type === 'turn.started' && event.turnId)
   {
     waiter = pendingWaitersBySession.get(key)
@@ -198,50 +207,86 @@ export const sendTurnAndAwait = Effect.fn('sendTurnAndAwait')(function* (
     terminalState: null,
   }
   pendingWaitersBySession.set(key, waiter)
+  let cleanupConfirmed = false
+
+  const removeWaiter = Effect.sync(() =>
+  {
+    if (pendingWaitersBySession.get(key) === waiter)
+    {
+      pendingWaitersBySession.delete(key)
+    }
+    if (waiter.providerTurnId !== null)
+    {
+      const waiterTurnKey = turnKey(
+        waiter.providerInstanceId,
+        waiter.threadId,
+        waiter.providerTurnId,
+      )
+      if (waitersByTurn.get(waiterTurnKey) === waiter)
+      {
+        waitersByTurn.delete(waiterTurnKey)
+      }
+      hiddenTurnTombstones.add(waiterTurnKey)
+      if (hiddenTurnTombstones.size > MAX_HIDDEN_TURN_TOMBSTONES)
+      {
+        hiddenTurnTombstones.delete(hiddenTurnTombstones.values().next().value!)
+      }
+    }
+  })
 
   const interruptAndAwaitTerminalState = Effect.fn('interruptAndAwaitHiddenTurnTerminalState')(
-    function* ()
+    function* (): Effect.fn.Return<boolean>
     {
       const interruptInput =
         waiter.providerTurnId === null
           ? { threadId: input.request.threadId }
           : { threadId: input.request.threadId, turnId: waiter.providerTurnId }
-      yield* Effect.all(
-        [
-          providerService.interruptTurn(interruptInput).pipe(
-            Effect.catchCause((cause) =>
-              Effect.logWarning('failed to interrupt hidden provider turn during cleanup', {
-                threadId: input.request.threadId,
-                turnId: waiter.providerTurnId,
-                cause,
-              }),
-            ),
-            Effect.timeoutOption(INTERRUPT_GRACE_TIMEOUT),
-            Effect.asVoid,
-          ),
-          Deferred.await(waiter.result).pipe(
-            Effect.timeoutOption(INTERRUPT_GRACE_TIMEOUT),
-            Effect.asVoid,
-          ),
-        ],
-        { concurrency: 'unbounded', discard: true },
+      yield* providerService.interruptTurn(interruptInput).pipe(
+        Effect.catchCause((cause) =>
+          Effect.logWarning('failed to interrupt hidden provider turn during cleanup', {
+            threadId: input.request.threadId,
+            turnId: waiter.providerTurnId,
+            cause,
+          }),
+        ),
+        Effect.timeoutOption(INTERRUPT_GRACE_TIMEOUT),
+        Effect.asVoid,
       )
-      if (waiter.terminalState === null)
+      if (waiter.terminalState !== null)
       {
-        // no terminal event confirmed: stop the session so a still-running
-        // compaction turn cannot leak visible output once the waiter is gone;
-        // the stopped binding keeps its cursor, so the next turn recovers
-        yield* providerService.stopSession({ threadId: input.request.threadId }).pipe(
+        cleanupConfirmed = true
+        return true
+      }
+      const stopped = yield* providerService
+        .stopSession({
+          threadId: input.request.threadId,
+        })
+        .pipe(
+          Effect.as(true),
           Effect.catchCause((cause) =>
             Effect.logWarning('failed to stop session after hidden turn cleanup', {
               threadId: input.request.threadId,
               cause,
-            }),
+            }).pipe(Effect.as(false)),
           ),
         )
+      if (stopped)
+      {
+        cleanupConfirmed = true
       }
+      return stopped
     },
   )
+
+  const retryCleanup = Effect.fn('retryHiddenTurnCleanup')(function* (): Effect.fn.Return<void>
+  {
+    while (!cleanupConfirmed)
+    {
+      yield* Effect.sleep(CLEANUP_RETRY_DELAY)
+      yield* interruptAndAwaitTerminalState()
+    }
+    yield* removeWaiter
+  })
 
   return yield* Effect.gen(function* ()
   {
@@ -267,13 +312,12 @@ export const sendTurnAndAwait = Effect.fn('sendTurnAndAwait')(function* (
     }).pipe(
       Effect.timeoutOption(WAIT_TIMEOUT),
       Effect.catchCause((cause) =>
-        waiter.providerTurnId === null
-          ? Effect.failCause(cause)
-          : interruptAndAwaitTerminalState().pipe(Effect.andThen(Effect.failCause(cause))),
+        interruptAndAwaitTerminalState().pipe(Effect.andThen(Effect.failCause(cause))),
       ),
     )
     if (Option.isSome(awaited))
     {
+      cleanupConfirmed = true
       return awaited.value
     }
 
@@ -284,23 +328,15 @@ export const sendTurnAndAwait = Effect.fn('sendTurnAndAwait')(function* (
     })
   }).pipe(
     Effect.ensuring(
-      Effect.sync(() =>
+      Effect.gen(function* ()
       {
-        if (pendingWaitersBySession.get(key) === waiter)
+        if (cleanupConfirmed)
         {
-          pendingWaitersBySession.delete(key)
+          yield* removeWaiter
         }
-        if (waiter.providerTurnId !== null)
+        else
         {
-          const waiterTurnKey = turnKey(
-            waiter.providerInstanceId,
-            waiter.threadId,
-            waiter.providerTurnId,
-          )
-          if (waitersByTurn.get(waiterTurnKey) === waiter)
-          {
-            waitersByTurn.delete(waiterTurnKey)
-          }
+          yield* retryCleanup().pipe(Effect.forkDetach)
         }
       }),
     ),

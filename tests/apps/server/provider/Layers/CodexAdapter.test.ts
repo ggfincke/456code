@@ -1,5 +1,6 @@
 // tests/apps/server/provider/Layers/CodexAdapter.test.ts
 // verifies Codex adapter event translation and runtime behavior
+
 // @effect-diagnostics nodeBuiltinImport:off
 import * as NodeAssert from 'node:assert/strict'
 import * as NodeFS from 'node:fs'
@@ -35,6 +36,7 @@ import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
 import * as CodexErrors from 'effect-codex-app-server/errors'
+import * as TestClock from 'effect/testing/TestClock'
 
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { ServerSettingsService } from '../../../../../apps/server/src/serverSettings.ts'
@@ -50,7 +52,7 @@ import {
 import { makeCodexAdapter } from '../../../../../apps/server/src/provider/Layers/CodexAdapter.ts'
 const decodeCodexSettings = Schema.decodeSync(CodexSettings)
 
-// Test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
+// test-local service tag so the rest of the file can keep using `yield* CodexAdapter`.
 class CodexAdapter extends Context.Service<CodexAdapter, CodexAdapterShape>()(
   '@t3tools/tests/apps/server/provider/Layers/CodexAdapter.test/CodexAdapter',
 )
@@ -992,80 +994,55 @@ lifecycleLayer('CodexAdapterLive lifecycle', (it) =>
     }),
   )
 
-  it.effect('preserves request type when mapping serverRequest/resolved', () =>
-    Effect.gen(function* ()
+  it.effect.each([
     {
-      const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
-
-      const event: ProviderEvent = {
-        id: asEventId('evt-request-resolved'),
-        kind: 'notification',
-        provider: ProviderDriverKind.make('codex'),
-        threadId: asThreadId('thread-1'),
-        createdAt: '2026-01-01T00:00:00.000Z',
-        method: 'serverRequest/resolved',
-        requestKind: 'command',
-        requestId: ApprovalRequestId.make('req-1'),
-        payload: {
-          threadId: 'thread-1',
-          requestId: 'req-1',
-        },
-      }
-
-      yield* runtime.emit(event)
-      const firstEvent = yield* Fiber.join(firstEventFiber)
-
-      NodeAssert.equal(firstEvent._tag, 'Some')
-      if (firstEvent._tag !== 'Some')
-      {
-        return
-      }
-      NodeAssert.equal(firstEvent.value.type, 'request.resolved')
-      if (firstEvent.value.type !== 'request.resolved')
-      {
-        return
-      }
-      NodeAssert.equal(firstEvent.value.payload.requestType, 'command_execution_approval')
-    }),
-  )
-
-  it.effect('preserves file-read request type when mapping serverRequest/resolved', () =>
-    Effect.gen(function* ()
+      requestKind: 'command' as const,
+      requestId: 'req-1',
+      expectedRequestType: 'command_execution_approval',
+    },
     {
-      const { adapter, runtime } = yield* startLifecycleRuntime()
-      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
-
-      const event: ProviderEvent = {
-        id: asEventId('evt-file-read-request-resolved'),
-        kind: 'notification',
-        provider: ProviderDriverKind.make('codex'),
-        threadId: asThreadId('thread-1'),
-        createdAt: '2026-01-01T00:00:00.000Z',
-        method: 'serverRequest/resolved',
-        requestKind: 'file-read',
-        requestId: ApprovalRequestId.make('req-file-read-1'),
-        payload: {
-          threadId: 'thread-1',
-          requestId: 'req-file-read-1',
-        },
-      }
-
-      yield* runtime.emit(event)
-      const firstEvent = yield* Fiber.join(firstEventFiber)
-
-      NodeAssert.equal(firstEvent._tag, 'Some')
-      if (firstEvent._tag !== 'Some')
+      requestKind: 'file-read' as const,
+      requestId: 'req-file-read-1',
+      expectedRequestType: 'file_read_approval',
+    },
+  ])(
+    'preserves $requestKind request type when mapping serverRequest/resolved',
+    ({ requestKind, requestId, expectedRequestType }) =>
+      Effect.gen(function* ()
       {
-        return
-      }
-      NodeAssert.equal(firstEvent.value.type, 'request.resolved')
-      if (firstEvent.value.type !== 'request.resolved')
-      {
-        return
-      }
-      NodeAssert.equal(firstEvent.value.payload.requestType, 'file_read_approval')
-    }),
+        const { adapter, runtime } = yield* startLifecycleRuntime()
+        const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+
+        const event: ProviderEvent = {
+          id: asEventId(`evt-${requestKind}-request-resolved`),
+          kind: 'notification',
+          provider: ProviderDriverKind.make('codex'),
+          threadId: asThreadId('thread-1'),
+          createdAt: '2026-01-01T00:00:00.000Z',
+          method: 'serverRequest/resolved',
+          requestKind,
+          requestId: ApprovalRequestId.make(requestId),
+          payload: {
+            threadId: 'thread-1',
+            requestId,
+          },
+        }
+
+        yield* runtime.emit(event)
+        const firstEvent = yield* Fiber.join(firstEventFiber)
+
+        NodeAssert.equal(firstEvent._tag, 'Some')
+        if (firstEvent._tag !== 'Some')
+        {
+          return
+        }
+        NodeAssert.equal(firstEvent.value.type, 'request.resolved')
+        if (firstEvent.value.type !== 'request.resolved')
+        {
+          return
+        }
+        NodeAssert.equal(firstEvent.value.payload.requestType, expectedRequestType)
+      }),
   )
 
   it.effect('preserves explicit empty multi-select user-input answers', () =>
@@ -1318,6 +1295,58 @@ const scopedLifecycleLayer = it.layer(
 
 scopedLifecycleLayer('CodexAdapterLive scoped lifecycle', (it) =>
 {
+  it.effect('keeps event forwarding alive after the startSession caller exits', () =>
+    Effect.gen(function* ()
+    {
+      const adapter = yield* CodexAdapter
+      const threadId = asThreadId('thread-event-forwarding')
+      yield* Effect.raceFirst(
+        Effect.gen(function* ()
+        {
+          yield* adapter.startSession({
+            provider: ProviderDriverKind.make('codex'),
+            threadId,
+            runtimeMode: 'full-access',
+          })
+          yield* adapter.sendTurn({
+            threadId,
+            input: 'hello',
+            attachments: [],
+          })
+        }),
+        Effect.never,
+      )
+
+      const runtime = scopedLifecycleRuntimeFactory.lastRuntime
+      NodeAssert.ok(runtime)
+
+      const firstEventFiber = yield* Stream.runHead(adapter.streamEvents).pipe(Effect.forkChild)
+      yield* runtime.emit({
+        id: asEventId('evt-after-start-caller-exit'),
+        kind: 'notification',
+        provider: ProviderDriverKind.make('codex'),
+        threadId,
+        turnId: asTurnId('turn-1'),
+        createdAt: '2026-01-01T00:00:00.000Z',
+        method: 'turn/started',
+      } satisfies ProviderEvent)
+
+      const firstEvent = yield* Fiber.join(firstEventFiber).pipe(
+        Effect.timeout('1 second'),
+        TestClock.withLive,
+      )
+      NodeAssert.equal(firstEvent._tag, 'Some')
+      if (firstEvent._tag === 'Some')
+      {
+        NodeAssert.equal(firstEvent.value.type, 'turn.started')
+        NodeAssert.equal(firstEvent.value.threadId, threadId)
+        NodeAssert.equal(firstEvent.value.turnId, 'turn-1')
+      }
+
+      yield* adapter.stopSession(threadId)
+    }),
+  )
+
   it.effect('closes the externally owned session scope on stopSession', () =>
     Effect.gen(function* ()
     {

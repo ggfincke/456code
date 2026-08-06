@@ -1,5 +1,6 @@
 // apps/server/src/cartographer/CartographerEmbedBroker.ts
 // supervises capability-protected cartographer embed sidecars
+
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off globalTimersInEffect:off globalDateInEffect:off - node owns the external sidecar process lifetime
 
 import * as NodeChildProcess from 'node:child_process'
@@ -15,12 +16,24 @@ import {
   type ProposalGenerationId,
   type ThreadId,
 } from '@t3tools/contracts'
+import * as Clock from 'effect/Clock'
 import * as Context from 'effect/Context'
+import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
+import * as Metric from 'effect/Metric'
+import * as Option from 'effect/Option'
 import * as Semaphore from 'effect/Semaphore'
 
 import * as ServerConfig from '../config.ts'
+import {
+  increment,
+  metricAttributes,
+  restartReconciliationDuration,
+  restartReconciliationItemsTotal,
+  restartReconciliationRunsTotal,
+} from '../observability/Metrics.ts'
 import { captureCurrentWorktree } from './CurrentWorktreeSnapshot.ts'
 
 const EMBED_ROUTE_PREFIX = '/api/cartographer/embed'
@@ -30,6 +43,58 @@ const EMBED_START_TIMEOUT_MS = 120_000
 const EMBED_HANDSHAKE_MAX_BYTES = 64 * 1024
 const EMBED_ERROR_MAX_BYTES = 8 * 1024
 const EMBED_COOKIE_NAME = 't3-cartographer-session'
+const EMBED_RECONCILIATION_GRACE_MS = 24 * 60 * 60 * 1_000
+const EMBED_RECONCILIATION_BUDGET_MS = 250
+const EMBED_RECONCILIATION_MAX_ENTRIES = 256
+const EMBED_ARTIFACT_NAME_PATTERN = /^[A-Za-z0-9_-]{24}$/u
+
+export type CartographerEmbedReconciliationReason =
+  | 'live-session'
+  | 'pending-root'
+  | 'within-grace'
+  | 'age-unavailable'
+  | 'stale-report-only'
+  | 'delete-disabled'
+  | 'malformed-name'
+  | 'not-directory'
+  | 'symlink'
+  | 'containment-escape'
+  | 'metadata-unavailable'
+  | 'canonicalization-failed'
+
+export interface CartographerEmbedReconciliationItem
+{
+  readonly name: string
+  readonly reason: CartographerEmbedReconciliationReason
+}
+
+export interface CartographerEmbedReconciliationReport
+{
+  readonly reportVersion: 1
+  readonly enumerated: number
+  readonly candidates: number
+  readonly live: number
+  readonly grace: number
+  readonly malformed: number
+  readonly manualSkip: number
+  readonly budgetExceeded: boolean
+  readonly deleteAttempted: 0
+  readonly deleteSucceeded: 0
+  readonly deleteFailed: 0
+  readonly items: ReadonlyArray<CartographerEmbedReconciliationItem>
+}
+
+interface MutableCartographerEmbedReconciliationReport
+{
+  enumerated: number
+  candidates: number
+  live: number
+  grace: number
+  malformed: number
+  manualSkip: number
+  budgetExceeded: boolean
+  items: Array<CartographerEmbedReconciliationItem>
+}
 
 interface CartographerEmbedReady
 {
@@ -79,6 +144,7 @@ export interface CartographerEmbedProxyTarget
 
 export interface CartographerEmbedBrokerShape
 {
+  readonly reconcileEmbedRoots: Effect.Effect<CartographerEmbedReconciliationReport>
   readonly issue: (
     input: CartographerEmbedIssueInput,
   ) => Effect.Effect<CartographerIssueEmbedResult, CartographerEmbedError>
@@ -112,6 +178,58 @@ export class CartographerEmbedBroker extends Context.Service<
 function token(bytes = 32): string
 {
   return NodeCrypto.randomBytes(bytes).toString('base64url')
+}
+
+function emptyReconciliationReport(): MutableCartographerEmbedReconciliationReport
+{
+  return {
+    enumerated: 0,
+    candidates: 0,
+    live: 0,
+    grace: 0,
+    malformed: 0,
+    manualSkip: 0,
+    budgetExceeded: false,
+    items: [],
+  }
+}
+
+function snapshotReconciliationReport(
+  report: MutableCartographerEmbedReconciliationReport,
+  budgetExceeded = report.budgetExceeded,
+): CartographerEmbedReconciliationReport
+{
+  return {
+    reportVersion: 1,
+    enumerated: report.enumerated,
+    candidates: report.candidates,
+    live: report.live,
+    grace: report.grace,
+    malformed: report.malformed,
+    manualSkip: report.manualSkip,
+    budgetExceeded,
+    deleteAttempted: 0,
+    deleteSucceeded: 0,
+    deleteFailed: 0,
+    items: [...report.items],
+  }
+}
+
+function isContainedPath(parent: string, child: string): boolean
+{
+  const relative = NodePath.relative(parent, child)
+  return (
+    relative !== '' &&
+    !relative.startsWith(`..${NodePath.sep}`) &&
+    relative !== '..' &&
+    !NodePath.isAbsolute(relative)
+  )
+}
+
+function filesystemEffect<A>(operation: () => Promise<A>): Effect.Effect<A>
+{
+  // reconciliation treats filesystem faults as defects; promise rejection dies
+  return Effect.promise(operation)
 }
 
 function tokenHash(value: string): Buffer
@@ -358,6 +476,7 @@ export const make = Effect.gen(function* ()
 {
   const config = yield* ServerConfig.ServerConfig
   const sessions = new Map<string, CartographerEmbedSession>()
+  const pendingArtifactRoots = new Set<string>()
   const threadLocks = new Map<ThreadId, Semaphore.Semaphore>()
   const deletedThreads = new Set<ThreadId>()
   const pendingStarts = new Map<ThreadId, AbortController>()
@@ -368,6 +487,241 @@ export const make = Effect.gen(function* ()
   const configuredCliPath = process.env.T3CODE_CARTOGRAPHER_CLI
   const cliPath =
     configuredCliPath === undefined ? undefined : normalizeConfiguredAbsolutePath(configuredCliPath)
+
+  const reconciliationMode = config.cartographerReconciliationMode ?? 'report'
+  const reconciliationReason =
+    reconciliationMode === 'off'
+      ? 'mode-off'
+      : reconciliationMode === 'delete'
+        ? 'delete-disabled'
+        : 'report-only'
+
+  const scanEmbedRoots = Effect.fn('CartographerEmbedBroker.scanEmbedRoots')(function* (
+    report: MutableCartographerEmbedReconciliationReport,
+  )
+  {
+    if (reconciliationMode === 'off') return snapshotReconciliationReport(report)
+
+    const observedAtMs = yield* Clock.currentTimeMillis
+    const deadlineMs = observedAtMs + EMBED_RECONCILIATION_BUDGET_MS
+    const canonicalStateDir = yield* filesystemEffect(() => NodeFSP.realpath(config.stateDir))
+    const managedRoot = NodePath.join(canonicalStateDir, 'cartographer', 'embed')
+    const managedRootStat = yield* filesystemEffect(async () =>
+    {
+      try
+      {
+        return await NodeFSP.lstat(managedRoot)
+      }
+      catch (cause)
+      {
+        if ((cause as NodeJS.ErrnoException).code === 'ENOENT') return null
+        throw cause
+      }
+    })
+    if (managedRootStat === null) return snapshotReconciliationReport(report)
+    if (!managedRootStat.isDirectory() || managedRootStat.isSymbolicLink())
+    {
+      return yield* Effect.die(new Error('Cartographer embed reconciliation root is unsafe.'))
+    }
+    const canonicalManagedRoot = yield* filesystemEffect(() => NodeFSP.realpath(managedRoot))
+    if (NodePath.normalize(canonicalManagedRoot) !== NodePath.normalize(managedRoot))
+    {
+      return yield* Effect.die(
+        new Error('Cartographer embed reconciliation root escaped ownership.'),
+      )
+    }
+
+    return yield* Effect.acquireUseRelease(
+      filesystemEffect(() => NodeFSP.opendir(canonicalManagedRoot)),
+      (directory) =>
+        Effect.gen(function* ()
+        {
+          while (report.enumerated < EMBED_RECONCILIATION_MAX_ENTRIES)
+          {
+            if ((yield* Clock.currentTimeMillis) >= deadlineMs)
+            {
+              report.budgetExceeded = true
+              break
+            }
+            const entry = yield* filesystemEffect(() => directory.read())
+            if (entry === null) break
+
+            const name = entry.name
+            const childPath = NodePath.join(canonicalManagedRoot, name)
+            report.enumerated += 1
+            if (!EMBED_ARTIFACT_NAME_PATTERN.test(name))
+            {
+              report.malformed += 1
+              report.manualSkip += 1
+              report.items.push({ name, reason: 'malformed-name' })
+              continue
+            }
+            const childStat = yield* Effect.promise(async () =>
+            {
+              try
+              {
+                return await NodeFSP.lstat(childPath)
+              }
+              catch
+              {
+                return null
+              }
+            })
+            if (childStat === null)
+            {
+              report.manualSkip += 1
+              report.items.push({ name, reason: 'metadata-unavailable' })
+              continue
+            }
+            if (childStat.isSymbolicLink())
+            {
+              report.manualSkip += 1
+              report.items.push({ name, reason: 'symlink' })
+              continue
+            }
+            if (!childStat.isDirectory())
+            {
+              report.manualSkip += 1
+              report.items.push({ name, reason: 'not-directory' })
+              continue
+            }
+            const canonicalChildPath = yield* Effect.promise(async () =>
+            {
+              try
+              {
+                return await NodeFSP.realpath(childPath)
+              }
+              catch
+              {
+                return null
+              }
+            })
+            if (canonicalChildPath === null)
+            {
+              report.manualSkip += 1
+              report.items.push({ name, reason: 'canonicalization-failed' })
+              continue
+            }
+            if (!isContainedPath(canonicalManagedRoot, canonicalChildPath))
+            {
+              report.manualSkip += 1
+              report.items.push({ name, reason: 'containment-escape' })
+              continue
+            }
+            if (sessions.has(name))
+            {
+              report.live += 1
+              report.items.push({ name, reason: 'live-session' })
+              continue
+            }
+            if (pendingArtifactRoots.has(name))
+            {
+              report.live += 1
+              report.items.push({ name, reason: 'pending-root' })
+              continue
+            }
+
+            const createdAtMs =
+              Number.isFinite(childStat.birthtimeMs) && childStat.birthtimeMs > 0
+                ? childStat.birthtimeMs
+                : Number.isFinite(childStat.ctimeMs) && childStat.ctimeMs > 0
+                  ? childStat.ctimeMs
+                  : null
+            if (createdAtMs === null)
+            {
+              report.grace += 1
+              report.items.push({ name, reason: 'age-unavailable' })
+              continue
+            }
+            if (observedAtMs - createdAtMs <= EMBED_RECONCILIATION_GRACE_MS)
+            {
+              report.grace += 1
+              report.items.push({ name, reason: 'within-grace' })
+              continue
+            }
+
+            report.candidates += 1
+            report.items.push({
+              name,
+              reason: reconciliationMode === 'delete' ? 'delete-disabled' : 'stale-report-only',
+            })
+          }
+
+          if (!report.budgetExceeded && report.enumerated === EMBED_RECONCILIATION_MAX_ENTRIES)
+          {
+            if ((yield* Clock.currentTimeMillis) >= deadlineMs)
+            {
+              report.budgetExceeded = true
+            }
+            else if ((yield* filesystemEffect(() => directory.read())) !== null)
+            {
+              report.budgetExceeded = true
+            }
+          }
+          return snapshotReconciliationReport(report)
+        }),
+      (directory) =>
+        filesystemEffect(async () =>
+        {
+          await directory.close().catch(() => undefined)
+        }),
+    )
+  })
+
+  const reconcileEmbedRoots: CartographerEmbedBrokerShape['reconcileEmbedRoots'] = Effect.suspend(
+    () =>
+    {
+      const report = emptyReconciliationReport()
+      const scan = scanEmbedRoots(report).pipe(
+        Effect.timeoutOption(EMBED_RECONCILIATION_BUDGET_MS),
+        Effect.map(
+          Option.match({
+            onNone: () => snapshotReconciliationReport(report, true),
+            onSome: (completedReport) => completedReport,
+          }),
+        ),
+      )
+
+      return Effect.gen(function* ()
+      {
+        const startedAtMs = yield* Clock.currentTimeMillis
+        const exit = yield* Effect.exit(scan)
+        const endedAtMs = yield* Clock.currentTimeMillis
+        const outcome = Exit.isFailure(exit)
+          ? 'failure'
+          : reconciliationMode === 'off'
+            ? 'skipped'
+            : exit.value.budgetExceeded
+              ? 'budget-exceeded'
+              : 'reported'
+        const attributes = {
+          owner: 'cartographer-embed',
+          mode: reconciliationMode,
+          outcome,
+          reason: reconciliationReason,
+        }
+        yield* increment(restartReconciliationRunsTotal, attributes)
+        yield* Metric.update(
+          Metric.withAttributes(restartReconciliationDuration, metricAttributes(attributes)),
+          Duration.millis(Math.max(0, endedAtMs - startedAtMs)),
+        )
+
+        if (Exit.isFailure(exit)) return yield* Effect.failCause(exit.cause)
+        const itemCounts = new Map<CartographerEmbedReconciliationReason, number>()
+        for (const item of exit.value.items)
+        {
+          itemCounts.set(item.reason, (itemCounts.get(item.reason) ?? 0) + 1)
+        }
+        yield* Effect.forEach(
+          itemCounts,
+          ([reason, amount]) =>
+            increment(restartReconciliationItemsTotal, { ...attributes, reason }, amount),
+          { discard: true },
+        )
+        return exit.value
+      })
+    },
+  )
 
   const disposeSession = (session: CartographerEmbedSession): Promise<void> =>
   {
@@ -539,6 +893,7 @@ export const make = Effect.gen(function* ()
     const startController = new AbortController()
     pendingStarts.set(input.threadId, startController)
     const sessionId = CartographerEmbedSessionId.make(token(18))
+    pendingArtifactRoots.add(sessionId)
     let artifactRoot = NodePath.join(config.stateDir, 'cartographer', 'embed', sessionId)
     let preRegistrationChild: NodeChildProcess.ChildProcessWithoutNullStreams | null = null
     let sessionRegistered = false
@@ -679,6 +1034,7 @@ export const make = Effect.gen(function* ()
       session.expiryTimer.unref()
       sessions.set(sessionId, session)
       sessionRegistered = true
+      pendingArtifactRoots.delete(sessionId)
       if (pendingStarts.get(input.threadId) === startController)
       {
         pendingStarts.delete(input.threadId)
@@ -698,17 +1054,20 @@ export const make = Effect.gen(function* ()
           {
             pendingStarts.delete(input.threadId)
           }
-          if (sessionRegistered) return
-          if (preRegistrationChild !== null)
+          if (!sessionRegistered)
           {
-            await stopChild(preRegistrationChild)
+            if (preRegistrationChild !== null)
+            {
+              await stopChild(preRegistrationChild)
+            }
+            await NodeFSP.rm(artifactRoot, {
+              recursive: true,
+              force: true,
+              maxRetries: 3,
+              retryDelay: 25,
+            }).catch(() => undefined)
           }
-          await NodeFSP.rm(artifactRoot, {
-            recursive: true,
-            force: true,
-            maxRetries: 3,
-            retryDelay: 25,
-          }).catch(() => undefined)
+          pendingArtifactRoots.delete(sessionId)
         }),
       ),
     )
@@ -816,6 +1175,7 @@ export const make = Effect.gen(function* ()
   })
 
   return CartographerEmbedBroker.of({
+    reconcileEmbedRoots,
     issue,
     exchangeTicket,
     resolveProxyTarget,

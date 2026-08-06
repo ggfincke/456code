@@ -1,3 +1,6 @@
+// tests/apps/mobile/features/terminal/terminalMenu.test.ts
+// verify build terminal menu sessions behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { type KnownTerminalSession } from '@t3tools/client-runtime/state/terminal'
@@ -145,30 +148,27 @@ describe('nextTerminalId', () =>
 
 describe('nextOpenTerminalId', () =>
 {
-  it('matches nextTerminalId when not on a terminal route', () =>
-  {
-    expect(nextOpenTerminalId({ listedTerminalIds: [] })).toBe(DEFAULT_TERMINAL_ID)
-    expect(nextOpenTerminalId({ listedTerminalIds: [DEFAULT_TERMINAL_ID] })).toBe('term-2')
-  })
-
-  it('avoids the mounted primary tab when the session list is still empty', () =>
-  {
-    expect(
-      nextOpenTerminalId({
-        listedTerminalIds: [],
-        activeRouteTerminalId: DEFAULT_TERMINAL_ID,
-      }),
-    ).toBe('term-2')
-  })
-
-  it('does not double-count when the route id is already listed', () =>
+  it.each([
+    {
+      name: 'avoids the mounted primary tab when the session list is still empty',
+      listedTerminalIds: [] as const,
+      activeRouteTerminalId: DEFAULT_TERMINAL_ID,
+      expected: 'term-2',
+    },
+    {
+      name: 'does not double-count when the route id is already listed',
+      listedTerminalIds: [DEFAULT_TERMINAL_ID] as const,
+      activeRouteTerminalId: DEFAULT_TERMINAL_ID,
+      expected: 'term-2',
+    },
+  ])('$name', ({ listedTerminalIds, activeRouteTerminalId, expected }) =>
   {
     expect(
       nextOpenTerminalId({
-        listedTerminalIds: [DEFAULT_TERMINAL_ID],
-        activeRouteTerminalId: DEFAULT_TERMINAL_ID,
+        listedTerminalIds: [...listedTerminalIds],
+        activeRouteTerminalId,
       }),
-    ).toBe('term-2')
+    ).toBe(expected)
   })
 })
 

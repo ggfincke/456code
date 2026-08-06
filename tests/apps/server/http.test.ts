@@ -1,22 +1,23 @@
+// tests/apps/server/http.test.ts
+// verify http dev routing behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import { isLoopbackHostname, resolveDevRedirectUrl } from '../../../apps/server/src/http.ts'
 
 describe('http dev routing', () =>
 {
-  it('treats localhost and loopback addresses as local', () =>
+  it.each([
+    ['127.0.0.1', true],
+    ['localhost', true],
+    ['::1', true],
+    ['[::1]', true],
+    ['192.168.86.35', false],
+    ['10.0.0.24', false],
+    ['example.local', false],
+  ] as const)('isLoopbackHostname(%s) -> %s', (hostname, expected) =>
   {
-    expect(isLoopbackHostname('127.0.0.1')).toBe(true)
-    expect(isLoopbackHostname('localhost')).toBe(true)
-    expect(isLoopbackHostname('::1')).toBe(true)
-    expect(isLoopbackHostname('[::1]')).toBe(true)
-  })
-
-  it('does not treat LAN addresses as local', () =>
-  {
-    expect(isLoopbackHostname('192.168.86.35')).toBe(false)
-    expect(isLoopbackHostname('10.0.0.24')).toBe(false)
-    expect(isLoopbackHostname('example.local')).toBe(false)
+    expect(isLoopbackHostname(hostname)).toBe(expected)
   })
 
   it('preserves path and query when redirecting to the dev server', () =>

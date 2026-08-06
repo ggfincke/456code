@@ -2,16 +2,36 @@
 // verifies durable queued-message persistence and delivery decisions
 
 import { describe, expect, it } from '@effect/vitest'
+import type { StartThreadTurnInput } from '@t3tools/client-runtime/operations'
+import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 import {
   CommandId,
   EnvironmentId,
   MessageId,
+  OrchestrationDispatchCommandError,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
   TurnId,
+  type OrchestrationThread,
 } from '@t3tools/contracts'
-import { AtomRegistry } from 'effect/unstable/reactivity'
+import * as Cause from 'effect/Cause'
+import { AsyncResult, AtomRegistry } from 'effect/unstable/reactivity'
+import { vi } from 'vite-plus/test'
+
+import type { DraftComposerImageAttachment } from '../../../../apps/mobile/src/lib/composerImages'
+
+// keep this state-level suite independent of Expo's native module loader.
+vi.mock('../../../../apps/mobile/src/lib/composerImages', () => ({
+  toUploadChatImageAttachments: (attachments: ReadonlyArray<DraftComposerImageAttachment>) =>
+    attachments.map((attachment) => ({
+      type: attachment.type,
+      name: attachment.name,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      dataUrl: attachment.dataUrl,
+    })),
+}))
 
 import {
   decodeQueuedThreadMessage,
@@ -32,6 +52,12 @@ import {
   ThreadOutboxManagerError,
 } from '../../../../apps/mobile/src/state/thread-outbox-manager'
 import type { ThreadOutboxStorage } from '../../../../apps/mobile/src/state/thread-outbox-storage'
+import {
+  drainExistingQueuedThreadMessage,
+  drainQueuedThreadCreation,
+  type ExistingThreadOutboxState,
+} from '../../../../apps/mobile/src/state/thread-outbox-delivery'
+import { threadDetailToShell } from '../../../../apps/mobile/src/state/thread-shell-fallback'
 
 function queuedMessage(input: {
   readonly environmentId?: string
@@ -48,6 +74,55 @@ function queuedMessage(input: {
     text: input.messageId,
     attachments: [],
     createdAt: input.createdAt,
+  }
+}
+
+function threadShell(
+  input: {
+    readonly modelInstanceId?: string
+    readonly model?: string
+    readonly providerSwitch?: EnvironmentThreadShell['providerSwitch']
+    readonly started?: boolean
+  } = {},
+): EnvironmentThreadShell
+{
+  return {
+    environmentId: EnvironmentId.make('environment-1'),
+    id: ThreadId.make('thread-1'),
+    projectId: ProjectId.make('project-1'),
+    title: 'Thread',
+    modelSelection: {
+      instanceId: ProviderInstanceId.make(input.modelInstanceId ?? 'provider-current'),
+      model: input.model ?? 'gpt-current',
+    },
+    runtimeMode: 'full-access',
+    interactionMode: 'default',
+    branch: null,
+    worktreePath: null,
+    latestTurn: input.started
+      ? {
+          turnId: TurnId.make('turn-1'),
+          state: 'completed',
+          requestedAt: '2026-08-02T10:00:00.000Z',
+          startedAt: '2026-08-02T10:00:01.000Z',
+          completedAt: '2026-08-02T10:00:02.000Z',
+          assistantMessageId: null,
+        }
+      : null,
+    providerSwitch: input.providerSwitch ?? null,
+    createdAt: '2026-08-01T10:00:00.000Z',
+    updatedAt: '2026-08-02T10:00:02.000Z',
+    archivedAt: null,
+    origin: null,
+    settledOverride: null,
+    settledAt: null,
+    snoozedUntil: null,
+    snoozedAt: null,
+    session: null,
+    latestUserMessageAt: input.started ? '2026-08-02T10:00:00.000Z' : null,
+    hasPendingApprovals: false,
+    hasPendingUserInput: false,
+    hasActionableProposedPlan: false,
   }
 }
 
@@ -111,16 +186,529 @@ describe('thread outbox', () =>
       selectedMessage,
     )
     expect(
-      resolveQueuedThreadSettings(legacyMessage, {
-        modelSelection: selectedMessage.modelSelection,
-        runtimeMode: selectedMessage.runtimeMode,
-        interactionMode: selectedMessage.interactionMode,
-      }),
+      resolveQueuedThreadSettings(
+        legacyMessage,
+        {
+          modelSelection: selectedMessage.modelSelection,
+          runtimeMode: selectedMessage.runtimeMode,
+          interactionMode: selectedMessage.interactionMode,
+        },
+        false,
+      ),
     ).toEqual({
       modelSelection: selectedMessage.modelSelection,
       runtimeMode: selectedMessage.runtimeMode,
       interactionMode: selectedMessage.interactionMode,
     })
+  })
+
+  it('round-trips persisted delivery state while decoding schema versions one through four', () =>
+  {
+    const message = {
+      ...queuedMessage({
+        messageId: 'message-1',
+        createdAt: '2026-06-08T10:00:01.000Z',
+      }),
+      deliveryAttemptCount: 2,
+      settingsSyncAttemptCount: 1,
+      turnStartCreatedAt: '2026-08-02T12:00:00.000Z',
+    } satisfies QueuedThreadMessage
+
+    expect(decodeQueuedThreadMessage(encodeQueuedThreadMessage(message))).toEqual(message)
+    for (const schemaVersion of [1, 2, 3, 4])
+    {
+      expect(
+        decodeQueuedThreadMessage({
+          schemaVersion,
+          ...queuedMessage({
+            messageId: `legacy-${schemaVersion}`,
+            createdAt: '2026-06-08T10:00:01.000Z',
+          }),
+        }),
+      ).toMatchObject({ messageId: `legacy-${schemaVersion}` })
+    }
+  })
+
+  it('adopts the started thread provider when draining across a provider switch', () =>
+  {
+    const message = {
+      ...queuedMessage({
+        messageId: 'message-1',
+        createdAt: '2026-06-08T10:00:01.000Z',
+      }),
+      modelSelection: {
+        instanceId: ProviderInstanceId.make('provider-before-switch'),
+        model: 'gpt-5.4',
+      },
+      runtimeMode: 'approval-required',
+      interactionMode: 'plan',
+    } satisfies QueuedThreadMessage
+    const currentModelSelection = {
+      instanceId: ProviderInstanceId.make('provider-after-switch'),
+      model: 'gpt-5.5',
+    } as const
+
+    const settings = resolveQueuedThreadSettings(
+      message,
+      {
+        modelSelection: currentModelSelection,
+        runtimeMode: 'full-access',
+        interactionMode: 'default',
+      },
+      true,
+    )
+
+    expect(settings).toEqual({
+      modelSelection: currentModelSelection,
+      runtimeMode: message.runtimeMode,
+      interactionMode: message.interactionMode,
+    })
+    expect(modelSelectionsEqual(settings.modelSelection, currentModelSelection)).toBe(true)
+  })
+
+  it('omits model selection for a started thread and persists a fresh turn timestamp', async () =>
+  {
+    const message = {
+      ...queuedMessage({
+        messageId: 'message-1',
+        createdAt: '2026-06-08T10:00:01.000Z',
+      }),
+      modelSelection: {
+        instanceId: ProviderInstanceId.make('provider-before-switch'),
+        model: 'gpt-before-switch',
+      },
+      runtimeMode: 'full-access',
+      interactionMode: 'default',
+      turnStartCreatedAt: '2026-06-08T10:00:02.000Z',
+    } satisfies QueuedThreadMessage
+    const thread = threadShell({
+      modelInstanceId: 'provider-after-switch',
+      model: 'gpt-after-switch',
+      started: true,
+    })
+    let persisted = message as QueuedThreadMessage
+    const startInputs: Array<{
+      readonly environmentId: EnvironmentId
+      readonly input: StartThreadTurnInput
+    }> = []
+    let metadataUpdateCount = 0
+    let removeCount = 0
+
+    const outcome = await drainExistingQueuedThreadMessage({
+      message,
+      initialState: { thread, shellStatus: 'live', environmentConnected: true },
+      confirmQueued: async () => true,
+      readState: () => ({ thread, shellStatus: 'live', environmentConnected: true }),
+      update: async (updated) =>
+      {
+        persisted = updated
+        return true
+      },
+      remove: async () =>
+      {
+        removeCount += 1
+      },
+      now: () => '2026-08-02T12:00:00.000Z',
+      updateThreadMetadata: async () =>
+      {
+        metadataUpdateCount += 1
+        return AsyncResult.success({ sequence: 1 })
+      },
+      setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+      startTurn: async (input) =>
+      {
+        startInputs.push(input)
+        return AsyncResult.success({ sequence: 1 })
+      },
+    })
+
+    expect(outcome).toEqual({ kind: 'complete' })
+    expect(metadataUpdateCount).toBe(0)
+    expect(removeCount).toBe(1)
+    expect(persisted.turnStartCreatedAt).toBe('2026-08-02T12:00:00.000Z')
+    expect(startInputs).toHaveLength(1)
+    expect(startInputs[0]?.input).toMatchObject({
+      commandId: message.commandId,
+      threadId: message.threadId,
+      createdAt: '2026-08-02T12:00:00.000Z',
+      message: {
+        messageId: message.messageId,
+        text: message.text,
+      },
+    })
+    expect(startInputs[0]?.input).not.toHaveProperty('modelSelection')
+  })
+
+  it('rechecks live switch-free shell state after durable confirmation and timestamp storage', async () =>
+  {
+    const message = queuedMessage({
+      messageId: 'message-1',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+    const clearThread = threadShell()
+    const switchingThread = threadShell({
+      providerSwitch: {
+        phase: 'compacting',
+        targetInstanceId: ProviderInstanceId.make('provider-next'),
+        targetModel: 'gpt-next',
+        requestedAt: '2026-08-02T11:59:59.000Z',
+      },
+    })
+    let state: ExistingThreadOutboxState = {
+      thread: clearThread,
+      shellStatus: 'live',
+      environmentConnected: true,
+    }
+    let startCount = 0
+    let updateCount = 0
+    const commonCommands = {
+      updateThreadMetadata: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+      startTurn: async () =>
+      {
+        startCount += 1
+        return AsyncResult.success({ sequence: 1 })
+      },
+    }
+
+    const duringConfirmation = await drainExistingQueuedThreadMessage({
+      message,
+      initialState: state,
+      confirmQueued: async () =>
+      {
+        state = {
+          thread: switchingThread,
+          shellStatus: 'synchronizing',
+          environmentConnected: true,
+        }
+        return true
+      },
+      readState: () => state,
+      update: async () =>
+      {
+        updateCount += 1
+        return true
+      },
+      remove: async () => undefined,
+      now: () => '2026-08-02T12:00:00.000Z',
+      ...commonCommands,
+    })
+    expect(duringConfirmation).toEqual({ kind: 'wait' })
+    expect(startCount).toBe(0)
+    expect(updateCount).toBe(0)
+
+    state = {
+      thread: clearThread,
+      shellStatus: 'live',
+      environmentConnected: true,
+    }
+    const duringTimestampWrite = await drainExistingQueuedThreadMessage({
+      message,
+      initialState: state,
+      confirmQueued: async () => true,
+      readState: () => state,
+      update: async () =>
+      {
+        updateCount += 1
+        state = {
+          thread: switchingThread,
+          shellStatus: 'live',
+          environmentConnected: true,
+        }
+        return true
+      },
+      remove: async () => undefined,
+      now: () => '2026-08-02T12:00:00.000Z',
+      ...commonCommands,
+    })
+    expect(duringTimestampWrite).toEqual({ kind: 'wait' })
+    expect(startCount).toBe(0)
+    expect(updateCount).toBe(1)
+  })
+
+  it('retains and durably accounts for a rejected turn timestamp write', async () =>
+  {
+    const message = queuedMessage({
+      messageId: 'message-1',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+    let persisted = message
+    const thread = threadShell()
+    let updateCount = 0
+    let startCount = 0
+
+    const outcome = await drainExistingQueuedThreadMessage({
+      message,
+      initialState: { thread, shellStatus: 'live', environmentConnected: true },
+      confirmQueued: async () => true,
+      readState: () => ({ thread, shellStatus: 'live', environmentConnected: true }),
+      update: async (updated) =>
+      {
+        updateCount += 1
+        if (updateCount === 1)
+        {
+          throw new Error('timestamp write rejected')
+        }
+        persisted = updated
+        return true
+      },
+      remove: async () => undefined,
+      now: () => '2026-08-02T12:00:00.000Z',
+      updateThreadMetadata: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+      startTurn: async () =>
+      {
+        startCount += 1
+        return AsyncResult.success({ sequence: 1 })
+      },
+      warn: () => undefined,
+    })
+
+    expect(outcome).toEqual({ kind: 'retry', attempt: 1 })
+    expect(updateCount).toBe(2)
+    expect(startCount).toBe(0)
+    expect(persisted.deliveryAttemptCount).toBe(1)
+    expect(persisted.turnStartCreatedAt).toBeUndefined()
+  })
+
+  it('waits when creation synchronization begins during durable confirmation', async () =>
+  {
+    const message = {
+      ...queuedMessage({
+        messageId: 'message-1',
+        createdAt: '2026-06-08T10:00:01.000Z',
+      }),
+      modelSelection: threadShell().modelSelection,
+      creation: {
+        projectId: ProjectId.make('project-1'),
+        workspaceMode: 'local' as const,
+        branch: null,
+        worktreePath: null,
+      },
+    }
+    let state: ExistingThreadOutboxState = {
+      thread: undefined,
+      shellStatus: 'live',
+      environmentConnected: true,
+    }
+    let sendCount = 0
+
+    const outcome = await drainQueuedThreadCreation({
+      message,
+      initialState: state,
+      confirmQueued: async () =>
+      {
+        state = { ...state, shellStatus: 'synchronizing' }
+        return true
+      },
+      readState: () => state,
+      send: async () =>
+      {
+        sendCount += 1
+        return AsyncResult.success({ sequence: 1 })
+      },
+      update: async () => true,
+      remove: async () => undefined,
+    })
+
+    expect(outcome).toEqual({ kind: 'wait' })
+    expect(sendCount).toBe(0)
+  })
+
+  it('rechecks provider switch state after each accepted settings command', async () =>
+  {
+    const message = {
+      ...queuedMessage({
+        messageId: 'message-1',
+        createdAt: '2026-06-08T10:00:01.000Z',
+      }),
+      modelSelection: {
+        instanceId: ProviderInstanceId.make('provider-current'),
+        model: 'gpt-queued',
+      },
+      runtimeMode: 'approval-required' as const,
+      interactionMode: 'plan' as const,
+    }
+    const thread = threadShell({ started: true })
+    const switchingThread = threadShell({
+      started: true,
+      providerSwitch: {
+        phase: 'compacting',
+        targetInstanceId: ProviderInstanceId.make('provider-next'),
+        targetModel: 'gpt-next',
+        requestedAt: '2026-08-02T11:59:59.000Z',
+      },
+    })
+    let state: ExistingThreadOutboxState = {
+      thread,
+      shellStatus: 'live',
+      environmentConnected: true,
+    }
+    let runtimeCount = 0
+    let interactionCount = 0
+    let startCount = 0
+
+    const outcome = await drainExistingQueuedThreadMessage({
+      message,
+      initialState: state,
+      confirmQueued: async () => true,
+      readState: () => state,
+      update: async () => true,
+      remove: async () => undefined,
+      now: () => '2026-08-02T12:00:00.000Z',
+      updateThreadMetadata: async () =>
+      {
+        state = {
+          thread: switchingThread,
+          shellStatus: 'synchronizing',
+          environmentConnected: true,
+        }
+        return AsyncResult.success({ sequence: 1 })
+      },
+      setThreadRuntimeMode: async () =>
+      {
+        runtimeCount += 1
+        return AsyncResult.success({ sequence: 1 })
+      },
+      setThreadInteractionMode: async () =>
+      {
+        interactionCount += 1
+        return AsyncResult.success({ sequence: 1 })
+      },
+      startTurn: async () =>
+      {
+        startCount += 1
+        return AsyncResult.success({ sequence: 1 })
+      },
+    })
+
+    expect(outcome).toEqual({ kind: 'wait' })
+    expect(runtimeCount).toBe(0)
+    expect(interactionCount).toBe(0)
+    expect(startCount).toBe(0)
+  })
+
+  it('persists a fresh command id after a switch rejection and sends on retry', async () =>
+  {
+    const message = queuedMessage({
+      messageId: 'message-1',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+    let persisted = message
+    const thread = threadShell()
+    let removeCount = 0
+    const commandIds: CommandId[] = []
+    const switchError = new OrchestrationDispatchCommandError({
+      message: 'Provider switch is in progress',
+      code: 'turn-start-during-switch',
+    })
+    let startAttempt = 0
+    const drain = () =>
+      drainExistingQueuedThreadMessage({
+        message: persisted,
+        initialState: { thread, shellStatus: 'live', environmentConnected: true },
+        confirmQueued: async () => true,
+        readState: () => ({ thread, shellStatus: 'live', environmentConnected: true }),
+        update: async (updated) =>
+        {
+          persisted = updated
+          return true
+        },
+        remove: async () =>
+        {
+          removeCount += 1
+        },
+        now: () => `2026-08-02T12:00:0${startAttempt}.000Z`,
+        updateThreadMetadata: async () => AsyncResult.success({ sequence: 1 }),
+        setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+        setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+        startTurn: async ({ input }) =>
+        {
+          commandIds.push(input.commandId ?? CommandId.make('missing'))
+          startAttempt += 1
+          return startAttempt === 1
+            ? AsyncResult.failure(Cause.fail(switchError))
+            : AsyncResult.success({ sequence: 2 })
+        },
+        warn: () => undefined,
+      })
+
+    await expect(drain()).resolves.toEqual({ kind: 'wait' })
+    expect(removeCount).toBe(0)
+    expect(persisted.commandId).not.toBe(message.commandId)
+    persisted = decodeQueuedThreadMessage(encodeQueuedThreadMessage(persisted))
+
+    await expect(drain()).resolves.toEqual({ kind: 'complete' })
+    expect(removeCount).toBe(1)
+    expect(commandIds).toEqual([message.commandId, persisted.commandId])
+    expect(persisted.failure).toBeUndefined()
+  })
+
+  it('rotates after restart when the original switch rejection receipt is replayed', async () =>
+  {
+    const message = queuedMessage({
+      messageId: 'message-switch-restart',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+    let persisted = message
+    let allowRotationWrite = false
+    let removeCount = 0
+    let startAttempt = 0
+    const commandIds: CommandId[] = []
+    const switchError = new OrchestrationDispatchCommandError({
+      message: 'Provider switch is in progress',
+      code: 'turn-start-during-switch',
+    })
+    const thread = threadShell()
+    const drain = () =>
+      drainExistingQueuedThreadMessage({
+        message: persisted,
+        initialState: { thread, shellStatus: 'live', environmentConnected: true },
+        confirmQueued: async () => true,
+        readState: () => ({ thread, shellStatus: 'live', environmentConnected: true }),
+        update: async (updated) =>
+        {
+          if (updated.commandId !== message.commandId && !allowRotationWrite)
+          {
+            throw new Error('simulated storage outage during command id rotation')
+          }
+          persisted = updated
+          return true
+        },
+        remove: async () =>
+        {
+          removeCount += 1
+        },
+        now: () => `2026-08-02T12:00:0${startAttempt}.000Z`,
+        updateThreadMetadata: async () => AsyncResult.success({ sequence: 1 }),
+        setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+        setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+        startTurn: async ({ input }) =>
+        {
+          commandIds.push(input.commandId ?? CommandId.make('missing'))
+          startAttempt += 1
+          return startAttempt <= 2
+            ? AsyncResult.failure(Cause.fail(switchError))
+            : AsyncResult.success({ sequence: 2 })
+        },
+        warn: () => undefined,
+      })
+
+    await expect(drain()).resolves.toEqual({ kind: 'retry', attempt: 1 })
+    expect(persisted.commandId).toBe(message.commandId)
+
+    persisted = decodeQueuedThreadMessage(encodeQueuedThreadMessage(persisted))
+    allowRotationWrite = true
+    await expect(drain()).resolves.toEqual({ kind: 'wait' })
+    expect(persisted.commandId).not.toBe(message.commandId)
+
+    persisted = decodeQueuedThreadMessage(encodeQueuedThreadMessage(persisted))
+    await expect(drain()).resolves.toEqual({ kind: 'complete' })
+    expect(removeCount).toBe(1)
+    expect(commandIds).toEqual([message.commandId, message.commandId, persisted.commandId])
   })
 
   it('compares model options as part of the queued settings change', () =>
@@ -309,6 +897,122 @@ describe('thread outbox', () =>
 
     await manager.load()
     expect(loadCalls).toBe(2)
+    registry.dispose()
+  })
+
+  it('automatically retries the initial outbox load with bounded backoff', async () =>
+  {
+    vi.useFakeTimers()
+    const registry = AtomRegistry.make()
+    let loadCalls = 0
+    const manager = createThreadOutboxManager({
+      registry,
+      storage: {
+        load: async () =>
+        {
+          loadCalls += 1
+          if (loadCalls === 1)
+          {
+            throw new Error('storage unavailable')
+          }
+          return []
+        },
+        write: async () => undefined,
+        remove: async () => undefined,
+      },
+      warn: () => undefined,
+    })
+
+    try
+    {
+      await manager.load()
+      expect(loadCalls).toBe(1)
+      await vi.advanceTimersByTimeAsync(999)
+      expect(loadCalls).toBe(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(loadCalls).toBe(2)
+    }
+    finally
+    {
+      registry.dispose()
+      vi.useRealTimers()
+    }
+  })
+
+  it('reports environment cleanup incomplete when persisted loading fails', async () =>
+  {
+    const registry = AtomRegistry.make()
+    const manager = createThreadOutboxManager({
+      registry,
+      storage: {
+        load: async () =>
+        {
+          throw new Error('storage unavailable')
+        },
+        write: async () => undefined,
+        remove: async () => undefined,
+      },
+      warn: () => undefined,
+    })
+
+    await expect(manager.clearEnvironment(EnvironmentId.make('environment-1'))).resolves.toEqual({
+      complete: false,
+      remainingMessageCount: 0,
+    })
+    registry.dispose()
+  })
+
+  it('keeps failed environment removals and completes only after none remain', async () =>
+  {
+    const registry = AtomRegistry.make()
+    const first = queuedMessage({
+      messageId: 'message-1',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+    const second = queuedMessage({
+      messageId: 'message-2',
+      createdAt: '2026-06-08T10:00:02.000Z',
+    })
+    const retained = queuedMessage({
+      environmentId: 'environment-10',
+      messageId: 'message-1',
+      createdAt: '2026-06-08T10:00:03.000Z',
+    })
+    const stored = new Map([
+      [`${first.environmentId}:${first.messageId}`, first],
+      [`${second.environmentId}:${second.messageId}`, second],
+      [`${retained.environmentId}:${retained.messageId}`, retained],
+    ])
+    let failSecond = true
+    const manager = createThreadOutboxManager({
+      registry,
+      storage: {
+        load: async () => [...stored.values()],
+        write: async () => undefined,
+        remove: async (message) =>
+        {
+          if (message.messageId === second.messageId && failSecond)
+          {
+            throw new Error('remove failed')
+          }
+          stored.delete(`${message.environmentId}:${message.messageId}`)
+        },
+      },
+      warn: () => undefined,
+    })
+
+    await expect(manager.clearEnvironment(first.environmentId)).resolves.toEqual({
+      complete: false,
+      remainingMessageCount: 1,
+    })
+    expect(stored.has(`${retained.environmentId}:${retained.messageId}`)).toBe(true)
+
+    failSecond = false
+    await expect(manager.clearEnvironment(first.environmentId)).resolves.toEqual({
+      complete: true,
+      remainingMessageCount: 0,
+    })
+    expect([...stored.values()]).toEqual([retained])
     registry.dispose()
   })
 
@@ -538,7 +1242,7 @@ describe('thread outbox', () =>
     registry.dispose()
   })
 
-  it('only removes a missing-thread message after shell synchronization is live', () =>
+  it('only fails a missing-thread message after shell synchronization is live', () =>
   {
     expect(
       resolveThreadOutboxDeliveryAction({
@@ -547,6 +1251,7 @@ describe('thread outbox', () =>
         shellStatus: 'synchronizing',
         environmentConnected: true,
         threadBusy: false,
+        providerSwitchActive: false,
       }),
     ).toBe('wait')
     expect(
@@ -556,8 +1261,9 @@ describe('thread outbox', () =>
         shellStatus: 'live',
         environmentConnected: true,
         threadBusy: false,
+        providerSwitchActive: false,
       }),
-    ).toBe('remove')
+    ).toBe('fail')
     expect(
       resolveThreadOutboxDeliveryAction({
         isCreation: false,
@@ -565,8 +1271,29 @@ describe('thread outbox', () =>
         shellStatus: 'live',
         environmentConnected: true,
         threadBusy: false,
+        providerSwitchActive: false,
       }),
     ).toBe('send')
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: false,
+        threadExists: true,
+        shellStatus: 'live',
+        environmentConnected: true,
+        threadBusy: false,
+        providerSwitchActive: true,
+      }),
+    ).toBe('wait')
+    expect(
+      resolveThreadOutboxDeliveryAction({
+        isCreation: false,
+        threadExists: true,
+        shellStatus: 'cached',
+        environmentConnected: true,
+        threadBusy: false,
+        providerSwitchActive: false,
+      }),
+    ).toBe('wait')
   })
 
   it('sends queued creations once connected and live, removing already-created ones', () =>
@@ -578,9 +1305,10 @@ describe('thread outbox', () =>
         shellStatus: 'cached',
         environmentConnected: false,
         threadBusy: false,
+        providerSwitchActive: false,
       }),
     ).toBe('wait')
-    // Connected but not yet synchronized: a previously delivered creation may
+    // connected but not yet synchronized: a previously delivered creation may
     // simply not be visible yet — sending now could duplicate the thread.
     expect(
       resolveThreadOutboxDeliveryAction({
@@ -589,6 +1317,7 @@ describe('thread outbox', () =>
         shellStatus: 'synchronizing',
         environmentConnected: true,
         threadBusy: false,
+        providerSwitchActive: false,
       }),
     ).toBe('wait')
     expect(
@@ -598,6 +1327,7 @@ describe('thread outbox', () =>
         shellStatus: 'live',
         environmentConnected: true,
         threadBusy: false,
+        providerSwitchActive: false,
       }),
     ).toBe('send')
     expect(
@@ -607,6 +1337,7 @@ describe('thread outbox', () =>
         shellStatus: 'live',
         environmentConnected: true,
         threadBusy: true,
+        providerSwitchActive: false,
       }),
     ).toBe('remove')
   })
@@ -666,7 +1397,7 @@ describe('thread outbox', () =>
     expect(shouldRetryThreadOutboxDelivery(new Error('Thread no longer exists'))).toBe(false)
   })
 
-  it('retains queued messages when settings synchronization fails before startTurn', () =>
+  it('bounds settings synchronization retries before retaining a failed queued message', () =>
   {
     const deterministicFailure = new Error('Thread no longer exists')
 
@@ -675,14 +1406,198 @@ describe('thread outbox', () =>
         stage: 'settings-sync',
         error: deterministicFailure,
         interrupted: false,
+        attempt: 1,
       }),
     ).toBe('retry')
+    expect(
+      resolveThreadOutboxFailureAction({
+        stage: 'settings-sync',
+        error: deterministicFailure,
+        interrupted: false,
+        attempt: 3,
+      }),
+    ).toBe('fail')
     expect(
       resolveThreadOutboxFailureAction({
         stage: 'start-turn',
         error: deterministicFailure,
         interrupted: false,
+        attempt: 1,
       }),
-    ).toBe('discard')
+    ).toBe('fail')
+    expect(
+      resolveThreadOutboxFailureAction({
+        stage: 'start-turn',
+        error: new Error('Socket is not connected'),
+        interrupted: false,
+        attempt: 3,
+      }),
+    ).toBe('fail')
+    expect(
+      resolveThreadOutboxFailureAction({
+        stage: 'start-turn',
+        error: new Error('interrupted'),
+        interrupted: true,
+        attempt: 3,
+      }),
+    ).toBe('fail')
+  })
+
+  it('persists a deterministic turn rejection as a visible failed item', async () =>
+  {
+    let persisted = queuedMessage({
+      messageId: 'message-1',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+    const thread = threadShell()
+    let removeCount = 0
+
+    const outcome = await drainExistingQueuedThreadMessage({
+      message: persisted,
+      initialState: { thread, shellStatus: 'live', environmentConnected: true },
+      confirmQueued: async () => true,
+      readState: () => ({ thread, shellStatus: 'live', environmentConnected: true }),
+      update: async (updated) =>
+      {
+        persisted = updated
+        return true
+      },
+      remove: async () =>
+      {
+        removeCount += 1
+      },
+      now: () => '2026-08-02T12:00:00.000Z',
+      updateThreadMetadata: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+      setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+      startTurn: async () => AsyncResult.failure(Cause.fail(new Error('Thread no longer exists'))),
+      warn: () => undefined,
+    })
+
+    expect(outcome).toEqual({ kind: 'complete' })
+    expect(removeCount).toBe(0)
+    expect(persisted.deliveryAttemptCount).toBe(1)
+    expect(persisted.failure?.reason).toBe('Thread no longer exists')
+  })
+
+  it('persists and bounds transport failures into the durable visible failure state', async () =>
+  {
+    let persisted: QueuedThreadMessage = queuedMessage({
+      messageId: 'message-1',
+      createdAt: '2026-06-08T10:00:01.000Z',
+    })
+    const thread = threadShell()
+    let removeCount = 0
+    const transientError = { _tag: 'ConnectionTransientError', message: 'offline' }
+
+    for (let attempt = 1; attempt <= 3; attempt += 1)
+    {
+      const outcome = await drainExistingQueuedThreadMessage({
+        message: persisted,
+        initialState: { thread, shellStatus: 'live', environmentConnected: true },
+        confirmQueued: async () => true,
+        readState: () => ({ thread, shellStatus: 'live', environmentConnected: true }),
+        update: async (updated) =>
+        {
+          persisted = updated
+          return true
+        },
+        remove: async () =>
+        {
+          removeCount += 1
+        },
+        now: () => '2026-08-02T12:00:00.000Z',
+        updateThreadMetadata: async () => AsyncResult.success({ sequence: 1 }),
+        setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+        setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+        startTurn: async () => AsyncResult.failure(Cause.fail(transientError)),
+        warn: () => undefined,
+      })
+
+      expect(outcome).toEqual(attempt < 3 ? { kind: 'retry', attempt } : { kind: 'complete' })
+      persisted = decodeQueuedThreadMessage(encodeQueuedThreadMessage(persisted))
+    }
+
+    expect(removeCount).toBe(0)
+    expect(persisted.deliveryAttemptCount).toBe(3)
+    expect(persisted.failure?.reason).toBe('offline')
+  })
+
+  it('persists settings attempts across restarts and stops before starting a turn', async () =>
+  {
+    let persisted: QueuedThreadMessage = {
+      ...queuedMessage({
+        messageId: 'message-1',
+        createdAt: '2026-06-08T10:00:01.000Z',
+      }),
+      modelSelection: {
+        instanceId: ProviderInstanceId.make('provider-current'),
+        model: 'gpt-queued',
+      },
+    }
+    const thread = threadShell({ started: true })
+    let metadataUpdateCount = 0
+    let startCount = 0
+
+    for (let attempt = 1; attempt <= 3; attempt += 1)
+    {
+      const outcome = await drainExistingQueuedThreadMessage({
+        message: persisted,
+        initialState: { thread, shellStatus: 'live', environmentConnected: true },
+        confirmQueued: async () => true,
+        readState: () => ({ thread, shellStatus: 'live', environmentConnected: true }),
+        update: async (updated) =>
+        {
+          persisted = updated
+          return true
+        },
+        remove: async () => undefined,
+        now: () => '2026-08-02T12:00:00.000Z',
+        updateThreadMetadata: async () =>
+        {
+          metadataUpdateCount += 1
+          return AsyncResult.failure(Cause.fail(new Error('settings rejected')))
+        },
+        setThreadRuntimeMode: async () => AsyncResult.success({ sequence: 1 }),
+        setThreadInteractionMode: async () => AsyncResult.success({ sequence: 1 }),
+        startTurn: async () =>
+        {
+          startCount += 1
+          return AsyncResult.success({ sequence: 1 })
+        },
+        warn: () => undefined,
+      })
+
+      expect(outcome).toEqual(attempt < 3 ? { kind: 'retry', attempt } : { kind: 'complete' })
+      persisted = decodeQueuedThreadMessage(encodeQueuedThreadMessage(persisted))
+    }
+
+    expect(metadataUpdateCount).toBe(3)
+    expect(startCount).toBe(0)
+    expect(persisted.settingsSyncAttemptCount).toBe(3)
+    expect(persisted.failure?.reason).toBe('settings rejected')
+  })
+
+  it('preserves a background provider switch in the detail-to-shell fallback', () =>
+  {
+    const switchState = {
+      phase: 'finalizing' as const,
+      targetInstanceId: ProviderInstanceId.make('provider-next'),
+      targetModel: 'gpt-next',
+      requestedAt: '2026-08-02T12:00:00.000Z',
+    }
+    const { environmentId: _, ...shell } = threadShell({ providerSwitch: switchState })
+    const detail = {
+      ...shell,
+      deletedAt: null,
+      messages: [],
+      proposedPlans: [],
+      activities: [],
+      checkpoints: [],
+    } satisfies OrchestrationThread
+
+    expect(threadDetailToShell(EnvironmentId.make('environment-1'), detail).providerSwitch).toEqual(
+      switchState,
+    )
   })
 })

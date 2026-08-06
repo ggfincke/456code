@@ -9,23 +9,24 @@ legacy connection owner or supported mixed mode.
 
 ## Ownership
 
-Each registered environment has one scoped Effect `Context` containing focused
+Each registered environment has one supervised session scope containing focused
 services:
 
 - `EnvironmentSupervisor` owns desired state, retry scheduling, and the active
   session scope.
-- `ConnectionBroker` prepares credentials and endpoints for primary, bearer,
+- `ConnectionResolver` prepares credentials and endpoints for primary, bearer,
   relay, and SSH targets.
 - `RpcSessionFactory` performs one transport attempt. It does not retry.
-- `EnvironmentRpc` exposes the active session without leaking the transport.
-- `EnvironmentProjectCommands` and `EnvironmentThreadCommands` construct
-  orchestration commands, IDs, and timestamps.
-- `EnvironmentShell` and `EnvironmentThreads` own live subscriptions and cached
+- `ConnectionDriver` sequences endpoint preparation, session creation, and the
+  initial server-config synchronization.
+- `EnvironmentRegistry` owns registrations and the per-environment supervisor
+  scopes.
+- State modules own live subscriptions, commands, and cached shell and thread
   snapshots.
 
-`EnvironmentServicesFactory` assembles that context, and `EnvironmentRegistry`
-owns its scope. There is no aggregate environment runtime facade. React
-components do not create connections, transports, retry loops, or RPC clients.
+The exported `Connection.layer` assembles the resolver, RPC session factory,
+driver, registry, onboarding, and startup services. React components do not
+create connections, transports, retry loops, or RPC clients.
 
 ## Connection State
 
@@ -96,20 +97,21 @@ connection policy.
 
 ## Source Boundaries
 
-The public package subpaths mirror the runtime layers:
+The public package entry points are declared in
+[`packages/client-runtime/package.json`](../../packages/client-runtime/package.json):
 
-- `connection/core` contains state, catalog, retry policy, and connectivity.
-- `connection/transport` contains brokerage, authorization, attempts, and RPC
-  sessions.
-- `connection/platform` declares capabilities and persistence contracts.
-- `connection/services` contains environment-scoped data services.
-- `connection/application` assembles registries, discovery, and startup.
-- `connection/atoms` adapts shared services to application-owned Atom runtimes.
-- `connection/presentation` contains pure UI projections.
+- `connection` exports the catalog, resolver, driver, registry, supervisor,
+  onboarding, wakeups, and assembled `Connection.layer`.
+- `authorization`, `environment`, `errors`, and `rpc` expose their corresponding
+  shared runtime boundaries.
+- `operations` and `operations/projects` expose reusable environment operations.
+- `platform` declares the capabilities and persistence contracts supplied by web
+  and mobile.
+- `relay` preserves the supported managed-relay client surface.
 
-Other reusable state lives in domain subpaths such as `shell`, `threads`,
-`terminal`, and `vcs`. Applications must import explicit package subpaths; the
-package intentionally has no root export.
+Reusable state uses explicit `state/*` subpaths such as `state/shell`,
+`state/threads`, `state/terminal`, and `state/vcs`. Applications must import
+explicit package subpaths; the package intentionally has no root export.
 
 ## Application Boundary
 
@@ -118,9 +120,11 @@ its own Atom runtime, and selects the domain atom factories required by that
 platform. Web and mobile may expose different hooks and features without
 changing connection ownership.
 
-Application code must not construct `WsTransport`, RPC clients, retry loops, or
-raw orchestration commands. Persistence paths belong to the platform
-registration and cache stores, with explicit migration or invalidation policy.
+Application code must not own transport or RPC construction. The shared runtime
+owns `RpcSessionFactory`, connection brokerage through `ConnectionResolver`, and
+retry policy through `EnvironmentSupervisor`. Persistence paths belong to the
+platform registration and cache stores, with explicit migration or invalidation
+policy.
 
 ## Verification
 

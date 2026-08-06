@@ -1,5 +1,6 @@
 // tests/apps/server/import/importEngine.integration.test.ts
 // verifies transcript imports through the persisted orchestration engine and projections
+
 // @effect-diagnostics nodeBuiltinImport:off globalErrorInEffectFailure:off
 
 import * as NodeFS from 'node:fs'
@@ -229,6 +230,11 @@ function makeService(input: {
   readonly dispatch?: ImportServiceDepsShape['dispatch']
   readonly resolveTarget?: ImportServiceDepsShape['resolveImportTarget']
   readonly fallbackModelSelection?: ModelSelection
+  readonly verifyReplacementThread?: NonNullable<ImportServiceDepsShape['verifyReplacementThread']>
+  readonly cleanupDeletedThreadAttachments?: NonNullable<
+    ImportServiceDepsShape['cleanupDeletedThreadAttachments']
+  >
+  readonly verifyReplacementIndex?: NonNullable<ImportServiceDepsShape['verifyReplacementIndex']>
   readonly bindContinuation?: (
     request: ContinuationRequest,
   ) => Effect.Effect<ContinuationOutcome, never, never>
@@ -239,6 +245,7 @@ function makeService(input: {
       ImportServiceDeps,
       ImportServiceDeps.of({
         dispatch: input.dispatch ?? input.harness.engine.dispatch,
+        replacementIntents: input.harness.importReplacementIntents,
         findThreadByContentHash: (lookup) => findImportedThread(input.harness, lookup),
         findThreadById: (threadId) => findImportedThreadById(input.harness, threadId),
         findProjectByWorkspaceRoot: (normalizedRoot) =>
@@ -279,6 +286,52 @@ function makeService(input: {
             .pipe(
               Effect.map((snapshot) => snapshot.threads.some((thread) => thread.id === threadId)),
             ),
+        verifyReplacementThread:
+          input.verifyReplacementThread ??
+          ((replacement) =>
+            input.harness.snapshotQuery
+              .getThreadDetailSnapshot(replacement.replacementThreadId)
+              .pipe(
+                Effect.map(
+                  Option.match({
+                    onNone: () => null,
+                    onSome: (snapshot) =>
+                    {
+                      const origin = snapshot.thread.origin
+                      return snapshot.thread.projectId === replacement.replacementProjectId &&
+                        origin?.kind === 'imported' &&
+                        origin.contentHash === replacement.sourceVersion &&
+                        snapshot.thread.messages.length === replacement.expectedMessageCount &&
+                        snapshot.thread.activities.length === replacement.expectedActivityCount
+                        ? {
+                            replacementThreadId: replacement.replacementThreadId,
+                            projectId: replacement.replacementProjectId,
+                            sourceVersion: replacement.sourceVersion,
+                            messageCount: snapshot.thread.messages.length,
+                            activityCount: snapshot.thread.activities.length,
+                            snapshotSequence: snapshot.snapshotSequence,
+                            verifiedAt: '2026-01-01T00:00:00.000Z',
+                          }
+                        : null
+                    },
+                  }),
+                ),
+              )),
+        verifyReplacementAttachments: () => Effect.succeed({ complete: true }),
+        cleanupDeletedThreadAttachments:
+          input.cleanupDeletedThreadAttachments ?? (() => Effect.succeed({ complete: true })),
+        verifyReplacementIndex:
+          input.verifyReplacementIndex ??
+          (({ replacementThreadId, sourceThreadId }) =>
+            Effect.all([
+              findImportedThreadById(input.harness, replacementThreadId),
+              findImportedThreadById(input.harness, sourceThreadId),
+            ]).pipe(
+              Effect.map(([replacement, source]) => ({
+                replacementVisible: replacement !== null,
+                sourceVisible: source !== null,
+              })),
+            )),
         fallbackModelSelection: input.fallbackModelSelection ?? {
           instanceId: CODEX_INSTANCE_ID,
           model: 'gpt-default',
@@ -927,6 +980,160 @@ it.live('retries an ambiguously failed final marker with exactly one effective m
       }),
     (harness) => harness.dispose,
   ).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.live('recovers persisted active replacement intents across restart boundaries', () =>
+  Effect.gen(function* ()
+  {
+    for (const boundary of [
+      'intent',
+      'create',
+      'importing',
+      'verifying',
+      'tombstone',
+      'reconciling',
+    ] as const)
+    {
+      const harness = yield* makeOrchestrationIntegrationHarness({ provider: CODEX_DRIVER })
+      const nativeSessionId = `active-restart-${boundary}`
+      const codexRoot = NodePath.join(harness.rootDir, 'imports', 'codex')
+      const sessionDirectory = NodePath.join(codexRoot, '2026', '01', '01')
+      const sourcePath = NodePath.join(sessionDirectory, `rollout-${nativeSessionId}.jsonl`)
+      NodeFS.mkdirSync(sessionDirectory, { recursive: true })
+      const sourceDescriptors: ReadonlyArray<ImportFileSourceDescriptor> = [
+        {
+          source: 'codex-cli',
+          driverKind: CODEX_DRIVER,
+          providerInstanceId: CODEX_INSTANCE_ID,
+          scanRoot: codexRoot,
+          continuationIdentity: fileContinuationIdentity(CODEX_DRIVER, codexRoot),
+        },
+      ]
+      const request = {
+        items: [
+          {
+            source: 'codex-cli' as const,
+            sourcePath,
+            providerInstanceId: CODEX_INSTANCE_ID,
+          },
+        ],
+      }
+
+      NodeFS.writeFileSync(
+        sourcePath,
+        codexRollout({
+          cwd: harness.workspaceDir,
+          messageCount: 201,
+          nativeSessionId,
+        }),
+      )
+      let batchNumber = 0
+      const partialService = yield* makeService({
+        harness,
+        sourceDescriptors,
+        continuationRequests: [],
+        dispatch: (command) =>
+        {
+          if (command.type === 'thread.messages.import' && (batchNumber += 1) === 2)
+          {
+            return Effect.fail(new Error('injected partial active import'))
+          }
+          return harness.engine.dispatch(command)
+        },
+      })
+      const partialResult = yield* partialService.importSessions(request)
+      expect(partialResult.failed[0]?.message).toContain('injected partial active import')
+      const partialSnapshot = yield* harness.snapshotQuery.getSnapshot()
+      const sourceThread = partialSnapshot.threads.find(
+        (thread) => thread.deletedAt === null && thread.origin?.nativeSessionId === nativeSessionId,
+      )
+      expect(sourceThread?.messages).toHaveLength(200)
+
+      NodeFS.writeFileSync(
+        sourcePath,
+        codexRollout({
+          cwd: harness.workspaceDir,
+          messageCount: 202,
+          nativeSessionId,
+        }),
+      )
+      let replacementThreadId: ThreadId | null = null
+      const crashingService = yield* makeService({
+        harness,
+        sourceDescriptors,
+        continuationRequests: [],
+        dispatch: (command) =>
+        {
+          if (command.type === 'thread.create' && command.threadId !== sourceThread?.id)
+          {
+            replacementThreadId = command.threadId
+            if (boundary === 'intent') return Effect.interrupt
+            if (boundary === 'create')
+            {
+              return harness.engine.dispatch(command).pipe(Effect.andThen(Effect.interrupt))
+            }
+          }
+          if (
+            boundary === 'importing' &&
+            command.type === 'thread.messages.import' &&
+            command.threadId === replacementThreadId
+          )
+          {
+            return Effect.interrupt
+          }
+          if (
+            boundary === 'tombstone' &&
+            command.type === 'thread.delete' &&
+            command.threadId === sourceThread?.id
+          )
+          {
+            return harness.engine.dispatch(command).pipe(Effect.andThen(Effect.interrupt))
+          }
+          return harness.engine.dispatch(command)
+        },
+        ...(boundary === 'verifying' ? { verifyReplacementThread: () => Effect.interrupt } : {}),
+        ...(boundary === 'reconciling'
+          ? { cleanupDeletedThreadAttachments: () => Effect.interrupt }
+          : {}),
+      })
+      const crashExit = yield* Effect.exit(crashingService.importSessions(request))
+      expect(crashExit._tag).toBe('Failure')
+      const openBeforeRestart = yield* harness.importReplacementIntents.listOpen()
+      expect(openBeforeRestart).toHaveLength(1)
+      expect(openBeforeRestart[0]?.replacementThreadId).toBe(replacementThreadId)
+      expect(openBeforeRestart[0]?.phase).toBe(
+        boundary === 'intent' || boundary === 'create'
+          ? 'creating'
+          : boundary === 'tombstone'
+            ? 'tombstoning'
+            : boundary,
+      )
+
+      const rootDir = harness.rootDir
+      yield* harness.dispose
+      const restartedHarness = yield* makeOrchestrationIntegrationHarness({
+        provider: CODEX_DRIVER,
+        rootDir,
+      })
+      const restartedService = yield* makeService({
+        harness: restartedHarness,
+        sourceDescriptors,
+        continuationRequests: [],
+      })
+      const recovered = yield* restartedService.importSessions(request)
+      expect(recovered.failed).toEqual([])
+      expect(recovered.imported[0]?.threadId ?? recovered.skipped[0]?.threadId).toBe(
+        replacementThreadId,
+      )
+      const detail = yield* restartedHarness.snapshotQuery.getThreadDetailSnapshot(
+        replacementThreadId!,
+      )
+      expect(Option.getOrThrow(detail).thread.messages).toHaveLength(202)
+      expect(yield* restartedHarness.importReplacementIntents.listOpen()).toEqual([])
+      expect(yield* findImportedThreadById(restartedHarness, sourceThread!.id)).toBeNull()
+      yield* restartedHarness.dispose
+    }
+  }).pipe(Effect.provide(NodeServices.layer)),
 )
 
 it.live('serializes native identity claims while isolating exact provider choices', () =>

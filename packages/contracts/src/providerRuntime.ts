@@ -1,3 +1,6 @@
+// packages/contracts/src/providerRuntime.ts
+// define provider runtime contracts
+
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 import {
@@ -249,7 +252,7 @@ const RuntimeErrorType = Schema.Literal('runtime.error')
 const ProviderRuntimeEventBase = Schema.Struct({
   eventId: EventId,
   provider: ProviderDriverKind,
-  // Optional during the driver/instance migration. See providerInstance.ts
+  // optional during the driver/instance migration. See providerInstance.ts
   // for the routing-key-vs-driver-id distinction. Once every emitter
   // populates it (post-slice-4), routing flips to instance-id-only.
   providerInstanceId: Schema.optional(ProviderInstanceId),
@@ -323,6 +326,13 @@ export const ThreadTokenUsageSnapshot = Schema.Struct({
   compactsAutomatically: Schema.optional(Schema.Boolean),
 })
 export type ThreadTokenUsageSnapshot = typeof ThreadTokenUsageSnapshot.Type
+
+export const ContextWindowUpdatedActivityPayload = Schema.Struct({
+  ...ThreadTokenUsageSnapshot.fields,
+  provider: Schema.optional(ProviderDriverKind),
+  providerInstanceId: Schema.optional(ProviderInstanceId),
+})
+export type ContextWindowUpdatedActivityPayload = typeof ContextWindowUpdatedActivityPayload.Type
 
 const ThreadTokenUsageUpdatedPayload = Schema.Struct({
   usage: ThreadTokenUsageSnapshot,
@@ -1020,7 +1030,7 @@ export type ProviderRuntimeEventV2 = typeof ProviderRuntimeEventV2.Type
 export const ProviderRuntimeEvent = ProviderRuntimeEventV2
 export type ProviderRuntimeEvent = ProviderRuntimeEventV2
 
-// Compatibility aliases for call sites still importing legacy names.
+// compatibility aliases for call sites still importing legacy names.
 const ProviderRuntimeMessageDeltaEvent = ProviderRuntimeContentDeltaEvent
 export type ProviderRuntimeMessageDeltaEvent = ProviderRuntimeContentDeltaEvent
 const ProviderRuntimeMessageCompletedEvent = ProviderRuntimeItemCompletedEvent
@@ -1034,7 +1044,7 @@ export type ProviderRuntimeApprovalRequestedEvent = ProviderRuntimeRequestOpened
 const ProviderRuntimeApprovalResolvedEvent = ProviderRuntimeRequestResolvedEvent
 export type ProviderRuntimeApprovalResolvedEvent = ProviderRuntimeRequestResolvedEvent
 
-// Legacy helper aliases retained for adapters/tests.
+// legacy helper aliases retained for adapters/tests.
 const ProviderRuntimeToolKind = Schema.Literals(['command', 'file-read', 'file-change', 'other'])
 export type ProviderRuntimeToolKind = typeof ProviderRuntimeToolKind.Type
 

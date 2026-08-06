@@ -1,5 +1,6 @@
 // apps/server/src/import/importService.ts
 // imports inert transcript records into orchestration projects and threads
+
 // @effect-diagnostics nodeBuiltinImport:off
 
 import * as NodeBuffer from 'node:buffer'
@@ -34,6 +35,15 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as Semaphore from 'effect/Semaphore'
+
+import {
+  ACTIVE_IMPORT_REPLACEMENT_VERSION,
+  type ImportReplacementAttachmentEvidence,
+  type ImportReplacementIndexEvidence,
+  type ImportReplacementIntent,
+  type ImportReplacementIntentRepositoryShape,
+  type ImportReplacementThreadEvidence,
+} from '../persistence/Services/ImportReplacementIntents.ts'
 
 import { parseClaudeSession } from './claudeSessionParser.ts'
 import type { AcpImportBatchLoadResult, AcpImportWireUsage } from './acpImport.ts'
@@ -79,6 +89,7 @@ const maximumDateEpochMillis = 8_640_000_000_000_000
 export const ACP_IMPORT_REQUEST_DEADLINE_MS = 5 * 60_000
 export const IMPORT_REQUEST_DEADLINE_MS = 5 * 60_000
 const encodeUnknownJsonString = Schema.encodeUnknownEffect(Schema.UnknownFromJsonString)
+const encodeUnknownJsonStringSync = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
 const importTransactionMutex = Semaphore.makeUnsafe(1)
 
 export interface ImportServiceDepsShape
@@ -112,6 +123,37 @@ export interface ImportServiceDepsShape
     compatibleInstanceIds: ReadonlyArray<ProviderInstanceId>,
   ) => Effect.Effect<ResolvedImportTarget | null, Error>
   readonly threadExistsInShell: (threadId: ThreadIdType) => Effect.Effect<boolean, Error>
+  readonly replacementIntents?: ImportReplacementIntentRepositoryShape
+  readonly verifyReplacementThread?: (input: {
+    readonly replacementThreadId: ThreadIdType
+    readonly replacementProjectId: ProjectIdType
+    readonly source: ImportSource
+    readonly sourcePath: string
+    readonly nativeSessionId: string | null
+    readonly providerInstanceId: ProviderInstanceId | null
+    readonly originalWorkspaceRoot: string | null
+    readonly sourceVersion: string
+    readonly expectedMessageCount: number
+    readonly expectedActivityCount: number
+    readonly expectedRecordFingerprint: string
+  }) => Effect.Effect<ImportReplacementThreadEvidence | null, Error>
+  readonly verifyReplacementAttachments?: (input: {
+    readonly replacementThreadId: ThreadIdType
+    readonly expectedRelativePaths: ReadonlyArray<string>
+  }) => Effect.Effect<{ readonly complete: boolean }, Error>
+  readonly cleanupDeletedThreadAttachments?: (
+    sourceThreadId: ThreadIdType,
+  ) => Effect.Effect<{ readonly complete: boolean }, Error>
+  readonly verifyReplacementIndex?: (input: {
+    readonly replacementThreadId: ThreadIdType
+    readonly sourceThreadId: ThreadIdType
+  }) => Effect.Effect<
+    {
+      readonly replacementVisible: boolean
+      readonly sourceVisible: boolean
+    },
+    Error
+  >
   readonly fallbackModelSelection: ModelSelection
   readonly maximumRequestBytes?: number
   readonly maximumRequestRecords?: number
@@ -200,6 +242,30 @@ class ImportSessionOperationError extends Schema.TaggedErrorClass<ImportSessionO
 function hashContent(content: string): string
 {
   return NodeCrypto.createHash('sha256').update(content).digest('hex')
+}
+
+function replacementIntentKey(input: {
+  readonly source: ImportSource
+  readonly sourcePath: string
+  readonly nativeSessionId: string | null
+  readonly providerInstanceId: ProviderInstanceId | null
+  readonly originalWorkspaceRoot: string | null
+  readonly sourceVersion: string
+}): string
+{
+  return NodeCrypto.createHash('sha256')
+    .update(
+      JSON.stringify([
+        input.source,
+        input.sourcePath,
+        input.nativeSessionId,
+        input.providerInstanceId,
+        input.originalWorkspaceRoot,
+        input.sourceVersion,
+        ACTIVE_IMPORT_REPLACEMENT_VERSION,
+      ]),
+    )
+    .digest('hex')
 }
 
 function parserFor(source: 'codex-cli' | 'claude-code')
@@ -425,6 +491,25 @@ export const make = Effect.gen(function* ()
 {
   const deps = yield* ImportServiceDeps
   const continuation = yield* ImportContinuationDeps
+  const replacementIntents =
+    deps.replacementIntents ??
+    ({
+      getByIntentKey: () => Effect.succeed(Option.none()),
+      findOpenBySourceIdentity: () => Effect.succeed(Option.none()),
+      insertIfAbsent: () =>
+        Effect.die(new Error('Import replacement intent repository is unavailable')),
+      casTransition: () => Effect.succeed(false),
+      listOpen: () => Effect.succeed([]),
+      retire: () => Effect.succeed(false),
+    } satisfies ImportReplacementIntentRepositoryShape)
+  const verifyReplacementThread = deps.verifyReplacementThread ?? (() => Effect.succeed(null))
+  const verifyReplacementAttachments =
+    deps.verifyReplacementAttachments ?? (() => Effect.succeed({ complete: false }))
+  const cleanupDeletedThreadAttachments =
+    deps.cleanupDeletedThreadAttachments ?? (() => Effect.succeed({ complete: false }))
+  const verifyReplacementIndex =
+    deps.verifyReplacementIndex ??
+    (() => Effect.succeed({ replacementVisible: false, sourceVisible: true }))
   const canResolveUnrecordedWorkspace = deps.resolveImportWorkspaceRoot !== undefined
   const resolveImportWorkspaceRoot: NonNullable<
     ImportServiceDepsShape['resolveImportWorkspaceRoot']
@@ -960,24 +1045,79 @@ export const make = Effect.gen(function* ()
             : [item.source, originProviderInstanceId ?? 'none', session.meta.nativeSessionId].join(
                 '\u0000',
               )
-        const projectedThread = yield* deps.findThreadByContentHash({
-          contentHash,
+        const openReplacementIntentOption = yield* replacementIntents.findOpenBySourceIdentity({
           source: item.source,
           sourcePath: session.meta.sourcePath,
           nativeSessionId: session.meta.nativeSessionId,
           providerInstanceId: originProviderInstanceId,
         })
+        let activeReplacementIntent = Option.getOrNull(openReplacementIntentOption)
+        if (
+          activeReplacementIntent !== null &&
+          activeReplacementIntent.replacementVersion !== ACTIVE_IMPORT_REPLACEMENT_VERSION
+        )
+        {
+          const manualAt = DateTime.formatIso(yield* DateTime.now)
+          yield* replacementIntents.casTransition({
+            intentKey: activeReplacementIntent.intentKey,
+            expectedPhase: activeReplacementIntent.phase,
+            nextPhase: 'manual',
+            threadEvidence: activeReplacementIntent.threadEvidence,
+            attachmentEvidence: activeReplacementIntent.attachmentEvidence,
+            indexEvidence: activeReplacementIntent.indexEvidence,
+            attemptCount: activeReplacementIntent.attemptCount + 1,
+            lastError: `Unsupported replacement version '${activeReplacementIntent.replacementVersion}'`,
+            retryAfter: null,
+            updatedAt: manualAt,
+          })
+          return yield* new ImportSessionOperationError({
+            operation: 'persist',
+            sourcePath: item.sourcePath,
+            cause: `Import replacement requires manual recovery for version '${activeReplacementIntent.replacementVersion}'`,
+          })
+        }
+        if (activeReplacementIntent?.phase === 'manual')
+        {
+          return yield* new ImportSessionOperationError({
+            operation: 'persist',
+            sourcePath: item.sourcePath,
+            cause: 'Import replacement requires manual recovery',
+          })
+        }
+        const intentReplacementThread =
+          activeReplacementIntent === null
+            ? null
+            : yield* deps.findThreadById(activeReplacementIntent.replacementThreadId)
+        const intentSourceThread =
+          activeReplacementIntent === null || intentReplacementThread !== null
+            ? null
+            : yield* deps.findThreadById(activeReplacementIntent.sourceThreadId)
+        const projectedThread =
+          activeReplacementIntent === null
+            ? yield* deps.findThreadByContentHash({
+                contentHash,
+                source: item.source,
+                sourcePath: session.meta.sourcePath,
+                nativeSessionId: session.meta.nativeSessionId,
+                providerInstanceId: originProviderInstanceId,
+              })
+            : null
         let existingThread =
-          importedThreadsBySourceAndHash.get(importSeed) ??
-          (nativeSessionKey === null
-            ? undefined
-            : importedThreadsByNativeSession.get(nativeSessionKey)) ??
-          projectedThread
+          intentReplacementThread ??
+          intentSourceThread ??
+          (activeReplacementIntent === null
+            ? (importedThreadsBySourceAndHash.get(importSeed) ??
+              (nativeSessionKey === null
+                ? undefined
+                : importedThreadsByNativeSession.get(nativeSessionKey)) ??
+              projectedThread)
+            : null)
         let importWorkspaceRoot = existingThread?.workspaceRoot
         let originalWorkspaceRoot = existingThread?.originalWorkspaceRoot
         let incompleteImportProjectId: ProjectIdType | null = null
         let incompleteImportWasArchived = false
         let archivedIncompleteThreadToReplace: ImportedThreadMatch | null = null
+        let activeIncompleteThreadToReplace: ImportedThreadMatch | null = null
         // only archived or changed-source threads need finalization state up
         // front; the preserved-binding guard below fetches it on demand
         let existingImportFinalized: boolean | null =
@@ -1009,11 +1149,7 @@ export const make = Effect.gen(function* ()
           }
           else
           {
-            yield* deps.dispatch({
-              type: 'thread.delete',
-              commandId: commandId(importSeed, 'replace-incomplete-v1', existingThread.threadId),
-              threadId: existingThread.threadId,
-            })
+            activeIncompleteThreadToReplace = existingThread
           }
           for (const [key, match] of importedThreadsBySourceAndHash)
           {
@@ -1114,7 +1250,222 @@ export const make = Effect.gen(function* ()
           },
           createdAt: session.meta.firstActivityAt ?? now,
         } as const
+
+        if (
+          activeReplacementIntent !== null &&
+          (activeReplacementIntent.sourceVersion !== contentHash ||
+            activeReplacementIntent.expectedRecordFingerprint !==
+              hashContent(encodeUnknownJsonStringSync(session.records)))
+        )
+        {
+          yield* replacementIntents.casTransition({
+            intentKey: activeReplacementIntent.intentKey,
+            expectedPhase: activeReplacementIntent.phase,
+            nextPhase: 'manual',
+            threadEvidence: activeReplacementIntent.threadEvidence,
+            attachmentEvidence: activeReplacementIntent.attachmentEvidence,
+            indexEvidence: activeReplacementIntent.indexEvidence,
+            attemptCount: activeReplacementIntent.attemptCount + 1,
+            lastError: `Source content no longer matches replacement intent '${activeReplacementIntent.intentKey}'`,
+            retryAfter: null,
+            updatedAt: now,
+          })
+          return yield* new ImportSessionOperationError({
+            operation: 'persist',
+            sourcePath: item.sourcePath,
+            cause: 'Import source changed again while an active replacement was open',
+          })
+        }
+
+        if (activeReplacementIntent === null && activeIncompleteThreadToReplace !== null)
+        {
+          const identitySeed = encodeUnknownJsonStringSync([
+            item.source,
+            session.meta.sourcePath,
+            session.meta.nativeSessionId,
+            originProviderInstanceId,
+            originalWorkspaceRoot ?? null,
+            contentHash,
+            ACTIVE_IMPORT_REPLACEMENT_VERSION,
+          ])
+          const intentKey = replacementIntentKey({
+            source: item.source,
+            sourcePath: session.meta.sourcePath,
+            nativeSessionId: session.meta.nativeSessionId,
+            providerInstanceId: originProviderInstanceId,
+            originalWorkspaceRoot: originalWorkspaceRoot ?? null,
+            sourceVersion: contentHash,
+          })
+          activeReplacementIntent = yield* replacementIntents.insertIfAbsent({
+            intentKey,
+            source: item.source,
+            sourcePath: session.meta.sourcePath,
+            nativeSessionId: session.meta.nativeSessionId,
+            providerInstanceId: originProviderInstanceId,
+            originalWorkspaceRoot: originalWorkspaceRoot ?? null,
+            sourceVersion: contentHash,
+            replacementVersion: ACTIVE_IMPORT_REPLACEMENT_VERSION,
+            sourceThreadId: activeIncompleteThreadToReplace.threadId,
+            sourceProjectId: activeIncompleteThreadToReplace.projectId,
+            replacementThreadId: ThreadId.make(deterministicId(identitySeed, 'replacement-thread')),
+            replacementProjectId: projectId,
+            replacementWorkspaceRoot: importWorkspaceRoot ?? null,
+            createCommandId: CommandId.make(deterministicId(identitySeed, 'create-command')),
+            tombstoneCommandId: CommandId.make(deterministicId(identitySeed, 'tombstone-command')),
+            expectedMessageCount: session.records.filter((record) => record.kind === 'message')
+              .length,
+            expectedActivityCount: session.records.filter((record) => record.kind === 'activity')
+              .length,
+            expectedRecordFingerprint: hashContent(encodeUnknownJsonStringSync(session.records)),
+            phase: 'intent',
+            threadEvidence: null,
+            attachmentEvidence: null,
+            indexEvidence: null,
+            attemptCount: 0,
+            lastError: null,
+            retryAfter: null,
+            createdAt: now,
+            updatedAt: now,
+            retiredAt: null,
+          })
+        }
+
+        const transitionActiveReplacement = Effect.fn('ImportService.transitionActiveReplacement')(
+          function* (
+            nextPhase: ImportReplacementIntent['phase'],
+            evidence?: {
+              readonly threadEvidence?: ImportReplacementThreadEvidence | null
+              readonly attachmentEvidence?: ImportReplacementAttachmentEvidence | null
+              readonly indexEvidence?: ImportReplacementIndexEvidence | null
+            },
+          )
+          {
+            if (activeReplacementIntent === null) return null
+            const current = activeReplacementIntent
+            const transitioned = yield* replacementIntents.casTransition({
+              intentKey: current.intentKey,
+              expectedPhase: current.phase,
+              nextPhase,
+              threadEvidence: evidence?.threadEvidence ?? current.threadEvidence,
+              attachmentEvidence: evidence?.attachmentEvidence ?? current.attachmentEvidence,
+              indexEvidence: evidence?.indexEvidence ?? current.indexEvidence,
+              attemptCount: 0,
+              lastError: null,
+              retryAfter: null,
+              updatedAt: now,
+            })
+            if (transitioned)
+            {
+              activeReplacementIntent = {
+                ...current,
+                phase: nextPhase,
+                threadEvidence: evidence?.threadEvidence ?? current.threadEvidence,
+                attachmentEvidence: evidence?.attachmentEvidence ?? current.attachmentEvidence,
+                indexEvidence: evidence?.indexEvidence ?? current.indexEvidence,
+                attemptCount: 0,
+                lastError: null,
+                retryAfter: null,
+                updatedAt: now,
+              }
+              return activeReplacementIntent
+            }
+            const refreshed = yield* replacementIntents.getByIntentKey(current.intentKey)
+            activeReplacementIntent = Option.getOrNull(refreshed)
+            return activeReplacementIntent
+          },
+        )
+
+        const markActiveReplacementManual = Effect.fn('ImportService.markActiveReplacementManual')(
+          function* (cause: unknown)
+          {
+            if (activeReplacementIntent === null) return
+            const current = activeReplacementIntent
+            yield* replacementIntents.casTransition({
+              intentKey: current.intentKey,
+              expectedPhase: current.phase,
+              nextPhase: 'manual',
+              threadEvidence: current.threadEvidence,
+              attachmentEvidence: current.attachmentEvidence,
+              indexEvidence: current.indexEvidence,
+              attemptCount: importCreationAttempts,
+              lastError: errorMessage(cause),
+              retryAfter: null,
+              updatedAt: now,
+            })
+            activeReplacementIntent = {
+              ...current,
+              phase: 'manual',
+              lastError: errorMessage(cause),
+            }
+          },
+        )
+
+        if (activeReplacementIntent?.phase === 'intent')
+        {
+          yield* transitionActiveReplacement('creating')
+        }
         let threadId = existingThread?.threadId ?? null
+        if (activeReplacementIntent !== null)
+        {
+          threadId = activeReplacementIntent.replacementThreadId
+          let replacement = yield* deps.findThreadById(threadId)
+          if (replacement === null)
+          {
+            let lastCreateError: unknown = 'Replacement thread was not projected'
+            for (let attempt = 0; attempt < importCreationAttempts; attempt += 1)
+            {
+              yield* deps
+                .dispatch({
+                  ...threadCreateBase,
+                  projectId: activeReplacementIntent.replacementProjectId,
+                  commandId: activeReplacementIntent.createCommandId,
+                  threadId: activeReplacementIntent.replacementThreadId,
+                })
+                .pipe(
+                  Effect.catch((error) =>
+                    Effect.sync(() =>
+                    {
+                      lastCreateError = error
+                    }),
+                  ),
+                )
+              replacement = yield* deps.findThreadById(activeReplacementIntent.replacementThreadId)
+              if (replacement !== null) break
+            }
+            if (replacement === null)
+            {
+              yield* markActiveReplacementManual(lastCreateError)
+              return yield* new ImportSessionOperationError({
+                operation: 'persist',
+                sourcePath: item.sourcePath,
+                cause: lastCreateError,
+              })
+            }
+          }
+          if (
+            replacement.threadId !== activeReplacementIntent.replacementThreadId ||
+            replacement.projectId !== activeReplacementIntent.replacementProjectId ||
+            replacement.contentHash !== activeReplacementIntent.sourceVersion ||
+            replacement.source !== activeReplacementIntent.source ||
+            replacement.sourcePath !== activeReplacementIntent.sourcePath ||
+            replacement.nativeSessionId !== activeReplacementIntent.nativeSessionId ||
+            replacement.providerInstanceId !== activeReplacementIntent.providerInstanceId
+          )
+          {
+            yield* markActiveReplacementManual(
+              'Exact replacement id resolved to mismatched origin metadata',
+            )
+            return yield* new ImportSessionOperationError({
+              operation: 'persist',
+              sourcePath: item.sourcePath,
+              cause: 'Exact replacement id resolved to mismatched origin metadata',
+            })
+          }
+          if (activeReplacementIntent.phase === 'creating')
+          {
+            yield* transitionActiveReplacement('importing')
+          }
+        }
         if (threadId === null)
         {
           const initialProjectId = projectId
@@ -1458,6 +1809,184 @@ export const make = Effect.gen(function* ()
         for (const batch of chunks(indexedRecords, importBatchSize))
         {
           yield* deps.dispatch(makeImportCommand(importSeed, threadId, batch, now))
+        }
+
+        if (
+          activeReplacementIntent?.phase === 'importing' ||
+          activeReplacementIntent?.phase === 'verifying'
+        )
+        {
+          if (activeReplacementIntent.phase === 'importing')
+          {
+            yield* transitionActiveReplacement('verifying')
+          }
+          let verifiedThread: ImportReplacementThreadEvidence | null = null
+          let attachmentsComplete = false
+          let verificationError: unknown = 'Replacement verification did not complete'
+          for (let attempt = 0; attempt < importCreationAttempts; attempt += 1)
+          {
+            const [threadEvidence, attachmentEvidence] = yield* Effect.all([
+              verifyReplacementThread({
+                replacementThreadId: activeReplacementIntent.replacementThreadId,
+                replacementProjectId: activeReplacementIntent.replacementProjectId,
+                source: activeReplacementIntent.source,
+                sourcePath: activeReplacementIntent.sourcePath,
+                nativeSessionId: activeReplacementIntent.nativeSessionId,
+                providerInstanceId: activeReplacementIntent.providerInstanceId,
+                originalWorkspaceRoot: activeReplacementIntent.originalWorkspaceRoot,
+                sourceVersion: activeReplacementIntent.sourceVersion,
+                expectedMessageCount: activeReplacementIntent.expectedMessageCount,
+                expectedActivityCount: activeReplacementIntent.expectedActivityCount,
+                expectedRecordFingerprint: activeReplacementIntent.expectedRecordFingerprint,
+              }),
+              verifyReplacementAttachments({
+                replacementThreadId: activeReplacementIntent.replacementThreadId,
+                expectedRelativePaths: [],
+              }),
+            ]).pipe(
+              Effect.catch((error) =>
+              {
+                verificationError = error
+                return Effect.succeed([null, { complete: false }] as const)
+              }),
+            )
+            verifiedThread = threadEvidence
+            attachmentsComplete = attachmentEvidence.complete
+            if (verifiedThread !== null && attachmentsComplete) break
+          }
+          if (verifiedThread === null || !attachmentsComplete)
+          {
+            yield* markActiveReplacementManual(verificationError)
+            return yield* new ImportSessionOperationError({
+              operation: 'persist',
+              sourcePath: item.sourcePath,
+              cause: verificationError,
+            })
+          }
+          const attachmentEvidence: ImportReplacementAttachmentEvidence = {
+            replacementThreadId: activeReplacementIntent.replacementThreadId,
+            expectedRelativePaths: [],
+            exactSetVerified: true,
+            sourceCleanupComplete: false,
+            verifiedAt: now,
+          }
+          yield* transitionActiveReplacement('tombstoning', {
+            threadEvidence: verifiedThread,
+            attachmentEvidence,
+          })
+        }
+
+        if (activeReplacementIntent?.phase === 'tombstoning')
+        {
+          let sourceStillVisible = true
+          let tombstoneError: unknown = 'Source thread remained visible after tombstone dispatch'
+          for (let attempt = 0; attempt < importCreationAttempts; attempt += 1)
+          {
+            yield* deps
+              .dispatch({
+                type: 'thread.delete',
+                commandId: activeReplacementIntent.tombstoneCommandId,
+                threadId: activeReplacementIntent.sourceThreadId,
+              })
+              .pipe(
+                Effect.catch((error) =>
+                  Effect.sync(() =>
+                  {
+                    tombstoneError = error
+                  }),
+                ),
+              )
+            sourceStillVisible =
+              (yield* deps.findThreadById(activeReplacementIntent.sourceThreadId)) !== null
+            if (!sourceStillVisible) break
+          }
+          if (sourceStillVisible)
+          {
+            yield* markActiveReplacementManual(tombstoneError)
+            return yield* new ImportSessionOperationError({
+              operation: 'persist',
+              sourcePath: item.sourcePath,
+              cause: tombstoneError,
+            })
+          }
+          yield* transitionActiveReplacement('reconciling')
+        }
+
+        if (activeReplacementIntent?.phase === 'reconciling')
+        {
+          let cleanupComplete = false
+          let indexState = { replacementVisible: false, sourceVisible: true }
+          let reconciliationError: unknown = 'Replacement reconciliation did not complete'
+          for (let attempt = 0; attempt < importCreationAttempts; attempt += 1)
+          {
+            const [cleanup, index] = yield* Effect.all([
+              cleanupDeletedThreadAttachments(activeReplacementIntent.sourceThreadId),
+              verifyReplacementIndex({
+                replacementThreadId: activeReplacementIntent.replacementThreadId,
+                sourceThreadId: activeReplacementIntent.sourceThreadId,
+              }),
+            ]).pipe(
+              Effect.catch((error) =>
+              {
+                reconciliationError = error
+                return Effect.succeed([
+                  { complete: false },
+                  { replacementVisible: false, sourceVisible: true },
+                ] as const)
+              }),
+            )
+            cleanupComplete = cleanup.complete
+            indexState = index
+            if (cleanupComplete && index.replacementVisible && !index.sourceVisible) break
+          }
+          if (!cleanupComplete || !indexState.replacementVisible || indexState.sourceVisible)
+          {
+            yield* markActiveReplacementManual(reconciliationError)
+            return yield* new ImportSessionOperationError({
+              operation: 'persist',
+              sourcePath: item.sourcePath,
+              cause: reconciliationError,
+            })
+          }
+          const attachmentEvidence: ImportReplacementAttachmentEvidence = {
+            replacementThreadId: activeReplacementIntent.replacementThreadId,
+            expectedRelativePaths: [],
+            exactSetVerified: true,
+            sourceCleanupComplete: true,
+            verifiedAt: now,
+          }
+          const indexEvidence: ImportReplacementIndexEvidence = {
+            replacementThreadId: activeReplacementIntent.replacementThreadId,
+            exactIdVisible: true,
+            sourceThreadVisible: false,
+            verifiedAt: now,
+          }
+          yield* transitionActiveReplacement('reconciling', {
+            attachmentEvidence,
+            indexEvidence,
+          })
+          const current = activeReplacementIntent
+          if (current !== null)
+          {
+            const retired = yield* replacementIntents.retire({
+              intentKey: current.intentKey,
+              expectedPhase: 'reconciling',
+              retiredAt: now,
+            })
+            if (!retired)
+            {
+              const refreshed = yield* replacementIntents.getByIntentKey(current.intentKey)
+              if (Option.getOrNull(refreshed)?.phase !== 'retired')
+              {
+                return yield* new ImportSessionOperationError({
+                  operation: 'persist',
+                  sourcePath: item.sourcePath,
+                  cause: 'Import replacement retirement lost its compare-and-set race',
+                })
+              }
+            }
+          }
+          activeReplacementIntent = null
         }
 
         const continuationOutcome = importShouldRemainArchived

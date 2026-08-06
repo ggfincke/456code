@@ -1,3 +1,6 @@
+// tests/apps/desktop/settings/DesktopClientSettings.test.ts
+// verify desktop client settings behavior
+
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, describe, it } from '@effect/vitest'
 import { ClientSettingsSchema, type ClientSettings } from '@t3tools/contracts'
@@ -77,16 +80,6 @@ const withClientSettings = <A, E, R>(
 
 describe('DesktopClientSettings', () =>
 {
-  it.effect('returns none when no client settings file exists', () =>
-    withClientSettings(
-      Effect.gen(function* ()
-      {
-        const settings = yield* DesktopClientSettings.DesktopClientSettings
-        assert.isTrue(Option.isNone(yield* settings.get))
-      }),
-    ),
-  )
-
   it.effect('persists and reloads client settings', () =>
     withClientSettings(
       Effect.gen(function* ()

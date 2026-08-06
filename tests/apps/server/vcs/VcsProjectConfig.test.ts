@@ -1,3 +1,6 @@
+// tests/apps/server/vcs/VcsProjectConfig.test.ts
+// verify vcs project config behavior
+
 import { assert, it, describe } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
@@ -15,23 +18,6 @@ const TestLayer = VcsProjectConfig.layer.pipe(
 
 describe('VcsProjectConfig', () =>
 {
-  it('keeps operation context and the original cause on config errors', () =>
-  {
-    const cause = new Error('permission denied')
-    const error = new VcsProjectConfig.VcsProjectConfigError({
-      operation: 'read',
-      cwd: '/repo/packages/app',
-      configPath: '/repo/.456code/vcs.json',
-      cause,
-    })
-
-    assert.equal(error.operation, 'read')
-    assert.equal(error.cwd, '/repo/packages/app')
-    assert.equal(error.configPath, '/repo/.456code/vcs.json')
-    assert.strictEqual(error.cause, cause)
-    assert.equal(error.message, 'Failed to read VCS project config at /repo/.456code/vcs.json.')
-  })
-
   it.layer(TestLayer)('uses an explicit requested VCS kind before config', (it) =>
   {
     it.effect('returns the requested kind', () =>

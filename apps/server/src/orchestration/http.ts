@@ -11,6 +11,7 @@ import * as HttpApiBuilder from 'effect/unstable/httpapi/HttpApiBuilder'
 
 import { projectThreadDetailSnapshot } from './ActivityPayloadProjection.ts'
 import { normalizeDispatchCommand } from './Normalizer.ts'
+import { dispatchWithAttachmentLifecycle } from './dispatchWithAttachmentLifecycle.ts'
 import {
   annotateEnvironmentRequest,
   failEnvironmentInternal,
@@ -89,13 +90,14 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
           const normalizedCommand = yield* normalizeDispatchCommand(args.payload).pipe(
             Effect.catch(() => failEnvironmentInvalidRequest('invalid_command')),
           )
-          return yield* orchestrationEngine
-            .dispatch(normalizedCommand)
-            .pipe(
-              Effect.catch((cause) =>
-                failEnvironmentInternal('orchestration_dispatch_failed', cause),
-              ),
-            )
+          return yield* dispatchWithAttachmentLifecycle(
+            normalizedCommand,
+            orchestrationEngine.dispatch(normalizedCommand),
+          ).pipe(
+            Effect.catch((cause) =>
+              failEnvironmentInternal('orchestration_dispatch_failed', cause),
+            ),
+          )
         }),
       )
   }),

@@ -131,6 +131,7 @@ const THREAD_SHELL = {
   branch: null,
   worktreePath: null,
   latestTurn: null,
+  providerSwitch: null,
   createdAt: '2026-06-01T00:00:00.000Z',
   updatedAt: '2026-06-01T00:00:00.000Z',
   archivedAt: null,
@@ -388,7 +389,12 @@ describe('environment entity projections', () =>
     const messages = harness.registry.get(messagesAtom)
     const activities = harness.registry.get(activitiesAtom)
 
-    expect(scopedDetail).toEqual({ ...detail, environmentId: ENVIRONMENT_ID })
+    // threadDetail normalizes an absent approvalOutcomes to an empty list
+    expect(scopedDetail).toEqual({
+      ...detail,
+      environmentId: ENVIRONMENT_ID,
+      approvalOutcomes: [],
+    })
     expect(harness.registry.get(statusAtom)).toBe('live')
     expect(harness.registry.get(otherThreadDetailAtom)).toBe(otherValue)
 

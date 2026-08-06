@@ -1,3 +1,6 @@
+// tests/apps/web/timestampFormat.test.ts
+// verify relative expiry labels behavior
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import {
@@ -45,20 +48,22 @@ describe('relative expiry labels', () =>
       until: '6h left',
       expiresIn: 'Expires in 6h',
     },
+    {
+      label: 'minutes and seconds under one hour',
+      instant: '2026-04-07T12:04:12.000Z',
+      until: '4m left',
+      expiresIn: 'Expires in 4m 12s',
+    },
+    {
+      label: 'hours with minute and second remainder',
+      instant: '2026-04-07T14:02:03.000Z',
+      until: '2h left',
+      expiresIn: 'Expires in 2h 2m 3s',
+    },
   ])('formats $label', ({ instant, until, expiresIn }) =>
   {
     expect(formatRelativeTimeUntilLabel(instant)).toBe(until)
     expect(formatExpiresInLabel(instant)).toBe(expiresIn)
-  })
-
-  it('uses minutes and seconds under one hour for expires-in labels', () =>
-  {
-    expect(formatExpiresInLabel('2026-04-07T12:04:12.000Z')).toBe('Expires in 4m 12s')
-  })
-
-  it('uses hours with minute and second remainder for expires-in labels', () =>
-  {
-    expect(formatExpiresInLabel('2026-04-07T14:02:03.000Z')).toBe('Expires in 2h 2m 3s')
   })
 })
 

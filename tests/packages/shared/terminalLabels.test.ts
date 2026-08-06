@@ -1,3 +1,6 @@
+// tests/packages/shared/terminalLabels.test.ts
+// verify get terminal label behavior
+
 import { describe, expect, it } from 'vite-plus/test'
 
 import type { TerminalSummary } from '@t3tools/contracts'
@@ -40,7 +43,6 @@ describe('nextTerminalId', () =>
   it('allocates term-1 when no terminals are listed yet', () =>
   {
     expect(nextTerminalId([])).toBe(DEFAULT_TERMINAL_ID)
-    expect(nextTerminalId([])).toBe('term-1')
   })
 
   it('allocates term-2 when only term-1 exists', () =>

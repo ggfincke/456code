@@ -1,3 +1,6 @@
+// apps/server/src/observability/Metrics.ts
+// expose rpc requests total
+
 import * as Clock from 'effect/Clock'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
@@ -73,6 +76,27 @@ export const terminalSessionsTotal = Metric.counter('t3_terminal_sessions_total'
 export const terminalRestartsTotal = Metric.counter('t3_terminal_restarts_total', {
   description: 'Total terminal restart requests handled.',
 })
+
+export const restartReconciliationRunsTotal = Metric.counter(
+  't3_server_restart_reconciliation_runs_total',
+  {
+    description: 'Total bounded restart reconciliation runs.',
+  },
+)
+
+export const restartReconciliationItemsTotal = Metric.counter(
+  't3_server_restart_reconciliation_items_total',
+  {
+    description: 'Total items classified by restart reconciliation.',
+  },
+)
+
+export const restartReconciliationDuration = Metric.timer(
+  't3_server_restart_reconciliation_duration',
+  {
+    description: 'Restart reconciliation duration.',
+  },
+)
 
 export const metricAttributes = (
   attributes: Readonly<Record<string, unknown>>,

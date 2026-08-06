@@ -1,3 +1,6 @@
+// apps/mobile/src/state/use-composer-drafts.ts
+// hydrates and serializes environment-scoped mobile composer drafts
+
 import { useAtomValue } from '@effect/atom-react'
 import {
   ModelSelection as ModelSelectionSchema,
@@ -107,8 +110,22 @@ export const composerDraftsAtom = Atom.make<Record<string, ComposerDraft>>({}).p
 )
 
 let loadPromise: Promise<void> | null = null
+let hydrated = false
 let persistTimer: ReturnType<typeof setTimeout> | null = null
+let persistRequestedBeforeHydration = false
 const persistenceQueue = new SerializedAsyncQueue()
+
+interface PendingComposerDraftMutation
+{
+  readonly draftKey: string
+  readonly apply: (current: Record<string, ComposerDraft>) => Record<string, ComposerDraft>
+}
+
+// synchronous mutations issued before hydration resolves. They publish to the
+// atom immediately and are replayed, in invocation order, over the persisted
+// document once it lands: a key they deleted stays deleted instead of being
+// resurrected by the merge, and an append is never applied twice.
+let pendingMutations: Array<PendingComposerDraftMutation> = []
 
 function normalizeDraft(draft: ComposerDraft | undefined): ComposerDraft
 {
@@ -233,12 +250,19 @@ async function savePersistedComposerDrafts(drafts: Record<string, ComposerDraft>
   catch (error)
   {
     console.warn('[composer-drafts] failed to persist drafts', error)
-    // Draft persistence is best-effort; in-memory drafts still keep working.
+    // draft persistence is best-effort; in-memory drafts still keep working.
   }
 }
 
 function schedulePersistComposerDrafts(drafts: Record<string, ComposerDraft>): void
 {
+  // writing before hydration would replace the persisted document with a
+  // partial one; the hydration flush persists the reconciled state instead.
+  if (!hydrated)
+  {
+    persistRequestedBeforeHydration = true
+    return
+  }
   if (persistTimer !== null)
   {
     clearTimeout(persistTimer)
@@ -250,6 +274,46 @@ function schedulePersistComposerDrafts(drafts: Record<string, ComposerDraft>): v
   }, PERSIST_DEBOUNCE_MS)
 }
 
+function completeComposerDraftsHydration(persistedDrafts: Record<string, ComposerDraft>): void
+{
+  if (pendingMutations.length === 0)
+  {
+    hydrated = true
+    if (Object.keys(persistedDrafts).length === 0)
+    {
+      return
+    }
+    const current = appAtomRegistry.get(composerDraftsAtom)
+    appAtomRegistry.set(composerDraftsAtom, {
+      ...persistedDrafts,
+      ...current,
+    })
+    return
+  }
+
+  const replayedKeys = new Set(pendingMutations.map((mutation) => mutation.draftKey))
+  // a key nobody touched before hydration keeps whatever the atom holds; a key
+  // the pending mutations own replays from the persisted draft, so the result
+  // matches what a hydration that had already finished would have produced.
+  const base: Record<string, ComposerDraft> = { ...persistedDrafts }
+  for (const [draftKey, draft] of Object.entries(appAtomRegistry.get(composerDraftsAtom)))
+  {
+    if (!replayedKeys.has(draftKey))
+    {
+      base[draftKey] = draft
+    }
+  }
+  const next = pendingMutations.reduce((current, mutation) => mutation.apply(current), base)
+  pendingMutations = []
+  hydrated = true
+  appAtomRegistry.set(composerDraftsAtom, next)
+  if (persistRequestedBeforeHydration)
+  {
+    persistRequestedBeforeHydration = false
+    schedulePersistComposerDrafts(next)
+  }
+}
+
 export function ensureComposerDraftsLoaded(): void
 {
   if (loadPromise !== null)
@@ -259,15 +323,7 @@ export function ensureComposerDraftsLoaded(): void
   loadPromise = loadPersistedComposerDrafts()
     .then((persistedDrafts) =>
     {
-      if (Object.keys(persistedDrafts).length === 0)
-      {
-        return
-      }
-      const current = appAtomRegistry.get(composerDraftsAtom)
-      appAtomRegistry.set(composerDraftsAtom, {
-        ...persistedDrafts,
-        ...current,
-      })
+      completeComposerDraftsHydration(persistedDrafts)
     })
     .catch((cause) =>
     {
@@ -280,14 +336,24 @@ export function ensureComposerDraftsLoaded(): void
           cause,
         }),
       )
-      // Draft loading is best-effort; in-memory drafts still keep working.
+      // draft loading is best-effort; in-memory drafts still keep working.
+      completeComposerDraftsHydration({})
     })
 }
 
+// the single funnel for synchronous draft mutations: it publishes immediately
+// and, while hydration is still in flight, records the mutation so hydration
+// can replay it in order.
 function updateComposerDrafts(
+  draftKey: string,
   update: (current: Record<string, ComposerDraft>) => Record<string, ComposerDraft>,
 ): void
 {
+  ensureComposerDraftsLoaded()
+  if (!hydrated)
+  {
+    pendingMutations.push({ draftKey, apply: update })
+  }
   const next = update(appAtomRegistry.get(composerDraftsAtom))
   appAtomRegistry.set(composerDraftsAtom, next)
   schedulePersistComposerDrafts(next)
@@ -295,7 +361,7 @@ function updateComposerDrafts(
 
 export function setComposerDraftText(draftKey: string, value: string): void
 {
-  updateComposerDrafts((current) =>
+  updateComposerDrafts(draftKey, (current) =>
   {
     const draft = {
       ...normalizeDraft(current[draftKey]),
@@ -316,7 +382,7 @@ export function setComposerDraftText(draftKey: string, value: string): void
 
 export function appendComposerDraftText(draftKey: string, value: string): void
 {
-  updateComposerDrafts((current) =>
+  updateComposerDrafts(draftKey, (current) =>
   {
     const existing = normalizeDraft(current[draftKey])
     return {
@@ -338,7 +404,7 @@ export function appendComposerDraftAttachments(
   {
     return
   }
-  updateComposerDrafts((current) =>
+  updateComposerDrafts(draftKey, (current) =>
   {
     const existing = normalizeDraft(current[draftKey])
     return {
@@ -356,7 +422,7 @@ export function replaceComposerDraftAttachments(
   attachments: ReadonlyArray<DraftComposerImageAttachment>,
 ): void
 {
-  updateComposerDrafts((current) =>
+  updateComposerDrafts(draftKey, (current) =>
   {
     const draft = {
       ...normalizeDraft(current[draftKey]),
@@ -377,7 +443,7 @@ export function replaceComposerDraftAttachments(
 
 export function removeComposerDraftAttachment(draftKey: string, imageId: string): void
 {
-  updateComposerDrafts((current) =>
+  updateComposerDrafts(draftKey, (current) =>
   {
     const existing = normalizeDraft(current[draftKey])
     const draft = {
@@ -402,7 +468,7 @@ export function updateComposerDraftSettings(
   settings: Partial<ComposerDraftSettingsUpdate>,
 ): void
 {
-  updateComposerDrafts((current) =>
+  updateComposerDrafts(draftKey, (current) =>
   {
     const draft = {
       ...normalizeDraft(current[draftKey]),
@@ -477,7 +543,7 @@ function mergeComposerDraftText(existing: string, incoming: string): string
   {
     return incoming
   }
-  // Import retries are possible after an interrupted native handoff. Keep the
+  // import retries are possible after an interrupted native handoff. Keep the
   // operation idempotent when the same shared text is already present.
   if (existing === incoming || existing.endsWith(`\n\n${incoming}`))
   {
@@ -534,10 +600,8 @@ export function mergeComposerDraftContentState(
   }
 }
 
-/**
- * Atomically moves an incoming share into a project-scoped composer draft.
- * The durable write happens before the share inbox item can be acknowledged.
- */
+// atomically moves an incoming share into a project-scoped composer draft.
+// the durable write happens before the share inbox item can be acknowledged.
 export async function mergeComposerDraftContent(
   draftKey: string,
   content: ComposerDraftContent,
@@ -565,7 +629,7 @@ export async function mergeComposerDraftContent(
     (attachment) =>
       !currentAttachmentIds.has(attachment.id) && !nextAttachmentIds.has(attachment.id),
   ).length
-  // Publish the content and its import receipt together before the filesystem
+  // publish the content and its import receipt together before the filesystem
   // await. Typing during persistence then builds on the receipt-bearing state,
   // and its debounced write is serialized after this transaction.
   if (next !== current)
@@ -576,7 +640,7 @@ export async function mergeComposerDraftContent(
   return { skippedAttachmentCount }
 }
 
-/** Restores the exact content/settings captured before an interrupted import. */
+// restores the exact content/settings captured before an interrupted import.
 export async function restoreComposerDraftSnapshot(
   draftKey: string,
   snapshot: ComposerDraft,
@@ -603,12 +667,12 @@ export async function restoreComposerDraftSnapshot(
 
 export function clearComposerDraftContent(draftKey: string): void
 {
-  updateComposerDrafts((current) => clearComposerDraftContentState(current, draftKey))
+  updateComposerDrafts(draftKey, (current) => clearComposerDraftContentState(current, draftKey))
 }
 
 export function clearComposerDraft(draftKey: string): void
 {
-  updateComposerDrafts((current) =>
+  updateComposerDrafts(draftKey, (current) =>
   {
     if (!current[draftKey])
     {
@@ -654,7 +718,7 @@ export async function clearComposerDraftsEnvironment(environmentId: EnvironmentI
     persistTimer = null
   }
   appAtomRegistry.set(composerDraftsAtom, next)
-  await writePersistedComposerDrafts(next)
+  await persistenceQueue.run(() => writePersistedComposerDrafts(next))
 }
 
 export function useComposerDraft(draftKey: string | null): ComposerDraft

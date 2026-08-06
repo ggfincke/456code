@@ -78,46 +78,38 @@ describe('liveActivityPreferences', () =>
     vi.clearAllMocks()
   })
 
-  it.effect('pushes disabled Live Activity preferences to relay registrations', () =>
-    Effect.gen(function* ()
+  it.effect.each([
     {
-      yield* setLiveActivityUpdatesEnabled({
-        enabled: false,
-        previousEnabled: true,
-        clerkToken: 'clerk-token',
-        connections: [connection],
-      })
-
-      expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledWith({
-        liveActivitiesEnabled: false,
-      })
-      expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledWith({
-        clerkToken: 'clerk-token',
-        connection,
-        liveActivitiesEnabled: false,
-      })
-    }).pipe(Effect.provide(testLayer)),
-  )
-
-  it.effect('pushes enabled Live Activity preferences to relay registrations', () =>
-    Effect.gen(function* ()
+      name: 'disabled',
+      enabled: false,
+      previousEnabled: true,
+    },
     {
-      yield* setLiveActivityUpdatesEnabled({
-        enabled: true,
-        previousEnabled: false,
-        clerkToken: 'clerk-token',
-        connections: [connection],
-      })
+      name: 'enabled',
+      enabled: true,
+      previousEnabled: false,
+    },
+  ])(
+    'pushes $name Live Activity preferences to relay registrations',
+    ({ enabled, previousEnabled }) =>
+      Effect.gen(function* ()
+      {
+        yield* setLiveActivityUpdatesEnabled({
+          enabled,
+          previousEnabled,
+          clerkToken: 'clerk-token',
+          connections: [connection],
+        })
 
-      expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledWith({
-        liveActivitiesEnabled: true,
-      })
-      expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledWith({
-        clerkToken: 'clerk-token',
-        connection,
-        liveActivitiesEnabled: true,
-      })
-    }).pipe(Effect.provide(testLayer)),
+        expect(updateAgentAwarenessRegistrationPreferences).toHaveBeenCalledWith({
+          liveActivitiesEnabled: enabled,
+        })
+        expect(linkEnvironmentToCloudWithPreference).toHaveBeenCalledWith({
+          clerkToken: 'clerk-token',
+          connection,
+          liveActivitiesEnabled: enabled,
+        })
+      }).pipe(Effect.provide(testLayer)),
   )
 
   it.effect('keeps local preferences refreshable when signed out', () =>

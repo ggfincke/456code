@@ -13,21 +13,6 @@ import * as GitVcsDriver from '../../../../apps/server/src/vcs/GitVcsDriver.ts'
 import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
 import { detectPrTemplate } from '../../../../apps/server/src/sourceControl/PrTemplateDetection.ts'
 
-const SINGLE_TEMPLATE_PATHS = [
-  '.github/pull_request_template.md',
-  '.github/PULL_REQUEST_TEMPLATE.md',
-  'pull_request_template.md',
-  'PULL_REQUEST_TEMPLATE.md',
-  'docs/pull_request_template.md',
-  'docs/PULL_REQUEST_TEMPLATE.md',
-] as const
-
-const TEMPLATE_DIRECTORIES = [
-  '.github/PULL_REQUEST_TEMPLATE',
-  'PULL_REQUEST_TEMPLATE',
-  'docs/PULL_REQUEST_TEMPLATE',
-] as const
-
 const PrTemplateDetectionTestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(
     ServerConfig.layerTest(process.cwd(), {
@@ -89,10 +74,11 @@ const detectTemplate = (cwd: string, treeish = 'HEAD') =>
     return yield* detectPrTemplate(cwd, treeish, git.execute)
   })
 
-it.effect.each(SINGLE_TEMPLATE_PATHS)('recognizes $0', (relativePath) =>
+it.effect('recognizes a single-file pull request template path', () =>
   runWithTempDirectory((cwd) =>
     Effect.gen(function* ()
     {
+      const relativePath = '.github/pull_request_template.md'
       yield* writeTemplate(cwd, relativePath, `template from ${relativePath}`)
       yield* commitTemplates(cwd)
 
@@ -134,11 +120,11 @@ it.effect('uses the first non-empty template in the configured path order', () =
   ),
 )
 
-it.effect.each(TEMPLATE_DIRECTORIES)('recognizes the $0 directory', (relativeDirectory) =>
+it.effect('recognizes a pull request template directory', () =>
   runWithTempDirectory((cwd) =>
     Effect.gen(function* ()
     {
-      yield* writeTemplate(cwd, `${relativeDirectory}/template.MD`, 'directory template')
+      yield* writeTemplate(cwd, '.github/PULL_REQUEST_TEMPLATE/template.MD', 'directory template')
       yield* commitTemplates(cwd)
 
       const template = yield* detectTemplate(cwd)

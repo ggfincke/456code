@@ -99,6 +99,14 @@
       "types": "./src/orchestrationActivityOrder.ts",
       "import": "./src/orchestrationActivityOrder.ts"
     },
+    "./approvalOutcomeClassifier": {
+      "types": "./src/approvalOutcomeClassifier.ts",
+      "import": "./src/approvalOutcomeClassifier.ts"
+    },
+    "./providerSwitchActivity": {
+      "types": "./src/providerSwitchActivity.ts",
+      "import": "./src/providerSwitchActivity.ts"
+    },
     "./remote": {
       "types": "./src/remote.ts",
       "import": "./src/remote.ts"

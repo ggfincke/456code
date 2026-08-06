@@ -44,6 +44,7 @@ import { AppText as Text } from '../../components/AppText'
 import { ComposerAttachmentStrip } from '../../components/ComposerAttachmentStrip'
 import {
   ComposerEditor,
+  composerEditorCapabilities,
   type ComposerEditorHandle,
   type ComposerEditorSelection,
 } from '../../components/ComposerEditor'
@@ -70,9 +71,14 @@ import {
   providerOptionsConfigurationLabel,
   resolveProviderOptionDescriptors,
 } from '../../lib/providerOptions'
+import {
+  providerSwitchSuppressesStop,
+  type ThreadProviderSwitchNotice,
+} from '../../lib/thread-activity/provider-switch'
 import { useComposerPathSearch } from '../../state/use-composer-path-search'
 import { ComposerCommandPopover, type ComposerCommandItem } from './ComposerCommandPopover'
 import { composerConnectionStatus, type ComposerStatusPillState } from './threadComposerStatus'
+import { resolveComposerSubmitHandler } from './threadComposerSubmit'
 
 function searchMobileComposerSkills(
   skills: ReadonlyArray<ServerProviderSkill>,
@@ -164,16 +170,12 @@ function searchMobileComposerSkills(
   }))
 }
 
-/**
- * Height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
- * Exported so the parent can compute feed overlap / content insets.
- */
+// height of the collapsed composer (pill + vertical padding, excluding safe-area inset).
+// exported so the parent can compute feed overlap / content insets.
 export const COMPOSER_COLLAPSED_CHROME = 60
 
-/**
- * Height of the expanded composer (card + toolbar + vertical padding, excluding safe-area inset).
- * Used by the parent to compute the larger feed bottom inset when the composer is focused.
- */
+// height of the expanded composer (card + toolbar + vertical padding, excluding safe-area inset).
+// used by the parent to compute the larger feed bottom inset when the composer is focused.
 export const COMPOSER_EXPANDED_CHROME = 174
 
 export interface ThreadComposerProps
@@ -186,17 +188,18 @@ export interface ThreadComposerProps
   readonly connectionState: RemoteClientConnectionState
   readonly connectionError: string | null
   readonly environmentLabel: string | null
-  /**
-   * Message sync phase for the selected thread (drives the status pill):
-   * "loading" = first fetch, nothing to show yet; "syncing" = cached messages
-   * are on screen while they reconcile with the server.
-   */
+  // message sync phase for the selected thread (drives the status pill):
+  // "loading" = first fetch, nothing to show yet; "syncing" = cached messages
+  // are on screen while they reconcile with the server.
   readonly threadSyncPhase?: 'loading' | 'syncing' | null
   readonly selectedThread: OrchestrationThreadShell
   readonly serverConfig: ServerConfig | null
   readonly queueCount: number
+  readonly queueFailureReason: string | null
   readonly activeThreadBusy: boolean
   readonly sendBlockedReason: string | null
+  readonly providerSwitchActive: boolean
+  readonly providerSwitchNotice: ThreadProviderSwitchNotice | null
   readonly environmentId: EnvironmentId
   readonly projectCwd: string | null
   readonly editorRef?: RefObject<ComposerEditorHandle | null>
@@ -206,21 +209,22 @@ export interface ThreadComposerProps
   readonly onRemoveDraftImage: (imageId: string) => void
   readonly onStopThread: () => void
   readonly onSendMessage: () => Promise<MessageId | null>
+  readonly onDiscardQueuedMessage: () => void
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void
   readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void
   readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void
+  readonly onRetryProviderSwitch: () => void
+  readonly onDismissProviderSwitchNotice: () => void
   readonly onReconnectEnvironment: () => void
   readonly onExpandedChange?: (expanded: boolean) => void
 }
 
-/**
- * The pill / card container — renders as LiquidGlassView on supported
- * iOS 26+ devices (progressive blur, native morph), opaque View otherwise.
- * Exported so NewTaskDraftScreen can render the same composer chrome.
- */
-// One timing for every piece of the expanded↔compact morph so the surface,
+// the pill / card container — renders as LiquidGlassView on supported
+// iOS 26+ devices (progressive blur, native morph), opaque View otherwise.
+// exported so NewTaskDraftScreen can render the same composer chrome.
+// one timing for every piece of the expanded↔compact morph so the surface,
 // toolbar, and siblings move together instead of popping between layouts.
-// Android gets NO layout transition: the composer rides the keyboard via
+// android gets NO layout transition: the composer rides the keyboard via
 // KeyboardStickyView (frame-synced to the IME), and a time-based morph
 // running alongside that translate reads as jitter. Snapping the layout and
 // letting the keyboard-synced slide be the only motion looks native there.
@@ -233,7 +237,7 @@ export function ComposerSurface(props: {
   readonly isDarkMode: boolean
 })
 {
-  // Drop shadow lives on a wrapper: `overflow: "hidden"` on the surface itself
+  // drop shadow lives on a wrapper: `overflow: "hidden"` on the surface itself
   // (needed to clip content to the pill shape) would clip the shadow on iOS.
   const shadowStyle: ViewStyle = {
     borderRadius: props.style.borderRadius,
@@ -335,6 +339,79 @@ const ComposerConnectionStatusPill = memo(function ComposerConnectionStatusPill(
   )
 })
 
+// the thread's single provider-switch surface: an in-flight switch says it
+// cannot be cancelled, and an outcome stays on screen until dismissed so a
+// completion or a failure is never only a work-log row.
+const ComposerProviderSwitchNotice = memo(function ComposerProviderSwitchNotice(props: {
+  readonly notice: ThreadProviderSwitchNotice
+  readonly onRetry: () => void
+  readonly onDismiss: () => void
+})
+{
+  const { notice } = props
+  const isFailure = notice.kind === 'failed'
+
+  return (
+    <Animated.View
+      accessibilityLiveRegion="polite"
+      className="pb-2"
+      entering={FadeIn.duration(180)}
+      exiting={FadeOut.duration(120)}
+    >
+      <View
+        className={
+          isFailure
+            ? 'flex-row items-start gap-3 rounded-2xl bg-danger px-3 py-2'
+            : 'flex-row items-start gap-3 rounded-2xl bg-subtle px-3 py-2'
+        }
+      >
+        {notice.kind === 'switching' ? <ActivityIndicator size="small" color="#8e8e93" /> : null}
+        <View className="min-w-0 flex-1">
+          <Text
+            className={
+              isFailure
+                ? 'text-xs font-sans-bold leading-snug text-danger-foreground'
+                : 'text-xs font-sans-bold leading-snug text-foreground'
+            }
+          >
+            {notice.label}
+          </Text>
+          {notice.kind === 'switching' ? (
+            <Text className="pt-0.5 text-2xs leading-snug text-foreground-muted">
+              {notice.detail}
+            </Text>
+          ) : null}
+          {isFailure && notice.detail !== null ? (
+            <Text className="pt-0.5 text-2xs leading-snug text-foreground-muted">
+              {notice.detail}
+            </Text>
+          ) : null}
+        </View>
+        {isFailure && notice.retrySelection !== null ? (
+          <Pressable
+            accessibilityLabel="Retry provider switch"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={props.onRetry}
+          >
+            <Text className="text-xs font-sans-bold text-danger-foreground">Retry</Text>
+          </Pressable>
+        ) : null}
+        {notice.kind === 'switching' ? null : (
+          <Pressable
+            accessibilityLabel="Dismiss provider switch notice"
+            accessibilityRole="button"
+            hitSlop={8}
+            onPress={props.onDismiss}
+          >
+            <Text className="text-xs font-sans-bold text-foreground-muted">Dismiss</Text>
+          </Pressable>
+        )}
+      </View>
+    </Animated.View>
+  )
+})
+
 export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposerProps)
 {
   const isDarkMode = useColorScheme() === 'dark'
@@ -381,9 +458,12 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     setIsFocused(false)
     onExpandedChange?.(false)
   }, [onExpandedChange])
-  const showStopAction =
-    props.selectedThread.session?.status === 'running' ||
-    props.selectedThread.session?.status === 'starting'
+  // a switch leaves the session running (old provider compacting) or briefly
+  // null; neither is a stoppable turn, so the stop affordance stays hidden.
+  const showStopAction = !providerSwitchSuppressesStop({
+    sessionStatus: props.selectedThread.session?.status,
+    providerSwitchActive: props.providerSwitchActive,
+  })
 
   const sendLabel =
     props.sendBlockedReason !== null
@@ -808,6 +888,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           />
         ) : null}
 
+        {props.providerSwitchNotice ? (
+          <ComposerProviderSwitchNotice
+            notice={props.providerSwitchNotice}
+            onRetry={props.onRetryProviderSwitch}
+            onDismiss={props.onDismissProviderSwitchNotice}
+          />
+        ) : null}
+
         <ComposerSurface
           isDarkMode={isDarkMode}
           style={
@@ -857,9 +945,9 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
               placeholder={props.placeholder}
               onFocus={handleFocus}
               onBlur={handleBlur}
-              onSubmit={handleSend}
+              onSubmit={resolveComposerSubmitHandler(composerEditorCapabilities, handleSend)}
               scrollEnabled={isExpanded}
-              // Android: collapsed single line centers natively (gravity) in
+              // android: collapsed single line centers natively (gravity) in
               // a pill-height box matching the send button; iOS keeps insets.
               singleLineCentered={!isExpanded}
               contentInsetVertical={isExpanded || Platform.OS === 'android' ? 0 : 6}
@@ -918,7 +1006,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         </ComposerSurface>
 
         {isExpanded ? (
-          // Toolbar row — matches draft page layout (expanded only)
+          // toolbar row — matches draft page layout (expanded only)
           <Animated.View entering={FadeIn.duration(160)} exiting={FadeOut.duration(120)}>
             <ComposerToolbarRow paddingBottom={8} paddingHorizontal={0} paddingTop={8}>
               <ComposerToolbarScroller
@@ -975,8 +1063,23 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           </Animated.View>
         ) : null}
 
-        {/* Queue count */}
-        {props.queueCount > 0 ? (
+        {props.queueFailureReason !== null ? (
+          <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
+            <View className="flex-row items-start gap-3 pt-2">
+              <Text className="flex-1 text-xs text-danger-foreground">
+                Queued message failed: {props.queueFailureReason}
+              </Text>
+              <Pressable
+                accessibilityLabel="Discard failed queued message"
+                accessibilityRole="button"
+                hitSlop={8}
+                onPress={props.onDiscardQueuedMessage}
+              >
+                <Text className="text-xs font-sans-bold text-danger-foreground">Discard</Text>
+              </Pressable>
+            </View>
+          </Animated.View>
+        ) : props.queueCount > 0 ? (
           <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(120)}>
             <Text className="pt-2 text-xs text-foreground-muted">
               {props.queueCount} queued message{props.queueCount === 1 ? '' : 's'} will send

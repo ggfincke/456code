@@ -1,3 +1,6 @@
+// apps/server/src/persistence/Layers/OrchestrationEventStore.ts
+// manage orchestration event state
+
 import {
   CommandId,
   EventId,
@@ -8,6 +11,7 @@ import {
   OrchestrationEvent,
   OrchestrationEventMetadata,
   OrchestrationEventType,
+  UNKNOWN_ORCHESTRATION_EVENT_TYPE,
   ProjectId,
   ThreadId,
 } from '@t3tools/contracts'
@@ -189,7 +193,16 @@ const makeEventStore = Effect.gen(function* ()
   })
 
   const append: OrchestrationEventStoreShape['append'] = (event) =>
-    appendEventRow({
+  {
+    // the unknown-event sentinel exists for decode-side tolerance only; the
+    // server always constructs concrete events, so persisting one is a defect
+    if (event.type === UNKNOWN_ORCHESTRATION_EVENT_TYPE)
+    {
+      return Effect.die(
+        new Error('Unknown-event sentinels are decode-side only and cannot be appended.'),
+      )
+    }
+    return appendEventRow({
       eventId: event.eventId,
       aggregateKind: event.aggregateKind,
       streamId: event.aggregateId,
@@ -214,6 +227,7 @@ const makeEventStore = Effect.gen(function* ()
         ),
       ),
     )
+  }
 
   const readFromSequence: OrchestrationEventStoreShape['readFromSequence'] = (
     sequenceExclusive,

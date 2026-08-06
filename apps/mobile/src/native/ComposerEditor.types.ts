@@ -1,3 +1,6 @@
+// apps/mobile/src/native/ComposerEditor.types.ts
+// define the shared composer editor contract
+
 import type { ServerProviderSkill } from '@t3tools/contracts'
 import type { Ref } from 'react'
 import type { StyleProp, TextStyle, ViewStyle } from 'react-native'
@@ -12,6 +15,11 @@ export interface ComposerEditorHandle
   focus: () => void
   blur: () => void
   setSelection: (selection: ComposerEditorSelection) => void
+}
+
+export interface ComposerEditorCapabilities
+{
+  readonly supportsHardwareSubmit: boolean
 }
 
 export interface ComposerEditorProps
@@ -30,7 +38,7 @@ export interface ComposerEditorProps
   readonly spellCheck?: boolean
   readonly multiline?: boolean
   readonly contentInsetVertical?: number
-  /** Android: center a single line vertically (collapsed pill); no-op on iOS. */
+  // android: center a single line vertically (collapsed pill); no-op on iOS.
   readonly singleLineCentered?: boolean
   readonly style?: StyleProp<ViewStyle>
   readonly textStyle?: StyleProp<TextStyle>
@@ -39,6 +47,6 @@ export interface ComposerEditorProps
   readonly onPasteImages?: (uris: ReadonlyArray<string>) => void
   readonly onFocus?: () => void
   readonly onBlur?: () => void
-  /** Invoked by the native editor when Command-Return is pressed on a hardware keyboard. */
+  // invoked by the native editor when Command-Return is pressed on a hardware keyboard.
   readonly onSubmit?: () => void
 }

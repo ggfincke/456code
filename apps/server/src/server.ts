@@ -25,6 +25,7 @@ import { websocketRpcRouteLayer } from './ws.ts'
 import { ImportContinuationLive } from './import/continuation.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import { layerConfig as SqlitePersistenceLayerLive } from './persistence/Layers/Sqlite.ts'
+import { ImportReplacementIntentRepositoryLive } from './persistence/Layers/ImportReplacementIntents.ts'
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
 import * as AnalyticsService from './telemetry/AnalyticsService.ts'
 import { ProviderSessionDirectoryLive } from './provider/Layers/ProviderSessionDirectory.ts'
@@ -36,10 +37,10 @@ import { ProviderSessionReaperLive } from './provider/Layers/ProviderSessionReap
 import * as OpenCodeRuntime from './provider/opencodeRuntime.ts'
 import * as CheckpointDiffQuery from './checkpointing/CheckpointDiffQuery.ts'
 import * as CheckpointStore from './checkpointing/CheckpointStore.ts'
-import * as AzureDevOpsCli from './sourceControl/AzureDevOpsCli.ts'
-import * as BitbucketApi from './sourceControl/BitbucketApi.ts'
-import * as GitHubCli from './sourceControl/GitHubCli.ts'
-import * as GitLabCli from './sourceControl/GitLabCli.ts'
+import * as AzureDevOpsCli from './sourceControl/AzureDevOps/AzureDevOpsCli.ts'
+import * as BitbucketApi from './sourceControl/Bitbucket/BitbucketApi.ts'
+import * as GitHubCli from './sourceControl/GitHub/GitHubCli.ts'
+import * as GitLabCli from './sourceControl/GitLab/GitLabCli.ts'
 import * as TextGeneration from './textGeneration/TextGeneration.ts'
 import { ProviderInstanceRegistryHydrationLive } from './provider/Layers/ProviderInstanceRegistryHydration.ts'
 import * as TerminalManager from './terminal/Manager.ts'
@@ -74,6 +75,7 @@ import * as VcsProvisioningService from './vcs/VcsProvisioningService.ts'
 import * as VcsStatusBroadcaster from './vcs/VcsStatusBroadcaster.ts'
 import * as GitWorkflowService from './git/GitWorkflowService.ts'
 import * as ReviewService from './review/ReviewService.ts'
+import * as SourceControlDiscovery from './sourceControl/SourceControlDiscovery.ts'
 import * as SourceControlProviderRegistry from './sourceControl/SourceControlProviderRegistry.ts'
 import * as SourceControlRepositoryService from './sourceControl/SourceControlRepositoryService.ts'
 import * as ProjectSetupScriptRunner from './project/ProjectSetupScriptRunner.ts'
@@ -101,8 +103,10 @@ import { cartographerEmbedRouteLayer } from './cartographer/CartographerHttp.ts'
 import * as ProposalGenerationService from './proposal/ProposalGenerationService.ts'
 import * as ProposalImplementationAttemptService from './proposal/ProposalImplementationAttemptService.ts'
 import * as ProposalService from './proposal/ProposalService.ts'
+import * as ProposalRetainedRefAttemptStore from './proposal/ProposalRetainedRefAttemptStore.ts'
+import * as ProposalRetainedRefReconciler from './proposal/ProposalRetainedRefReconciler.ts'
 
-// Effect's default preemptive shutdown waits 20s before finalizing request scopes.
+// effect's default preemptive shutdown waits 20s before finalizing request scopes.
 // T3's primary transport is long-lived WebSocket RPC, whose Effect scope finalizer
 // already closes the websocket gracefully. Do not add an artificial drain before
 // those finalizers get a chance to run.
@@ -183,7 +187,7 @@ const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
   Layer.provide(ProviderSessionRuntime.layer),
 )
 
-// `ProviderAdapterRegistryLive` is now a facade that resolves kind → adapter
+// `ProviderAdapterRegistryLive` is now a facade that resolves kind -> adapter
 // by looking up the default `ProviderInstance` per driver in the instance
 // registry. Adapter construction itself moved inside each driver's
 // `create()`; `ProviderEventLoggersLive` owns the shared native/canonical
@@ -194,7 +198,9 @@ const ProviderLayerLive = ProviderServiceLive.pipe(
   Layer.provideMerge(ProviderSessionDirectoryLayerLive),
 )
 
-const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive))
+const PersistenceLayerLive = ImportReplacementIntentRepositoryLive.pipe(
+  Layer.provideMerge(SqlitePersistenceLayerLive),
+)
 
 const VcsDriverRegistryLayerLive = VcsDriverRegistry.layer.pipe(
   Layer.provide(VcsProjectConfig.layer),
@@ -272,6 +278,8 @@ const ProposalPreviewLayerLive = Layer.mergeAll(
     Layer.provideMerge(ProcessRunner.layer),
   ),
   CartographerEmbedBroker.layer,
+  ProposalRetainedRefAttemptStore.layer,
+  ProposalRetainedRefReconciler.layer.pipe(Layer.provide(ProposalRetainedRefAttemptStore.layer)),
 )
 
 const WorkspaceEntriesLayerLive = WorkspaceEntries.layer.pipe(Layer.provide(WorkspacePaths.layer))
@@ -299,11 +307,12 @@ const AuthLayerLive = EnvironmentAuth.layer.pipe(
 
 const ProviderRuntimeLayerLive = ProviderSessionReaperLive.pipe(
   Layer.provideMerge(ProviderLayerLive),
+  // includes durable reactor delivery and runner registration
   Layer.provideMerge(OrchestrationLayerLive),
 )
 
 const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
-  // Core Services
+  // core Services
   Layer.provideMerge(CheckpointingLayerLive),
   Layer.provideMerge(SourceControlProviderRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
@@ -313,16 +322,16 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(PersistenceLayerLive),
   Layer.provideMerge(Keybindings.layer),
   Layer.provideMerge(ProviderRegistryLive),
-  // The instance registry is the new routing keystone — text generation,
+  // the instance registry is the new routing keystone — text generation,
   // adapter lookup, and runtime ingestion all resolve `ProviderInstanceId`
   // through this layer. Built-in drivers come from `BUILT_IN_DRIVERS`;
   // `providerInstances` hydration merges `settings.providers.<kind>`
   // with explicit `providerInstances` entries on boot.
   Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
-  // Shared native/canonical NDJSON writers used by both the per-instance
+  // shared native/canonical NDJSON writers used by both the per-instance
   // drivers (native stream, written from inside each `<X>Adapter`) and
   // `ProviderService` (canonical stream, written after event normalization).
-  // Provided once at the runtime level so every consumer sees the same
+  // provided once at the runtime level so every consumer sees the same
   // logger instances.
   Layer.provideMerge(ProviderEventLoggers.ProviderEventLoggersLive),
   // `OpenCodeDriver.create()` yields `OpenCodeRuntime`; previously the old
@@ -339,6 +348,14 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ServerEnvironment.layer),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
+)
+
+export const makeSourceControlDiscoveryLayer = <ROut, E, RIn>(
+  runtimeCoreDependencies: Layer.Layer<ROut, E, RIn>,
+) => SourceControlDiscovery.layer.pipe(Layer.provideMerge(runtimeCoreDependencies))
+
+export const SourceControlDiscoveryLayerLive = makeSourceControlDiscoveryLayer(
+  RuntimeCoreDependenciesLive,
 )
 
 const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
@@ -358,7 +375,7 @@ const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
 )
 
-// The contract's `EnvironmentHttpApi` still carries the T3 Connect group for
+// the contract's `EnvironmentHttpApi` still carries the T3 Connect group for
 // clients that predate its removal. This server serves only the local groups,
 // so `/api/connect/*` is simply not routed.
 class LocalEnvironmentHttpApi extends HttpApi.make('environment')
@@ -489,6 +506,7 @@ export const makeServerLayer = Layer.unwrap(
       // present (inert fallback otherwise); providing it here keeps provider
       // services out of makeRoutesLayer requirements so test graphs stay small
       Layer.provide(ImportContinuationLive),
+      Layer.provide(SourceControlDiscoveryLayerLive),
       Layer.provideMerge(RuntimeServicesLive),
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ObservabilityLive),
@@ -499,5 +517,5 @@ export const makeServerLayer = Layer.unwrap(
   }),
 )
 
-// Important: Only `ServerConfig` should be provided by the CLI layer!!! Don't let other requirements leak into the launch layer.
+// important: Only `ServerConfig` should be provided by the CLI layer!!! Don't let other requirements leak into the launch layer.
 export const runServer = Layer.launch(makeServerLayer)

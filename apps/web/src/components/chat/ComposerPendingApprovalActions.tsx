@@ -1,3 +1,6 @@
+// apps/web/src/components/chat/ComposerPendingApprovalActions.tsx
+// render composer pending approval actions
+
 import { type ApprovalRequestId, type ProviderApprovalDecision } from '@t3tools/contracts'
 import { memo } from 'react'
 import { Button } from '../ui/button'
@@ -18,21 +21,25 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
   onRespondToApproval,
 }: ComposerPendingApprovalActionsProps)
 {
+  const respond = (decision: ProviderApprovalDecision) =>
+  {
+    if (isResponding)
+    {
+      return
+    }
+    void onRespondToApproval(requestId, decision)
+  }
+
   return (
     <>
-      <Button
-        size="sm"
-        variant="ghost"
-        disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, 'cancel')}
-      >
+      <Button size="sm" variant="ghost" disabled={isResponding} onClick={() => respond('cancel')}>
         Cancel turn
       </Button>
       <Button
         size="sm"
         variant="destructive-outline"
         disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, 'decline')}
+        onClick={() => respond('decline')}
       >
         Decline
       </Button>
@@ -40,16 +47,11 @@ export const ComposerPendingApprovalActions = memo(function ComposerPendingAppro
         size="sm"
         variant="outline"
         disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, 'acceptForSession')}
+        onClick={() => respond('acceptForSession')}
       >
         Always allow this session
       </Button>
-      <Button
-        size="sm"
-        variant="default"
-        disabled={isResponding}
-        onClick={() => void onRespondToApproval(requestId, 'accept')}
-      >
+      <Button size="sm" variant="default" disabled={isResponding} onClick={() => respond('accept')}>
         Approve once
       </Button>
     </>

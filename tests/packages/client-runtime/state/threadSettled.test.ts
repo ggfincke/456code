@@ -2,6 +2,7 @@
 // verifies thread settlement state transitions
 
 import {
+  ApprovalRequestId,
   ProjectId,
   ProviderInstanceId,
   ThreadId,
@@ -27,6 +28,7 @@ function makeShell(input: {
   readonly activityAt: string | null
   readonly sessionStatus?: 'starting' | 'running'
   readonly pending?: 'approval' | 'user-input'
+  readonly approvalStatus?: 'responding' | 'unknown'
 }): OrchestrationThreadShell
 {
   const threadId = ThreadId.make('thread-1')
@@ -50,6 +52,7 @@ function makeShell(input: {
             completedAt: null,
             assistantMessageId: null,
           },
+    providerSwitch: null,
     createdAt: '2026-04-01T00:00:00.000Z',
     updatedAt: NOW,
     archivedAt: null,
@@ -72,6 +75,18 @@ function makeShell(input: {
     hasPendingApprovals: input.pending === 'approval',
     hasPendingUserInput: input.pending === 'user-input',
     hasActionableProposedPlan: false,
+    ...(input.approvalStatus === undefined
+      ? {}
+      : {
+          approvalOutcomes: [
+            {
+              requestId: ApprovalRequestId.make('approval-1'),
+              status: input.approvalStatus,
+              decision: null,
+              updatedAt: NOW,
+            },
+          ],
+        }),
   }
 }
 
@@ -241,11 +256,11 @@ describe('effectiveSettled', () =>
 
   it('does not re-settle a warm thread on the merge signal: a message sent in a settled thread keeps it active until idle', () =>
   {
-    // The merge signal never clears, so without the idle guard a follow-up
+    // the merge signal never clears, so without the idle guard a follow-up
     // message would un-settle the row only until its turn completed, then
     // snap straight back into the settled tail.
     const justActive = makeShell({ activityAt: '2026-04-09T23:30:00.000Z' })
-    // The idle gate is strict: activity exactly one hour old is still warm.
+    // the idle gate is strict: activity exactly one hour old is still warm.
     const boundary = makeShell({ activityAt: '2026-04-09T23:00:00.000Z' })
     const idle = makeShell({ activityAt: '2026-04-09T22:59:59.999Z' })
 
@@ -277,7 +292,7 @@ describe('effectiveSettled', () =>
 
   it('re-settles a merged-PR thread once the follow-up burst goes idle', () =>
   {
-    // Same shell, advancing clock: active while warm, settled again after
+    // same shell, advancing clock: active while warm, settled again after
     // the idle window passes — the burst cools and the merge signal wins.
     const shell = makeShell({ activityAt: '2026-04-09T23:30:00.000Z' })
     const options = { autoSettleAfterDays: null, changeRequestState: 'merged' as const }
@@ -301,6 +316,28 @@ describe('effectiveSettled', () =>
       }),
     ).toBe(false)
   })
+
+  it.each(['responding', 'unknown'] as const)(
+    'blocks settling for %s outcomes even when the shell pending flag is clear',
+    (approvalStatus) =>
+    {
+      const shell = makeShell({
+        settledOverride: 'settled',
+        activityAt: STALE,
+        approvalStatus,
+      })
+
+      expect(shell.hasPendingApprovals).toBe(false)
+      expect(canSettle(shell, { now: NOW })).toBe(false)
+      expect(
+        effectiveSettled(shell, {
+          now: NOW,
+          autoSettleAfterDays: 3,
+          changeRequestState: 'merged',
+        }),
+      ).toBe(false)
+    },
+  )
 
   it('keeps a new turn active from queued through starting and running', () =>
   {
@@ -364,7 +401,7 @@ describe('effectiveSettled', () =>
 describe('hasQueuedTurnStart', () =>
 {
   const QUEUED_AT = '2026-04-09T12:00:00.000Z'
-  // Within the adoption grace window of the queued message.
+  // within the adoption grace window of the queued message.
   const JUST_AFTER = { now: '2026-04-09T12:00:30.000Z' }
 
   it('flags a user message no turn has picked up, within the grace window', () =>
@@ -383,7 +420,7 @@ describe('hasQueuedTurnStart', () =>
   {
     const noTurn = { latestUserMessageAt: QUEUED_AT, latestTurn: null, session: null }
     expect(hasQueuedTurnStart(noTurn, { now: '2026-04-09T12:03:00.000Z' })).toBe(false)
-    // Historical shells (e.g. from servers that never carried latestTurn)
+    // historical shells (e.g. from servers that never carried latestTurn)
     // must never read as queued.
     expect(hasQueuedTurnStart(noTurn, { now: NOW })).toBe(false)
   })
@@ -420,7 +457,7 @@ describe('hasQueuedTurnStart', () =>
 
   it('bounds the grace window in both directions: a future-stamped message is skew, not queued work', () =>
   {
-    // Message timestamps originate on other devices; a clock an hour ahead
+    // message timestamps originate on other devices; a clock an hour ahead
     // must not hold the queued state for the whole skew.
     const skewed = {
       latestUserMessageAt: '2026-04-09T13:00:00.000Z',
@@ -428,7 +465,7 @@ describe('hasQueuedTurnStart', () =>
       session: null,
     }
     expect(hasQueuedTurnStart(skewed, { now: '2026-04-09T12:00:00.000Z' })).toBe(false)
-    // A small negative age (within the grace window) still reads as queued.
+    // a small negative age (within the grace window) still reads as queued.
     const slightlyAhead = {
       latestUserMessageAt: '2026-04-09T12:00:30.000Z',
       latestTurn: null,
@@ -472,13 +509,13 @@ describe('canSettle', () =>
         changeRequestState: 'merged',
       }),
     ).toBe(false)
-    // Past the window the message is a failed/stale start: settleable again.
+    // past the window the message is a failed/stale start: settleable again.
     expect(canSettle(queued, { now: NOW })).toBe(true)
   })
 
   it('lets a server-accepted settle overrule the clock-derived queued blocker', () =>
   {
-    // The settle action ran with wall-clock `now` (past the grace window);
+    // the settle action ran with wall-clock `now` (past the grace window);
     // the list partition re-evaluates with a minute-floored `now` that is
     // still INSIDE the window. settledAt >= message time proves the server
     // already adjudicated this exact message, so the row must not snap back
@@ -496,7 +533,7 @@ describe('canSettle', () =>
       true,
     )
 
-    // A message NEWER than settledAt is genuinely new work: still blocked
+    // a message NEWER than settledAt is genuinely new work: still blocked
     // until the server's auto-unsettle lands.
     const messageAfterSettle = {
       ...base,

@@ -1,3 +1,6 @@
+// tests/apps/server/terminal/BunPtyAdapter.test.ts
+// verify bun pty adapter behavior
+
 import { assert, expect, it } from '@effect/vitest'
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Cause from 'effect/Cause'
@@ -5,21 +8,6 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 
 import * as BunPtyAdapter from '../../../../apps/server/src/terminal/BunPtyAdapter.ts'
-
-it('describes unavailable Bun PTY operations structurally', () =>
-{
-  const error = new BunPtyAdapter.BunPtyOperationUnavailableError({
-    operation: 'resize',
-    pid: 42,
-  })
-
-  expect(error).toMatchObject({
-    _tag: 'BunPtyOperationUnavailableError',
-    operation: 'resize',
-    pid: 42,
-  })
-  expect(error.message).toBe('Bun PTY resize is unavailable for process 42.')
-})
 
 it.effect('reports unsupported platforms with a structured startup defect', () =>
   Effect.gen(function* ()

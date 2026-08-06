@@ -4,7 +4,10 @@
 import type { EnvironmentId } from '@t3tools/contracts'
 
 import { appAtomRegistry } from './atom-registry'
-import { createThreadOutboxManager } from './thread-outbox-manager'
+import {
+  createThreadOutboxManager,
+  type ThreadOutboxEnvironmentCleanupResult,
+} from './thread-outbox-manager'
 import type { QueuedThreadMessage } from './thread-outbox-model'
 import { expoThreadOutboxStorage } from './thread-outbox-storage'
 
@@ -31,7 +34,7 @@ export function confirmThreadOutboxMessageQueued(message: QueuedThreadMessage): 
   return threadOutboxManager.confirmQueued(message)
 }
 
-/** Rewrite a queued message; no-op (false) if it was removed in the meantime. */
+// rewrite a queued message; no-op (false) if it was removed in the meantime.
 export function updateThreadOutboxMessage(message: QueuedThreadMessage): Promise<boolean>
 {
   return threadOutboxManager.update(message)
@@ -42,7 +45,9 @@ export function removeThreadOutboxMessage(message: QueuedThreadMessage): Promise
   return threadOutboxManager.remove(message)
 }
 
-export function clearThreadOutboxEnvironment(environmentId: EnvironmentId): Promise<void>
+export function clearThreadOutboxEnvironment(
+  environmentId: EnvironmentId,
+): Promise<ThreadOutboxEnvironmentCleanupResult>
 {
   return threadOutboxManager.clearEnvironment(environmentId)
 }
