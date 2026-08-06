@@ -1,8 +1,15 @@
 // apps/server/src/textGeneration/TextGenerationUtils.ts
 // share server text generation utils
 
-import { TextGenerationError } from '@t3tools/contracts'
+import { TextGenerationError, type ChatAttachment } from '@t3tools/contracts'
+import * as Effect from 'effect/Effect'
+import type * as FileSystem from 'effect/FileSystem'
 import * as Schema from 'effect/Schema'
+import * as Stream from 'effect/Stream'
+import type * as EffectAcpSchema from 'effect-acp/schema'
+
+import { resolveAttachmentPath } from '../attachmentStore.ts'
+import type { TextGenerationOp } from './TextGeneration.ts'
 
 const isTextGenerationError = Schema.is(TextGenerationError)
 
@@ -127,3 +134,63 @@ export function normalizeCliError(
     cause: error,
   })
 }
+
+export function readCliStreamAsString<E>(
+  cliName: string,
+  operation: TextGenerationOp,
+  stream: Stream.Stream<Uint8Array, E>,
+): Effect.Effect<string, TextGenerationError>
+{
+  return stream.pipe(
+    Stream.decodeText(),
+    Stream.runFold(
+      () => '',
+      (acc, chunk) => acc + chunk,
+    ),
+    Effect.mapError((cause) =>
+      normalizeCliError(cliName, operation, cause, 'Failed to collect process output'),
+    ),
+  )
+}
+
+export const buildAcpImagePromptParts = Effect.fn('buildAcpImagePromptParts')(function* (input: {
+  readonly operation: TextGenerationOp
+  readonly providerLabel: string
+  readonly attachments: ReadonlyArray<ChatAttachment> | undefined
+  readonly attachmentsDir: string
+  readonly fileSystem: FileSystem.FileSystem
+})
+{
+  const parts: Array<EffectAcpSchema.ContentBlock> = []
+  for (const attachment of input.attachments ?? [])
+  {
+    const attachmentPath = resolveAttachmentPath({
+      attachmentsDir: input.attachmentsDir,
+      attachment,
+    })
+    if (!attachmentPath)
+    {
+      return yield* new TextGenerationError({
+        operation: input.operation,
+        detail: `Invalid ${input.providerLabel} image attachment id '${attachment.id}'.`,
+      })
+    }
+
+    const bytes = yield* input.fileSystem.readFile(attachmentPath).pipe(
+      Effect.mapError(
+        (cause) =>
+          new TextGenerationError({
+            operation: input.operation,
+            detail: `Failed to read ${input.providerLabel} image attachment.`,
+            cause,
+          }),
+      ),
+    )
+    parts.push({
+      type: 'image',
+      data: Buffer.from(bytes).toString('base64'),
+      mimeType: attachment.mimeType,
+    })
+  }
+  return parts
+})

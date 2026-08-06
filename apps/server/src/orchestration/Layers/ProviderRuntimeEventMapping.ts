@@ -4,12 +4,32 @@
 import {
   ApprovalRequestId,
   isToolLifecycleItemType,
+  type OrchestrationThread,
   type OrchestrationThreadActivity,
+  type ProviderInstanceId,
   type ProviderRuntimeEvent,
   type ContextWindowUpdatedActivityPayload,
   type ThreadTokenUsageSnapshot,
   TurnId,
 } from '@t3tools/contracts'
+
+export function matchesProviderInstanceFence(
+  expectedProviderInstanceId: ProviderInstanceId,
+  actualProviderInstanceId: ProviderInstanceId | undefined,
+): boolean
+{
+  return actualProviderInstanceId === expectedProviderInstanceId
+}
+
+export function runtimeEventMatchesThreadProviderInstance(
+  event: ProviderRuntimeEvent,
+  thread: Pick<OrchestrationThread, 'modelSelection' | 'session'>,
+): boolean
+{
+  const expectedProviderInstanceId =
+    thread.session?.providerInstanceId ?? thread.modelSelection.instanceId
+  return matchesProviderInstanceFence(expectedProviderInstanceId, event.providerInstanceId)
+}
 
 export function toTurnId(value: TurnId | string | undefined): TurnId | undefined
 {

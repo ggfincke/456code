@@ -137,6 +137,7 @@ export interface BranchNamePromptInput
 {
   message: string
   attachments?: ReadonlyArray<ChatAttachment> | undefined
+  includeImageContext?: boolean | undefined
   policy?: TextGenerationPolicy | undefined
 }
 
@@ -183,7 +184,9 @@ export function buildBranchNamePrompt(input: BranchNamePromptInput)
       'Branch should describe the requested work from the user message.',
       'Keep it short and specific (2-6 words).',
       'Use plain words only, no issue prefixes and no punctuation-heavy text.',
-      'If images are attached, use them as primary context for visual/UI issues.',
+      ...(input.includeImageContext === false
+        ? []
+        : ['If images are attached, use them as primary context for visual/UI issues.']),
     ],
     message: input.message,
     attachments: input.attachments,
@@ -202,6 +205,7 @@ export interface ThreadTitlePromptInput
 {
   message: string
   attachments?: ReadonlyArray<ChatAttachment> | undefined
+  includeImageContext?: boolean | undefined
   policy?: TextGenerationPolicy | undefined
 }
 
@@ -214,7 +218,9 @@ export function buildThreadTitlePrompt(input: ThreadTitlePromptInput)
       "Title should summarize the user's request, not restate it verbatim.",
       'Keep it short and specific (3-8 words).',
       'Avoid quotes, filler, prefixes, and trailing punctuation.',
-      'If images are attached, use them as primary context for visual/UI issues.',
+      ...(input.includeImageContext === false
+        ? []
+        : ['If images are attached, use them as primary context for visual/UI issues.']),
     ],
     message: input.message,
     attachments: input.attachments,

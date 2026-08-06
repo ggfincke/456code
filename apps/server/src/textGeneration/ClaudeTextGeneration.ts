@@ -20,6 +20,7 @@ import {
 } from './TextGenerationPrompts.ts'
 import {
   normalizeCliError,
+  readCliStreamAsString,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -58,24 +59,8 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
   const claudeEnvironment = yield* makeClaudeEnvironment(claudeSettings, environment, sourceCwd)
 
-  const readStreamAsString = <E>(
-    operation: string,
-    stream: Stream.Stream<Uint8Array, E>,
-  ): Effect.Effect<string, TextGenerationError> =>
-    stream.pipe(
-      Stream.decodeText(),
-      Stream.runFold(
-        () => '',
-        (acc, chunk) => acc + chunk,
-      ),
-      Effect.mapError((cause) =>
-        normalizeCliError('claude', operation, cause, 'Failed to collect process output'),
-      ),
-    )
-
   const encodeJsonForOperation = (
-    operation:
-      'generateCommitMessage' | 'generatePrContent' | 'generateBranchName' | 'generateThreadTitle',
+    operation: TextGeneration.TextGenerationOp,
     value: unknown,
     detail: string,
   ): Effect.Effect<string, TextGenerationError> =>
@@ -99,8 +84,7 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
     outputSchemaJson,
     modelSelection,
   }: {
-    operation:
-      'generateCommitMessage' | 'generatePrContent' | 'generateBranchName' | 'generateThreadTitle'
+    operation: TextGeneration.TextGenerationOp
     cwd: string
     prompt: string
     outputSchemaJson: S
@@ -179,8 +163,8 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
 
       const [stdout, stderr, exitCode] = yield* Effect.all(
         [
-          readStreamAsString(operation, child.stdout),
-          readStreamAsString(operation, child.stderr),
+          readCliStreamAsString('claude', operation, child.stdout),
+          readCliStreamAsString('claude', operation, child.stderr),
           child.exitCode.pipe(
             Effect.mapError((cause) =>
               normalizeCliError('claude', operation, cause, 'Failed to read Claude CLI exit code'),
@@ -312,6 +296,7 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
       const { prompt, outputSchema } = buildBranchNamePrompt({
         message: input.message,
         attachments: input.attachments,
+        includeImageContext: false,
       })
 
       const generated = yield* runClaudeJson({
@@ -333,6 +318,7 @@ export const makeClaudeTextGeneration = Effect.fn('makeClaudeTextGeneration')(fu
       const { prompt, outputSchema } = buildThreadTitlePrompt({
         message: input.message,
         attachments: input.attachments,
+        includeImageContext: false,
       })
 
       const generated = yield* runClaudeJson({

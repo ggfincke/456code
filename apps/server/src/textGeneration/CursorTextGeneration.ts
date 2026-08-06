@@ -2,6 +2,7 @@
 // generates source control text through cursor
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
@@ -20,10 +21,12 @@ import {
   buildThreadTitlePrompt,
 } from './TextGenerationPrompts.ts'
 import {
+  buildAcpImagePromptParts,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from './TextGenerationUtils.ts'
+import * as ServerConfig from '../config.ts'
 import {
   applyCursorAcpModelSelection,
   makeCursorAcpRuntime,
@@ -41,20 +44,23 @@ export const makeCursorTextGeneration = Effect.fn('makeCursorTextGeneration')(fu
 )
 {
   const crypto = yield* Crypto.Crypto
+  const fileSystem = yield* FileSystem.FileSystem
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const serverConfig = yield* ServerConfig.ServerConfig
   const resolvedEnvironment = environment ?? process.env
 
   const runCursorJson = <S extends Schema.Top>({
     operation,
     cwd,
     prompt,
+    attachments,
     outputSchemaJson,
     modelSelection,
   }: {
-    operation:
-      'generateCommitMessage' | 'generatePrContent' | 'generateBranchName' | 'generateThreadTitle'
+    operation: TextGeneration.TextGenerationOp
     cwd: string
     prompt: string
+    attachments?: TextGeneration.BranchNameGenerationInput['attachments']
     outputSchemaJson: S
     modelSelection: ModelSelection
   }): Effect.Effect<S['Type'], TextGenerationError, S['DecodingServices']> =>
@@ -103,8 +109,16 @@ export const makeCursorTextGeneration = Effect.fn('makeCursorTextGeneration')(fu
             }),
         })
 
+        const imagePromptParts = yield* buildAcpImagePromptParts({
+          operation,
+          providerLabel: 'Cursor',
+          attachments,
+          attachmentsDir: serverConfig.attachmentsDir,
+          fileSystem,
+        })
+
         return yield* runtime.prompt({
-          prompt: [{ type: 'text', text: prompt }],
+          prompt: [{ type: 'text', text: prompt }, ...imagePromptParts],
         })
       }).pipe(
         Effect.timeoutOption(CURSOR_TIMEOUT_MS),
@@ -236,6 +250,7 @@ export const makeCursorTextGeneration = Effect.fn('makeCursorTextGeneration')(fu
         operation: 'generateBranchName',
         cwd: input.cwd,
         prompt,
+        attachments: input.attachments,
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
       })
@@ -257,6 +272,7 @@ export const makeCursorTextGeneration = Effect.fn('makeCursorTextGeneration')(fu
         operation: 'generateThreadTitle',
         cwd: input.cwd,
         prompt,
+        attachments: input.attachments,
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
       })

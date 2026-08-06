@@ -35,6 +35,7 @@ import {
 import * as OpenCodeRuntime from '../provider/opencodeRuntime.ts'
 
 const OPENCODE_TEXT_GENERATION_IDLE_TTL = '30 seconds'
+const OPENCODE_TEXT_GENERATION_REQUEST_TIMEOUT_MS = 180_000
 
 const OpenCodeTextGenerationOperation = Schema.Literals([
   'generateCommitMessage',
@@ -95,6 +96,13 @@ export class OpenCodeTextGenerationPromptRequestError extends Schema.TaggedError
     return `OpenCode prompt request failed for ${this.operation} in ${this.cwd} using ${this.providerId}/${this.modelId} (session ${this.sessionId}).`
   }
 }
+
+const isOpenCodeTextGenerationSessionRequestError = Schema.is(
+  OpenCodeTextGenerationSessionRequestError,
+)
+const isOpenCodeTextGenerationPromptRequestError = Schema.is(
+  OpenCodeTextGenerationPromptRequestError,
+)
 
 export class OpenCodeTextGenerationPromptResponseError extends Schema.TaggedErrorClass<OpenCodeTextGenerationPromptResponseError>()(
   'OpenCodeTextGenerationPromptResponseError',
@@ -276,8 +284,7 @@ export const makeOpenCodeTextGeneration = Effect.fn('makeOpenCodeTextGeneration'
 
   const acquireSharedServer = (input: {
     readonly binaryPath: string
-    readonly operation:
-      'generateCommitMessage' | 'generatePrContent' | 'generateBranchName' | 'generateThreadTitle'
+    readonly operation: TextGeneration.TextGenerationOp
   }) =>
     sharedServerMutex.withPermit(
       Effect.gen(function* ()
@@ -440,7 +447,18 @@ export const makeOpenCodeTextGeneration = Effect.fn('makeOpenCodeTextGeneration'
               cwd: input.cwd,
               cause,
             }),
-        })
+        }).pipe(
+          Effect.timeout(OPENCODE_TEXT_GENERATION_REQUEST_TIMEOUT_MS),
+          Effect.mapError((cause) =>
+            isOpenCodeTextGenerationSessionRequestError(cause)
+              ? cause
+              : new OpenCodeTextGenerationSessionRequestError({
+                  operation: input.operation,
+                  cwd: input.cwd,
+                  cause,
+                }),
+          ),
+        )
         if (!session.data)
         {
           return yield* new OpenCodeTextGenerationSessionPayloadError({
@@ -472,7 +490,17 @@ export const makeOpenCodeTextGeneration = Effect.fn('makeOpenCodeTextGeneration'
               ...promptContext,
               cause,
             }),
-        })
+        }).pipe(
+          Effect.timeout(OPENCODE_TEXT_GENERATION_REQUEST_TIMEOUT_MS),
+          Effect.mapError((cause) =>
+            isOpenCodeTextGenerationPromptRequestError(cause)
+              ? cause
+              : new OpenCodeTextGenerationPromptRequestError({
+                  ...promptContext,
+                  cause,
+                }),
+          ),
+        )
         const promptFailure = getOpenCodePromptFailure(result.data?.info?.error)
         if (promptFailure)
         {

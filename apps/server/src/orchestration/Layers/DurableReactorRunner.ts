@@ -25,7 +25,7 @@ import { OrchestrationEngineService } from '../Services/OrchestrationEngine.ts'
 const EVENT_PAGE_SIZE = 500
 const LEASE_DURATION_MS = 30_000
 const LEASE_RENEWAL_MS = 10_000
-const POLL_INTERVAL_MS = 500
+const POLL_INTERVAL_MS = 5_000
 const RETRY_BASE_MS = 1_000
 const RETRY_CAP_MS = 5 * 60_000
 const MAX_ATTEMPTS = 8

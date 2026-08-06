@@ -112,7 +112,12 @@ export const make = Effect.gen(function* ()
   })
 
   const persistEnvironmentId = (value: string) =>
-    fileSystem.writeFileString(serverConfig.environmentIdPath, `${value}\n`).pipe(
+    fileSystem.writeFileString(serverConfig.environmentIdPath, `${value}\n`, { flag: 'wx' }).pipe(
+      Effect.as(true),
+      Effect.catchIf(
+        (cause) => cause.reason._tag === 'AlreadyExists',
+        () => Effect.succeed(false),
+      ),
       Effect.mapError(
         (cause) =>
           new ServerEnvironmentIdPersistenceError({
@@ -132,8 +137,27 @@ export const make = Effect.gen(function* ()
     }
 
     const generated = yield* crypto.randomUUIDv4
-    yield* persistEnvironmentId(generated)
-    return generated
+    const created = yield* persistEnvironmentId(generated)
+    if (created)
+    {
+      return generated
+    }
+
+    for (let attempt = 0; attempt < 50; attempt += 1)
+    {
+      const winner = yield* readPersistedEnvironmentId
+      if (winner)
+      {
+        return winner
+      }
+      yield* Effect.sleep('10 millis')
+    }
+
+    return yield* new ServerEnvironmentIdPersistenceError({
+      operation: 'read',
+      environmentIdPath: serverConfig.environmentIdPath,
+      cause: new Error('The winning environment ID was not readable after exclusive creation.'),
+    })
   })
 
   const environmentId = EnvironmentId.make(environmentIdRaw)

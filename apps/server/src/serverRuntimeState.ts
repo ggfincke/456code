@@ -219,3 +219,22 @@ export const clearPersistedServerRuntimeStateIfStale = (input: {
     yield* clearPersistedServerRuntimeState(input.path)
     return true
   })
+
+export const clearPersistedServerRuntimeStateIfOwned = (input: {
+  readonly path: string
+  readonly expectedState: PersistedServerRuntimeState
+}) =>
+  Effect.gen(function* ()
+  {
+    const currentState = yield* readPersistedServerRuntimeState(input.path)
+    if (
+      Option.isNone(currentState) ||
+      !runtimeStatesMatch(currentState.value, input.expectedState)
+    )
+    {
+      return false
+    }
+
+    yield* clearPersistedServerRuntimeState(input.path)
+    return true
+  })

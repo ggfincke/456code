@@ -115,6 +115,7 @@ export interface ProviderServiceShape
     input: {
       readonly threadId: ThreadId
       readonly numTurns: number
+      readonly expectedProviderInstanceId?: ProviderInstanceId
     },
     context?: ProviderEffectContext,
   ) => Effect.Effect<void, ProviderServiceError>

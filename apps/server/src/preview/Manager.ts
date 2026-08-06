@@ -216,23 +216,25 @@ export const make = Effect.gen(function* PreviewManagerMake()
             updatedAt,
           })
         : buildIdleSnapshot({ threadId: input.threadId, tabId, updatedAt })
-      yield* SynchronizedRef.update(stateRef, (state) =>
-      {
-        const sessions = new Map(state.sessions)
-        sessions.set(compositeKey(input.threadId, tabId), {
-          threadId: input.threadId,
-          tabId,
-          snapshot,
-        })
-        return { sessions }
-      })
-      yield* PubSub.publish(eventsPubSub, {
-        type: 'opened',
-        threadId: input.threadId,
-        tabId,
-        createdAt: snapshot.updatedAt,
-        snapshot,
-      })
+      yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
+        Effect.gen(function* ()
+        {
+          const sessions = new Map(state.sessions)
+          sessions.set(compositeKey(input.threadId, tabId), {
+            threadId: input.threadId,
+            tabId,
+            snapshot,
+          })
+          yield* PubSub.publish(eventsPubSub, {
+            type: 'opened',
+            threadId: input.threadId,
+            tabId,
+            createdAt: snapshot.updatedAt,
+            snapshot,
+          })
+          return [undefined, { sessions }] as const
+        }),
+      )
       return snapshot
     },
   )
@@ -367,37 +369,36 @@ export const make = Effect.gen(function* PreviewManagerMake()
     function* (input)
     {
       const createdAt = yield* currentIsoTimestamp
-      const events = yield* SynchronizedRef.modify(stateRef, (state) =>
-      {
-        const eventsToEmit: PreviewEvent[] = []
-        const sessions = new Map(state.sessions)
-        const targets = input.tabId
-          ? [state.sessions.get(compositeKey(input.threadId, input.tabId))].filter(
-              (entry): entry is PreviewSessionState => entry !== undefined,
-            )
-          : sessionsForThread(state, input.threadId)
-        for (const target of targets)
+      yield* SynchronizedRef.modifyEffect(stateRef, (state) =>
+        Effect.gen(function* ()
         {
-          sessions.delete(compositeKey(target.threadId, target.tabId))
-          eventsToEmit.push({
-            type: 'closed',
-            threadId: target.threadId,
-            tabId: target.tabId,
-            createdAt,
+          const eventsToEmit: PreviewEvent[] = []
+          const sessions = new Map(state.sessions)
+          const targets = input.tabId
+            ? [state.sessions.get(compositeKey(input.threadId, input.tabId))].filter(
+                (entry): entry is PreviewSessionState => entry !== undefined,
+              )
+            : sessionsForThread(state, input.threadId)
+          for (const target of targets)
+          {
+            sessions.delete(compositeKey(target.threadId, target.tabId))
+            eventsToEmit.push({
+              type: 'closed',
+              threadId: target.threadId,
+              tabId: target.tabId,
+              createdAt,
+            })
+          }
+          if (eventsToEmit.length === 0)
+          {
+            return [undefined, state] as const
+          }
+          yield* Effect.forEach(eventsToEmit, (event) => PubSub.publish(eventsPubSub, event), {
+            discard: true,
           })
-        }
-        if (eventsToEmit.length === 0)
-        {
-          return [eventsToEmit, state] as const
-        }
-        return [eventsToEmit, { sessions }] as const
-      })
-      if (events.length > 0)
-      {
-        yield* Effect.forEach(events, (event) => PubSub.publish(eventsPubSub, event), {
-          discard: true,
-        })
-      }
+          return [undefined, { sessions }] as const
+        }),
+      )
     },
   )
 

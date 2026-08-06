@@ -1100,11 +1100,15 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeServerLifecycle,
             Effect.gen(function* ()
             {
+              const liveQueue = yield* Stream.toQueue(lifecycleEvents.stream, {
+                capacity: 'unbounded',
+              })
               const snapshot = yield* lifecycleEvents.snapshot
               const snapshotEvents = Array.from(snapshot.events).toSorted(
                 (left, right) => left.sequence - right.sequence,
               )
-              const liveEvents = lifecycleEvents.stream.pipe(
+              const liveEvents = Stream.fromQueue(liveQueue).pipe(
+                Stream.catchCause(() => Stream.empty),
                 Stream.filter((event) => event.sequence > snapshot.sequence),
               )
               return Stream.concat(Stream.fromIterable(snapshotEvents), liveEvents)
@@ -1116,13 +1120,17 @@ const makeWsRpcLayer = (
             WS_METHODS.subscribeAuthAccess,
             Effect.gen(function* ()
             {
-              const initialSnapshot = yield* loadAuthAccessSnapshot()
-              const revisionRef = yield* Ref.make(1)
               const accessChanges: Stream.Stream<
                 PairingGrantStore.BootstrapCredentialChange | SessionStore.SessionCredentialChange
               > = Stream.merge(bootstrapCredentials.streamChanges, sessions.streamChanges)
+              const liveQueue = yield* Stream.toQueue(accessChanges, { capacity: 'unbounded' })
+              const initialSnapshot = yield* loadAuthAccessSnapshot()
+              const revisionRef = yield* Ref.make(1)
 
-              const liveEvents: Stream.Stream<AuthAccessStreamEvent> = accessChanges.pipe(
+              const liveEvents: Stream.Stream<AuthAccessStreamEvent> = Stream.fromQueue(
+                liveQueue,
+              ).pipe(
+                Stream.catchCause(() => Stream.empty),
                 Stream.mapEffect((change) =>
                   Ref.updateAndGet(revisionRef, (revision) => revision + 1).pipe(
                     Effect.map((revision) =>

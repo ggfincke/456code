@@ -165,7 +165,9 @@ function toTextList(values: ReadonlyArray<string> | null | undefined): ReadonlyA
 
 function toInt(value: number | null | undefined): number | null
 {
-  return typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : null
+  if (typeof value !== 'number') return null
+  const integer = Math.trunc(value)
+  return Number.isSafeInteger(integer) ? integer : null
 }
 
 function toNonNegativeInt(value: number | null | undefined): number | null
@@ -491,6 +493,18 @@ function aggregateRuns(jobs: ReadonlyArray<WorkersJobSummary>): WorkersRunSummar
     })
 }
 
+export function runsFromWorkersList(snapshot: WorkersListResult): WorkersListRunsResult
+{
+  return {
+    state: snapshot.state,
+    stateDir: snapshot.stateDir,
+    readAt: snapshot.readAt,
+    runs: aggregateRuns(snapshot.jobs),
+    skippedJobCount: snapshot.skippedJobCount,
+    error: snapshot.error,
+  }
+}
+
 // job ids address a directory under <stateDir>/jobs; anything that could escape
 // it is rejected before it is ever joined into a path
 export function isSafeJobId(jobId: string): boolean
@@ -716,14 +730,7 @@ export const make = Effect.gen(function* ()
   )(function* (_input)
   {
     const snapshot = yield* list({})
-    return {
-      state: snapshot.state,
-      stateDir: snapshot.stateDir,
-      readAt: snapshot.readAt,
-      runs: aggregateRuns(snapshot.jobs),
-      skippedJobCount: snapshot.skippedJobCount,
-      error: snapshot.error,
-    }
+    return runsFromWorkersList(snapshot)
   })
 
   const getJob: WorkerBrokerStore['Service']['getJob'] = Effect.fn('WorkerBrokerStore.getJob')(

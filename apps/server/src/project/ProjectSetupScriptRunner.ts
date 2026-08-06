@@ -103,33 +103,26 @@ export const make = Effect.gen(function* ()
       ...(input.projectId === undefined ? {} : { projectId: input.projectId }),
       ...(input.projectCwd === undefined ? {} : { projectCwd: input.projectCwd }),
     }
+    const mapOperationError =
+      (operation: ProjectSetupScriptOperationError['operation']) => (cause: unknown) =>
+        new ProjectSetupScriptOperationError({ ...errorContext, operation, cause })
     const projectById = input.projectId
-      ? yield* projectionSnapshotQuery.getProjectShellById(ProjectId.make(input.projectId)).pipe(
-          Effect.map(Option.getOrUndefined),
-          Effect.mapError(
-            (cause) =>
-              new ProjectSetupScriptOperationError({
-                ...errorContext,
-                operation: 'resolveProject',
-                cause,
-              }),
-          ),
-        )
+      ? yield* projectionSnapshotQuery
+          .getProjectShellById(ProjectId.make(input.projectId))
+          .pipe(
+            Effect.map(Option.getOrUndefined),
+            Effect.mapError(mapOperationError('resolveProject')),
+          )
       : null
     const project =
       projectById ??
       (input.projectCwd
-        ? yield* projectionSnapshotQuery.getActiveProjectByWorkspaceRoot(input.projectCwd).pipe(
-            Effect.map(Option.getOrUndefined),
-            Effect.mapError(
-              (cause) =>
-                new ProjectSetupScriptOperationError({
-                  ...errorContext,
-                  operation: 'resolveProject',
-                  cause,
-                }),
-            ),
-          )
+        ? yield* projectionSnapshotQuery
+            .getActiveProjectByWorkspaceRoot(input.projectCwd)
+            .pipe(
+              Effect.map(Option.getOrUndefined),
+              Effect.mapError(mapOperationError('resolveProject')),
+            )
         : null)
 
     if (!project)
@@ -160,32 +153,14 @@ export const make = Effect.gen(function* ()
         worktreePath: input.worktreePath,
         env,
       })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProjectSetupScriptOperationError({
-              ...errorContext,
-              operation: 'openTerminal',
-              cause,
-            }),
-        ),
-      )
+      .pipe(Effect.mapError(mapOperationError('openTerminal')))
     yield* terminalManager
       .write({
         threadId: input.threadId,
         terminalId,
         data: `${script.command}\r`,
       })
-      .pipe(
-        Effect.mapError(
-          (cause) =>
-            new ProjectSetupScriptOperationError({
-              ...errorContext,
-              operation: 'writeCommand',
-              cause,
-            }),
-        ),
-      )
+      .pipe(Effect.mapError(mapOperationError('writeCommand')))
 
     return {
       status: 'started',

@@ -916,7 +916,25 @@ export const make = Effect.gen(function* ()
         const localBranchNames = yield* git.listLocalBranchNames(input.cwd)
         const localBranchExists = localBranchNames.includes(localBranch)
 
-        if (input.force === true || !localBranchExists)
+        let alreadySwitched = false
+        if (input.force === true && localBranchExists)
+        {
+          yield* git.fetchRemoteTrackingBranch({
+            cwd: input.cwd,
+            remoteName,
+            remoteBranch,
+          })
+          yield* Effect.scoped(git.switchRef({ cwd: input.cwd, refName: localBranch }))
+          yield* git
+            .execute({
+              operation: 'BitbucketApi.checkoutPullRequest.resetForcedBranch',
+              cwd: input.cwd,
+              args: ['reset', '--hard', `refs/remotes/${remoteName}/${remoteBranch}`],
+            })
+            .pipe(Effect.asVoid)
+          alreadySwitched = true
+        }
+        else if (!localBranchExists)
         {
           yield* git.fetchRemoteBranch({
             cwd: input.cwd,
@@ -940,7 +958,10 @@ export const make = Effect.gen(function* ()
           remoteName,
           remoteBranch,
         })
-        yield* Effect.scoped(git.switchRef({ cwd: input.cwd, refName: localBranch }))
+        if (!alreadySwitched)
+        {
+          yield* Effect.scoped(git.switchRef({ cwd: input.cwd, refName: localBranch }))
+        }
       }).pipe(
         Effect.mapError((cause) =>
           isBitbucketApiError(cause)

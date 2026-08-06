@@ -186,11 +186,11 @@ function parseRepositoryNameFromPullRequestUrl(url: string): string | null
 }
 
 function resolveHeadRepositoryNameWithOwner(
-  pullRequest: ResolvedPullRequest & PullRequestHeadRemoteInfo,
+  pullRequest: PullRequestHeadRemoteInfo & { readonly url: string },
 ): string | null
 {
-  const explicitRepository = pullRequest.headRepositoryNameWithOwner?.trim() ?? ''
-  if (explicitRepository.length > 0)
+  const explicitRepository = normalizeOptionalString(pullRequest.headRepositoryNameWithOwner)
+  if (explicitRepository)
   {
     return explicitRepository
   }
@@ -200,9 +200,9 @@ function resolveHeadRepositoryNameWithOwner(
     return null
   }
 
-  const ownerLogin = pullRequest.headRepositoryOwnerLogin?.trim() ?? ''
+  const ownerLogin = normalizeOptionalString(pullRequest.headRepositoryOwnerLogin)
   const repositoryName = parseRepositoryNameFromPullRequestUrl(pullRequest.url)
-  if (ownerLogin.length === 0 || !repositoryName)
+  if (!ownerLogin || !repositoryName)
   {
     return null
   }
@@ -270,31 +270,6 @@ function normalizeOptionalOwnerLogin(value: string | null | undefined): string |
   return normalized ? normalized.toLowerCase() : null
 }
 
-function resolvePullRequestHeadRepositoryNameWithOwner(
-  pr: PullRequestHeadRemoteInfo & { url: string },
-)
-{
-  const explicitRepository = normalizeOptionalString(pr.headRepositoryNameWithOwner)
-  if (explicitRepository)
-  {
-    return explicitRepository
-  }
-
-  if (!pr.isCrossRepository)
-  {
-    return null
-  }
-
-  const ownerLogin = normalizeOptionalString(pr.headRepositoryOwnerLogin)
-  const repositoryName = parseRepositoryNameFromPullRequestUrl(pr.url)
-  if (!ownerLogin || !repositoryName)
-  {
-    return null
-  }
-
-  return `${ownerLogin}/${repositoryName}`
-}
-
 interface PullRequestHeadIdentity
 {
   readonly repositoryNameWithOwner: string | null
@@ -319,7 +294,7 @@ function resolveExpectedHeadIdentity(
 function resolvePullRequestHeadIdentity(pr: PullRequestInfo): PullRequestHeadIdentity
 {
   const repositoryNameWithOwner = normalizeOptionalRepositoryNameWithOwner(
-    resolvePullRequestHeadRepositoryNameWithOwner(pr),
+    resolveHeadRepositoryNameWithOwner(pr),
   )
   return {
     repositoryNameWithOwner,

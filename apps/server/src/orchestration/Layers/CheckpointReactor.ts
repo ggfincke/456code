@@ -7,7 +7,7 @@ import {
   MessageId,
   type OrchestrationProposedPlanId,
   type ProjectId,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   ThreadId,
   TurnId,
   OrchestrationEvent,
@@ -52,6 +52,10 @@ import { isHiddenTurnRuntimeEvent } from '../../provider/HiddenTurnRegistry.ts'
 import { ReactorDeliveryError } from '../../persistence/Errors.ts'
 import { OrchestrationReactorDelivery } from '../../persistence/Services/OrchestrationReactorDelivery.ts'
 import { DurableReactorInfrastructureLive } from './OrchestrationReactor.ts'
+import {
+  matchesProviderInstanceFence,
+  runtimeEventMatchesThreadProviderInstance,
+} from './ProviderRuntimeEventMapping.ts'
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
 const REACTOR_ID = 'checkpoint-domain' as const
@@ -1338,6 +1342,25 @@ const make = Effect.gen(function* ()
               )
             }
 
+            const expectedProviderInstanceId = operation.providerInstanceId
+            const currentThread = yield* resolveThreadDetail(ThreadId.make(operation.threadId))
+            if (
+              expectedProviderInstanceId === null ||
+              currentThread === undefined ||
+              currentThread.providerSwitch !== null ||
+              !matchesProviderInstanceFence(
+                ProviderInstanceId.make(expectedProviderInstanceId),
+                currentThread.session?.providerInstanceId ??
+                  currentThread.modelSelection.instanceId,
+              )
+            )
+            {
+              return yield* recordOutcome(
+                'manual-unknown',
+                'The provider binding changed before conversation rollback could start.',
+              )
+            }
+
             const attemptStarted = yield* transition('provider-pending', {
               providerOutcomeJson: encodeProviderRollbackJournalDetail({
                 ...detail,
@@ -1350,6 +1373,7 @@ const make = Effect.gen(function* ()
               .rollbackConversation({
                 threadId: ThreadId.make(operation.threadId),
                 numTurns: detail.rolledBackTurns,
+                expectedProviderInstanceId: ProviderInstanceId.make(expectedProviderInstanceId),
               })
               .pipe(
                 Effect.as(null),
@@ -1598,6 +1622,15 @@ const make = Effect.gen(function* ()
   )
   {
     if (isHiddenTurnRuntimeEvent(event))
+    {
+      return
+    }
+    const thread = yield* resolveThreadDetail(event.threadId)
+    if (
+      !thread ||
+      thread.providerSwitch !== null ||
+      !runtimeEventMatchesThreadProviderInstance(event, thread)
+    )
     {
       return
     }

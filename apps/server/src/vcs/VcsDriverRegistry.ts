@@ -15,7 +15,7 @@ import * as VcsProjectConfig from './VcsProjectConfig.ts'
 import * as VcsDriver from './VcsDriver.ts'
 
 const DETECTION_CACHE_CAPACITY = 2_048
-const DETECTION_CACHE_TTL = Duration.seconds(2)
+const DETECTION_CACHE_TTL = Duration.minutes(10)
 
 export interface VcsDriverResolveInput
 {

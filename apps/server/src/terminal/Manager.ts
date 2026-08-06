@@ -89,7 +89,7 @@ class TerminalSubprocessCheckError extends Schema.TaggedErrorClass<TerminalSubpr
   {
     cause: Schema.optional(Schema.Defect()),
     terminalPid: Schema.Number,
-    command: Schema.Literals(['powershell', 'pgrep', 'ps']),
+    command: Schema.Literals(['powershell', 'ps']),
   },
 )
 {
@@ -236,6 +236,7 @@ export interface TerminalSessionState
   exitSignal: number | null
   updatedAt: string
   eventSequence: number
+  lifecycleGeneration: number
   cols: number
   rows: number
   process: PtyAdapter.PtyProcess | null
@@ -263,6 +264,7 @@ type DrainProcessEventAction =
       threadId: string
       terminalId: string
       sequence: number
+      lifecycleGeneration: number
       history: string | null
       data: string
     }
@@ -647,136 +649,102 @@ function isRetryableShellSpawnError(error: PtyAdapter.PtySpawnError): boolean
   )
 }
 
-function parseFirstChildPidFromPgrep(stdout: string): number | null
+interface ProcessSnapshotRow
 {
-  for (const line of stdout.split(/\r?\n/g))
+  readonly pid: number
+  readonly ppid: number
+  readonly command: string
+}
+
+function parseProcessSnapshot(output: string, platform: NodeJS.Platform): ProcessSnapshotRow[]
+{
+  const rows: ProcessSnapshotRow[] = []
+  for (const line of output.split(/\r?\n/g))
   {
-    const n = Number.parseInt(line.trim(), 10)
-    if (Number.isInteger(n) && n > 0)
-    {
-      return n
-    }
+    const parts = platform === 'win32' ? line.trim().split('|', 3) : line.trim().split(/\s+/, 3)
+    const pid = Number(parts[0])
+    const ppid = Number(parts[1])
+    if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(ppid) || ppid < 0) continue
+    rows.push({ pid, ppid, command: parts[2]?.trim() ?? '' })
   }
-  return null
+  return rows
 }
 
-function windowsInspectSubprocess(
-  terminalPid: number,
+function inspectProcessSnapshotRows(
+  terminalPids: ReadonlyArray<number>,
+  rows: ReadonlyArray<ProcessSnapshotRow>,
   platform: NodeJS.Platform,
-): Effect.Effect<
-  TerminalSubprocessInspectResult,
-  TerminalSubprocessCheckError,
-  ProcessRunner.ProcessRunner
->
+): ReadonlyMap<number, TerminalSubprocessInspectResult>
 {
-  const command =
-    'Get-CimInstance Win32_Process -ErrorAction Stop | ForEach-Object { Write-Output "$($_.ProcessId)|$($_.ParentProcessId)|$($_.Name)" }'
-  return Effect.gen(function* ()
+  const commandByPid = new Map(rows.map((row) => [row.pid, row.command]))
+  const childrenByParent = new Map<number, number[]>()
+  for (const row of rows)
   {
-    const processRunner = yield* ProcessRunner.ProcessRunner
-    return yield* processRunner.run({
-      // powershell.exe is a real executable — never spawn it through cmd.exe
-      // shell mode, which would re-tokenize the `-Command` payload (pipes,
-      // semicolons) before PowerShell ever sees it.
-      command: 'powershell.exe',
-      args: ['-NoProfile', '-NonInteractive', '-Command', command],
-      timeout: '1500 millis',
-      maxOutputBytes: 32_768,
-      outputMode: 'truncate',
-      timeoutBehavior: 'timedOutResult',
-    })
-  }).pipe(
-    Effect.map((result) =>
+    const children = childrenByParent.get(row.ppid) ?? []
+    children.push(row.pid)
+    childrenByParent.set(row.ppid, children)
+  }
+
+  const inspections = new Map<number, TerminalSubprocessInspectResult>()
+  for (const terminalPid of terminalPids)
+  {
+    const childPid = childrenByParent.get(terminalPid)?.[0]
+    if (childPid === undefined)
     {
-      if (result.code !== 0)
+      inspections.set(terminalPid, {
+        hasRunningSubprocess: false,
+        childCommand: null,
+        processIds: [],
+      })
+      continue
+    }
+
+    const processIds = new Set<number>([terminalPid])
+    const pending = [terminalPid]
+    while (pending.length > 0)
+    {
+      const parentPid = pending.pop()
+      if (parentPid === undefined) continue
+      for (const pid of childrenByParent.get(parentPid) ?? [])
       {
-        return { hasRunningSubprocess: false, childCommand: null, processIds: [] } as const
+        if (processIds.has(pid)) continue
+        processIds.add(pid)
+        pending.push(pid)
       }
-      const processNameById = new Map<number, string>()
-      const childrenByParent = new Map<number, number[]>()
-      for (const line of result.stdout.split(/\r?\n/g))
-      {
-        const [pidRaw, parentPidRaw, nameRaw] = line.trim().split('|', 3)
-        const pid = Number(pidRaw)
-        const parentPid = Number(parentPidRaw)
-        if (!Number.isInteger(pid) || !Number.isInteger(parentPid)) continue
-        processNameById.set(pid, nameRaw?.trim() ?? '')
-        const children = childrenByParent.get(parentPid) ?? []
-        children.push(pid)
-        childrenByParent.set(parentPid, children)
-      }
-      const directChildren = childrenByParent.get(terminalPid) ?? []
-      const childPid = directChildren[0]
-      if (childPid === undefined)
-      {
-        return { hasRunningSubprocess: false, childCommand: null, processIds: [] } as const
-      }
-      const processIds = new Set<number>([terminalPid])
-      const pending = [terminalPid]
-      while (pending.length > 0)
-      {
-        const parentPid = pending.pop()
-        if (parentPid === undefined) continue
-        for (const pid of childrenByParent.get(parentPid) ?? [])
-        {
-          if (processIds.has(pid)) continue
-          processIds.add(pid)
-          pending.push(pid)
-        }
-      }
-      const normalized = normalizeChildCommandName(processNameById.get(childPid) ?? '', platform)
-      return {
-        hasRunningSubprocess: true,
-        childCommand: normalized ? truncateTerminalWireLabel(normalized) : null,
-        processIds: [...processIds],
-      } as const
-    }),
-    Effect.mapError(
-      (cause) =>
-        new TerminalSubprocessCheckError({
-          cause,
-          terminalPid,
-          command: 'powershell',
-        }),
-    ),
-  )
+    }
+
+    const normalized = normalizeChildCommandName(commandByPid.get(childPid) ?? '', platform)
+    inspections.set(terminalPid, {
+      hasRunningSubprocess: true,
+      childCommand: normalized ? truncateTerminalWireLabel(normalized) : null,
+      processIds: [...processIds],
+    })
+  }
+  return inspections
 }
 
-const posixInspectSubprocess = Effect.fn('terminal.posixInspectSubprocess')(function* (
-  terminalPid: number,
+const inspectProcessSnapshot = Effect.fn('terminal.inspectProcessSnapshot')(function* (
+  terminalPids: ReadonlyArray<number>,
   platform: NodeJS.Platform,
 ): Effect.fn.Return<
-  TerminalSubprocessInspectResult,
+  ReadonlyMap<number, TerminalSubprocessInspectResult>,
   TerminalSubprocessCheckError,
   ProcessRunner.ProcessRunner
 >
 {
   const processRunner = yield* ProcessRunner.ProcessRunner
-  const runPgrep = processRunner
+  const windowsCommand =
+    'Get-CimInstance Win32_Process -ErrorAction Stop | ForEach-Object { Write-Output "$($_.ProcessId)|$($_.ParentProcessId)|$($_.Name)" }'
+  const command = platform === 'win32' ? 'powershell.exe' : 'ps'
+  const args =
+    platform === 'win32'
+      ? ['-NoProfile', '-NonInteractive', '-Command', windowsCommand]
+      : ['-eo', 'pid=,ppid=,comm=']
+  const result = yield* processRunner
     .run({
-      command: 'pgrep',
-      args: ['-P', String(terminalPid)],
-      timeout: '1 second',
-      maxOutputBytes: 32_768,
-      outputMode: 'truncate',
-      timeoutBehavior: 'timedOutResult',
-    })
-    .pipe(
-      Effect.mapError(
-        (cause) =>
-          new TerminalSubprocessCheckError({
-            cause,
-            terminalPid,
-            command: 'pgrep',
-          }),
-      ),
-    )
-
-  const runPs = processRunner
-    .run({
-      command: 'ps',
-      args: ['-eo', 'pid=,ppid='],
-      timeout: '1 second',
+      command,
+      args,
+      timeout: '1500 millis',
       maxOutputBytes: 262_144,
       outputMode: 'truncate',
       timeoutBehavior: 'timedOutResult',
@@ -786,142 +754,22 @@ const posixInspectSubprocess = Effect.fn('terminal.posixInspectSubprocess')(func
         (cause) =>
           new TerminalSubprocessCheckError({
             cause,
-            terminalPid,
-            command: 'ps',
+            terminalPid: terminalPids[0] ?? 0,
+            command: platform === 'win32' ? 'powershell' : 'ps',
           }),
       ),
     )
 
-  let childPid: number | null = null
-
-  const pgrepResult = yield* Effect.exit(runPgrep)
-  if (pgrepResult._tag === 'Success')
+  if (result.code !== 0)
   {
-    if (pgrepResult.value.code === 0)
-    {
-      childPid = parseFirstChildPidFromPgrep(pgrepResult.value.stdout)
-    }
-    else if (pgrepResult.value.code === 1)
-    {
-      return { hasRunningSubprocess: false, childCommand: null, processIds: [] }
-    }
+    return inspectProcessSnapshotRows(terminalPids, [], platform)
   }
-
-  if (childPid === null)
-  {
-    const psResult = yield* Effect.exit(runPs)
-    if (psResult._tag === 'Failure' || psResult.value.code !== 0)
-    {
-      return { hasRunningSubprocess: false, childCommand: null, processIds: [] }
-    }
-    for (const line of psResult.value.stdout.split(/\r?\n/g))
-    {
-      const [pidRaw, ppidRaw] = line.trim().split(/\s+/g)
-      const pid = Number(pidRaw)
-      const ppid = Number(ppidRaw)
-      if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue
-      if (ppid === terminalPid)
-      {
-        childPid = pid
-        break
-      }
-    }
-  }
-
-  if (childPid === null)
-  {
-    return { hasRunningSubprocess: false, childCommand: null, processIds: [] }
-  }
-
-  const runComm = processRunner.run({
-    command: 'ps',
-    args: ['-p', String(childPid), '-o', 'comm='],
-    timeout: '1 second',
-    maxOutputBytes: 8_192,
-    outputMode: 'truncate',
-    timeoutBehavior: 'timedOutResult',
-  })
-
-  const commResult = yield* Effect.exit(runComm)
-  let rawComm: string | null = null
-  if (commResult._tag === 'Success' && commResult.value && commResult.value.code === 0)
-  {
-    rawComm = commResult.value.stdout.trim()
-  }
-
-  if (!rawComm || rawComm.length === 0)
-  {
-    const runArgs = processRunner.run({
-      command: 'ps',
-      args: ['-p', String(childPid), '-o', 'args='],
-      timeout: '1 second',
-      maxOutputBytes: 16_384,
-      outputMode: 'truncate',
-      timeoutBehavior: 'timedOutResult',
-    })
-    const argsResult = yield* Effect.exit(runArgs)
-    if (argsResult._tag === 'Success' && argsResult.value && argsResult.value.code === 0)
-    {
-      const first = argsResult.value.stdout.trim().split(/\s+/)[0] ?? ''
-      rawComm = first.length > 0 ? first : null
-    }
-  }
-
-  const normalized = rawComm ? normalizeChildCommandName(rawComm, platform) : null
-  const processIds = new Set<number>([terminalPid])
-  const psResult = yield* Effect.exit(runPs)
-  if (psResult._tag === 'Success' && psResult.value.code === 0)
-  {
-    const childrenByParent = new Map<number, number[]>()
-    for (const line of psResult.value.stdout.split(/\r?\n/g))
-    {
-      const [pidRaw, ppidRaw] = line.trim().split(/\s+/g)
-      const pid = Number(pidRaw)
-      const ppid = Number(ppidRaw)
-      if (!Number.isInteger(pid) || !Number.isInteger(ppid)) continue
-      const children = childrenByParent.get(ppid) ?? []
-      children.push(pid)
-      childrenByParent.set(ppid, children)
-    }
-    const pending = [terminalPid]
-    while (pending.length > 0)
-    {
-      const parentPid = pending.pop()
-      if (parentPid === undefined) continue
-      for (const child of childrenByParent.get(parentPid) ?? [])
-      {
-        if (processIds.has(child)) continue
-        processIds.add(child)
-        pending.push(child)
-      }
-    }
-  }
-  else
-  {
-    processIds.add(childPid)
-  }
-  return {
-    hasRunningSubprocess: true,
-    childCommand: normalized ? truncateTerminalWireLabel(normalized) : null,
-    processIds: [...processIds],
-  }
+  return inspectProcessSnapshotRows(
+    terminalPids,
+    parseProcessSnapshot(result.stdout, platform),
+    platform,
+  )
 })
-
-function defaultSubprocessInspectorForPlatform(platform: NodeJS.Platform)
-{
-  return Effect.fn('terminal.defaultSubprocessInspector')(function* (terminalPid: number)
-  {
-    if (!Number.isInteger(terminalPid) || terminalPid <= 0)
-    {
-      return { hasRunningSubprocess: false, childCommand: null, processIds: [] }
-    }
-    if (platform === 'win32')
-    {
-      return yield* windowsInspectSubprocess(terminalPid, platform)
-    }
-    return yield* posixInspectSubprocess(terminalPid, platform)
-  })
-}
 
 function capHistory(history: string, maxLines: number): string
 {
@@ -1326,12 +1174,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
   const baseEnv = options.env ?? process.env
   const shellResolver = options.shellResolver ?? (() => defaultShellResolver(platform, baseEnv))
   const processRunner = yield* ProcessRunner.ProcessRunner
-  const subprocessInspector =
-    options.subprocessInspector ??
-    ((terminalPid) =>
-      defaultSubprocessInspectorForPlatform(platform)(terminalPid).pipe(
-        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
-      ))
+  const subprocessInspector = options.subprocessInspector
   const subprocessPollIntervalMs =
     options.subprocessPollIntervalMs ?? DEFAULT_SUBPROCESS_POLL_INTERVAL_MS
   const processKillGraceMs = options.processKillGraceMs ?? DEFAULT_PROCESS_KILL_GRACE_MS
@@ -1873,6 +1716,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
             threadId: session.threadId,
             terminalId: session.terminalId,
             sequence: eventStamp.sequence,
+            lifecycleGeneration: session.lifecycleGeneration,
             history: sanitized.visibleText.length > 0 ? session.history : null,
             data: nextEvent.data,
           } as const
@@ -1915,35 +1759,76 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
 
       if (action.type === 'output')
       {
-        if (action.history !== null)
-        {
-          yield* queuePersist(action.threadId, action.terminalId, action.history)
-        }
-
-        yield* publishEvent({
-          type: 'output',
-          threadId: action.threadId,
-          terminalId: action.terminalId,
-          sequence: action.sequence,
-          data: action.data,
-        })
+        const committed = yield* withThreadLock(
+          action.threadId,
+          Effect.gen(function* ()
+          {
+            const liveSession = yield* getSession(action.threadId, action.terminalId)
+            if (
+              Option.isNone(liveSession) ||
+              liveSession.value !== session ||
+              liveSession.value.status !== 'running' ||
+              liveSession.value.pid !== expectedPid ||
+              liveSession.value.lifecycleGeneration !== action.lifecycleGeneration
+            )
+            {
+              return false
+            }
+            if (action.history !== null)
+            {
+              yield* queuePersist(action.threadId, action.terminalId, action.history)
+            }
+            const sequence =
+              liveSession.value.eventSequence === action.sequence
+                ? action.sequence
+                : advanceEventSequence(liveSession.value).sequence
+            yield* publishEvent({
+              type: 'output',
+              threadId: action.threadId,
+              terminalId: action.terminalId,
+              sequence,
+              data: action.data,
+            })
+            return true
+          }),
+        )
+        if (!committed) return
         continue
       }
 
-      yield* clearKillFiber(action.process)
-      yield* unregisterTerminal({
-        threadId: action.threadId,
-        terminalId: action.terminalId,
-      })
-      yield* publishEvent({
-        type: 'exited',
-        threadId: action.threadId,
-        terminalId: action.terminalId,
-        sequence: action.sequence,
-        exitCode: action.exitCode,
-        exitSignal: action.exitSignal,
-      })
-      yield* evictInactiveSessionsIfNeeded()
+      yield* withThreadLock(
+        action.threadId,
+        Effect.gen(function* ()
+        {
+          const liveSession = yield* getSession(action.threadId, action.terminalId)
+          if (
+            Option.isNone(liveSession) ||
+            liveSession.value !== session ||
+            liveSession.value.status !== 'exited'
+          )
+          {
+            return
+          }
+          yield* clearKillFiber(action.process)
+          yield* unregisterTerminal({
+            threadId: action.threadId,
+            terminalId: action.terminalId,
+          })
+          const sequence =
+            liveSession.value.eventSequence === action.sequence
+              ? action.sequence
+              : advanceEventSequence(liveSession.value).sequence
+          yield* publishEvent({
+            type: 'exited',
+            threadId: action.threadId,
+            terminalId: action.terminalId,
+            sequence,
+            exitCode: action.exitCode,
+            exitSignal: action.exitSignal,
+          })
+          yield* evictInactiveSessionsIfNeeded()
+        }),
+      )
       return
     }
   })
@@ -1966,6 +1851,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
       session.pendingProcessEvents = []
       session.pendingProcessEventIndex = 0
       session.processEventDrainRunning = false
+      session.lifecycleGeneration += 1
       session.updatedAt = updatedAt
       return [undefined, state] as const
     })
@@ -2066,6 +1952,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
       session.pendingProcessEvents = []
       session.pendingProcessEventIndex = 0
       session.processEventDrainRunning = false
+      session.lifecycleGeneration += 1
       session.updatedAt = startingAt
       return [undefined, state] as const
     })
@@ -2238,78 +2125,103 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
       return
     }
 
-    const checkSubprocessActivity = Effect.fn('terminal.checkSubprocessActivity')(function* (
-      session: TerminalSessionState & { pid: number },
+    const inspections = subprocessInspector
+      ? yield* Effect.forEach(
+          runningSessions,
+          (session) =>
+            subprocessInspector(session.pid).pipe(
+              Effect.map((next) => Option.some({ session, next })),
+              Effect.catch((reason) =>
+                Effect.logWarning('failed to check terminal subprocess activity', {
+                  threadId: session.threadId,
+                  terminalId: session.terminalId,
+                  terminalPid: session.pid,
+                  reason,
+                }).pipe(
+                  Effect.as(
+                    Option.none<{
+                      readonly session: TerminalSessionState & { pid: number }
+                      readonly next: TerminalSubprocessInspectResult
+                    }>(),
+                  ),
+                ),
+              ),
+            ),
+          { concurrency: 4 },
+        )
+      : yield* inspectProcessSnapshot(
+          runningSessions.map((session) => session.pid),
+          platform,
+        ).pipe(
+          Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
+          Effect.map((results) =>
+            runningSessions.map((session) =>
+              Option.fromNullishOr(results.get(session.pid)).pipe(
+                Option.map((next) => ({ session, next })),
+              ),
+            ),
+          ),
+          Effect.catch((reason) =>
+            Effect.logWarning('failed to sample terminal subprocess activity', {
+              terminalCount: runningSessions.length,
+              reason,
+            }).pipe(Effect.as([])),
+          ),
+        )
+
+    yield* Effect.forEach(
+      inspections,
+      (inspection) =>
+        Option.match(inspection, {
+          onNone: () => Effect.void,
+          onSome: ({ session, next }) =>
+            withThreadLock(
+              session.threadId,
+              Effect.gen(function* ()
+              {
+                const liveSession = yield* getSession(session.threadId, session.terminalId)
+                if (
+                  Option.isNone(liveSession) ||
+                  liveSession.value.status !== 'running' ||
+                  liveSession.value.pid !== session.pid
+                )
+                {
+                  return
+                }
+
+                yield* registerTerminalProcesses({
+                  threadId: session.threadId,
+                  terminalId: session.terminalId,
+                  processIds: next.processIds,
+                })
+                const nextChildLabel = next.hasRunningSubprocess ? next.childCommand : null
+                if (
+                  liveSession.value.hasRunningSubprocess === next.hasRunningSubprocess &&
+                  liveSession.value.childCommandLabel === nextChildLabel
+                )
+                {
+                  return
+                }
+
+                liveSession.value.hasRunningSubprocess = next.hasRunningSubprocess
+                liveSession.value.childCommandLabel = nextChildLabel
+                const eventStamp = advanceEventSequence(liveSession.value)
+                yield* publishEvent({
+                  type: 'activity',
+                  threadId: liveSession.value.threadId,
+                  terminalId: liveSession.value.terminalId,
+                  sequence: eventStamp.sequence,
+                  hasRunningSubprocess: next.hasRunningSubprocess,
+                  label: terminalWireLabel(liveSession.value),
+                })
+              }),
+            ),
+        }),
+      {
+        concurrency: 4,
+        discard: true,
+      },
     )
-    {
-      const terminalPid = session.pid
-      const inspectResult = yield* subprocessInspector(terminalPid).pipe(
-        Effect.map(Option.some),
-        Effect.catch((reason) =>
-          Effect.logWarning('failed to check terminal subprocess activity', {
-            threadId: session.threadId,
-            terminalId: session.terminalId,
-            terminalPid,
-            reason,
-          }).pipe(Effect.as(Option.none<TerminalSubprocessInspectResult>())),
-        ),
-      )
-
-      if (Option.isNone(inspectResult))
-      {
-        return
-      }
-
-      const next = inspectResult.value
-      yield* registerTerminalProcesses({
-        threadId: session.threadId,
-        terminalId: session.terminalId,
-        processIds: next.processIds,
-      })
-      const nextChildLabel = next.hasRunningSubprocess ? next.childCommand : null
-      const event = yield* modifyManagerState((state) =>
-      {
-        const liveSession: Option.Option<TerminalSessionState> = Option.fromNullishOr(
-          state.sessions.get(toSessionKey(session.threadId, session.terminalId)),
-        )
-        if (
-          Option.isNone(liveSession) ||
-          liveSession.value.status !== 'running' ||
-          liveSession.value.pid !== terminalPid ||
-          (liveSession.value.hasRunningSubprocess === next.hasRunningSubprocess &&
-            liveSession.value.childCommandLabel === nextChildLabel)
-        )
-        {
-          return [Option.none(), state] as const
-        }
-
-        liveSession.value.hasRunningSubprocess = next.hasRunningSubprocess
-        liveSession.value.childCommandLabel = nextChildLabel
-        const eventStamp = advanceEventSequence(liveSession.value)
-
-        return [
-          Option.some({
-            type: 'activity' as const,
-            threadId: liveSession.value.threadId,
-            terminalId: liveSession.value.terminalId,
-            sequence: eventStamp.sequence,
-            hasRunningSubprocess: next.hasRunningSubprocess,
-            label: terminalWireLabel(liveSession.value),
-          }),
-          state,
-        ] as const
-      })
-
-      if (Option.isSome(event))
-      {
-        yield* publishEvent(event.value)
-      }
-    })
-
-    yield* Effect.forEach(runningSessions, checkSubprocessActivity, {
-      concurrency: 'unbounded',
-      discard: true,
-    })
   })
 
   const hasRunningSessions = readManagerState.pipe(
@@ -2390,6 +2302,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
         exitSignal: null,
         updatedAt: yield* nowIso,
         eventSequence: 0,
+        lifecycleGeneration: 0,
         cols,
         rows,
         process: null,
@@ -2800,6 +2713,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
         session.pendingProcessEvents = []
         session.pendingProcessEventIndex = 0
         session.processEventDrainRunning = false
+        session.lifecycleGeneration += 1
         const eventStamp = advanceEventSequence(session)
         yield* persistHistory(input.threadId, terminalId, session.history)
         yield* publishEvent({
@@ -2843,6 +2757,7 @@ export const makeWithOptions = Effect.fn('TerminalManager.makeWithOptions')(func
             exitSignal: null,
             updatedAt: yield* nowIso,
             eventSequence: 0,
+            lifecycleGeneration: 0,
             cols,
             rows,
             process: null,

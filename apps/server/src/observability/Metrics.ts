@@ -119,6 +119,49 @@ export interface WithMetricsOptions
   ) => Readonly<Record<string, unknown>>
 }
 
+export const recordMetrics = Effect.fn('Metrics.recordMetrics')(function* <E>(input: {
+  readonly startedAt: bigint
+  readonly exit: Exit.Exit<unknown, E>
+  readonly counter?: Metric.Metric<number, unknown>
+  readonly timer?: Metric.Metric<Duration.Duration, unknown>
+  readonly attributes?:
+    Readonly<Record<string, unknown>> | (() => Readonly<Record<string, unknown>>)
+  readonly outcomeAttributes?: (
+    outcome: ReturnType<typeof outcomeFromExit>,
+  ) => Readonly<Record<string, unknown>>
+})
+{
+  const endedAt = yield* Clock.currentTimeNanos
+  const elapsedNanos = endedAt > input.startedAt ? endedAt - input.startedAt : 0n
+  const duration = Duration.nanos(elapsedNanos)
+  const baseAttributes =
+    typeof input.attributes === 'function' ? input.attributes() : (input.attributes ?? {})
+
+  if (input.timer)
+  {
+    yield* Metric.update(
+      Metric.withAttributes(input.timer, metricAttributes(baseAttributes)),
+      duration,
+    )
+  }
+
+  if (input.counter)
+  {
+    const outcome = outcomeFromExit(input.exit)
+    yield* Metric.update(
+      Metric.withAttributes(
+        input.counter,
+        metricAttributes({
+          ...baseAttributes,
+          outcome,
+          ...(input.outcomeAttributes ? input.outcomeAttributes(outcome) : {}),
+        }),
+      ),
+      1,
+    )
+  }
+})
+
 const withMetricsImpl = <A, E, R>(
   effect: Effect.Effect<A, E, R>,
   options: WithMetricsOptions,
@@ -127,35 +170,7 @@ const withMetricsImpl = <A, E, R>(
   {
     const startedAt = yield* Clock.currentTimeNanos
     const exit = yield* Effect.exit(effect)
-    const endedAt = yield* Clock.currentTimeNanos
-    const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n
-    const duration = Duration.nanos(elapsedNanos)
-    const baseAttributes =
-      typeof options.attributes === 'function' ? options.attributes() : (options.attributes ?? {})
-
-    if (options.timer)
-    {
-      yield* Metric.update(
-        Metric.withAttributes(options.timer, metricAttributes(baseAttributes)),
-        duration,
-      )
-    }
-
-    if (options.counter)
-    {
-      const outcome = outcomeFromExit(exit)
-      yield* Metric.update(
-        Metric.withAttributes(
-          options.counter,
-          metricAttributes({
-            ...baseAttributes,
-            outcome,
-            ...(options.outcomeAttributes ? options.outcomeAttributes(outcome) : {}),
-          }),
-        ),
-        1,
-      )
-    }
+    yield* recordMetrics({ startedAt, exit, ...options })
 
     if (Exit.isSuccess(exit))
     {

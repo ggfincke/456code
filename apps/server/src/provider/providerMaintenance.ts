@@ -268,11 +268,7 @@ function isPnpmGlobalCommandPath(commandPath: string): boolean
 function isNpmGlobalCommandPath(commandPath: string): boolean
 {
   const normalized = normalizeCommandPath(commandPath)
-  return (
-    normalized.includes('/node_modules/.bin/') ||
-    normalized.includes('/lib/node_modules/') ||
-    normalized.includes('/npm/node_modules/')
-  )
+  return normalized.includes('/lib/node_modules/') || normalized.includes('/npm/node_modules/')
 }
 
 function isHomebrewCommandPath(commandPath: string): boolean

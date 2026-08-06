@@ -38,14 +38,9 @@ import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
-  ProviderAdapterSessionNotFoundError,
   ProviderAdapterValidationError,
 } from '../Errors.ts'
-import {
-  classifyAcpTermination,
-  mapAcpToAdapterError,
-  type AcpTerminationClassification,
-} from '../acp/AcpAdapterSupport.ts'
+import { classifyAcpTermination, mapAcpToAdapterError } from '../acp/AcpAdapterSupport.ts'
 import type * as AcpSessionRuntime from '../acp/AcpSessionRuntime.ts'
 import {
   makeAcpAssistantItemEvent,
@@ -71,8 +66,8 @@ import {
   XAiAskUserQuestionRequest,
 } from '../acp/XAiAcpExtension.ts'
 import { type GrokAdapterShape } from '../Services/GrokAdapter.ts'
+import { makeAcpAdapterSessionLifecycle } from './AcpAdapterSessionLifecycle.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
-import { makeKeyedSemaphore } from './KeyedSemaphore.ts'
 
 const encodeUnknownJsonStringExit = Schema.encodeUnknownExit(Schema.UnknownFromJsonString)
 
@@ -273,8 +268,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined
     const makeAcpNativeLoggers = yield* makeAcpNativeLoggerFactory()
 
-    const sessions = new Map<ThreadId, GrokSessionContext>()
-    const threadLocks = yield* makeKeyedSemaphore<string>()
     const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>()
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
@@ -305,8 +298,42 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
     const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
       PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid)
 
-    const withThreadLock = <A, E, R>(threadId: string, effect: Effect.Effect<A, E, R>) =>
-      threadLocks.withPermit(threadId, effect)
+    const sessionLifecycle = yield* makeAcpAdapterSessionLifecycle<
+      GrokSessionContext,
+      ProviderAdapterRequestError
+    >({
+      provider: PROVIDER,
+      enableAbnormalTermination: options?.enableAbnormalTermination === true,
+      settlePending: (context) =>
+        Effect.all([
+          settlePendingApprovalsAsCancelled(context.pendingApprovals),
+          settlePendingUserInputsAsCancelled(context.pendingUserInputs),
+        ]).pipe(Effect.asVoid),
+      emitSessionExited: (context, classification) =>
+        Effect.gen(function* ()
+        {
+          yield* offerRuntimeEvent({
+            type: 'session.exited',
+            ...(yield* makeEventStamp()),
+            provider: PROVIDER,
+            threadId: context.threadId,
+            payload: {
+              exitKind: classification.exitKind,
+              reason: classification.reason,
+              recoverable: classification.recoverable,
+            },
+          })
+        }),
+    })
+    const {
+      sessions,
+      withThreadLock,
+      requireSession,
+      finalizeSessionLocked,
+      finalizeSession,
+      listSessions,
+      hasSession,
+    } = sessionLifecycle
 
     const settlePromptInFlight = (
       threadId: ThreadId,
@@ -530,71 +557,6 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
           }),
         )
       })
-
-    const requireSession = (
-      threadId: ThreadId,
-    ): Effect.Effect<GrokSessionContext, ProviderAdapterSessionNotFoundError> =>
-    {
-      const ctx = sessions.get(threadId)
-      if (!ctx || ctx.stopped)
-      {
-        return Effect.fail(
-          new ProviderAdapterSessionNotFoundError({ provider: PROVIDER, threadId }),
-        )
-      }
-      return Effect.succeed(ctx)
-    }
-
-    const finalizeSessionLocked = (
-      ctx: GrokSessionContext,
-      classification: AcpTerminationClassification,
-    ) =>
-      Effect.gen(function* ()
-      {
-        const claimed = yield* Ref.modify(ctx.finalizationState, (state) =>
-          state === 'open'
-            ? ([true, classification.finalization] as const)
-            : ([false, state] as const),
-        )
-        if (!claimed) return
-        ctx.stopped = true
-        yield* settlePendingApprovalsAsCancelled(ctx.pendingApprovals)
-        yield* settlePendingUserInputsAsCancelled(ctx.pendingUserInputs)
-        const liveCtx = sessions.get(ctx.threadId)
-        const isLiveGeneration = liveCtx === ctx && liveCtx.generationId === ctx.generationId
-        if (isLiveGeneration)
-        {
-          sessions.delete(ctx.threadId)
-        }
-        if (
-          isLiveGeneration &&
-          (classification.finalization === 'graceful' ||
-            options?.enableAbnormalTermination === true)
-        )
-        {
-          yield* offerRuntimeEvent({
-            type: 'session.exited',
-            ...(yield* makeEventStamp()),
-            provider: PROVIDER,
-            threadId: ctx.threadId,
-            payload: {
-              exitKind: classification.exitKind,
-              reason: classification.reason,
-              recoverable: classification.recoverable,
-            },
-          })
-        }
-        if (ctx.notificationFiber)
-        {
-          yield* Fiber.interrupt(ctx.notificationFiber)
-        }
-        yield* Effect.ignore(Scope.close(ctx.scope, Exit.void))
-      }).pipe(Effect.uninterruptible)
-
-    const finalizeSession = (
-      ctx: GrokSessionContext,
-      classification: AcpTerminationClassification,
-    ) => withThreadLock(ctx.threadId, finalizeSessionLocked(ctx, classification))
 
     const gracefulStop = classifyAcpTermination({ _tag: 'AdapterStop' })
 
@@ -1598,29 +1560,9 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
       })
 
     const stopSession: GrokAdapterShape['stopSession'] = (threadId) =>
-      withThreadLock(
-        threadId,
-        Effect.gen(function* ()
-        {
-          const ctx = yield* requireSession(threadId)
-          yield* finalizeSessionLocked(ctx, gracefulStop)
-        }),
-      )
+      sessionLifecycle.stopSession(threadId, gracefulStop)
 
-    const listSessions: GrokAdapterShape['listSessions'] = () =>
-      Effect.sync(() => Array.from(sessions.values(), (c) => ({ ...c.session })))
-
-    const hasSession: GrokAdapterShape['hasSession'] = (threadId) =>
-      Effect.sync(() =>
-      {
-        const c = sessions.get(threadId)
-        return c !== undefined && !c.stopped
-      })
-
-    const stopAll: GrokAdapterShape['stopAll'] = () =>
-      Effect.forEach(Array.from(sessions.values()), (ctx) => finalizeSession(ctx, gracefulStop), {
-        discard: true,
-      })
+    const stopAll: GrokAdapterShape['stopAll'] = () => sessionLifecycle.stopAll(gracefulStop)
 
     yield* Effect.addFinalizer(() =>
       Effect.ignore(stopAll()).pipe(

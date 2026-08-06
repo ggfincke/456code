@@ -132,7 +132,7 @@ export const GrokDriver: ProviderDriver<GrokSettings, GrokDriverEnv> = {
 
       const adapter = yield* makeGrokAdapter(effectiveConfig, {
         environment: processEnv,
-        enableAbnormalTermination: false,
+        enableAbnormalTermination: true,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       })

@@ -207,7 +207,12 @@ export class GitLabRepositoryDecodeError extends Schema.TaggedErrorClass<GitLabR
   'GitLabRepositoryDecodeError',
   {
     ...gitLabCliDecodeErrorContext,
-    operation: Schema.Literals(['getRepositoryCloneUrls', 'createRepository', 'getDefaultBranch']),
+    operation: Schema.Literals([
+      'getRepositoryCloneUrls',
+      'createRepository',
+      'createMergeRequest',
+      'getDefaultBranch',
+    ]),
     repository: Schema.optional(Schema.String),
   },
 )
@@ -344,6 +349,11 @@ const RawGitLabDefaultBranchSchema = Schema.Struct({
   default_branch: Schema.optional(Schema.NullOr(TrimmedNonEmptyString)),
 })
 
+const RawGitLabProjectSchema = Schema.Struct({
+  id: Schema.Int,
+  path: TrimmedNonEmptyString,
+})
+
 const RawGitLabNamespaceSchema = Schema.Struct({
   id: Schema.Number,
 })
@@ -354,6 +364,7 @@ const decodeGitLabRepositoryCloneUrls = Schema.decodeEffect(
 const decodeGitLabDefaultBranch = Schema.decodeEffect(
   Schema.fromJsonString(RawGitLabDefaultBranchSchema),
 )
+const decodeGitLabProject = Schema.decodeEffect(Schema.fromJsonString(RawGitLabProjectSchema))
 const decodeGitLabNamespace = Schema.decodeEffect(Schema.fromJsonString(RawGitLabNamespaceSchema))
 
 function normalizeRepositoryCloneUrls(
@@ -395,13 +406,6 @@ function sourceRefName(input: {
 }): string
 {
   return input.source?.refName ?? normalizeHeadSelector(input.headSelector)
-}
-
-function sourceProjectIdentifier(
-  source: SourceControlProvider.SourceControlRefSelector | undefined,
-): string | null
-{
-  return source?.repository ?? source?.owner ?? null
 }
 
 function toSummaryWithOptionalUpdatedAt(
@@ -475,6 +479,90 @@ export const make = Effect.gen(function* ()
         error,
       ),
     )
+
+  const getProject = Effect.fn('GitLabCli.getProject')(function* (cwd: string, repository: string)
+  {
+    const raw = yield* execute({
+      cwd,
+      args: [
+        'api',
+        repository === ':fullpath'
+          ? 'projects/:fullpath'
+          : `projects/${encodeURIComponent(repository)}`,
+      ],
+    }).pipe(Effect.map((result) => result.stdout.trim()))
+
+    return yield* decodeGitLabProject(raw).pipe(
+      Effect.mapError(
+        (cause) =>
+          new GitLabRepositoryDecodeError({
+            operation: 'createMergeRequest',
+            command: 'glab',
+            cwd,
+            repository,
+            cause,
+          }),
+      ),
+    )
+  })
+
+  const resolveSourceProjectId = Effect.fn('GitLabCli.resolveSourceProjectId')(function* (input: {
+    readonly cwd: string
+    readonly source?: SourceControlProvider.SourceControlRefSelector
+  })
+  {
+    if (!input.source)
+    {
+      return null
+    }
+
+    const explicitRepository = input.source.repository?.trim() ?? ''
+    let sourceRepository = explicitRepository
+    if (sourceRepository.length === 0)
+    {
+      const owner = input.source.owner?.trim() ?? ''
+      if (owner.length === 0)
+      {
+        return null
+      }
+      const targetProject = yield* getProject(input.cwd, ':fullpath')
+      sourceRepository = `${owner}/${targetProject.path}`
+    }
+    else if (!sourceRepository.includes('/') && input.source.owner)
+    {
+      sourceRepository = `${input.source.owner}/${sourceRepository}`
+    }
+
+    const sourceProject = yield* getProject(input.cwd, sourceRepository)
+    return sourceProject.id
+  })
+
+  const createMergeRequest: GitLabCli['Service']['createMergeRequest'] = Effect.fn(
+    'GitLabCli.createMergeRequest',
+  )(function* (input)
+  {
+    const sourceProjectId = yield* resolveSourceProjectId(input)
+    yield* execute({
+      cwd: input.cwd,
+      args: [
+        'api',
+        '--method',
+        'POST',
+        'projects/:fullpath/merge_requests',
+        '--raw-field',
+        `source_branch=${sourceRefName(input)}`,
+        '--raw-field',
+        `target_branch=${input.target?.refName ?? input.baseBranch}`,
+        ...(sourceProjectId === null
+          ? []
+          : ['--raw-field', `source_project_id=${sourceProjectId}`]),
+        '--raw-field',
+        `title=${input.title}`,
+        '--field',
+        `description=@${input.bodyFile}`,
+      ],
+    })
+  })
 
   return GitLabCli.of({
     execute,
@@ -634,28 +722,7 @@ export const make = Effect.gen(function* ()
         Effect.map(normalizeRepositoryCloneUrls),
       )
     },
-    createMergeRequest: (input) =>
-    {
-      const sourceProject = sourceProjectIdentifier(input.source)
-      return execute({
-        cwd: input.cwd,
-        args: [
-          'api',
-          '--method',
-          'POST',
-          'projects/:fullpath/merge_requests',
-          '--raw-field',
-          `source_branch=${sourceRefName(input)}`,
-          '--raw-field',
-          `target_branch=${input.target?.refName ?? input.baseBranch}`,
-          ...(sourceProject ? ['--raw-field', `source_project_id=${sourceProject}`] : []),
-          '--raw-field',
-          `title=${input.title}`,
-          '--field',
-          `description=@${input.bodyFile}`,
-        ],
-      }).pipe(Effect.asVoid)
-    },
+    createMergeRequest,
     getDefaultBranch: (input) =>
       execute({
         cwd: input.cwd,

@@ -2,6 +2,7 @@
 // generates source control text through grok
 import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
+import * as FileSystem from 'effect/FileSystem'
 import * as Option from 'effect/Option'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
@@ -21,10 +22,12 @@ import {
   buildThreadTitlePrompt,
 } from './TextGenerationPrompts.ts'
 import {
+  buildAcpImagePromptParts,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
 } from './TextGenerationUtils.ts'
+import * as ServerConfig from '../config.ts'
 import {
   applyGrokAcpModelSelection,
   currentGrokModelIdFromSessionSetup,
@@ -42,19 +45,22 @@ export const makeGrokTextGeneration = Effect.fn('makeGrokTextGeneration')(functi
 )
 {
   const crypto = yield* Crypto.Crypto
+  const fileSystem = yield* FileSystem.FileSystem
   const commandSpawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const serverConfig = yield* ServerConfig.ServerConfig
 
   const runGrokJson = <S extends Schema.Top>({
     operation,
     cwd,
     prompt,
+    attachments,
     outputSchemaJson,
     modelSelection,
   }: {
-    operation:
-      'generateCommitMessage' | 'generatePrContent' | 'generateBranchName' | 'generateThreadTitle'
+    operation: TextGeneration.TextGenerationOp
     cwd: string
     prompt: string
+    attachments?: TextGeneration.BranchNameGenerationInput['attachments']
     outputSchemaJson: S
     modelSelection: ModelSelection
   }): Effect.Effect<S['Type'], TextGenerationError, S['DecodingServices']> =>
@@ -100,8 +106,16 @@ export const makeGrokTextGeneration = Effect.fn('makeGrokTextGeneration')(functi
             }),
         })
 
+        const imagePromptParts = yield* buildAcpImagePromptParts({
+          operation,
+          providerLabel: 'Grok',
+          attachments,
+          attachmentsDir: serverConfig.attachmentsDir,
+          fileSystem,
+        })
+
         return yield* runtime.prompt({
-          prompt: [{ type: 'text', text: prompt }],
+          prompt: [{ type: 'text', text: prompt }, ...imagePromptParts],
         })
       }).pipe(
         Effect.timeoutOption(GROK_TIMEOUT_MS),
@@ -230,6 +244,7 @@ export const makeGrokTextGeneration = Effect.fn('makeGrokTextGeneration')(functi
         operation: 'generateBranchName',
         cwd: input.cwd,
         prompt,
+        attachments: input.attachments,
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
       })
@@ -251,6 +266,7 @@ export const makeGrokTextGeneration = Effect.fn('makeGrokTextGeneration')(functi
         operation: 'generateThreadTitle',
         cwd: input.cwd,
         prompt,
+        attachments: input.attachments,
         outputSchemaJson: outputSchema,
         modelSelection: input.modelSelection,
       })

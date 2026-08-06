@@ -19,6 +19,7 @@ import {
   incrementJsonlRecordCount,
   iterateJsonlPhysicalLines,
   materializeWarnings,
+  truncateText as truncate,
   truncateUtf8,
   type WarningState,
 } from './parserSupport.ts'
@@ -108,11 +109,6 @@ function isRecord(value: unknown): value is Record<string, unknown>
 function asString(value: unknown): string | null
 {
   return typeof value === 'string' && value.length > 0 ? value : null
-}
-
-function truncate(value: string, limit: number): string
-{
-  return value.length <= limit ? value : `${value.slice(0, Math.max(0, limit - 1))}…`
 }
 
 function summarize(value: string): string

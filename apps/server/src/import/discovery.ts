@@ -39,6 +39,7 @@ import {
   parseCodexRollout,
 } from './codexRolloutParser.ts'
 import { claudeExplicitTitle, claudeSemanticTitle, codexSemanticTitle } from './importTitle.ts'
+import { truncateText as truncate } from './parserSupport.ts'
 import {
   discoverOpenCodeSessionMetadataFiles,
   loadOpenCodeSessionFromMetadata,
@@ -298,11 +299,6 @@ async function claudeCandidates(
 function errorMessage(error: unknown): string
 {
   return error instanceof Error ? error.message : String(error)
-}
-
-function truncate(value: string, maximumChars: number): string
-{
-  return value.length <= maximumChars ? value : `${value.slice(0, Math.max(0, maximumChars - 1))}…`
 }
 
 function boundedPath(value: string | null): string | null

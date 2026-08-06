@@ -40,6 +40,7 @@ import { ServerSettingsService } from '../../serverSettings.ts'
 import { proposedPlanIdForTurn } from '../proposedPlanIdentity.ts'
 import { isHiddenTurnRuntimeEvent } from '../../provider/HiddenTurnRegistry.ts'
 import {
+  runtimeEventMatchesThreadProviderInstance,
   runtimeEventToActivities,
   taskIdFromToolProgressSummary,
   toTurnId,
@@ -999,6 +1000,7 @@ const make = Effect.gen(function* ()
     {
       const thread = yield* resolveThreadShell(event.threadId)
       if (!thread) return
+      if (!runtimeEventMatchesThreadProviderInstance(event, thread)) return
       const isHiddenTurnEvent =
         isHiddenTurnRuntimeEvent(event) ||
         (thread.providerSwitch !== null &&

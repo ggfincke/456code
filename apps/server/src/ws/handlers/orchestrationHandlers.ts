@@ -29,6 +29,9 @@ import type * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import type * as Path from 'effect/Path'
 import * as Queue from 'effect/Queue'
+import * as Ref from 'effect/Ref'
+import * as Schedule from 'effect/Schedule'
+import * as Semaphore from 'effect/Semaphore'
 import * as Stream from 'effect/Stream'
 import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
@@ -279,6 +282,7 @@ function isThreadDetailEvent(event: OrchestrationEvent): event is Extract<
 }
 
 const RESUME_MAX_EVENT_GAP = 1_000
+const LIVE_EVENT_BUFFER_CAPACITY = 1_024
 
 export function makeOrchestrationRpcHandlers({
   checkpointDiffQuery,
@@ -483,6 +487,7 @@ export function makeOrchestrationRpcHandlers({
 
   type ShellLiveInput =
     | { readonly kind: 'event'; readonly event: OrchestrationEvent }
+    | { readonly kind: 'snapshot'; readonly snapshot: OrchestrationShellSnapshot }
     | { readonly kind: 'synchronized' }
 
   // a completion marker is queued alongside raw live events so it cannot
@@ -506,7 +511,7 @@ export function makeOrchestrationRpcHandlers({
 
         output.push(...(yield* coalesceShellEvents(pendingEvents)))
         pendingEvents = []
-        output.push({ kind: 'synchronized' })
+        output.push(input)
       }
 
       output.push(...(yield* coalesceShellEvents(pendingEvents)))
@@ -631,17 +636,6 @@ export function makeOrchestrationRpcHandlers({
           // sequence but the live subscription is not attached yet). Every
           // path below emits from this same buffered live tail. Overlapping
           // events are deduped by sequence on the client.
-          const liveBuffer = yield* Queue.unbounded<ShellLiveInput>()
-          yield* Effect.forkScoped(
-            orchestrationEngine.streamDomainEvents.pipe(
-              Stream.runForEach((event) =>
-                Queue.offer(liveBuffer, { kind: 'event' as const, event }),
-              ),
-            ),
-            { startImmediately: true },
-          )
-          const bufferedLiveStream = coalesceShellLiveStream(Stream.fromQueue(liveBuffer))
-
           const loadSnapshot = projectionSnapshotQuery.getShellSnapshot().pipe(
             Effect.tapError((cause) =>
               Effect.logError('orchestration shell snapshot load failed', { cause }),
@@ -654,19 +648,67 @@ export function makeOrchestrationRpcHandlers({
                 }),
             ),
           )
+          const liveBuffer = yield* Queue.dropping<ShellLiveInput>(LIVE_EVENT_BUFFER_CAPACITY)
+          const liveBufferOverflowed = yield* Ref.make(false)
+          const liveBufferLock = yield* Semaphore.make(1)
+          const offerLiveInput = (item: ShellLiveInput) =>
+            liveBufferLock.withPermit(
+              Queue.offer(liveBuffer, item).pipe(
+                Effect.flatMap((accepted) =>
+                  accepted ? Effect.void : Ref.set(liveBufferOverflowed, true),
+                ),
+              ),
+            )
+          yield* Effect.forkScoped(
+            orchestrationEngine.streamDomainEvents.pipe(
+              Stream.runForEach((event) => offerLiveInput({ kind: 'event', event })),
+            ),
+            { startImmediately: true },
+          )
+          const bufferedLiveStream = Stream.fromEffect(
+            Effect.gen(function* ()
+            {
+              const item = yield* Queue.take(liveBuffer)
+              const overflowed = yield* liveBufferLock.withPermit(
+                Effect.gen(function* ()
+                {
+                  if (!(yield* Ref.getAndSet(liveBufferOverflowed, false)))
+                  {
+                    return false
+                  }
+                  yield* Queue.takeAll(liveBuffer)
+                  return true
+                }),
+              )
+              if (!overflowed)
+              {
+                return item
+              }
+              return { kind: 'snapshot' as const, snapshot: yield* loadSnapshot }
+            }),
+          ).pipe(Stream.repeat(Schedule.forever), coalesceShellLiveStream)
+          const drainShellLiveBuffer = Effect.fn('orchestration.drainShellLiveBuffer')(
+            function* ()
+            {
+              const drained = yield* liveBufferLock.withPermit(
+                Effect.all([Queue.takeAll(liveBuffer), Ref.getAndSet(liveBufferOverflowed, false)]),
+              )
+              const inputs: ShellLiveInput[] = drained[1]
+                ? [{ kind: 'snapshot', snapshot: yield* loadSnapshot }]
+                : [...drained[0]]
+              inputs.push({ kind: 'synchronized' })
+              return yield* coalesceShellLiveInputs(inputs)
+            },
+          )
 
-          // offer the completion marker into the same queue as live events.
-          // anything buffered while snapshot/replay work was in flight is
-          // therefore delivered before the client is told it is synchronized.
+          // drain buffered events before the completion marker so catch-up
+          // cannot be declared complete while an older event is still queued.
           const synchronizedThenLive =
             input.requestCompletionMarker === true
               ? Stream.concat(
-                  Stream.fromEffect(
-                    Queue.offer(liveBuffer, { kind: 'synchronized' as const }).pipe(
-                      Effect.andThen(Queue.takeAll(liveBuffer)),
-                      Effect.flatMap(coalesceShellLiveInputs),
-                    ),
-                  ).pipe(Stream.flatMap((items) => Stream.fromIterable(items))),
+                  Stream.fromEffect(drainShellLiveBuffer()).pipe(
+                    Stream.flatMap((items) => Stream.fromIterable(items)),
+                  ),
                   bufferedLiveStream,
                 )
               : bufferedLiveStream
@@ -1202,14 +1244,6 @@ export function makeOrchestrationRpcHandlers({
             })),
           )
 
-          // attach live delivery before reading either replay or snapshot state.
-          // otherwise an event published while the snapshot is loading is lost.
-          const liveBuffer = yield* Queue.unbounded<OrchestrationThreadStreamItem>()
-          yield* Effect.forkScoped(
-            liveStream.pipe(Stream.runForEach((item) => Queue.offer(liveBuffer, item))),
-            { startImmediately: true },
-          )
-          const bufferedLiveStream = Stream.fromQueue(liveBuffer)
           const loadSnapshot = projectionSnapshotQuery.getThreadDetailSnapshot(input.threadId).pipe(
             Effect.mapError(
               (cause) =>
@@ -1219,12 +1253,89 @@ export function makeOrchestrationRpcHandlers({
                 }),
             ),
           )
+          const loadRequiredSnapshot = loadSnapshot.pipe(
+            Effect.flatMap(
+              Option.match({
+                onNone: () =>
+                  Effect.fail(
+                    new OrchestrationGetSnapshotError({
+                      message: `Thread ${input.threadId} was not found`,
+                      cause: input.threadId,
+                    }),
+                  ),
+                onSome: Effect.succeed,
+              }),
+            ),
+          )
+
+          // attach live delivery before reading either replay or snapshot state.
+          // otherwise an event published while the snapshot is loading is lost.
+          const liveBuffer = yield* Queue.dropping<OrchestrationThreadStreamItem>(
+            LIVE_EVENT_BUFFER_CAPACITY,
+          )
+          const liveBufferOverflowed = yield* Ref.make(false)
+          const liveBufferLock = yield* Semaphore.make(1)
+          const offerLiveItem = (item: OrchestrationThreadStreamItem) =>
+            liveBufferLock.withPermit(
+              Queue.offer(liveBuffer, item).pipe(
+                Effect.flatMap((accepted) =>
+                  accepted ? Effect.void : Ref.set(liveBufferOverflowed, true),
+                ),
+              ),
+            )
+          yield* Effect.forkScoped(liveStream.pipe(Stream.runForEach(offerLiveItem)), {
+            startImmediately: true,
+          })
+          const bufferedLiveStream = Stream.fromEffect(
+            Effect.gen(function* ()
+            {
+              const item = yield* Queue.take(liveBuffer)
+              const overflowed = yield* liveBufferLock.withPermit(
+                Effect.gen(function* ()
+                {
+                  if (!(yield* Ref.getAndSet(liveBufferOverflowed, false)))
+                  {
+                    return false
+                  }
+                  yield* Queue.takeAll(liveBuffer)
+                  return true
+                }),
+              )
+              if (!overflowed)
+              {
+                return item
+              }
+              const snapshot = yield* loadRequiredSnapshot
+              return {
+                kind: 'snapshot' as const,
+                snapshot: projectThreadDetailSnapshot(snapshot),
+              }
+            }),
+          ).pipe(Stream.repeat(Schedule.forever))
+          const drainThreadLiveBuffer = Effect.fn('orchestration.drainThreadLiveBuffer')(
+            function* ()
+            {
+              const drained = yield* liveBufferLock.withPermit(
+                Effect.all([Queue.takeAll(liveBuffer), Ref.getAndSet(liveBufferOverflowed, false)]),
+              )
+              const items: OrchestrationThreadStreamItem[] = drained[1]
+                ? [
+                    {
+                      kind: 'snapshot',
+                      snapshot: projectThreadDetailSnapshot(yield* loadRequiredSnapshot),
+                    },
+                  ]
+                : [...drained[0]]
+              items.push({ kind: 'synchronized' })
+              return items
+            },
+          )
           const afterCatchUp =
             input.requestCompletionMarker === true
               ? Stream.concat(
-                  Stream.fromEffect(
-                    Queue.offer(liveBuffer, { kind: 'synchronized' as const }),
-                  ).pipe(Stream.drain),
+                  Stream.fromEffect(drainThreadLiveBuffer()).pipe(
+                    Stream.flatMap((items) => Stream.fromIterable(items)),
+                  ),
                   bufferedLiveStream,
                 )
               : bufferedLiveStream

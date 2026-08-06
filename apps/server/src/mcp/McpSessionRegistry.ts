@@ -131,7 +131,10 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
       }
       yield* SynchronizedRef.update(state, ({ records }) =>
       {
-        const next = new Map(pruneDead(records, issuedAt))
+        const current = pruneDead(records, issuedAt)
+        const next = new Map(
+          Array.from(current).filter(([, record]) => record.scope.threadId !== scope.threadId),
+        )
         next.set(tokenHash, { tokenHash, scope, lastAliveAt: issuedAt })
         return { records: next }
       })
@@ -260,10 +263,8 @@ export const issueActiveMcpCredential = (
   request: McpCredentialRequest,
 ): Effect.Effect<McpIssuedCredential | undefined> =>
   activeMcpSessionRegistry
-    ? activeMcpSessionRegistry
-        .revokeThread(request.threadId)
-        .pipe(Effect.andThen(activeMcpSessionRegistry.issue(request)))
-    : Effect.sync((): McpIssuedCredential | undefined => undefined)
+    ? activeMcpSessionRegistry.issue(request)
+    : Effect.succeed<McpIssuedCredential | undefined>(undefined)
 
 // refreshes the thread credential from provider activity
 export const touchActiveMcpThread = (threadId: ThreadId): Effect.Effect<void> =>

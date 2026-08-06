@@ -178,9 +178,14 @@ function parseNumstatEntries(
     if (rawPath.length === 0) continue
     const added = Number.parseInt(addedRaw ?? '0', 10)
     const deleted = Number.parseInt(deletedRaw ?? '0', 10)
+    const braceRename = /^(.*)\{[^{}]* => ([^{}]*)\}(.*)$/u.exec(rawPath)
+    const expandedBraceRename = braceRename
+      ? `${braceRename[1] ?? ''}${braceRename[2] ?? ''}${braceRename[3] ?? ''}`
+      : null
     const renameArrowIndex = rawPath.indexOf(' => ')
     const normalizedPath =
-      renameArrowIndex >= 0 ? rawPath.slice(renameArrowIndex + ' => '.length).trim() : rawPath
+      expandedBraceRename ??
+      (renameArrowIndex >= 0 ? rawPath.slice(renameArrowIndex + ' => '.length).trim() : rawPath)
     entries.push({
       path: normalizedPath.length > 0 ? normalizedPath : rawPath,
       insertions: Number.isFinite(added) ? added : 0,
@@ -2726,8 +2731,30 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
   {
     const targetBranch = input.newRefName ?? input.refName
     const sanitizedBranch = targetBranch.replace(/\//g, '-')
-    const repoName = path.basename(input.cwd)
-    const worktreePath = input.path ?? path.join(worktreesDir, repoName, sanitizedBranch)
+    let worktreePath = input.path
+    if (!worktreePath)
+    {
+      const gitCommonDir = yield* resolveGitCommonDir(input.cwd)
+      const repositoryRoot =
+        path.basename(gitCommonDir) === '.git' ? path.dirname(gitCommonDir) : gitCommonDir
+      const repositoryHash = yield* crypto
+        .digest('SHA-256', new TextEncoder().encode(gitCommonDir))
+        .pipe(
+          Effect.map(Encoding.encodeHex),
+          Effect.mapError(
+            (cause) =>
+              new GitCommandError({
+                operation: 'GitVcsDriver.createWorktree.hashRepository',
+                command: 'crypto.digest SHA-256',
+                cwd: input.cwd,
+                detail: 'Failed to derive a unique repository worktree path.',
+                cause,
+              }),
+          ),
+        )
+      const repositorySegment = `${path.basename(repositoryRoot)}-${repositoryHash.slice(0, 8)}`
+      worktreePath = path.join(worktreesDir, repositorySegment, sanitizedBranch)
+    }
     const args = input.newRefName
       ? ['worktree', 'add', '-b', input.newRefName, worktreePath, input.refName]
       : ['worktree', 'add', worktreePath, input.refName]
@@ -2954,15 +2981,30 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
             ).pipe(Effect.map((result) => result.exitCode === 0))
           : false
 
+      if (
+        !localInputExists &&
+        remoteExists &&
+        !localTrackingBranch &&
+        localTrackedBranchTargetExists
+      )
+      {
+        return yield* new GitCommandError({
+          ...gitCommandContext({
+            operation: 'GitVcsDriver.switchRef',
+            cwd: input.cwd,
+            args: ['checkout', input.refName],
+          }),
+          detail: `Cannot switch to remote ref '${input.refName}' because local branch '${localTrackedBranchCandidate}' exists without tracking it. Choose the local branch or configure its upstream first.`,
+        })
+      }
+
       const checkoutArgs = localInputExists
         ? ['checkout', input.refName]
-        : remoteExists && !localTrackingBranch && localTrackedBranchTargetExists
-          ? ['checkout', input.refName]
-          : remoteExists && !localTrackingBranch
-            ? ['checkout', '--track', input.refName]
-            : remoteExists && localTrackingBranch
-              ? ['checkout', localTrackingBranch]
-              : ['checkout', input.refName]
+        : remoteExists && !localTrackingBranch
+          ? ['checkout', '--track', input.refName]
+          : remoteExists && localTrackingBranch
+            ? ['checkout', localTrackingBranch]
+            : ['checkout', input.refName]
 
       yield* executeGit('GitVcsDriver.switchRef.checkout', input.cwd, checkoutArgs, {
         timeoutMs: 10_000,

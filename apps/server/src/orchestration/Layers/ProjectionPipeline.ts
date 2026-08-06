@@ -141,6 +141,7 @@ function settledTurnStateForSessionStatus(
 interface ProjectorDefinition
 {
   readonly name: ProjectorName
+  readonly eventTypes: ReadonlySet<OrchestrationEvent['type']>
   readonly apply: (
     event: OrchestrationEvent,
     attachmentCleanupIntents: AttachmentCleanupIntents,
@@ -2559,47 +2560,100 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     const projectors: ReadonlyArray<ProjectorDefinition> = [
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.projects,
+        eventTypes: new Set(['project.created', 'project.meta-updated', 'project.deleted']),
         apply: applyProjectsProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadMessages,
+        eventTypes: new Set(['thread.message-sent', 'thread.reverted']),
         apply: applyThreadMessagesProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadProposedPlans,
+        eventTypes: new Set(['thread.proposed-plan-upserted', 'thread.reverted']),
         apply: applyThreadProposedPlansProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadOrchestratePlans,
+        eventTypes: new Set([
+          'thread.orchestrate-plan-upserted',
+          'thread.orchestrate-plan-response-requested',
+          'thread.reverted',
+        ]),
         apply: applyThreadOrchestratePlansProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
+        eventTypes: new Set([
+          'thread.provider-switch-failed',
+          'thread.provider-switched',
+          'thread.activity-appended',
+          'thread.reverted',
+        ]),
         apply: applyThreadActivitiesProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
+        eventTypes: new Set(['thread.session-set']),
         apply: applyThreadSessionsProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadTurns,
+        eventTypes: new Set([
+          'thread.turn-start-requested',
+          'thread.session-set',
+          'thread.message-sent',
+          'thread.turn-interrupt-requested',
+          'thread.turn-diff-completed',
+          'thread.reverted',
+        ]),
         apply: applyThreadTurnsProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
+        eventTypes: new Set(),
         apply: applyCheckpointsProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.pendingApprovals,
+        eventTypes: new Set(['thread.activity-appended', 'thread.approval-response-requested']),
         apply: applyPendingApprovalsProjection,
       },
       {
         name: ORCHESTRATION_PROJECTOR_NAMES.threads,
+        eventTypes: new Set([
+          'thread.created',
+          'thread.archived',
+          'thread.unarchived',
+          'thread.settled',
+          'thread.unsettled',
+          'thread.snoozed',
+          'thread.unsnoozed',
+          'thread.meta-updated',
+          'thread.runtime-mode-set',
+          'thread.interaction-mode-set',
+          'thread.provider-switch-requested',
+          'thread.provider-switch-progressed',
+          'thread.provider-switch-failed',
+          'thread.provider-switched',
+          'thread.handoff-cleared',
+          'thread.deleted',
+          'thread.message-sent',
+          'thread.activity-appended',
+          'thread.proposed-plan-upserted',
+          'thread.orchestrate-plan-upserted',
+          'thread.orchestrate-plan-response-requested',
+          'thread.approval-response-requested',
+          'thread.user-input-response-requested',
+          'thread.session-set',
+          'thread.turn-diff-completed',
+          'thread.reverted',
+        ]),
         apply: applyThreadsProjection,
       },
     ]
 
-    const runProjectorForEvent = Effect.fn('runProjectorForEvent')(function* (
+    const applyProjectorForEvent = Effect.fn('applyProjectorForEvent')(function* (
       projector: ProjectorDefinition,
       event: OrchestrationEvent,
     )
@@ -2609,45 +2663,46 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
         removedRelativePaths: new Set<string>(),
       }
 
-      yield* sql.withTransaction(
-        Effect.gen(function* ()
-        {
-          yield* projector.apply(event, attachmentCleanupIntents)
-          yield* Effect.forEach(
-            attachmentCleanupIntents.removedRelativePaths,
-            (relativePath) =>
-              attachmentLifecycleRepository.enqueuePathCleanup({
-                cleanupKey: `projection:${projector.name}:${event.sequence}:path:${relativePath}`,
-                stagingKey: null,
-                relativePath,
-                stagingRelativePath: null,
-                reason: `projection removed attachment reference during ${event.type}`,
-                sourceSequence: event.sequence,
-                now: event.occurredAt,
-              }),
-            { concurrency: 1 },
-          )
-          yield* Effect.forEach(
-            attachmentCleanupIntents.deletedThreads,
-            ([threadId, threadSegment]) =>
-              attachmentLifecycleRepository.enqueueThreadCleanup({
-                cleanupKey: `projection:${projector.name}:${event.sequence}:thread:${threadSegment}`,
-                threadId: ThreadId.make(threadId),
-                threadSegment,
-                reason: 'projection deleted thread attachments',
-                sourceSequence: event.sequence,
-                now: event.occurredAt,
-              }),
-            { concurrency: 1 },
-          )
-          yield* projectionStateRepository.upsert({
-            projector: projector.name,
-            lastAppliedSequence: event.sequence,
-            updatedAt: event.occurredAt,
-          })
-        }),
+      if (projector.eventTypes.has(event.type))
+      {
+        yield* projector.apply(event, attachmentCleanupIntents)
+      }
+      yield* Effect.forEach(
+        attachmentCleanupIntents.removedRelativePaths,
+        (relativePath) =>
+          attachmentLifecycleRepository.enqueuePathCleanup({
+            cleanupKey: `projection:${projector.name}:${event.sequence}:path:${relativePath}`,
+            stagingKey: null,
+            relativePath,
+            stagingRelativePath: null,
+            reason: `projection removed attachment reference during ${event.type}`,
+            sourceSequence: event.sequence,
+            now: event.occurredAt,
+          }),
+        { concurrency: 1 },
       )
+      yield* Effect.forEach(
+        attachmentCleanupIntents.deletedThreads,
+        ([threadId, threadSegment]) =>
+          attachmentLifecycleRepository.enqueueThreadCleanup({
+            cleanupKey: `projection:${projector.name}:${event.sequence}:thread:${threadSegment}`,
+            threadId: ThreadId.make(threadId),
+            threadSegment,
+            reason: 'projection deleted thread attachments',
+            sourceSequence: event.sequence,
+            now: event.occurredAt,
+          }),
+        { concurrency: 1 },
+      )
+      yield* projectionStateRepository.upsert({
+        projector: projector.name,
+        lastAppliedSequence: event.sequence,
+        updatedAt: event.occurredAt,
+      })
     })
+
+    const runProjectorForEvent = (projector: ProjectorDefinition, event: OrchestrationEvent) =>
+      sql.withTransaction(applyProjectorForEvent(projector, event))
 
     const bootstrapProjector = (projector: ProjectorDefinition) =>
       projectionStateRepository
@@ -2666,17 +2721,21 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
         )
 
     const projectEvent: OrchestrationProjectionPipelineShape['projectEvent'] = (event) =>
-      Effect.forEach(projectors, (projector) => runProjectorForEvent(projector, event), {
-        concurrency: 1,
-      }).pipe(
-        Effect.provideService(FileSystem.FileSystem, fileSystem),
-        Effect.provideService(Path.Path, path),
-        Effect.provideService(ServerConfig, serverConfig),
-        Effect.asVoid,
-        Effect.catchTag('SqlError', (sqlError) =>
-          Effect.fail(toPersistenceSqlError('ProjectionPipeline.projectEvent:query')(sqlError)),
-        ),
-      )
+      sql
+        .withTransaction(
+          Effect.forEach(projectors, (projector) => applyProjectorForEvent(projector, event), {
+            concurrency: 1,
+          }),
+        )
+        .pipe(
+          Effect.provideService(FileSystem.FileSystem, fileSystem),
+          Effect.provideService(Path.Path, path),
+          Effect.provideService(ServerConfig, serverConfig),
+          Effect.asVoid,
+          Effect.catchTag('SqlError', (sqlError) =>
+            Effect.fail(toPersistenceSqlError('ProjectionPipeline.projectEvent:query')(sqlError)),
+          ),
+        )
 
     const bootstrap: OrchestrationProjectionPipelineShape['bootstrap'] = Effect.forEach(
       projectors,

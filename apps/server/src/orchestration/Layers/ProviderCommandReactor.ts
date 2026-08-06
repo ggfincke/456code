@@ -2106,7 +2106,9 @@ const make = Effect.gen(function* ()
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.flatMap((built) =>
-        providerService.sendTurn(built.request).pipe(
+        invokeProvider(
+          providerService.sendTurn(built.request, undefined, activeEffectContext),
+        ).pipe(
           Effect.flatMap(() =>
             built.handoffDeliveryMarker === undefined
               ? Effect.void
@@ -2145,7 +2147,15 @@ const make = Effect.gen(function* ()
     if (thread.session && thread.session.status !== 'stopped')
     {
       const stopped = yield* invokeProvider(
-        providerService.stopSession({ threadId: thread.id }, activeEffectContext),
+        providerService.stopSession(
+          {
+            threadId: thread.id,
+            ...(thread.session.providerInstanceId === undefined
+              ? {}
+              : { expectedProviderInstanceId: thread.session.providerInstanceId }),
+          },
+          activeEffectContext,
+        ),
       ).pipe(
         Effect.as(true),
         Effect.catchCause((cause) =>
@@ -2161,6 +2171,14 @@ const make = Effect.gen(function* ()
       )
       if (!stopped)
       {
+        yield* setThreadSession({
+          threadId: thread.id,
+          session: {
+            ...thread.session,
+            updatedAt: now,
+          },
+          createdAt: now,
+        })
         return
       }
     }
