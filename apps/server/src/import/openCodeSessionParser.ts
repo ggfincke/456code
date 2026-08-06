@@ -15,6 +15,7 @@ import {
   appendParsingWarningActivity,
   applyStrictlyIncreasingTimestamps,
   materializeWarnings,
+  truncateText as truncate,
   truncateUtf8,
   type WarningState,
 } from './parserSupport.ts'
@@ -97,11 +98,6 @@ function asString(value: unknown): string | null
 function asFiniteNumber(value: unknown): number | null
 {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function truncate(value: string, limit: number): string
-{
-  return value.length <= limit ? value : `${value.slice(0, Math.max(0, limit - 1))}…`
 }
 
 function summarize(value: string): string

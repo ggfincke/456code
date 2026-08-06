@@ -17,15 +17,8 @@ import {
   type VcsListRefsInput,
   type VcsListRefsResult,
   type GitManagerServiceError,
-  type GitPreparePullRequestThreadInput,
-  type GitPreparePullRequestThreadResult,
-  type GitPullRequestRefInput,
   type VcsPullResult,
   type VcsRemoveWorktreeInput,
-  type GitResolvePullRequestResult,
-  type GitRunStackedActionInput,
-  type GitRunStackedActionResult,
-  type VcsStatusInput,
   type VcsStatusLocalResult,
   type VcsStatusRemoteResult,
   type VcsStatusResult,
@@ -35,33 +28,23 @@ import * as GitManager from './GitManager.ts'
 import * as GitVcsDriver from '../vcs/GitVcsDriver.ts'
 import * as VcsDriverRegistry from '../vcs/VcsDriverRegistry.ts'
 
+type GitManagerWorkflowMethods = Pick<
+  GitManager.GitManager['Service'],
+  | 'status'
+  | 'localStatus'
+  | 'remoteStatus'
+  | 'invalidateLocalStatus'
+  | 'invalidateRemoteStatus'
+  | 'invalidateStatus'
+  | 'runStackedAction'
+  | 'resolvePullRequest'
+  | 'preparePullRequestThread'
+>
+
 export class GitWorkflowService extends Context.Service<
   GitWorkflowService,
-  {
-    readonly status: (
-      input: VcsStatusInput,
-    ) => Effect.Effect<VcsStatusResult, GitManagerServiceError>
-    readonly localStatus: (
-      input: VcsStatusInput,
-    ) => Effect.Effect<VcsStatusLocalResult, GitManagerServiceError>
-    readonly remoteStatus: (
-      input: VcsStatusInput,
-      options?: GitVcsDriver.GitRemoteStatusOptions,
-    ) => Effect.Effect<VcsStatusRemoteResult | null, GitManagerServiceError>
-    readonly invalidateLocalStatus: (cwd: string) => Effect.Effect<void, never>
-    readonly invalidateRemoteStatus: (cwd: string) => Effect.Effect<void, never>
-    readonly invalidateStatus: (cwd: string) => Effect.Effect<void, never>
+  GitManagerWorkflowMethods & {
     readonly pullCurrentBranch: (cwd: string) => Effect.Effect<VcsPullResult, GitCommandError>
-    readonly runStackedAction: (
-      input: GitRunStackedActionInput,
-      options?: GitManager.GitRunStackedActionOptions,
-    ) => Effect.Effect<GitRunStackedActionResult, GitManagerServiceError>
-    readonly resolvePullRequest: (
-      input: GitPullRequestRefInput,
-    ) => Effect.Effect<GitResolvePullRequestResult, GitManagerServiceError>
-    readonly preparePullRequestThread: (
-      input: GitPreparePullRequestThreadInput,
-    ) => Effect.Effect<GitPreparePullRequestThreadResult, GitManagerServiceError>
     readonly listRefs: (
       input: VcsListRefsInput,
     ) => Effect.Effect<VcsListRefsResult, GitCommandError>

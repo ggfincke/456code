@@ -19,7 +19,7 @@ const warningTextLimit = 512
 const maximumDateTimestamp = 8_640_000_000_000_000
 const textEncoder = new TextEncoder()
 
-function truncateWarning(value: string, limit: number): string
+export function truncateText(value: string, limit: number): string
 {
   return value.length <= limit ? value : `${value.slice(0, Math.max(0, limit - 1))}…`
 }
@@ -29,7 +29,7 @@ export function addWarning(state: WarningState, message: string): void
   state.totalCount += 1
   if (state.details.length < warningDetailLimit)
   {
-    state.details.push(truncateWarning(message, warningTextLimit))
+    state.details.push(truncateText(message, warningTextLimit))
     return
   }
   state.omittedCount += 1

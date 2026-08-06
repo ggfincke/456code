@@ -9,6 +9,7 @@ import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 
 import {
+  GitCommandError,
   SourceControlRepositoryError,
   type SourceControlCloneRepositoryInput,
   type SourceControlCloneRepositoryResult,
@@ -266,24 +267,35 @@ export const make = Effect.gen(function* ()
       // with an opaque "src refspec HEAD does not match any". Treat this as a
       // partial success: the remote was created and wired up, but there is
       // nothing to push yet.
-      const hasCommits = yield* git
-        .execute({
-          operation: 'SourceControlRepositoryService.publishRepository.headCheck',
+      const headCheckOperation = 'SourceControlRepositoryService.publishRepository.headCheck'
+      const headCheckArgs = ['rev-parse', '--verify', '--quiet', 'HEAD^{commit}'] as const
+      const headCheck = yield* git.execute({
+        operation: headCheckOperation,
+        cwd: input.cwd,
+        args: headCheckArgs,
+        allowNonZeroExit: true,
+      })
+      if (headCheck.exitCode !== 0 && headCheck.exitCode !== 1)
+      {
+        return yield* new GitCommandError({
+          operation: headCheckOperation,
+          command: `git ${headCheckArgs.join(' ')}`,
           cwd: input.cwd,
-          args: ['rev-parse', '--verify', 'HEAD'],
+          exitCode: headCheck.exitCode,
+          stdoutLength: headCheck.stdout.length,
+          stderrLength: headCheck.stderr.length,
+          detail: 'Failed to determine whether the repository has a valid HEAD commit.',
         })
-        .pipe(
-          Effect.map(() => true),
-          Effect.orElseSucceed(() => false),
-        )
+      }
+      const hasCommits = headCheck.exitCode === 0
       if (!hasCommits)
       {
-        const details = yield* git.statusDetails(input.cwd).pipe(Effect.orElseSucceed(() => null))
+        const details = yield* git.statusDetails(input.cwd)
         return {
           repository: toRepositoryInfo(providerKind, urls),
           remoteName,
           remoteUrl,
-          branch: details?.branch ?? 'main',
+          branch: details.branch ?? 'main',
           status: 'remote_added' as const,
         }
       }
