@@ -430,6 +430,26 @@ const program = Effect.gen(function* ()
     }),
   )
 
+  // the adapter now switches modes via the typed session/set_mode rpc
+  // instead of session/set_config_option (megacore U-076)
+  yield* agent.handleSetSessionMode((request) =>
+    Effect.gen(function* ()
+    {
+      if (!availableModes.some((mode) => mode.id === request.modeId))
+      {
+        return yield* AcpError.AcpRequestError.invalidParams(
+          `Unknown mock mode id: ${request.modeId}`,
+          {
+            method: 'session/set_mode',
+            params: request,
+          },
+        )
+      }
+      currentModeId = request.modeId
+      return {}
+    }),
+  )
+
   yield* agent.handleSetSessionConfigOption((request) =>
     Effect.gen(function* ()
     {

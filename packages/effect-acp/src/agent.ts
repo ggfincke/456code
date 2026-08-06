@@ -150,6 +150,11 @@ export class AcpAgent extends Context.Service<
         request: AcpSchema.SetSessionModelRequest,
       ) => Effect.Effect<AcpSchema.SetSessionModelResponse, AcpError.AcpError>,
     ) => Effect.Effect<void>
+    readonly handleSetSessionMode: (
+      handler: (
+        request: AcpSchema.SetSessionModeRequest,
+      ) => Effect.Effect<AcpSchema.SetSessionModeResponse, AcpError.AcpError>,
+    ) => Effect.Effect<void>
     readonly handleSetSessionConfigOption: (
       handler: (
         request: AcpSchema.SetSessionConfigOptionRequest,
@@ -219,6 +224,9 @@ interface AcpCoreAgentRequestHandlers
   setSessionModel?: (
     request: AcpSchema.SetSessionModelRequest,
   ) => Effect.Effect<AcpSchema.SetSessionModelResponse, AcpError.AcpError>
+  setSessionMode?: (
+    request: AcpSchema.SetSessionModeRequest,
+  ) => Effect.Effect<AcpSchema.SetSessionModeResponse, AcpError.AcpError>
   setSessionConfigOption?: (
     request: AcpSchema.SetSessionConfigOptionRequest,
   ) => Effect.Effect<AcpSchema.SetSessionConfigOptionResponse, AcpError.AcpError>
@@ -273,7 +281,11 @@ export const make = Effect.fn('effect-acp/AcpAgent.make')(function* (
             ),
           ),
           Effect.flatMap((decoded) =>
-            Effect.forEach(cancelHandlers, (handler) => handler(decoded), { discard: true }),
+            Effect.forEach(
+              cancelHandlers,
+              (handler) => handler(decoded).pipe(Effect.catch(() => Effect.void)),
+              { discard: true },
+            ),
           ),
         )
       }
@@ -327,6 +339,8 @@ export const make = Effect.fn('effect-acp/AcpAgent.make')(function* (
         runHandler(coreHandlers.closeSession, payload, AGENT_METHODS.session_close),
       [AGENT_METHODS.session_set_model]: (payload) =>
         runHandler(coreHandlers.setSessionModel, payload, AGENT_METHODS.session_set_model),
+      [AGENT_METHODS.session_set_mode]: (payload) =>
+        runHandler(coreHandlers.setSessionMode, payload, AGENT_METHODS.session_set_mode),
       [AGENT_METHODS.session_set_config_option]: (payload) =>
         runHandler(
           coreHandlers.setSessionConfigOption,
@@ -472,6 +486,12 @@ export const make = Effect.fn('effect-acp/AcpAgent.make')(function* (
       Effect.suspend(() =>
       {
         coreHandlers.setSessionModel = handler
+        return Effect.void
+      }),
+    handleSetSessionMode: (handler) =>
+      Effect.suspend(() =>
+      {
+        coreHandlers.setSessionMode = handler
         return Effect.void
       }),
     handleSetSessionConfigOption: (handler) =>

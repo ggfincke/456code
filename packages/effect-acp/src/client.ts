@@ -100,6 +100,11 @@ export class AcpClient extends Context.Service<
       readonly setSessionModel: (
         payload: AcpSchema.SetSessionModelRequest,
       ) => Effect.Effect<AcpSchema.SetSessionModelResponse, AcpError.AcpError>
+      // selects the active mode for a session.
+      // @see https://agentclientprotocol.com/protocol/schema#session/set_mode
+      readonly setSessionMode: (
+        payload: AcpSchema.SetSessionModeRequest,
+      ) => Effect.Effect<AcpSchema.SetSessionModeResponse, AcpError.AcpError>
       // updates a session configuration option.
       // @see https://agentclientprotocol.com/protocol/schema#session/set_config_option
       readonly setSessionConfigOption: (
@@ -487,6 +492,8 @@ export const make = Effect.fn('effect-acp/AcpClient.make')(function* (
         callRpc(AGENT_METHODS.session_close, rpc[AGENT_METHODS.session_close](payload)),
       setSessionModel: (payload) =>
         callRpc(AGENT_METHODS.session_set_model, rpc[AGENT_METHODS.session_set_model](payload)),
+      setSessionMode: (payload) =>
+        callRpc(AGENT_METHODS.session_set_mode, rpc[AGENT_METHODS.session_set_mode](payload)),
       setSessionConfigOption: (payload) =>
         callRpc(
           AGENT_METHODS.session_set_config_option,

@@ -594,13 +594,32 @@ export const make = (
             ? acp.agent.loadSession(loadPayload)
             : Effect.gen(function* ()
               {
+                const loadFiber = yield* acp.agent
+                  .loadSession(loadPayload)
+                  .pipe(Effect.forkIn(runtimeScope))
                 const idleFiber = yield* waitForSessionLoadReplayIdle({
                   gateRef: sessionLoadGateRef,
                 }).pipe(Effect.forkIn(runtimeScope))
-                return yield* Effect.raceFirst(
-                  acp.agent.loadSession(loadPayload),
-                  Fiber.join(idleFiber),
-                ).pipe(Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)))
+                const outcome = yield* Effect.raceFirst(
+                  Fiber.join(loadFiber).pipe(
+                    Effect.map((response) => ({ _tag: 'loaded' as const, response })),
+                  ),
+                  Fiber.join(idleFiber).pipe(
+                    Effect.map((response) => ({ _tag: 'replay-idle' as const, response })),
+                  ),
+                ).pipe(
+                  Effect.onInterrupt(() => Fiber.interrupt(loadFiber).pipe(Effect.asVoid)),
+                  Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)),
+                )
+                if (outcome._tag === 'replay-idle')
+                  {
+                  yield* Fiber.join(loadFiber).pipe(
+                    Effect.flatMap(updateConfigOptions),
+                    Effect.ignore,
+                    Effect.forkIn(runtimeScope),
+                  )
+                }
+                return outcome.response
               })
           const loaded = yield* loadSession.pipe(
             Effect.timeoutOption(sessionLoadTimeout),
@@ -800,9 +819,20 @@ export const make = (
             {
               return Effect.succeed({} satisfies EffectAcpSchema.SetSessionModeResponse)
             }
-            return setConfigOption('mode', modeId).pipe(
+            return getStartedState.pipe(
+              Effect.flatMap((started) =>
+              {
+                const requestPayload = {
+                  sessionId: started.sessionId,
+                  modeId,
+                } satisfies EffectAcpSchema.SetSessionModeRequest
+                return runLoggedRequest(
+                  'session/set_mode',
+                  requestPayload,
+                  acp.agent.setSessionMode(requestPayload),
+                )
+              }),
               Effect.tap(() => updateCurrentModeId(modeId)),
-              Effect.as({} satisfies EffectAcpSchema.SetSessionModeResponse),
             )
           }),
         ),
