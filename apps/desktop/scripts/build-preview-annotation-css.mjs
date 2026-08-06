@@ -11,20 +11,30 @@ import { compile } from 'tailwindcss'
 const directory = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url))
 const appRoot = NodePath.join(directory, '..')
 const sourcePath = NodePath.join(appRoot, 'src', 'preview', 'Annotation.css')
-const preloadPath = NodePath.join(appRoot, 'src', 'preview', 'PickPreload.ts')
-const outputPath = NodePath.join(appRoot, 'src', 'preview', 'AnnotationStyles.generated.ts')
+const previewDir = NodePath.join(appRoot, 'src', 'preview')
+const preloadScanPaths = [
+  NodePath.join(previewDir, 'PickPreload.ts'),
+  NodePath.join(previewDir, 'PickChrome.ts'),
+  NodePath.join(previewDir, 'PickGeometry.ts'),
+]
+const outputPath = NodePath.join(previewDir, 'AnnotationStyles.generated.ts')
 const require = NodeModule.createRequire(import.meta.url)
 const tailwindRoot = NodePath.dirname(require.resolve('tailwindcss/package.json'))
 
-const [annotationSource, preloadSource, themeSource, preflightSource] = await Promise.all([
+const [annotationSource, ...preloadSourcesAndTheme] = await Promise.all([
   NodeFSP.readFile(sourcePath, 'utf8'),
-  NodeFSP.readFile(preloadPath, 'utf8'),
+  ...preloadScanPaths.map((path) => NodeFSP.readFile(path, 'utf8')),
   NodeFSP.readFile(NodePath.join(tailwindRoot, 'theme.css'), 'utf8'),
   NodeFSP.readFile(NodePath.join(tailwindRoot, 'preflight.css'), 'utf8'),
 ])
+const themeSource = preloadSourcesAndTheme.at(-2)
+const preflightSource = preloadSourcesAndTheme.at(-1)
+const preloadSources = preloadSourcesAndTheme.slice(0, -2)
 
 const candidates = new Set(
-  Array.from(preloadSource.matchAll(/!?-?[A-Za-z0-9_:@/.[\]()%,-]+/g), (match) => match[0]),
+  preloadSources.flatMap((preloadSource) =>
+    Array.from(preloadSource.matchAll(/!?-?[A-Za-z0-9_:@/.[\]()%,-]+/g), (match) => match[0]),
+  ),
 )
 const compilerInput = [
   themeSource,
