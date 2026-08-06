@@ -3,7 +3,13 @@
 
 import { useAtomValue } from '@effect/atom-react'
 import * as Schema from 'effect/Schema'
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react'
+import {
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type CSSProperties,
+  type ReactNode,
+} from 'react'
 import { useLocation, useNavigate } from '@tanstack/react-router'
 
 import { isElectron } from '../env'
@@ -19,6 +25,7 @@ import {
   resolveInitialThreadSidebarWidth,
   resolveThreadSidebarMaximumWidth,
   THREAD_MAIN_CONTENT_MIN_WIDTH,
+  THREAD_SIDEBAR_DEFAULT_WIDTH,
   THREAD_SIDEBAR_MIN_WIDTH,
   THREAD_SIDEBAR_WIDTH_STORAGE_KEY,
 } from './threadSidebarWidth'
@@ -33,6 +40,17 @@ import {
 import { Tooltip, TooltipPopup, TooltipTrigger } from './ui/tooltip'
 
 const MACOS_TRAFFIC_LIGHTS_LEFT_INSET = '90px'
+
+function subscribeToViewportWidth(onChange: () => void): () => void
+{
+  window.addEventListener('resize', onChange)
+  return () => window.removeEventListener('resize', onChange)
+}
+
+function readViewportWidth(): number
+{
+  return window.innerWidth
+}
 
 function readInitialThreadSidebarWidth(): number
 {
@@ -121,7 +139,8 @@ export function AppSidebarLayout({ children }: { children: ReactNode })
   const useSidebarV2Theme = useSidebarV2 || isOnSettings
   const isMacosDesktop = isElectron && isMacPlatform(navigator.platform)
   const [sidebarWidth, setSidebarWidth] = useState(readInitialThreadSidebarWidth)
-  const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(window.innerWidth)
+  const viewportWidth = useSyncExternalStore(subscribeToViewportWidth, readViewportWidth)
+  const sidebarMaximumWidth = resolveThreadSidebarMaximumWidth(viewportWidth)
   const [isWindowFullscreen, setIsWindowFullscreen] = useState(() =>
   {
     const getWindowFullscreenState = window.desktopBridge?.getWindowFullscreenState
@@ -190,6 +209,7 @@ export function AppSidebarLayout({ children }: { children: ReactNode })
         data-sidebar-version={useSidebarV2Theme ? 'v2' : 'v1'}
         className="border-r border-sidebar-border bg-sidebar text-sidebar-foreground"
         resizable={{
+          defaultWidth: THREAD_SIDEBAR_DEFAULT_WIDTH,
           maxWidth: sidebarMaximumWidth,
           minWidth: THREAD_SIDEBAR_MIN_WIDTH,
           shouldAcceptWidth: ({ currentWidth, nextWidth, wrapper }) =>

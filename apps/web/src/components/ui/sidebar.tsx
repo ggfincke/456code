@@ -37,6 +37,7 @@ type SidebarContextProps = {
 }
 
 type SidebarResizableOptions = {
+  defaultWidth?: number
   maxWidth?: number
   minWidth?: number
   onResize?: (width: number) => void
@@ -52,6 +53,7 @@ type SidebarResizableOptions = {
 }
 
 type SidebarResolvedResizableOptions = {
+  defaultWidth: number
   maxWidth: number
   minWidth: number
   onResize?: (width: number) => void
@@ -208,6 +210,7 @@ function Sidebar({
 
     const options = typeof resizable === 'boolean' ? {} : resizable
     return {
+      defaultWidth: options.defaultWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
       maxWidth: options.maxWidth ?? Number.POSITIVE_INFINITY,
       minWidth: options.minWidth ?? SIDEBAR_RESIZE_DEFAULT_MIN_WIDTH,
       storageKey: options.storageKey ?? null,
@@ -364,6 +367,8 @@ function clampSidebarWidth(width: number, options: SidebarResolvedResizableOptio
 function SidebarRail({
   className,
   onClick,
+  onDoubleClick,
+  onKeyDown,
   onPointerCancel,
   onPointerDown,
   onPointerMove,
@@ -394,6 +399,64 @@ function SidebarRail({
   const railLabel = canResize ? 'Resize Sidebar' : 'Toggle Sidebar'
   const railTitle = canResize ? 'Drag to resize sidebar' : 'Toggle Sidebar'
 
+  const resolveRailElements = React.useCallback((rail: HTMLButtonElement) =>
+  {
+    const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']")
+    const sidebarRoot = rail.closest<HTMLElement>("[data-slot='sidebar']")
+    const sidebarContainer = sidebarRoot?.querySelector<HTMLElement>(
+      "[data-slot='sidebar-container']",
+    )
+    if (!wrapper || !sidebarRoot || !sidebarContainer)
+    {
+      return null
+    }
+
+    return { sidebarContainer, sidebarRoot, wrapper }
+  }, [])
+
+  const acceptWidth = React.useCallback(
+    (
+      nextWidth: number,
+      currentWidth: number,
+      rail: HTMLButtonElement,
+      sidebarRoot: HTMLElement,
+      wrapper: HTMLElement,
+    ): boolean =>
+      resolvedResizable?.shouldAcceptWidth?.({
+        currentWidth,
+        nextWidth,
+        rail,
+        side: sidebarInstance?.side ?? 'left',
+        sidebarRoot,
+        wrapper,
+      }) ?? true,
+    [resolvedResizable, sidebarInstance?.side],
+  )
+
+  const commitWidth = React.useCallback(
+    (width: number, rail: HTMLButtonElement): void =>
+    {
+      if (!resolvedResizable) return
+      const elements = resolveRailElements(rail)
+      if (!elements) return
+      const currentWidth = elements.sidebarContainer.getBoundingClientRect().width
+      const nextWidth = clampSidebarWidth(width, resolvedResizable)
+      if (!acceptWidth(nextWidth, currentWidth, rail, elements.sidebarRoot, elements.wrapper))
+      {
+        return
+      }
+
+      elements.wrapper.style.setProperty('--sidebar-width', `${nextWidth}px`)
+      rail.setAttribute('aria-valuenow', String(nextWidth))
+      if (resolvedResizable.storageKey && typeof window !== 'undefined')
+      {
+        setLocalStorageItem(resolvedResizable.storageKey, nextWidth, Schema.Finite)
+      }
+      resolvedResizable.onResize?.(nextWidth)
+    },
+    [acceptWidth, resolveRailElements, resolvedResizable],
+  )
+
   const stopResize = React.useCallback(
     (pointerId: number) =>
     {
@@ -405,6 +468,21 @@ function SidebarRail({
       if (resizeState.rafId !== null)
       {
         window.cancelAnimationFrame(resizeState.rafId)
+        const nextWidth = resizeState.pendingWidth
+        if (
+          acceptWidth(
+            nextWidth,
+            resizeState.width,
+            resizeState.rail,
+            resizeState.sidebarRoot,
+            resizeState.wrapper,
+          )
+        )
+        {
+          resizeState.wrapper.style.setProperty('--sidebar-width', `${nextWidth}px`)
+          resizeState.width = nextWidth
+          resizeState.rail.setAttribute('aria-valuenow', String(nextWidth))
+        }
       }
       resizeState.transitionTargets.forEach((element) =>
       {
@@ -423,7 +501,7 @@ function SidebarRail({
       document.body.style.removeProperty('cursor')
       document.body.style.removeProperty('user-select')
     },
-    [resolvedResizable],
+    [acceptWidth, resolvedResizable],
   )
 
   const handlePointerDown = React.useCallback(
@@ -433,20 +511,13 @@ function SidebarRail({
       if (event.defaultPrevented) return
       if (!resolvedResizable || !open || event.button !== 0) return
 
-      const wrapper = event.currentTarget.closest<HTMLElement>("[data-slot='sidebar-wrapper']")
-      const sidebarRoot = event.currentTarget.closest<HTMLElement>("[data-slot='sidebar']")
-      if (!wrapper || !sidebarRoot)
+      const elements = resolveRailElements(event.currentTarget)
+      if (!elements)
       {
         return
       }
 
-      const sidebarContainer = sidebarRoot.querySelector<HTMLElement>(
-        "[data-slot='sidebar-container']",
-      )
-      if (!sidebarContainer)
-      {
-        return
-      }
+      const { sidebarContainer, sidebarRoot, wrapper } = elements
 
       const startWidth = sidebarContainer.getBoundingClientRect().width
       const initialWidth = clampSidebarWidth(startWidth, resolvedResizable)
@@ -480,7 +551,7 @@ function SidebarRail({
       document.body.style.cursor = 'col-resize'
       document.body.style.userSelect = 'none'
     },
-    [onPointerDown, open, resolvedResizable, sidebarInstance?.side],
+    [onPointerDown, open, resolveRailElements, resolvedResizable, sidebarInstance?.side],
   )
 
   const handlePointerMove = React.useCallback(
@@ -532,6 +603,7 @@ function SidebarRail({
 
         activeResizeState.wrapper.style.setProperty('--sidebar-width', `${nextWidth}px`)
         activeResizeState.width = nextWidth
+        activeResizeState.rail.setAttribute('aria-valuenow', String(nextWidth))
       })
     },
     [onPointerMove, resolvedResizable],
@@ -591,13 +663,59 @@ function SidebarRail({
     [onClick, open, resolvedResizable, toggleSidebar],
   )
 
+  const handleDoubleClick = React.useCallback(
+    (event: React.MouseEvent<HTMLButtonElement>) =>
+    {
+      onDoubleClick?.(event)
+      if (event.defaultPrevented || !canResize || !resolvedResizable) return
+      event.preventDefault()
+      commitWidth(resolvedResizable.defaultWidth, event.currentTarget)
+    },
+    [canResize, commitWidth, onDoubleClick, resolvedResizable],
+  )
+
+  const handleKeyDown = React.useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>) =>
+    {
+      onKeyDown?.(event)
+      if (event.defaultPrevented || !canResize || !resolvedResizable) return
+      if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+      const elements = resolveRailElements(event.currentTarget)
+      if (!elements) return
+
+      event.preventDefault()
+      const direction = event.key === 'ArrowRight' ? 1 : -1
+      const sideDirection = sidebarInstance?.side === 'right' ? -direction : direction
+      const currentWidth = elements.sidebarContainer.getBoundingClientRect().width
+      commitWidth(currentWidth + sideDirection * 16, event.currentTarget)
+    },
+    [
+      canResize,
+      commitWidth,
+      onKeyDown,
+      resolveRailElements,
+      resolvedResizable,
+      sidebarInstance?.side,
+    ],
+  )
+
   React.useLayoutEffect(() =>
   {
-    if (!resolvedResizable?.storageKey || typeof window === 'undefined') return
+    if (!canResize || !resolvedResizable || typeof window === 'undefined') return
     const rail = railRef.current
     if (!rail) return
     const wrapper = rail.closest<HTMLElement>("[data-slot='sidebar-wrapper']")
-    if (!wrapper) return
+    const sidebarRoot = rail.closest<HTMLElement>("[data-slot='sidebar']")
+    const sidebarContainer = sidebarRoot?.querySelector<HTMLElement>(
+      "[data-slot='sidebar-container']",
+    )
+    if (!wrapper || !sidebarContainer) return
+
+    rail.setAttribute(
+      'aria-valuenow',
+      String(clampSidebarWidth(sidebarContainer.getBoundingClientRect().width, resolvedResizable)),
+    )
+    if (!resolvedResizable.storageKey) return
 
     let storedWidth: number | null
     try
@@ -614,8 +732,17 @@ function SidebarRail({
     // hydrate the CSS variable before the browser paints so a restored sidebar
     // never flashes at the default width first.
     wrapper.style.setProperty('--sidebar-width', `${clampedWidth}px`)
+    rail.setAttribute('aria-valuenow', String(clampedWidth))
     resolvedResizable.onResize?.(clampedWidth)
-  }, [resolvedResizable])
+  }, [canResize, resolvedResizable])
+
+  React.useLayoutEffect(() =>
+  {
+    if (!canResize)
+    {
+      railRef.current?.removeAttribute('aria-valuenow')
+    }
+  }, [canResize])
 
   React.useEffect(() =>
   {
@@ -641,9 +768,16 @@ function SidebarRail({
         render={
           <button
             aria-label={railLabel}
+            aria-orientation={canResize ? 'vertical' : undefined}
+            aria-valuemax={
+              canResize && Number.isFinite(resolvedResizable?.maxWidth)
+                ? resolvedResizable?.maxWidth
+                : undefined
+            }
+            aria-valuemin={canResize ? resolvedResizable?.minWidth : undefined}
             className={cn(
               // disable pointer events only when offcanvas sidebar is collapsed, that's when the rail sits over the native scrollbar on windows and linux. icon mode stays fully clickable.
-              '-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none',
+              '-translate-x-1/2 group-data-[side=left]:-right-4 absolute inset-y-0 z-20 hidden w-4 transition-all ease-linear after:absolute after:inset-y-0 after:left-1/2 after:w-[2px] hover:after:bg-sidebar-border focus-visible:after:bg-sidebar-border active:after:bg-sidebar-foreground group-data-[side=right]:left-0 sm:flex [[data-collapsible=offcanvas][data-state=collapsed]_&]:pointer-events-none',
               'in-data-[side=left]:cursor-w-resize in-data-[side=right]:cursor-e-resize',
               '[[data-side=left][data-state=collapsed]_&]:cursor-e-resize [[data-side=right][data-state=collapsed]_&]:cursor-w-resize',
               'group-data-[collapsible=offcanvas]:translate-x-0 hover:group-data-[collapsible=offcanvas]:bg-sidebar group-data-[collapsible=offcanvas]:after:left-full',
@@ -654,12 +788,15 @@ function SidebarRail({
             data-sidebar="rail"
             data-slot="sidebar-rail"
             onClick={handleClick}
+            onDoubleClick={handleDoubleClick}
+            onKeyDown={handleKeyDown}
             onPointerCancel={handlePointerCancel}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
             ref={railRef}
-            tabIndex={-1}
+            role={canResize ? 'separator' : undefined}
+            tabIndex={canResize ? 0 : -1}
             type="button"
             {...props}
           />

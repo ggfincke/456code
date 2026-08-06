@@ -2636,12 +2636,16 @@ export default function SidebarV2()
             <button
               type="button"
               onClick={showMoreSettled}
-              className="mt-1 flex h-[30px] w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border font-mono text-[11px] text-muted-foreground transition-colors hover:border-solid hover:border-input hover:bg-background/45 hover:text-foreground dark:border-white/15 dark:hover:border-white/30 dark:hover:bg-transparent"
+              className="mt-1 flex h-[30px] w-full min-w-0 items-center justify-center gap-1.5 overflow-hidden rounded-md border border-dashed border-border px-2 font-mono text-[11px] text-muted-foreground transition-colors hover:border-solid hover:border-input hover:bg-background/45 hover:text-foreground dark:border-white/15 dark:hover:border-white/30 dark:hover:bg-transparent"
             >
-              Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
-              <span className="text-muted-foreground/50">
-                ({hiddenSettledCount} settled hidden)
+              <span className="shrink-0 whitespace-nowrap">
+                Show {Math.min(hiddenSettledCount, SETTLED_TAIL_PAGE_COUNT)} more
               </span>
+              {hiddenSettledCount > SETTLED_TAIL_PAGE_COUNT ? (
+                <span className="min-w-0 truncate text-muted-foreground/50">
+                  ({hiddenSettledCount} hidden)
+                </span>
+              ) : null}
             </button>
           </div>
         ) : null}
