@@ -91,7 +91,7 @@ import * as WorkerBrokerStore from './workers/WorkerBrokerStore.ts'
 import * as WorkersStatusBroadcaster from './workers/WorkersStatusBroadcaster.ts'
 import { OrchestrationLayerLive } from './orchestration/runtimeLayer.ts'
 import {
-  clearPersistedServerRuntimeState,
+  clearPersistedServerRuntimeStateIfOwned,
   makePersistedServerRuntimeState,
   persistServerRuntimeState,
 } from './serverRuntimeState.ts'
@@ -424,7 +424,7 @@ export const makeServerLayer = Layer.unwrap(
           const address = server.address
           if (typeof address === 'string' || !('port' in address))
           {
-            return
+            return null
           }
 
           const state = yield* makePersistedServerRuntimeState({
@@ -435,8 +435,15 @@ export const makeServerLayer = Layer.unwrap(
             path: config.serverRuntimeStatePath,
             state,
           })
+          return state
         }),
-        () => clearPersistedServerRuntimeState(config.serverRuntimeStatePath),
+        (state) =>
+          state === null
+            ? Effect.void
+            : clearPersistedServerRuntimeStateIfOwned({
+                path: config.serverRuntimeStatePath,
+                expectedState: state,
+              }),
       ),
     )
     const tailscaleServeLayer = config.tailscaleServeEnabled

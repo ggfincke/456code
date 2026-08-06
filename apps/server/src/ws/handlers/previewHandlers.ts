@@ -5,6 +5,7 @@ import { type DiscoveredLocalServerList, WS_METHODS, type WsRpcGroup } from '@t3
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as Queue from 'effect/Queue'
+import * as Semaphore from 'effect/Semaphore'
 import * as Stream from 'effect/Stream'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
@@ -106,17 +107,21 @@ export function makePreviewRpcHandlers({
           Effect.gen(function* ()
           {
             yield* portDiscovery.retain
-            const initial = yield* portDiscovery.scan()
-            const initialScannedAt = DateTime.formatIso(yield* DateTime.now)
-            yield* Queue.offer(queue, {
-              servers: initial,
-              scannedAt: initialScannedAt,
-            })
-            yield* portDiscovery.subscribe((servers) =>
+            const setupLock = yield* Semaphore.make(1)
+            const publishServers = (servers: DiscoveredLocalServerList['servers']) =>
               Effect.gen(function* ()
               {
                 const scannedAt = DateTime.formatIso(yield* DateTime.now)
                 yield* Queue.offer(queue, { servers, scannedAt })
+              })
+
+            yield* setupLock.withPermit(
+              Effect.gen(function* ()
+              {
+                yield* portDiscovery.subscribe((servers) =>
+                  setupLock.withPermit(publishServers(servers)),
+                )
+                yield* publishServers(yield* portDiscovery.scan())
               }),
             )
           }),

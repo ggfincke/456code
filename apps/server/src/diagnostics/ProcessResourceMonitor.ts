@@ -16,8 +16,8 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
-import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 
+import * as ProcessRunner from '../processRunner.ts'
 import * as ProcessDiagnostics from './ProcessDiagnostics.ts'
 
 const SAMPLE_INTERVAL_MS = 5_000
@@ -287,7 +287,7 @@ export function aggregateProcessResourceHistory(input: {
 
 export const make = Effect.gen(function* ()
 {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const processRunner = yield* ProcessRunner.ProcessRunner
   const state = yield* Ref.make<MonitorState>({ samples: [], lastFailure: null })
 
   const recordSamplingFailure = (cause: {
@@ -305,8 +305,8 @@ export const make = Effect.gen(function* ()
   {
     const sampledAt = yield* DateTime.now
     const sampledAtMs = DateTime.toEpochMillis(sampledAt)
-    const rows = yield* ProcessDiagnostics.readProcessRows.pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    const rows = yield* ProcessDiagnostics.readProcessRowsWithRunner.pipe(
+      Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
     )
     const samples = collectMonitoredSamples({
       rows,
@@ -322,9 +322,6 @@ export const make = Effect.gen(function* ()
     Effect.catchTags({
       ProcessDiagnosticsQueryTimeoutError: recordSamplingFailure,
       ProcessDiagnosticsQueryFailedError: recordSamplingFailure,
-      ProcessDiagnosticsServerProcessSignalError: recordSamplingFailure,
-      ProcessDiagnosticsNotDescendantError: recordSamplingFailure,
-      ProcessDiagnosticsSignalFailedError: recordSamplingFailure,
     }),
   )
 
@@ -351,4 +348,6 @@ export const make = Effect.gen(function* ()
   return ProcessResourceMonitor.of({ readHistory })
 })
 
-export const layer = Layer.effect(ProcessResourceMonitor, make)
+export const layer = Layer.effect(ProcessResourceMonitor, make).pipe(
+  Layer.provide(ProcessRunner.layer),
+)

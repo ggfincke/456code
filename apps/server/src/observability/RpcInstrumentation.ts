@@ -3,15 +3,12 @@
 
 import { WS_METHODS } from '@t3tools/contracts'
 import * as Clock from 'effect/Clock'
-import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
-import * as Metric from 'effect/Metric'
 import * as References from 'effect/References'
 import * as Stream from 'effect/Stream'
 
-import { outcomeFromExit } from './Attributes.ts'
-import { metricAttributes, rpcRequestDuration, rpcRequestsTotal, withMetrics } from './Metrics.ts'
+import { recordMetrics, rpcRequestDuration, rpcRequestsTotal, withMetrics } from './Metrics.ts'
 
 const RPC_SPAN_PREFIX = 'ws.rpc'
 const DEFAULT_RPC_SPAN_ATTRIBUTES = {
@@ -70,25 +67,12 @@ const recordRpcStreamMetrics = <E>(
   startedAt: bigint,
   exit: Exit.Exit<unknown, E>,
 ): Effect.Effect<void, never, never> =>
-  Effect.gen(function* ()
-  {
-    const endedAt = yield* Clock.currentTimeNanos
-    const elapsedNanos = endedAt > startedAt ? endedAt - startedAt : 0n
-
-    yield* Metric.update(
-      Metric.withAttributes(rpcRequestDuration, metricAttributes({ method })),
-      Duration.nanos(elapsedNanos),
-    )
-    yield* Metric.update(
-      Metric.withAttributes(
-        rpcRequestsTotal,
-        metricAttributes({
-          method,
-          outcome: outcomeFromExit(exit),
-        }),
-      ),
-      1,
-    )
+  recordMetrics({
+    startedAt,
+    exit,
+    counter: rpcRequestsTotal,
+    timer: rpcRequestDuration,
+    attributes: { method },
   })
 
 export const observeRpcEffect = <A, E, R>(

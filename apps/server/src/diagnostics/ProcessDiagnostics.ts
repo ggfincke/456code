@@ -10,15 +10,12 @@ import type {
 import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Context from 'effect/Context'
 import * as DateTime from 'effect/DateTime'
-import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
-import * as ChildProcess from 'effect/unstable/process/ChildProcess'
-import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 
-import { collectUint8StreamText } from '../stream/collectUint8StreamText.ts'
+import * as ProcessRunner from '../processRunner.ts'
 
 export interface ProcessRow
 {
@@ -126,15 +123,19 @@ class ProcessDiagnosticsSignalFailedError extends Schema.TaggedErrorClass<Proces
   }
 }
 
-const ProcessDiagnosticsError = Schema.Union([
+const ProcessDiagnosticsQueryError = Schema.Union([
   ProcessDiagnosticsQueryTimeoutError,
   ProcessDiagnosticsQueryFailedError,
+])
+type ProcessDiagnosticsQueryError = typeof ProcessDiagnosticsQueryError.Type
+
+const ProcessDiagnosticsError = Schema.Union([
+  ProcessDiagnosticsQueryError,
   ProcessDiagnosticsServerProcessSignalError,
   ProcessDiagnosticsNotDescendantError,
   ProcessDiagnosticsSignalFailedError,
 ])
 type ProcessDiagnosticsError = typeof ProcessDiagnosticsError.Type
-const isProcessDiagnosticsError = Schema.is(ProcessDiagnosticsError)
 
 function parsePositiveInt(value: string): number | null
 {
@@ -362,7 +363,7 @@ function makeResult(input: {
 interface ProcessOutput
 {
   readonly cwd: string
-  readonly exitCode: number
+  readonly exitCode: number | null
   readonly stdout: string
   readonly stdoutBytes: number
   readonly stdoutTruncated: boolean
@@ -377,78 +378,53 @@ const runProcess = Effect.fn('runProcess')(function* (input: {
 })
 {
   const cwd = process.cwd()
-  return yield* Effect.gen(function* ()
-  {
-    const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-    // `ps` and `powershell.exe` are real executables; spawning through cmd.exe
-    // shell mode would re-tokenize the PowerShell `-Command` payload (which
-    // contains pipes) before PowerShell ever sees it.
-    const child = yield* spawner.spawn(
-      ChildProcess.make(input.command, input.args, {
-        cwd,
-      }),
-    )
-    const [stdout, stderr, exitCode] = yield* Effect.all(
-      [
-        collectUint8StreamText({
-          stream: child.stdout,
-          maxBytes: PROCESS_QUERY_MAX_OUTPUT_BYTES,
-          truncatedMarker: '\n\n[truncated]',
-        }),
-        collectUint8StreamText({
-          stream: child.stderr,
-          maxBytes: PROCESS_QUERY_MAX_OUTPUT_BYTES,
-          truncatedMarker: '\n\n[truncated]',
-        }),
-        child.exitCode,
-      ],
-      { concurrency: 'unbounded' },
-    )
-
-    return {
+  const processRunner = yield* ProcessRunner.ProcessRunner
+  return yield* processRunner
+    .run({
+      command: input.command,
+      args: input.args,
       cwd,
-      exitCode,
-      stdout: stdout.text,
-      stdoutBytes: stdout.bytes,
-      stdoutTruncated: stdout.truncated,
-      stderr: stderr.text,
-      stderrBytes: stderr.bytes,
-      stderrTruncated: stderr.truncated,
-    } satisfies ProcessOutput
-  }).pipe(
-    Effect.scoped,
-    Effect.timeoutOption(Duration.millis(PROCESS_QUERY_TIMEOUT_MS)),
-    Effect.flatMap((result) =>
-      Option.match(result, {
-        onNone: () =>
-          Effect.fail(
-            new ProcessDiagnosticsQueryTimeoutError({
+      timeout: PROCESS_QUERY_TIMEOUT_MS,
+      maxOutputBytes: PROCESS_QUERY_MAX_OUTPUT_BYTES,
+      outputMode: 'truncate',
+      truncatedMarker: '\n\n[truncated]',
+    })
+    .pipe(
+      Effect.map(
+        (result) =>
+          ({
+            cwd,
+            exitCode: result.code === null ? null : Number(result.code),
+            stdout: result.stdout,
+            stdoutBytes: Buffer.byteLength(result.stdout),
+            stdoutTruncated: result.stdoutTruncated,
+            stderr: result.stderr,
+            stderrBytes: Buffer.byteLength(result.stderr),
+            stderrTruncated: result.stderrTruncated,
+          }) satisfies ProcessOutput,
+      ),
+      Effect.mapError((cause) =>
+        cause._tag === 'ProcessTimeoutError'
+          ? new ProcessDiagnosticsQueryTimeoutError({
               command: input.command,
               argCount: input.args.length,
               cwd,
               timeoutMillis: PROCESS_QUERY_TIMEOUT_MS,
+            })
+          : new ProcessDiagnosticsQueryFailedError({
+              command: input.command,
+              argCount: input.args.length,
+              cwd,
+              cause,
             }),
-          ),
-        onSome: Effect.succeed,
-      }),
-    ),
-    Effect.mapError((cause) =>
-      isProcessDiagnosticsError(cause)
-        ? cause
-        : new ProcessDiagnosticsQueryFailedError({
-            command: input.command,
-            argCount: input.args.length,
-            cwd,
-            cause,
-          }),
-    ),
-  )
+      ),
+    )
 })
 
 function readPosixProcessRows(): Effect.Effect<
   ReadonlyArray<ProcessRow>,
-  ProcessDiagnosticsError,
-  ChildProcessSpawner.ChildProcessSpawner
+  ProcessDiagnosticsQueryError,
+  ProcessRunner.ProcessRunner
 >
 {
   return runProcess({
@@ -462,7 +438,7 @@ function readPosixProcessRows(): Effect.Effect<
               command: 'ps',
               argCount: 2,
               cwd: result.cwd,
-              exitCode: result.exitCode,
+              ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
               stdoutBytes: result.stdoutBytes,
               stderrBytes: result.stderrBytes,
               stdoutTruncated: result.stdoutTruncated,
@@ -476,8 +452,8 @@ function readPosixProcessRows(): Effect.Effect<
 
 function readWindowsProcessRows(): Effect.Effect<
   ReadonlyArray<ProcessRow>,
-  ProcessDiagnosticsError,
-  ChildProcessSpawner.ChildProcessSpawner
+  ProcessDiagnosticsQueryError,
+  ProcessRunner.ProcessRunner
 >
 {
   const command = [
@@ -499,7 +475,7 @@ function readWindowsProcessRows(): Effect.Effect<
               command: 'powershell.exe',
               argCount: 4,
               cwd: result.cwd,
-              exitCode: result.exitCode,
+              ...(result.exitCode === null ? {} : { exitCode: result.exitCode }),
               stdoutBytes: result.stdoutBytes,
               stderrBytes: result.stderrBytes,
               stdoutTruncated: result.stdoutTruncated,
@@ -511,11 +487,13 @@ function readWindowsProcessRows(): Effect.Effect<
   )
 }
 
-export const readProcessRows = Effect.gen(function* ()
+export const readProcessRowsWithRunner = Effect.gen(function* ()
 {
   const platform = yield* HostProcessPlatform
   return yield* platform === 'win32' ? readWindowsProcessRows() : readPosixProcessRows()
 })
+
+export const readProcessRows = readProcessRowsWithRunner.pipe(Effect.provide(ProcessRunner.layer))
 
 export function aggregateProcessDiagnostics(input: {
   readonly serverPid: number
@@ -528,7 +506,7 @@ export function aggregateProcessDiagnostics(input: {
 
 function assertDescendantPid(
   pid: number,
-): Effect.Effect<void, ProcessDiagnosticsError, ChildProcessSpawner.ChildProcessSpawner>
+): Effect.Effect<void, ProcessDiagnosticsError, ProcessRunner.ProcessRunner>
 {
   if (pid === process.pid)
   {
@@ -539,7 +517,7 @@ function assertDescendantPid(
     )
   }
 
-  return readProcessRows.pipe(
+  return readProcessRowsWithRunner.pipe(
     Effect.flatMap((rows) =>
     {
       const filteredRows = rows.filter((row) => !isDiagnosticsQueryProcess(row, process.pid))
@@ -560,17 +538,17 @@ function assertDescendantPid(
 
 export const make = Effect.gen(function* ()
 {
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
+  const processRunner = yield* ProcessRunner.ProcessRunner
 
   const read: ProcessDiagnostics['Service']['read'] = Effect.gen(function* ()
   {
     const readAt = yield* DateTime.now
-    const rows = yield* readProcessRows.pipe(
-      Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+    const rows = yield* readProcessRowsWithRunner.pipe(
+      Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
     )
     return makeResult({ serverPid: process.pid, rows, readAt })
   }).pipe(
-    Effect.catch((error: ProcessDiagnosticsError) =>
+    Effect.catch((error: ProcessDiagnosticsQueryError) =>
       DateTime.now.pipe(
         Effect.map((readAt) =>
           makeResult({ serverPid: process.pid, rows: [], readAt, error: error.message }),
@@ -583,7 +561,7 @@ export const make = Effect.gen(function* ()
     function* (input)
     {
       return yield* assertDescendantPid(input.pid).pipe(
-        Effect.provideService(ChildProcessSpawner.ChildProcessSpawner, spawner),
+        Effect.provideService(ProcessRunner.ProcessRunner, processRunner),
         Effect.flatMap(() =>
           Effect.try({
             try: () =>
@@ -619,4 +597,4 @@ export const make = Effect.gen(function* ()
   return ProcessDiagnostics.of({ read, signal })
 })
 
-export const layer = Layer.effect(ProcessDiagnostics, make)
+export const layer = Layer.effect(ProcessDiagnostics, make).pipe(Layer.provide(ProcessRunner.layer))

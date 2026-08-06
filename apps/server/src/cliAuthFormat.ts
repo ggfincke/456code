@@ -34,12 +34,12 @@ export function formatIssuedPairingCredential(
   credential: IssuedPairingLink,
   options?: {
     readonly json?: boolean
-    readonly baseUrl?: string
+    readonly baseUrl?: string | URL
   },
 ): string
 {
   const pairUrl =
-    options?.baseUrl != null && options.baseUrl.length > 0
+    options?.baseUrl != null && options.baseUrl.toString().length > 0
       ? (() =>
         {
           const url = new URL('/pair', options.baseUrl)

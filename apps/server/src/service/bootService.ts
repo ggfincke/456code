@@ -436,8 +436,13 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     // older CLI wrote a different runtime/node path) AND the entry point it
     // references still exists (a pinned runtime under ~/.456code can be deleted to
     // reclaim space). Either mismatch makes connect offer a repair.
-    const entryExists = yield* fs.exists(plannedEntryPath)
-    const current = unit === renderBootServiceUnit(plan) && entryExists
+    const [entryExists, sentinelExists] = yield* Effect.all([
+      fs.exists(plannedEntryPath),
+      isEphemeralCacheEntry(host.cliEntryPath)
+        ? fs.exists(runtimePaths.sentinelPath)
+        : Effect.succeed(true),
+    ])
+    const current = unit === renderBootServiceUnit(plan) && entryExists && sentinelExists
     return { supported: true, installed: true, current, unitPath, logPath }
   }).pipe(
     Effect.mapError((cause) => new BootServiceInstallError({ cause })),

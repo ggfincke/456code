@@ -11,6 +11,7 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as References from 'effect/References'
+import * as Schema from 'effect/Schema'
 import { Argument, Command, Flag, GlobalFlag } from 'effect/unstable/cli'
 
 import * as EnvironmentAuth from '../auth/EnvironmentAuth.ts'
@@ -76,7 +77,23 @@ const subjectFlag = Flag.string('subject').pipe(
   Flag.optional,
 )
 
+const PairingBaseUrl = Schema.URLFromString.check(
+  Schema.makeFilter((baseUrl) =>
+  {
+    try
+    {
+      new URL('/pair', baseUrl)
+      return undefined
+    }
+    catch
+    {
+      return 'Expected a hierarchical base URL that can resolve /pair.'
+    }
+  }),
+)
+
 const baseUrlFlag = Flag.string('base-url').pipe(
+  Flag.withSchema(PairingBaseUrl),
   Flag.withDescription('Optional public base URL used to print a ready `/pair#token=...` link.'),
   Flag.optional,
 )
