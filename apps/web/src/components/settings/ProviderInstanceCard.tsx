@@ -264,7 +264,21 @@ function ProviderEnvironmentSection(props: {
                   <TableCell>
                     <DraftInput
                       value={variable.name}
-                      onCommit={(name) => updateVariable(variable.id, { name: name.trim() })}
+                      onCommit={(name) =>
+                        {
+                        const nextName = name.trim()
+                        if (variable.valueRedacted && nextName !== variable.name)
+                          {
+                          toastManager.add({
+                            type: 'warning',
+                            title: 'Enter the secret before renaming',
+                            description:
+                              'Stored secrets cannot be moved to a new variable name. Enter a replacement value first.',
+                          })
+                          return
+                        }
+                        updateVariable(variable.id, { name: nextName })
+                      }}
                       placeholder="VARIABLE_NAME"
                       spellCheck={false}
                       aria-label={`Environment variable name ${index + 1}`}
@@ -774,6 +788,7 @@ export function ProviderInstanceCard({
 
             <div>
               <ProviderEnvironmentSection
+                key={JSON.stringify(instance.environment ?? [])}
                 environment={instance.environment ?? []}
                 onChange={updateEnvironment}
               />

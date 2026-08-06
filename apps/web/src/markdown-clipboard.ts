@@ -16,6 +16,7 @@ const SANITIZED_HTML_SELECTOR = [
   '[aria-hidden="true"]',
   ...SKIPPED_CLASS_NAMES.map((className) => `.${className}`),
 ].join(', ')
+const FENCED_CODE_BLOCK_PATTERN = /(`{3,})[^\n]*\n(?:[\s\S]*?\n[ \t]*\1[ \t]*(?=\n|$)|[\s\S]*$)/g
 
 export interface MarkdownClipboardPayload
 {
@@ -264,15 +265,24 @@ function serializeNode(node: Node): string
 }
 
 // collapses serializer spacing artifacts without touching fenced code content.
+function tidyMarkdownProse(markdown: string): string
+{
+  return markdown.replace(/[ \t]+(?=\n)/g, '').replace(/\n{3,}/g, '\n\n')
+}
+
 function tidyMarkdown(markdown: string): string
 {
-  return markdown
-    .split(/(```[\s\S]*?(?:```|$))/)
-    .map((part, index) =>
-      index % 2 === 1 ? part : part.replace(/[ \t]+(?=\n)/g, '').replace(/\n{3,}/g, '\n\n'),
-    )
-    .join('')
-    .trim()
+  let result = ''
+  let cursor = 0
+  for (const match of markdown.matchAll(FENCED_CODE_BLOCK_PATTERN))
+  {
+    const matchIndex = match.index ?? 0
+    result += tidyMarkdownProse(markdown.slice(cursor, matchIndex))
+    result += match[0]
+    cursor = matchIndex + match[0].length
+  }
+  result += tidyMarkdownProse(markdown.slice(cursor))
+  return result.trim()
 }
 
 export function serializeRenderedMarkdownFragment(container: Node): string

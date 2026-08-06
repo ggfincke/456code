@@ -137,7 +137,15 @@ export const ProposedPlanCard = memo(function ProposedPlanCard({
       },
     }).then((result) =>
     {
-      if (result._tag !== 'Success') return
+      if (result._tag !== 'Success')
+      {
+        if (generationStartRef.current === revisionKey)
+        {
+          generationStartRef.current = null
+          latestGenerationQuery.refresh()
+        }
+        return
+      }
       setStartedGeneration({ key: revisionKey, generation: result.value })
       latestGenerationQuery.refresh()
     })

@@ -380,6 +380,7 @@ function WorkersRunDetailView({
 })
 {
   const groups = workerStageGroups(jobs)
+  const failureBreakdown = run === null ? null : workerRunFailureBreakdown(jobs)
 
   return (
     <div className="pb-4">
@@ -395,8 +396,8 @@ function WorkersRunDetailView({
             <ScopeViolationBadge count={run.scopeViolationCount} />
           </div>
           <DetailField label="Jobs">{run.total.toLocaleString()}</DetailField>
-          {workerRunFailureBreakdown(jobs) === null ? null : (
-            <DetailField label="Failures">{workerRunFailureBreakdown(jobs)}</DetailField>
+          {failureBreakdown === null ? null : (
+            <DetailField label="Failures">{failureBreakdown}</DetailField>
           )}
           <DetailField label="Elapsed">{workerRunSpanLabel(run, nowMs) ?? '—'}</DetailField>
           <DetailField label="Started">{relativeOrDash(run.firstCreatedAt)}</DetailField>

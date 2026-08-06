@@ -113,6 +113,8 @@ interface ActiveRecording
   readonly mimeType: string
   readonly startedAt: string
   readonly startupSettled: Promise<void>
+  nextFrameSequence: number
+  lastDrawnFrameSequence: number
   lifecycle: BrowserRecordingLifecycle
 }
 
@@ -146,12 +148,14 @@ const drawFrame = (frame: DesktopPreviewRecordingFrame): void =>
 {
   const recording = active
   if (!recording || recording.tabId !== frame.tabId) return
+  const frameSequence = ++recording.nextFrameSequence
   const image = new Image()
   image.addEventListener(
     'load',
     () =>
     {
-      if (active !== recording) return
+      if (active !== recording || frameSequence < recording.lastDrawnFrameSequence) return
+      recording.lastDrawnFrameSequence = frameSequence
       recording.context.drawImage(image, 0, 0, recording.canvas.width, recording.canvas.height)
     },
     { once: true },
@@ -292,6 +296,8 @@ export async function startBrowserRecording(tabId: string): Promise<string>
     mimeType,
     startedAt,
     startupSettled,
+    nextFrameSequence: 0,
+    lastDrawnFrameSequence: 0,
     lifecycle: { phase: 'starting' },
   }
   active = recording
@@ -401,6 +407,7 @@ const finalizeBrowserRecording = async (
   let result:
     | { readonly _tag: 'Success'; readonly artifact: DesktopPreviewRecordingArtifact }
     | { readonly _tag: 'Failure'; readonly error: unknown }
+  let stopScreencastError: BrowserRecordingOperationError | undefined
   try
   {
     try
@@ -409,13 +416,14 @@ const finalizeBrowserRecording = async (
     }
     catch (cause)
     {
-      throw new BrowserRecordingOperationError({
+      stopScreencastError = new BrowserRecordingOperationError({
         operation: 'stop-screencast',
         tabId,
         cause,
       })
     }
     await waitForRecordingStartupToSettle(recording)
+    if (stopScreencastError) throw stopScreencastError
     try
     {
       await stopMediaRecorder(recording.recorder)

@@ -190,10 +190,6 @@ export function useThreadActions()
         )
       }
 
-      const currentRouteThreadRef = getCurrentRouteThreadRef()
-      const shouldNavigateToDraft =
-        currentRouteThreadRef?.threadId === threadRef.threadId &&
-        currentRouteThreadRef.environmentId === threadRef.environmentId
       const archiveResult = await archiveThreadMutation({
         environmentId: threadRef.environmentId,
         input: { threadId: threadRef.threadId },
@@ -205,6 +201,10 @@ export function useThreadActions()
       refreshArchivedThreadsForEnvironment(threadRef.environmentId)
       opts.onArchived?.()
 
+      const currentRouteThreadRef = getCurrentRouteThreadRef()
+      const shouldNavigateToDraft =
+        currentRouteThreadRef?.threadId === threadRef.threadId &&
+        currentRouteThreadRef.environmentId === threadRef.environmentId
       if (shouldNavigateToDraft)
       {
         const navigationResult = await settlePromise(() =>
@@ -322,10 +322,6 @@ export function useThreadActions()
       })
 
       const deletedThreadIds = deletedIds ?? new Set<ThreadId>()
-      const currentRouteThreadRef = getCurrentRouteThreadRef()
-      const shouldNavigateToFallback =
-        currentRouteThreadRef?.threadId === threadRef.threadId &&
-        currentRouteThreadRef.environmentId === threadRef.environmentId
       const fallbackThreadId = getFallbackThreadIdAfterDelete({
         threads,
         deletedThreadId: threadRef.threadId,
@@ -348,6 +344,10 @@ export function useThreadActions()
       )
       clearTerminalUiState(threadRef)
 
+      const currentRouteThreadRef = getCurrentRouteThreadRef()
+      const shouldNavigateToFallback =
+        currentRouteThreadRef?.threadId === threadRef.threadId &&
+        currentRouteThreadRef.environmentId === threadRef.environmentId
       if (shouldNavigateToFallback)
       {
         if (fallbackThreadId)

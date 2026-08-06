@@ -10,12 +10,7 @@ import { finalizePromotedDraftThreadByRef, useComposerDraftStore } from '../comp
 import { resolveThreadRouteRef, resolveThreadRouteRenderState } from '../threadRoutes'
 import { resolveThreadSyncPhase } from '../threadSync'
 import { SidebarInset } from '~/components/ui/sidebar'
-import {
-  useEnvironmentThreadRefs,
-  useThreadDetail,
-  useThreadShell,
-  useThreadStatus,
-} from '../state/entities'
+import { useThreadDetail, useThreadShell, useThreadStatus } from '../state/entities'
 import { useEnvironmentQuery } from '../state/query'
 import { environmentShell } from '../state/shell'
 
@@ -31,23 +26,13 @@ function ChatThreadRouteView()
   const serverThreadShell = useThreadShell(threadRef)
   const serverThreadDetail = useThreadDetail(threadRef)
   const serverThreadStatus = useThreadStatus(threadRef)
-  const environmentThreadRefs = useEnvironmentThreadRefs(threadRef?.environmentId ?? null)
   const bootstrapComplete = shell.data?.snapshot._tag === 'Some'
-  const environmentHasServerThreads = environmentThreadRefs.length > 0
   const draftThreadExists = useComposerDraftStore((store) =>
     threadRef ? store.getDraftThreadByRef(threadRef) !== null : false,
   )
   const draftThread = useComposerDraftStore((store) =>
     threadRef ? store.getDraftThreadByRef(threadRef) : null,
   )
-  const environmentHasDraftThreads = useComposerDraftStore((store) =>
-  {
-    if (!threadRef)
-    {
-      return false
-    }
-    return store.hasDraftThreadsInEnvironment(threadRef.environmentId)
-  })
   const renderState = resolveThreadRouteRenderState({
     bootstrapComplete,
     serverThreadShellExists: serverThreadShell !== null,
@@ -61,7 +46,6 @@ function ChatThreadRouteView()
     status: serverThreadStatus,
   })
   const serverThreadStarted = threadHasStarted(serverThreadDetail)
-  const environmentHasAnyThreads = environmentHasServerThreads || environmentHasDraftThreads
 
   useEffect(() =>
   {
@@ -70,11 +54,11 @@ function ChatThreadRouteView()
       return
     }
 
-    if (renderState === 'missing' && environmentHasAnyThreads)
+    if (renderState === 'missing')
     {
       void navigate({ to: '/', replace: true })
     }
-  }, [bootstrapComplete, environmentHasAnyThreads, navigate, renderState, threadRef])
+  }, [bootstrapComplete, navigate, renderState, threadRef])
 
   useEffect(() =>
   {

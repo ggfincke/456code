@@ -53,6 +53,9 @@ export type ReviewCommentMessageSegment =
 const REVIEW_COMMENT_BLOCK_PATTERN = /<review_comment\b([^>]*)>\s*([\s\S]*?)<\/review_comment>/g
 const REVIEW_COMMENT_ATTRIBUTE_PATTERN = /([a-zA-Z][a-zA-Z0-9_-]*)="([^"]*)"/g
 const REVIEW_COMMENT_FENCE_PATTERN = /(`{3,})([^\s`]*)[^\n]*\n([\s\S]*?)\n\1/g
+const REVIEW_COMMENT_BODY_ENCODING = 'escaped-close-tag-v1'
+const REVIEW_COMMENT_CLOSE_TAG = '</review_comment>'
+const REVIEW_COMMENT_ESCAPED_CLOSE_TAG = '&lt;/review_comment&gt;'
 
 function escapeReviewCommentAttribute(value: string): string
 {
@@ -70,6 +73,20 @@ function unescapeReviewCommentAttribute(value: string): string
     .replace(/&gt;/g, '>')
     .replace(/&quot;/g, '"')
     .replace(/&amp;/g, '&')
+}
+
+function escapeReviewCommentBody(value: string): string
+{
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll(REVIEW_COMMENT_CLOSE_TAG, REVIEW_COMMENT_ESCAPED_CLOSE_TAG)
+}
+
+function unescapeReviewCommentBody(value: string): string
+{
+  return value
+    .replaceAll(REVIEW_COMMENT_ESCAPED_CLOSE_TAG, REVIEW_COMMENT_CLOSE_TAG)
+    .replaceAll('&amp;', '&')
 }
 
 function readReviewCommentAttributes(rawAttributes: string): Record<string, string>
@@ -91,7 +108,10 @@ function readNonNegativeInteger(value: string | undefined): number | null
   return Number(value)
 }
 
-function extractReviewCommentBody(rawBody: string): {
+function extractReviewCommentBody(
+  rawBody: string,
+  encoded: boolean,
+): {
   text: string
   language: string
   contents: string
@@ -100,10 +120,11 @@ function extractReviewCommentBody(rawBody: string): {
   const matches = Array.from(rawBody.matchAll(REVIEW_COMMENT_FENCE_PATTERN))
   const match = matches.at(-1)
   const fenceIndex = match?.index
+  const decode = encoded ? unescapeReviewCommentBody : (value: string) => value
   return {
-    text: rawBody.slice(0, fenceIndex ?? rawBody.length).trim(),
+    text: decode(rawBody.slice(0, fenceIndex ?? rawBody.length).trim()),
     language: match?.[2]?.trim() || 'diff',
-    contents: match?.[3] ?? '',
+    contents: decode(match?.[3] ?? ''),
   }
 }
 
@@ -122,7 +143,10 @@ function parseReviewCommentContext(
   {
     return null
   }
-  const body = extractReviewCommentBody(rawBody)
+  const body = extractReviewCommentBody(
+    rawBody,
+    attributes.bodyEncoding === REVIEW_COMMENT_BODY_ENCODING,
+  )
 
   return {
     id: `review-comment:${index}:${sectionId}:${filePath}:${startIndex}:${endIndex}`,
@@ -218,10 +242,14 @@ export function formatReviewCommentContext(comment: ReviewCommentContext): strin
       ` startIndex="${comment.startIndex}"`,
       ` endIndex="${comment.endIndex}"`,
       ` rangeLabel="${escapeReviewCommentAttribute(comment.rangeLabel)}"`,
+      ` bodyEncoding="${REVIEW_COMMENT_BODY_ENCODING}"`,
       '>',
     ].join(''),
-    comment.text.trim(),
-    formatReviewCommentFence(comment.fenceLanguage ?? 'diff', comment.diff),
+    escapeReviewCommentBody(comment.text.trim()),
+    formatReviewCommentFence(
+      comment.fenceLanguage ?? 'diff',
+      escapeReviewCommentBody(comment.diff),
+    ),
     '</review_comment>',
   ].join('\n')
 }

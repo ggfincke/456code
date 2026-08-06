@@ -49,6 +49,7 @@ const inputGroupAddonVariants = cva(
 function InputGroupAddon({
   className,
   align = 'inline-start',
+  onMouseDown,
   ...props
 }: React.ComponentProps<'div'> & VariantProps<typeof inputGroupAddonVariants>)
 {
@@ -59,6 +60,8 @@ function InputGroupAddon({
       data-slot="input-group-addon"
       onMouseDown={(e) =>
       {
+        onMouseDown?.(e)
+        if (e.defaultPrevented) return
         const target = e.target as HTMLElement
         const isInteractive = target.closest(
           "button, a, input, select, textarea, [role='button'], [role='combobox'], [role='listbox'], [data-slot='select-trigger']",

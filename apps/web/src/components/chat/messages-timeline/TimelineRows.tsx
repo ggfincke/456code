@@ -42,10 +42,7 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react'
-import {
-  extractTrailingElementContexts,
-  type ParsedElementContextEntry,
-} from '~/lib/elementContext'
+import { type ParsedElementContextEntry } from '~/lib/elementContext'
 import {
   extractTrailingPreviewAnnotation,
   type ParsedPreviewAnnotation,
@@ -90,6 +87,7 @@ import { formatWorkspaceRelativePath } from '../../../filePathDisplay'
 import {
   buildReviewCommentRenderablePatch,
   formatReviewCommentFence,
+  formatReviewCommentContext,
   parseReviewCommentMessageSegments,
   type ReviewCommentContext,
 } from '../../../reviewCommentContext'
@@ -134,6 +132,37 @@ type TimelineMessage = Extract<TimelineEntry, { kind: 'message' }>['message']
 type TimelineWorkEntry = Extract<MessagesTimelineRow, { kind: 'work' }>['groupedEntries'][number]
 type TimelineRow = MessagesTimelineRow
 
+function splitTrailingReviewComments(value: string): {
+  promptText: string
+  comments: ReviewCommentContext[]
+}
+{
+  const segments = parseReviewCommentMessageSegments(value)
+  const firstCommentIndex = segments.findIndex((segment) => segment.kind === 'review-comment')
+  if (firstCommentIndex === -1)
+  {
+    return { promptText: value, comments: [] }
+  }
+
+  const trailingSegments = segments.slice(firstCommentIndex)
+  const hasTrailingText = trailingSegments.some(
+    (segment) => segment.kind === 'text' && segment.text.trim().length > 0,
+  )
+  if (hasTrailingText)
+  {
+    return { promptText: value, comments: [] }
+  }
+
+  const promptText = segments
+    .slice(0, firstCommentIndex)
+    .flatMap((segment) => (segment.kind === 'text' ? [segment.text] : []))
+    .join('')
+  const comments = trailingSegments.flatMap((segment) =>
+    segment.kind === 'review-comment' ? [segment.comment] : [],
+  )
+  return { promptText, comments }
+}
+
 const TimelineRowContent = memo(function TimelineRowContent({ row }: { row: TimelineRow })
 {
   return (
@@ -171,19 +200,28 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'message' 
 {
   const ctx = use(TimelineRowCtx)
   const userImages = row.message.attachments ?? []
-  const displayedUserMessage = deriveDisplayedUserMessageState(row.message.text)
-  const terminalContexts = displayedUserMessage.contexts
+  const reviewCommentState = splitTrailingReviewComments(row.message.text)
   const previewAnnotations: ParsedPreviewAnnotation[] = []
-  let visibleText = displayedUserMessage.visibleText
+  let promptWithoutPreviewAnnotations = reviewCommentState.promptText
   while (true)
   {
-    const extracted = extractTrailingPreviewAnnotation(visibleText)
+    const extracted = extractTrailingPreviewAnnotation(promptWithoutPreviewAnnotations)
     if (!extracted.annotation) break
     previewAnnotations.unshift(extracted.annotation)
-    visibleText = extracted.promptText
+    promptWithoutPreviewAnnotations = extracted.promptText
   }
-  const elementContextState = extractTrailingElementContexts(visibleText)
-  const elementContexts = [...displayedUserMessage.elementContexts, ...elementContextState.contexts]
+  const displayedUserMessage = deriveDisplayedUserMessageState(promptWithoutPreviewAnnotations)
+  const terminalContexts = displayedUserMessage.contexts
+  const elementContexts = displayedUserMessage.elementContexts
+  const visibleText =
+    reviewCommentState.comments.length === 0
+      ? displayedUserMessage.visibleText
+      : [
+          displayedUserMessage.visibleText.trim(),
+          ...reviewCommentState.comments.map(formatReviewCommentContext),
+        ]
+          .filter((text) => text.length > 0)
+          .join('\n\n')
   const previewImages = userImages.filter((image) => image.name.startsWith('preview-annotation-'))
   const regularImages = userImages.filter((image) => !image.name.startsWith('preview-annotation-'))
   const canRevertAgentWork = typeof row.revertTurnCount === 'number'
@@ -243,7 +281,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'message' 
           </div>
         ) : null}
         <CollapsibleUserMessageBody
-          text={elementContextState.promptText}
+          text={visibleText}
           terminalContexts={terminalContexts}
           skills={ctx.skills}
           markdownCwd={ctx.markdownCwd}
@@ -261,9 +299,7 @@ function UserTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'message' 
           </Tooltip>
           <div className="flex items-center gap-0.5">
             {canRevertAgentWork && <RevertUserMessageButton messageId={row.message.id} />}
-            {displayedUserMessage.copyText && (
-              <MessageCopyButton text={displayedUserMessage.copyText} variant="ghost" />
-            )}
+            {row.message.text && <MessageCopyButton text={row.message.text} variant="ghost" />}
           </div>
         </div>
       </div>

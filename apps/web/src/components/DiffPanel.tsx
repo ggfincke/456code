@@ -139,23 +139,32 @@ export default function DiffPanel({
   useEffect(() =>
   {
     if (!routeThreadRef || diffSelection.kind !== 'turn') return
-    useDiffPanelStore.getState().reconcileTurnSelection(
-      routeThreadRef,
-      orderedTurnDiffSummaries.map((summary) => summary.turnId),
-    )
+    const availableTurnIds = orderedTurnDiffSummaries.map((summary) => summary.turnId)
+    if (!availableTurnIds.includes(diffSelection.turnId))
+    {
+      const latestTurnId = availableTurnIds[0]
+      if (latestTurnId)
+      {
+        useDiffPanelStore.getState().selectTurn(routeThreadRef, latestTurnId)
+      }
+      return
+    }
+    useDiffPanelStore.getState().reconcileTurnSelection(routeThreadRef, availableTurnIds)
   }, [diffSelection, orderedTurnDiffSummaries, routeThreadRef])
 
   const selectedTurnId = diffSelection.kind === 'turn' ? diffSelection.turnId : null
   const selectedGitScope = diffSelection.kind === 'unstaged' ? 'unstaged' : 'branch'
   const selectedBaseRef = diffSelection.kind === 'branch' ? diffSelection.baseRef : null
-  const selectedFilePath = diffSelection.kind === 'turn' ? diffSelection.filePath : null
-  const selectedFileRevealRequestId =
-    diffSelection.kind === 'turn' ? diffSelection.revealRequestId : 0
-  const selectedTurn =
+  const exactSelectedTurn =
     selectedTurnId === null
       ? undefined
-      : (orderedTurnDiffSummaries.find((summary) => summary.turnId === selectedTurnId) ??
-        orderedTurnDiffSummaries[0])
+      : orderedTurnDiffSummaries.find((summary) => summary.turnId === selectedTurnId)
+  const selectedTurn =
+    selectedTurnId === null ? undefined : (exactSelectedTurn ?? orderedTurnDiffSummaries[0])
+  const selectedFilePath =
+    diffSelection.kind === 'turn' && exactSelectedTurn ? diffSelection.filePath : null
+  const selectedFileRevealRequestId =
+    diffSelection.kind === 'turn' && exactSelectedTurn ? diffSelection.revealRequestId : 0
   const selectedCheckpointTurnCount =
     selectedTurn &&
     (selectedTurn.checkpointTurnCount ?? inferredCheckpointTurnCountByTurnId[selectedTurn.turnId])

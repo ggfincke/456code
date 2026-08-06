@@ -229,7 +229,8 @@ const currentStatus = async (
 ): Promise<PreviewAutomationStatus> =>
 {
   const state = readThreadPreviewState(threadRef)
-  const { snapshot, tabId } = resolvePreviewAutomationTarget(state, requestedTabId)
+  const target = resolvePreviewAutomationTarget(state, requestedTabId)
+  const { snapshot, tabId } = target
   const visible = tabId
     ? (useBrowserSurfaceStore.getState().byTabId[tabId]?.visible ?? false)
     : false
@@ -246,7 +247,7 @@ const currentStatus = async (
   }
   const navStatus = snapshot?.navStatus
   return {
-    available: Boolean(previewBridge?.automation),
+    available: target.kind === 'missing-explicit' ? false : Boolean(previewBridge?.automation),
     visible,
     tabId,
     url: navStatus && navStatus._tag !== 'Idle' ? navStatus.url : null,
@@ -353,7 +354,8 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           reconcilePreviewServerSessions(threadRef, result.value.sessions)
           state = readThreadPreviewState(threadRef)
         }
-        tabId = request.tabId ?? state.snapshot?.tabId ?? null
+        const target = resolvePreviewAutomationTarget(state, request.tabId ?? null)
+        tabId = target.tabId
         const unavailableTarget = {
           requestId: request.requestId,
           operation: request.operation,
@@ -361,6 +363,10 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
           threadId: request.threadId,
           tabId,
           bridgeAvailable: Boolean(previewBridge),
+        }
+        if (target.kind === 'missing-explicit')
+        {
+          throw new PreviewAutomationTargetUnavailableError(unavailableTarget)
         }
         const requireReadyTab = async () =>
         {
@@ -386,15 +392,23 @@ function PreviewAutomationHost(props: { readonly environmentId: EnvironmentId })
                   url: input.url,
                 }).resolvedUrl
               : undefined
-            let activeTabId = resolvePreviewAutomationOpenTab(
+            const openTarget = resolvePreviewAutomationOpenTab(
               state,
               request.tabId,
               input.reuseExistingTab ?? true,
             )
+            if (openTarget.kind === 'missing-explicit')
+            {
+              throw new PreviewAutomationTargetUnavailableError({
+                ...unavailableTarget,
+                tabId: openTarget.tabId,
+              })
+            }
+            let activeTabId = openTarget.kind === 'reuse' ? openTarget.tabId : null
             let activeSnapshot = activeTabId
               ? (state.sessions[activeTabId] ?? state.snapshot ?? undefined)
               : undefined
-            const reusedExistingTab = activeTabId !== null
+            const reusedExistingTab = openTarget.kind === 'reuse'
             tabId = activeTabId
             if (!activeTabId)
             {

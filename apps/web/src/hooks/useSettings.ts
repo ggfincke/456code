@@ -26,7 +26,6 @@ const CLIENT_SETTINGS_PERSISTENCE_ERROR_SCOPE = '[CLIENT_SETTINGS]'
 type UnifiedSettingsPatch = ServerSettingsPatch & ClientSettingsPatch
 
 const clientSettingsListeners = new Set<() => void>()
-const clientSettingsHydrationListeners = new Set<() => void>()
 let clientSettingsSnapshot = DEFAULT_CLIENT_SETTINGS
 let clientSettingsHydrated = false
 let clientSettingsHydrationPromise: Promise<void> | null = null
@@ -35,14 +34,6 @@ let clientSettingsHydrationGeneration = 0
 function emitClientSettingsChange()
 {
   for (const listener of clientSettingsListeners)
-  {
-    listener()
-  }
-}
-
-function emitClientSettingsHydrationChange()
-{
-  for (const listener of clientSettingsHydrationListeners)
   {
     listener()
   }
@@ -59,16 +50,6 @@ function replaceClientSettingsSnapshot(settings: ClientSettings): void
   emitClientSettingsChange()
 }
 
-function setClientSettingsHydrated(nextHydrated: boolean): void
-{
-  if (clientSettingsHydrated === nextHydrated)
-  {
-    return
-  }
-  clientSettingsHydrated = nextHydrated
-  emitClientSettingsHydrationChange()
-}
-
 function subscribeClientSettings(listener: () => void): () => void
 {
   clientSettingsListeners.add(listener)
@@ -76,21 +57,6 @@ function subscribeClientSettings(listener: () => void): () => void
   return () =>
   {
     clientSettingsListeners.delete(listener)
-  }
-}
-
-function getClientSettingsHydratedSnapshot(): boolean
-{
-  return clientSettingsHydrated
-}
-
-function subscribeClientSettingsHydration(listener: () => void): () => void
-{
-  clientSettingsHydrationListeners.add(listener)
-  void hydrateClientSettings()
-  return () =>
-  {
-    clientSettingsHydrationListeners.delete(listener)
   }
 }
 
@@ -131,7 +97,7 @@ async function hydrateClientSettings(): Promise<void>
     {
       if (hydrationGeneration === clientSettingsHydrationGeneration)
       {
-        setClientSettingsHydrated(true)
+        clientSettingsHydrated = true
       }
     }
   })()
@@ -198,15 +164,6 @@ function splitPatch(patch: UnifiedSettingsPatch): {
 export function getClientSettings(): ClientSettings
 {
   return getClientSettingsSnapshot()
-}
-
-export function useClientSettingsHydrated(): boolean
-{
-  return useSyncExternalStore(
-    subscribeClientSettingsHydration,
-    getClientSettingsHydratedSnapshot,
-    () => false,
-  )
 }
 
 function useClientSettingsValue(): ClientSettings
@@ -307,11 +264,6 @@ function useUpdateSettingsTarget(environmentId: EnvironmentId | null)
   return updateSettings
 }
 
-export function useUpdateEnvironmentSettings(environmentId: EnvironmentId)
-{
-  return useUpdateSettingsTarget(environmentId)
-}
-
 export function useUpdatePrimarySettings()
 {
   return useUpdateSettingsTarget(usePrimaryEnvironment()?.environmentId ?? null)
@@ -335,13 +287,4 @@ export function __resetClientSettingsPersistenceForTests(): void
   clientSettingsHydrated = false
   clientSettingsHydrationPromise = null
   clientSettingsListeners.clear()
-  clientSettingsHydrationListeners.clear()
-}
-
-export function __setClientSettingsForTests(settings: ClientSettings): void
-{
-  clientSettingsHydrationGeneration += 1
-  clientSettingsSnapshot = settings
-  clientSettingsHydrated = true
-  clientSettingsHydrationPromise = null
 }

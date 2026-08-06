@@ -678,6 +678,10 @@ function ChatViewContent(props: ChatViewProps)
   )
   const composerDraftTarget: ScopedThreadRef | DraftId =
     routeKind === 'server' ? routeThreadRef : props.draftId
+  const composerDraftOwnerKey =
+    routeKind === 'server' ? `server:${routeThreadKey}` : `draft:${props.draftId}`
+  const composerDraftOwnerKeyRef = useRef(composerDraftOwnerKey)
+  composerDraftOwnerKeyRef.current = composerDraftOwnerKey
   const draftThread = useComposerDraftStore((store) =>
     routeKind === 'server'
       ? store.getDraftSessionByRef(routeThreadRef)
@@ -4301,6 +4305,7 @@ function ChatViewContent(props: ChatViewProps)
       selectedPromptEffort: ctxSelectedPromptEffort,
       selectedModelSelection: ctxSelectedModelSelection,
     } = sendCtx
+    const composerDraftOwnerKeyForSend = composerDraftOwnerKey
     const legacyOrchestrateInvocation = parseLegacyOrchestrateInvocation(promptRef.current)
     const interactionModeForSend =
       legacyOrchestrateInvocation === null ? interactionMode : 'orchestrate'
@@ -4337,15 +4342,25 @@ function ChatViewContent(props: ChatViewProps)
         text: followUp.text,
         interactionMode: followUp.interactionMode,
       })
-      if (!sent && promptRef.current.length === 0)
+      if (!sent)
       {
-        promptRef.current = draftPromptForRetry
-        setComposerDraftPrompt(composerDraftTarget, draftPromptForRetry)
-        composerRef.current?.resetCursorState({
-          cursor: collapseExpandedComposerCursor(draftPromptForRetry, draftPromptForRetry.length),
-          prompt: draftPromptForRetry,
-          detectTrigger: true,
-        })
+        const retryDraft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)
+        if ((retryDraft?.prompt.length ?? 0) === 0)
+        {
+          setComposerDraftPrompt(composerDraftTarget, draftPromptForRetry)
+        }
+        if (
+          composerDraftOwnerKeyRef.current === composerDraftOwnerKeyForSend &&
+          promptRef.current.length === 0
+        )
+        {
+          promptRef.current = draftPromptForRetry
+          composerRef.current?.resetCursorState({
+            cursor: collapseExpandedComposerCursor(draftPromptForRetry, draftPromptForRetry.length),
+            prompt: draftPromptForRetry,
+            detectTrigger: true,
+          })
+        }
       }
       return false
     }
@@ -4442,17 +4457,21 @@ function ChatViewContent(props: ChatViewProps)
     const composerElementContextsSnapshot = [...composerElementContexts]
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations]
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments]
-    const messageTextWithContexts = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
-      composerElementContextsSnapshot,
+    const messageTextWithReviewComments = appendReviewCommentsToPrompt(
+      promptForSend,
+      composerReviewCommentsSnapshot,
     )
     const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
       (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
-      messageTextWithContexts,
+      messageTextWithReviewComments,
     )
-    const messageTextForSend = appendReviewCommentsToPrompt(
-      messageTextWithPreviewAnnotations,
-      composerReviewCommentsSnapshot,
+    // match the display extractors' reverse order so metadata stays hidden.
+    const messageTextForSend = appendElementContextsToPrompt(
+      appendTerminalContextsToPrompt(
+        messageTextWithPreviewAnnotations,
+        composerTerminalContextsSnapshot,
+      ),
+      composerElementContextsSnapshot,
     )
     const messageIdForSend = newMessageId()
     const messageCreatedAt = new Date().toISOString()
@@ -4665,15 +4684,24 @@ function ChatViewContent(props: ChatViewProps)
 
     if (failure !== null)
     {
+      const retryDraft = useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)
+      const retryDraftIsEmpty =
+        retryDraft === null ||
+        (retryDraft.prompt.length === 0 &&
+          retryDraft.images.length === 0 &&
+          retryDraft.terminalContexts.length === 0 &&
+          retryDraft.elementContexts.length === 0 &&
+          retryDraft.previewAnnotations.length === 0 &&
+          retryDraft.reviewComments.length === 0)
+      const composerOwnerIsCurrent =
+        composerDraftOwnerKeyRef.current === composerDraftOwnerKeyForSend
       if (
-        promptRef.current.length === 0 &&
-        composerImagesRef.current.length === 0 &&
-        composerTerminalContextsRef.current.length === 0 &&
-        composerElementContextsRef.current.length === 0 &&
-        (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.previewAnnotations
-          .length ?? 0) === 0 &&
-        (useComposerDraftStore.getState().getComposerDraft(composerDraftTarget)?.reviewComments
-          .length ?? 0) === 0
+        retryDraftIsEmpty &&
+        (!composerOwnerIsCurrent ||
+          (promptRef.current.length === 0 &&
+            composerImagesRef.current.length === 0 &&
+            composerTerminalContextsRef.current.length === 0 &&
+            composerElementContextsRef.current.length === 0))
       )
       {
         setOptimisticUserMessages((existing) =>
@@ -4686,22 +4714,25 @@ function ChatViewContent(props: ChatViewProps)
           const next = existing.filter((message) => message.id !== messageIdForSend)
           return next.length === existing.length ? existing : next
         })
-        promptRef.current = promptForSend
         const retryComposerImages = composerImagesSnapshot.map(cloneComposerImageForRetry)
-        composerImagesRef.current = retryComposerImages
-        composerTerminalContextsRef.current = composerTerminalContextsSnapshot
-        composerElementContextsRef.current = composerElementContextsSnapshot
         setComposerDraftPrompt(composerDraftTarget, promptForSend)
         addComposerDraftImages(composerDraftTarget, retryComposerImages)
         setComposerDraftTerminalContexts(composerDraftTarget, composerTerminalContextsSnapshot)
         setComposerDraftElementContexts(composerDraftTarget, composerElementContextsSnapshot)
         setComposerDraftPreviewAnnotations(composerDraftTarget, composerPreviewAnnotationsSnapshot)
         setComposerDraftReviewComments(composerDraftTarget, composerReviewCommentsSnapshot)
-        composerRef.current?.resetCursorState({
-          cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
-          prompt: promptForSend,
-          detectTrigger: true,
-        })
+        if (composerOwnerIsCurrent)
+        {
+          promptRef.current = promptForSend
+          composerImagesRef.current = retryComposerImages
+          composerTerminalContextsRef.current = composerTerminalContextsSnapshot
+          composerElementContextsRef.current = composerElementContextsSnapshot
+          composerRef.current?.resetCursorState({
+            cursor: collapseExpandedComposerCursor(promptForSend, promptForSend.length),
+            prompt: promptForSend,
+            detectTrigger: true,
+          })
+        }
       }
       if (!isAtomCommandInterrupted(failure))
       {
@@ -5652,7 +5683,7 @@ function ChatViewContent(props: ChatViewProps)
       activeWorkspaceRoot ? (
       <Suspense fallback={null}>
         <FilePreviewPanel
-          key={`${activeProject.environmentId}:${activeWorkspaceRoot}`}
+          key={`${activeProject.environmentId}:${activeWorkspaceRoot}:${activeThreadRef.threadId}`}
           environmentId={activeProject.environmentId}
           cwd={activeWorkspaceRoot}
           projectName={activeProject.title}

@@ -75,6 +75,17 @@ function DisabledCommandPaletteResultRow(props: {
 {
   return (
     <div className="flex min-h-8 select-none items-center gap-2 rounded-sm px-2 py-1.5 text-base opacity-64 sm:min-h-7 sm:text-sm">
+      <CommandPaletteResultContent item={props.item} />
+    </div>
+  )
+}
+
+function CommandPaletteResultContent(props: {
+  item: CommandPaletteActionItem | CommandPaletteSubmenuItem
+})
+{
+  return (
+    <>
       {props.item.icon}
       {props.item.description ? (
         <span className="flex min-w-0 flex-1 flex-col">
@@ -93,7 +104,7 @@ function DisabledCommandPaletteResultRow(props: {
         </span>
       )}
       {props.item.titleTrailingContent}
-    </div>
+    </>
   )
 }
 
@@ -124,24 +135,7 @@ function CommandPaletteResultRow(props: {
         props.onExecuteItem(props.item)
       }}
     >
-      {props.item.icon}
-      {props.item.description ? (
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="flex min-w-0 items-center gap-1.5 text-sm text-foreground">
-            {props.item.titleLeadingContent}
-            <span className="truncate">{props.item.title}</span>
-          </span>
-          <span className="truncate text-muted-foreground/85 text-xs">
-            {props.item.description}
-          </span>
-        </span>
-      ) : (
-        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-sm text-foreground">
-          {props.item.titleLeadingContent}
-          <span className="truncate">{props.item.title}</span>
-        </span>
-      )}
-      {props.item.titleTrailingContent}
+      <CommandPaletteResultContent item={props.item} />
       {props.item.timestamp ? (
         <span className="min-w-12 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground/70">
           {props.item.timestamp}

@@ -16,8 +16,38 @@ export type DraftInputProps = Omit<InputProps, 'value' | 'onChange' | 'defaultVa
 // keystroke from triggering a settings-wide re-render or a server RPC
 // round-trip, which otherwise makes fields backed by a server-hydrated
 // value feel laggy.
-export function DraftInput({ value, onCommit, ...rest }: DraftInputProps)
+export function DraftInput({
+  value,
+  onCommit,
+  onFocus,
+  onBlur,
+  onKeyDown,
+  ...rest
+}: DraftInputProps)
 {
   const bag = useCommitOnBlur(value, onCommit)
-  return <Input {...rest} {...bag} />
+  return (
+    <Input
+      {...rest}
+      {...bag}
+      onFocus={(event) =>
+      {
+        bag.onFocus()
+        onFocus?.(event)
+      }}
+      onBlur={(event) =>
+      {
+        bag.onBlur()
+        onBlur?.(event)
+      }}
+      onKeyDown={(event) =>
+      {
+        onKeyDown?.(event)
+        if (!event.defaultPrevented)
+        {
+          bag.onKeyDown(event)
+        }
+      }}
+    />
+  )
 }

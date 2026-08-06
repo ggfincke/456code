@@ -738,10 +738,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     routeThreadRef,
     draftId,
     activeThreadId,
-    activeThreadEnvironmentId: _activeThreadEnvironmentId,
     activeThread,
-    isServerThread: _isServerThread,
-    isLocalDraftThread: _isLocalDraftThread,
     forceExpandedOnMobile,
     projectSelectionRequired,
     phase,
@@ -1058,13 +1055,6 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       void handleInteractionModeChange(mode === 'build' ? 'default' : mode)
     },
     [handleInteractionModeChange],
-  )
-  const handleProviderModelSelect = useCallback(
-    (instanceId: ProviderInstanceId, model: string) =>
-    {
-      onProviderModelSelect(instanceId, model)
-    },
-    [onProviderModelSelect],
   )
   const selectedModelSelection = useMemo<ModelSelection>(
     () => createModelSelection(selectedInstanceId, selectedModel, selectedModelOptionsForDispatch),
@@ -3488,7 +3478,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
                       setIsComposerModelPickerOpen(open)
                     }}
                     getModelDisabledReason={getModelDisabledReason}
-                    onInstanceModelChange={handleProviderModelSelect}
+                    onInstanceModelChange={onProviderModelSelect}
                   />
                 )}
 
