@@ -8,12 +8,9 @@ import * as Effect from 'effect/Effect'
 import { pipe } from 'effect/Function'
 import * as Layer from 'effect/Layer'
 import * as Schema from 'effect/Schema'
+import * as Semaphore from 'effect/Semaphore'
 
-import {
-  isRelayManagedConnection,
-  type SavedRemoteConnection,
-  toStableSavedRemoteConnection,
-} from '../lib/connection'
+import { type SavedRemoteConnection, toStableSavedRemoteConnection } from '../lib/connection'
 import * as MobileSecureStorage from './mobile-secure-storage'
 
 const CONNECTIONS_KEY = 'code456.connections'
@@ -74,6 +71,53 @@ export interface RecentThreadShortcut
   readonly title: string
 }
 
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>>
+{
+  return typeof value === 'object' && value !== null
+}
+
+function isSavedRemoteConnection(value: unknown): value is SavedRemoteConnection
+{
+  if (!isRecord(value))
+  {
+    return false
+  }
+
+  const authenticationMethod = value.authenticationMethod
+  const bearerToken = value.bearerToken
+  const relayManaged = value.relayManaged
+  return (
+    typeof value.environmentId === 'string' &&
+    value.environmentId.length > 0 &&
+    typeof value.environmentLabel === 'string' &&
+    typeof value.pairingUrl === 'string' &&
+    typeof value.displayUrl === 'string' &&
+    typeof value.httpBaseUrl === 'string' &&
+    typeof value.wsBaseUrl === 'string' &&
+    (bearerToken === null || typeof bearerToken === 'string') &&
+    (authenticationMethod === undefined ||
+      authenticationMethod === 'bearer' ||
+      authenticationMethod === 'dpop') &&
+    (value.dpopAccessToken === undefined || typeof value.dpopAccessToken === 'string') &&
+    (relayManaged === undefined || relayManaged === true) &&
+    ((typeof bearerToken === 'string' && bearerToken.trim().length > 0) ||
+      relayManaged === true ||
+      authenticationMethod === 'dpop')
+  )
+}
+
+function isRecentThreadShortcut(value: unknown): value is RecentThreadShortcut
+{
+  return (
+    isRecord(value) &&
+    typeof value.environmentId === 'string' &&
+    value.environmentId.length > 0 &&
+    typeof value.threadId === 'string' &&
+    value.threadId.length > 0 &&
+    typeof value.title === 'string'
+  )
+}
+
 export class MobileStorage extends Context.Service<
   MobileStorage,
   {
@@ -132,13 +176,14 @@ export class MobileStorage extends Context.Service<
 export const make = Effect.fn('MobileStorage.make')(function* ()
 {
   const secureStorage = yield* MobileSecureStorage.MobileSecureStorage
+  const deviceIdLock = yield* Semaphore.make(1)
 
-  const parseJson = <A>(key: string, raw: string): A | null =>
+  const parseJson = (key: string, raw: string): unknown | null =>
   {
     if (!raw.trim()) return null
     try
     {
-      return JSON.parse(raw) as A
+      return JSON.parse(raw) as unknown
     }
     catch (cause)
     {
@@ -150,10 +195,10 @@ export const make = Effect.fn('MobileStorage.make')(function* ()
     }
   }
 
-  const readJson = Effect.fn('MobileStorage.readJson')(function* <A>(key: string)
+  const readJson = Effect.fn('MobileStorage.readJson')(function* (key: string)
   {
     const raw = (yield* secureStorage.getItem(key)) ?? ''
-    return parseJson<A>(key, raw)
+    return parseJson(key, raw)
   })
 
   const writeJson = Effect.fn('MobileStorage.writeJson')(function* (key: string, value: unknown)
@@ -165,18 +210,11 @@ export const make = Effect.fn('MobileStorage.make')(function* ()
     yield* secureStorage.setItem(key, encoded)
   })
 
-  const loadSavedConnections = readJson<{
-    readonly connections?: ReadonlyArray<SavedRemoteConnection>
-  }>(CONNECTIONS_KEY).pipe(
+  const loadSavedConnections = readJson(CONNECTIONS_KEY).pipe(
     Effect.map((parsed) =>
-      pipe(
-        parsed?.connections ?? [],
-        Arr.filter(
-          (connection) =>
-            !!connection.environmentId &&
-            (!!connection.bearerToken?.trim() || isRelayManagedConnection(connection)),
-        ),
-      ),
+      isRecord(parsed) && Array.isArray(parsed.connections)
+        ? parsed.connections.filter(isSavedRemoteConnection)
+        : [],
     ),
   )
 
@@ -209,30 +247,29 @@ export const make = Effect.fn('MobileStorage.make')(function* ()
     yield* writeJson(CONNECTIONS_KEY, { connections: next })
   })
 
-  const loadOrCreateAgentAwarenessDeviceId = Effect.gen(function* ()
-  {
-    const existing = yield* secureStorage.getItem(AGENT_AWARENESS_DEVICE_ID_KEY)
-    if (existing?.trim()) return existing
-    const deviceId = yield* Effect.tryPromise({
-      try: () => import('../lib/uuid').then(({ uuidv4 }) => uuidv4()),
-      catch: (cause) => new MobileDeviceIdGenerationError({ cause }),
-    })
-    yield* secureStorage.setItem(AGENT_AWARENESS_DEVICE_ID_KEY, deviceId)
-    return deviceId
-  })
+  const loadOrCreateAgentAwarenessDeviceId = deviceIdLock.withPermit(
+    Effect.gen(function* ()
+    {
+      const existing = yield* secureStorage.getItem(AGENT_AWARENESS_DEVICE_ID_KEY)
+      if (existing?.trim()) return existing
+      const deviceId = yield* Effect.tryPromise({
+        try: () => import('../lib/uuid').then(({ uuidv4 }) => uuidv4()),
+        catch: (cause) => new MobileDeviceIdGenerationError({ cause }),
+      })
+      yield* secureStorage.setItem(AGENT_AWARENESS_DEVICE_ID_KEY, deviceId)
+      return deviceId
+    }),
+  )
 
   const loadAgentAwarenessDeviceId = secureStorage
     .getItem(AGENT_AWARENESS_DEVICE_ID_KEY)
     .pipe(Effect.map((existing) => (existing?.trim() ? existing : null)))
 
-  const loadAgentAwarenessRegistrationRecord = readJson<AgentAwarenessRegistrationRecord>(
-    AGENT_AWARENESS_REGISTRATION_KEY,
-  ).pipe(
+  const loadAgentAwarenessRegistrationRecord = readJson(AGENT_AWARENESS_REGISTRATION_KEY).pipe(
     Effect.map((parsed) =>
     {
       if (
-        !parsed ||
-        typeof parsed !== 'object' ||
+        !isRecord(parsed) ||
         typeof parsed.identity !== 'string' ||
         typeof parsed.signature !== 'string'
       )
@@ -251,21 +288,11 @@ export const make = Effect.fn('MobileStorage.make')(function* ()
 
   // threads most recently opened on this device, newest first — the source
   // for the launcher's dynamic "recent thread" app shortcuts.
-  const loadRecentThreadShortcuts = readJson<{
-    readonly threads?: ReadonlyArray<RecentThreadShortcut>
-  }>(RECENT_THREAD_SHORTCUTS_KEY).pipe(
+  const loadRecentThreadShortcuts = readJson(RECENT_THREAD_SHORTCUTS_KEY).pipe(
     Effect.map((parsed) =>
-      pipe(
-        parsed?.threads ?? [],
-        Arr.filter(
-          (thread) =>
-            typeof thread?.environmentId === 'string' &&
-            thread.environmentId.length > 0 &&
-            typeof thread.threadId === 'string' &&
-            thread.threadId.length > 0 &&
-            typeof thread.title === 'string',
-        ),
-      ),
+      isRecord(parsed) && Array.isArray(parsed.threads)
+        ? parsed.threads.filter(isRecentThreadShortcut)
+        : [],
     ),
   )
 

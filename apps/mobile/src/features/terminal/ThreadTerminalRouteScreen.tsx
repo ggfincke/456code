@@ -28,6 +28,7 @@ import { GlassSurface } from '../../components/GlassSurface'
 import { LoadingScreen } from '../../components/LoadingScreen'
 import { environmentCatalog } from '../../connection/catalog'
 import { useEnvironmentPresentation } from '../../state/presentation'
+import { useEnvironmentQuery } from '../../state/query'
 import { terminalEnvironment } from '../../state/terminal'
 import { useAtomCommand } from '../../state/use-atom-command'
 import { useWorkspaceState } from '../../state/workspace'
@@ -216,6 +217,15 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     environmentId: selectedThread?.environmentId ?? null,
     threadId: selectedThread?.id ?? null,
   })
+  const terminalMetadata = useEnvironmentQuery(
+    selectedThread === null
+      ? null
+      : terminalEnvironment.metadata({
+          environmentId: selectedThread.environmentId,
+          input: null,
+        }),
+  )
+  const hasResolvedTerminalMetadata = terminalMetadata.data !== null
   const runningSession = useMemo(
     () => pickRunningTerminalSessionForBootstrap(knownSessions),
     [knownSessions],
@@ -325,6 +335,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
       hasResolvedFontPreference &&
       hasMeasuredSurface &&
       isEnvironmentReady &&
+      (requestedTerminalId !== null || hasResolvedTerminalMetadata) &&
       !shouldRedirectToRunningTerminal
         ? {
             threadId: selectedThread.id,
@@ -341,6 +352,7 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
       hasMeasuredSurface,
       hasResolvedFontPreference,
       hasResolvedPendingLaunch,
+      hasResolvedTerminalMetadata,
       initialAttachGridSize,
       isEnvironmentReady,
       launchLocation,
@@ -397,7 +409,9 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
     if (
       terminalAttachInput === null ||
       !selectedThread ||
-      (terminal.status !== 'closed' && terminal.status !== 'exited') ||
+      (terminal.status !== 'closed' &&
+        terminal.status !== 'exited' &&
+        terminal.status !== 'error') ||
       terminal.version === 0 ||
       runningTerminalKeyRef.current === terminalKey ||
       reopenedStaleTerminalKeyRef.current === terminalKey
@@ -1183,6 +1197,25 @@ export function ThreadTerminalRouteScreen(props: ThreadTerminalRouteScreenProps)
   if (!environment.isReady && environment.presentation === null)
   {
     return <LoadingScreen message="Opening terminal…" />
+  }
+
+  if (requestedTerminalId === null && terminalMetadata.error !== null)
+  {
+    return (
+      <View className="flex-1 bg-screen">
+        <EmptyState
+          title="Terminal unavailable"
+          detail={terminalMetadata.error}
+          actionLabel="Try again"
+          onAction={terminalMetadata.refresh}
+        />
+      </View>
+    )
+  }
+
+  if (requestedTerminalId === null && !hasResolvedTerminalMetadata)
+  {
+    return <LoadingScreen message="Finding terminal…" />
   }
 
   return (

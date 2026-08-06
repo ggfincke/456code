@@ -2,11 +2,14 @@
 // define review comment target
 
 import { useSyncExternalStore } from 'react'
+import type { EnvironmentId, ThreadId } from '@t3tools/contracts'
 
 import type { ReviewRenderableLineRow } from './reviewModel'
 
 export interface ReviewCommentTarget
 {
+  readonly environmentId?: EnvironmentId
+  readonly threadId?: ThreadId
   readonly sectionId: string
   readonly sectionTitle: string
   readonly filePath: string
@@ -119,12 +122,17 @@ export function getReviewChangeMarker(change: ReviewRenderableLineRow['change'])
 }
 
 export function buildReviewCommentTarget(
-  target: Pick<ReviewCommentTarget, 'sectionId' | 'sectionTitle' | 'filePath' | 'lines'>,
+  target: Pick<
+    ReviewCommentTarget,
+    'environmentId' | 'threadId' | 'sectionId' | 'sectionTitle' | 'filePath' | 'lines'
+  >,
   anchorIndex: number,
   lineIndex: number,
 ): ReviewCommentTarget
 {
   return {
+    ...(target.environmentId ? { environmentId: target.environmentId } : {}),
+    ...(target.threadId ? { threadId: target.threadId } : {}),
     sectionId: target.sectionId,
     sectionTitle: target.sectionTitle,
     filePath: target.filePath,

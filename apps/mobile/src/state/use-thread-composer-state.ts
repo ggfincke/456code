@@ -1,6 +1,7 @@
 // apps/mobile/src/state/use-thread-composer-state.ts
 // manages mobile thread composer drafts and guarded message enqueueing
 import { useAtomValue } from '@effect/atom-react'
+import * as Option from 'effect/Option'
 import { useCallback, useEffect, useMemo } from 'react'
 import { Alert } from 'react-native'
 
@@ -40,11 +41,12 @@ import {
   useComposerDraft,
 } from './use-composer-drafts'
 import { setPendingConnectionError } from '../state/use-remote-environment-registry'
-import { useSelectedThreadDetail } from '../state/use-thread-detail'
+import { useSelectedThreadDetailState } from '../state/use-thread-detail'
 import { useThreadProviderSwitch } from '../state/use-thread-provider-switch'
 import { useThreadSelection } from '../state/use-thread-selection'
 import { enqueueThreadOutboxMessage, removeThreadOutboxMessage } from './thread-outbox'
 import { requiresWebImportContinuation } from './thread-outbox-model'
+import { readEnvironmentThreadState } from './threads'
 import { useThreadOutboxMessages } from './use-thread-outbox'
 
 export function appendReviewCommentToDraft(input: {
@@ -84,7 +86,8 @@ export function useThreadDraftForThread(input: {
 export function useThreadComposerState()
 {
   const { selectedThread: selectedThreadShell } = useThreadSelection()
-  const selectedThreadDetail = useSelectedThreadDetail()
+  const selectedThreadDetailState = useSelectedThreadDetailState()
+  const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data)
   const composerDrafts = useAtomValue(composerDraftsAtom)
   const queuedMessagesByThreadKey = useThreadOutboxMessages()
   const providerSwitch = useThreadProviderSwitch()
@@ -150,9 +153,12 @@ export function useThreadComposerState()
     (!!selectedThread &&
       (selectedThread.session?.status === 'running' ||
         selectedThread.session?.status === 'starting'))
-  const sendBlockedReason = requiresWebImportContinuation(selectedThreadShell)
-    ? 'Continue this imported session in the web app after reviewing its provider continuation.'
-    : null
+  const sendBlockedReason =
+    selectedThreadDetailState.status === 'deleted'
+      ? 'This thread was deleted.'
+      : requiresWebImportContinuation(selectedThreadShell)
+        ? 'Continue this imported session in the web app after reviewing its provider continuation.'
+        : null
 
   const onSendMessage = useCallback(async () =>
   {
@@ -161,6 +167,13 @@ export function useThreadComposerState()
       return null
     }
     if (sendBlockedReason !== null)
+    {
+      return null
+    }
+    if (
+      readEnvironmentThreadState(selectedThreadShell.environmentId, selectedThreadShell.id)
+        .status === 'deleted'
+    )
     {
       return null
     }

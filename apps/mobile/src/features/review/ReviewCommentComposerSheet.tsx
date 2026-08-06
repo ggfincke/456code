@@ -58,9 +58,13 @@ export function ReviewCommentComposerSheet(props: ReviewCommentComposerSheetProp
   const { width } = useWindowDimensions()
   const colorScheme = useColorScheme()
   const iconTint = String(useThemeColor('--color-icon'))
-  const target = useReviewCommentTarget()
+  const activeTarget = useReviewCommentTarget()
   const { codeSurface } = useAppearanceCodeSurface()
   const { environmentId, threadId } = props.route.params
+  const target =
+    activeTarget?.environmentId === environmentId && activeTarget.threadId === threadId
+      ? activeTarget
+      : null
   const [commentText, setCommentText] = useState('')
   const [highlightedLinesById, setHighlightedLinesById] = useState<
     Record<string, ReadonlyArray<ReviewHighlightedToken>>

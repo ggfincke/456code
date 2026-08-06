@@ -12,7 +12,7 @@ import { SymbolView } from '../../components/AppSymbol'
 import * as Effect from 'effect/Effect'
 import { AsyncResult } from 'effect/unstable/reactivity'
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { Alert, Linking, Platform, ScrollView, View } from 'react-native'
+import { Alert, AppState, Linking, Platform, ScrollView, View } from 'react-native'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
 
 import {
@@ -190,6 +190,14 @@ function ConfiguredSettingsRouteScreen()
   useEffect(() =>
   {
     void refreshNotifications()
+    const subscription = AppState.addEventListener('change', (state) =>
+    {
+      if (state === 'active')
+      {
+        void refreshNotifications()
+      }
+    })
+    return () => subscription.remove()
   }, [refreshNotifications])
 
   useEffect(() =>

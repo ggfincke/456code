@@ -18,6 +18,8 @@ export const threadOutboxManager = createThreadOutboxManager({
   storage: expoThreadOutboxStorage,
 })
 
+export const dispatchingThreadOutboxMessageIdAtom = threadOutboxManager.dispatchingMessageIdAtom
+
 export function ensureThreadOutboxLoaded(): void
 {
   void threadOutboxManager.load()
@@ -32,6 +34,19 @@ export function enqueueThreadOutboxMessage(message: QueuedThreadMessage): Promis
 export function confirmThreadOutboxMessageQueued(message: QueuedThreadMessage): Promise<boolean>
 {
   return threadOutboxManager.confirmQueued(message)
+}
+
+export function claimThreadOutboxMessageDelivery(
+  message: QueuedThreadMessage,
+  canClaim: () => boolean,
+): Promise<boolean>
+{
+  return threadOutboxManager.claimDelivery(message, canClaim)
+}
+
+export function releaseThreadOutboxMessageDelivery(message: QueuedThreadMessage): void
+{
+  threadOutboxManager.releaseDelivery(message)
 }
 
 // rewrite a queued message; no-op (false) if it was removed in the meantime.

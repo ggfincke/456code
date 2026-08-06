@@ -1,7 +1,8 @@
 // apps/mobile/src/features/layout/workspace-inspector-pane.tsx
 // render workspace inspector pane
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { Gesture } from 'react-native-gesture-handler'
 import Animated, {
   runOnJS,
   useAnimatedStyle,
@@ -9,7 +10,12 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated'
 
-import { constrainAuxiliaryPaneWidth, type WorkspacePaneLayout } from '../../lib/layout'
+import {
+  AUXILIARY_PANE_MAX_WIDTH,
+  AUXILIARY_PANE_MIN_WIDTH,
+  constrainAuxiliaryPaneWidth,
+  type WorkspacePaneLayout,
+} from '../../lib/layout'
 import { WORKSPACE_PANE_TIMING } from './workspace-pane-animation'
 import { WorkspacePaneDivider } from './workspace-pane-divider'
 
@@ -38,7 +44,6 @@ export function WorkspaceInspectorPane(props: {
   const inspectorSupported = props.renderInspector !== undefined && inspectorWidth !== null
   const inspectorVisible =
     inspectorSupported && panes.auxiliaryPaneVisible && (props.active ?? true)
-  const resizeStartWidth = useRef(0)
   const [resizing, setResizing] = useState(false)
 
   // a file-to-file replace remounts the route. Initialize an already-visible
@@ -67,9 +72,10 @@ export function WorkspaceInspectorPane(props: {
       },
     )
     const targetWidth = inspectorVisible ? (inspectorWidth ?? 0) : 0
-    renderedInspectorWidth.value = resizing
-      ? targetWidth
-      : withTiming(targetWidth, WORKSPACE_PANE_TIMING)
+    if (!resizing)
+    {
+      renderedInspectorWidth.value = withTiming(targetWidth, WORKSPACE_PANE_TIMING)
+    }
   }, [
     inspectorProgress,
     inspectorVisible,
@@ -82,10 +88,13 @@ export function WorkspaceInspectorPane(props: {
   useEffect(() =>
   {
     const targetWidth = inspectorWidth ?? 0
-    if (!inspectorVisible || resizing)
+    if (resizing)
     {
-      // hidden panes re-measure silently; during a divider drag the content
-      // tracks the finger directly.
+      return
+    }
+    if (!inspectorVisible)
+    {
+      // hidden panes re-measure silently.
       renderedContentWidth.value = targetWidth
       return
     }
@@ -103,36 +112,78 @@ export function WorkspaceInspectorPane(props: {
   const inspectorContentStyle = useAnimatedStyle(() => ({ width: renderedContentWidth.value }), [])
   const beginResize = useCallback(() =>
   {
-    resizeStartWidth.current = inspectorWidth ?? 0
     setResizing(true)
-  }, [inspectorWidth])
+  }, [])
   const resizeBy = useCallback(
     (delta: number) =>
     {
       setAuxiliaryPaneWidth(
         constrainAuxiliaryPaneWidth({
-          preferredWidth: resizeStartWidth.current + delta,
+          preferredWidth: (inspectorWidth ?? 0) + delta,
           availableWidth: panes.contentPaneWidth,
         }),
       )
     },
-    [panes.contentPaneWidth, setAuxiliaryPaneWidth],
+    [inspectorWidth, panes.contentPaneWidth, setAuxiliaryPaneWidth],
   )
-  const endResize = useCallback(() =>
-  {
-    setResizing(false)
-  }, [])
+  const commitResize = useCallback(
+    (width: number) =>
+    {
+      setAuxiliaryPaneWidth(width)
+      setResizing(false)
+    },
+    [setAuxiliaryPaneWidth],
+  )
+  const resizeStartWidth = useSharedValue(inspectorWidth ?? 0)
+  const maxResizeWidth = constrainAuxiliaryPaneWidth({
+    preferredWidth: AUXILIARY_PANE_MAX_WIDTH,
+    availableWidth: panes.contentPaneWidth,
+  })
+  const resizeGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .activeOffsetX([-4, 4])
+        .failOffsetY([-24, 24])
+        .onStart(() =>
+        {
+          resizeStartWidth.value = renderedInspectorWidth.value
+          runOnJS(beginResize)()
+        })
+        .onUpdate((event) =>
+        {
+          const width = Math.min(
+            maxResizeWidth,
+            Math.max(
+              AUXILIARY_PANE_MIN_WIDTH,
+              Math.round(resizeStartWidth.value - event.translationX),
+            ),
+          )
+          renderedInspectorWidth.value = width
+          renderedContentWidth.value = width
+        })
+        .onFinalize(() =>
+        {
+          runOnJS(commitResize)(renderedInspectorWidth.value)
+        }),
+    [
+      beginResize,
+      commitResize,
+      maxResizeWidth,
+      renderedContentWidth,
+      renderedInspectorWidth,
+      resizeStartWidth,
+    ],
+  )
 
   return (
     <>
       {inspectorVisible ? (
         <WorkspacePaneDivider
           accessibilityLabel="Resize detail pane"
+          active={resizing}
           currentWidth={inspectorWidth ?? 0}
-          resizeDirection={-1}
-          onResizeStart={beginResize}
+          gesture={resizeGesture}
           onResizeBy={resizeBy}
-          onResizeEnd={endResize}
         />
       ) : null}
       {inspectorSupported ? (

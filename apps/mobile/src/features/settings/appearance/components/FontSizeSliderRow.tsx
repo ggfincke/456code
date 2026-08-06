@@ -112,7 +112,6 @@ export function FontSizeSliderRow(props: {
         dragging.value = true
         const f = fractionAt(event.x)
         progress.value = f
-        runOnJS(commit)(valueAtFraction(f))
       })
       .onFinalize(() =>
       {
@@ -121,10 +120,9 @@ export function FontSizeSliderRow(props: {
           return
         }
         dragging.value = false
-        progress.value = withTiming(
-          fractionOfValue(valueAtFraction(progress.value)),
-          SNAP_ANIMATION,
-        )
+        const next = valueAtFraction(progress.value)
+        progress.value = withTiming(fractionOfValue(next), SNAP_ANIMATION)
+        runOnJS(commit)(next)
       })
 
     const tap = Gesture.Tap()

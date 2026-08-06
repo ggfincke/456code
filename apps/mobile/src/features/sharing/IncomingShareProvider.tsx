@@ -81,7 +81,30 @@ async function incomingShareIdForPayloads(payloads: ReadonlyArray<SharePayload>)
     })),
   )
   const digest = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, fingerprint)
-  return `share-${digest}`
+  const contentId = `share-${digest}`
+  if (activeNativeShare?.fingerprint === digest)
+  {
+    return activeNativeShare.id
+  }
+
+  const id = acknowledgedNativeShareFingerprints.has(digest)
+    ? `${contentId}-${Crypto.randomUUID()}`
+    : contentId
+  activeNativeShare = { fingerprint: digest, id }
+  return id
+}
+
+let activeNativeShare: { readonly fingerprint: string; readonly id: string } | null = null
+const acknowledgedNativeShareFingerprints = new Set<string>()
+
+function clearIncomingSharePayloads(): void
+{
+  clearSharedPayloads()
+  if (activeNativeShare)
+  {
+    acknowledgedNativeShareFingerprints.add(activeNativeShare.fingerprint)
+  }
+  activeNativeShare = null
 }
 
 async function readBase64(uri: string): Promise<string>
@@ -146,7 +169,7 @@ const incomingShareInbox = new IncomingShareInbox({
   writeDraft: writeIncomingShareDraft,
   removeDraft: removeIncomingShareDraft,
   getPayloads: getSharedPayloads,
-  clearPayloads: clearSharedPayloads,
+  clearPayloads: clearIncomingSharePayloads,
   buildDraft: async ({ payloads, id, createdAt }) =>
   {
     const cleanupUris = new Set<string>()

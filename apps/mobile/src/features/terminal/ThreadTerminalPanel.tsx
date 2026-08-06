@@ -89,7 +89,9 @@ export const ThreadTerminalPanel = memo(function ThreadTerminalPanel(
     }
     if (
       attachInput === null ||
-      (terminal.status !== 'closed' && terminal.status !== 'exited') ||
+      (terminal.status !== 'closed' &&
+        terminal.status !== 'exited' &&
+        terminal.status !== 'error') ||
       terminal.version === 0 ||
       runningTerminalKeyRef.current === terminalKey ||
       reopenedStaleTerminalKeyRef.current === terminalKey

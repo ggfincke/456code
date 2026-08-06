@@ -3,7 +3,11 @@
 
 import { useCallback, useMemo } from 'react'
 
-import { updateReviewExpandedFileIds, updateReviewViewedFileIds } from './reviewState'
+import {
+  updateReviewExpandedFileIds,
+  updateReviewRevealedLargeFileIds,
+  updateReviewViewedFileIds,
+} from './reviewState'
 import type { ReviewRenderableFile } from './reviewModel'
 
 export function getDefaultReviewExpandedFileIds(
@@ -61,10 +65,18 @@ export function useReviewFileVisibility(input: {
   readonly sectionId: string | null
   readonly files: ReadonlyArray<ReviewRenderableFile>
   readonly cachedExpandedFileIds: ReadonlyArray<string> | undefined
+  readonly cachedRevealedLargeFileIds: ReadonlyArray<string> | undefined
   readonly cachedViewedFileIds: ReadonlyArray<string> | undefined
 })
 {
-  const { cachedExpandedFileIds, cachedViewedFileIds, files, sectionId, threadKey } = input
+  const {
+    cachedExpandedFileIds,
+    cachedRevealedLargeFileIds,
+    cachedViewedFileIds,
+    files,
+    sectionId,
+    threadKey,
+  } = input
 
   const expandedFileIds = useMemo(
     () => getValidReviewFileIds(files, cachedExpandedFileIds),
@@ -73,6 +85,10 @@ export function useReviewFileVisibility(input: {
   const viewedFileIds = useMemo(
     () => getValidExplicitReviewFileIds(files, cachedViewedFileIds),
     [cachedViewedFileIds, files],
+  )
+  const revealedLargeFileIds = useMemo(
+    () => getValidExplicitReviewFileIds(files, cachedRevealedLargeFileIds),
+    [cachedRevealedLargeFileIds, files],
   )
   const collapsedFileIds = useMemo(() =>
   {
@@ -125,10 +141,28 @@ export function useReviewFileVisibility(input: {
     [files, sectionId, threadKey, viewedFileIds],
   )
 
+  const revealLargeFile = useCallback(
+    (fileId: string) =>
+    {
+      if (!threadKey || !sectionId || revealedLargeFileIds.includes(fileId))
+      {
+        return
+      }
+
+      updateReviewRevealedLargeFileIds(threadKey, sectionId, (existing) => [
+        ...getValidExplicitReviewFileIds(files, existing),
+        fileId,
+      ])
+    },
+    [files, revealedLargeFileIds, sectionId, threadKey],
+  )
+
   return {
     expandedFileIds,
     viewedFileIds,
     collapsedFileIds,
+    revealedLargeFileIds,
+    revealLargeFile,
     toggleExpandedFile,
     toggleViewedFile,
   }

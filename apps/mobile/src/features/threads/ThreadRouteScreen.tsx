@@ -45,6 +45,7 @@ import {
 } from '../terminal/terminalLaunchContext'
 import { terminalDebugLog } from '../terminal/terminalDebugLog'
 import { ThreadDetailScreen } from './ThreadDetailScreen'
+import { useThreadRequests } from './use-thread-requests'
 import {
   ThreadGitControls,
   useThreadGitCenterHeaderItems,
@@ -54,7 +55,6 @@ import { GitOverviewSheet } from './git/GitOverviewSheet'
 import { useAtomCommand } from '../../state/use-atom-command'
 import { useSelectedThreadGitActions } from '../../state/use-selected-thread-git-actions'
 import { useSelectedThreadGitState } from '../../state/use-selected-thread-git-state'
-import { useSelectedThreadRequests } from '../../state/use-selected-thread-requests'
 import { useSelectedThreadWorktree } from '../../state/use-selected-thread-worktree'
 import { useThreadComposerState } from '../../state/use-thread-composer-state'
 import { threadEnvironment } from '../../state/threads'
@@ -205,7 +205,7 @@ function ThreadRouteContent(
   const composer = useThreadComposerState()
   const gitState = useSelectedThreadGitState()
   const gitActions = useSelectedThreadGitActions()
-  const requests = useSelectedThreadRequests()
+  const requests = useThreadRequests()
   const interruptThreadTurn = useAtomCommand(threadEnvironment.interruptTurn, 'thread interrupt')
   const navigation = useNavigation()
   const params = props.route.params
@@ -823,6 +823,7 @@ function ThreadRouteContent(
           draftAttachments={composer.draftAttachments}
           connectionStateLabel={routeConnectionState}
           threadSyncStatus={selectedThreadDetailState.status}
+          showComposer={selectedThreadDetailState.status !== 'deleted'}
           activeThreadBusy={composer.activeThreadBusy}
           sendBlockedReason={composer.sendBlockedReason}
           providerSwitchActive={composer.providerSwitchActive}

@@ -22,7 +22,11 @@ import {
   unregisterAgentAwarenessDeviceForCurrentUser,
 } from '../agent-awareness/remoteRegistration'
 import { clearConnectOnboardingRequest, requestConnectOnboarding } from './connectOnboarding'
-import { resolveCloudPublicConfig, resolveRelayClerkTokenOptions } from './publicConfig'
+import {
+  hasCloudPublicConfig,
+  resolveCloudPublicConfig,
+  resolveRelayClerkTokenOptions,
+} from './publicConfig'
 
 function resetManagedRelayTokenCache()
 {
@@ -203,17 +207,17 @@ export function CloudAuthProvider(props: { readonly children: ReactNode })
 {
   const config = resolveCloudPublicConfig()
   const publishableKey = config.clerk.publishableKey
-  const relayUrl = config.relay.url
+  const cloudConfigured = hasCloudPublicConfig(config)
 
   useEffect(() =>
   {
-    if (!publishableKey || !relayUrl)
+    if (!cloudConfigured)
     {
       deactivateCloudRelayAccount()
     }
-  }, [publishableKey, relayUrl])
+  }, [cloudConfigured])
 
-  if (!publishableKey || !relayUrl)
+  if (!cloudConfigured || !publishableKey)
   {
     return props.children
   }
