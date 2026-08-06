@@ -162,7 +162,11 @@ export function isTailscaleIpv4Address(address: string): boolean
   {
     return false
   }
-  const [first, second, third, fourth] = parts.map((part) => Number.parseInt(part, 10))
+  if (parts.some((part) => !/^\d{1,3}$/u.test(part)))
+  {
+    return false
+  }
+  const [first, second, third, fourth] = parts.map(Number)
   if (
     first === undefined ||
     second === undefined ||
@@ -369,23 +373,3 @@ export const probeTailscaleHttpsEndpoint = (input: {
       onSome: (httpResponse) => httpResponse.status >= 200 && httpResponse.status < 300,
     })
   }).pipe(Effect.orElseSucceed(() => false))
-
-export const resolveTailscaleHttpsBaseUrl = (
-  input: {
-    readonly servePort?: number
-  } = {},
-): Effect.Effect<
-  string | null,
-  TailscaleCommandError | TailscaleStatusParseError,
-  ChildProcessSpawner.ChildProcessSpawner
-> =>
-  readTailscaleStatus.pipe(
-    Effect.map((status) =>
-      status.magicDnsName
-        ? buildTailscaleHttpsBaseUrl({
-            magicDnsName: status.magicDnsName,
-            ...(input.servePort === undefined ? {} : { servePort: input.servePort }),
-          })
-        : null,
-    ),
-  )
