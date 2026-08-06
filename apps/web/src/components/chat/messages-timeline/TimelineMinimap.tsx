@@ -10,7 +10,7 @@ import {
   resolveTimelineMinimapTopPercent,
   TIMELINE_MINIMAP_MIN_ITEMS,
   type MessagesTimelineRow,
-} from '../MessagesTimeline.logic'
+} from './MessagesTimeline.logic'
 
 interface TimelineMinimapItem
 {

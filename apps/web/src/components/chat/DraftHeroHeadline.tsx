@@ -13,7 +13,7 @@ import { selectProjectGroupingSettings } from '~/logicalProject'
 import {
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
-} from '~/sidebarProjectGrouping'
+} from '~/lib/sidebarProjectGrouping'
 import { useProjects, useThreadShells } from '~/state/entities'
 import { useEnvironments, usePrimaryEnvironmentId } from '~/state/environments'
 import { sortLogicalProjectsForSidebar } from '../Sidebar.logic'

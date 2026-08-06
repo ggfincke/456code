@@ -23,6 +23,7 @@ import {
   deriveComposerSendState,
   deriveLockedProvider,
   dismissBranchMismatchForSession,
+  formatOutgoingPrompt,
   getStartedThreadModelChangeBlockReason,
   getStartedThreadProviderSwitchBlockReason,
   handleImportContinuationSendBlock,
@@ -37,6 +38,7 @@ import {
   resolveImportContinuationProviderSnapshot,
   resolveThreadMetadataUpdateForNextTurn,
   resolveSendEnvMode,
+  shouldRestoreComposerDraftAfterSendFailure,
   startNewThreadForProject,
   shouldShowBranchMismatchBanner,
   shouldReconcileComposerDraftModelSelection,
@@ -1450,5 +1452,80 @@ describe('hasServerAcknowledgedLocalDispatch', () =>
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingApproval: true })).toBe(true)
     expect(hasServerAcknowledgedLocalDispatch({ ...common, hasPendingUserInput: true })).toBe(true)
     expect(hasServerAcknowledgedLocalDispatch({ ...common, threadError: 'failed' })).toBe(true)
+  })
+})
+
+describe('shouldRestoreComposerDraftAfterSendFailure', () =>
+{
+  it('restores when the retry draft is empty and the owner key still matches live refs', () =>
+  {
+    expect(
+      shouldRestoreComposerDraftAfterSendFailure({
+        retryDraftIsEmpty: true,
+        composerOwnerIsCurrent: true,
+        promptEmpty: true,
+        imagesEmpty: true,
+        terminalContextsEmpty: true,
+        elementContextsEmpty: true,
+      }),
+    ).toBe(true)
+  })
+
+  it('restores when the owner key moved even if live refs are non-empty', () =>
+  {
+    expect(
+      shouldRestoreComposerDraftAfterSendFailure({
+        retryDraftIsEmpty: true,
+        composerOwnerIsCurrent: false,
+        promptEmpty: false,
+        imagesEmpty: false,
+        terminalContextsEmpty: true,
+        elementContextsEmpty: true,
+      }),
+    ).toBe(true)
+  })
+
+  it('skips restore when the retry draft already has content', () =>
+  {
+    expect(
+      shouldRestoreComposerDraftAfterSendFailure({
+        retryDraftIsEmpty: false,
+        composerOwnerIsCurrent: true,
+        promptEmpty: true,
+        imagesEmpty: true,
+        terminalContextsEmpty: true,
+        elementContextsEmpty: true,
+      }),
+    ).toBe(false)
+  })
+
+  it('skips restore when the owner matches but live refs already have content', () =>
+  {
+    expect(
+      shouldRestoreComposerDraftAfterSendFailure({
+        retryDraftIsEmpty: true,
+        composerOwnerIsCurrent: true,
+        promptEmpty: false,
+        imagesEmpty: true,
+        terminalContextsEmpty: true,
+        elementContextsEmpty: true,
+      }),
+    ).toBe(false)
+  })
+})
+
+describe('formatOutgoingPrompt', () =>
+{
+  it('returns the text unchanged when the model has no prompt-injected effort', () =>
+  {
+    expect(
+      formatOutgoingPrompt({
+        provider: ProviderDriverKind.make('codex'),
+        model: 'gpt-5.4',
+        models: [],
+        effort: null,
+        text: 'hello',
+      }),
+    ).toBe('hello')
   })
 })

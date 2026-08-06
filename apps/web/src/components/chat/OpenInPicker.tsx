@@ -4,7 +4,7 @@
 import { EditorId, type EnvironmentId, type ResolvedKeybindingsConfig } from '@t3tools/contracts'
 import { memo, useCallback, useEffect, useMemo } from 'react'
 import { isOpenFavoriteEditorShortcut, shortcutLabelForCommand } from '../../keybindings'
-import { usePreferredEditor } from '../../editorPreferences'
+import { usePreferredEditor } from '../../lib/editorPreferences'
 import { ChevronDownIcon, FolderClosedIcon } from 'lucide-react'
 import { Button } from '../ui/button'
 import { Group, GroupSeparator } from '../ui/group'

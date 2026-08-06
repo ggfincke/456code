@@ -18,6 +18,7 @@ import {
   type ThreadId,
   type TurnId,
 } from '@t3tools/contracts'
+import { applyClaudePromptEffortPrefix, resolvePromptInjectedEffort } from '@t3tools/shared/model'
 import { type ChatMessage, type SessionPhase, type Thread, type ThreadShell } from '../types'
 import { type ComposerImageAttachment, type DraftThreadState } from '../composerDraftStore'
 import * as Schema from 'effect/Schema'
@@ -29,8 +30,11 @@ import {
   type TerminalContextDraft,
 } from '../lib/terminalContext'
 import type { DraftThreadEnvMode } from '../composerDraftStore'
+import { getProviderModelCapabilities } from '../providerModels'
 
 export const LAST_INVOKED_SCRIPT_BY_PROJECT_KEY = '456code:last-invoked-script-by-project'
+export const IMAGE_ONLY_BOOTSTRAP_PROMPT =
+  '[User attached one or more images without additional text. Respond using the conversation context and the attached image(s).]'
 export const MAX_HIDDEN_MOUNTED_TERMINAL_THREADS = 10
 export const MAX_HIDDEN_MOUNTED_PREVIEW_THREADS = 3
 
@@ -555,6 +559,40 @@ export function readFileAsDataUrl(file: File): Promise<string>
     })
     reader.readAsDataURL(file)
   })
+}
+
+// inject provider effort prefixes before the optimistic/outgoing user row is built
+export function formatOutgoingPrompt(params: {
+  provider: ProviderDriverKind
+  model: string | null
+  models: ReadonlyArray<ServerProvider['models'][number]>
+  effort: string | null
+  text: string
+}): string
+{
+  const caps = getProviderModelCapabilities(params.models, params.model, params.provider)
+  const promptEffort = resolvePromptInjectedEffort(caps, params.effort)
+  return applyClaudePromptEffortPrefix(params.text, promptEffort)
+}
+
+// retry restore only when the draft is still empty and the owner key has not moved
+export function shouldRestoreComposerDraftAfterSendFailure(input: {
+  readonly retryDraftIsEmpty: boolean
+  readonly composerOwnerIsCurrent: boolean
+  readonly promptEmpty: boolean
+  readonly imagesEmpty: boolean
+  readonly terminalContextsEmpty: boolean
+  readonly elementContextsEmpty: boolean
+}): boolean
+{
+  return (
+    input.retryDraftIsEmpty &&
+    (!input.composerOwnerIsCurrent ||
+      (input.promptEmpty &&
+        input.imagesEmpty &&
+        input.terminalContextsEmpty &&
+        input.elementContextsEmpty))
+  )
 }
 
 export function resolveSendEnvMode(input: {
