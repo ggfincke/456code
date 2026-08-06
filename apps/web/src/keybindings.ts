@@ -120,9 +120,17 @@ function matchesShortcut(
   platform = navigator.platform,
 ): boolean
 {
+  // spreading a native KeyboardEvent drops its prototype-getter modifiers, so
+  // the overrides are built explicitly (megacore U-137)
   const modifierEvent =
     event.key === '+' && shortcut.key === '+' && !shortcut.shiftKey
-      ? { ...event, shiftKey: false }
+      ? {
+          key: event.key,
+          metaKey: event.metaKey,
+          ctrlKey: event.ctrlKey,
+          altKey: event.altKey,
+          shiftKey: false,
+        }
       : event
   if (!matchesShortcutModifiers(modifierEvent, shortcut, platform)) return false
   return resolveEventKeys(event).has(shortcut.key)

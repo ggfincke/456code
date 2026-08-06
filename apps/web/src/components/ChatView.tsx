@@ -4457,21 +4457,19 @@ function ChatViewContent(props: ChatViewProps)
     const composerElementContextsSnapshot = [...composerElementContexts]
     const composerPreviewAnnotationsSnapshot = [...composerPreviewAnnotations]
     const composerReviewCommentsSnapshot: ReviewCommentContext[] = [...composerReviewComments]
-    const messageTextWithReviewComments = appendReviewCommentsToPrompt(
-      promptForSend,
-      composerReviewCommentsSnapshot,
+    // this append order is the exact inverse of the TimelineRows peel order;
+    // reordering only one side leaves raw context blocks visible (megacore U-125)
+    const messageTextWithContexts = appendElementContextsToPrompt(
+      appendTerminalContextsToPrompt(promptForSend, composerTerminalContextsSnapshot),
+      composerElementContextsSnapshot,
     )
     const messageTextWithPreviewAnnotations = composerPreviewAnnotationsSnapshot.reduce(
       (text, annotation) => appendPreviewAnnotationPrompt(text, annotation),
-      messageTextWithReviewComments,
+      messageTextWithContexts,
     )
-    // match the display extractors' reverse order so metadata stays hidden.
-    const messageTextForSend = appendElementContextsToPrompt(
-      appendTerminalContextsToPrompt(
-        messageTextWithPreviewAnnotations,
-        composerTerminalContextsSnapshot,
-      ),
-      composerElementContextsSnapshot,
+    const messageTextForSend = appendReviewCommentsToPrompt(
+      messageTextWithPreviewAnnotations,
+      composerReviewCommentsSnapshot,
     )
     const messageIdForSend = newMessageId()
     const messageCreatedAt = new Date().toISOString()

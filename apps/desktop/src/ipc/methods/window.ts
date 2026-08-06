@@ -93,20 +93,19 @@ export const getLocalEnvironmentBootstraps = DesktopIpc.makeSyncIpcMethod({
       // endpoints keep the renderer from dialing the dead port, avoiding the
       // needless /api/auth/bootstrap/bearer error cycles a real endpoint would
       // trigger.
-      if (Option.isNone(config) || Option.isSome(config.value.preflightFailure))
+      if (Option.isNone(config) || Option.isSome(snapshot.preflightFailure))
       {
         // skip the primary (same-origin, no "connecting" affordance) and skip a
         // secondary whose preflight failed *fatally* (no node, wrong version,
         // missing build tools): it has stopped retrying, so an indefinite
         // "Connecting…" would be misleading — its error is surfaced by the
         // WSL-state UI instead.
+        // classify from the ungated snapshot: currentConfig is None while a
+        // backend is failing preflight, which would make both checks dead
         const fatalPreflight =
-          Option.isSome(config) &&
-          Option.isSome(config.value.preflightFailure) &&
-          config.value.preflightFailure.value.fatal
+          Option.isSome(snapshot.preflightFailure) && snapshot.preflightFailure.value.fatal
         const stoppedPreflight =
-          Option.isSome(config) &&
-          Option.isSome(config.value.preflightFailure) &&
+          Option.isSome(snapshot.preflightFailure) &&
           (!snapshot.desiredRunning || !snapshot.restartScheduled)
         if (isPrimary || fatalPreflight || stoppedPreflight) continue
         bootstraps.push({

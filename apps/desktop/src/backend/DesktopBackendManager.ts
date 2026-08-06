@@ -178,6 +178,10 @@ export interface DesktopBackendSnapshot
   readonly activePid: Option.Option<number>
   readonly restartAttempt: number
   readonly restartScheduled: boolean
+  // reported independently of the readiness gate on currentConfig: a backend
+  // that failed preflight has no published config, so consumers still need to
+  // tell a fatal failure apart from a transient retry (megacore U-133)
+  readonly preflightFailure: Option.Option<PreflightFailure>
 }
 
 // opaque identifier for one backend process inside the pool. Today only
@@ -450,6 +454,7 @@ export const makeBackendInstance = Effect.fn('makeBackendInstance')(function* (
       activePid: activePid(current.active),
       restartAttempt: current.restartAttempt,
       restartScheduled: Option.isSome(current.restartFiber),
+      preflightFailure: Option.flatMap(current.config, (config) => config.preflightFailure),
     })),
   )
   const currentConfig = Ref.get(state).pipe(

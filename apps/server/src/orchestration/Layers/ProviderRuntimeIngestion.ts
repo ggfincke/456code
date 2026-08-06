@@ -1509,7 +1509,11 @@ const make = Effect.gen(function* ()
           turnId &&
           checkpointContext &&
           workspaceCwd &&
-          (yield* checkpointStore.isGitRepository(workspaceCwd))
+          // placeholder capture is best effort: an unreadable or non-repo
+          // workspace means "no checkpoint", never a failed ingestion
+          (yield* checkpointStore
+            .isGitRepository(workspaceCwd)
+            .pipe(Effect.orElseSucceed(() => false)))
         )
         {
           // skip if a checkpoint already exists for this turn. A real
