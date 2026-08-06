@@ -18,6 +18,7 @@ import * as Option from 'effect/Option'
 import * as PubSub from 'effect/PubSub'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
+import * as Semaphore from 'effect/Semaphore'
 import * as Stream from 'effect/Stream'
 
 import * as ServerConfig from '../config.ts'
@@ -242,6 +243,17 @@ export class PairingGrantStore extends Context.Service<
         readonly proofKeyThumbprint?: string
       },
     ) => Effect.Effect<BootstrapGrant, BootstrapCredentialError>
+    // keeps the grant available unless the exchange effect succeeds
+    readonly consumeOnSuccess: <A, E, R, R2>(
+      credential: string,
+      input:
+        | {
+            readonly proofKeyThumbprint?: string
+          }
+        | undefined,
+      use: (grant: BootstrapGrant) => Effect.Effect<A, E, R>,
+      onConsumeFailure: (result: A) => Effect.Effect<void, never, R2>,
+    ) => Effect.Effect<A, BootstrapCredentialError | E, R | R2>
   }
 >()('456code/auth/PairingGrantStore')
 {}
@@ -283,6 +295,7 @@ export const make = Effect.gen(function* ()
   const config = yield* ServerConfig.ServerConfig
   const pairingLinks = yield* AuthPairingLinks.AuthPairingLinkRepository
   const seededGrantsRef = yield* Ref.make(new Map<string, StoredBootstrapGrant>())
+  const credentialMutex = yield* Semaphore.make(1)
   const changesPubSub = yield* PubSub.unbounded<BootstrapCredentialChange>()
   const generatePairingToken = Effect.gen(function* ()
   {
@@ -458,155 +471,249 @@ export const make = Effect.gen(function* ()
     return issued
   })
 
-  const consume: PairingGrantStore['Service']['consume'] = Effect.fn('PairingGrantStore.consume')(
-    function* (credential, input)
+  const inspectCredential = Effect.fn('PairingGrantStore.inspectCredential')(function* (
+    credential: string,
+    input?: {
+      readonly proofKeyThumbprint?: string
+    },
+  )
+  {
+    const now = yield* DateTime.now
+    const seeded = (yield* Ref.get(seededGrantsRef)).get(credential)
+    if (seeded)
     {
-      const now = yield* DateTime.now
-      const seededResult: ConsumeResult = yield* Ref.modify(
-        seededGrantsRef,
-        (current): readonly [ConsumeResult, Map<string, StoredBootstrapGrant>] =>
-        {
-          const grant = current.get(credential)
-          if (!grant)
-          {
-            return [
-              {
-                _tag: 'error',
-                reason: 'not-found',
-                error: new UnknownBootstrapCredentialError({}),
-              },
-              current,
-            ]
-          }
-
-          const next = new Map(current)
-          if (DateTime.isGreaterThanOrEqualTo(now, grant.expiresAt))
-          {
-            next.delete(credential)
-            return [
-              {
-                _tag: 'error',
-                reason: 'expired',
-                error: new ExpiredBootstrapCredentialError({}),
-              },
-              next,
-            ]
-          }
-
-          if (grant.proofKeyThumbprint && grant.proofKeyThumbprint !== input?.proofKeyThumbprint)
-          {
-            return [
-              {
-                _tag: 'error',
-                reason: 'not-found',
-                error: new BootstrapCredentialProofKeyMismatchError({}),
-              },
-              next,
-            ]
-          }
-
-          const remainingUses = grant.remainingUses
-          if (typeof remainingUses === 'number')
-          {
-            if (remainingUses <= 1)
-            {
-              next.delete(credential)
-            }
-            else
-            {
-              next.set(credential, {
-                ...grant,
-                remainingUses: remainingUses - 1,
-              })
-            }
-          }
-
-          return [
-            {
-              _tag: 'success',
-              grant: {
-                method: grant.method,
-                scopes: grant.scopes,
-                subject: grant.subject,
-                ...(grant.label ? { label: grant.label } : {}),
-                ...(grant.proofKeyThumbprint
-                  ? { proofKeyThumbprint: grant.proofKeyThumbprint }
-                  : {}),
-                expiresAt: grant.expiresAt,
-              } satisfies BootstrapGrant,
-            },
-            next,
-          ]
-        },
-      )
-
-      if (seededResult._tag === 'success')
-      {
-        return seededResult.grant
-      }
-      if (seededResult.reason !== 'not-found')
-      {
-        return yield* seededResult.error
-      }
-
-      const consumed = yield* pairingLinks
-        .consumeAvailable({
-          credential,
-          proofKeyThumbprint: input?.proofKeyThumbprint ?? null,
-          consumedAt: now,
-          now,
-        })
-        .pipe(Effect.mapError((cause) => new BootstrapCredentialConsumeAvailableError({ cause })))
-
-      if (Option.isSome(consumed))
-      {
-        yield* emitRemoved(consumed.value.id)
-        return {
-          method: consumed.value.method,
-          scopes: consumed.value.scopes,
-          subject: consumed.value.subject,
-          ...(consumed.value.label ? { label: consumed.value.label } : {}),
-          ...(consumed.value.proofKeyThumbprint
-            ? { proofKeyThumbprint: consumed.value.proofKeyThumbprint }
-            : {}),
-          expiresAt: consumed.value.expiresAt,
-        } satisfies BootstrapGrant
-      }
-
-      const matching = yield* pairingLinks
-        .getByCredential({ credential })
-        .pipe(Effect.mapError((cause) => new BootstrapCredentialLookupError({ cause })))
-      if (Option.isNone(matching))
-      {
-        return yield* new UnknownBootstrapCredentialError({})
-      }
-
-      if (matching.value.revokedAt !== null)
-      {
-        return yield* new UnavailableBootstrapCredentialError({})
-      }
-
-      if (matching.value.consumedAt !== null)
-      {
-        return yield* new UnknownBootstrapCredentialError({})
-      }
-
-      if (DateTime.isGreaterThanOrEqualTo(now, matching.value.expiresAt))
+      if (DateTime.isGreaterThanOrEqualTo(now, seeded.expiresAt))
       {
         return yield* new ExpiredBootstrapCredentialError({})
       }
-
-      if (
-        matching.value.proofKeyThumbprint !== null &&
-        matching.value.proofKeyThumbprint !== input?.proofKeyThumbprint
-      )
+      if (seeded.proofKeyThumbprint && seeded.proofKeyThumbprint !== input?.proofKeyThumbprint)
       {
         return yield* new BootstrapCredentialProofKeyMismatchError({})
       }
+      return {
+        method: seeded.method,
+        scopes: seeded.scopes,
+        subject: seeded.subject,
+        ...(seeded.label ? { label: seeded.label } : {}),
+        ...(seeded.proofKeyThumbprint ? { proofKeyThumbprint: seeded.proofKeyThumbprint } : {}),
+        expiresAt: seeded.expiresAt,
+      } satisfies BootstrapGrant
+    }
 
+    const matching = yield* pairingLinks
+      .getByCredential({ credential })
+      .pipe(Effect.mapError((cause) => new BootstrapCredentialLookupError({ cause })))
+    if (Option.isNone(matching))
+    {
+      return yield* new UnknownBootstrapCredentialError({})
+    }
+    if (matching.value.revokedAt !== null)
+    {
       return yield* new UnavailableBootstrapCredentialError({})
+    }
+    if (matching.value.consumedAt !== null)
+    {
+      return yield* new UnknownBootstrapCredentialError({})
+    }
+    if (DateTime.isGreaterThanOrEqualTo(now, matching.value.expiresAt))
+    {
+      return yield* new ExpiredBootstrapCredentialError({})
+    }
+    if (
+      matching.value.proofKeyThumbprint !== null &&
+      matching.value.proofKeyThumbprint !== input?.proofKeyThumbprint
+    )
+    {
+      return yield* new BootstrapCredentialProofKeyMismatchError({})
+    }
+
+    return {
+      method: matching.value.method,
+      scopes: matching.value.scopes,
+      subject: matching.value.subject,
+      ...(matching.value.label ? { label: matching.value.label } : {}),
+      ...(matching.value.proofKeyThumbprint
+        ? { proofKeyThumbprint: matching.value.proofKeyThumbprint }
+        : {}),
+      expiresAt: matching.value.expiresAt,
+    } satisfies BootstrapGrant
+  })
+
+  const consumeUnlocked = Effect.fn('PairingGrantStore.consumeUnlocked')(function* (
+    credential: string,
+    input?: {
+      readonly proofKeyThumbprint?: string
     },
   )
+  {
+    const now = yield* DateTime.now
+    const seededResult: ConsumeResult = yield* Ref.modify(
+      seededGrantsRef,
+      (current): readonly [ConsumeResult, Map<string, StoredBootstrapGrant>] =>
+      {
+        const grant = current.get(credential)
+        if (!grant)
+        {
+          return [
+            {
+              _tag: 'error',
+              reason: 'not-found',
+              error: new UnknownBootstrapCredentialError({}),
+            },
+            current,
+          ]
+        }
+
+        const next = new Map(current)
+        if (DateTime.isGreaterThanOrEqualTo(now, grant.expiresAt))
+        {
+          next.delete(credential)
+          return [
+            {
+              _tag: 'error',
+              reason: 'expired',
+              error: new ExpiredBootstrapCredentialError({}),
+            },
+            next,
+          ]
+        }
+
+        if (grant.proofKeyThumbprint && grant.proofKeyThumbprint !== input?.proofKeyThumbprint)
+        {
+          return [
+            {
+              _tag: 'error',
+              reason: 'not-found',
+              error: new BootstrapCredentialProofKeyMismatchError({}),
+            },
+            next,
+          ]
+        }
+
+        const remainingUses = grant.remainingUses
+        if (typeof remainingUses === 'number')
+        {
+          if (remainingUses <= 1)
+          {
+            next.delete(credential)
+          }
+          else
+          {
+            next.set(credential, {
+              ...grant,
+              remainingUses: remainingUses - 1,
+            })
+          }
+        }
+
+        return [
+          {
+            _tag: 'success',
+            grant: {
+              method: grant.method,
+              scopes: grant.scopes,
+              subject: grant.subject,
+              ...(grant.label ? { label: grant.label } : {}),
+              ...(grant.proofKeyThumbprint ? { proofKeyThumbprint: grant.proofKeyThumbprint } : {}),
+              expiresAt: grant.expiresAt,
+            } satisfies BootstrapGrant,
+          },
+          next,
+        ]
+      },
+    )
+
+    if (seededResult._tag === 'success')
+    {
+      return seededResult.grant
+    }
+    if (seededResult.reason !== 'not-found')
+    {
+      return yield* seededResult.error
+    }
+
+    const consumed = yield* pairingLinks
+      .consumeAvailable({
+        credential,
+        proofKeyThumbprint: input?.proofKeyThumbprint ?? null,
+        consumedAt: now,
+        now,
+      })
+      .pipe(Effect.mapError((cause) => new BootstrapCredentialConsumeAvailableError({ cause })))
+
+    if (Option.isSome(consumed))
+    {
+      yield* emitRemoved(consumed.value.id)
+      return {
+        method: consumed.value.method,
+        scopes: consumed.value.scopes,
+        subject: consumed.value.subject,
+        ...(consumed.value.label ? { label: consumed.value.label } : {}),
+        ...(consumed.value.proofKeyThumbprint
+          ? { proofKeyThumbprint: consumed.value.proofKeyThumbprint }
+          : {}),
+        expiresAt: consumed.value.expiresAt,
+      } satisfies BootstrapGrant
+    }
+
+    const matching = yield* pairingLinks
+      .getByCredential({ credential })
+      .pipe(Effect.mapError((cause) => new BootstrapCredentialLookupError({ cause })))
+    if (Option.isNone(matching))
+    {
+      return yield* new UnknownBootstrapCredentialError({})
+    }
+
+    if (matching.value.revokedAt !== null)
+    {
+      return yield* new UnavailableBootstrapCredentialError({})
+    }
+
+    if (matching.value.consumedAt !== null)
+    {
+      return yield* new UnknownBootstrapCredentialError({})
+    }
+
+    if (DateTime.isGreaterThanOrEqualTo(now, matching.value.expiresAt))
+    {
+      return yield* new ExpiredBootstrapCredentialError({})
+    }
+
+    if (
+      matching.value.proofKeyThumbprint !== null &&
+      matching.value.proofKeyThumbprint !== input?.proofKeyThumbprint
+    )
+    {
+      return yield* new BootstrapCredentialProofKeyMismatchError({})
+    }
+
+    return yield* new UnavailableBootstrapCredentialError({})
+  })
+
+  const consume: PairingGrantStore['Service']['consume'] = (credential, input) =>
+    credentialMutex
+      .withPermit(consumeUnlocked(credential, input))
+      .pipe(Effect.withSpan('PairingGrantStore.consume'))
+
+  const consumeOnSuccess: PairingGrantStore['Service']['consumeOnSuccess'] = (
+    credential,
+    input,
+    use,
+    onConsumeFailure,
+  ) =>
+    credentialMutex
+      .withPermit(
+        Effect.gen(function* ()
+        {
+          const grant = yield* inspectCredential(credential, input)
+          const result = yield* use(grant)
+          yield* consumeUnlocked(credential, input).pipe(
+            Effect.tapError(() => onConsumeFailure(result)),
+          )
+          return result
+        }),
+      )
+      .pipe(Effect.withSpan('PairingGrantStore.consumeOnSuccess'))
 
   return PairingGrantStore.of({
     issueOneTimeToken,
@@ -617,6 +724,7 @@ export const make = Effect.gen(function* ()
     },
     revoke,
     consume,
+    consumeOnSuccess,
   })
 })
 

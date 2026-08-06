@@ -27,6 +27,7 @@ import {
 } from './TextGenerationPrompts.ts'
 import {
   normalizeCliError,
+  readCliStreamAsString,
   sanitizeCommitSubject,
   sanitizePrTitle,
   sanitizeThreadTitle,
@@ -55,21 +56,6 @@ export const makeCodexTextGeneration = Effect.fn('makeCodexTextGeneration')(func
     readonly imagePaths: ReadonlyArray<string>
   }
 
-  const readStreamAsString = <E>(
-    operation: string,
-    stream: Stream.Stream<Uint8Array, E>,
-  ): Effect.Effect<string, TextGenerationError> =>
-    stream.pipe(
-      Stream.decodeText(),
-      Stream.runFold(
-        () => '',
-        (acc, chunk) => acc + chunk,
-      ),
-      Effect.mapError((cause) =>
-        normalizeCliError('codex', operation, cause, 'Failed to collect process output'),
-      ),
-    )
-
   const writeTempFile = (
     operation: string,
     prefix: string,
@@ -95,8 +81,7 @@ export const makeCodexTextGeneration = Effect.fn('makeCodexTextGeneration')(func
     fileSystem.remove(filePath).pipe(Effect.catch(() => Effect.void))
 
   const encodeJsonForOperation = (
-    operation:
-      'generateCommitMessage' | 'generatePrContent' | 'generateBranchName' | 'generateThreadTitle',
+    operation: TextGeneration.TextGenerationOp,
     value: unknown,
   ): Effect.Effect<string, TextGenerationError> =>
     encodeJsonString(value).pipe(
@@ -111,8 +96,7 @@ export const makeCodexTextGeneration = Effect.fn('makeCodexTextGeneration')(func
     )
 
   const materializeImageAttachments = Effect.fn('materializeImageAttachments')(function* (
-    _operation:
-      'generateCommitMessage' | 'generatePrContent' | 'generateBranchName' | 'generateThreadTitle',
+    _operation: TextGeneration.TextGenerationOp,
     attachments: TextGeneration.BranchNameGenerationInput['attachments'],
   ): Effect.fn.Return<MaterializedImageAttachments, TextGenerationError>
   {
@@ -156,8 +140,7 @@ export const makeCodexTextGeneration = Effect.fn('makeCodexTextGeneration')(func
     cleanupPaths = [],
     modelSelection,
   }: {
-    operation:
-      'generateCommitMessage' | 'generatePrContent' | 'generateBranchName' | 'generateThreadTitle'
+    operation: TextGeneration.TextGenerationOp
     cwd: string
     prompt: string
     outputSchemaJson: S
@@ -225,8 +208,8 @@ export const makeCodexTextGeneration = Effect.fn('makeCodexTextGeneration')(func
 
       const [stdout, stderr, exitCode] = yield* Effect.all(
         [
-          readStreamAsString(operation, child.stdout),
-          readStreamAsString(operation, child.stderr),
+          readCliStreamAsString('codex', operation, child.stdout),
+          readCliStreamAsString('codex', operation, child.stderr),
           child.exitCode.pipe(
             Effect.mapError((cause) =>
               normalizeCliError('codex', operation, cause, 'Failed to read Codex CLI exit code'),

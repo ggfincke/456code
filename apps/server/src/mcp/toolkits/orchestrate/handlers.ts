@@ -192,7 +192,7 @@ const handlers = {
         plan,
         createdAt,
       }
-      yield* orchestrationEngine
+      const dispatchResult = yield* orchestrationEngine
         .dispatch(command as unknown as OrchestrationCommand)
         .pipe(
           Effect.mapError((cause) =>
@@ -204,7 +204,35 @@ const handlers = {
             ),
           ),
         )
-      return plan
+      const committedEventOption = yield* orchestrationEngine
+        .readEvents(dispatchResult.sequence - 1, 1)
+        .pipe(
+          Stream.runHead,
+          Effect.mapError((cause) =>
+            orchestratePlanError(
+              'orchestrate_plan_upsert.resolve_persisted_revision',
+              'persistence-failed',
+              errorDetail(cause),
+              input.runId,
+            ),
+          ),
+        )
+      if (
+        Option.isNone(committedEventOption) ||
+        committedEventOption.value.sequence !== dispatchResult.sequence ||
+        committedEventOption.value.type !== 'thread.orchestrate-plan-upserted' ||
+        committedEventOption.value.payload.threadId !== scope.threadId ||
+        committedEventOption.value.payload.plan.runId !== input.runId
+      )
+      {
+        return yield* orchestratePlanError(
+          'orchestrate_plan_upsert.resolve_persisted_revision',
+          'persistence-failed',
+          `The committed orchestrate plan event at sequence ${dispatchResult.sequence} was unavailable.`,
+          input.runId,
+        )
+      }
+      return committedEventOption.value.payload.plan
     }),
 } satisfies Parameters<typeof OrchestrateToolkit.toLayer>[0]
 
