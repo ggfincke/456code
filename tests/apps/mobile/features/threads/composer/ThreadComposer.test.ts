@@ -1,9 +1,9 @@
-// tests/apps/mobile/features/threads/ThreadComposer.test.ts
+// tests/apps/mobile/features/threads/composer/ThreadComposer.test.ts
 // verifies mobile thread composer connection-status presentation
 
 import { describe, expect, it } from 'vite-plus/test'
 
-import { composerConnectionStatus } from '../../../../../apps/mobile/src/features/threads/threadComposerStatus.ts'
+import { composerConnectionStatus } from '../../../../../../apps/mobile/src/features/threads/composer/threadComposerStatus.ts'
 
 describe('mobile thread composer status', () =>
 {

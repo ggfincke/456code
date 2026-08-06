@@ -1,10 +1,10 @@
-// tests/apps/mobile/state/use-thread-pr.test.ts
+// tests/apps/mobile/state/threads/use-thread-pr.test.ts
 // verify present thread pr behavior
 
 import type { VcsStatusResult } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
-import { presentThreadPr } from '../../../../apps/mobile/src/state/thread-pr-presentation'
+import { presentThreadPr } from '../../../../../apps/mobile/src/state/threads/thread-pr-presentation'
 
 const pullRequest: NonNullable<VcsStatusResult['pr']> = {
   number: 3774,

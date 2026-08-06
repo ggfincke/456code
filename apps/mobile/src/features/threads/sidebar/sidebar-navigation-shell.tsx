@@ -1,4 +1,4 @@
-// apps/mobile/src/features/threads/sidebar-navigation-shell.tsx
+// apps/mobile/src/features/threads/sidebar/sidebar-navigation-shell.tsx
 // render sidebar navigation shell
 
 import {
@@ -14,8 +14,8 @@ import {
 import type { ReactNode } from 'react'
 import { Platform, useColorScheme } from 'react-native'
 
-import { NATIVE_LIQUID_GLASS_SUPPORTED } from '../../native/native-glass'
-import { nativeHeaderScrollEdgeEffects } from '../../native/StackHeader'
+import { NATIVE_LIQUID_GLASS_SUPPORTED } from '../../../native/native-glass'
+import { nativeHeaderScrollEdgeEffects } from '../../../native/StackHeader'
 
 const SCROLL_EDGE_EFFECTS = nativeHeaderScrollEdgeEffects(Platform.OS, Platform.Version)
 

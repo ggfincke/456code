@@ -1,10 +1,10 @@
-// apps/mobile/src/features/threads/sidebar-filter-button.tsx
+// apps/mobile/src/features/threads/sidebar/sidebar-filter-button.tsx
 // render sidebar filter button
 
-import { SymbolView } from '../../components/AppSymbol'
+import { SymbolView } from '../../../components/AppSymbol'
 import { Pressable, StyleSheet, useColorScheme } from 'react-native'
 
-import { useThemeColor } from '../../lib/useThemeColor'
+import { useThemeColor } from '../../../lib/useThemeColor'
 
 export type SidebarFilterButtonIcon =
   'line.3.horizontal.decrease.circle' | 'line.3.horizontal.decrease.circle.fill'

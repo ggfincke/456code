@@ -1,4 +1,4 @@
-// tests/apps/mobile/state/use-composer-drafts.test.ts
+// tests/apps/mobile/state/threads/use-composer-drafts.test.ts
 // verifies composer draft persistence and exact environment cleanup boundaries
 
 import { afterEach, describe, expect, it } from '@effect/vitest'
@@ -46,7 +46,7 @@ vi.mock('expo-file-system', () => ({
   },
 }))
 
-import { appAtomRegistry } from '../../../../apps/mobile/src/state/atom-registry'
+import { appAtomRegistry } from '../../../../../apps/mobile/src/state/atom-registry'
 import {
   clearComposerDraftContentState,
   clearComposerDraftsEnvironment,
@@ -57,7 +57,7 @@ import {
   mergeComposerDraftContentState,
   removeComposerDraftsForEnvironment,
   restoreComposerDraftSnapshotState,
-} from '../../../../apps/mobile/src/state/use-composer-drafts'
+} from '../../../../../apps/mobile/src/state/threads/use-composer-drafts'
 
 const DRAFT: ComposerDraft = {
   text: 'hello',

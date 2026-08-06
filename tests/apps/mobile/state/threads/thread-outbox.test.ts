@@ -1,4 +1,4 @@
-// tests/apps/mobile/state/thread-outbox.test.ts
+// tests/apps/mobile/state/threads/thread-outbox.test.ts
 // verifies durable queued-message persistence and delivery decisions
 
 import { describe, expect, it } from '@effect/vitest'
@@ -19,10 +19,10 @@ import * as Cause from 'effect/Cause'
 import { AsyncResult, AtomRegistry } from 'effect/unstable/reactivity'
 import { vi } from 'vite-plus/test'
 
-import type { DraftComposerImageAttachment } from '../../../../apps/mobile/src/lib/composerImages'
+import type { DraftComposerImageAttachment } from '../../../../../apps/mobile/src/lib/composerImages'
 
 // keep this state-level suite independent of Expo's native module loader.
-vi.mock('../../../../apps/mobile/src/lib/composerImages', () => ({
+vi.mock('../../../../../apps/mobile/src/lib/composerImages', () => ({
   toUploadChatImageAttachments: (attachments: ReadonlyArray<DraftComposerImageAttachment>) =>
     attachments.map((attachment) => ({
       type: attachment.type,
@@ -46,18 +46,18 @@ import {
   shouldRetryThreadOutboxDelivery,
   threadOutboxRetryDelayMs,
   type QueuedThreadMessage,
-} from '../../../../apps/mobile/src/state/thread-outbox-model'
+} from '../../../../../apps/mobile/src/state/threads/thread-outbox-model'
 import {
   createThreadOutboxManager,
   ThreadOutboxManagerError,
-} from '../../../../apps/mobile/src/state/thread-outbox-manager'
-import type { ThreadOutboxStorage } from '../../../../apps/mobile/src/state/thread-outbox-storage'
+} from '../../../../../apps/mobile/src/state/threads/thread-outbox-manager'
+import type { ThreadOutboxStorage } from '../../../../../apps/mobile/src/state/threads/thread-outbox-storage'
 import {
   drainExistingQueuedThreadMessage,
   drainQueuedThreadCreation,
   type ExistingThreadOutboxState,
-} from '../../../../apps/mobile/src/state/thread-outbox-delivery'
-import { threadDetailToShell } from '../../../../apps/mobile/src/state/thread-shell-fallback'
+} from '../../../../../apps/mobile/src/state/threads/thread-outbox-delivery'
+import { threadDetailToShell } from '../../../../../apps/mobile/src/state/threads/thread-shell-fallback'
 
 function queuedMessage(input: {
   readonly environmentId?: string

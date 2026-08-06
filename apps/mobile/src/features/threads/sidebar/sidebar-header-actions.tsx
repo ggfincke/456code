@@ -1,10 +1,10 @@
-// apps/mobile/src/features/threads/sidebar-header-actions.tsx
+// apps/mobile/src/features/threads/sidebar/sidebar-header-actions.tsx
 // render sidebar header actions
 
-import { SymbolView } from '../../components/AppSymbol'
+import { SymbolView } from '../../../components/AppSymbol'
 import { Pressable, StyleSheet, View, useColorScheme } from 'react-native'
 
-import { useThemeColor } from '../../lib/useThemeColor'
+import { useThemeColor } from '../../../lib/useThemeColor'
 
 export interface SidebarHeaderActionsProps
 {

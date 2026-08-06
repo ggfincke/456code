@@ -1,4 +1,4 @@
-// tests/apps/mobile/features/threads/threadListV2.test.ts
+// tests/apps/mobile/features/threads/sidebar/threadListV2.test.ts
 // verifies mobile thread list ordering and status presentation
 import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
 import { EnvironmentId, ProjectId, ProviderInstanceId, ThreadId, TurnId } from '@t3tools/contracts'
@@ -9,7 +9,7 @@ import {
   resolveThreadListV2Presentation,
   resolveThreadListV2Status,
   sortThreadsForListV2,
-} from '../../../../../apps/mobile/src/features/threads/threadListV2'
+} from '../../../../../../apps/mobile/src/features/threads/sidebar/threadListV2'
 
 const environmentId = EnvironmentId.make('environment-1')
 

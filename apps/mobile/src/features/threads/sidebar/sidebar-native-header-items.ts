@@ -1,4 +1,4 @@
-// apps/mobile/src/features/threads/sidebar-native-header-items.ts
+// apps/mobile/src/features/threads/sidebar/sidebar-native-header-items.ts
 // create sidebar header items
 
 import type {
@@ -6,8 +6,8 @@ import type {
   NativeStackHeaderItemMenu,
 } from '@react-navigation/native-stack'
 
-import type { HomeListFilterMenu } from '../home/home-list-filter-menu'
-import { withNativeGlassHeaderItem } from '../layout/native-glass-header-items'
+import type { HomeListFilterMenu } from '../../home/home-list-filter-menu'
+import { withNativeGlassHeaderItem } from '../../layout/native-glass-header-items'
 
 type NativeHeaderMenuItems = NativeStackHeaderItemMenu['menu']['items']
 type NativeHeaderIcon = NonNullable<Extract<NativeStackHeaderItem, { type: 'button' }>['icon']>

@@ -36,6 +36,19 @@ import AgentActivity, { type AgentActivityProps } from '../../widgets/AgentActiv
 import { resolveCloudPublicConfig } from '../cloud/publicConfig'
 import { supportsAgentAwarenessPush } from './capabilities'
 import { makeRelayDeviceRegistrationRequest, resolveApsEnvironment } from './registrationPayload'
+import {
+  getAgentAwarenessRegistrationStatus,
+  readRegistrationStatus,
+  resetRegistrationStatus,
+  setRegistrationStatus,
+  subscribeAgentAwarenessRegistrationStatus,
+  type AgentAwarenessRegistrationStatus,
+} from './remoteRegistrationStatus'
+export {
+  getAgentAwarenessRegistrationStatus,
+  subscribeAgentAwarenessRegistrationStatus,
+  type AgentAwarenessRegistrationStatus,
+} from './remoteRegistrationStatus'
 
 const REMOTE_ACTIVITY_REGISTRATION_RETRY_MS = 15_000
 
@@ -90,36 +103,6 @@ let appStateSubscription: { remove: () => void } | null = null
 // only local iOS permission or saved preferences: if the registration request
 // never succeeded, the device cannot receive anything, so the switches must
 // not read as enabled.
-export type AgentAwarenessRegistrationStatus = 'unknown' | 'pending' | 'registered' | 'failed'
-let registrationStatus: AgentAwarenessRegistrationStatus = 'unknown'
-const registrationStatusListeners = new Set<() => void>()
-
-function setRegistrationStatus(next: AgentAwarenessRegistrationStatus): void
-{
-  if (registrationStatus === next)
-  {
-    return
-  }
-  registrationStatus = next
-  for (const listener of registrationStatusListeners)
-  {
-    listener()
-  }
-}
-
-export function getAgentAwarenessRegistrationStatus(): AgentAwarenessRegistrationStatus
-{
-  return registrationStatus
-}
-
-export function subscribeAgentAwarenessRegistrationStatus(listener: () => void): () => void
-{
-  registrationStatusListeners.add(listener)
-  return () =>
-  {
-    registrationStatusListeners.delete(listener)
-  }
-}
 let activeLiveActivityRegistrationRetry: ReturnType<typeof setTimeout> | null = null
 let relayTokenProvider: (() => Promise<string | null>) | null = null
 let relayTokenProviderIdentity: string | null = null
@@ -247,7 +230,7 @@ export function setAgentAwarenessRelayTokenProvider(
     // same account re-activating (e.g. Clerk token refresh) normally needs no
     // re-registration — but if the previous attempt never succeeded, this is
     // the only trigger that will retry it before the next cold start.
-    if (registrationStatus !== 'registered')
+    if (readRegistrationStatus() !== 'registered')
     {
       enqueueDeviceRegistration({}, 'device registration retry after cloud session refresh failed')
     }
@@ -721,7 +704,7 @@ function startPendingDeviceRegistration(): void
     generation,
     hasObservedPushToken: next.input.observedPushToken !== undefined,
   })
-  if (registrationStatus !== 'registered')
+  if (readRegistrationStatus() !== 'registered')
   {
     setRegistrationStatus('pending')
   }
@@ -741,7 +724,7 @@ function startPendingDeviceRegistration(): void
       // the prior accepted registration intact on the relay, so an already
       // registered device stays "registered" rather than flipping the
       // settings toggles off.
-      if (registrationStatus !== 'registered')
+      if (readRegistrationStatus() !== 'registered')
       {
         setRegistrationStatus('failed')
       }
@@ -971,7 +954,7 @@ export function refreshAgentAwarenessRegistration(): Effect.Effect<
       {
         // same rationale as the queued path: a failed refresh does not undo an
         // already accepted registration.
-        if (registrationStatus !== 'registered')
+        if (readRegistrationStatus() !== 'registered')
         {
           setRegistrationStatus('failed')
         }
@@ -989,7 +972,7 @@ export function updateAgentAwarenessRegistrationPreferences(
     Effect.tapError((error) =>
       Effect.sync(() =>
       {
-        if (registrationStatus !== 'registered')
+        if (readRegistrationStatus() !== 'registered')
         {
           setRegistrationStatus('failed')
         }
@@ -1016,8 +999,7 @@ export function __resetAgentAwarenessRemoteRegistrationForTest(): void
   deviceRegistrationGeneration++
   activeDeviceRegistration = null
   pendingDeviceRegistration = null
-  registrationStatus = 'unknown'
-  registrationStatusListeners.clear()
+  resetRegistrationStatus()
   registeredActivityPushTokens.clear()
 }
 
