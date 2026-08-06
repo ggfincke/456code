@@ -99,6 +99,7 @@ export function mapManagedRelayError(error: ManagedRelayClientError): Connection
       return new ConnectionTransientError({
         reason: 'timeout',
         detail: error.message,
+        ...(error.traceId === null ? {} : { traceId: error.traceId }),
       })
     case 'ManagedRelayUrlInvalidError':
       return new ConnectionBlockedError({

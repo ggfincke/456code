@@ -189,7 +189,7 @@ export const resolveRemoteWebSocketConnectionUrl = Effect.fn(
   const issued = yield* issueRemoteWebSocketTicket({
     httpBaseUrl: input.httpBaseUrl,
     bearerToken: input.bearerToken,
-    ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
   })
 
   const url = new URL(input.wsBaseUrl)
@@ -215,7 +215,7 @@ export const resolveRemoteDpopWebSocketConnectionUrl = Effect.fn(
     httpBaseUrl: input.httpBaseUrl,
     accessToken: input.accessToken,
     dpopProof: input.dpopProof,
-    ...(input.timeoutMs ? { timeoutMs: input.timeoutMs } : {}),
+    ...(input.timeoutMs !== undefined ? { timeoutMs: input.timeoutMs } : {}),
   })
   const url = new URL(input.wsBaseUrl)
   if (url.pathname === '' || url.pathname === '/')

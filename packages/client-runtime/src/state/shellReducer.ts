@@ -4,6 +4,46 @@
 import * as Arr from 'effect/Array'
 import type { OrchestrationShellSnapshot, OrchestrationShellStreamEvent } from '@t3tools/contracts'
 
+const entityPositions = new WeakMap<
+  ReadonlyArray<{ readonly id: string }>,
+  ReadonlyMap<string, number>
+>()
+
+function entityPositionsFor<A extends { readonly id: string }>(
+  entities: ReadonlyArray<A>,
+): ReadonlyMap<string, number>
+{
+  const cached = entityPositions.get(entities)
+  if (cached !== undefined)
+  {
+    return cached
+  }
+  const positions = new Map(entities.map((entity, index) => [entity.id, index] as const))
+  entityPositions.set(entities, positions)
+  return positions
+}
+
+function upsertEntity<A extends { readonly id: string }>(
+  entities: ReadonlyArray<A>,
+  incoming: A,
+): ReadonlyArray<A>
+{
+  const positions = entityPositionsFor(entities)
+  const index = positions.get(incoming.id)
+  if (index !== undefined)
+  {
+    const next = entities.with(index, incoming)
+    entityPositions.set(next, positions)
+    return next
+  }
+
+  const next = Arr.append(entities, incoming)
+  const nextPositions = new Map(positions)
+  nextPositions.set(incoming.id, entities.length)
+  entityPositions.set(next, nextPositions)
+  return next
+}
+
 // reduce a single shell stream event into an existing snapshot, returning a new
 // snapshot with the event's changes applied. This is a pure reducer that both
 // web and mobile can use to keep their local shell snapshot in sync.
@@ -21,9 +61,7 @@ export function applyShellStreamEvent(
   {
     case 'project-upserted':
     {
-      const projects = snapshot.projects.some((p) => p.id === event.project.id)
-        ? Arr.map(snapshot.projects, (p) => (p.id === event.project.id ? event.project : p))
-        : Arr.append(snapshot.projects, event.project)
+      const projects = upsertEntity(snapshot.projects, event.project)
       return { ...snapshot, projects, snapshotSequence: event.sequence }
     }
     case 'project-removed':
@@ -34,9 +72,7 @@ export function applyShellStreamEvent(
       }
     case 'thread-upserted':
     {
-      const threads = snapshot.threads.some((t) => t.id === event.thread.id)
-        ? Arr.map(snapshot.threads, (t) => (t.id === event.thread.id ? event.thread : t))
-        : Arr.append(snapshot.threads, event.thread)
+      const threads = upsertEntity(snapshot.threads, event.thread)
       return { ...snapshot, threads, snapshotSequence: event.sequence }
     }
     case 'thread-removed':
