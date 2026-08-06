@@ -15,7 +15,9 @@ describe('project RPC errors', () =>
   it('derives stable messages from structured request context while retaining causes', () =>
   {
     const cause = new Error('sensitive platform detail')
+    // message construction moved to the server consumers (megacore U-139)
     const searchError = new ProjectSearchEntriesError({
+      message: "Failed to search workspace entries in '/workspace'.",
       cwd: '/workspace',
       queryLength: 'authorization: Bearer secret-token'.length,
       limit: 20,
@@ -25,6 +27,7 @@ describe('project RPC errors', () =>
       cause,
     })
     const readError = new ProjectReadFileError({
+      message: "Failed to read workspace file 'src/index.ts' in '/workspace'.",
       cwd: '/workspace',
       relativePath: 'src/index.ts',
       failure: 'operation_failed',

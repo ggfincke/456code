@@ -90,7 +90,7 @@ import { ImportContinuationDepsUnbound } from '../../../apps/server/src/import/c
 import { ImportReplacementIntentRepository } from '../../../apps/server/src/persistence/Services/ImportReplacementIntents.ts'
 import { OrchestrationProjectionPipeline } from '../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts'
 import { AttachmentLifecycleRepository } from '../../../apps/server/src/persistence/Services/AttachmentLifecycle.ts'
-import * as CheckpointDiffQuery from '../../../apps/server/src/checkpointing/CheckpointDiffQuery.ts'
+import * as CheckpointDiffQuery from '../../../apps/server/src/orchestration/Services/CheckpointDiffQuery.ts'
 import * as GitManager from '../../../apps/server/src/git/GitManager.ts'
 import * as Keybindings from '../../../apps/server/src/keybindings.ts'
 import * as ExternalLauncher from '../../../apps/server/src/process/externalLauncher.ts'

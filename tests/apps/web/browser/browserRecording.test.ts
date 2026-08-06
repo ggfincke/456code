@@ -34,7 +34,7 @@ const { events, onFrame, registrySet, save, startScreencast, stopScreencast, sur
     }
   })
 
-vi.mock('~/components/preview/previewBridge', () => ({
+vi.mock('~/browser/previewBridge', () => ({
   previewBridge: {
     recording: { onFrame, save, startScreencast, stopScreencast },
   },

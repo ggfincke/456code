@@ -19,13 +19,16 @@ import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
 } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
-import * as ProviderSessionRuntime from '../../../../../apps/server/src/persistence/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntime from '../../../../../apps/server/src/persistence/Services/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntimeLayers from '../../../../../apps/server/src/persistence/Layers/ProviderSessionRuntime.ts'
 import { ProviderSessionDirectory } from '../../../../../apps/server/src/provider/Services/ProviderSessionDirectory.ts'
 import { ProviderSessionDirectoryLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts'
 
 function makeDirectoryLayer<E, R>(persistenceLayer: Layer.Layer<SqlClient.SqlClient, E, R>)
 {
-  const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(Layer.provide(persistenceLayer))
+  const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
+    Layer.provide(persistenceLayer),
+  )
   return Layer.mergeAll(
     runtimeRepositoryLayer,
     ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer)),

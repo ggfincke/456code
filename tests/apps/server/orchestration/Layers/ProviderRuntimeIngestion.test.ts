@@ -2,6 +2,7 @@
 // verifies provider runtime events are projected into thread state
 
 // @effect-diagnostics nodeBuiltinImport:off
+import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
@@ -54,6 +55,9 @@ import { OrchestrationProjectionSnapshotQueryLive } from '../../../../../apps/se
 import { ProviderRuntimeIngestionLive } from '../../../../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts'
 import { OrchestrationEngineService } from '../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
 import { ProviderRuntimeIngestionService } from '../../../../../apps/server/src/orchestration/Services/ProviderRuntimeIngestion.ts'
+import * as VcsProcess from '../../../../../apps/server/src/vcs/VcsProcess.ts'
+import * as VcsDriverRegistry from '../../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
+import * as CheckpointStore from '../../../../../apps/server/src/checkpointing/CheckpointStore.ts'
 import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { ServerSettingsService } from '../../../../../apps/server/src/serverSettings.ts'
@@ -168,7 +172,16 @@ function createProviderServiceHarness()
 
   const emit = (event: LegacyProviderRuntimeEvent): void =>
   {
-    Effect.runSync(PubSub.publish(runtimeEventPubSub, normalizeLegacyEvent(event)))
+    // mirror ProviderService.streamEvents stamping: ingestion now fences events
+    // by provider instance (megacore U-072) and this harness bypasses the
+    // service boundary that stamps providerInstanceId in production
+    const normalized = normalizeLegacyEvent(event)
+    const stamped: ProviderRuntimeEvent = {
+      ...normalized,
+      providerInstanceId:
+        normalized.providerInstanceId ?? ProviderInstanceId.make(String(normalized.provider)),
+    }
+    Effect.runSync(PubSub.publish(runtimeEventPubSub, stamped))
   }
 
   return {
@@ -248,7 +261,9 @@ describe('ProviderRuntimeIngestion', () =>
   async function createHarness(options?: { serverSettings?: Partial<ServerSettings> })
   {
     const workspaceRoot = makeTempDir('t3-provider-project-')
-    NodeFS.mkdirSync(NodePath.join(workspaceRoot, '.git'))
+    // repository detection now goes through the vcs registry (megacore XC2-1),
+    // so the fixture needs a real repo rather than an empty .git directory
+    NodeChildProcess.execFileSync('git', ['init', '--quiet'], { cwd: workspaceRoot })
     const provider = createProviderServiceHarness()
     const orchestrationLayer = OrchestrationEngineLive.pipe(
       Layer.provide(OrchestrationProjectionSnapshotQueryLive),
@@ -274,6 +289,7 @@ describe('ProviderRuntimeIngestion', () =>
             domainSubscriptionCount += 1
             return engine.streamDomainEvents
           },
+          streamDomainEventsForAggregate: engine.streamDomainEventsForAggregate,
           latestSequence: engine.latestSequence,
         })
       }),
@@ -285,6 +301,10 @@ describe('ProviderRuntimeIngestion', () =>
       Layer.provide(SqlitePersistenceMemory),
     )
     const layer = ProviderRuntimeIngestionLive.pipe(
+      // ingestion now resolves repositories through CheckpointStore (megacore XC2-1)
+      Layer.provideMerge(CheckpointStore.layer),
+      Layer.provideMerge(VcsDriverRegistry.layer),
+      Layer.provideMerge(VcsProcess.layer),
       Layer.provideMerge(observedOrchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(SqlitePersistenceMemory),
@@ -833,6 +853,7 @@ describe('ProviderRuntimeIngestion', () =>
           threadId: ThreadId.make('thread-1'),
           status: 'ready',
           providerName: 'claudeAgent',
+          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
           runtimeMode: 'approval-required',
           activeTurnId: null,
           updatedAt: seededAt,
@@ -1073,6 +1094,26 @@ describe('ProviderRuntimeIngestion', () =>
   it('preserves completed tool metadata on projected tool activities', async () =>
   {
     const harness = await createHarness()
+    // the ingestion fence (megacore U-072) drops events whose provider
+    // instance does not match the bound session; bind a claude session first
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-claude-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: 'cursor',
+          providerInstanceId: ProviderInstanceId.make('cursor'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({
@@ -1130,6 +1171,26 @@ describe('ProviderRuntimeIngestion', () =>
   it('normalizes command execution activities to ran-command summaries', async () =>
   {
     const harness = await createHarness()
+    // the ingestion fence (megacore U-072) drops events whose provider
+    // instance does not match the bound session; bind a claude session first
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-claude-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: 'cursor',
+          providerInstanceId: ProviderInstanceId.make('cursor'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({
@@ -1173,6 +1234,26 @@ describe('ProviderRuntimeIngestion', () =>
   it('uses structured read-file paths when available', async () =>
   {
     const harness = await createHarness()
+    // the ingestion fence (megacore U-072) drops events whose provider
+    // instance does not match the bound session; bind a claude session first
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-claude-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: 'cursor',
+          providerInstanceId: ProviderInstanceId.make('cursor'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({
@@ -2856,6 +2937,26 @@ describe('ProviderRuntimeIngestion', () =>
   it('projects context window updates into normalized thread activities', async () =>
   {
     const harness = await createHarness()
+    // the ingestion fence (megacore U-072) drops events whose provider
+    // instance does not match the bound session; bind a claude session first
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-claude-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: 'codex',
+          providerInstanceId: ProviderInstanceId.make('codex-work'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({
@@ -2916,6 +3017,26 @@ describe('ProviderRuntimeIngestion', () =>
   it('projects Claude usage snapshots with context window into normalized thread activities', async () =>
   {
     const harness = await createHarness()
+    // the ingestion fence (megacore U-072) drops events whose provider
+    // instance does not match the bound session; bind a claude session first
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-claude-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: 'claudeAgent',
+          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({
@@ -3094,6 +3215,26 @@ describe('ProviderRuntimeIngestion', () =>
   it('titles task activities with the task description, including on completion', async () =>
   {
     const harness = await createHarness()
+    // the ingestion fence (megacore U-072) drops events whose provider
+    // instance does not match the bound session; bind a claude session first
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-claude-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: 'claudeAgent',
+          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({
@@ -3171,6 +3312,26 @@ describe('ProviderRuntimeIngestion', () =>
   it('titles task completion from task.started when no progress event carried the name', async () =>
   {
     const harness = await createHarness()
+    // the ingestion fence (megacore U-072) drops events whose provider
+    // instance does not match the bound session; bind a claude session first
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-claude-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: 'claudeAgent',
+          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({
@@ -3220,6 +3381,26 @@ describe('ProviderRuntimeIngestion', () =>
   it('titles task completion from persisted activities after the description cache is swept', async () =>
   {
     const harness = await createHarness()
+    // the ingestion fence (megacore U-072) drops events whose provider
+    // instance does not match the bound session; bind a claude session first
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-claude-fence'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: 'claudeAgent',
+          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({

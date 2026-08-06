@@ -43,6 +43,7 @@ const idleSnapshot: DesktopBackendSnapshot = {
   ready: false,
   activePid: Option.none(),
   restartAttempt: 5,
+  preflightFailure: Option.none(),
   restartScheduled: false,
 }
 
@@ -51,6 +52,7 @@ const primarySnapshot: DesktopBackendSnapshot = {
   ready: true,
   activePid: Option.some(123),
   restartAttempt: 0,
+  preflightFailure: Option.none(),
   restartScheduled: false,
 }
 

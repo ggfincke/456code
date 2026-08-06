@@ -433,6 +433,94 @@ describe('applyThreadDetailEvent', () =>
         expect(failed.thread.modelSelection).toEqual(baseThread.modelSelection)
       }
     })
+
+    it('ignores provider switch lifecycle events for a different request', () =>
+    {
+      const requested = applyThreadDetailEvent(baseThread, {
+        ...baseEventFields,
+        eventId: EventId.make('provider-switch-request-a'),
+        sequence: 1,
+        occurredAt: '2026-04-01T01:00:00.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-requested',
+        payload: {
+          threadId: baseThread.id,
+          targetModelSelection: {
+            instanceId: ProviderInstanceId.make('claude'),
+            model: 'sonnet',
+          },
+          expectedCurrentInstanceId: baseThread.modelSelection.instanceId,
+        },
+      })
+      expect(requested.kind).toBe('updated')
+      if (requested.kind !== 'updated') return
+
+      const requestId = EventId.make('provider-switch-request-b')
+      const progressed = applyThreadDetailEvent(requested.thread, {
+        ...baseEventFields,
+        eventId: EventId.make('provider-switch-progressed-b'),
+        sequence: 2,
+        occurredAt: '2026-04-01T01:00:01.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-progressed',
+        payload: {
+          threadId: baseThread.id,
+          requestId,
+          phase: 'compacting',
+        },
+      })
+      const failed = applyThreadDetailEvent(requested.thread, {
+        ...baseEventFields,
+        eventId: EventId.make('provider-switch-failed-b'),
+        sequence: 3,
+        occurredAt: '2026-04-01T01:00:02.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switch-failed',
+        payload: {
+          threadId: baseThread.id,
+          requestId,
+          reasonCode: 'target-unavailable',
+          detail: 'Target provider unavailable.',
+        },
+      })
+      const switched = applyThreadDetailEvent(requested.thread, {
+        ...baseEventFields,
+        eventId: EventId.make('provider-switched-b'),
+        sequence: 4,
+        occurredAt: '2026-04-01T01:00:03.000Z',
+        aggregateKind: 'thread',
+        aggregateId: baseThread.id,
+        type: 'thread.provider-switched',
+        payload: {
+          requestId,
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('cursor'),
+            model: 'composer',
+          },
+          fromInstanceId: baseThread.modelSelection.instanceId,
+          fromModel: baseThread.modelSelection.model,
+          handoffText: 'Ignore this stale switch.',
+        },
+      })
+
+      expect(progressed).toEqual({ kind: 'unchanged' })
+      expect(failed).toEqual({ kind: 'unchanged' })
+      expect(switched).toEqual({ kind: 'unchanged' })
+      expect(requested.thread.providerSwitch).toEqual({
+        phase: 'pending',
+        targetInstanceId: ProviderInstanceId.make('claude'),
+        targetModel: 'sonnet',
+        requestedAt: '2026-04-01T01:00:00.000Z',
+        requestId: EventId.make('provider-switch-request-a'),
+        requestSequence: 1,
+        sourceModelSelection: baseThread.modelSelection,
+      })
+      expect(requested.thread.modelSelection).toEqual(baseThread.modelSelection)
+      expect(requested.thread.activities).toEqual([])
+    })
   })
 
   describe('thread.deleted', () =>
@@ -849,12 +937,9 @@ describe('applyThreadDetailEvent', () =>
         },
       })
 
-      expect(result.kind).toBe('updated')
-      if (result.kind === 'updated')
-      {
-        expect(result.thread.session?.status).toBe('stopped')
-        expect(result.thread.session?.activeTurnId).toBeNull()
-      }
+      // stop requests no longer optimistically mark the session stopped; the
+      // authoritative session events own the transition (megacore U-009)
+      expect(result.kind).toBe('unchanged')
     })
 
     it('returns unchanged when no session exists', () =>

@@ -28,7 +28,8 @@ import {
 import { ServerSettingsService } from '../../../../apps/server/src/serverSettings.ts'
 import { AnalyticsService } from '../../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
-import * as ProviderSessionRuntime from '../../../../apps/server/src/persistence/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntime from '../../../../apps/server/src/persistence/Services/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntimeLayers from '../../../../apps/server/src/persistence/Layers/ProviderSessionRuntime.ts'
 
 import {
   makeTestProviderAdapterHarness,
@@ -69,7 +70,7 @@ const makeIntegrationFixture = Effect.gen(function* ()
   })
 
   const directoryLayer = ProviderSessionDirectoryLive.pipe(
-    Layer.provide(ProviderSessionRuntime.layer),
+    Layer.provide(ProviderSessionRuntimeLayers.layer),
   )
 
   const shared = Layer.mergeAll(
@@ -308,6 +309,7 @@ it.live('rolls back provider conversation state only', () =>
       yield* provider.rollbackConversation({
         threadId: session.threadId,
         numTurns: 1,
+        expectedProviderInstanceId: ProviderInstanceId.make('codex'),
       })
 
       const rollbackCalls = fixture.harness.getRollbackCalls(session.threadId)

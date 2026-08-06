@@ -50,6 +50,7 @@ const defaultWslInstance: DesktopBackendManager.DesktopBackendInstance = {
     ready: true,
     activePid: Option.some(123),
     restartAttempt: 0,
+    preflightFailure: Option.none(),
     restartScheduled: false,
   }),
   waitForReady: () => Effect.succeed(true),
@@ -93,6 +94,8 @@ describe('getLocalEnvironmentBootstraps', () =>
         ready: false,
         activePid: Option.none(),
         restartAttempt: 2,
+        // preflight state is reported on the snapshot now (megacore U-133)
+        preflightFailure: retryingConfig.preflightFailure,
         restartScheduled: true,
       }),
     }
@@ -130,6 +133,11 @@ describe('getLocalEnvironmentBootstraps', () =>
         desiredRunning: false,
         ready: false,
         activePid: Option.none(),
+        preflightFailure: Option.some({
+          reason: 'WSL probe timed out',
+          fatal: false,
+          retryLimit: 12,
+        }),
         restartAttempt: 12,
         restartScheduled: false,
       }),

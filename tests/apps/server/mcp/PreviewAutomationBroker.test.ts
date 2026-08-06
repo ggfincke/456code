@@ -442,7 +442,8 @@ it.effect('distinguishes malformed remote failures', () =>
           connectionId: request.connectionId,
           requestId: request.requestId,
           ok: false,
-        }),
+          // deliberately malformed: ok:false w/o error exercises the runtime malformed-response path
+        } as unknown as Parameters<typeof broker.respond>[0]),
       ).pipe(Effect.forkScoped)
       yield* Effect.yieldNow
 

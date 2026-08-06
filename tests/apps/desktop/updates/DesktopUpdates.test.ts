@@ -144,6 +144,7 @@ function makeHarness(options: UpdatesHarnessOptions = {})
       ready: false,
       activePid: Option.none(),
       restartAttempt: 0,
+      preflightFailure: Option.none(),
       restartScheduled: false,
     }),
     waitForReady: () => Effect.succeed(true),

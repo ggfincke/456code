@@ -12,7 +12,8 @@ import * as AuthPairingLinks from '../../../../apps/server/src/persistence/AuthP
 import * as AuthSessions from '../../../../apps/server/src/persistence/AuthSessions.ts'
 import * as PersistenceErrors from '../../../../apps/server/src/persistence/Errors.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
-import * as ProviderSessionRuntime from '../../../../apps/server/src/persistence/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntime from '../../../../apps/server/src/persistence/Services/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntimeLayers from '../../../../apps/server/src/persistence/Layers/ProviderSessionRuntime.ts'
 
 const issuedAt = DateTime.makeUnsafe('2026-06-20T00:00:00.000Z')
 const expiresAt = DateTime.makeUnsafe('2027-06-20T00:00:00.000Z')
@@ -23,7 +24,7 @@ const authSessionLayer = AuthSessions.layer.pipe(Layer.provideMerge(SqlitePersis
 const authPairingLinkLayer = AuthPairingLinks.layer.pipe(
   Layer.provideMerge(SqlitePersistenceMemory),
 )
-const providerSessionRuntimeLayer = ProviderSessionRuntime.layer.pipe(
+const providerSessionRuntimeLayer = ProviderSessionRuntimeLayers.layer.pipe(
   Layer.provideMerge(SqlitePersistenceMemory),
 )
 

@@ -86,6 +86,7 @@ const TestEngineLive = Layer.effect(
       {
         return feed.stream
       },
+      streamDomainEventsForAggregate: () => feed.stream,
       latestSequence: feed.snapshot.pipe(Effect.map((events) => events.at(-1)?.sequence ?? 0)),
     })
   }),
@@ -191,7 +192,8 @@ describe('DurableReactorRunner', () =>
         )
 
         yield* feed.append(event(2), false)
-        yield* TestClock.adjust('700 millis')
+        // poll interval widened from 500ms to 5s (megacore perf batch)
+        yield* TestClock.adjust('5100 millis')
         assert.deepStrictEqual(yield* Ref.get(executions), [1, 2])
         assert.equal(
           Option.getOrThrow(yield* delivery.getProgress('thread-deletion')).cursorSequence,

@@ -4,7 +4,7 @@
 import { describe, expect, it } from 'vite-plus/test'
 import * as OpenApi from 'effect/unstable/httpapi/OpenApi'
 
-import { RelayApi } from '../../../packages/contracts/src/relay.ts'
+import { RelayApi } from '../../../packages/client-runtime/src/relay/protocol.ts'
 
 describe('RelayApi security', () =>
 {

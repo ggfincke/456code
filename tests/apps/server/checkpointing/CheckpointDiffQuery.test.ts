@@ -10,9 +10,10 @@ import { describe, expect } from 'vite-plus/test'
 
 import * as ProjectionSnapshotQuery from '../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import { checkpointRefForThreadTurn } from '../../../../apps/server/src/checkpointing/Utils.ts'
-import * as CheckpointDiffQuery from '../../../../apps/server/src/checkpointing/CheckpointDiffQuery.ts'
+import * as CheckpointDiffQuery from '../../../../apps/server/src/orchestration/Services/CheckpointDiffQuery.ts'
+import * as CheckpointDiffQueryLayers from '../../../../apps/server/src/orchestration/Layers/CheckpointDiffQuery.ts'
 import * as CheckpointStore from '../../../../apps/server/src/checkpointing/CheckpointStore.ts'
-import { CheckpointThreadNotFoundError } from '../../../../apps/server/src/checkpointing/Errors.ts'
+import { CheckpointThreadNotFoundError } from '../../../../apps/server/src/orchestration/Errors.ts'
 import { makeProjectionSnapshotQueryStub } from '../projectionSnapshotQueryTestHelpers.ts'
 
 function unusedCheckpointStoreCall<A>(): Effect.Effect<A>
@@ -64,7 +65,7 @@ function makeThreadCheckpointContext(input: {
   }
 }
 
-describe('CheckpointDiffQuery.layer', () =>
+describe('CheckpointDiffQueryLayers.layer', () =>
 {
   it.effect('uses the narrow full-thread context lookup for all-turns diffs', () =>
     Effect.gen(function* ()
@@ -96,7 +97,7 @@ describe('CheckpointDiffQuery.layer', () =>
           }),
       }
 
-      const layer = CheckpointDiffQuery.layer.pipe(
+      const layer = CheckpointDiffQueryLayers.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(
@@ -192,7 +193,7 @@ describe('CheckpointDiffQuery.layer', () =>
           }),
       }
 
-      const layer = CheckpointDiffQuery.layer.pipe(
+      const layer = CheckpointDiffQueryLayers.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(
@@ -269,7 +270,7 @@ describe('CheckpointDiffQuery.layer', () =>
         diffCheckpoints: () => Effect.succeed('diff patch'),
       }
 
-      const layer = CheckpointDiffQuery.layer.pipe(
+      const layer = CheckpointDiffQueryLayers.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(
@@ -304,7 +305,7 @@ describe('CheckpointDiffQuery.layer', () =>
 
       const checkpointStore: CheckpointStore.CheckpointStore['Service'] = baseCheckpointStoreStub
 
-      const layer = CheckpointDiffQuery.layer.pipe(
+      const layer = CheckpointDiffQueryLayers.layer.pipe(
         Layer.provideMerge(Layer.succeed(CheckpointStore.CheckpointStore, checkpointStore)),
         Layer.provideMerge(
           Layer.succeed(
