@@ -44,6 +44,61 @@ export interface VcsProcessOutput
   readonly stderrTruncated: boolean
 }
 
+interface VcsProcessErrorContext
+{
+  readonly operation: string
+  readonly command: string
+  readonly cwd: string
+  readonly argumentCount?: number
+}
+
+function makeVcsProcessSpawnError(
+  context: VcsProcessErrorContext,
+  error: { readonly cause: unknown },
+): VcsProcessSpawnError
+{
+  return new VcsProcessSpawnError({ ...context, cause: error.cause })
+}
+
+function makeVcsProcessTimeoutError(
+  context: VcsProcessErrorContext,
+  error: { readonly timeoutMs: number },
+): VcsProcessTimeoutError
+{
+  return new VcsProcessTimeoutError({ ...context, timeoutMs: error.timeoutMs })
+}
+
+function makeVcsProcessExitError(
+  context: VcsProcessErrorContext,
+  error: {
+    readonly exitCode: number
+    readonly stderr: string
+    readonly stderrTruncated: boolean
+  },
+  failureKind: VcsProcessExitFailureKind,
+): VcsProcessExitError
+{
+  const detail =
+    failureKind === 'authentication'
+      ? 'Authentication failed.'
+      : failureKind === 'not-found'
+        ? context.command === 'glab'
+          ? 'Merge request not found.'
+          : context.command === 'gh' || context.command === 'az'
+            ? 'Pull request not found.'
+            : 'VCS resource not found.'
+        : 'Process exited with a non-zero status.'
+
+  return new VcsProcessExitError({
+    ...context,
+    exitCode: error.exitCode,
+    detail,
+    failureKind,
+    stderrLength: error.stderr.length,
+    stderrTruncated: error.stderrTruncated,
+  })
+}
+
 export class VcsProcess extends Context.Service<
   VcsProcess,
   {
@@ -125,8 +180,7 @@ export const make = Effect.gen(function* ()
       .pipe(
         Effect.mapError(
           Match.valueTags({
-            ProcessSpawnError: (error) =>
-              VcsProcessSpawnError.fromProcessSpawnError(baseError, error),
+            ProcessSpawnError: (error) => makeVcsProcessSpawnError(baseError, error),
             ProcessOutputLimitError: (error) =>
               new VcsProcessOutputLimitError({
                 ...baseError,
@@ -134,8 +188,7 @@ export const make = Effect.gen(function* ()
                 maxBytes: error.maxBytes,
                 observedBytes: error.observedBytes,
               }),
-            ProcessTimeoutError: (error) =>
-              VcsProcessTimeoutError.fromProcessTimeoutError(baseError, error),
+            ProcessTimeoutError: (error) => makeVcsProcessTimeoutError(baseError, error),
             ProcessStdinError: (error) =>
               new VcsProcessStdinWriteError({
                 ...baseError,
@@ -159,7 +212,7 @@ export const make = Effect.gen(function* ()
 
     if (!input.allowNonZeroExit && result.code !== 0)
     {
-      return yield* VcsProcessExitError.fromProcessExit(
+      return yield* makeVcsProcessExitError(
         baseError,
         {
           exitCode: result.code,

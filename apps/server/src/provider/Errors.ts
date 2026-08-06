@@ -3,7 +3,7 @@
 
 import * as Schema from 'effect/Schema'
 
-import type { CheckpointServiceError } from '../checkpointing/Errors.ts'
+import type { CheckpointStoreError } from '../checkpointing/Errors.ts'
 
 /**
  * ProviderAdapterValidationError - Invalid adapter API input.
@@ -226,4 +226,4 @@ export type ProviderServiceError =
   | ProviderSessionNotFoundError
   | ProviderSessionDirectoryPersistenceError
   | ProviderAdapterError
-  | CheckpointServiceError
+  | CheckpointStoreError

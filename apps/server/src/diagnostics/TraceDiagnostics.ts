@@ -10,6 +10,7 @@ import type {
   ServerTraceDiagnosticsSpanOccurrence,
   ServerTraceDiagnosticsSpanSummary,
 } from '@t3tools/contracts'
+import { decodeTraceRecord, traceRecordOutcome } from '@t3tools/shared/observability'
 import * as Context from 'effect/Context'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
@@ -19,25 +20,6 @@ import * as Option from 'effect/Option'
 import * as PlatformError from 'effect/PlatformError'
 import * as Result from 'effect/Result'
 import * as Schema from 'effect/Schema'
-
-interface TraceRecordLike
-{
-  readonly name?: unknown
-  readonly traceId?: unknown
-  readonly spanId?: unknown
-  readonly startTimeUnixNano?: unknown
-  readonly endTimeUnixNano?: unknown
-  readonly durationMs?: unknown
-  readonly exit?: unknown
-  readonly events?: unknown
-}
-
-interface TraceEventLike
-{
-  readonly name?: unknown
-  readonly timeUnixNano?: unknown
-  readonly attributes?: unknown
-}
 
 export interface TraceDiagnosticsOptions
 {
@@ -100,11 +82,6 @@ function toRotatedTracePaths(traceFilePath: string, maxFiles: number): ReadonlyA
   return [...backups, traceFilePath]
 }
 
-function isRecordObject(value: unknown): value is TraceRecordLike
-{
-  return typeof value === 'object' && value !== null
-}
-
 function toStringValue(value: unknown): string | null
 {
   return typeof value === 'string' && value.trim().length > 0 ? value : null
@@ -128,30 +105,6 @@ function unixNanoToDateTime(value: unknown): DateTime.Utc | null
   {
     return null
   }
-}
-
-function readExitTag(exit: unknown): string | null
-{
-  if (!isRecordObject(exit) || !('_tag' in exit)) return null
-  return toStringValue(exit._tag)
-}
-
-function readExitCause(exit: unknown): string
-{
-  if (!isRecordObject(exit) || !('cause' in exit)) return 'Failure'
-  return toStringValue(exit.cause)?.trim() ?? 'Failure'
-}
-
-function isTraceEvent(value: unknown): value is TraceEventLike
-{
-  return typeof value === 'object' && value !== null
-}
-
-function readEventAttributes(event: TraceEventLike): Readonly<Record<string, unknown>>
-{
-  return typeof event.attributes === 'object' && event.attributes !== null
-    ? (event.attributes as Readonly<Record<string, unknown>>)
-    : {}
 }
 
 function makeEmptyDiagnostics(input: {
@@ -270,18 +223,19 @@ export function aggregateTraceDiagnostics(
         continue
       }
 
-      if (!isRecordObject(parsed))
+      const record = decodeTraceRecord(parsed)
+      if (record === null)
       {
         parseErrorCount += 1
         continue
       }
 
-      const name = toStringValue(parsed.name)
-      const traceId = toStringValue(parsed.traceId)
-      const spanId = toStringValue(parsed.spanId)
-      const durationMs = toNumberValue(parsed.durationMs)
-      const endedAt = unixNanoToDateTime(parsed.endTimeUnixNano)
-      const startedAt = unixNanoToDateTime(parsed.startTimeUnixNano)
+      const name = toStringValue(record.name)
+      const traceId = toStringValue(record.traceId)
+      const spanId = toStringValue(record.spanId)
+      const durationMs = toNumberValue(record.durationMs)
+      const endedAt = unixNanoToDateTime(record.endTimeUnixNano)
+      const startedAt = unixNanoToDateTime(record.startTimeUnixNano)
 
       if (!name || !traceId || !spanId || durationMs === null || !endedAt)
       {
@@ -297,9 +251,9 @@ export function aggregateTraceDiagnostics(
       lastSpanAt =
         lastSpanAt === null || DateTime.isGreaterThan(endedAt, lastSpanAt) ? endedAt : lastSpanAt
 
-      const exitTag = readExitTag(parsed.exit)
-      const isFailure = exitTag === 'Failure'
-      const isInterrupted = exitTag === 'Interrupted'
+      const outcome = traceRecordOutcome(record)
+      const isFailure = outcome._tag === 'Failure'
+      const isInterrupted = outcome._tag === 'Interrupted'
       if (isFailure) failureCount += 1
       if (isInterrupted) interruptionCount += 1
 
@@ -324,7 +278,7 @@ export function aggregateTraceDiagnostics(
 
       if (isFailure)
       {
-        const cause = readExitCause(parsed.exit)
+        const cause = outcome._tag === 'Failure' ? outcome.cause : 'Failure'
         latestFailures.push({ ...spanItem, cause })
 
         const failureKey = `${name}\0${cause}`
@@ -340,38 +294,33 @@ export function aggregateTraceDiagnostics(
         })
       }
 
-      if (Array.isArray(parsed.events))
+      for (const event of record.events)
       {
-        for (const rawEvent of parsed.events)
+        const level = toStringValue(event.attributes['effect.logLevel'])
+        if (!level) continue
+
+        logLevelCounts[level] = (logLevelCounts[level] ?? 0) + 1
+        const normalizedLevel = level.toLowerCase()
+        if (
+          normalizedLevel !== 'warning' &&
+          normalizedLevel !== 'warn' &&
+          normalizedLevel !== 'error' &&
+          normalizedLevel !== 'fatal'
+        )
         {
-          if (!isTraceEvent(rawEvent)) continue
-          const attributes = readEventAttributes(rawEvent)
-          const level = toStringValue(attributes['effect.logLevel'])
-          if (!level) continue
-
-          logLevelCounts[level] = (logLevelCounts[level] ?? 0) + 1
-          const normalizedLevel = level.toLowerCase()
-          if (
-            normalizedLevel !== 'warning' &&
-            normalizedLevel !== 'warn' &&
-            normalizedLevel !== 'error' &&
-            normalizedLevel !== 'fatal'
-          )
-          {
-            continue
-          }
-
-          const seenAt = unixNanoToDateTime(rawEvent.timeUnixNano) ?? endedAt
-          const message = toStringValue(rawEvent.name)?.trim() ?? 'Log event'
-          latestWarningAndErrorLogs.push({
-            spanName: name,
-            level,
-            message,
-            seenAt,
-            traceId,
-            spanId,
-          })
+          continue
         }
+
+        const seenAt = unixNanoToDateTime(event.timeUnixNano) ?? endedAt
+        const message = toStringValue(event.name)?.trim() ?? 'Log event'
+        latestWarningAndErrorLogs.push({
+          spanName: name,
+          level,
+          message,
+          seenAt,
+          traceId,
+          spanId,
+        })
       }
     }
   }

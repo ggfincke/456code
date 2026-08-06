@@ -15,10 +15,6 @@ const CONNECT_CALLBACK_PATH = '/connect/callback'
 // default lives here.
 export const DEFAULT_HOSTED_APP_URL = 'https://app.t3.codes'
 
-// requested at authorize time by the hosted page and honored by the CLI's
-// token exchange; keep both sides on this single definition.
-export const CONNECT_OAUTH_SCOPES = ['openid', 'profile', 'email'] as const
-
 export interface ConnectAuthorizeRequest
 {
   readonly state: string
@@ -93,27 +89,6 @@ export interface ConnectAuthCode
 export function encodeConnectAuthCode(input: ConnectAuthCode): string
 {
   return `${input.code}${CONNECT_AUTH_CODE_SEPARATOR}${input.state}`
-}
-
-// validates an out-of-band authorization code against the state of the request this process
-// generated. Returns the parsed code or a user-facing error message; both
-// the prompt's live validation and the authoritative post-prompt check go
-// through here so they cannot drift.
-export function checkConnectAuthCode(
-  blob: string,
-  expectedState: string,
-): ConnectAuthCode | string
-{
-  const parsed = parseConnectAuthCode(blob)
-  if (parsed === null)
-  {
-    return 'That does not look like a relay code. Copy the full code.'
-  }
-  if (parsed.state !== expectedState)
-  {
-    return 'That code belongs to a different connect request. Open the URL above and try again.'
-  }
-  return parsed
 }
 
 export function parseConnectAuthCode(blob: string): ConnectAuthCode | null

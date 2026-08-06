@@ -36,7 +36,7 @@ import * as Stream from 'effect/Stream'
 import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
-import * as CheckpointDiffQuery from '../../checkpointing/CheckpointDiffQuery.ts'
+import * as CheckpointDiffQuery from '../../orchestration/Services/CheckpointDiffQuery.ts'
 import * as ServerConfig from '../../config.ts'
 import {
   projectActivityEvent,
@@ -1236,13 +1236,15 @@ export function makeOrchestrationRpcHandlers({
             event.aggregateId === input.threadId &&
             isThreadDetailEvent(event)
 
-          const liveStream = orchestrationEngine.streamDomainEvents.pipe(
-            Stream.filter(isThisThreadDetailEvent),
-            Stream.map((event) => ({
-              kind: 'event' as const,
-              event: projectActivityEvent(event),
-            })),
-          )
+          const liveStream = orchestrationEngine
+            .streamDomainEventsForAggregate('thread', input.threadId)
+            .pipe(
+              Stream.filter(isThisThreadDetailEvent),
+              Stream.map((event) => ({
+                kind: 'event' as const,
+                event: projectActivityEvent(event),
+              })),
+            )
 
           const loadSnapshot = projectionSnapshotQuery.getThreadDetailSnapshot(input.threadId).pipe(
             Effect.mapError(

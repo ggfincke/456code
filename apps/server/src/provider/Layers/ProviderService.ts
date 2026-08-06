@@ -21,7 +21,7 @@ import {
   ProviderSendTurnInput,
   ProviderSessionStartInput,
   ProviderStopSessionInput,
-  type ProviderInstanceId,
+  ProviderInstanceId,
   type ProviderDriverKind,
   type ProviderContinuationIdentity as ProviderContinuationIdentityType,
   type ProviderRuntimeEvent,
@@ -55,7 +55,7 @@ import * as ProviderService from '../Services/ProviderService.ts'
 import * as ProviderSessionDirectory from '../Services/ProviderSessionDirectory.ts'
 import { type EventNdjsonLogger } from './EventNdjsonLogger.ts'
 import * as ProviderEventLoggers from './ProviderEventLoggers.ts'
-import * as AnalyticsService from '../../telemetry/AnalyticsService.ts'
+import * as AnalyticsService from '../../telemetry/Services/AnalyticsService.ts'
 import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import * as McpSessionRegistry from '../../mcp/McpSessionRegistry.ts'
 import { applyOrchestrateModeInstructions } from '../CollaborationModeInstructions.ts'
@@ -79,6 +79,7 @@ type ProviderServiceMethod<Name extends keyof ProviderService.ProviderService['S
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
   numTurns: NonNegativeInt,
+  expectedProviderInstanceId: ProviderInstanceId,
 })
 
 function toValidationError(
@@ -631,6 +632,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     readonly threadId: ThreadId
     readonly operation: string
     readonly allowRecovery: boolean
+    readonly expectedProviderInstanceId?: ProviderInstanceId
     readonly routingAuthority?: ProviderService.ProviderRoutingAuthority
     readonly context?: ProviderEffectContext
   })
@@ -645,6 +647,16 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       )
     }
     const instanceId = yield* requireBindingInstanceId(input.operation, binding)
+    if (
+      input.expectedProviderInstanceId !== undefined &&
+      instanceId !== input.expectedProviderInstanceId
+    )
+    {
+      return yield* toValidationError(
+        input.operation,
+        `Provider binding changed from expected instance '${input.expectedProviderInstanceId}' to '${instanceId}'.`,
+      )
+    }
     const route = yield* registry.getRoute(instanceId)
     const persistedContinuationIdentity = readPersistedContinuationIdentity(binding.runtimePayload)
     yield* validateAdapterRoute({
@@ -1316,6 +1328,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         threadId: input.threadId,
         operation: 'ProviderService.rollbackConversation',
         allowRecovery: true,
+        expectedProviderInstanceId: input.expectedProviderInstanceId,
         ...(context !== undefined ? { context } : {}),
       })
       metricProvider = routed.adapter.provider

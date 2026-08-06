@@ -1,4 +1,4 @@
-// apps/server/src/telemetry/AnalyticsService.ts
+// apps/server/src/telemetry/Layers/AnalyticsService.ts
 // provide analytics service behavior
 
 // persists an installation-scoped anonymous identifier, buffers events in
@@ -7,7 +7,6 @@
 // @module AnalyticsService
 import { HostProcessArchitecture, HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import * as Config from 'effect/Config'
-import * as Context from 'effect/Context'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
@@ -17,9 +16,10 @@ import * as HttpClient from 'effect/unstable/http/HttpClient'
 import * as HttpClientRequest from 'effect/unstable/http/HttpClientRequest'
 import * as HttpClientResponse from 'effect/unstable/http/HttpClientResponse'
 
-import packageJson from '../../package.json' with { type: 'json' }
-import * as ServerConfig from '../config.ts'
-import { getTelemetryIdentifier } from './Identify.ts'
+import packageJson from '../../../package.json' with { type: 'json' }
+import * as ServerConfig from '../../config.ts'
+import { getTelemetryIdentifier } from '../Identify.ts'
+import { AnalyticsService } from '../Services/AnalyticsService.ts'
 
 interface BufferedAnalyticsEvent
 {
@@ -45,30 +45,6 @@ const TelemetryEnvConfig = Config.all({
   ),
   wslDistroName: Config.string('WSL_DISTRO_NAME').pipe(Config.option),
 })
-
-export class AnalyticsService extends Context.Service<
-  AnalyticsService,
-  {
-    // record an anonymous event for best-effort buffered delivery.
-    readonly record: (
-      event: string,
-      properties?: Readonly<Record<string, unknown>>,
-    ) => Effect.Effect<void>
-
-    // flush all currently queued telemetry events.
-    readonly flush: Effect.Effect<void>
-  }
->()('456code/telemetry/AnalyticsService')
-{
-  // no-op layer for callers that intentionally disable telemetry.
-  static readonly layerTest = Layer.succeed(
-    AnalyticsService,
-    AnalyticsService.of({
-      record: () => Effect.void,
-      flush: Effect.void,
-    }),
-  )
-}
 
 export const make = Effect.gen(function* ()
 {

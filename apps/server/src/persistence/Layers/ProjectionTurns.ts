@@ -10,7 +10,7 @@ import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as Struct from 'effect/Struct'
 
-import { toPersistenceDecodeError, toPersistenceSqlError } from '../Errors.ts'
+import { toPersistenceSqlError, toPersistenceSqlOrDecodeError } from '../Errors.ts'
 import {
   ClearCheckpointTurnConflictInput,
   DeleteProjectionTurnsByThreadInput,
@@ -35,14 +35,6 @@ const ProjectionTurnByIdDbRowSchema = ProjectionTurnById.mapFields(
     checkpointFiles: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
   }),
 )
-
-function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)
-{
-  return (cause: unknown) =>
-    Schema.isSchemaError(cause)
-      ? toPersistenceDecodeError(decodeOperation)(cause)
-      : toPersistenceSqlError(sqlOperation)(cause)
-}
 
 const makeProjectionTurnRepository = Effect.gen(function* ()
 {

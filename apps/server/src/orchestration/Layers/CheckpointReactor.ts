@@ -26,6 +26,7 @@ import * as Stream from 'effect/Stream'
 import { makeDrainableWorker } from '@t3tools/shared/DrainableWorker'
 
 import { parseTurnDiffFilesFromUnifiedDiff } from '../../checkpointing/Diffs.ts'
+import type { CheckpointStoreError } from '../../checkpointing/Errors.ts'
 import { checkpointRefForThreadTurn, resolveThreadWorkspaceCwd } from '../../checkpointing/Utils.ts'
 import * as CheckpointStore from '../../checkpointing/CheckpointStore.ts'
 import { ServerConfig } from '../../config.ts'
@@ -43,7 +44,6 @@ import {
 import { OrchestrationEngineService } from '../Services/OrchestrationEngine.ts'
 import { ProjectionSnapshotQuery } from '../Services/ProjectionSnapshotQuery.ts'
 import { RuntimeReceiptBus } from '../Services/RuntimeReceiptBus.ts'
-import { isGitRepository } from '../../git/Utils.ts'
 import { ProposalImplementationAttemptService } from '../../proposal/ProposalImplementationAttemptService.ts'
 import { VcsStatusBroadcaster } from '../../vcs/VcsStatusBroadcaster.ts'
 import * as VcsDriverRegistry from '../../vcs/VcsDriverRegistry.ts'
@@ -454,8 +454,6 @@ const make = Effect.gen(function* ()
     return project ? [project] : []
   })
 
-  const isGitWorkspace = (cwd: string) => isGitRepository(cwd)
-
   // resolves the workspace CWD for checkpoint operations, preferring the
   // active provider session CWD and falling back to the thread/project config.
   // returns undefined when no CWD can be determined or the workspace is not
@@ -465,7 +463,7 @@ const make = Effect.gen(function* ()
     readonly thread: { readonly projectId: ProjectId; readonly worktreePath: string | null }
     readonly projects: ReadonlyArray<{ readonly id: ProjectId; readonly workspaceRoot: string }>
     readonly preferSessionRuntime: boolean
-  }): Effect.fn.Return<string | undefined>
+  }): Effect.fn.Return<string | undefined, CheckpointStoreError>
   {
     const fromSession = yield* resolveSessionRuntimeForThread(input.threadId)
     const fromThread = resolveThreadWorkspaceCwd({
@@ -488,7 +486,7 @@ const make = Effect.gen(function* ()
     {
       return undefined
     }
-    if (!isGitWorkspace(cwd))
+    if (!(yield* checkpointStore.isGitRepository(cwd)))
     {
       return undefined
     }
@@ -1556,7 +1554,7 @@ const make = Effect.gen(function* ()
       yield* failVisibly('No active provider session with workspace cwd is bound to this thread.')
       return
     }
-    if (!isGitWorkspace(sessionRuntime.value.cwd))
+    if (!(yield* checkpointStore.isGitRepository(sessionRuntime.value.cwd)))
     {
       yield* failVisibly(
         'Checkpoints are unavailable because this project is not a git repository.',

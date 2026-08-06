@@ -99,6 +99,14 @@ function commandToAggregateRef(command: OrchestrationCommand): {
   }
 }
 
+function aggregateEventKey(
+  aggregateKind: OrchestrationEvent['aggregateKind'],
+  aggregateId: OrchestrationEvent['aggregateId'],
+): string
+{
+  return JSON.stringify([aggregateKind, aggregateId])
+}
+
 const makeOrchestrationEngine = Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient
@@ -115,6 +123,24 @@ const makeOrchestrationEngine = Effect.gen(function* ()
 
   const commandQueue = yield* Queue.unbounded<CommandEnvelope>()
   const eventPubSub = yield* PubSub.unbounded<OrchestrationEvent>()
+  const aggregateEventSubscribers = new Map<string, Set<Queue.Queue<OrchestrationEvent>>>()
+
+  const publishEvent = Effect.fn('OrchestrationEngine.publishEvent')(function* (
+    event: OrchestrationEvent,
+  )
+  {
+    yield* PubSub.publish(eventPubSub, event)
+    const subscribers = aggregateEventSubscribers.get(
+      aggregateEventKey(event.aggregateKind, event.aggregateId),
+    )
+    if (subscribers === undefined)
+    {
+      return
+    }
+    yield* Effect.forEach(subscribers, (subscriber) => Queue.offer(subscriber, event), {
+      discard: true,
+    })
+  })
 
   const projectEventsOntoReadModel = (
     baseReadModel: OrchestrationReadModel,
@@ -153,7 +179,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
 
       for (const persistedEvent of persistedEvents)
       {
-        yield* PubSub.publish(eventPubSub, persistedEvent)
+        yield* publishEvent(persistedEvent)
       }
     })
 
@@ -229,12 +255,12 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 ),
               )
               const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase]
+              const savedEvents = yield* eventStore.appendAll(eventBases)
               const committedEvents: OrchestrationEvent[] = []
               let nextCommandReadModel = commandReadModel
 
-              for (const nextEvent of eventBases)
+              for (const savedEvent of savedEvents)
               {
-                const savedEvent = yield* eventStore.append(nextEvent)
                 nextCommandReadModel = yield* projectEvent(nextCommandReadModel, savedEvent)
                 yield* projectionPipeline.projectEvent(savedEvent)
                 committedEvents.push(savedEvent)
@@ -288,7 +314,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
         commandReadModel = committedCommand.nextCommandReadModel
         for (const [index, event] of committedCommand.committedEvents.entries())
         {
-          yield* PubSub.publish(eventPubSub, event)
+          yield* publishEvent(event)
           if (index === 0)
           {
             yield* Metric.update(
@@ -401,6 +427,34 @@ const makeOrchestrationEngine = Effect.gen(function* ()
       return yield* Deferred.await(result)
     })
 
+  const streamDomainEventsForAggregate: OrchestrationEngineShape['streamDomainEventsForAggregate'] =
+    (aggregateKind, aggregateId) =>
+    {
+      const key = aggregateEventKey(aggregateKind, aggregateId)
+      return Stream.unwrap(
+        Effect.acquireRelease(
+          Effect.gen(function* ()
+          {
+            const subscriber = yield* Queue.unbounded<OrchestrationEvent>()
+            const subscribers = aggregateEventSubscribers.get(key) ?? new Set()
+            subscribers.add(subscriber)
+            aggregateEventSubscribers.set(key, subscribers)
+            return subscriber
+          }),
+          (subscriber) =>
+            Effect.sync(() =>
+            {
+              const subscribers = aggregateEventSubscribers.get(key)
+              subscribers?.delete(subscriber)
+              if (subscribers?.size === 0)
+              {
+                aggregateEventSubscribers.delete(key)
+              }
+            }).pipe(Effect.andThen(Queue.shutdown(subscriber))),
+        ).pipe(Effect.map(Stream.fromQueue)),
+      )
+    }
+
   return {
     readEvents,
     dispatch,
@@ -411,6 +465,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
     {
       return Stream.fromPubSub(eventPubSub)
     },
+    streamDomainEventsForAggregate,
     // the command read model's snapshotSequence tracks the latest committed
     // event sequence (updated on the worker fiber). A plain property read is a
     // consistent, committed value — reassignment of `commandReadModel` is

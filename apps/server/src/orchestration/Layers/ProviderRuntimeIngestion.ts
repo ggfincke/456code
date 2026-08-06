@@ -29,7 +29,7 @@ import { makeDrainableWorker } from '@t3tools/shared/DrainableWorker'
 import { ProviderService } from '../../provider/Services/ProviderService.ts'
 import { ProjectionTurnRepository } from '../../persistence/Services/ProjectionTurns.ts'
 import { ProjectionTurnRepositoryLive } from '../../persistence/Layers/ProjectionTurns.ts'
-import { isGitRepository } from '../../git/Utils.ts'
+import * as CheckpointStore from '../../checkpointing/CheckpointStore.ts'
 import { OrchestrationEngineService } from '../Services/OrchestrationEngine.ts'
 import { ProjectionSnapshotQuery } from '../Services/ProjectionSnapshotQuery.ts'
 import {
@@ -337,6 +337,7 @@ const make = Effect.gen(function* ()
   const crypto = yield* Crypto.Crypto
   const orchestrationEngine = yield* OrchestrationEngineService
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
+  const checkpointStore = yield* CheckpointStore.CheckpointStore
   const providerService = yield* ProviderService
   const projectionTurnRepository = yield* ProjectionTurnRepository
   const serverSettingsService = yield* ServerSettingsService
@@ -1504,7 +1505,12 @@ const make = Effect.gen(function* ()
           : undefined
         const workspaceCwd =
           checkpointContext?.worktreePath ?? checkpointContext?.workspaceRoot ?? undefined
-        if (turnId && checkpointContext && workspaceCwd && isGitRepository(workspaceCwd))
+        if (
+          turnId &&
+          checkpointContext &&
+          workspaceCwd &&
+          (yield* checkpointStore.isGitRepository(workspaceCwd))
+        )
         {
           // skip if a checkpoint already exists for this turn. A real
           // (non-placeholder) capture from CheckpointReactor should not

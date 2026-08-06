@@ -1,5 +1,5 @@
 // packages/shared/src/path.ts
-// determine whether windows drive path
+// normalize cross-platform project paths
 
 export function isWindowsDrivePath(value: string): boolean
 {
@@ -47,14 +47,38 @@ function trimTrailingPathSeparators(value: string): string
   return /^[a-zA-Z]:$/.test(trimmed) ? `${trimmed}\\` : trimmed
 }
 
-export function normalizeProjectPathForDispatch(value: string): string
+export function expandTildePath(value: string, homeDirectory?: string | null): string
 {
-  return trimTrailingPathSeparators(value.trim())
+  const trimmed = value.trim()
+  const home = homeDirectory?.trim()
+  if (!home || (trimmed !== '~' && !trimmed.startsWith('~/') && !trimmed.startsWith('~\\')))
+  {
+    return trimmed
+  }
+  const normalizedHome = trimTrailingPathSeparators(home)
+  if (trimmed === '~')
+  {
+    return normalizedHome
+  }
+  const separator = isWindowsAbsolutePath(normalizedHome) ? '\\' : '/'
+  const suffix = trimmed.slice(2).replaceAll(/[\\/]+/g, separator)
+  return suffix.length === 0 ? normalizedHome : `${normalizedHome}${separator}${suffix}`
 }
 
-export function normalizeProjectPathForComparison(value: string): string
+export function normalizeProjectPathForDispatch(
+  value: string,
+  homeDirectory?: string | null,
+): string
 {
-  const normalized = normalizeProjectPathForDispatch(value)
+  return trimTrailingPathSeparators(expandTildePath(value, homeDirectory))
+}
+
+export function normalizeProjectPathForComparison(
+  value: string,
+  homeDirectory?: string | null,
+): string
+{
+  const normalized = normalizeProjectPathForDispatch(value, homeDirectory)
   if (isWindowsDrivePath(normalized) || isUncPath(normalized))
   {
     return normalized.replaceAll('/', '\\').toLowerCase()

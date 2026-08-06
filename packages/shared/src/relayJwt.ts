@@ -43,11 +43,6 @@ export class RelayJwtError extends Schema.TaggedErrorClass<RelayJwtError>()('Rel
   }
 }
 
-export function normalizeRelayIssuer(value: string): string
-{
-  return value.trim().replace(/\/+$/gu, '')
-}
-
 export function decodeRelayJwt(token: string): JWTPayload
 {
   return decodeJwt(token)

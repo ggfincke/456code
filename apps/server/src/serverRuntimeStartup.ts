@@ -34,7 +34,7 @@ import * as ProjectionSnapshotQuery from './orchestration/Services/ProjectionSna
 import * as OrchestrationReactor from './orchestration/Services/OrchestrationReactor.ts'
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
 import * as ServerSettings from './serverSettings.ts'
-import * as AnalyticsService from './telemetry/AnalyticsService.ts'
+import * as AnalyticsService from './telemetry/Services/AnalyticsService.ts'
 import * as ServerEnvironment from './environment/ServerEnvironment.ts'
 import * as EnvironmentAuth from './auth/EnvironmentAuth.ts'
 import * as ProviderSessionReaper from './provider/Services/ProviderSessionReaper.ts'
