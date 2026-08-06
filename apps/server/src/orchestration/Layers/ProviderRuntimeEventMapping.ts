@@ -3,7 +3,6 @@
 
 import {
   ApprovalRequestId,
-  isToolLifecycleItemType,
   type OrchestrationThread,
   type OrchestrationThreadActivity,
   type ProviderInstanceId,
@@ -12,6 +11,7 @@ import {
   type ThreadTokenUsageSnapshot,
   TurnId,
 } from '@t3tools/contracts'
+import { isToolLifecycleItemType } from '@t3tools/shared/toolActivity'
 
 export function matchesProviderInstanceFence(
   expectedProviderInstanceId: ProviderInstanceId,

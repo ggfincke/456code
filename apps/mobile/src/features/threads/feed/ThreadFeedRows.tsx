@@ -95,12 +95,26 @@ function MessageAttachmentImage(props: {
   readonly onPressImage: (uri: string, headers?: Record<string, string>) => void
 })
 {
-  const uri = useAssetUrl(props.environmentId, {
+  const asset = useAssetUrl(props.environmentId, {
     _tag: 'attachment',
     attachmentId: props.attachmentId,
   })
 
-  if (uri === null)
+  if (asset._tag === 'Failure')
+  {
+    return (
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="Retry attachment preview"
+        className={`${props.className} items-center justify-center bg-subtle`}
+        onPress={asset.retry}
+      >
+        <Text className="text-center text-xs text-foreground-muted">Tap to retry</Text>
+      </TouchableOpacity>
+    )
+  }
+
+  if (asset._tag !== 'Success')
   {
     return (
       <View className={`${props.className} items-center justify-center`}>
@@ -110,8 +124,8 @@ function MessageAttachmentImage(props: {
   }
 
   return (
-    <TouchableOpacity activeOpacity={0.7} onPress={() => props.onPressImage(uri)}>
-      <Image source={{ uri }} className={props.className} resizeMode="cover" />
+    <TouchableOpacity activeOpacity={0.7} onPress={() => props.onPressImage(asset.url)}>
+      <Image source={{ uri: asset.url }} className={props.className} resizeMode="cover" />
     </TouchableOpacity>
   )
 }

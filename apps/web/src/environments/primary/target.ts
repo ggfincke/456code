@@ -329,3 +329,12 @@ export function readPrimaryEnvironmentTarget(): PrimaryEnvironmentTarget
     resolveWindowOriginPrimaryTarget()
   )
 }
+
+export function primaryEnvironmentTopologySignature(target: PrimaryEnvironmentTarget): string
+{
+  const bootstrapToken =
+    target.source === 'desktop-managed'
+      ? (getDesktopLocalEnvironmentBootstrap()?.bootstrapToken ?? '')
+      : ''
+  return `${target.source}|${target.target.httpBaseUrl}|${target.target.wsBaseUrl}|${bootstrapToken}`
+}

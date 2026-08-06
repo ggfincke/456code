@@ -21,7 +21,7 @@ import {
 } from '~/components/ui/menu'
 import { Tooltip, TooltipPopup, TooltipTrigger } from '~/components/ui/tooltip'
 
-import { previewBridge } from './previewBridge'
+import { previewBridge } from '~/browser/previewBridge'
 
 const COLOR_SCHEME_OPTIONS: ReadonlyArray<{
   value: DesktopPreviewColorScheme

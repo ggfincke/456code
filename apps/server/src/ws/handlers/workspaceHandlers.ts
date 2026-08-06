@@ -188,6 +188,7 @@ export function makeWorkspaceRpcHandlers({
                 cwd: input.cwd,
                 queryLength: input.query.length,
                 limit: input.limit,
+                message: `Failed to search workspace entries in '${input.cwd}'.`,
                 ...projectEntriesFailureContext(cause),
                 cause,
               }),
@@ -203,6 +204,7 @@ export function makeWorkspaceRpcHandlers({
             (cause) =>
               new ProjectListEntriesError({
                 ...input,
+                message: `Failed to list workspace entries in '${input.cwd}'.`,
                 ...projectEntriesFailureContext(cause),
                 cause,
               }),
@@ -218,6 +220,7 @@ export function makeWorkspaceRpcHandlers({
             (cause) =>
               new ProjectReadFileError({
                 ...input,
+                message: `Failed to read workspace file '${input.relativePath}' in '${input.cwd}'.`,
                 ...projectFileFailureContext(cause),
                 cause,
               }),
@@ -262,6 +265,7 @@ export function makeWorkspaceRpcHandlers({
                 : new ProjectReadFileError({
                     cwd: workspaceRoot,
                     relativePath: input.relativePath,
+                    message: `Failed to read workspace file '${input.relativePath}' in '${workspaceRoot}'.`,
                     ...projectFileFailureContext(cause),
                     cause,
                   }),
@@ -279,6 +283,7 @@ export function makeWorkspaceRpcHandlers({
               new ProjectWriteFileError({
                 cwd: input.cwd,
                 relativePath: input.relativePath,
+                message: `Failed to write workspace file '${input.relativePath}' in '${input.cwd}'.`,
                 ...projectFileFailureContext(cause),
                 cause,
               }),
@@ -298,6 +303,7 @@ export function makeWorkspaceRpcHandlers({
             (cause) =>
               new FilesystemBrowseError({
                 ...input,
+                message: `Failed to browse filesystem path '${input.partialPath}'${input.cwd === undefined ? '' : ` from '${input.cwd}'`}.`,
                 ...filesystemBrowseFailureContext(cause),
                 cause,
               }),

@@ -216,7 +216,8 @@ export const ServerProvider = Schema.Struct({
   message: Schema.optional(TrimmedNonEmptyString),
   // optional for back-compat: every legacy producer omits this field and
   // an absent value is interpreted as `"available"` by consumers (see
-  // `isProviderAvailable`). New `ProviderInstanceRegistry` outputs set it
+  // `isProviderAvailable` in `packages/shared/src/serverSettings.ts`). New
+  // `ProviderInstanceRegistry` outputs set it
   // explicitly so the UI can render unavailable shadows from
   // `ServerSettings.providerInstances`.
   availability: Schema.optional(ServerProviderAvailability),
@@ -236,13 +237,6 @@ export type ServerProvider = typeof ServerProvider.Type
 
 export const ServerProviders = Schema.Array(ServerProvider)
 export type ServerProviders = typeof ServerProviders.Type
-
-// treat the optional `availability` as "available" when absent. This is
-// the rule legacy producers (which omit the field) and new producers
-// (which set it explicitly) agree on so consumers never have to thread
-// `?? "available"` defaults through their code paths.
-export const isProviderAvailable = (snapshot: ServerProvider): boolean =>
-  snapshot.availability !== 'unavailable'
 
 export const ServerObservability = Schema.Struct({
   logsDirectoryPath: TrimmedNonEmptyString,

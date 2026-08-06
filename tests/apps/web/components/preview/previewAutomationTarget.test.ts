@@ -48,7 +48,9 @@ describe('preview automation target selection', () =>
         { snapshot: active, sessions: { [active.tabId]: active } },
         'tab-missing',
       ),
-    ).toEqual({ tabId: null, snapshot: null })
+      // explicit-but-missing is now distinguished from no-current-target so
+      // callers cannot silently retarget the active tab (megacore WEB2-7)
+    ).toEqual({ kind: 'missing-explicit', tabId: 'tab-missing', snapshot: null })
   })
 
   it("reuses the provider session's pinned tab instead of the mutable UI tab", () =>
@@ -60,8 +62,17 @@ describe('preview automation target selection', () =>
       sessions: { [uiActive.tabId]: uiActive, [agentTab.tabId]: agentTab },
     }
 
-    expect(resolvePreviewAutomationOpenTab(state, agentTab.tabId, true)).toBe(agentTab.tabId)
-    expect(resolvePreviewAutomationOpenTab(state, undefined, true)).toBe(uiActive.tabId)
-    expect(resolvePreviewAutomationOpenTab(state, agentTab.tabId, false)).toBeNull()
+    expect(resolvePreviewAutomationOpenTab(state, agentTab.tabId, true)).toEqual({
+      kind: 'reuse',
+      tabId: agentTab.tabId,
+    })
+    expect(resolvePreviewAutomationOpenTab(state, undefined, true)).toEqual({
+      kind: 'reuse',
+      tabId: uiActive.tabId,
+    })
+    expect(resolvePreviewAutomationOpenTab(state, agentTab.tabId, false)).toEqual({
+      kind: 'create',
+      tabId: null,
+    })
   })
 })

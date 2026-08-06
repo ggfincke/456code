@@ -51,6 +51,12 @@ export interface OrchestrationEngineShape
   // this is a hot runtime stream (new events only), not a historical replay.
   readonly streamDomainEvents: Stream.Stream<OrchestrationEvent>
 
+  // stream live events for one aggregate without global PubSub fan-out.
+  readonly streamDomainEventsForAggregate: (
+    aggregateKind: OrchestrationEvent['aggregateKind'],
+    aggregateId: OrchestrationEvent['aggregateId'],
+  ) => Stream.Stream<OrchestrationEvent>
+
   // the latest sequence reflected in the engine's authoritative command read
   // model (0 if none). Used to gauge how far behind a resuming client is before
   // choosing between an incremental replay and a fresh projected snapshot.

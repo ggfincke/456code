@@ -130,10 +130,17 @@ function awaitThreadState(
   predicate: (state: EnvironmentThreadState) => boolean,
 )
 {
-  return Queue.take(observed).pipe(
-    Effect.repeat({
-      until: predicate,
-    }),
+  // live events are batched into 16ms frames (megacore U-184), so the test
+  // clock has to advance past the batch window for each emission to arrive
+  const takeBatched = Effect.forkScoped(
+    TestClock.adjust('16 millis').pipe(Effect.repeat({ times: 200 })),
+  ).pipe(Effect.andThen(Queue.take(observed)))
+  return Effect.scoped(
+    takeBatched.pipe(
+      Effect.repeat({
+        until: predicate,
+      }),
+    ),
   )
 }
 

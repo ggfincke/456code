@@ -19,8 +19,7 @@ import {
 import {
   type AuthSessionRepositoryError,
   PersistenceDecodeError,
-  type PersistenceErrorCorrelation,
-  PersistenceSqlError,
+  toPersistenceSqlOrDecodeError,
 } from './Errors.ts'
 
 export const AuthSessionClientMetadataRecord = Schema.Struct({
@@ -166,22 +165,6 @@ function toAuthSessionRecord(row: typeof AuthSessionDbRow.Type): AuthSessionReco
     lastConnectedAt: row.lastConnectedAt,
     revokedAt: row.revokedAt,
   }
-}
-
-function toPersistenceSqlOrDecodeError(
-  sqlOperation: string,
-  decodeOperation: string,
-  correlation?: PersistenceErrorCorrelation,
-)
-{
-  return (cause: unknown): AuthSessionRepositoryError =>
-    Schema.isSchemaError(cause)
-      ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
-      : new PersistenceSqlError({
-          operation: sqlOperation,
-          ...(correlation === undefined ? {} : { correlation }),
-          cause,
-        })
 }
 
 export const make = Effect.gen(function* ()

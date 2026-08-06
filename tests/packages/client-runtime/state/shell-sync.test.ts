@@ -4,6 +4,7 @@
 import {
   EnvironmentId,
   ORCHESTRATION_WS_METHODS,
+  ProjectId,
   type OrchestrationShellSnapshot,
   type OrchestrationShellStreamItem,
 } from '@t3tools/contracts'
@@ -359,6 +360,89 @@ describe('environment shell synchronization', () =>
       }
       expect(yield* Ref.get(loaderCalls)).toBe(3)
       expect(yield* Ref.get(subscriptionCount)).toBe(3)
+    }),
+  )
+
+  it.effect('ignores stale shell events after applying a newer snapshot sequence', () =>
+    Effect.gen(function* ()
+    {
+      const project = {
+        id: ProjectId.make('project-1'),
+        title: 'Initial title',
+        workspaceRoot: '/workspace/test',
+        repositoryIdentity: null,
+        defaultModelSelection: null,
+        scripts: [],
+        createdAt: '2026-06-06T00:00:00.000Z',
+        updatedAt: '2026-06-06T00:00:00.000Z',
+      } as const
+      const initialSnapshot: OrchestrationShellSnapshot = {
+        snapshotSequence: 1,
+        projects: [project],
+        threads: [],
+        updatedAt: '2026-06-06T00:00:00.000Z',
+      }
+      const events = yield* Queue.unbounded<OrchestrationShellStreamItem>()
+      const client = {
+        [ORCHESTRATION_WS_METHODS.subscribeShell]: () => Stream.fromQueue(events),
+      } as unknown as WsRpcProtocolClient
+      const supervisor = EnvironmentSupervisor.EnvironmentSupervisor.of({
+        target: TARGET,
+        state: yield* SubscriptionRef.make(AVAILABLE_CONNECTION_STATE),
+        session: yield* SubscriptionRef.make(Option.some(session(client))),
+        prepared: yield* SubscriptionRef.make(Option.some(PREPARED)),
+        connect: Effect.void,
+        disconnect: Effect.void,
+        retryNow: Effect.void,
+      } satisfies EnvironmentSupervisor.EnvironmentSupervisor['Service'])
+      const cache = Persistence.EnvironmentCacheStore.of({
+        loadShell: () => Effect.succeed(Option.some(initialSnapshot)),
+        saveShell: () => Effect.void,
+        loadThread: () => Effect.succeed(Option.none()),
+        saveThread: () => Effect.void,
+        removeThread: () => Effect.void,
+        loadServerConfig: () => Effect.succeed(Option.none()),
+        saveServerConfig: () => Effect.void,
+        loadVcsRefs: () => Effect.succeed(Option.none()),
+        saveVcsRefs: () => Effect.void,
+        removeVcsRefs: () => Effect.void,
+        clearVcsRefs: () => Effect.void,
+        clear: () => Effect.void,
+      })
+      const shellState = yield* makeEnvironmentShellState().pipe(
+        Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor),
+        Effect.provideService(Persistence.EnvironmentCacheStore, cache),
+        Effect.provideService(
+          ShellSnapshotLoader,
+          ShellSnapshotLoader.of({ load: () => Effect.succeed(Option.none()) }),
+        ),
+      )
+
+      yield* Queue.offer(events, {
+        kind: 'project-upserted',
+        sequence: 2,
+        project: { ...project, title: 'Current title' },
+      })
+      yield* SubscriptionRef.changes(shellState).pipe(
+        Stream.filter(
+          (state) => Option.isSome(state.snapshot) && state.snapshot.value.snapshotSequence === 2,
+        ),
+        Stream.runHead,
+      )
+      yield* Queue.offer(events, {
+        kind: 'project-upserted',
+        sequence: 1,
+        project: { ...project, title: 'Stale title' },
+      })
+      yield* Queue.offer(events, { kind: 'synchronized' })
+      yield* SubscriptionRef.changes(shellState).pipe(
+        Stream.filter((state) => state.status === 'live'),
+        Stream.runHead,
+      )
+
+      const snapshot = Option.getOrThrow((yield* SubscriptionRef.get(shellState)).snapshot)
+      expect(snapshot.snapshotSequence).toBe(2)
+      expect(snapshot.projects[0]?.title).toBe('Current title')
     }),
   )
 })

@@ -852,13 +852,13 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
             ? [String((entry.params as Record<string, unknown>).configId)]
             : [],
         )
-        assert.deepStrictEqual(configIdsAfterStart, [
-          'model',
-          'reasoning',
-          'context',
-          'fast',
-          'mode',
-        ])
+        // mode now travels over the typed session/set_mode rpc rather than
+        // session/set_config_option (megacore U-076)
+        assert.deepStrictEqual(configIdsAfterStart, ['model', 'reasoning', 'context', 'fast'])
+        assert.equal(
+          requestsAfterStart.filter((entry) => entry.method === 'session/set_mode').length,
+          1,
+        )
 
         yield* adapter.sendTurn({
           threadId,
@@ -876,7 +876,8 @@ cursorAdapterTestLayer('CursorAdapterLive', (it) =>
             ? [String((entry.params as Record<string, unknown>).configId)]
             : [],
         )
-        assert.deepStrictEqual(finalConfigIds, ['model', 'reasoning', 'context', 'fast', 'mode'])
+        assert.deepStrictEqual(finalConfigIds, ['model', 'reasoning', 'context', 'fast'])
+        assert.equal(finalRequests.filter((entry) => entry.method === 'session/set_mode').length, 1)
         assert.equal(finalRequests.filter((entry) => entry.method === 'session/prompt').length, 1)
       }),
   )

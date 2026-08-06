@@ -97,7 +97,7 @@ vi.mock('~/components/ui/toast', () => ({
   toastManager: { add: vi.fn() },
 }))
 
-vi.mock('../../../../../apps/web/src/components/preview/previewBridge', () => ({
+vi.mock('../../../../../apps/web/src/browser/previewBridge', () => ({
   previewBridge: { navigate: mocks.navigate },
 }))
 

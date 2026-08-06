@@ -26,6 +26,7 @@ import { useThemeColor } from '../../lib/useThemeColor'
 import { useThreadSelection } from '../../state/use-thread-selection'
 import { useSelectedThreadWorktree } from '../../state/use-selected-thread-worktree'
 import { useEnvironmentQuery } from '../../state/query'
+import type { AssetUrlState } from '../../state/assets'
 import { projectEnvironment } from '../../state/projects'
 import {
   useAdaptiveWorkspaceLayout,
@@ -93,7 +94,7 @@ function defaultViewMode(path: string | null): FileViewMode
 
 function FileContent(props: {
   readonly activeMode: FileViewMode
-  readonly previewUri: string | null
+  readonly previewAsset: AssetUrlState
   readonly fileContents: string | null
   readonly fileError: string | null
   readonly relativePath: string
@@ -105,24 +106,43 @@ function FileContent(props: {
   const isMarkdown = isMarkdownPreviewFile(props.relativePath)
   const isBrowserFile = isBrowserPreviewFile(props.relativePath)
   const isImageFile = isImagePreviewFile(props.relativePath)
+  const previewUri = props.previewAsset._tag === 'Success' ? props.previewAsset.url : null
+
+  if (
+    props.activeMode === 'preview' &&
+    (isImageFile || isBrowserFile) &&
+    props.previewAsset._tag === 'Failure'
+  )
+  {
+    return (
+      <View className="flex-1 items-center justify-center bg-sheet px-6">
+        <EmptyState
+          title="Preview unavailable"
+          detail={props.previewAsset.error}
+          actionLabel="Try again"
+          onAction={props.previewAsset.retry}
+        />
+      </View>
+    )
+  }
 
   if (props.activeMode === 'preview' && isImageFile)
   {
     if (isSvgImagePreviewFile(props.relativePath))
     {
-      return <WorkspaceFileWebPreview uri={props.previewUri} />
+      return <WorkspaceFileWebPreview uri={previewUri} />
     }
     return (
       <WorkspaceFileImagePreview
         accessibilityLabel={basename(props.relativePath)}
-        uri={props.previewUri}
+        uri={previewUri}
       />
     )
   }
 
   if (props.activeMode === 'preview' && isBrowserFile)
   {
-    return <WorkspaceFileWebPreview uri={props.previewUri} />
+    return <WorkspaceFileWebPreview uri={previewUri} />
   }
 
   if (props.fileError && props.fileContents === null)
@@ -520,16 +540,19 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps)
       : defaultViewMode(relativePath)
   const resolvedActiveMode = canPreview ? activeMode : 'source'
   const assetPreviewPath = isBrowserFile || isImageFile ? relativePath : null
-  const assetPreviewUri = useWorkspaceFileAssetUrl({
+  const assetPreview = useWorkspaceFileAssetUrl({
     cwd,
     environmentId,
     relativePath: assetPreviewPath,
     threadId,
   })
-  const previewUri =
-    assetPreviewUri === null || previewRevision === 0
-      ? assetPreviewUri
-      : `${assetPreviewUri}${assetPreviewUri.includes('?') ? '&' : '?'}revision=${previewRevision}`
+  const previewAsset =
+    assetPreview._tag !== 'Success' || previewRevision === 0
+      ? assetPreview
+      : {
+          ...assetPreview,
+          url: `${assetPreview.url}${assetPreview.url.includes('?') ? '&' : '?'}revision=${previewRevision}`,
+        }
   const needsFileContents =
     relativePath !== null &&
     (resolvedActiveMode === 'source' || isMarkdownPreviewFile(relativePath))
@@ -672,12 +695,12 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps)
             >
               Copy path
             </NativeHeaderToolbar.MenuAction>
-            {isBrowserFile && typeof assetPreviewUri === 'string' ? (
+            {isBrowserFile && assetPreview._tag === 'Success' ? (
               <NativeHeaderToolbar.MenuAction
                 icon="safari"
                 onPress={() =>
                   {
-                  void tryOpenExternalUrl(assetPreviewUri, 'file-preview')
+                  void tryOpenExternalUrl(assetPreview.url, 'file-preview')
                 }}
               >
                 Open in Safari
@@ -688,6 +711,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps)
                 icon="arrow.clockwise"
                 onPress={() =>
                   {
+                  assetPreview.retry()
                   setPreviewRevision((current) => current + 1)
                 }}
               >
@@ -698,7 +722,7 @@ export function ThreadFileScreen(props: ThreadFileRouteScreenProps)
         </NativeHeaderToolbar>
         <FileContent
           activeMode={resolvedActiveMode}
-          previewUri={previewUri}
+          previewAsset={previewAsset}
           fileContents={fileData?.contents ?? null}
           fileError={fileQuery.error}
           initialLine={targetLine}

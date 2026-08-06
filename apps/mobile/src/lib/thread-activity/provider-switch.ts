@@ -6,6 +6,7 @@ import {
   formatProviderSwitchTargetLabel,
   PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND,
   PROVIDER_SWITCH_FAILED_ACTIVITY_KIND,
+  providerSwitchBlockReason,
   readPayload,
   readString,
   type ProviderSwitchPhase,
@@ -21,6 +22,7 @@ import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrat
 export {
   describeProviderSwitchFailureReason,
   formatProviderSwitchTargetLabel,
+  providerSwitchBlockReason,
   PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND,
   PROVIDER_SWITCH_FAILED_ACTIVITY_KIND,
   type ProviderSwitchPhase,
@@ -229,36 +231,6 @@ export function threadProviderSwitchRequired(input: {
 }
 
 export const PROVIDER_SWITCH_BLOCKED_TITLE = 'Could not switch providers'
-
-// pre-flight gate for a handoff on a started thread, in the same order as the
-// web twin (getStartedThreadProviderSwitchBlockReason): a second switch, a live
-// turn, and either unanswered request all own the thread's session, so the
-// handoff has to wait rather than race them.
-export function providerSwitchBlockReason(input: {
-  readonly isSwitchingProvider: boolean
-  readonly isTurnRunning: boolean
-  readonly hasPendingApproval: boolean
-  readonly hasPendingUserInput: boolean
-}): string | null
-{
-  if (input.isSwitchingProvider)
-  {
-    return 'A provider handoff is already in progress.'
-  }
-  if (input.isTurnRunning)
-  {
-    return 'Wait for the current response to finish before switching providers.'
-  }
-  if (input.hasPendingApproval)
-  {
-    return 'Resolve the pending approval before switching providers.'
-  }
-  if (input.hasPendingUserInput)
-  {
-    return 'Answer the pending question before switching providers.'
-  }
-  return null
-}
 
 export function providerSwitchConfirmationCopy(targetLabel: string): {
   readonly title: string

@@ -80,7 +80,7 @@ export function useThreadProviderSwitch(): ThreadProviderSwitchState
     () =>
       (selectedThread?.hasPendingApprovals ?? false) ||
       (approvalOutcomeSource !== null && hasBlockingApprovalOutcome(approvalOutcomeSource)) ||
-      derivePendingApprovals(sortedActivities).length > 0,
+      derivePendingApprovals(sortedActivities, approvalOutcomeSource?.approvalOutcomes).length > 0,
     [approvalOutcomeSource, selectedThread?.hasPendingApprovals, sortedActivities],
   )
   const hasPendingUserInput = useMemo(

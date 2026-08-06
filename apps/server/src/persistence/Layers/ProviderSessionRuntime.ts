@@ -15,9 +15,8 @@ import { ThreadId } from '@t3tools/contracts'
 
 import {
   PersistenceDecodeError,
-  type PersistenceErrorCorrelation,
   PersistenceSqlError,
-  type ProviderSessionRuntimeRepositoryError,
+  toPersistenceSqlOrDecodeError,
 } from '../Errors.ts'
 import {
   ProviderSessionRuntime,
@@ -50,22 +49,6 @@ const GetRuntimeRequestSchema = Schema.Struct({
 })
 
 const DeleteRuntimeRequestSchema = GetRuntimeRequestSchema
-
-function toPersistenceSqlOrDecodeError(
-  sqlOperation: string,
-  decodeOperation: string,
-  correlation?: PersistenceErrorCorrelation,
-)
-{
-  return (cause: unknown): ProviderSessionRuntimeRepositoryError =>
-    Schema.isSchemaError(cause)
-      ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
-      : new PersistenceSqlError({
-          operation: sqlOperation,
-          ...(correlation === undefined ? {} : { correlation }),
-          cause,
-        })
-}
 
 export const make = Effect.gen(function* ()
 {

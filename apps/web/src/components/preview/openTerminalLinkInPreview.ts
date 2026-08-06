@@ -96,7 +96,9 @@ export async function openTerminalLinkInPreview<E>(
 
   if (choice === 'open-in-preview')
   {
-    let resolvedUrl: string
+    // environment-aware rewriting is best effort: when the environment has no
+    // resolver registered we still open the literal url rather than failing
+    let resolvedUrl = input.url
     try
     {
       resolvedUrl = resolveBrowserNavigationTarget(input.threadRef.environmentId, {
@@ -104,16 +106,9 @@ export async function openTerminalLinkInPreview<E>(
         url: input.url,
       }).resolvedUrl
     }
-    catch (cause)
+    catch
     {
-      console.error(
-        new TerminalLinkPreviewOpenError({
-          ...errorContext,
-          cause,
-        }),
-      )
-      input.fallbackToBrowser()
-      return
+      resolvedUrl = input.url
     }
     const result = await input.openPreview({
       environmentId: input.threadRef.environmentId,

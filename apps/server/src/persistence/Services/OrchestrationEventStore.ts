@@ -30,6 +30,11 @@ export interface OrchestrationEventStoreShape
     event: Omit<OrchestrationEvent, 'sequence'>,
   ) => Effect.Effect<OrchestrationEvent, OrchestrationEventStoreError>
 
+  // persist an ordered event batch in one statement.
+  readonly appendAll: (
+    events: ReadonlyArray<Omit<OrchestrationEvent, 'sequence'>>,
+  ) => Effect.Effect<ReadonlyArray<OrchestrationEvent>, OrchestrationEventStoreError>
+
   // replay events after the provided sequence.
   //
   // @param sequenceExclusive - Sequence cursor (exclusive).

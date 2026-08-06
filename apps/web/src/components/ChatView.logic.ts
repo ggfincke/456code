@@ -1,5 +1,6 @@
 // apps/web/src/components/ChatView.logic.ts
 // provides pure chat view state, import continuation, and dispatch helpers
+export { providerSwitchBlockReason as getStartedThreadProviderSwitchBlockReason } from '@t3tools/client-runtime/provider-switch'
 import {
   type EventId,
   type EnvironmentId,
@@ -794,32 +795,6 @@ export function deriveLockedProvider(input: {
   )
   {
     return input.importContinuationGate.driverKind
-  }
-  return null
-}
-
-export function getStartedThreadProviderSwitchBlockReason(input: {
-  isSwitchingProvider: boolean
-  isTurnRunning: boolean
-  hasPendingApproval: boolean
-  hasPendingUserInput: boolean
-}): string | null
-{
-  if (input.isSwitchingProvider)
-  {
-    return 'A provider handoff is already in progress.'
-  }
-  if (input.isTurnRunning)
-  {
-    return 'Wait for the current response to finish before switching providers.'
-  }
-  if (input.hasPendingApproval)
-  {
-    return 'Resolve the pending approval before switching providers.'
-  }
-  if (input.hasPendingUserInput)
-  {
-    return 'Answer the pending question before switching providers.'
   }
   return null
 }

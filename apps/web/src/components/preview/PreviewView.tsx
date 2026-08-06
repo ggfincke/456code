@@ -22,11 +22,11 @@ import {
   useThreadPreviewState,
 } from '~/previewStateStore'
 import { resolveDiscoveredServerUrl } from '~/browser/browserTargetResolver'
+import { previewBridge } from '~/browser/previewBridge'
 import { useEnvironment, useEnvironmentHttpBaseUrl } from '~/state/environments'
 import { previewEnvironment } from '~/state/preview'
 import { useAtomCommand } from '~/state/use-atom-command'
 
-import { previewBridge } from './previewBridge'
 import { subscribePreviewAction } from './previewActionBus'
 import { openPreviewSession } from './openPreviewSession'
 import { PreviewChromeRow } from './PreviewChromeRow'

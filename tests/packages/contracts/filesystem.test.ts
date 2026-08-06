@@ -11,11 +11,14 @@ describe('FilesystemBrowseError', () =>
   it('derives a stable message from browse context while retaining the cause', () =>
   {
     const cause = new Error('sensitive filesystem detail')
+    // message construction moved to the server consumers that own the wording;
+    // contracts is schema-only and carries whatever message it is given (megacore U-139)
     const error = new FilesystemBrowseError({
       cwd: '/workspace',
       partialPath: './src/mai',
       failure: 'read_directory_failed',
       parentPath: '/workspace/src',
+      message: "Failed to browse filesystem path './src/mai' from '/workspace'.",
       cause,
     })
 

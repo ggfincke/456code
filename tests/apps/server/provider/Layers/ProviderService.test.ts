@@ -57,14 +57,16 @@ import { ORCHESTRATE_MODE_INSTRUCTIONS } from '../../../../../apps/server/src/pr
 import * as ProviderEventLoggers from '../../../../../apps/server/src/provider/Layers/ProviderEventLoggers.ts'
 import { ProviderSessionDirectoryLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
-import * as ProviderSessionRuntime from '../../../../../apps/server/src/persistence/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntime from '../../../../../apps/server/src/persistence/Services/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntimeLayers from '../../../../../apps/server/src/persistence/Layers/ProviderSessionRuntime.ts'
 import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
 } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as McpSessionRegistry from '../../../../../apps/server/src/mcp/McpSessionRegistry.ts'
 import * as ServerSettings from '../../../../../apps/server/src/serverSettings.ts'
-import * as AnalyticsService from '../../../../../apps/server/src/telemetry/AnalyticsService.ts'
+import * as AnalyticsService from '../../../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
+import * as AnalyticsServiceLayers from '../../../../../apps/server/src/telemetry/Layers/AnalyticsService.ts'
 import { makeAdapterRegistryMock } from '../../../../../apps/server/src/provider/testUtils/providerAdapterRegistryMock.ts'
 
 const defaultServerSettingsLayer = ServerSettings.ServerSettingsService.layerTest()
@@ -308,7 +310,7 @@ function makeProviderServiceLayer()
     ProviderAdapterRegistry.ProviderAdapterRegistry,
     registry,
   )
-  const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+  const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
   )
   const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
@@ -319,7 +321,7 @@ function makeProviderServiceLayer()
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provideMerge(AnalyticsService.layerTest),
+        Layer.provideMerge(AnalyticsServiceLayers.layerTest),
         Layer.provide(
           Layer.succeed(
             ProviderEventLoggers.ProviderEventLoggers,
@@ -346,7 +348,7 @@ function makeProviderServiceTestLayer(
   registry: ProviderAdapterRegistry.ProviderAdapterRegistry['Service'],
 )
 {
-  const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+  const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
     Layer.provide(SqlitePersistenceMemory),
   )
   const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
@@ -354,7 +356,7 @@ function makeProviderServiceTestLayer(
     Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
     Layer.provide(directoryLayer),
     Layer.provide(defaultServerSettingsLayer),
-    Layer.provide(AnalyticsService.layerTest),
+    Layer.provide(AnalyticsServiceLayers.layerTest),
     Layer.provide(
       Layer.succeed(
         ProviderEventLoggers.ProviderEventLoggers,
@@ -384,7 +386,7 @@ it.effect('ProviderServiceLive catches stopAll failures during shutdown', () =>
       ProviderAdapterRegistry.ProviderAdapterRegistry,
       registry,
     )
-    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
       Layer.provide(SqlitePersistenceMemory),
     )
     const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
@@ -393,7 +395,7 @@ it.effect('ProviderServiceLive catches stopAll failures during shutdown', () =>
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provideMerge(AnalyticsService.layerTest),
+        Layer.provideMerge(AnalyticsServiceLayers.layerTest),
         Layer.provide(
           Layer.succeed(
             ProviderEventLoggers.ProviderEventLoggers,
@@ -454,7 +456,7 @@ it.effect('ProviderServiceLive rejects new sessions for disabled providers', () 
       ProviderAdapterRegistry.ProviderAdapterRegistry,
       registry,
     )
-    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
       Layer.provide(SqlitePersistenceMemory),
     )
     const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
@@ -462,7 +464,7 @@ it.effect('ProviderServiceLive rejects new sessions for disabled providers', () 
       Layer.provide(providerAdapterLayer),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(AnalyticsServiceLayers.layerTest),
       Layer.provide(
         Layer.succeed(
           ProviderEventLoggers.ProviderEventLoggers,
@@ -605,7 +607,7 @@ it.effect(
           },
         },
       })
-      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+      const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
         Layer.provide(SqlitePersistenceMemory),
       )
       const directoryLayer = ProviderSessionDirectoryLive.pipe(
@@ -615,7 +617,7 @@ it.effect(
         Layer.provide(providerAdapterLayer),
         Layer.provide(directoryLayer),
         Layer.provide(serverSettingsLayer),
-        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(AnalyticsServiceLayers.layerTest),
         Layer.provide(
           Layer.succeed(
             ProviderEventLoggers.ProviderEventLoggers,
@@ -695,7 +697,7 @@ it.effect('ProviderServiceLive rejects new sessions for disabled custom instance
       ProviderAdapterRegistry.ProviderAdapterRegistry,
       registry,
     )
-    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
       Layer.provide(SqlitePersistenceMemory),
     )
     const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
@@ -703,7 +705,7 @@ it.effect('ProviderServiceLive rejects new sessions for disabled custom instance
       Layer.provide(providerAdapterLayer),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(AnalyticsServiceLayers.layerTest),
       Layer.provide(
         Layer.succeed(
           ProviderEventLoggers.ProviderEventLoggers,
@@ -917,7 +919,7 @@ it.effect('ProviderServiceLive resets authority when switching same-driver insta
       streamChanges: Stream.empty,
       subscribeChanges: Effect.flatMap(PubSub.unbounded<void>(), PubSub.subscribe),
     }
-    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
       Layer.provide(SqlitePersistenceMemory),
     )
     const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
@@ -925,7 +927,7 @@ it.effect('ProviderServiceLive resets authority when switching same-driver insta
       Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(AnalyticsServiceLayers.layerTest),
       Layer.provide(
         Layer.succeed(
           ProviderEventLoggers.ProviderEventLoggers,
@@ -1033,7 +1035,7 @@ it.effect('ProviderServiceLive writes canonical events to the emitting thread se
     const registry = makeAdapterRegistryMock({
       [ProviderDriverKind.make('codex')]: codex.adapter,
     })
-    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
       Layer.provide(SqlitePersistenceMemory),
     )
     const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
@@ -1052,7 +1054,7 @@ it.effect('ProviderServiceLive writes canonical events to the emitting thread se
       Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(AnalyticsServiceLayers.layerTest),
       Layer.provide(
         Layer.succeed(
           ProviderEventLoggers.ProviderEventLoggers,
@@ -1096,7 +1098,7 @@ it.effect('ProviderServiceLive keeps persisted resumable sessions on startup', (
     })
 
     const persistenceLayer = makeSqlitePersistenceLive(dbPath)
-    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
       Layer.provide(persistenceLayer),
     )
     const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
@@ -1115,7 +1117,7 @@ it.effect('ProviderServiceLive keeps persisted resumable sessions on startup', (
       Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
       Layer.provide(directoryLayer),
       Layer.provide(defaultServerSettingsLayer),
-      Layer.provide(AnalyticsService.layerTest),
+      Layer.provide(AnalyticsServiceLayers.layerTest),
       Layer.provide(
         Layer.succeed(
           ProviderEventLoggers.ProviderEventLoggers,
@@ -1167,7 +1169,7 @@ it.effect(
       )
       const dbPath = NodePath.join(tempDir, 'orchestration.sqlite')
       const persistenceLayer = makeSqlitePersistenceLive(dbPath)
-      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+      const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
         Layer.provide(persistenceLayer),
       )
 
@@ -1185,7 +1187,7 @@ it.effect(
         ),
         Layer.provide(firstDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(AnalyticsServiceLayers.layerTest),
         Layer.provide(
           Layer.succeed(
             ProviderEventLoggers.ProviderEventLoggers,
@@ -1247,7 +1249,7 @@ it.effect(
         ),
         Layer.provide(secondDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(AnalyticsServiceLayers.layerTest),
         Layer.provide(
           Layer.succeed(
             ProviderEventLoggers.ProviderEventLoggers,
@@ -1265,6 +1267,7 @@ it.effect(
         yield* provider.rollbackConversation({
           threadId: startedSession.threadId,
           numTurns: 1,
+          expectedProviderInstanceId: ProviderInstanceId.make('codex'),
         })
       }).pipe(Effect.provide(secondProviderLayer))
 
@@ -1381,6 +1384,7 @@ routing.layer('ProviderServiceLive routing', (it) =>
       yield* provider.rollbackConversation({
         threadId: session.threadId,
         numTurns: 0,
+        expectedProviderInstanceId: ProviderInstanceId.make('codex'),
       })
 
       yield* provider.stopSession({ threadId: session.threadId })
@@ -1454,7 +1458,10 @@ routing.layer('ProviderServiceLive routing', (it) =>
         },
         context,
       )
-      yield* provider.rollbackConversation({ threadId, numTurns: 1 }, context)
+      yield* provider.rollbackConversation(
+        { threadId, numTurns: 1, expectedProviderInstanceId: ProviderInstanceId.make('codex') },
+        context,
+      )
       yield* provider.stopSession({ threadId }, context)
 
       assert.deepEqual(routing.codex.startSession.mock.calls.at(-1)?.[1], context)
@@ -1520,6 +1527,7 @@ routing.layer('ProviderServiceLive routing', (it) =>
       yield* provider.rollbackConversation({
         threadId: initial.threadId,
         numTurns: 1,
+        expectedProviderInstanceId: ProviderInstanceId.make('codex'),
       })
 
       assert.equal(routing.codex.startSession.mock.calls.length, 1)
@@ -1976,7 +1984,7 @@ routing.layer('ProviderServiceLive routing', (it) =>
       )
       const dbPath = NodePath.join(tempDir, 'orchestration.sqlite')
       const persistenceLayer = makeSqlitePersistenceLive(dbPath)
-      const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+      const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
         Layer.provide(persistenceLayer),
       )
 
@@ -1993,7 +2001,7 @@ routing.layer('ProviderServiceLive routing', (it) =>
         ),
         Layer.provide(firstDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(AnalyticsServiceLayers.layerTest),
         Layer.provide(
           Layer.succeed(
             ProviderEventLoggers.ProviderEventLoggers,
@@ -2033,7 +2041,7 @@ routing.layer('ProviderServiceLive routing', (it) =>
         ),
         Layer.provide(secondDirectoryLayer),
         Layer.provide(defaultServerSettingsLayer),
-        Layer.provide(AnalyticsService.layerTest),
+        Layer.provide(AnalyticsServiceLayers.layerTest),
         Layer.provide(
           Layer.succeed(
             ProviderEventLoggers.ProviderEventLoggers,
@@ -2087,7 +2095,7 @@ routing.layer('ProviderServiceLive routing', (it) =>
         )
         const dbPath = NodePath.join(tempDir, 'orchestration.sqlite')
         const persistenceLayer = makeSqlitePersistenceLive(dbPath)
-        const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+        const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
           Layer.provide(persistenceLayer),
         )
 
@@ -2104,7 +2112,7 @@ routing.layer('ProviderServiceLive routing', (it) =>
           ),
           Layer.provide(firstDirectoryLayer),
           Layer.provide(defaultServerSettingsLayer),
-          Layer.provide(AnalyticsService.layerTest),
+          Layer.provide(AnalyticsServiceLayers.layerTest),
           Layer.provide(
             Layer.succeed(
               ProviderEventLoggers.ProviderEventLoggers,
@@ -2138,7 +2146,7 @@ routing.layer('ProviderServiceLive routing', (it) =>
           ),
           Layer.provide(secondDirectoryLayer),
           Layer.provide(defaultServerSettingsLayer),
-          Layer.provide(AnalyticsService.layerTest),
+          Layer.provide(AnalyticsServiceLayers.layerTest),
           Layer.provide(
             Layer.succeed(
               ProviderEventLoggers.ProviderEventLoggers,
@@ -2393,6 +2401,7 @@ fanout.layer('ProviderServiceLive fanout', (it) =>
       yield* provider.rollbackConversation({
         threadId: session.threadId,
         numTurns: 1,
+        expectedProviderInstanceId: claudeAgentInstanceId,
       })
       yield* provider.stopSession({ threadId: session.threadId })
 

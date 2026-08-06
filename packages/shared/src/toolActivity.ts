@@ -1,7 +1,14 @@
 // packages/shared/src/toolActivity.ts
 // derive tool activity presentation
 
-import type { ToolLifecycleItemType } from '@t3tools/contracts'
+import { TOOL_LIFECYCLE_ITEM_TYPES, type ToolLifecycleItemType } from '@t3tools/contracts'
+
+const TOOL_LIFECYCLE_ITEM_TYPE_SET: ReadonlySet<string> = new Set(TOOL_LIFECYCLE_ITEM_TYPES)
+
+export function isToolLifecycleItemType(value: string): value is ToolLifecycleItemType
+{
+  return TOOL_LIFECYCLE_ITEM_TYPE_SET.has(value)
+}
 
 function asRecord(value: unknown): Record<string, unknown> | undefined
 {

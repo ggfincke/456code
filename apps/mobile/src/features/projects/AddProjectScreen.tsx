@@ -19,7 +19,6 @@ import {
   type EnvironmentConnectionPhase,
 } from '@t3tools/client-runtime/connection'
 import {
-  appendBrowsePathSegment,
   canNavigateUp,
   ensureBrowseDirectoryPath,
   getBrowseDirectoryPath,
@@ -29,7 +28,13 @@ import {
   inferProjectTitleFromPath,
   isFilesystemBrowseQuery,
 } from '@t3tools/client-runtime/state/projects'
-import { CommandId, type EnvironmentId, ProjectId } from '@t3tools/contracts'
+import {
+  CommandId,
+  type EnvironmentId,
+  type FilesystemBrowseResult,
+  ProjectId,
+} from '@t3tools/contracts'
+import { normalizeProjectPathForDispatch } from '@t3tools/shared/path'
 import { StackActions, useNavigation } from '@react-navigation/native'
 import { SymbolView } from '../../components/AppSymbol'
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
@@ -496,7 +501,7 @@ export function AddProjectSourceScreen()
   )
 }
 
-function useCreateProject(environment: EnvironmentOption | null)
+function useCreateProject(environment: EnvironmentOption | null, homeDirectory: string | null)
 {
   const navigation = useNavigation()
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false })
@@ -506,11 +511,12 @@ function useCreateProject(environment: EnvironmentOption | null)
     async (workspaceRoot: string) =>
     {
       if (!environment || !canCreateProjectInEnvironment(environment.connectionState)) return
+      const normalizedWorkspaceRoot = normalizeProjectPathForDispatch(workspaceRoot, homeDirectory)
 
       const existing = findExistingAddProject({
         projects,
         environmentId: environment.environmentId,
-        path: workspaceRoot,
+        path: normalizedWorkspaceRoot,
       })
       if (existing)
       {
@@ -529,7 +535,7 @@ function useCreateProject(environment: EnvironmentOption | null)
       const command = buildProjectCreateCommand({
         commandId: CommandId.make(uuidv4()),
         projectId,
-        workspaceRoot,
+        workspaceRoot: normalizedWorkspaceRoot,
         createdAt: new Date().toISOString(),
       })
       const result = await createProject({
@@ -544,12 +550,12 @@ function useCreateProject(environment: EnvironmentOption | null)
         StackActions.replace('NewTaskDraft', {
           environmentId: environment.environmentId,
           projectId,
-          title: inferProjectTitleFromPath(workspaceRoot),
+          title: inferProjectTitleFromPath(normalizedWorkspaceRoot),
         }),
       )
       return result
     },
-    [createProject, environment, projects, navigation],
+    [createProject, environment, homeDirectory, projects, navigation],
   )
 }
 
@@ -560,6 +566,28 @@ function useEnvironmentFromParam(
   const environmentOptions = useEnvironmentOptions()
   const environmentId = stringParam(environmentIdParam) as EnvironmentId | null
   return resolveAddProjectEnvironment(environmentOptions, environmentId)
+}
+
+function isTildePath(path: string): boolean
+{
+  return path === '~' || path.startsWith('~/') || path.startsWith('~\\')
+}
+
+function useEnvironmentHomeDirectory(environment: EnvironmentOption | null)
+{
+  const query = useEnvironmentQuery(
+    environment === null
+      ? null
+      : filesystemEnvironment.browse({
+          environmentId: environment.environmentId,
+          input: { partialPath: '~/' },
+        }),
+  )
+  const data = query.data as FilesystemBrowseResult | null
+  return {
+    directory: data?.parentPath ?? null,
+    error: query.error,
+  }
 }
 
 export function AddProjectRepositoryScreen(props: {
@@ -740,13 +768,7 @@ function FolderBrowser(props: {
             icon={<SymbolView name="folder" size={17} tintColor={accentColor} type="monochrome" />}
             isFirst={index === 0 && !canBrowseUpPath}
             right={null}
-            onPress={() =>
-              props.setPathInput(
-                browseDirectoryPath.length > 0
-                  ? appendBrowsePathSegment(browseDirectoryPath, entry.name)
-                  : ensureBrowseDirectoryPath(entry.fullPath),
-              )
-            }
+            onPress={() => props.setPathInput(ensureBrowseDirectoryPath(entry.fullPath))}
           />
         ))}
       </ListSection>
@@ -757,7 +779,8 @@ function FolderBrowser(props: {
 export function AddProjectLocalFolderScreen(props: { readonly environmentId?: string | string[] })
 {
   const environment = useEnvironmentFromParam(props.environmentId)
-  const createProject = useCreateProject(environment)
+  const homeDirectory = useEnvironmentHomeDirectory(environment)
+  const createProject = useCreateProject(environment, homeDirectory.directory)
   const [pathInput, setPathInput] = useState(() =>
     getAddProjectInitialQuery(environment?.baseDirectory),
   )
@@ -784,15 +807,29 @@ export function AddProjectLocalFolderScreen(props: { readonly environmentId?: st
       setError(resolved.error)
       return
     }
+    if (isTildePath(resolved.path) && homeDirectory.directory === null)
+    {
+      setError(homeDirectory.error ?? 'The environment home directory is still loading. Try again.')
+      return
+    }
 
     setIsSubmitting(true)
-    const result = await createProject(resolved.path)
+    const result = await createProject(
+      normalizeProjectPathForDispatch(resolved.path, homeDirectory.directory),
+    )
     if (result && AsyncResult.isFailure(result))
     {
       setError(errorMessage(Cause.squash(result.cause)))
     }
     setIsSubmitting(false)
-  }, [createProject, environment, isSubmitting, pathInput])
+  }, [
+    createProject,
+    environment,
+    homeDirectory.directory,
+    homeDirectory.error,
+    isSubmitting,
+    pathInput,
+  ])
 
   return (
     <AddProjectShell>
@@ -833,7 +870,8 @@ export function AddProjectDestinationScreen(props: {
     reportFailure: false,
   })
   const environment = useEnvironmentFromParam(props.environmentId)
-  const createProject = useCreateProject(environment)
+  const homeDirectory = useEnvironmentHomeDirectory(environment)
+  const createProject = useCreateProject(environment, homeDirectory.directory)
   const remoteUrl = stringParam(props.remoteUrl)
   const repositoryTitle = stringParam(props.repositoryTitle)
   const [pathInput, setPathInput] = useState(() =>
@@ -862,13 +900,19 @@ export function AddProjectDestinationScreen(props: {
       setError(resolved.error)
       return
     }
+    if (isTildePath(resolved.path) && homeDirectory.directory === null)
+    {
+      setError(homeDirectory.error ?? 'The environment home directory is still loading. Try again.')
+      return
+    }
+    const destinationPath = normalizeProjectPathForDispatch(resolved.path, homeDirectory.directory)
 
     setIsSubmitting(true)
     const cloneResult = await cloneRepository({
       environmentId: environment.environmentId,
       input: {
         remoteUrl,
-        destinationPath: resolved.path,
+        destinationPath,
       },
     })
     if (AsyncResult.isFailure(cloneResult))
@@ -884,7 +928,16 @@ export function AddProjectDestinationScreen(props: {
       }
     }
     setIsSubmitting(false)
-  }, [cloneRepository, createProject, environment, isSubmitting, pathInput, remoteUrl])
+  }, [
+    cloneRepository,
+    createProject,
+    environment,
+    homeDirectory.directory,
+    homeDirectory.error,
+    isSubmitting,
+    pathInput,
+    remoteUrl,
+  ])
 
   return (
     <AddProjectShell>

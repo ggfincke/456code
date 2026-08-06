@@ -37,9 +37,12 @@ type RuntimeLayerSource =
 
 export const remoteHttpRuntime = ManagedRuntime.make(httpClientLayer)
 
-const primaryHttpRuntime = ManagedRuntime.make(
-  PrimaryEnvironmentHttpClient.layer.pipe(Layer.provide(primaryEnvironmentHttpLayer)),
-)
+const makePrimaryHttpRuntime = () =>
+  ManagedRuntime.make(
+    PrimaryEnvironmentHttpClient.layer.pipe(Layer.provide(primaryEnvironmentHttpLayer)),
+  )
+
+let primaryHttpRuntime = makePrimaryHttpRuntime()
 
 export type PrimaryHttpEffectRunner = <A, E>(
   effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient>,
@@ -53,6 +56,13 @@ let primaryHttpRunner = livePrimaryHttpRunner
 export const runPrimaryHttp = <A, E>(
   effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient>,
 ) => primaryHttpRunner(effect)
+
+export function invalidatePrimaryHttpRuntime(): void
+{
+  const previous = primaryHttpRuntime
+  primaryHttpRuntime = makePrimaryHttpRuntime()
+  previous.dispose()
+}
 
 export function __setPrimaryHttpRunnerForTests(runner?: PrimaryHttpEffectRunner): void
 {

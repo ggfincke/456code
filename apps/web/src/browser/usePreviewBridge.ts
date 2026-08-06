@@ -1,5 +1,5 @@
-// apps/web/src/components/preview/usePreviewBridge.ts
-// manage preview bridge through a React hook
+// apps/web/src/browser/usePreviewBridge.ts
+// synchronize desktop preview bridge state through a React hook
 
 'use client'
 
@@ -11,12 +11,12 @@ import type {
 } from '@t3tools/contracts'
 import { useEffect, useRef } from 'react'
 
-import { useBrowserPointerStore } from '~/browser/browserPointerStore'
-import { applyPreviewDesktopState, type DesktopPreviewOverlay } from '~/previewStateStore'
 import { previewEnvironment } from '~/state/preview'
 import { useAtomCommand } from '~/state/use-atom-command'
 
+import { useBrowserPointerStore } from './browserPointerStore'
 import { previewBridge } from './previewBridge'
+import { applyPreviewDesktopState, type DesktopPreviewOverlay } from './previewStateStore'
 
 // mirrors low-latency desktop state into the store and reflects navigation
 // events back to the server. Webview lifetime is owned by ElectronBrowserHost.

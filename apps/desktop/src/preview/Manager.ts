@@ -3327,7 +3327,6 @@ export const PreviewManagerError = Schema.Union([
 ])
 export type PreviewManagerError = typeof PreviewManagerError.Type
 
-export const isPreviewManagerError = Schema.is(PreviewManagerError)
 export const isPreviewAutomationControlInterruptedError = Schema.is(
   PreviewAutomationControlInterruptedError,
 )

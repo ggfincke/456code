@@ -19,7 +19,7 @@ import { PersistenceSqlError } from '../../../apps/server/src/persistence/Errors
 import * as ProposalRetainedRefReconciler from '../../../apps/server/src/proposal/ProposalRetainedRefReconciler.ts'
 import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
 import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
-import * as AnalyticsService from '../../../apps/server/src/telemetry/AnalyticsService.ts'
+import * as AnalyticsService from '../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
 import * as ServerRuntimeStartup from '../../../apps/server/src/serverRuntimeStartup.ts'
 import { makeProjectionSnapshotQueryStub } from './projectionSnapshotQueryTestHelpers.ts'
 
@@ -342,6 +342,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets returns existing project and threa
             Effect.as({ sequence: 1 }),
           ),
         streamDomainEvents: Stream.empty,
+        streamDomainEventsForAggregate: () => Stream.empty,
         latestSequence: Effect.succeed(0),
       } satisfies OrchestrationEngine.OrchestrationEngineService['Service']),
       Effect.provide(NodeServices.layer),
@@ -378,6 +379,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets creates a project and thread when 
             Effect.as({ sequence: 1 }),
           ),
         streamDomainEvents: Stream.empty,
+        streamDomainEventsForAggregate: () => Stream.empty,
         latestSequence: Effect.succeed(0),
       } satisfies OrchestrationEngine.OrchestrationEngineService['Service']),
       Effect.provide(NodeServices.layer),
@@ -419,6 +421,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
             Effect.as({ sequence: 1 }),
           ),
         streamDomainEvents: Stream.empty,
+        streamDomainEventsForAggregate: () => Stream.empty,
         latestSequence: Effect.succeed(0),
       } satisfies OrchestrationEngine.OrchestrationEngineService['Service']),
       Effect.provideService(Crypto.Crypto, {

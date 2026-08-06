@@ -45,12 +45,17 @@ import * as Ref from 'effect/Ref'
 import * as Stream from 'effect/Stream'
 import { FetchHttpClient } from 'effect/unstable/http'
 
-import { readDesktopPrimaryBearerToken } from '../environments/primary/desktopAuth'
+import {
+  invalidateDesktopPrimaryAuth,
+  readDesktopPrimaryBearerToken,
+} from '../environments/primary/desktopAuth'
 import { primaryEnvironmentHttpLayer } from '../environments/primary/httpLayer'
 import {
+  primaryEnvironmentTopologySignature,
   readPrimaryEnvironmentTarget,
   type PrimaryEnvironmentTarget,
 } from '../environments/primary/target'
+import { invalidatePrimaryHttpRuntime } from '../lib/runtime'
 import { clearComposerDraftsEnvironment } from '../composerDraftStore'
 import { isHostedStaticApp } from '../hostedPairing'
 import { appAtomRegistry } from '../rpc/atomRegistry'
@@ -509,6 +514,7 @@ const platformConnectionSourceLayer = Layer.effect(
       })
     }
     const cacheRef = yield* Ref.make(new Map<string, CachedPlatformRegistration>())
+    const primaryTopologySignatureRef = yield* Ref.make(Option.none<string>())
 
     // resolve the full set of platform-managed environments the host currently
     // reports: the primary (same-origin cookie auth) plus any desktop-local
@@ -541,7 +547,17 @@ const platformConnectionSourceLayer = Layer.effect(
       else if (primaryTopologyRead.target !== null)
       {
         const primaryTarget = primaryTopologyRead.target
-        const signature = `primary|${primaryTarget.target.httpBaseUrl}|${primaryTarget.target.wsBaseUrl}`
+        const signature = primaryEnvironmentTopologySignature(primaryTarget)
+        const previousSignature = yield* Ref.get(primaryTopologySignatureRef)
+        if (Option.isNone(previousSignature) || previousSignature.value !== signature)
+        {
+          yield* Ref.set(primaryTopologySignatureRef, Option.some(signature))
+          yield* Effect.sync(() =>
+          {
+            invalidateDesktopPrimaryAuth()
+            invalidatePrimaryHttpRuntime()
+          })
+        }
         const cached = previous.get(PRIMARY_LOCAL_ENVIRONMENT_ID)
         if (
           cached !== undefined &&

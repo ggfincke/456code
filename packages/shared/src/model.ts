@@ -2,8 +2,6 @@
 // create model capabilities
 
 import {
-  DEFAULT_MODEL,
-  DEFAULT_MODEL_BY_PROVIDER,
   MODEL_SLUG_ALIASES_BY_PROVIDER,
   type ModelCapabilities,
   type ModelSelection,
@@ -338,24 +336,6 @@ export function resolveSelectableModel(
 
   const resolved = options.find((option) => option.slug === normalized)
   return resolved ? resolved.slug : null
-}
-
-function resolveModelSlug(model: string | null | undefined, provider: ProviderDriverKind): string
-{
-  const normalized = normalizeModelSlug(model, provider)
-  if (!normalized)
-  {
-    return DEFAULT_MODEL_BY_PROVIDER[provider] ?? DEFAULT_MODEL
-  }
-  return normalized
-}
-
-export function resolveModelSlugForProvider(
-  provider: ProviderDriverKind,
-  model: string | null | undefined,
-): string
-{
-  return resolveModelSlug(model, provider)
 }
 
 // trim a string, returning null for empty/missing values.

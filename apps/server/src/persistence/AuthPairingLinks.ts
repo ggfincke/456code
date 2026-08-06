@@ -14,8 +14,7 @@ import { AuthEnvironmentScopes } from '@t3tools/contracts'
 import {
   type AuthPairingLinkRepositoryError,
   PersistenceDecodeError,
-  type PersistenceErrorCorrelation,
-  PersistenceSqlError,
+  toPersistenceSqlOrDecodeError,
 } from './Errors.ts'
 
 export const AuthPairingLinkRecord = Schema.Struct({
@@ -107,22 +106,6 @@ export class AuthPairingLinkRepository extends Context.Service<
   }
 >()('456code/persistence/AuthPairingLinks/AuthPairingLinkRepository')
 {}
-
-function toPersistenceSqlOrDecodeError(
-  sqlOperation: string,
-  decodeOperation: string,
-  correlation?: PersistenceErrorCorrelation,
-)
-{
-  return (cause: unknown): AuthPairingLinkRepositoryError =>
-    Schema.isSchemaError(cause)
-      ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
-      : new PersistenceSqlError({
-          operation: sqlOperation,
-          ...(correlation === undefined ? {} : { correlation }),
-          cause,
-        })
-}
 
 export const make = Effect.gen(function* ()
 {

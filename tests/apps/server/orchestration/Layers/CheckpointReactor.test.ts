@@ -186,7 +186,15 @@ function createProviderServiceHarness(
 
   const emit = (event: LegacyProviderRuntimeEvent): void =>
   {
-    Effect.runSync(PubSub.publish(runtimeEventPubSub, event as unknown as ProviderRuntimeEvent))
+    // mirror ProviderService.streamEvents stamping: the reactor now fences
+    // runtime events by provider instance (megacore U-072/U-073) and this
+    // harness bypasses the service boundary that stamps providerInstanceId
+    const raw = event as unknown as ProviderRuntimeEvent
+    const stamped: ProviderRuntimeEvent = {
+      ...raw,
+      providerInstanceId: raw.providerInstanceId ?? ProviderInstanceId.make(String(raw.provider)),
+    }
+    Effect.runSync(PubSub.publish(runtimeEventPubSub, stamped))
   }
 
   return {
@@ -1559,9 +1567,11 @@ describe('CheckpointReactor', () =>
     expect(thread.checkpoints).toHaveLength(1)
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1)
     expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1)
+    // rollback is now fenced by the bound provider instance (megacore U-073)
     expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
       threadId: ThreadId.make('thread-1'),
       numTurns: 1,
+      expectedProviderInstanceId: ProviderInstanceId.make('codex'),
     })
     expect(NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')).toBe('v2\n')
     const operation = await waitForRevertOperation(
@@ -1985,10 +1995,12 @@ describe('CheckpointReactor', () =>
     expect(harness.provider.rollbackConversation.mock.calls[0]?.[0]).toEqual({
       threadId: ThreadId.make('thread-1'),
       numTurns: 1,
+      expectedProviderInstanceId: ProviderInstanceId.make('codex'),
     })
     expect(harness.provider.rollbackConversation.mock.calls[1]?.[0]).toEqual({
       threadId: ThreadId.make('thread-1'),
       numTurns: 1,
+      expectedProviderInstanceId: ProviderInstanceId.make('codex'),
     })
   })
 

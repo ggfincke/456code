@@ -444,13 +444,15 @@ describe('when: on default ref without open PR', () =>
 
 describe('when: working tree has local changes and ref is behind upstream', () =>
 {
-  it('resolveQuickAction still prefers commit, push, and create PR', () =>
+  it('resolveQuickAction pulls first so the later push can fast-forward', () =>
   {
+    // behind/diverged is now resolved before commit-and-push, which would
+    // otherwise commit locally and fail the push non-fast-forward (megacore U-008)
     const quick = resolveQuickAction(status({ hasWorkingTreeChanges: true, behindCount: 1 }), false)
     assert.deepInclude(quick, {
-      kind: 'run_action',
-      action: 'commit_push_pr',
-      label: 'Commit, push & PR',
+      kind: 'run_pull',
+      label: 'Pull',
+      disabled: false,
     })
   })
 })

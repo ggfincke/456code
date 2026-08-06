@@ -2,6 +2,7 @@
 // handle web authentication
 
 let desktopBearerTokenPromise: Promise<string> | null = null
+let desktopAuthGeneration = 0
 
 export function readDesktopPrimaryBearerToken(): Promise<string | null>
 {
@@ -15,15 +16,32 @@ export function readDesktopPrimaryBearerToken(): Promise<string | null>
     return Promise.resolve(null)
   }
 
-  desktopBearerTokenPromise ??= bridge.getLocalEnvironmentBearerToken().catch((error) =>
+  if (desktopBearerTokenPromise !== null)
   {
-    desktopBearerTokenPromise = null
-    throw error
-  })
-  return desktopBearerTokenPromise
+    return desktopBearerTokenPromise
+  }
+
+  const generation = desktopAuthGeneration
+  const promise = bridge.getLocalEnvironmentBearerToken()
+  desktopBearerTokenPromise = promise
+  const clearSettledPromise = () =>
+  {
+    if (desktopAuthGeneration === generation && desktopBearerTokenPromise === promise)
+    {
+      desktopBearerTokenPromise = null
+    }
+  }
+  void promise.then(clearSettledPromise, clearSettledPromise)
+  return promise
+}
+
+export function invalidateDesktopPrimaryAuth(): void
+{
+  desktopAuthGeneration += 1
+  desktopBearerTokenPromise = null
 }
 
 export function __resetDesktopPrimaryAuthForTests(): void
 {
-  desktopBearerTokenPromise = null
+  invalidateDesktopPrimaryAuth()
 }

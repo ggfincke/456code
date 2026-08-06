@@ -2,7 +2,6 @@
 // expose host process platform
 
 import * as Context from 'effect/Context'
-import * as Effect from 'effect/Effect'
 import * as NodeOS from 'node:os'
 
 export const HostProcessPlatform = Context.Reference<NodeJS.Platform>(
@@ -46,5 +45,3 @@ export const HostProcessArguments = Context.Reference<ReadonlyArray<string>>(
     defaultValue: () => process.argv,
   },
 )
-
-export const isHostWindows = Effect.map(HostProcessPlatform, (platform) => platform === 'win32')

@@ -1,5 +1,5 @@
-// apps/server/src/checkpointing/CheckpointDiffQuery.ts
-// implement checkpoint diff query
+// apps/server/src/orchestration/Layers/CheckpointDiffQuery.ts
+// implements orchestration checkpoint diff queries
 
 // provides read-only diff operations across checkpoint snapshots used by
 // orchestration APIs.
@@ -8,50 +8,26 @@
 import {
   type CheckpointRef,
   OrchestrationGetTurnDiffResult,
-  type OrchestrationGetFullThreadDiffInput,
   type OrchestrationGetFullThreadDiffResult,
-  type OrchestrationGetTurnDiffInput,
   type OrchestrationGetTurnDiffResult as OrchestrationGetTurnDiffResultType,
   type ThreadId,
 } from '@t3tools/contracts'
-import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 
-import * as ProjectionSnapshotQuery from '../orchestration/Services/ProjectionSnapshotQuery.ts'
+import * as CheckpointStore from '../../checkpointing/CheckpointStore.ts'
+import { checkpointRefForThreadTurn } from '../../checkpointing/Utils.ts'
 import {
   CheckpointDiffResultInvalidError,
   CheckpointRefUnavailableError,
   CheckpointThreadNotFoundError,
   CheckpointTurnRangeUnavailableError,
   CheckpointWorkspacePathMissingError,
-} from './Errors.ts'
-import type { CheckpointServiceError } from './Errors.ts'
-import { checkpointRefForThreadTurn } from './Utils.ts'
-import * as CheckpointStore from './CheckpointStore.ts'
-
-/** Service tag for checkpoint diff queries. */
-export class CheckpointDiffQuery extends Context.Service<
-  CheckpointDiffQuery,
-  {
-    // read the patch diff for a single turn checkpoint transition.
-    //
-    // verifies checkpoint availability in both projection state and filesystem.
-    readonly getTurnDiff: (
-      input: OrchestrationGetTurnDiffInput,
-    ) => Effect.Effect<OrchestrationGetTurnDiffResultType, CheckpointServiceError>
-
-    // read the full patch diff across a thread range of checkpoints.
-    //
-    // uses turn-diff semantics with `fromTurnCount = 0`.
-    readonly getFullThreadDiff: (
-      input: OrchestrationGetFullThreadDiffInput,
-    ) => Effect.Effect<OrchestrationGetFullThreadDiffResult, CheckpointServiceError>
-  }
->()('456code/checkpointing/CheckpointDiffQuery')
-{}
+} from '../Errors.ts'
+import { CheckpointDiffQuery } from '../Services/CheckpointDiffQuery.ts'
+import * as ProjectionSnapshotQuery from '../Services/ProjectionSnapshotQuery.ts'
 
 const isTurnDiffResult = Schema.is(OrchestrationGetTurnDiffResult)
 

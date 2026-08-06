@@ -80,6 +80,188 @@ export interface OtlpTraceRecord extends BaseTraceRecord
 }
 
 export type TraceRecord = EffectTraceRecord | OtlpTraceRecord
+export type TraceRecordOutcome = EffectTraceRecord['exit']
+
+function decodeTraceEvents(value: unknown): ReadonlyArray<TraceRecordEvent> | null
+{
+  if (!Array.isArray(value))
+  {
+    return null
+  }
+  const events: TraceRecordEvent[] = []
+  for (const event of value)
+  {
+    if (
+      !isPlainObject(event) ||
+      typeof event.name !== 'string' ||
+      typeof event.timeUnixNano !== 'string' ||
+      !isPlainObject(event.attributes)
+    )
+    {
+      return null
+    }
+    events.push({
+      name: event.name,
+      timeUnixNano: event.timeUnixNano,
+      attributes: event.attributes,
+    })
+  }
+  return events
+}
+
+function decodeTraceLinks(value: unknown): ReadonlyArray<TraceRecordLink> | null
+{
+  if (!Array.isArray(value))
+  {
+    return null
+  }
+  const links: TraceRecordLink[] = []
+  for (const link of value)
+  {
+    if (
+      !isPlainObject(link) ||
+      typeof link.traceId !== 'string' ||
+      typeof link.spanId !== 'string' ||
+      !isPlainObject(link.attributes)
+    )
+    {
+      return null
+    }
+    links.push({
+      traceId: link.traceId,
+      spanId: link.spanId,
+      attributes: link.attributes,
+    })
+  }
+  return links
+}
+
+function decodeBaseTraceRecord(input: Record<string, unknown>): BaseTraceRecord | null
+{
+  const events = decodeTraceEvents(input.events)
+  const links = decodeTraceLinks(input.links)
+  if (
+    typeof input.name !== 'string' ||
+    typeof input.kind !== 'string' ||
+    typeof input.traceId !== 'string' ||
+    typeof input.spanId !== 'string' ||
+    (input.parentSpanId !== undefined && typeof input.parentSpanId !== 'string') ||
+    typeof input.sampled !== 'boolean' ||
+    typeof input.startTimeUnixNano !== 'string' ||
+    typeof input.endTimeUnixNano !== 'string' ||
+    typeof input.durationMs !== 'number' ||
+    !Number.isFinite(input.durationMs) ||
+    !isPlainObject(input.attributes) ||
+    events === null ||
+    links === null
+  )
+  {
+    return null
+  }
+
+  return {
+    name: input.name,
+    kind: input.kind,
+    traceId: input.traceId,
+    spanId: input.spanId,
+    ...(input.parentSpanId === undefined ? {} : { parentSpanId: input.parentSpanId }),
+    sampled: input.sampled,
+    startTimeUnixNano: input.startTimeUnixNano,
+    endTimeUnixNano: input.endTimeUnixNano,
+    durationMs: input.durationMs,
+    attributes: input.attributes,
+    events,
+    links,
+  }
+}
+
+export function decodeTraceRecord(value: unknown): TraceRecord | null
+{
+  if (!isPlainObject(value))
+  {
+    return null
+  }
+  const base = decodeBaseTraceRecord(value)
+  if (base === null)
+  {
+    return null
+  }
+
+  if (value.type === 'effect-span')
+  {
+    if (!isPlainObject(value.exit))
+    {
+      return null
+    }
+    if (value.exit._tag === 'Success')
+    {
+      return { ...base, type: 'effect-span', exit: { _tag: 'Success' } }
+    }
+    if (
+      (value.exit._tag === 'Failure' || value.exit._tag === 'Interrupted') &&
+      typeof value.exit.cause === 'string'
+    )
+    {
+      return {
+        ...base,
+        type: 'effect-span',
+        exit: { _tag: value.exit._tag, cause: value.exit.cause },
+      }
+    }
+    return null
+  }
+
+  if (
+    value.type !== 'otlp-span' ||
+    !isPlainObject(value.resourceAttributes) ||
+    !isPlainObject(value.scope) ||
+    !isPlainObject(value.scope.attributes) ||
+    (value.scope.name !== undefined && typeof value.scope.name !== 'string') ||
+    (value.scope.version !== undefined && typeof value.scope.version !== 'string')
+  )
+  {
+    return null
+  }
+  if (
+    value.status !== undefined &&
+    (!isPlainObject(value.status) ||
+      (value.status.code !== undefined && typeof value.status.code !== 'string') ||
+      (value.status.message !== undefined && typeof value.status.message !== 'string'))
+  )
+  {
+    return null
+  }
+
+  const status = value.status as { readonly code?: string; readonly message?: string } | undefined
+  return {
+    ...base,
+    type: 'otlp-span',
+    resourceAttributes: value.resourceAttributes,
+    scope: {
+      ...(value.scope.name === undefined ? {} : { name: value.scope.name }),
+      ...(value.scope.version === undefined ? {} : { version: value.scope.version }),
+      attributes: value.scope.attributes,
+    },
+    ...(status === undefined ? {} : { status }),
+  }
+}
+
+export function traceRecordOutcome(record: TraceRecord): TraceRecordOutcome
+{
+  if (record.type === 'effect-span')
+  {
+    return record.exit
+  }
+  const statusCode = record.status?.code?.trim().toUpperCase()
+  if (statusCode === '2' || statusCode === 'ERROR' || statusCode === 'STATUS_CODE_ERROR')
+  {
+    return {
+      _tag: 'Failure',
+      cause: record.status?.message?.trim() || 'OTLP span reported an error status.',
+    }
+  }
+  return { _tag: 'Success' }
+}
 
 function isStructuralTag(value: unknown): value is string
 {

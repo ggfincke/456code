@@ -10,7 +10,7 @@ import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as Struct from 'effect/Struct'
 
-import { toPersistenceDecodeError, toPersistenceSqlError } from '../Errors.ts'
+import { toPersistenceSqlError, toPersistenceSqlOrDecodeError } from '../Errors.ts'
 import {
   DeleteByThreadIdInput,
   GetByThreadAndTurnCountInput,
@@ -25,14 +25,6 @@ const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
     files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
   }),
 )
-
-function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)
-{
-  return (cause: unknown) =>
-    Schema.isSchemaError(cause)
-      ? toPersistenceDecodeError(decodeOperation)(cause)
-      : toPersistenceSqlError(sqlOperation)(cause)
-}
 
 const makeProjectionCheckpointRepository = Effect.gen(function* ()
 {

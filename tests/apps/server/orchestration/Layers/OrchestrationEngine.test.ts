@@ -326,6 +326,8 @@ describe('OrchestrationEngine', () =>
   {
     let nextSequence = 8
     const eventStore: OrchestrationEventStoreShape = {
+      // batched append delegates to the single-append mock (megacore U-166)
+      appendAll: (events) => Effect.forEach(events, (event) => eventStore.append(event)),
       append: (event) =>
         Effect.sync(() =>
         {
@@ -1095,6 +1097,8 @@ describe('OrchestrationEngine', () =>
     let shouldFailFirstAppend = true
 
     const flakyStore: OrchestrationEventStoreShape = {
+      // batched append delegates to the single-append mock (megacore U-166)
+      appendAll: (events) => Effect.forEach(events, (event) => flakyStore.append(event)),
       append(event)
       {
         if (shouldFailFirstAppend && event.commandId === CommandId.make('cmd-flaky-1'))
@@ -1395,6 +1399,8 @@ describe('OrchestrationEngine', () =>
     let nextSequence = 1
 
     const nonTransactionalStore: OrchestrationEventStoreShape = {
+      // batched append delegates to the single-append mock (megacore U-166)
+      appendAll: (events) => Effect.forEach(events, (event) => nonTransactionalStore.append(event)),
       append(event)
       {
         const savedEvent = {

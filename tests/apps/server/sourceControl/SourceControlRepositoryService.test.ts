@@ -383,15 +383,14 @@ it.effect('publish succeeds with status remote_added when the local repo has no 
       makeLayer({
         git: {
           execute: (input) =>
+            // an unborn HEAD is now signalled by exit 1 under allowNonZeroExit;
+            // a failed effect means a real git failure and must propagate (megacore U-090)
             input.args[0] === 'rev-parse'
-              ? Effect.fail(
-                  new GitCommandError({
-                    operation: input.operation,
-                    command: 'git rev-parse --verify HEAD',
-                    cwd: input.cwd,
-                    detail: 'fatal: Needed a single revision',
-                  }),
-                )
+              ? Effect.succeed({
+                  ...processOutput(),
+                  exitCode: ChildProcessSpawner.ExitCode(1),
+                  stderr: 'fatal: Needed a single revision',
+                })
               : Effect.succeed(processOutput()),
           statusDetails: () =>
             Effect.succeed({

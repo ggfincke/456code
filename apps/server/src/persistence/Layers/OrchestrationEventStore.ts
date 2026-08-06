@@ -24,7 +24,7 @@ import * as Stream from 'effect/Stream'
 
 import {
   toPersistenceDecodeError,
-  toPersistenceSqlError,
+  toPersistenceSqlOrDecodeError,
   type OrchestrationEventStoreError,
 } from '../Errors.ts'
 import {
@@ -49,6 +49,7 @@ const AppendEventRequestSchema = Schema.Struct({
   payloadJson: UnknownFromJsonString,
   metadataJson: EventMetadataFromJsonString,
 })
+const AppendEventsRequestSchema = Schema.Array(AppendEventRequestSchema)
 
 const OrchestrationEventPersistedRowSchema = Schema.Struct({
   sequence: NonNegativeInt,
@@ -98,23 +99,69 @@ function inferActorKind(
   return 'client'
 }
 
-function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)
-{
-  return (cause: unknown): OrchestrationEventStoreError =>
-    Schema.isSchemaError(cause)
-      ? toPersistenceDecodeError(decodeOperation)(cause)
-      : toPersistenceSqlError(sqlOperation)(cause)
-}
-
 const makeEventStore = Effect.gen(function* ()
 {
   const sql = yield* SqlClient.SqlClient
 
-  const appendEventRow = SqlSchema.findOne({
-    Request: AppendEventRequestSchema,
+  const appendEventRows = SqlSchema.findAll({
+    Request: AppendEventsRequestSchema,
     Result: OrchestrationEventPersistedRowSchema,
-    execute: (request) =>
+    execute: (requests) =>
       sql`
+        WITH input_events (
+          ordinal,
+          event_id,
+          aggregate_kind,
+          stream_id,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        ) AS (
+          VALUES ${sql.join(
+            ',',
+            false,
+          )(
+            requests.map(
+              (request, index) =>
+                sql`(
+                ${index},
+                ${request.eventId},
+                ${request.aggregateKind},
+                ${request.streamId},
+                ${request.type},
+                ${request.occurredAt},
+                ${request.commandId},
+                ${request.causationEventId},
+                ${request.correlationId},
+                ${request.actorKind},
+                ${request.payloadJson},
+                ${request.metadataJson}
+              )`,
+            ),
+          )}
+        ),
+        versioned_events AS (
+          SELECT
+            input_events.*,
+            COALESCE(
+              (
+                SELECT MAX(existing.stream_version) + 1
+                FROM orchestration_events AS existing
+                WHERE existing.aggregate_kind = input_events.aggregate_kind
+                  AND existing.stream_id = input_events.stream_id
+              ),
+              0
+            ) + ROW_NUMBER() OVER (
+              PARTITION BY aggregate_kind, stream_id
+              ORDER BY ordinal
+            ) - 1 AS stream_version
+          FROM input_events
+        )
         INSERT INTO orchestration_events (
           event_id,
           aggregate_kind,
@@ -129,30 +176,21 @@ const makeEventStore = Effect.gen(function* ()
           payload_json,
           metadata_json
         )
-        VALUES (
-          ${request.eventId},
-          ${request.aggregateKind},
-          ${request.streamId},
-          COALESCE(
-            (
-              SELECT stream_version + 1
-              FROM orchestration_events
-              WHERE aggregate_kind = ${request.aggregateKind}
-                AND stream_id = ${request.streamId}
-              ORDER BY stream_version DESC
-              LIMIT 1
-            ),
-            0
-          ),
-          ${request.type},
-          ${request.occurredAt},
-          ${request.commandId},
-          ${request.causationEventId},
-          ${request.correlationId},
-          ${request.actorKind},
-          ${request.payloadJson},
-          ${request.metadataJson}
-        )
+        SELECT
+          event_id,
+          aggregate_kind,
+          stream_id,
+          stream_version,
+          event_type,
+          occurred_at,
+          command_id,
+          causation_event_id,
+          correlation_id,
+          actor_kind,
+          payload_json,
+          metadata_json
+        FROM versioned_events
+        ORDER BY ordinal
         RETURNING
           sequence,
           event_id AS "eventId",
@@ -192,42 +230,65 @@ const makeEventStore = Effect.gen(function* ()
       `,
   })
 
-  const append: OrchestrationEventStoreShape['append'] = (event) =>
+  const appendEvents = (
+    events: ReadonlyArray<Omit<OrchestrationEvent, 'sequence'>>,
+    operation: 'append' | 'appendAll',
+  ): Effect.Effect<ReadonlyArray<OrchestrationEvent>, OrchestrationEventStoreError> =>
   {
-    // the unknown-event sentinel exists for decode-side tolerance only; the
-    // server always constructs concrete events, so persisting one is a defect
-    if (event.type === UNKNOWN_ORCHESTRATION_EVENT_TYPE)
+    if (events.length === 0)
     {
-      return Effect.die(
-        new Error('Unknown-event sentinels are decode-side only and cannot be appended.'),
-      )
+      return Effect.succeed([])
     }
-    return appendEventRow({
-      eventId: event.eventId,
-      aggregateKind: event.aggregateKind,
-      streamId: event.aggregateId,
-      type: event.type,
-      causationEventId: event.causationEventId,
-      correlationId: event.correlationId,
-      actorKind: inferActorKind(event),
-      occurredAt: event.occurredAt,
-      commandId: event.commandId,
-      payloadJson: event.payload,
-      metadataJson: event.metadata,
+    return Effect.forEach(events, (event) =>
+    {
+      // the unknown-event sentinel exists for decode-side tolerance only; the
+      // server always constructs concrete events, so persisting one is a defect
+      if (event.type === UNKNOWN_ORCHESTRATION_EVENT_TYPE)
+      {
+        return Effect.die(
+          new Error('Unknown-event sentinels are decode-side only and cannot be appended.'),
+        )
+      }
+      return Effect.succeed({
+        eventId: event.eventId,
+        aggregateKind: event.aggregateKind,
+        streamId: event.aggregateId,
+        type: event.type,
+        causationEventId: event.causationEventId,
+        correlationId: event.correlationId,
+        actorKind: inferActorKind(event),
+        occurredAt: event.occurredAt,
+        commandId: event.commandId,
+        payloadJson: event.payload,
+        metadataJson: event.metadata,
+      })
     }).pipe(
+      Effect.flatMap(appendEventRows),
       Effect.mapError(
         toPersistenceSqlOrDecodeError(
-          'OrchestrationEventStore.append:insert',
-          'OrchestrationEventStore.append:decodeRow',
+          `OrchestrationEventStore.${operation}:insert`,
+          `OrchestrationEventStore.${operation}:decodeRows`,
         ),
       ),
-      Effect.flatMap((row) =>
-        decodeEvent(row).pipe(
-          Effect.mapError(toPersistenceDecodeError('OrchestrationEventStore.append:rowToEvent')),
+      Effect.flatMap((rows) =>
+        Effect.forEach(
+          [...rows].sort((left, right) => left.sequence - right.sequence),
+          (row) =>
+            decodeEvent(row).pipe(
+              Effect.mapError(
+                toPersistenceDecodeError(`OrchestrationEventStore.${operation}:rowToEvent`),
+              ),
+            ),
         ),
       ),
     )
   }
+
+  const append: OrchestrationEventStoreShape['append'] = (event) =>
+    appendEvents([event], 'append').pipe(Effect.map((events) => events[0]!))
+
+  const appendAll: OrchestrationEventStoreShape['appendAll'] = (events) =>
+    appendEvents(events, 'appendAll')
 
   const readFromSequence: OrchestrationEventStoreShape['readFromSequence'] = (
     sequenceExclusive,
@@ -288,6 +349,7 @@ const makeEventStore = Effect.gen(function* ()
 
   return {
     append,
+    appendAll,
     readFromSequence,
     readAll: () => readFromSequence(0, Number.MAX_SAFE_INTEGER),
   } satisfies OrchestrationEventStoreShape

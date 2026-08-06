@@ -3,10 +3,8 @@
 
 import {
   RelayAccessTokenType,
-  RelayApi,
   type RelayClientEnvironmentRecord,
   type RelayClientDeviceRecord,
-  RelayConnectEnvironmentEndpoint,
   type RelayDeviceRegistrationRequest,
   RelayDpopAccessTokenScope,
   RelayDpopTokenExchangeGrantType,
@@ -17,20 +15,14 @@ import {
   type RelayEnvironmentLinkRequest,
   type RelayEnvironmentLinkResponse,
   type RelayEnvironmentStatusResponse,
-  RelayExchangeDpopAccessTokenEndpoint,
-  RelayGetEnvironmentStatusEndpoint,
   RelayJwtSubjectTokenType,
   type RelayAgentActivitySnapshotResponse,
   type RelayLiveActivityRegistrationRequest,
   RelayMobileRegistrationScope,
   type RelayOkResponse,
   type RelayPublicClientId,
-  RelayRegisterDeviceEndpoint,
-  RelayAgentActivitySnapshotEndpoint,
-  RelayRegisterLiveActivityEndpoint,
   RelayProtectedError,
   type RelayProtectedError as RelayProtectedErrorType,
-  RelayUnregisterDeviceEndpoint,
 } from '@t3tools/contracts/relay'
 import { encodeOAuthScope, oauthScopeSetEquals } from '@t3tools/shared/oauthScope'
 import { decodeRelayJwt } from '@t3tools/shared/relayJwt'
@@ -46,6 +38,16 @@ import * as Schema from 'effect/Schema'
 import * as SynchronizedRef from 'effect/SynchronizedRef'
 import * as HttpClientError from 'effect/unstable/http/HttpClientError'
 import type * as HttpMethod from 'effect/unstable/http/HttpMethod'
+import {
+  RelayAgentActivitySnapshotEndpoint,
+  RelayApi,
+  RelayConnectEnvironmentEndpoint,
+  RelayExchangeDpopAccessTokenEndpoint,
+  RelayGetEnvironmentStatusEndpoint,
+  RelayRegisterDeviceEndpoint,
+  RelayRegisterLiveActivityEndpoint,
+  RelayUnregisterDeviceEndpoint,
+} from './protocol.ts'
 import * as HttpApiClient from 'effect/unstable/httpapi/HttpApiClient'
 
 export interface ManagedRelayDpopProofInput

@@ -22,7 +22,8 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 
 import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import { SqlitePersistenceMemory } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
-import * as ProviderSessionRuntime from '../../../../../apps/server/src/persistence/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntime from '../../../../../apps/server/src/persistence/Services/ProviderSessionRuntime.ts'
+import * as ProviderSessionRuntimeLayers from '../../../../../apps/server/src/persistence/Layers/ProviderSessionRuntime.ts'
 import { ProviderValidationError } from '../../../../../apps/server/src/provider/Errors.ts'
 import { ProviderSessionReaper } from '../../../../../apps/server/src/provider/Services/ProviderSessionReaper.ts'
 import {
@@ -198,7 +199,7 @@ describe('ProviderSessionReaper', () =>
       streamEvents: Stream.empty,
     }
 
-    const runtimeRepositoryLayer = ProviderSessionRuntime.layer.pipe(
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
       Layer.provide(SqlitePersistenceMemory),
     )
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
@@ -277,7 +278,11 @@ describe('ProviderSessionReaper', () =>
 
     await waitFor(() => harness.stopSession.mock.calls.length === 1)
 
-    expect(harness.stopSession.mock.calls[0]?.[0]).toEqual({ threadId })
+    // reaper stops are now fenced by the bound provider instance (megacore U-067)
+    expect(harness.stopSession.mock.calls[0]?.[0]).toEqual({
+      threadId,
+      expectedProviderInstanceId: ProviderInstanceId.make('claudeAgent'),
+    })
     expect(harness.stoppedThreadIds.has(threadId)).toBe(true)
   })
 

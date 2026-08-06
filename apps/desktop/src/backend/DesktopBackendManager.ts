@@ -178,6 +178,10 @@ export interface DesktopBackendSnapshot
   readonly activePid: Option.Option<number>
   readonly restartAttempt: number
   readonly restartScheduled: boolean
+  // reported independently of the readiness gate on currentConfig: a backend
+  // that failed preflight has no published config, so consumers still need to
+  // tell a fatal failure apart from a transient retry (megacore U-133)
+  readonly preflightFailure: Option.Option<PreflightFailure>
 }
 
 // opaque identifier for one backend process inside the pool. Today only
@@ -450,9 +454,14 @@ export const makeBackendInstance = Effect.fn('makeBackendInstance')(function* (
       activePid: activePid(current.active),
       restartAttempt: current.restartAttempt,
       restartScheduled: Option.isSome(current.restartFiber),
+      preflightFailure: Option.flatMap(current.config, (config) => config.preflightFailure),
     })),
   )
-  const currentConfig = Ref.get(state).pipe(Effect.map((current) => current.config))
+  const currentConfig = Ref.get(state).pipe(
+    Effect.map((current) =>
+      current.ready && Option.isSome(current.active) ? current.config : Option.none(),
+    ),
+  )
 
   const cancelRestart = Effect.gen(function* ()
   {
@@ -494,6 +503,7 @@ export const makeBackendInstance = Effect.fn('makeBackendInstance')(function* (
           ...latest,
           desiredRunning: true,
           ready: false,
+          config: Option.none(),
           preflightFailureAttempt: resetFatalPreflightCounter ? 0 : latest.preflightFailureAttempt,
         }))
 
@@ -647,6 +657,7 @@ export const makeBackendInstance = Effect.fn('makeBackendInstance')(function* (
                     ...latest,
                     active: Option.none<ActiveBackendRun>(),
                     ready: false,
+                    config: Option.none<DesktopBackendStartConfig>(),
                   }
                   return [
                     {
@@ -764,6 +775,8 @@ export const makeBackendInstance = Effect.fn('makeBackendInstance')(function* (
         {
           ...latest,
           restartAttempt: latest.restartAttempt + 1,
+          ready: false,
+          config: Option.none<DesktopBackendStartConfig>(),
         },
       ] as const
     })
@@ -828,6 +841,7 @@ export const makeBackendInstance = Effect.fn('makeBackendInstance')(function* (
             ...latest,
             desiredRunning: false,
             ready: false,
+            config: Option.none<DesktopBackendStartConfig>(),
             active: Option.none<ActiveBackendRun>(),
             restartFiber: Option.none<Fiber.Fiber<void, never>>(),
           },

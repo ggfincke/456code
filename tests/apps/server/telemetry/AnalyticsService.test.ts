@@ -13,7 +13,8 @@ import * as HttpServerResponse from 'effect/unstable/http/HttpServerResponse'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import { getTelemetryIdentifier } from '../../../../apps/server/src/telemetry/Identify.ts'
-import * as AnalyticsService from '../../../../apps/server/src/telemetry/AnalyticsService.ts'
+import * as AnalyticsService from '../../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
+import * as AnalyticsServiceLayers from '../../../../apps/server/src/telemetry/Layers/AnalyticsService.ts'
 
 interface RecordedBatchRequest
 {
@@ -50,7 +51,9 @@ it.layer(NodeServices.layer)('AnalyticsService test', (it) =>
         prefix: 't3-telemetry-base-',
       })
 
-      const telemetryLayer = AnalyticsService.layer.pipe(Layer.provideMerge(serverConfigLayer))
+      const telemetryLayer = AnalyticsServiceLayers.layer.pipe(
+        Layer.provideMerge(serverConfigLayer),
+      )
       const configLayer = ConfigProvider.layer(
         ConfigProvider.fromUnknown({
           T3CODE_TELEMETRY_ENABLED: true,

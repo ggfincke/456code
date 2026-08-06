@@ -8,7 +8,7 @@ const { closeTab, createTab } = vi.hoisted(() => ({
   createTab: vi.fn<() => Promise<void>>(),
 }))
 
-vi.mock('~/components/preview/previewBridge', () => ({
+vi.mock('~/browser/previewBridge', () => ({
   previewBridge: { closeTab, createTab },
 }))
 

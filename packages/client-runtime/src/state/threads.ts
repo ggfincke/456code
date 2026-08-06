@@ -4,6 +4,7 @@
 import {
   ORCHESTRATION_WS_METHODS,
   type EnvironmentId as EnvironmentIdType,
+  type OrchestrationEvent,
   type OrchestrationThread,
   type OrchestrationThreadDetailSnapshot,
   type OrchestrationThreadStreamItem,
@@ -34,6 +35,92 @@ import {
   type EnvironmentThreadState,
   type EnvironmentThreadStatus,
 } from './threadState.ts'
+
+const THREAD_STREAM_BATCH_SIZE = 128
+const THREAD_STREAM_BATCH_WINDOW = '16 millis'
+
+type ThreadMessageSentEvent = Extract<OrchestrationEvent, { readonly type: 'thread.message-sent' }>
+type ThreadEventStreamItem = Extract<OrchestrationThreadStreamItem, { readonly kind: 'event' }>
+
+function isStreamingAssistantMessageItem(
+  item: OrchestrationThreadStreamItem,
+): item is ThreadEventStreamItem & { readonly event: ThreadMessageSentEvent }
+{
+  return (
+    item.kind === 'event' &&
+    item.event.type === 'thread.message-sent' &&
+    item.event.payload.role === 'assistant' &&
+    item.event.payload.streaming
+  )
+}
+
+function coalesceThreadStreamItems(
+  items: Iterable<OrchestrationThreadStreamItem>,
+): ReadonlyArray<OrchestrationThreadStreamItem>
+{
+  const coalesced: OrchestrationThreadStreamItem[] = []
+  let streamingRun: Array<ThreadEventStreamItem & { readonly event: ThreadMessageSentEvent }> = []
+
+  const flushStreamingRun = () =>
+  {
+    const first = streamingRun[0]
+    if (first === undefined)
+    {
+      return
+    }
+    if (streamingRun.length === 1)
+    {
+      coalesced.push(first)
+      streamingRun = []
+      return
+    }
+
+    const latest = streamingRun.at(-1)!
+    const latestAttachments = streamingRun.findLast(
+      (entry) => entry.event.payload.attachments !== undefined,
+    )?.event.payload.attachments
+    coalesced.push({
+      kind: 'event',
+      event: {
+        ...latest.event,
+        payload: {
+          ...latest.event.payload,
+          text: streamingRun.map((entry) => entry.event.payload.text).join(''),
+          createdAt: first.event.payload.createdAt,
+          ...(latestAttachments === undefined ? {} : { attachments: latestAttachments }),
+        },
+      },
+    })
+    streamingRun = []
+  }
+
+  for (const item of items)
+  {
+    if (isStreamingAssistantMessageItem(item))
+    {
+      const previous = streamingRun.at(-1)
+      if (
+        previous === undefined ||
+        (previous.event.payload.messageId === item.event.payload.messageId &&
+          previous.event.payload.turnId === item.event.payload.turnId)
+      )
+      {
+        streamingRun.push(item)
+        continue
+      }
+    }
+    flushStreamingRun()
+
+    if (isStreamingAssistantMessageItem(item))
+    {
+      streamingRun.push(item)
+      continue
+    }
+    coalesced.push(item)
+  }
+  flushStreamingRun()
+  return coalesced
+}
 
 function statusWithoutLiveData(data: Option.Option<OrchestrationThread>): EnvironmentThreadStatus
 {
@@ -335,7 +422,11 @@ export const makeEnvironmentThreadState = Effect.fn('EnvironmentThreadState.make
         retryExpectedFailureAfter: '250 millis',
         resubscribe: foregroundResubscriptions,
       },
-    ).pipe(Stream.runForEach(applyItem)),
+    ).pipe(
+      Stream.groupedWithin(THREAD_STREAM_BATCH_SIZE, THREAD_STREAM_BATCH_WINDOW),
+      Stream.flatMap((items) => Stream.fromIterable(coalesceThreadStreamItems(items))),
+      Stream.runForEach(applyItem),
+    ),
   )
 
   yield* Effect.addFinalizer(() =>

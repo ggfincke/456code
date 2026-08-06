@@ -96,21 +96,44 @@ const isPersistenceDecodeError = Schema.is(PersistenceDecodeError)
 const isReactorDeliveryError = Schema.is(ReactorDeliveryError)
 
 // kept for orchestration/projection call sites, which are being revamped separately.
-export function toPersistenceSqlError(operation: string)
+export function toPersistenceSqlError(
+  operation: string,
+  correlation?: PersistenceErrorCorrelation,
+)
 {
   return (cause: unknown): PersistenceSqlError =>
     new PersistenceSqlError({
       operation,
       detail: `Failed to execute ${operation}`,
+      ...(correlation === undefined ? {} : { correlation }),
       cause,
     })
 }
 
 // kept for orchestration/projection call sites, which are being revamped separately.
-export function toPersistenceDecodeError(operation: string)
+export function toPersistenceDecodeError(
+  operation: string,
+  correlation?: PersistenceErrorCorrelation,
+)
 {
   return (cause: Schema.SchemaError): PersistenceDecodeError =>
-    PersistenceDecodeError.fromSchemaError(operation, cause)
+    PersistenceDecodeError.fromSchemaError(operation, cause, correlation)
+}
+
+export function toPersistenceSqlOrDecodeError(
+  sqlOperation: string,
+  decodeOperation: string,
+  correlation?: PersistenceErrorCorrelation,
+)
+{
+  return (cause: unknown): PersistenceSqlError | PersistenceDecodeError =>
+    Schema.isSchemaError(cause)
+      ? PersistenceDecodeError.fromSchemaError(decodeOperation, cause, correlation)
+      : new PersistenceSqlError({
+          operation: sqlOperation,
+          ...(correlation === undefined ? {} : { correlation }),
+          cause,
+        })
 }
 
 export const isPersistenceError = (u: unknown) =>

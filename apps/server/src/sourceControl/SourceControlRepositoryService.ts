@@ -290,12 +290,14 @@ export const make = Effect.gen(function* ()
       const hasCommits = headCheck.exitCode === 0
       if (!hasCommits)
       {
-        const details = yield* git.statusDetails(input.cwd)
+        // status details are best-effort here: an unborn-HEAD repo may not
+        // yield a branch, and the remote is already wired up regardless
+        const details = yield* git.statusDetails(input.cwd).pipe(Effect.orElseSucceed(() => null))
         return {
           repository: toRepositoryInfo(providerKind, urls),
           remoteName,
           remoteUrl,
-          branch: details.branch ?? 'main',
+          branch: details?.branch ?? 'main',
           status: 'remote_added' as const,
         }
       }

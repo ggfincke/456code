@@ -2,7 +2,6 @@
 // normalizes and resolves server settings
 import {
   isProviderDriverKind,
-  isProviderAvailable,
   type ModelSelection,
   type ProviderDriverKind,
   type ServerProvider,
@@ -25,6 +24,11 @@ const getLegacyProviderSettings = (
   provider: ProviderDriverKind,
 ): LegacyProviderSettings | undefined =>
   (settings.providers as Record<string, LegacyProviderSettings | undefined>)[provider]
+
+export function isProviderAvailable(snapshot: ServerProvider): boolean
+{
+  return snapshot.availability !== 'unavailable'
+}
 
 export function isModelSelectionProviderEnabled(
   settings: ServerSettings,

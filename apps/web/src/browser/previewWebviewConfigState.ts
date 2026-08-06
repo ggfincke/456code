@@ -12,7 +12,7 @@ import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import { AsyncResult, Atom } from 'effect/unstable/reactivity'
 
-import { previewBridge } from '~/components/preview/previewBridge'
+import { previewBridge } from './previewBridge'
 
 const PREVIEW_CONFIG_STALE_TIME_MS = 5 * 60_000
 const PREVIEW_CONFIG_IDLE_TTL_MS = 10 * 60_000

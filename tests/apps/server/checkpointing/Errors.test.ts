@@ -8,7 +8,7 @@ import {
   CheckpointRefUnavailableError,
   CheckpointTurnRangeUnavailableError,
   CheckpointWorkspacePathMissingError,
-} from '../../../../apps/server/src/checkpointing/Errors.ts'
+} from '../../../../apps/server/src/orchestration/Errors.ts'
 
 const threadId = ThreadId.make('thread-1')
 

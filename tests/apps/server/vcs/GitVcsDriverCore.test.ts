@@ -1313,6 +1313,54 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
         assert.equal(yield* fileSystem.exists(worktreePath), false)
       }),
     )
+
+    it.effect('requires force to remove a dirty worktree', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* makeTmpDir()
+        const { initialBranch } = yield* initRepoWithCommit(cwd)
+        const pathService = yield* Path.Path
+        const fileSystem = yield* FileSystem.FileSystem
+        const worktreePath = pathService.join(
+          yield* makeTmpDir('git-dirty-worktrees-'),
+          'feature-worktree',
+        )
+        const readmePath = pathService.join(worktreePath, 'README.md')
+        const driver = yield* GitVcsDriver.GitVcsDriver
+
+        yield* driver.createWorktree({
+          cwd,
+          path: worktreePath,
+          refName: initialBranch,
+          newRefName: 'feature/dirty-worktree',
+        })
+        const canonicalWorktreePath = yield* fileSystem.realPath(worktreePath)
+        yield* writeTextFile(worktreePath, 'README.md', '# dirty mutation\n')
+
+        const removalError = yield* driver
+          .removeWorktree({ cwd, path: worktreePath })
+          .pipe(Effect.flip)
+
+        assert.deepInclude(removalError, {
+          _tag: 'GitCommandError',
+          operation: 'GitVcsDriver.removeWorktree',
+        })
+        assert.equal(yield* fileSystem.exists(worktreePath), true)
+        assert.equal(yield* fileSystem.readFileString(readmePath), '# dirty mutation\n')
+        assert.include(
+          yield* git(cwd, ['worktree', 'list', '--porcelain']),
+          `worktree ${canonicalWorktreePath}`,
+        )
+
+        yield* driver.removeWorktree({ cwd, path: worktreePath, force: true })
+
+        assert.equal(yield* fileSystem.exists(worktreePath), false)
+        assert.notInclude(
+          yield* git(cwd, ['worktree', 'list', '--porcelain']),
+          `worktree ${canonicalWorktreePath}`,
+        )
+      }),
+    )
   })
 
   describe('remote operations', () =>
