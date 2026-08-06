@@ -127,7 +127,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
   const clientQueue = yield* Queue.bounded<RpcMessage.FromServerEncoded>(
     protocolMessageQueueCapacity,
   )
-  const notificationQueue = yield* Queue.sliding<AcpIncomingNotification>(
+  const notificationQueue = yield* Queue.sliding<AcpIncomingNotification, Cause.Done<void>>(
     Math.max(1, maximumRetainedNotifications),
   )
   const disconnects = yield* Queue.unbounded<number>()
@@ -136,6 +136,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
   )
   const nextRequestId = yield* Ref.make(1n)
   const terminationHandled = yield* Ref.make(false)
+  const terminationError = yield* Ref.make<AcpError.AcpError | undefined>(undefined)
   const extPending = yield* Ref.make(new Map<string, AcpPendingRequest>())
 
   const logProtocol = (event: AcpProtocolLogEvent) =>
@@ -158,13 +159,19 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
     message: RpcMessage.FromClientEncoded | RpcMessage.FromServerEncoded,
   )
   {
+    const method = message._tag === 'Request' ? message.tag : undefined
+    const terminatedBeforeEncoding = yield* Ref.get(terminationError)
+    if (terminatedBeforeEncoding !== undefined)
+    {
+      return yield* terminatedBeforeEncoding
+    }
+
     yield* logProtocol({
       direction: 'outgoing',
       stage: 'decoded',
       payload: message,
     })
 
-    const method = message._tag === 'Request' ? message.tag : undefined
     const encodedRequestId =
       message._tag === 'Request'
         ? message.id
@@ -185,7 +192,27 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
         payload: typeof encoded === 'string' ? encoded : new TextDecoder().decode(encoded),
       })
 
-      yield* Queue.offer(outgoing, encoded).pipe(Effect.asVoid)
+      const terminated = yield* Ref.get(terminationError)
+      if (terminated !== undefined)
+      {
+        return yield* terminated
+      }
+
+      const accepted = yield* Queue.offer(outgoing, encoded)
+      if (!accepted)
+      {
+        const error = yield* Ref.get(terminationError)
+        if (error !== undefined)
+        {
+          return yield* error
+        }
+        return yield* new AcpError.AcpTransportError({
+          operation: 'call-rpc',
+          ...(method === undefined ? {} : { method }),
+          detail: 'ACP output queue ended.',
+          cause: new Error('ACP output queue ended.'),
+        })
+      }
     }
   })
 
@@ -237,11 +264,7 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       ? Effect.void
       : Queue.offer(notificationQueue, notification).pipe(Effect.asVoid)
     ).pipe(
-      Effect.andThen(
-        options.onNotification
-          ? options.onNotification(notification).pipe(Effect.catch(() => Effect.void))
-          : Effect.void,
-      ),
+      Effect.andThen(options.onNotification ? options.onNotification(notification) : Effect.void),
     )
 
   const emitClientProtocolError = (error: AcpError.AcpError) =>
@@ -271,6 +294,9 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
           {
             return
           }
+          yield* Ref.set(terminationError, error)
+          yield* Queue.end(outgoing)
+          yield* Queue.end(notificationQueue)
           yield* failAllExtPending(error)
           yield* emitClientProtocolError(error)
           if (options.onTermination)
@@ -314,12 +340,25 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
       return respondWithError(message.id, AcpError.AcpRequestError.methodNotFound(message.tag))
     }
     return options.onExtRequest(message.tag, message.payload).pipe(
-      Effect.matchEffect({
-        onFailure: (error) =>
-          respondWithError(
+      Effect.matchCauseEffect({
+        onFailure: (cause) =>
+        {
+          const error = Cause.squash(cause)
+          return respondWithError(
             message.id,
-            AcpError.AcpRequestError.fromExtensionHandlerError(error, message.tag),
-          ),
+            isAcpError(error)
+              ? AcpError.AcpRequestError.fromExtensionHandlerError(error, message.tag)
+              : AcpError.AcpRequestError.internalError(
+                  `ACP extension request handler failed for method '${message.tag}'`,
+                  undefined,
+                  {
+                    method: message.tag,
+                    operation: 'handle-extension-request',
+                    cause,
+                  },
+                ),
+          )
+        },
         onSuccess: (value) => respondWithSuccess(message.id, value),
       }),
     )
@@ -726,6 +765,12 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
 
   const sendRequest = Effect.fn('sendRequest')(function* (method: string, payload: unknown)
   {
+    const terminated = yield* Ref.get(terminationError)
+    if (terminated !== undefined)
+    {
+      return yield* terminated
+    }
+
     const requestId = yield* Ref.modify(
       nextRequestId,
       (current) => [current, current + 1n] as const,
@@ -734,16 +779,22 @@ export const makeAcpPatchedProtocol = Effect.fn('makeAcpPatchedProtocol')(functi
     yield* Ref.update(extPending, (pending) =>
       new Map(pending).set(String(requestId), { deferred, method }),
     )
-    yield* offerOutgoing({
-      _tag: 'Request',
-      id: String(requestId),
-      tag: method,
-      payload,
-      headers: [],
-    }).pipe(Effect.tapError(() => removeExtPending(String(requestId))))
-    return yield* Deferred.await(deferred).pipe(
-      Effect.onInterrupt(() => removeExtPending(String(requestId))),
-    )
+    return yield* Effect.gen(function* ()
+    {
+      const terminatedAfterRegistration = yield* Ref.get(terminationError)
+      if (terminatedAfterRegistration !== undefined)
+      {
+        return yield* terminatedAfterRegistration
+      }
+      yield* offerOutgoing({
+        _tag: 'Request',
+        id: String(requestId),
+        tag: method,
+        payload,
+        headers: [],
+      })
+      return yield* Deferred.await(deferred)
+    }).pipe(Effect.ensuring(removeExtPending(String(requestId))))
   })
 
   return {
