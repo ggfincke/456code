@@ -5,12 +5,6 @@ import type {
   DesktopSshEnvironmentBootstrap,
   DesktopSshEnvironmentTarget,
 } from '@t3tools/contracts'
-import {
-  describeReadinessCause,
-  waitForHttpReady as waitForHttpReadyShared,
-} from '@t3tools/shared/httpReadiness'
-import * as NetService from '@t3tools/shared/Net'
-import { extractJsonObject, fromLenientJson } from '@t3tools/shared/schemaJson'
 import * as Context from 'effect/Context'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
@@ -19,46 +13,32 @@ import * as FileSystem from 'effect/FileSystem'
 import * as FiberMap from 'effect/FiberMap'
 import * as Layer from 'effect/Layer'
 import * as Path from 'effect/Path'
-import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
-import * as Stream from 'effect/Stream'
-import { HttpClient } from 'effect/unstable/http'
-import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
+import { ChildProcessSpawner } from 'effect/unstable/process'
 
+import { resolveSshTarget, targetConnectionKey } from './command.ts'
+import { SshCommandError } from './errors.ts'
+import type { RemoteT3RunnerOptions } from './remoteScripts.ts'
 import {
-  buildSshChildEnvironment,
-  type SshAuthOptions,
-  SshPasswordPrompt,
-  isSshAuthFailure,
-} from './auth.ts'
+  issueRemotePairingToken,
+  launchOrReuseRemoteServer,
+  resolvedRemoteRuntimeKey,
+  sshRunnerLogFields,
+  sshTargetLogFields,
+  stopRemoteServer,
+} from './remoteRuntime.ts'
 import {
-  baseSshArgs,
-  buildSshHostSpecEffect,
-  collectProcessOutput,
-  getLastNonEmptyOutputLine,
-  remoteStateKey,
-  resolveSshCommand,
-  resolveSshTarget,
-  runSshCommand,
-  targetConnectionKey,
-} from './command.ts'
+  makeSshAuthRunner,
+  type SshEnvironmentEffectContext,
+  type SshEnvironmentEffectError,
+} from './tunnelAuth.ts'
 import {
-  SshCommandError,
-  SshHttpBridgeError,
-  SshInvalidTargetError,
-  SshLaunchError,
-  SshPairingError,
-  SshPasswordPromptError,
-  SshReadinessError,
-} from './errors.ts'
-import {
-  buildRemoteLaunchScript,
-  buildRemoteLogTailScript,
-  buildRemotePairingScript,
-  buildRemoteStopScript,
-  SSH_READY_PROBE_TIMEOUT_MS,
-  type RemoteT3RunnerOptions,
-} from './remoteScripts.ts'
+  reserveLocalTunnelPort,
+  startSshTunnel,
+  type SshTunnelEntry,
+  TUNNEL_SHUTDOWN_TIMEOUT_MS,
+  waitForHttpReady,
+} from './tunnelProcess.ts'
 
 export {
   buildRemoteLaunchScript,
@@ -77,26 +57,23 @@ export {
   type RemoteT3RunnerOptions,
 } from './remoteScripts.ts'
 
-const SSH_READY_TIMEOUT_MS = 20_000
-const TUNNEL_SHUTDOWN_TIMEOUT_MS = 2_000
+export {
+  issueRemotePairingToken,
+  launchOrReuseRemoteServer,
+  stopRemoteServer,
+} from './remoteRuntime.ts'
+
+export {
+  describeReadinessCause,
+  normalizeSshErrorMessage,
+  resolveLoopbackSshHttpBaseUrl,
+  waitForHttpReady,
+} from './tunnelProcess.ts'
 
 export interface SshEnvironmentManagerOptions
 {
   readonly resolveCliPackageSpec?: () => string
   readonly resolveCliRunner?: Effect.Effect<RemoteT3RunnerOptions>
-}
-
-interface SshTunnelEntry
-{
-  readonly key: string
-  readonly target: DesktopSshEnvironmentTarget
-  readonly remotePort: number
-  readonly remoteServerKind: 'external' | 'managed' | null
-  readonly localPort: number
-  readonly httpBaseUrl: string
-  readonly wsBaseUrl: string
-  readonly process: ChildProcessSpawner.ChildProcessHandle
-  readonly scope: Scope.Scope
 }
 
 interface RemoteRuntimeLease
@@ -118,23 +95,6 @@ interface PendingRemoteRuntimeLaunch
   readonly ownerTunnelKey: string
 }
 
-type SshEnvironmentEffectContext =
-  | ChildProcessSpawner.ChildProcessSpawner
-  | FileSystem.FileSystem
-  | Path.Path
-  | HttpClient.HttpClient
-  | NetService.NetService
-  | SshPasswordPrompt
-
-type SshEnvironmentEffectError =
-  | SshCommandError
-  | SshInvalidTargetError
-  | SshLaunchError
-  | SshPairingError
-  | SshReadinessError
-  | SshPasswordPromptError
-  | NetService.NetError
-
 function makeSshTunnelCancelledError(target: DesktopSshEnvironmentTarget): SshCommandError
 {
   return new SshCommandError({
@@ -143,50 +103,6 @@ function makeSshTunnelCancelledError(target: DesktopSshEnvironmentTarget): SshCo
     stderr: '',
     message: `SSH environment connection was cancelled for ${target.alias || target.hostname}.`,
   })
-}
-
-function sshTargetLogFields(target: DesktopSshEnvironmentTarget)
-{
-  return {
-    alias: target.alias,
-    hostname: target.hostname,
-    username: target.username,
-    port: target.port,
-  }
-}
-
-function sshRunnerLogFields(runner: RemoteT3RunnerOptions | undefined)
-{
-  if (runner?.nodeScriptPath?.trim())
-  {
-    return { runner: 'node-script', nodeScriptPath: runner.nodeScriptPath.trim() }
-  }
-  if (runner?.packageSpec?.trim())
-  {
-    return { runner: 'package', packageSpec: runner.packageSpec.trim() }
-  }
-  return { runner: 'default' }
-}
-
-// aliases share runtime ownership after resolution while their local tunnels stay independent
-function resolvedRemoteRuntimeKey(target: DesktopSshEnvironmentTarget): string
-{
-  return `${target.hostname.trim().toLowerCase()}\u0000${target.username?.trim() ?? ''}\u0000${target.port ?? ''}`
-}
-
-interface SshAuthOperationInput<T>
-{
-  readonly key: string
-  readonly target: DesktopSshEnvironmentTarget
-  readonly operation: (
-    authOptions: SshAuthOptions,
-  ) => Effect.Effect<T, SshEnvironmentEffectError, SshEnvironmentEffectContext>
-}
-
-interface SshAuthAttemptInput<T> extends SshAuthOperationInput<T>
-{
-  readonly promptCount: number
-  readonly authSecret: string | null
 }
 
 export interface SshEnvironmentManagerShape
@@ -203,530 +119,6 @@ export interface SshEnvironmentManagerShape
     target: DesktopSshEnvironmentTarget,
   ) => Effect.Effect<void, SshEnvironmentEffectError, SshEnvironmentEffectContext>
 }
-
-const RemoteLaunchResult = Schema.Struct({
-  remotePort: Schema.Number,
-  serverKind: Schema.optional(Schema.Literals(['external', 'managed'])),
-})
-
-const RemotePairingResult = Schema.Struct({
-  credential: Schema.String,
-})
-
-const decodeRemoteLaunchResult = Schema.decodeEffect(fromLenientJson(RemoteLaunchResult))
-const decodeRemotePairingResult = Schema.decodeEffect(fromLenientJson(RemotePairingResult))
-
-const decodeRemoteJsonOutput = <A, E>(
-  stdout: string,
-  decode: (input: string) => Effect.Effect<A, E>,
-): Effect.Effect<A, E> =>
-  decode(stdout).pipe(
-    Effect.catch((error) =>
-      Effect.gen(function* ()
-      {
-        const jsonObject = extractJsonObject(stdout)
-        if (jsonObject === stdout.trim())
-        {
-          return yield* Effect.fail(error)
-        }
-        const exit = yield* Effect.exit(decode(jsonObject))
-        if (Exit.isSuccess(exit))
-        {
-          return exit.value
-        }
-        return yield* Effect.fail(error)
-      }),
-    ),
-  )
-
-const decodeRemoteLaunchOutput = (stdout: string) =>
-  decodeRemoteJsonOutput(stdout, decodeRemoteLaunchResult)
-
-const decodeRemotePairingOutput = (stdout: string) =>
-  decodeRemoteJsonOutput(stdout, decodeRemotePairingResult)
-
-export function normalizeSshErrorMessage(stderr: string, fallbackMessage: string): string
-{
-  const cleaned = stderr.trim()
-  return cleaned.length > 0 ? cleaned : fallbackMessage
-}
-
-// re-exported from the shared HTTP readiness module so existing importers
-// (notably tunnel.test.ts) keep resolving it from here.
-export { describeReadinessCause }
-
-export const launchOrReuseRemoteServer = Effect.fn('ssh/tunnel.launchOrReuseRemoteServer')(
-  function* (
-    target: DesktopSshEnvironmentTarget,
-    input?: SshAuthOptions,
-    runner?: RemoteT3RunnerOptions,
-  ): Effect.fn.Return<
-    { readonly remotePort: number; readonly remoteServerKind: 'external' | 'managed' | null },
-    SshCommandError | SshInvalidTargetError | SshLaunchError,
-    ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
-  >
-  {
-    yield* Effect.logInfo('ssh.remoteServer.launch.start', {
-      ...sshTargetLogFields(target),
-      ...sshRunnerLogFields(runner),
-      stateKey: remoteStateKey(target),
-    })
-    const result = yield* runSshCommand(target, {
-      remoteCommandArgs: ['sh', '-s', '--', remoteStateKey(target)],
-      stdin: buildRemoteLaunchScript(runner),
-      ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
-      ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
-      ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
-    })
-    if (!getLastNonEmptyOutputLine(result.stdout))
-    {
-      return yield* new SshLaunchError({
-        message: 'SSH launch did not return a remote port.',
-        stdout: result.stdout,
-      })
-    }
-    const parsed = yield* decodeRemoteLaunchOutput(result.stdout).pipe(
-      Effect.mapError(
-        (cause) =>
-          new SshLaunchError({
-            message: 'SSH launch returned unparseable output.',
-            stdout: result.stdout,
-            cause,
-          }),
-      ),
-    )
-    if (!Number.isInteger(parsed.remotePort))
-    {
-      return yield* new SshLaunchError({
-        message: `SSH launch returned an invalid remote port: ${String(parsed.remotePort)}.`,
-        stdout: result.stdout,
-      })
-    }
-    yield* Effect.logInfo('ssh.remoteServer.launch.ready', {
-      ...sshTargetLogFields(target),
-      remotePort: parsed.remotePort,
-      remoteServerKind: parsed.serverKind ?? null,
-      stateKey: remoteStateKey(target),
-    })
-    return {
-      remotePort: parsed.remotePort,
-      remoteServerKind: parsed.serverKind ?? null,
-    }
-  },
-)
-
-export const issueRemotePairingToken = Effect.fn('ssh/tunnel.issueRemotePairingToken')(function* (
-  target: DesktopSshEnvironmentTarget,
-  input?: SshAuthOptions,
-  runner?: RemoteT3RunnerOptions,
-): Effect.fn.Return<
-  {
-    readonly credential: string
-  },
-  SshCommandError | SshInvalidTargetError | SshPairingError,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
->
-{
-  yield* Effect.logDebug('ssh.remoteServer.pairingToken.start', {
-    ...sshTargetLogFields(target),
-    stateKey: remoteStateKey(target),
-  })
-  const result = yield* runSshCommand(target, {
-    remoteCommandArgs: ['sh', '-s'],
-    stdin: buildRemotePairingScript(target, runner),
-    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
-    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
-    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
-  })
-  if (!getLastNonEmptyOutputLine(result.stdout))
-  {
-    return yield* new SshPairingError({
-      message: 'SSH pairing did not return a credential.',
-      stdout: result.stdout,
-    })
-  }
-  const parsed = yield* decodeRemotePairingOutput(result.stdout).pipe(
-    Effect.mapError(
-      (cause) =>
-        new SshPairingError({
-          message: 'SSH pairing returned unparseable output.',
-          stdout: result.stdout,
-          cause,
-        }),
-    ),
-  )
-  if (parsed.credential.trim().length === 0)
-  {
-    return yield* new SshPairingError({
-      message: 'SSH pairing command returned an invalid credential.',
-      stdout: result.stdout,
-    })
-  }
-  yield* Effect.logDebug('ssh.remoteServer.pairingToken.created', {
-    ...sshTargetLogFields(target),
-    stateKey: remoteStateKey(target),
-  })
-  return {
-    credential: parsed.credential,
-  }
-})
-
-export const stopRemoteServer = Effect.fn('ssh/tunnel.stopRemoteServer')(function* (
-  target: DesktopSshEnvironmentTarget,
-  input?: SshAuthOptions,
-): Effect.fn.Return<
-  void,
-  SshCommandError | SshInvalidTargetError,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
->
-{
-  yield* Effect.logInfo('ssh.remoteServer.stop.start', {
-    ...sshTargetLogFields(target),
-    stateKey: remoteStateKey(target),
-  })
-  yield* runSshCommand(target, {
-    remoteCommandArgs: ['sh', '-s'],
-    stdin: buildRemoteStopScript(target),
-    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
-    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
-    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
-  })
-  yield* Effect.logInfo('ssh.remoteServer.stop.succeeded', {
-    ...sshTargetLogFields(target),
-    stateKey: remoteStateKey(target),
-  })
-})
-
-const readRemoteServerLogTail = Effect.fn('ssh/tunnel.readRemoteServerLogTail')(function* (
-  target: DesktopSshEnvironmentTarget,
-  input?: SshAuthOptions,
-): Effect.fn.Return<
-  string,
-  SshCommandError | SshInvalidTargetError,
-  ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
->
-{
-  const result = yield* runSshCommand(target, {
-    remoteCommandArgs: ['sh', '-s'],
-    stdin: buildRemoteLogTailScript(target),
-    timeoutMs: 10_000,
-    ...(input?.authSecret === undefined ? {} : { authSecret: input.authSecret }),
-    ...(input?.batchMode === undefined ? {} : { batchMode: input.batchMode }),
-    ...(input?.interactiveAuth === undefined ? {} : { interactiveAuth: input.interactiveAuth }),
-  })
-  return result.stdout.trim()
-})
-
-export const waitForHttpReady = (input: {
-  readonly baseUrl: string
-  readonly timeoutMs?: number
-  readonly intervalMs?: number
-  readonly probeTimeoutMs?: number
-  readonly path?: string
-}): Effect.Effect<void, SshReadinessError, HttpClient.HttpClient> =>
-  waitForHttpReadyShared({
-    baseUrl: input.baseUrl,
-    ...(input.path === undefined ? {} : { path: input.path }),
-    ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }),
-    ...(input.intervalMs === undefined ? {} : { intervalMs: input.intervalMs }),
-    probeTimeoutMs: input.probeTimeoutMs ?? SSH_READY_PROBE_TIMEOUT_MS,
-    makeError: ({ requestUrl, probeTimeoutMs, cause }) =>
-    {
-      if (typeof cause === 'object' && cause !== null && 'kind' in cause)
-      {
-        const kind = (cause as { readonly kind?: unknown }).kind
-        if (kind === 'probe-timeout')
-        {
-          return new SshReadinessError({
-            message: `Backend readiness probe exceeded ${probeTimeoutMs}ms at ${requestUrl}.`,
-            cause,
-          })
-        }
-        if (kind === 'overall-timeout')
-        {
-          const overall = cause as unknown as {
-            readonly baseUrl: string
-            readonly timeoutMs: number
-            readonly lastFailure: unknown
-          }
-          return new SshReadinessError({
-            message: `Timed out waiting ${overall.timeoutMs}ms for backend readiness at ${overall.baseUrl}.`,
-            cause: overall.lastFailure,
-          })
-        }
-      }
-      return new SshReadinessError({
-        message: `Backend readiness probe failed at ${requestUrl}.`,
-        cause,
-      })
-    },
-  })
-
-function isLoopbackHostname(hostname: string): boolean
-{
-  const normalized = hostname
-    .trim()
-    .toLowerCase()
-    .replace(/^\[(.*)\]$/, '$1')
-  return normalized === '127.0.0.1' || normalized === '::1' || normalized === 'localhost'
-}
-
-export const resolveLoopbackSshHttpBaseUrl = Effect.fn('ssh/tunnel.resolveLoopbackSshHttpBaseUrl')(
-  function* (rawHttpBaseUrl: unknown): Effect.fn.Return<string, SshHttpBridgeError>
-  {
-    return yield* Effect.try({
-      try: () =>
-      {
-        if (typeof rawHttpBaseUrl !== 'string' || rawHttpBaseUrl.trim().length === 0)
-        {
-          throw new Error('Invalid SSH forwarded http base URL.')
-        }
-        const baseUrl = new URL(rawHttpBaseUrl)
-        if (!isLoopbackHostname(baseUrl.hostname))
-        {
-          throw new Error('SSH desktop bridge only supports loopback forwarded URLs.')
-        }
-        return baseUrl.toString()
-      },
-      catch: (cause) =>
-        new SshHttpBridgeError({
-          message: cause instanceof Error ? cause.message : 'Invalid SSH forwarded http base URL.',
-          cause,
-        }),
-    })
-  },
-)
-
-const reserveLocalTunnelPort = Effect.fn('ssh/tunnel.reserveLocalTunnelPort')(function* ()
-{
-  const net = yield* NetService.NetService
-  return yield* net.reserveLoopbackPort()
-})
-
-const startSshTunnel = Effect.fn('ssh/tunnel.startSshTunnel')(function* (input: {
-  readonly key: string
-  readonly resolvedTarget: DesktopSshEnvironmentTarget
-  readonly remotePort: number
-  readonly localPort: number
-  readonly httpBaseUrl: string
-  readonly wsBaseUrl: string
-  readonly authOptions: SshAuthOptions
-  readonly remoteServerKind: 'external' | 'managed' | null
-}): Effect.fn.Return<
-  SshTunnelEntry,
-  SshCommandError | SshInvalidTargetError | SshReadinessError,
-  | ChildProcessSpawner.ChildProcessSpawner
-  | FileSystem.FileSystem
-  | Path.Path
-  | HttpClient.HttpClient
-  | NetService.NetService
-  | Scope.Scope
->
-{
-  const hostSpec = yield* buildSshHostSpecEffect(input.resolvedTarget)
-  const childEnvironment = yield* buildSshChildEnvironment({
-    ...(input.authOptions.authSecret === undefined
-      ? {}
-      : { authSecret: input.authOptions.authSecret }),
-    ...(input.authOptions.interactiveAuth === undefined
-      ? {}
-      : { interactiveAuth: input.authOptions.interactiveAuth }),
-  }).pipe(
-    Effect.mapError(
-      (cause) =>
-        new SshCommandError({
-          command: ['ssh'],
-          exitCode: null,
-          stderr: '',
-          message: 'Failed to prepare SSH authentication helpers.',
-          cause,
-        }),
-    ),
-  )
-  const args = [
-    ...baseSshArgs(input.resolvedTarget, {
-      batchMode: input.authOptions.batchMode ?? 'no',
-    }),
-    '-o',
-    'ExitOnForwardFailure=yes',
-    '-o',
-    'ServerAliveInterval=15',
-    '-o',
-    'ServerAliveCountMax=3',
-    '-n',
-    '-N',
-    '-L',
-    `${input.localPort}:127.0.0.1:${input.remotePort}`,
-    hostSpec,
-  ]
-  const sshCommand = yield* resolveSshCommand
-  const tunnelCommand = [sshCommand, ...args]
-  const spawner = yield* ChildProcessSpawner.ChildProcessSpawner
-  const scope = yield* Scope.Scope
-  yield* Effect.logDebug('ssh.tunnel.spawn.start', {
-    ...sshTargetLogFields(input.resolvedTarget),
-    command: tunnelCommand,
-    localPort: input.localPort,
-    remotePort: input.remotePort,
-    remoteServerKind: input.remoteServerKind,
-    httpBaseUrl: input.httpBaseUrl,
-  })
-  const child = yield* spawner
-    .spawn(
-      ChildProcess.make(sshCommand, args, {
-        env: childEnvironment,
-        extendEnv: true,
-        stdin: {
-          stream: Stream.empty,
-          endOnDone: true,
-        },
-      }),
-    )
-    .pipe(
-      Effect.mapError(
-        (cause) =>
-          new SshCommandError({
-            command: tunnelCommand,
-            exitCode: null,
-            stderr: '',
-            message:
-              cause instanceof Error
-                ? cause.message
-                : `Failed to spawn SSH tunnel for ${input.resolvedTarget.alias}.`,
-            cause,
-          }),
-      ),
-    )
-  yield* Effect.logDebug('ssh.tunnel.spawn.succeeded', {
-    ...sshTargetLogFields(input.resolvedTarget),
-    command: tunnelCommand,
-    pid: child.pid,
-    localPort: input.localPort,
-    remotePort: input.remotePort,
-    httpBaseUrl: input.httpBaseUrl,
-  })
-  const tunnelEntry: SshTunnelEntry = {
-    key: input.key,
-    target: input.resolvedTarget,
-    remotePort: input.remotePort,
-    remoteServerKind: input.remoteServerKind,
-    localPort: input.localPort,
-    httpBaseUrl: input.httpBaseUrl,
-    wsBaseUrl: input.wsBaseUrl,
-    process: child,
-    scope,
-  }
-  const exitFailure = Effect.all(
-    [collectProcessOutput(child.stderr), child.exitCode.pipe(Effect.map(Number))],
-    { concurrency: 'unbounded' },
-  ).pipe(
-    Effect.mapError(
-      (cause) =>
-        new SshCommandError({
-          command: tunnelCommand,
-          exitCode: null,
-          stderr: '',
-          message:
-            cause instanceof Error
-              ? cause.message
-              : `Failed to monitor SSH tunnel for ${input.resolvedTarget.alias}.`,
-          cause,
-        }),
-    ),
-    Effect.flatMap(([stderr, exitCode]) =>
-    {
-      const error = new SshCommandError({
-        command: tunnelCommand,
-        exitCode,
-        stderr,
-        message: normalizeSshErrorMessage(
-          stderr,
-          `SSH tunnel exited unexpectedly for ${input.resolvedTarget.alias} (exit ${exitCode}).`,
-        ),
-      })
-      return Effect.logWarning('ssh.tunnel.process.exited', {
-        ...sshTargetLogFields(input.resolvedTarget),
-        command: tunnelCommand,
-        pid: child.pid,
-        localPort: input.localPort,
-        remotePort: input.remotePort,
-        httpBaseUrl: input.httpBaseUrl,
-        exitCode,
-        stderr,
-      }).pipe(Effect.andThen(Effect.fail(error)))
-    }),
-  )
-  yield* Effect.raceFirst(
-    waitForHttpReady({
-      baseUrl: input.httpBaseUrl,
-      timeoutMs: SSH_READY_TIMEOUT_MS,
-    }),
-    exitFailure,
-  ).pipe(
-    Effect.tap(() =>
-      Effect.logInfo('ssh.tunnel.ready', {
-        ...sshTargetLogFields(input.resolvedTarget),
-        command: tunnelCommand,
-        pid: child.pid,
-        localPort: input.localPort,
-        remotePort: input.remotePort,
-        httpBaseUrl: input.httpBaseUrl,
-      }),
-    ),
-    Effect.tapError((cause) =>
-      Effect.gen(function* ()
-      {
-        const net = yield* NetService.NetService
-        const processRunningExit = yield* Effect.exit(child.isRunning)
-        const localPortAvailableExit = yield* Effect.exit(
-          net.canListenOnHost(input.localPort, '127.0.0.1'),
-        )
-        const remoteLogTailExit = yield* Effect.exit(
-          readRemoteServerLogTail(input.resolvedTarget, input.authOptions),
-        )
-        const processRunning = Exit.isSuccess(processRunningExit) ? processRunningExit.value : null
-        const localPortAvailable = Exit.isSuccess(localPortAvailableExit)
-          ? localPortAvailableExit.value
-          : null
-        const remoteLogTail = Exit.isSuccess(remoteLogTailExit)
-          ? remoteLogTailExit.value || null
-          : null
-        yield* Effect.logWarning('ssh.tunnel.ready.failed', {
-          ...sshTargetLogFields(input.resolvedTarget),
-          command: tunnelCommand,
-          pid: child.pid,
-          processRunning,
-          ...(Exit.isSuccess(processRunningExit)
-            ? {}
-            : { processRunningError: processRunningExit.cause }),
-          localPort: input.localPort,
-          localPortListening: localPortAvailable === null ? null : !localPortAvailable,
-          remotePort: input.remotePort,
-          httpBaseUrl: input.httpBaseUrl,
-          ...(Exit.isSuccess(localPortAvailableExit)
-            ? {}
-            : { localPortProbeError: localPortAvailableExit.cause }),
-          ...(remoteLogTail === null ? {} : { remoteLogTail }),
-          ...(Exit.isSuccess(remoteLogTailExit)
-            ? {}
-            : { remoteLogTailError: remoteLogTailExit.cause }),
-          cause,
-        })
-      }),
-    ),
-    Effect.onExit((exit) =>
-      Exit.isSuccess(exit)
-        ? Effect.void
-        : child
-            .kill({
-              killSignal: 'SIGTERM',
-              forceKillAfter: TUNNEL_SHUTDOWN_TIMEOUT_MS,
-            })
-            .pipe(Effect.ignore),
-    ),
-  )
-  return tunnelEntry
-})
 
 const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.make')(function* (
   options: SshEnvironmentManagerOptions = {},
@@ -837,126 +229,7 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
     ),
   )
 
-  const promptForPassword = Effect.fn('ssh/tunnel.promptForPassword')(function* (
-    target: DesktopSshEnvironmentTarget,
-    attempt: number,
-  ): Effect.fn.Return<string, SshInvalidTargetError | SshPasswordPromptError, SshPasswordPrompt>
-  {
-    const promptService = yield* SshPasswordPrompt
-    const hostSpec = yield* buildSshHostSpecEffect(target)
-    if (!promptService.isAvailable)
-    {
-      yield* Effect.logWarning('ssh.auth.passwordPrompt.unavailable', {
-        ...sshTargetLogFields(target),
-        attempt,
-      })
-      return yield* new SshPasswordPromptError({
-        message: `SSH authentication failed for ${hostSpec}.`,
-      })
-    }
-
-    yield* Effect.logInfo('ssh.auth.passwordPrompt.request', {
-      ...sshTargetLogFields(target),
-      attempt,
-    })
-    const password = yield* promptService.request({
-      attempt,
-      destination: target.alias.trim() || target.hostname.trim(),
-      username: target.username,
-      prompt: `Enter the SSH password for ${hostSpec}.`,
-    })
-    if (password === null)
-    {
-      yield* Effect.logWarning('ssh.auth.passwordPrompt.cancelled', {
-        ...sshTargetLogFields(target),
-        attempt,
-      })
-      return yield* new SshPasswordPromptError({
-        message: `SSH authentication cancelled for ${hostSpec}.`,
-      })
-    }
-    yield* Effect.logInfo('ssh.auth.passwordPrompt.received', {
-      ...sshTargetLogFields(target),
-      attempt,
-    })
-    return password
-  })
-
-  const handleSshAuthFailure = Effect.fn('ssh/tunnel.runWithSshAuthAttempt.handleFailure')(
-    function* <T>(
-      input: SshAuthAttemptInput<T> & {
-        readonly error: SshEnvironmentEffectError
-      },
-    ): Effect.fn.Return<T, SshEnvironmentEffectError, SshEnvironmentEffectContext>
-    {
-      if (!isSshAuthFailure(input.error))
-      {
-        return yield* input.error
-      }
-
-      yield* Effect.logWarning('ssh.auth.failed', {
-        ...sshTargetLogFields(input.target),
-        key: input.key,
-        promptCount: input.promptCount,
-        cause: input.error,
-      })
-      const promptService = yield* SshPasswordPrompt
-      if (!promptService.isAvailable)
-      {
-        return yield* input.error
-      }
-      if (input.authSecret !== null)
-      {
-        authSecrets.delete(input.key)
-      }
-      if (input.promptCount >= 2)
-      {
-        return yield* input.error
-      }
-
-      const nextPromptCount = input.promptCount + 1
-      const nextAuthSecret = yield* promptForPassword(input.target, nextPromptCount)
-      authSecrets.set(input.key, nextAuthSecret)
-      return yield* runWithSshAuthAttempt({
-        ...input,
-        promptCount: nextPromptCount,
-        authSecret: nextAuthSecret,
-      })
-    },
-  )
-
-  const runWithSshAuthAttempt = Effect.fn('ssh/tunnel.runWithSshAuthAttempt')(function* <T>(
-    input: SshAuthAttemptInput<T>,
-  ): Effect.fn.Return<T, SshEnvironmentEffectError, SshEnvironmentEffectContext>
-  {
-    const promptService = yield* SshPasswordPrompt
-    const authOptions =
-      input.authSecret === null
-        ? {
-            batchMode: promptService.isAvailable ? ('yes' as const) : ('no' as const),
-            interactiveAuth: !promptService.isAvailable,
-          }
-        : {
-            authSecret: input.authSecret,
-            batchMode: 'no' as const,
-            interactiveAuth: true,
-          }
-
-    return yield* input
-      .operation(authOptions)
-      .pipe(Effect.catch((error) => handleSshAuthFailure({ ...input, error })))
-  })
-
-  const runWithSshAuth = Effect.fn('ssh/tunnel.runWithSshAuth')(function* <T>(
-    input: SshAuthOperationInput<T>,
-  ): Effect.fn.Return<T, SshEnvironmentEffectError, SshEnvironmentEffectContext>
-  {
-    return yield* runWithSshAuthAttempt({
-      ...input,
-      promptCount: 0,
-      authSecret: authSecrets.get(input.key) ?? null,
-    })
-  })
+  const { runWithSshAuth } = makeSshAuthRunner(authSecrets)
 
   const launchSharedRemoteRuntime = Effect.fn('ssh/tunnel.launchSharedRemoteRuntime')(
     function* (input: {

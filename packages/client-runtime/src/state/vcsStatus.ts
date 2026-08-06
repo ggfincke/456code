@@ -1,10 +1,4 @@
 // packages/client-runtime/src/state/vcsStatus.ts
-// manage vcs status target state
+// re-export vcsStatus from nested state owner
 
-import type { EnvironmentId } from '@t3tools/contracts'
-
-export interface VcsStatusTarget
-{
-  readonly environmentId: EnvironmentId | null
-  readonly cwd: string | null
-}
+export * from './vcs/vcsStatus.ts'
