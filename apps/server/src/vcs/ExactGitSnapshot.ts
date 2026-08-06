@@ -3,43 +3,38 @@
 
 // @effect-diagnostics nodeBuiltinImport:off globalTimers:off
 
-import * as NodeChildProcess from 'node:child_process'
 import * as NodeFS from 'node:fs'
 import * as NodeFSP from 'node:fs/promises'
 import * as NodePath from 'node:path'
 
+import {
+  buildFastImportInput,
+  buildIndexInput,
+  type SnapshotEntry,
+} from './ExactGitSnapshotBuild.ts'
+import {
+  ExactGitSnapshotError,
+  OBJECT_ID,
+  exactError,
+  runGit,
+  throwIfCancelled,
+  trimLineBreak,
+} from './ExactGitSnapshotGit.ts'
+import {
+  type GitTreeEntry,
+  type IndexEntry,
+  type MaterializedTreeEntry,
+  decodePath,
+  nulRecords,
+  parseHeadTree,
+  parseIndex,
+  parseMaterializedTree,
+} from './ExactGitSnapshotParse.ts'
+
+export { ExactGitSnapshotError, type ExactGitSnapshotErrorCode } from './ExactGitSnapshotGit.ts'
+
 export const EXACT_GIT_SNAPSHOT_MAX_FILE_COUNT = 25_000
 export const EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT = 256 * 1024 * 1024
-
-const GIT_TIMEOUT_MS = 30_000
-const GIT_LISTING_MAX_BYTES = 64 * 1024 * 1024
-const GIT_STDERR_MAX_BYTES = 64 * 1024
-const OBJECT_ID = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/u
-const ALLOWED_INDEX_MODES = new Set(['100644', '100755', '120000', '160000'])
-const REGULAR_MODES = new Set(['100644', '100755'])
-const fatalUtf8Decoder = new TextDecoder('utf-8', { fatal: true })
-
-export type ExactGitSnapshotErrorCode =
-  | 'cancelled'
-  | 'cleanup-failed'
-  | 'dirty-submodule'
-  | 'git-failed'
-  | 'invalid-input'
-  | 'limit-exceeded'
-  | 'unsupported-entry'
-  | 'verification-failed'
-
-export class ExactGitSnapshotError extends Error
-{
-  readonly code: ExactGitSnapshotErrorCode
-
-  constructor(code: ExactGitSnapshotErrorCode, message: string, options?: ErrorOptions)
-  {
-    super(message, options)
-    this.name = 'ExactGitSnapshotError'
-    this.code = code
-  }
-}
 
 export interface ExactGitSnapshotLimits
 {
@@ -140,37 +135,6 @@ export interface ExactGitTreeRestorePreflight
   readonly pruneDirectoryCount: number
 }
 
-interface GitResult
-{
-  readonly exitCode: number
-  readonly stdout: Buffer
-  readonly stderr: Buffer
-}
-
-interface GitOptions
-{
-  readonly allowNonZeroExit?: boolean
-  readonly env?: NodeJS.ProcessEnv
-  readonly stdin?: Buffer
-  readonly maxStdoutBytes?: number
-}
-
-interface GitTreeEntry
-{
-  readonly mode: string
-  readonly type: 'blob' | 'commit'
-  readonly oid: string
-  readonly path: string
-}
-
-interface IndexEntry
-{
-  readonly mode: string
-  readonly oid: string
-  readonly stage: number
-  readonly path: string
-}
-
 interface SnapshotCandidate
 {
   readonly path: string
@@ -178,322 +142,12 @@ interface SnapshotCandidate
   index?: IndexEntry
   untracked: boolean
 }
-
-interface SnapshotEntry
-{
-  readonly path: string
-  readonly mode: string
-  readonly content?: Buffer
-  readonly existingOid?: string
-}
-
-interface MaterializedTreeEntry
-{
-  readonly path: string
-  readonly mode: string
-  readonly type: 'blob' | 'commit'
-  readonly oid: string
-  readonly size: number
-}
-
 interface LoadedExactGitTree
 {
   readonly entries: ReadonlyArray<MaterializedTreeEntry>
   readonly blobs: ReadonlyMap<string, Buffer>
   readonly fileCount: number
   readonly byteCount: number
-}
-
-function exactError(
-  code: ExactGitSnapshotErrorCode,
-  message: string,
-  cause?: unknown,
-): ExactGitSnapshotError
-{
-  return new ExactGitSnapshotError(code, message, cause === undefined ? undefined : { cause })
-}
-
-function throwIfCancelled(signal: AbortSignal): void
-{
-  if (signal.aborted)
-  {
-    throw exactError('cancelled', 'Exact Git snapshot operation was cancelled.')
-  }
-}
-
-function gitEnvironment(overrides?: NodeJS.ProcessEnv): NodeJS.ProcessEnv
-{
-  const environment: NodeJS.ProcessEnv = {
-    ...process.env,
-    GIT_LITERAL_PATHSPECS: '1',
-    GIT_NO_LAZY_FETCH: '1',
-    GIT_NO_REPLACE_OBJECTS: '1',
-    GIT_OPTIONAL_LOCKS: '0',
-    LANG: 'C',
-    LC_ALL: 'C',
-    ...overrides,
-  }
-  if (overrides?.GIT_INDEX_FILE === undefined)
-  {
-    delete environment.GIT_INDEX_FILE
-  }
-  return environment
-}
-
-function runGit(
-  cwd: string,
-  args: ReadonlyArray<string>,
-  signal: AbortSignal,
-  options: GitOptions = {},
-): Promise<GitResult>
-{
-  throwIfCancelled(signal)
-  const maxStdoutBytes = options.maxStdoutBytes ?? GIT_LISTING_MAX_BYTES
-
-  return new Promise((resolve, reject) =>
-  {
-    let child: NodeChildProcess.ChildProcessWithoutNullStreams
-    try
-    {
-      child = NodeChildProcess.spawn('git', ['-C', cwd, ...args], {
-        env: gitEnvironment(options.env),
-        stdio: ['pipe', 'pipe', 'pipe'],
-        windowsHide: true,
-      })
-    }
-    catch (cause)
-    {
-      reject(exactError('git-failed', `Could not start git ${args[0] ?? 'command'}.`, cause))
-      return
-    }
-
-    const stdout: Buffer[] = []
-    const stderr: Buffer[] = []
-    let stdoutBytes = 0
-    let stderrBytes = 0
-    let terminalError: ExactGitSnapshotError | null = null
-    let settled = false
-
-    const stop = (error: ExactGitSnapshotError) =>
-    {
-      terminalError ??= error
-      child.kill('SIGKILL')
-    }
-    const abort = () =>
-    {
-      stop(exactError('cancelled', 'Exact Git snapshot operation was cancelled.'))
-    }
-    const timeout = setTimeout(() =>
-    {
-      stop(exactError('git-failed', `git ${args[0] ?? 'command'} timed out.`))
-    }, GIT_TIMEOUT_MS)
-
-    signal.addEventListener('abort', abort, { once: true })
-    child.stdout.on('data', (chunk: Buffer) =>
-    {
-      stdoutBytes += chunk.byteLength
-      if (stdoutBytes > maxStdoutBytes)
-      {
-        stop(exactError('git-failed', `git ${args[0] ?? 'command'} exceeded its bounded output.`))
-        return
-      }
-      stdout.push(chunk)
-    })
-    child.stderr.on('data', (chunk: Buffer) =>
-    {
-      stderrBytes += chunk.byteLength
-      if (stderrBytes > GIT_STDERR_MAX_BYTES)
-      {
-        stop(
-          exactError(
-            'git-failed',
-            `git ${args[0] ?? 'command'} exceeded its bounded error output.`,
-          ),
-        )
-        return
-      }
-      stderr.push(chunk)
-    })
-    child.on('error', (cause) =>
-    {
-      stop(exactError('git-failed', `Could not run git ${args[0] ?? 'command'}.`, cause))
-    })
-    child.stdin.on('error', (cause: NodeJS.ErrnoException) =>
-    {
-      if (cause.code !== 'EPIPE')
-      {
-        stop(exactError('git-failed', `Could not write to git ${args[0] ?? 'command'}.`, cause))
-      }
-    })
-    child.on('close', (code) =>
-    {
-      if (settled) return
-      settled = true
-      clearTimeout(timeout)
-      signal.removeEventListener('abort', abort)
-      if (terminalError !== null)
-      {
-        reject(terminalError)
-        return
-      }
-      if (code === null)
-      {
-        reject(exactError('git-failed', `git ${args[0] ?? 'command'} returned no exit code.`))
-        return
-      }
-      if (code !== 0 && options.allowNonZeroExit !== true)
-      {
-        const detail = Buffer.concat(stderr).toString('utf8').trim()
-        reject(
-          exactError(
-            'git-failed',
-            detail.length > 0
-              ? `git ${args[0] ?? 'command'} failed: ${detail}`
-              : `git ${args[0] ?? 'command'} failed with exit code ${String(code)}.`,
-          ),
-        )
-        return
-      }
-      resolve({
-        exitCode: code,
-        stdout: Buffer.concat(stdout),
-        stderr: Buffer.concat(stderr),
-      })
-    })
-
-    if (signal.aborted) abort()
-    child.stdin.end(options.stdin)
-  })
-}
-
-function trimLineBreak(buffer: Buffer): string
-{
-  return buffer.toString('utf8').replace(/\r?\n$/u, '')
-}
-
-function nulRecords(buffer: Buffer, label: string): ReadonlyArray<Buffer>
-{
-  if (buffer.byteLength === 0) return []
-  if (buffer.at(-1) !== 0)
-  {
-    throw exactError('git-failed', `Git returned malformed ${label}.`)
-  }
-
-  const records: Buffer[] = []
-  let offset = 0
-  while (offset < buffer.byteLength)
-  {
-    const end = buffer.indexOf(0, offset)
-    if (end < 0)
-    {
-      throw exactError('git-failed', `Git returned malformed ${label}.`)
-    }
-    if (end > offset) records.push(buffer.subarray(offset, end))
-    offset = end + 1
-  }
-  return records
-}
-
-function decodePath(bytes: Buffer): string
-{
-  let path: string
-  try
-  {
-    path = fatalUtf8Decoder.decode(bytes)
-  }
-  catch (cause)
-  {
-    throw exactError(
-      'unsupported-entry',
-      'Git paths must be valid UTF-8 for exact snapshot materialization.',
-      cause,
-    )
-  }
-  validateGitPath(path)
-  return path
-}
-
-function validateGitPath(path: string): void
-{
-  const segments = path.split('/')
-  const hasControlCharacter = [...path].some((character) =>
-  {
-    const codePoint = character.codePointAt(0)!
-    return codePoint <= 0x1f || codePoint === 0x7f
-  })
-  if (
-    path.length === 0 ||
-    path.includes('\\') ||
-    path.startsWith('/') ||
-    /^[A-Za-z]:/u.test(path) ||
-    hasControlCharacter ||
-    NodePath.isAbsolute(path) ||
-    segments.some(
-      (segment) =>
-        segment.length === 0 ||
-        segment === '.' ||
-        segment === '..' ||
-        segment.toLowerCase() === '.git',
-    )
-  )
-  {
-    throw exactError('unsupported-entry', `Git path '${path}' is unsafe to materialize.`)
-  }
-}
-
-function parseHeadTree(buffer: Buffer): ReadonlyArray<GitTreeEntry>
-{
-  return nulRecords(buffer, 'HEAD tree entries').map((record) =>
-  {
-    const separator = record.indexOf(0x09)
-    if (separator < 0)
-    {
-      throw exactError('git-failed', 'Git returned a malformed HEAD tree entry.')
-    }
-    const metadata = record.subarray(0, separator).toString('ascii')
-    const match = /^([0-9]{6}) (blob|commit) ([0-9a-f]{40}(?:[0-9a-f]{24})?)$/u.exec(metadata)
-    if (
-      !match?.[1] ||
-      !match[2] ||
-      !match[3] ||
-      !ALLOWED_INDEX_MODES.has(match[1]) ||
-      (match[2] === 'commit' && match[1] !== '160000') ||
-      (match[2] === 'blob' && match[1] === '160000')
-    )
-    {
-      throw exactError('unsupported-entry', 'The repository contains an unsupported Git entry.')
-    }
-    return {
-      mode: match[1],
-      type: match[2] as 'blob' | 'commit',
-      oid: match[3],
-      path: decodePath(record.subarray(separator + 1)),
-    }
-  })
-}
-
-function parseIndex(buffer: Buffer): ReadonlyArray<IndexEntry>
-{
-  return nulRecords(buffer, 'index entries').map((record) =>
-  {
-    const separator = record.indexOf(0x09)
-    if (separator < 0)
-    {
-      throw exactError('git-failed', 'Git returned a malformed index entry.')
-    }
-    const metadata = record.subarray(0, separator).toString('ascii')
-    const match = /^([0-9]{6}) ([0-9a-f]{40}(?:[0-9a-f]{24})?) ([0-3])$/u.exec(metadata)
-    if (!match?.[1] || !match[2] || !match[3] || !ALLOWED_INDEX_MODES.has(match[1]))
-    {
-      throw exactError('unsupported-entry', 'The repository index has an unsupported entry.')
-    }
-    return {
-      mode: match[1],
-      oid: match[2],
-      stage: Number(match[3]),
-      path: decodePath(record.subarray(separator + 1)),
-    }
-  })
 }
 
 function validatedLimits(limits: ExactGitSnapshotLimits | undefined): ExactGitSnapshotLimits
@@ -715,6 +369,43 @@ function assertWithinLimits(
   }
 }
 
+function validateMaterializedEntries(
+  entries: ReadonlyArray<MaterializedTreeEntry>,
+  limits: ExactGitSnapshotLimits,
+): { readonly fileCount: number; readonly byteCount: number }
+{
+  const paths = new Set<string>()
+  const leaves = new Set<string>()
+  let byteCount = 0
+  for (const entry of entries)
+  {
+    if (paths.has(entry.path))
+    {
+      throw exactError('unsupported-entry', `Git tree repeats path '${entry.path}'.`)
+    }
+    paths.add(entry.path)
+    if (entry.type === 'blob') leaves.add(entry.path)
+    byteCount += entry.size
+    assertWithinLimits(paths.size, byteCount, limits)
+  }
+  for (const path of paths)
+  {
+    const segments = path.split('/')
+    for (let index = 1; index < segments.length; index += 1)
+    {
+      const parent = segments.slice(0, index).join('/')
+      if (leaves.has(parent))
+      {
+        throw exactError(
+          'unsupported-entry',
+          `Git tree places '${path}' below non-directory '${parent}'.`,
+        )
+      }
+    }
+  }
+  return { fileCount: paths.size, byteCount }
+}
+
 async function collectSnapshotEntries(
   repositoryRoot: string,
   headOid: string | null,
@@ -882,31 +573,6 @@ async function collectSnapshotEntries(
   return entries
 }
 
-function buildFastImportInput(entries: ReadonlyArray<SnapshotEntry>): {
-  readonly input: Buffer
-  readonly entriesWithContent: ReadonlyArray<SnapshotEntry>
-}
-{
-  const entriesWithContent = entries.filter(
-    (entry): entry is SnapshotEntry & { readonly content: Buffer } => entry.content !== undefined,
-  )
-  const parts: Buffer[] = []
-  for (const [index, entry] of entriesWithContent.entries())
-  {
-    parts.push(
-      Buffer.from(`blob\nmark :${index + 1}\ndata ${entry.content.byteLength}\n`, 'ascii'),
-      entry.content,
-      Buffer.from('\n', 'ascii'),
-    )
-  }
-  for (const index of entriesWithContent.keys())
-  {
-    parts.push(Buffer.from(`get-mark :${index + 1}\n`, 'ascii'))
-  }
-  parts.push(Buffer.from('done\n', 'ascii'))
-  return { input: Buffer.concat(parts), entriesWithContent }
-}
-
 async function writeSnapshotObjects(
   repositoryRoot: string,
   entries: ReadonlyArray<SnapshotEntry>,
@@ -931,24 +597,6 @@ async function writeSnapshotObjects(
     objectIds.set(entry, lines[index]!)
   }
   return objectIds
-}
-
-function buildIndexInput(
-  entries: ReadonlyArray<SnapshotEntry>,
-  importedObjectIds: ReadonlyMap<SnapshotEntry, string>,
-): Buffer
-{
-  return Buffer.concat(
-    entries.map((entry) =>
-    {
-      const oid = entry.existingOid ?? importedObjectIds.get(entry)
-      if (oid === undefined || !OBJECT_ID.test(oid))
-      {
-        throw exactError('git-failed', `Git object identity is missing for '${entry.path}'.`)
-      }
-      return Buffer.from(`${entry.mode} ${oid}\t${entry.path}\0`, 'utf8')
-    }),
-  )
 }
 
 async function captureWithClaimedIndex(
@@ -1065,84 +713,6 @@ export async function captureExactGitSnapshot(
     throw exactError('git-failed', 'Exact Git snapshot capture returned no result.')
   }
   return result
-}
-
-function parseMaterializedTree(buffer: Buffer): ReadonlyArray<MaterializedTreeEntry>
-{
-  return nulRecords(buffer, 'tree listing').map((record) =>
-  {
-    const separator = record.indexOf(0x09)
-    if (separator < 0)
-    {
-      throw exactError('git-failed', 'Git returned a malformed tree entry.')
-    }
-    const metadata = record.subarray(0, separator).toString('ascii')
-    const match = /^([0-9]{6}) (blob|commit) ([0-9a-f]{40}(?:[0-9a-f]{24})?)\s+([0-9]+|-)$/u.exec(
-      metadata,
-    )
-    if (!match?.[1] || !match[2] || !match[3] || !match[4])
-    {
-      throw exactError('git-failed', 'Git returned a malformed tree entry.')
-    }
-    const mode = match[1]
-    const type = match[2] as 'blob' | 'commit'
-    if (
-      (type === 'blob' && !REGULAR_MODES.has(mode) && mode !== '120000') ||
-      (type === 'commit' && mode !== '160000')
-    )
-    {
-      throw exactError('unsupported-entry', 'The Git tree contains an unsupported entry.')
-    }
-    const size = match[4] === '-' ? 0 : Number(match[4])
-    if (!Number.isSafeInteger(size) || size < 0)
-    {
-      throw exactError('git-failed', 'Git returned an invalid tree entry size.')
-    }
-    return {
-      mode,
-      type,
-      oid: match[3],
-      size,
-      path: decodePath(record.subarray(separator + 1)),
-    }
-  })
-}
-
-function validateMaterializedEntries(
-  entries: ReadonlyArray<MaterializedTreeEntry>,
-  limits: ExactGitSnapshotLimits,
-): { readonly fileCount: number; readonly byteCount: number }
-{
-  const paths = new Set<string>()
-  const leaves = new Set<string>()
-  let byteCount = 0
-  for (const entry of entries)
-  {
-    if (paths.has(entry.path))
-    {
-      throw exactError('unsupported-entry', `Git tree repeats path '${entry.path}'.`)
-    }
-    paths.add(entry.path)
-    if (entry.type === 'blob') leaves.add(entry.path)
-    byteCount += entry.size
-    assertWithinLimits(paths.size, byteCount, limits)
-  }
-  for (const path of paths)
-  {
-    const segments = path.split('/')
-    for (let index = 1; index < segments.length; index += 1)
-    {
-      const parent = segments.slice(0, index).join('/')
-      if (leaves.has(parent))
-      {
-        throw exactError(
-          'unsupported-entry',
-          `Git tree places '${path}' below non-directory '${parent}'.`,
-        )
-      }
-    }
-  }
-  return { fileCount: paths.size, byteCount }
 }
 
 async function readTreeBlobs(

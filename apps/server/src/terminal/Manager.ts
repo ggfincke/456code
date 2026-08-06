@@ -56,9 +56,33 @@ import {
   terminalRestartsTotal,
   terminalSessionsTotal,
 } from '../observability/Metrics.ts'
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 import * as PortScanner from '../preview/PortScanner.ts'
 import * as PtyAdapter from './PtyAdapter.ts'
+
+import {
+  defaultShellResolver,
+  formatShellCandidate,
+  isRetryableShellSpawnError,
+  resolveShellCandidates,
+  type ShellCandidate,
+} from './shellResolve.ts'
+import {
+  inspectProcessSnapshotRows,
+  parseProcessSnapshot,
+  type TerminalSubprocessInspectResult,
+} from './processParse.ts'
+import {
+  isDuplicateAttachSnapshotEvent,
+  normalizeChildCommandName,
+  shouldPublishTerminalMetadataEvent,
+  snapshot,
+  summary,
+  terminalEventToAttachEvent,
+  terminalWireLabel,
+} from './sessionSnapshot.ts'
+
+export type { ShellCandidate } from './shellResolve.ts'
 
 export {
   TerminalCwdError,
@@ -82,7 +106,6 @@ const DEFAULT_OPEN_COLS = 120
 const DEFAULT_OPEN_ROWS = 30
 const TERMINAL_ENV_BLOCKLIST = new Set(['PORT', 'ELECTRON_RENDERER_PORT', 'ELECTRON_RUN_AS_NODE'])
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
-const MAX_TERMINAL_LABEL_LENGTH = 128
 
 class TerminalSubprocessCheckError extends Schema.TaggedErrorClass<TerminalSubprocessCheckError>()(
   'TerminalSubprocessCheckError',
@@ -174,13 +197,6 @@ export class TerminalManager extends Context.Service<
 >()('456code/terminal/Manager/TerminalManager')
 {}
 
-interface TerminalSubprocessInspectResult
-{
-  readonly hasRunningSubprocess: boolean
-  readonly childCommand: string | null
-  readonly processIds: ReadonlyArray<number>
-}
-
 interface TerminalSubprocessInspector
 {
   (
@@ -206,12 +222,6 @@ const resizePtyProcess = (
         cause,
       }),
   })
-
-export interface ShellCandidate
-{
-  shell: string
-  args?: string[]
-}
 
 export interface TerminalStartInput extends TerminalOpenInput
 {
@@ -284,130 +294,6 @@ interface TerminalManagerState
   killFibers: Map<PtyAdapter.PtyProcess, Fiber.Fiber<void, never>>
 }
 
-function truncateTerminalWireLabel(value: string): string
-{
-  if (value.length <= MAX_TERMINAL_LABEL_LENGTH) return value
-  return value.slice(0, MAX_TERMINAL_LABEL_LENGTH)
-}
-
-function normalizeChildCommandName(raw: string, platform: NodeJS.Platform): string | null
-{
-  let trimmed = raw.trim()
-  if (trimmed.length === 0) return null
-  if (
-    (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
-    (trimmed.startsWith('(') && trimmed.endsWith(')'))
-  )
-  {
-    trimmed = trimmed.slice(1, -1).trim()
-  }
-  const firstToken = (trimmed.split(/\s+/)[0] ?? trimmed).trim()
-  if (firstToken.length === 0) return null
-  const separators = platform === 'win32' ? /[\\/]/ : /\//
-  const base = firstToken.split(separators).at(-1) ?? firstToken
-  const withoutExe =
-    platform === 'win32' && base.toLowerCase().endsWith('.exe') ? base.slice(0, -4) : base
-  return withoutExe.length > 0 ? withoutExe : null
-}
-
-function terminalWireLabel(session: TerminalSessionState): string
-{
-  if (session.hasRunningSubprocess && session.childCommandLabel)
-  {
-    const trimmed = session.childCommandLabel.trim()
-    if (trimmed.length > 0)
-    {
-      return truncateTerminalWireLabel(trimmed)
-    }
-  }
-  return truncateTerminalWireLabel(getTerminalLabel(session.terminalId))
-}
-
-function snapshot(session: TerminalSessionState): TerminalSessionSnapshot
-{
-  return {
-    threadId: session.threadId,
-    terminalId: session.terminalId,
-    cwd: session.cwd,
-    worktreePath: session.worktreePath,
-    status: session.status,
-    pid: session.pid,
-    history: session.history,
-    exitCode: session.exitCode,
-    exitSignal: session.exitSignal,
-    label: terminalWireLabel(session),
-    updatedAt: session.updatedAt,
-    sequence: session.eventSequence,
-  }
-}
-
-function summary(session: TerminalSessionState): TerminalSummary
-{
-  return {
-    threadId: session.threadId,
-    terminalId: session.terminalId,
-    cwd: session.cwd,
-    worktreePath: session.worktreePath,
-    status: session.status,
-    pid: session.pid,
-    exitCode: session.exitCode,
-    exitSignal: session.exitSignal,
-    hasRunningSubprocess: session.hasRunningSubprocess,
-    label: terminalWireLabel(session),
-    updatedAt: session.updatedAt,
-  }
-}
-
-function shouldPublishTerminalMetadataEvent(event: TerminalEvent): boolean
-{
-  switch (event.type)
-  {
-    case 'started':
-    case 'restarted':
-    case 'exited':
-    case 'closed':
-    case 'error':
-    case 'activity':
-      return true
-    case 'output':
-    case 'cleared':
-      return false
-  }
-}
-
-function terminalEventToAttachEvent(event: TerminalEvent): TerminalAttachStreamEvent | null
-{
-  switch (event.type)
-  {
-    case 'started':
-      return {
-        type: 'snapshot',
-        snapshot: event.snapshot,
-      }
-    case 'output':
-    case 'exited':
-    case 'closed':
-    case 'error':
-    case 'cleared':
-    case 'restarted':
-    case 'activity':
-      return event
-  }
-}
-
-function isDuplicateAttachSnapshotEvent(
-  event: TerminalEvent,
-  initialSnapshot: TerminalSessionSnapshot,
-)
-{
-  return typeof event.sequence === 'number' && typeof initialSnapshot.sequence === 'number'
-    ? event.sequence <= initialSnapshot.sequence
-    : event.type === 'started' &&
-        event.snapshot.threadId === initialSnapshot.threadId &&
-        event.snapshot.terminalId === initialSnapshot.terminalId &&
-        event.snapshot.updatedAt <= initialSnapshot.updatedAt
-}
-
 function advanceEventSequence(session: TerminalSessionState): {
   readonly updatedAt: string
   readonly sequence: number
@@ -446,281 +332,6 @@ function enqueueProcessEvent(
 
   session.processEventDrainRunning = true
   return true
-}
-
-function defaultShellResolver(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string
-{
-  if (platform === 'win32')
-  {
-    return 'pwsh.exe'
-  }
-  return env.SHELL ?? 'bash'
-}
-
-function normalizeShellCommand(
-  value: string | undefined,
-  platform: NodeJS.Platform,
-): string | null
-{
-  if (!value) return null
-  const trimmed = value.trim()
-  if (trimmed.length === 0) return null
-
-  if (platform === 'win32')
-  {
-    return trimmed
-  }
-
-  const firstToken = trimmed.split(/\s+/g)[0]?.trim()
-  if (!firstToken) return null
-  return firstToken.replace(/^['"]|['"]$/g, '')
-}
-
-function basenameForPlatform(command: string, platform: NodeJS.Platform): string
-{
-  const normalized =
-    platform === 'win32' ? command.replaceAll('/', '\\') : command.replaceAll('\\', '/')
-  const parts = normalized
-    .split(platform === 'win32' ? /\\+/ : /\/+/)
-    .filter((part) => part.length > 0)
-  return parts.at(-1) ?? normalized
-}
-
-function joinWindowsPath(...parts: ReadonlyArray<string>): string
-{
-  return parts
-    .map((part, index) =>
-    {
-      if (index === 0) return part.replace(/[\\/]+$/g, '')
-      return part.replace(/^[\\/]+|[\\/]+$/g, '')
-    })
-    .filter((part) => part.length > 0)
-    .join('\\')
-}
-
-function shellCandidateFromCommand(
-  command: string | null,
-  platform: NodeJS.Platform,
-): ShellCandidate | null
-{
-  if (!command || command.length === 0) return null
-  const shellName = basenameForPlatform(command, platform).toLowerCase()
-  if (platform === 'win32' && (shellName === 'pwsh.exe' || shellName === 'powershell.exe'))
-  {
-    return { shell: command, args: ['-NoLogo'] }
-  }
-  if (platform !== 'win32' && shellName === 'zsh')
-  {
-    return { shell: command, args: ['-o', 'nopromptsp'] }
-  }
-  return { shell: command }
-}
-
-function windowsSystemRoot(env: NodeJS.ProcessEnv): string
-{
-  return env.SystemRoot?.trim() || env.windir?.trim() || 'C:\\Windows'
-}
-
-function windowsPowerShellPath(env: NodeJS.ProcessEnv): string
-{
-  return joinWindowsPath(
-    windowsSystemRoot(env),
-    'System32',
-    'WindowsPowerShell',
-    'v1.0',
-    'powershell.exe',
-  )
-}
-
-function windowsCmdPath(env: NodeJS.ProcessEnv): string
-{
-  return joinWindowsPath(windowsSystemRoot(env), 'System32', 'cmd.exe')
-}
-
-function formatShellCandidate(candidate: ShellCandidate): string
-{
-  if (!candidate.args || candidate.args.length === 0) return candidate.shell
-  return `${candidate.shell} ${candidate.args.join(' ')}`
-}
-
-function uniqueShellCandidates(candidates: Array<ShellCandidate | null>): ShellCandidate[]
-{
-  const seen = new Set<string>()
-  const ordered: ShellCandidate[] = []
-  for (const candidate of candidates)
-  {
-    if (!candidate) continue
-    const key = formatShellCandidate(candidate)
-    if (seen.has(key)) continue
-    seen.add(key)
-    ordered.push(candidate)
-  }
-  return ordered
-}
-
-function resolveShellCandidates(
-  shellResolver: () => string,
-  platform: NodeJS.Platform,
-  env: NodeJS.ProcessEnv,
-): ShellCandidate[]
-{
-  const requested = shellCandidateFromCommand(
-    normalizeShellCommand(shellResolver(), platform),
-    platform,
-  )
-
-  if (platform === 'win32')
-  {
-    return uniqueShellCandidates([
-      requested,
-      shellCandidateFromCommand('pwsh.exe', platform),
-      shellCandidateFromCommand(windowsPowerShellPath(env), platform),
-      shellCandidateFromCommand('powershell.exe', platform),
-      shellCandidateFromCommand(env.ComSpec ?? null, platform),
-      shellCandidateFromCommand(windowsCmdPath(env), platform),
-      shellCandidateFromCommand('cmd.exe', platform),
-    ])
-  }
-
-  return uniqueShellCandidates([
-    requested,
-    shellCandidateFromCommand(normalizeShellCommand(env.SHELL, platform), platform),
-    shellCandidateFromCommand('/bin/zsh', platform),
-    shellCandidateFromCommand('/bin/bash', platform),
-    shellCandidateFromCommand('/bin/sh', platform),
-    shellCandidateFromCommand('zsh', platform),
-    shellCandidateFromCommand('bash', platform),
-    shellCandidateFromCommand('sh', platform),
-  ])
-}
-
-function isRetryableShellSpawnError(error: PtyAdapter.PtySpawnError): boolean
-{
-  const queue: unknown[] = [error]
-  const seen = new Set<unknown>()
-  const messages: string[] = []
-
-  while (queue.length > 0)
-  {
-    const current = queue.shift()
-    if (!current || seen.has(current))
-    {
-      continue
-    }
-    seen.add(current)
-
-    if (typeof current === 'string')
-    {
-      messages.push(current)
-      continue
-    }
-
-    if (current instanceof Error)
-    {
-      messages.push(current.message)
-      if (current.cause)
-      {
-        queue.push(current.cause)
-      }
-      continue
-    }
-
-    if (typeof current === 'object')
-    {
-      const value = current as { message?: unknown; cause?: unknown }
-      if (typeof value.message === 'string')
-      {
-        messages.push(value.message)
-      }
-      if (value.cause)
-      {
-        queue.push(value.cause)
-      }
-    }
-  }
-
-  const message = messages.join(' ').toLowerCase()
-  return (
-    message.includes('posix_spawnp failed') ||
-    message.includes('enoent') ||
-    message.includes('not found') ||
-    message.includes('file not found') ||
-    message.includes('no such file')
-  )
-}
-
-interface ProcessSnapshotRow
-{
-  readonly pid: number
-  readonly ppid: number
-  readonly command: string
-}
-
-function parseProcessSnapshot(output: string, platform: NodeJS.Platform): ProcessSnapshotRow[]
-{
-  const rows: ProcessSnapshotRow[] = []
-  for (const line of output.split(/\r?\n/g))
-  {
-    const parts = platform === 'win32' ? line.trim().split('|', 3) : line.trim().split(/\s+/, 3)
-    const pid = Number(parts[0])
-    const ppid = Number(parts[1])
-    if (!Number.isInteger(pid) || pid <= 0 || !Number.isInteger(ppid) || ppid < 0) continue
-    rows.push({ pid, ppid, command: parts[2]?.trim() ?? '' })
-  }
-  return rows
-}
-
-function inspectProcessSnapshotRows(
-  terminalPids: ReadonlyArray<number>,
-  rows: ReadonlyArray<ProcessSnapshotRow>,
-  platform: NodeJS.Platform,
-): ReadonlyMap<number, TerminalSubprocessInspectResult>
-{
-  const commandByPid = new Map(rows.map((row) => [row.pid, row.command]))
-  const childrenByParent = new Map<number, number[]>()
-  for (const row of rows)
-  {
-    const children = childrenByParent.get(row.ppid) ?? []
-    children.push(row.pid)
-    childrenByParent.set(row.ppid, children)
-  }
-
-  const inspections = new Map<number, TerminalSubprocessInspectResult>()
-  for (const terminalPid of terminalPids)
-  {
-    const childPid = childrenByParent.get(terminalPid)?.[0]
-    if (childPid === undefined)
-    {
-      inspections.set(terminalPid, {
-        hasRunningSubprocess: false,
-        childCommand: null,
-        processIds: [],
-      })
-      continue
-    }
-
-    const processIds = new Set<number>([terminalPid])
-    const pending = [terminalPid]
-    while (pending.length > 0)
-    {
-      const parentPid = pending.pop()
-      if (parentPid === undefined) continue
-      for (const pid of childrenByParent.get(parentPid) ?? [])
-      {
-        if (processIds.has(pid)) continue
-        processIds.add(pid)
-        pending.push(pid)
-      }
-    }
-
-    const normalized = normalizeChildCommandName(commandByPid.get(childPid) ?? '', platform)
-    inspections.set(terminalPid, {
-      hasRunningSubprocess: true,
-      childCommand: normalized ? truncateTerminalWireLabel(normalized) : null,
-      processIds: [...processIds],
-    })
-  }
-  return inspections
 }
 
 const inspectProcessSnapshot = Effect.fn('terminal.inspectProcessSnapshot')(function* (

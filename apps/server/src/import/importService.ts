@@ -45,24 +45,24 @@ import {
   type ImportReplacementThreadEvidence,
 } from '../persistence/Services/ImportReplacementIntents.ts'
 
-import { parseClaudeSession } from './claudeSessionParser.ts'
-import type { AcpImportBatchLoadResult, AcpImportWireUsage } from './acpImport.ts'
-import { compactImportedSession } from './compactImportedSession.ts'
+import { parseClaudeSession } from './parsers/claudeSessionParser.ts'
+import type { AcpImportBatchLoadResult, AcpImportWireUsage } from './parsers/acpImport.ts'
+import { compactImportedSession } from './continuation/compactImportedSession.ts'
 import {
   bindImportedContinuation,
   IMPORT_CONTINUATION_PRESERVED_BINDING_REASON,
   ImportContinuationDeps,
-} from './continuationContract.ts'
-import { parseCodexRollout } from './codexRolloutParser.ts'
-import { deterministicId, deterministicSortableMessageId } from './ids.ts'
-import { firstUserMessageTitle } from './importTitle.ts'
-import { loadOpenCodeSessionFromMetadata } from './openCodeStorage.ts'
+} from './continuation/continuationContract.ts'
+import { parseCodexRollout } from './parsers/codexRolloutParser.ts'
+import { deterministicId, deterministicSortableMessageId } from './continuation/ids.ts'
+import { firstUserMessageTitle } from './continuation/importTitle.ts'
+import { loadOpenCodeSessionFromMetadata } from './parsers/openCodeStorage.ts'
 import {
   codexSessionTitleForSource,
   readResolvedImportSourceFile,
   resolveImportSourcePath,
   type ImportFileSourceDescriptor,
-} from './sourceCatalog.ts'
+} from './discovery/sourceCatalog.ts'
 import type { ImportSource, ImportedRecord, ImportedSession } from './types.ts'
 import {
   IMPORT_NORMALIZED_REQUEST_MAX_RECORDS,
@@ -76,7 +76,7 @@ import {
   makeImportCountBudget,
   reserveImportBytes,
   reserveNormalizedImportResources,
-} from './resourceLimits.ts'
+} from './discovery/resourceLimits.ts'
 
 const importBatchSize = 200
 const importCreationAttempts = 3

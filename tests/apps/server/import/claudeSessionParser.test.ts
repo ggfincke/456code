@@ -7,7 +7,7 @@ import * as NodeFS from 'node:fs'
 
 import { describe, expect, it } from '@effect/vitest'
 
-import { parseClaudeSession } from '../../../../apps/server/src/import/claudeSessionParser.ts'
+import { parseClaudeSession } from '../../../../apps/server/src/import/parsers/claudeSessionParser.ts'
 
 function fixture(name: string): string
 {

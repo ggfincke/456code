@@ -35,7 +35,7 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 
 import * as ServerConfig from '../config.ts'
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 import {
   captureExactGitSnapshot,
   EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,

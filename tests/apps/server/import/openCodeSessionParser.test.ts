@@ -16,9 +16,9 @@ import {
   discoverOpenCodeSessionMetadataFiles,
   loadOpenCodeSessionFromMetadata,
   resolveOpenCodeStorageRoot,
-} from '../../../../apps/server/src/import/openCodeStorage.ts'
-import { parseOpenCodeSessionBundle } from '../../../../apps/server/src/import/openCodeSessionParser.ts'
-import { makeImportCountBudget } from '../../../../apps/server/src/import/resourceLimits.ts'
+} from '../../../../apps/server/src/import/parsers/openCodeStorage.ts'
+import { parseOpenCodeSessionBundle } from '../../../../apps/server/src/import/parsers/openCodeSessionParser.ts'
+import { makeImportCountBudget } from '../../../../apps/server/src/import/discovery/resourceLimits.ts'
 
 const fixtureStorageRoot = NodePath.resolve(
   NodeURL.fileURLToPath(new URL('./fixtures/opencode/storage', import.meta.url)),

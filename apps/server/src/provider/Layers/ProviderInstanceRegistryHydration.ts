@@ -50,7 +50,7 @@ import * as Layer from 'effect/Layer'
 import * as Stream from 'effect/Stream'
 
 import { ServerSettingsService } from '../../serverSettings.ts'
-import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from '../builtInDrivers.ts'
+import { BUILT_IN_DRIVERS, type BuiltInDriversEnv } from '../catalog/builtInDrivers.ts'
 import { ProviderInstanceRegistry } from '../Services/ProviderInstanceRegistry.ts'
 import { ProviderInstanceRegistryMutator } from '../Services/ProviderInstanceRegistryMutator.ts'
 import { ProviderInstanceRegistryMutableLayer } from './ProviderInstanceRegistryLive.ts'

@@ -29,7 +29,7 @@ import * as Scope from 'effect/Scope'
 import * as TestClock from 'effect/testing/TestClock'
 import { expect } from 'vite-plus/test'
 
-import * as ProcessRunner from '../../../../apps/server/src/processRunner.ts'
+import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import * as TerminalManager from '../../../../apps/server/src/terminal/Manager.ts'
 import * as PtyAdapter from '../../../../apps/server/src/terminal/PtyAdapter.ts'
 

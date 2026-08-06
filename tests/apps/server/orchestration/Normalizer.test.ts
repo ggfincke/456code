@@ -22,7 +22,7 @@ import { ServerConfig } from '../../../../apps/server/src/config.ts'
 import {
   resolveAttachmentPath,
   resolveAttachmentStagingPath,
-} from '../../../../apps/server/src/attachmentStore.ts'
+} from '../../../../apps/server/src/attachments/attachmentStore.ts'
 import {
   canonicalizeClientCommandTimestamps,
   normalizeDispatchCommand,

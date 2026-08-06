@@ -11,8 +11,8 @@ import * as NodeURL from 'node:url'
 import { afterEach, describe, expect, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 
-import { loadOpenCodeSessionFromMetadata } from '../../../../apps/server/src/import/openCodeStorage.ts'
-import { IMPORT_SCAN_MAX_TRAVERSAL_ENTRIES } from '../../../../apps/server/src/import/resourceLimits.ts'
+import { loadOpenCodeSessionFromMetadata } from '../../../../apps/server/src/import/parsers/openCodeStorage.ts'
+import { IMPORT_SCAN_MAX_TRAVERSAL_ENTRIES } from '../../../../apps/server/src/import/discovery/resourceLimits.ts'
 
 const fixtureRoot = NodePath.resolve(NodeURL.fileURLToPath(new URL('./fixtures', import.meta.url)))
 const temporaryPaths: string[] = []

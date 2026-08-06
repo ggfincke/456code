@@ -10,7 +10,7 @@ import { describe, expect } from 'vite-plus/test'
 import { ProviderInstanceId } from '@t3tools/contracts'
 import { createModelSelection } from '@t3tools/shared/model'
 
-import type { ProviderInstance } from '../../../../apps/server/src/provider/ProviderDriver.ts'
+import type { ProviderInstance } from '../../../../apps/server/src/provider/catalog/ProviderDriver.ts'
 import * as ProviderInstanceRegistry from '../../../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts'
 import * as TextGeneration from '../../../../apps/server/src/textGeneration/TextGeneration.ts'
 

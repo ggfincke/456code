@@ -29,7 +29,7 @@ import { describe, expect } from 'vite-plus/test'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
-import * as ProcessRunner from '../../../../apps/server/src/processRunner.ts'
+import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import * as ProposalGenerationService from '../../../../apps/server/src/proposal/ProposalGenerationService.ts'
 import * as ProposalService from '../../../../apps/server/src/proposal/ProposalService.ts'
 

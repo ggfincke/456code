@@ -19,7 +19,7 @@ import { getModelSelectionStringOptionValue } from '@t3tools/shared/model'
 import { extractJsonObject } from '@t3tools/shared/schemaJson'
 
 import * as ServerConfig from '../config.ts'
-import { resolveAttachmentPath } from '../attachmentStore.ts'
+import { resolveAttachmentPath } from '../attachments/attachmentStore.ts'
 import {
   buildBranchNamePrompt,
   buildCommitMessagePrompt,

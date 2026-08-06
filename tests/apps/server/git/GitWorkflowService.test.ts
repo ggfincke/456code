@@ -8,22 +8,30 @@ import * as Layer from 'effect/Layer'
 import { VcsRepositoryDetectionError } from '@t3tools/contracts'
 
 import * as GitManager from '../../../../apps/server/src/git/GitManager.ts'
+import * as GitStatusReaderLive from '../../../../apps/server/src/git/GitStatusReaderLive.ts'
 import * as GitWorkflowService from '../../../../apps/server/src/git/GitWorkflowService.ts'
 import * as GitVcsDriver from '../../../../apps/server/src/vcs/GitVcsDriver.ts'
 import * as VcsDriverRegistry from '../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
 
 function makeLayer(input: {
   readonly detect: VcsDriverRegistry.VcsDriverRegistry['Service']['detect']
+  readonly gitManager?: Partial<GitManager.GitManager['Service']>
 })
 {
+  const registryLayer = Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
+    detect: input.detect,
+  })
+  const gitManagerLayer = Layer.mock(GitManager.GitManager)(input.gitManager ?? {})
+  const statusReaderLayer = GitStatusReaderLive.layer.pipe(
+    Layer.provide(registryLayer),
+    Layer.provide(gitManagerLayer),
+  )
+
   return GitWorkflowService.layer.pipe(
-    Layer.provide(
-      Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
-        detect: input.detect,
-      }),
-    ),
+    Layer.provide(registryLayer),
     Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-    Layer.provide(Layer.mock(GitManager.GitManager)({})),
+    Layer.provide(gitManagerLayer),
+    Layer.provide(statusReaderLayer),
   )
 }
 
@@ -102,21 +110,14 @@ describe('GitWorkflowService', () =>
     const remoteStatus = vi.fn()
     const status = vi.fn()
 
-    const testLayer = GitWorkflowService.layer.pipe(
-      Layer.provide(
-        Layer.mock(VcsDriverRegistry.VcsDriverRegistry)({
-          detect: () => Effect.succeed(null),
-        }),
-      ),
-      Layer.provide(Layer.mock(GitVcsDriver.GitVcsDriver)({})),
-      Layer.provide(
-        Layer.mock(GitManager.GitManager)({
-          localStatus,
-          remoteStatus,
-          status,
-        }),
-      ),
-    )
+    const testLayer = makeLayer({
+      detect: () => Effect.succeed(null),
+      gitManager: {
+        localStatus,
+        remoteStatus,
+        status,
+      },
+    })
 
     return Effect.gen(function* ()
     {
@@ -146,7 +147,7 @@ describe('GitWorkflowService', () =>
 
       expect(error).toMatchObject({
         _tag: 'GitManagerError',
-        operation: 'GitWorkflowService.status',
+        operation: 'GitStatusReader.status',
         cwd: '/repo',
         detail: 'Failed to detect a VCS repository for this Git workflow.',
       })

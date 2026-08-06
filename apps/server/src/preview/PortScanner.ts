@@ -23,7 +23,7 @@ import * as Ref from 'effect/Ref'
 import * as Schedule from 'effect/Schedule'
 import * as Scope from 'effect/Scope'
 
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 
 export class PortDiscovery extends Context.Service<
   PortDiscovery,

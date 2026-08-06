@@ -13,7 +13,7 @@ import * as Layer from 'effect/Layer'
 import * as PlatformError from 'effect/PlatformError'
 import { expect } from 'vite-plus/test'
 
-import * as ProcessRunner from '../../../../apps/server/src/processRunner.ts'
+import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import * as PortScanner from '../../../../apps/server/src/preview/PortScanner.ts'
 const TestProcessRunner = Layer.succeed(ProcessRunner.ProcessRunner, {
   run: (input) =>

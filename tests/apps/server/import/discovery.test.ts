@@ -23,8 +23,11 @@ import * as Effect from 'effect/Effect'
 import * as Fiber from 'effect/Fiber'
 import * as Schema from 'effect/Schema'
 
-import type { AcpImportCatalogEntry } from '../../../../apps/server/src/import/acpImport.ts'
-import { ImportDiscoveryDeps, make } from '../../../../apps/server/src/import/discovery.ts'
+import type { AcpImportCatalogEntry } from '../../../../apps/server/src/import/parsers/acpImport.ts'
+import {
+  ImportDiscoveryDeps,
+  make,
+} from '../../../../apps/server/src/import/discovery/discovery.ts'
 
 const temporaryPaths: string[] = []
 const fixtureRoot = NodePath.resolve(NodeURL.fileURLToPath(new URL('./fixtures', import.meta.url)))

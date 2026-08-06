@@ -25,11 +25,11 @@ import {
   parseAcpImportSourcePath,
   scanAcpImportCatalog,
   scanAndLoadAcpImportCatalog,
-} from '../../../../apps/server/src/import/acpImport.ts'
+} from '../../../../apps/server/src/import/parsers/acpImport.ts'
 import {
   IMPORT_NORMALIZED_SESSION_MAX_BYTES,
   IMPORT_NORMALIZED_SESSION_MAX_RECORDS,
-} from '../../../../apps/server/src/import/resourceLimits.ts'
+} from '../../../../apps/server/src/import/discovery/resourceLimits.ts'
 import type * as EffectAcpSchema from 'effect-acp/schema'
 
 const currentDirectory = NodePath.dirname(NodeURL.fileURLToPath(import.meta.url))

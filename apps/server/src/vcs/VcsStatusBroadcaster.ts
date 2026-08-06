@@ -25,7 +25,7 @@ import type {
 } from '@t3tools/contracts'
 import { mergeGitStatusParts } from '@t3tools/shared/git'
 
-import * as GitWorkflowService from '../git/GitWorkflowService.ts'
+import * as GitStatusReader from './GitStatusReader.ts'
 
 const DEFAULT_VCS_STATUS_REFRESH_INTERVAL = Duration.seconds(30)
 const VCS_STATUS_REFRESH_FAILURE_BASE_DELAY = Duration.seconds(30)
@@ -208,7 +208,7 @@ const normalizeCwd = (cwd: string) =>
 
 export const make = Effect.gen(function* ()
 {
-  const workflow = yield* GitWorkflowService.GitWorkflowService
+  const statusReader = yield* GitStatusReader.GitStatusReader
   const fs = yield* FileSystem.FileSystem
   const changesPubSub = yield* Effect.acquireRelease(
     PubSub.unbounded<VcsStatusChange>(),
@@ -342,7 +342,7 @@ export const make = Effect.gen(function* ()
     cwd: string,
   )
   {
-    const local = yield* workflow.localStatus({ cwd })
+    const local = yield* statusReader.localStatus({ cwd })
     return yield* updateCachedLocalStatus(cwd, local)
   })
 
@@ -372,8 +372,8 @@ export const make = Effect.gen(function* ()
     }
     const [local, remote] = yield* Effect.all(
       [
-        cached?.local ? Effect.succeed(cached.local.value) : workflow.localStatus({ cwd }),
-        cached?.remote ? Effect.succeed(cached.remote.value) : workflow.remoteStatus({ cwd }),
+        cached?.local ? Effect.succeed(cached.local.value) : statusReader.localStatus({ cwd }),
+        cached?.remote ? Effect.succeed(cached.remote.value) : statusReader.remoteStatus({ cwd }),
       ],
       { concurrency: 'unbounded' },
     )
@@ -383,8 +383,8 @@ export const make = Effect.gen(function* ()
   const refreshLocalStatusCore = Effect.fn('VcsStatusBroadcaster.refreshLocalStatusCore')(
     function* (cwd: string)
     {
-      yield* workflow.invalidateLocalStatus(cwd)
-      const local = yield* workflow.localStatus({ cwd })
+      yield* statusReader.invalidateLocalStatus(cwd)
+      const local = yield* statusReader.localStatus({ cwd })
       return yield* updateCachedLocalStatus(cwd, local, { publish: true })
     },
   )
@@ -404,9 +404,9 @@ export const make = Effect.gen(function* ()
   {
     if (options?.refreshUpstream !== false)
     {
-      yield* workflow.invalidateRemoteStatus(cwd)
+      yield* statusReader.invalidateRemoteStatus(cwd)
     }
-    const remote = yield* workflow.remoteStatus({ cwd }, options)
+    const remote = yield* statusReader.remoteStatus({ cwd }, options)
     return yield* updateCachedRemoteStatus(cwd, remote, { publish: true })
   })
 
@@ -417,9 +417,9 @@ export const make = Effect.gen(function* ()
     const cwd = yield* withFileSystem(normalizeCwd(rawCwd))
     // invalidateStatus (not the two partial invalidations) so an explicit
     // refresh also bypasses GitManager's slow PR-lookup cache.
-    yield* workflow.invalidateStatus(cwd)
+    yield* statusReader.invalidateStatus(cwd)
     const [local, remote] = yield* Effect.all(
-      [workflow.localStatus({ cwd }), workflow.remoteStatus({ cwd })],
+      [statusReader.localStatus({ cwd }), statusReader.remoteStatus({ cwd })],
       { concurrency: 'unbounded' },
     )
     return yield* updateCachedStatus(cwd, local, remote, { publish: true })

@@ -14,12 +14,12 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import {
   normalizeAttachmentRelativePath,
   resolveAttachmentRelativePath,
-} from '../../attachmentPaths.ts'
+} from '../../attachments/attachmentPaths.ts'
 import {
   parseAttachmentIdFromRelativePath,
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
-} from '../../attachmentStore.ts'
+} from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
 import { toPersistenceSqlError } from '../../persistence/Errors.ts'
 import { AttachmentLifecycleRepositoryLive } from '../../persistence/Layers/AttachmentLifecycle.ts'

@@ -19,12 +19,10 @@ import {
   type GitManagerServiceError,
   type VcsPullResult,
   type VcsRemoveWorktreeInput,
-  type VcsStatusLocalResult,
-  type VcsStatusRemoteResult,
-  type VcsStatusResult,
 } from '@t3tools/contracts'
 
 import * as GitManager from './GitManager.ts'
+import * as GitStatusReader from '../vcs/GitStatusReader.ts'
 import * as GitVcsDriver from '../vcs/GitVcsDriver.ts'
 import * as VcsDriverRegistry from '../vcs/VcsDriverRegistry.ts'
 
@@ -79,34 +77,6 @@ export class GitWorkflowService extends Context.Service<
 >()('456code/git/GitWorkflowService')
 {}
 
-function nonRepositoryLocalStatus(): VcsStatusLocalResult
-{
-  return {
-    isRepo: false,
-    hasPrimaryRemote: false,
-    isDefaultRef: false,
-    refName: null,
-    hasWorkingTreeChanges: false,
-    workingTree: {
-      files: [],
-      insertions: 0,
-      deletions: 0,
-    },
-  }
-}
-
-function nonRepositoryStatus(): VcsStatusResult
-{
-  return {
-    ...nonRepositoryLocalStatus(),
-    hasUpstream: false,
-    aheadCount: 0,
-    behindCount: 0,
-    aheadOfDefaultCount: 0,
-    pr: null,
-  }
-}
-
 function nonRepositoryListRefs(): VcsListRefsResult
 {
   return {
@@ -123,6 +93,7 @@ export const make = Effect.gen(function* ()
   const registry = yield* VcsDriverRegistry.VcsDriverRegistry
   const git = yield* GitVcsDriver.GitVcsDriver
   const gitManager = yield* GitManager.GitManager
+  const statusReader = yield* GitStatusReader.GitStatusReader
 
   const ensureGit = Effect.fn('GitWorkflowService.ensureGit')(function* (
     operation: string,
@@ -178,36 +149,6 @@ export const make = Effect.gen(function* ()
     }
   })
 
-  const detectGitRepositoryForStatus = Effect.fn('GitWorkflowService.detectGitRepositoryForStatus')(
-    function* (operation: string, cwd: string)
-    {
-      const handle = yield* registry.detect({ cwd }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new GitManagerError({
-              operation,
-              cwd,
-              detail: 'Failed to detect a VCS repository for this Git workflow.',
-              cause,
-            }),
-        ),
-      )
-      if (!handle)
-      {
-        return false
-      }
-      if (handle.kind !== 'git')
-      {
-        return yield* new GitManagerError({
-          operation,
-          cwd,
-          detail: `The ${operation} workflow currently supports Git repositories only; detected ${handle.kind}. (${cwd})`,
-        })
-      }
-      return true
-    },
-  )
-
   const detectGitRepositoryForCommand = Effect.fn(
     'GitWorkflowService.detectGitRepositoryForCommand',
   )(function* (operation: string, cwd: string)
@@ -249,29 +190,12 @@ export const make = Effect.gen(function* ()
       ensureGit(operation, input.cwd).pipe(Effect.andThen(run(input)))
 
   return GitWorkflowService.of({
-    status: (input) =>
-      detectGitRepositoryForStatus('GitWorkflowService.status', input.cwd).pipe(
-        Effect.flatMap((isGitRepository) =>
-          isGitRepository ? gitManager.status(input) : Effect.succeed(nonRepositoryStatus()),
-        ),
-      ),
-    localStatus: (input) =>
-      detectGitRepositoryForStatus('GitWorkflowService.localStatus', input.cwd).pipe(
-        Effect.flatMap((isGitRepository) =>
-          isGitRepository
-            ? gitManager.localStatus(input)
-            : Effect.succeed(nonRepositoryLocalStatus()),
-        ),
-      ),
-    remoteStatus: (input, options) =>
-      detectGitRepositoryForStatus('GitWorkflowService.remoteStatus', input.cwd).pipe(
-        Effect.flatMap((isGitRepository) =>
-          isGitRepository ? gitManager.remoteStatus(input, options) : Effect.succeed(null),
-        ),
-      ),
-    invalidateLocalStatus: gitManager.invalidateLocalStatus,
-    invalidateRemoteStatus: gitManager.invalidateRemoteStatus,
-    invalidateStatus: gitManager.invalidateStatus,
+    status: statusReader.status,
+    localStatus: statusReader.localStatus,
+    remoteStatus: statusReader.remoteStatus,
+    invalidateLocalStatus: statusReader.invalidateLocalStatus,
+    invalidateRemoteStatus: statusReader.invalidateRemoteStatus,
+    invalidateStatus: statusReader.invalidateStatus,
     pullCurrentBranch: (cwd) =>
       ensureGitCommand('GitWorkflowService.pullCurrentBranch', cwd).pipe(
         Effect.andThen(git.pullCurrentBranch(cwd)),

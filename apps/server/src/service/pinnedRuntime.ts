@@ -8,7 +8,7 @@ import * as Path from 'effect/Path'
 import * as Schema from 'effect/Schema'
 import * as Semaphore from 'effect/Semaphore'
 
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 
 // a pinned runtime is an exact `456code@<version>` npm-installed into
 // <baseDir>/runtime/versions/<version>. The boot service points its systemd

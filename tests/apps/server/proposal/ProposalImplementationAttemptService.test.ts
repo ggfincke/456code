@@ -27,7 +27,7 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { describe, expect } from 'vite-plus/test'
 
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
-import * as ProcessRunner from '../../../../apps/server/src/processRunner.ts'
+import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import {
   ProposalImplementationAttemptService,
   classifyImplementationAttempt,

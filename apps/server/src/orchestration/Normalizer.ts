@@ -21,9 +21,9 @@ import {
   deriveAttachmentStagingKey,
   resolveAttachmentPath,
   resolveAttachmentStagingPath,
-} from '../attachmentStore.ts'
+} from '../attachments/attachmentStore.ts'
 import { ServerConfig } from '../config.ts'
-import { parseBase64DataUrl } from '../imageMime.ts'
+import { parseBase64DataUrl } from '../attachments/imageMime.ts'
 import { AttachmentLifecycleRepository } from '../persistence/Services/AttachmentLifecycle.ts'
 import * as WorkspacePaths from '../workspace/WorkspacePaths.ts'
 

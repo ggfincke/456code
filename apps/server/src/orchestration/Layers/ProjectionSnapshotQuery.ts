@@ -2,40 +2,21 @@
 // loads orchestration projection snapshots
 
 import {
-  ApprovalAcceptanceEvidence,
-  ApprovalOutcomeStatus,
-  ApprovalRequestId,
-  ChatAttachment,
-  CheckpointRef,
-  IsoDateTime,
-  MessageId,
-  NonNegativeInt,
   OrchestratePlanRevision,
-  OrchestrationCheckpointFile,
-  OrchestrationProposedPlanId,
-  OrchestrationPendingHandoff,
-  OrchestrationProviderSwitch,
   OrchestrationReadModel,
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
-  ProjectScript,
-  ThreadOrigin,
-  TurnId,
+  type ApprovalOutcome,
   type OrchestrationCheckpointSummary,
   type OrchestrationLatestTurn,
   type OrchestrationMessage,
+  type OrchestrationProject,
   type OrchestrationProjectShell,
   type OrchestrationProposedPlan,
-  type OrchestrationProject,
   type OrchestrationSession,
   type OrchestrationThreadActivity,
   type OrchestrationThreadShell,
-  ModelSelection,
-  ProjectId,
-  ProviderApprovalDecision,
-  ThreadId,
-  type ApprovalOutcome,
 } from '@t3tools/contracts'
 import * as Arr from 'effect/Array'
 import * as Effect from 'effect/Effect'
@@ -43,7 +24,6 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Result from 'effect/Result'
 import * as Schema from 'effect/Schema'
-import * as Struct from 'effect/Struct'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 
@@ -53,20 +33,45 @@ import {
   toPersistenceSqlError,
   type ProjectionRepositoryError,
 } from '../../persistence/Errors.ts'
-import { ProjectionCheckpoint } from '../../persistence/Services/ProjectionCheckpoints.ts'
-import { ProjectionProject } from '../../persistence/Services/ProjectionProjects.ts'
-import { ProjectionState } from '../../persistence/Services/ProjectionState.ts'
-import { ProjectionThreadActivity } from '../../persistence/Services/ProjectionThreadActivities.ts'
-import { ProjectionThreadMessage } from '../../persistence/Services/ProjectionThreadMessages.ts'
-import { ProjectionThreadProposedPlan } from '../../persistence/Services/ProjectionThreadProposedPlans.ts'
-import { ProjectionThreadSession } from '../../persistence/Services/ProjectionThreadSessions.ts'
-import { ProjectionThread } from '../../persistence/Services/ProjectionThreads.ts'
 import * as RepositoryIdentityResolver from '../../project/RepositoryIdentityResolver.ts'
 import { ORCHESTRATION_PROJECTOR_NAMES } from './ProjectionPipeline.ts'
 import {
-  COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS,
-  IMPORT_CONTINUATION_ACTIVITY_TYPE,
-} from '../activityPolicy.ts'
+  FullThreadDiffContextLookupInput,
+  ProjectionApprovalOutcomeDbRowSchema,
+  ProjectionCheckpointDbRowSchema,
+  ProjectionCountsRowSchema,
+  ProjectionFullThreadDiffContextRowSchema,
+  ProjectionImportProjectRowSchema,
+  ProjectionImportThreadRowSchema,
+  ProjectionLatestTurnDbRowSchema,
+  ProjectionProjectDbRowSchema,
+  ProjectionProjectLookupRowSchema,
+  ProjectionStateDbRowSchema,
+  ProjectionThreadActivityDbRowSchema,
+  ProjectionThreadCheckpointContextThreadRowSchema,
+  ProjectionThreadDbRowSchema,
+  ProjectionThreadIdLookupRowSchema,
+  ProjectionThreadImportFinalizedRowSchema,
+  ProjectionThreadMessageDbRowSchema,
+  ProjectionThreadOrchestratePlanDbRowSchema,
+  ProjectionThreadProposedPlanDbRowSchema,
+  ProjectionThreadSessionDbRowSchema,
+  ProjectIdLookupInput,
+  ThreadIdLookupInput,
+  WorkspaceRootLookupInput,
+  mapApprovalOutcomeRow,
+  mapLatestTurn,
+  mapOrchestratePlanRow,
+  mapProjectShellRow,
+  mapProposedPlanRow,
+  mapSessionRow,
+  maxIso,
+} from './ProjectionSnapshotMappers.ts'
+import {
+  COMMAND_THREAD_ACTIVITY_QUERY_SQL,
+  IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL,
+} from './ProjectionSnapshotSql.ts'
+export { COMMAND_THREAD_ACTIVITY_QUERY_SQL }
 import {
   ProjectionSnapshotQuery,
   type ProjectionFullThreadDiffContext,
@@ -79,257 +84,6 @@ import {
 const decodeReadModel = Schema.decodeUnknownEffect(OrchestrationReadModel)
 const decodeShellSnapshot = Schema.decodeUnknownEffect(OrchestrationShellSnapshot)
 const decodeThread = Schema.decodeUnknownEffect(OrchestrationThread)
-const ProjectionProjectDbRowSchema = ProjectionProject.mapFields(
-  Struct.assign({
-    defaultModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
-    scripts: Schema.fromJsonString(Schema.Array(ProjectScript)),
-  }),
-)
-const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
-  Struct.assign({
-    isStreaming: Schema.Number,
-    attachments: Schema.NullOr(Schema.fromJsonString(Schema.Array(ChatAttachment))),
-  }),
-)
-const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan
-const ProjectionThreadOrchestratePlanDbRowSchema = Schema.Struct({
-  threadId: ThreadId,
-  runId: OrchestratePlanRevision.fields.runId,
-  revision: OrchestratePlanRevision.fields.revision,
-  turnId: OrchestratePlanRevision.fields.turnId,
-  workflow: OrchestratePlanRevision.fields.workflow,
-  task: OrchestratePlanRevision.fields.task,
-  stages: Schema.fromJsonString(OrchestratePlanRevision.fields.stages),
-  totalWorkers: OrchestratePlanRevision.fields.totalWorkers,
-  maxWorkers: OrchestratePlanRevision.fields.maxWorkers,
-  source: OrchestratePlanRevision.fields.source,
-  status: OrchestratePlanRevision.fields.status,
-  createdAt: OrchestratePlanRevision.fields.createdAt,
-  updatedAt: OrchestratePlanRevision.fields.updatedAt,
-})
-const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
-  Struct.assign({
-    modelSelection: Schema.fromJsonString(ModelSelection),
-    pendingHandoff: Schema.NullOr(Schema.fromJsonString(OrchestrationPendingHandoff)),
-    providerSwitch: Schema.NullOr(Schema.fromJsonString(OrchestrationProviderSwitch)),
-    originJson: Schema.NullOr(Schema.fromJsonString(ThreadOrigin)),
-  }),
-)
-const ProjectionThreadActivityDbRowSchema = ProjectionThreadActivity.mapFields(
-  Struct.assign({
-    payload: Schema.fromJsonString(Schema.Unknown),
-    sequence: Schema.NullOr(NonNegativeInt),
-  }),
-)
-const ProjectionThreadSessionDbRowSchema = ProjectionThreadSession
-const ProjectionCheckpointDbRowSchema = ProjectionCheckpoint.mapFields(
-  Struct.assign({
-    files: Schema.fromJsonString(Schema.Array(OrchestrationCheckpointFile)),
-  }),
-)
-const ProjectionLatestTurnDbRowSchema = Schema.Struct({
-  threadId: ProjectionThread.fields.threadId,
-  turnId: TurnId,
-  state: Schema.String,
-  requestedAt: IsoDateTime,
-  startedAt: Schema.NullOr(IsoDateTime),
-  completedAt: Schema.NullOr(IsoDateTime),
-  assistantMessageId: Schema.NullOr(MessageId),
-  sourceProposedPlanThreadId: Schema.NullOr(ThreadId),
-  sourceProposedPlanId: Schema.NullOr(OrchestrationProposedPlanId),
-})
-const ProjectionStateDbRowSchema = ProjectionState
-const ProjectionCountsRowSchema = Schema.Struct({
-  projectCount: Schema.Number,
-  threadCount: Schema.Number,
-})
-const ProjectionImportProjectRowSchema = Schema.Struct({
-  projectId: ProjectId,
-  workspaceRoot: Schema.String,
-})
-const ProjectionImportThreadRowSchema = Schema.Struct({
-  threadId: ThreadId,
-  projectId: ProjectId,
-  modelSelection: Schema.fromJsonString(ModelSelection),
-  origin: Schema.fromJsonString(ThreadOrigin),
-  archived: Schema.Number,
-})
-const ProjectionThreadImportFinalizedRowSchema = Schema.Struct({
-  isFinalized: Schema.Number,
-})
-const ProjectionApprovalOutcomeDbRowSchema = Schema.Struct({
-  requestId: ApprovalRequestId,
-  threadId: ThreadId,
-  status: ApprovalOutcomeStatus,
-  requestedDecision: Schema.NullOr(ProviderApprovalDecision),
-  decision: Schema.NullOr(ProviderApprovalDecision),
-  detail: Schema.NullOr(Schema.String),
-  actionId: Schema.NullOr(Schema.String),
-  acceptanceEvidence: Schema.NullOr(Schema.fromJsonString(ApprovalAcceptanceEvidence)),
-  updatedAt: Schema.NullOr(IsoDateTime),
-  createdAt: IsoDateTime,
-})
-const WorkspaceRootLookupInput = Schema.Struct({
-  workspaceRoot: Schema.String,
-})
-const ProjectIdLookupInput = Schema.Struct({
-  projectId: ProjectId,
-})
-const ThreadIdLookupInput = Schema.Struct({
-  threadId: ThreadId,
-})
-const ProjectionProjectLookupRowSchema = ProjectionProjectDbRowSchema
-const ProjectionThreadIdLookupRowSchema = Schema.Struct({
-  threadId: ThreadId,
-})
-const ProjectionThreadCheckpointContextThreadRowSchema = Schema.Struct({
-  threadId: ThreadId,
-  projectId: ProjectId,
-  workspaceRoot: Schema.String,
-  worktreePath: Schema.NullOr(Schema.String),
-})
-const FullThreadDiffContextLookupInput = Schema.Struct({
-  threadId: ThreadId,
-  checkpointTurnCount: NonNegativeInt,
-})
-const ProjectionFullThreadDiffContextRowSchema = Schema.Struct({
-  threadId: ThreadId,
-  projectId: ProjectId,
-  workspaceRoot: Schema.String,
-  worktreePath: Schema.NullOr(Schema.String),
-  latestCheckpointTurnCount: Schema.NullOr(NonNegativeInt),
-  toCheckpointRef: Schema.NullOr(CheckpointRef),
-})
-
-const COMMAND_RELEVANT_THREAD_ACTIVITY_SQL_LIST = COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS.map(
-  (kind) => `'${kind}'`,
-).join(',\n        ')
-const IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL = `'${IMPORT_CONTINUATION_ACTIVITY_TYPE}'`
-
-export const COMMAND_THREAD_ACTIVITY_QUERY_SQL = `
-  WITH retained_command_activities AS (
-    SELECT
-      activity_id,
-      thread_id,
-      turn_id,
-      tone,
-      kind,
-      summary,
-      payload_json,
-      sequence,
-      created_at
-    FROM projection_thread_activities AS activity
-      INDEXED BY idx_projection_thread_activities_command_relevant
-    WHERE activity.kind IN (
-        ${COMMAND_RELEVANT_THREAD_ACTIVITY_SQL_LIST}
-      )
-      AND activity.rowid IN (
-        SELECT recent.rowid
-        FROM projection_thread_activities AS recent
-          INDEXED BY idx_projection_thread_activities_command_window
-        WHERE recent.thread_id = activity.thread_id
-          AND (
-            json_valid(recent.payload_json) = 0
-            OR COALESCE(json_extract(recent.payload_json, '$.type'), '')
-              <> ${IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL}
-          )
-        ORDER BY
-          CASE
-            WHEN recent.turn_id IS NULL AND recent.sequence IS NOT NULL THEN 0
-            ELSE 1
-          END DESC,
-          CASE
-            WHEN recent.turn_id IS NULL AND recent.sequence IS NOT NULL THEN recent.sequence
-            ELSE NULL
-          END DESC,
-          recent.created_at DESC,
-          CASE WHEN recent.sequence IS NULL THEN 1 ELSE 0 END DESC,
-          recent.sequence DESC,
-          CASE
-            WHEN substr(recent.kind, -8) = '.started' OR recent.kind = 'tool.started' THEN 0
-            WHEN substr(recent.kind, -10) = '.completed'
-              OR substr(recent.kind, -9) = '.resolved'
-              THEN 2
-            ELSE 1
-          END DESC,
-          recent.activity_id DESC
-        LIMIT 500
-      )
-    UNION ALL
-    SELECT
-      activity_id,
-      thread_id,
-      turn_id,
-      tone,
-      kind,
-      summary,
-      payload_json,
-      sequence,
-      created_at
-    FROM projection_thread_activities AS marker
-      INDEXED BY idx_projection_thread_activities_import_continuation
-    WHERE json_valid(marker.payload_json) = 1
-      AND json_extract(marker.payload_json, '$.type')
-        = ${IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL}
-      AND marker.rowid = (
-        SELECT latest_marker.rowid
-        FROM projection_thread_activities AS latest_marker
-          INDEXED BY idx_projection_thread_activities_import_continuation
-        WHERE latest_marker.thread_id = marker.thread_id
-          AND json_valid(latest_marker.payload_json) = 1
-          AND json_extract(latest_marker.payload_json, '$.type')
-            = ${IMPORT_CONTINUATION_ACTIVITY_SQL_LITERAL}
-        ORDER BY
-          CASE
-            WHEN latest_marker.turn_id IS NULL AND latest_marker.sequence IS NOT NULL THEN 0
-            ELSE 1
-          END DESC,
-          CASE
-            WHEN latest_marker.turn_id IS NULL AND latest_marker.sequence IS NOT NULL
-              THEN latest_marker.sequence
-            ELSE NULL
-          END DESC,
-          latest_marker.created_at DESC,
-          CASE WHEN latest_marker.sequence IS NULL THEN 1 ELSE 0 END DESC,
-          latest_marker.sequence DESC,
-          CASE
-            WHEN substr(latest_marker.kind, -8) = '.started'
-              OR latest_marker.kind = 'tool.started'
-              THEN 0
-            WHEN substr(latest_marker.kind, -10) = '.completed'
-              OR substr(latest_marker.kind, -9) = '.resolved'
-              THEN 2
-            ELSE 1
-          END DESC,
-          latest_marker.activity_id DESC
-        LIMIT 1
-      )
-  )
-  SELECT
-    activity_id AS "activityId",
-    thread_id AS "threadId",
-    turn_id AS "turnId",
-    tone,
-    kind,
-    summary,
-    payload_json AS "payload",
-    sequence,
-    created_at AS "createdAt"
-  FROM retained_command_activities
-  ORDER BY
-    thread_id ASC,
-    CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN 0 ELSE 1 END ASC,
-    CASE WHEN turn_id IS NULL AND sequence IS NOT NULL THEN sequence ELSE NULL END ASC,
-    created_at ASC,
-    CASE WHEN sequence IS NULL THEN 1 ELSE 0 END ASC,
-    sequence ASC,
-    CASE
-      WHEN substr(kind, -8) = '.started' OR kind = 'tool.started' THEN 0
-      WHEN substr(kind, -10) = '.completed' OR substr(kind, -9) = '.resolved' THEN 2
-      ELSE 1
-    END ASC,
-    activity_id ASC
-`
 
 const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.projects,
@@ -340,15 +94,6 @@ const REQUIRED_SNAPSHOT_PROJECTORS = [
   ORCHESTRATION_PROJECTOR_NAMES.threadSessions,
   ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
 ] as const
-
-function maxIso(left: string | null, right: string): string
-{
-  if (left === null)
-  {
-    return right
-  }
-  return left > right ? left : right
-}
 
 function computeSnapshotSequence(
   stateRows: ReadonlyArray<Schema.Schema.Type<typeof ProjectionStateDbRowSchema>>,
@@ -377,119 +122,6 @@ function computeSnapshotSequence(
   }
 
   return Number.isFinite(minSequence) ? minSequence : 0
-}
-
-function mapLatestTurn(
-  row: Schema.Schema.Type<typeof ProjectionLatestTurnDbRowSchema>,
-): OrchestrationLatestTurn
-{
-  return {
-    turnId: row.turnId,
-    state:
-      row.state === 'error'
-        ? 'error'
-        : row.state === 'interrupted'
-          ? 'interrupted'
-          : row.state === 'completed'
-            ? 'completed'
-            : 'running',
-    requestedAt: row.requestedAt,
-    startedAt: row.startedAt,
-    completedAt: row.completedAt,
-    assistantMessageId: row.assistantMessageId,
-    ...(row.sourceProposedPlanThreadId !== null && row.sourceProposedPlanId !== null
-      ? {
-          sourceProposedPlan: {
-            threadId: row.sourceProposedPlanThreadId,
-            planId: row.sourceProposedPlanId,
-          },
-        }
-      : {}),
-  }
-}
-
-function mapSessionRow(
-  row: Schema.Schema.Type<typeof ProjectionThreadSessionDbRowSchema>,
-): OrchestrationSession
-{
-  return {
-    threadId: row.threadId,
-    status: row.status,
-    providerName: row.providerName,
-    ...(row.providerInstanceId !== null ? { providerInstanceId: row.providerInstanceId } : {}),
-    runtimeMode: row.runtimeMode,
-    activeTurnId: row.activeTurnId,
-    lastError: row.lastError,
-    updatedAt: row.updatedAt,
-  }
-}
-
-function mapProjectShellRow(
-  row: Schema.Schema.Type<typeof ProjectionProjectDbRowSchema>,
-  repositoryIdentity: OrchestrationProject['repositoryIdentity'],
-): OrchestrationProjectShell
-{
-  return {
-    id: row.projectId,
-    title: row.title,
-    workspaceRoot: row.workspaceRoot,
-    repositoryIdentity,
-    defaultModelSelection: row.defaultModelSelection,
-    scripts: row.scripts,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }
-}
-
-function mapProposedPlanRow(
-  row: Schema.Schema.Type<typeof ProjectionThreadProposedPlanDbRowSchema>,
-): OrchestrationProposedPlan
-{
-  return {
-    id: row.planId,
-    turnId: row.turnId,
-    planMarkdown: row.planMarkdown,
-    implementedAt: row.implementedAt,
-    implementationThreadId: row.implementationThreadId,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }
-}
-
-function mapApprovalOutcomeRow(
-  row: Schema.Schema.Type<typeof ProjectionApprovalOutcomeDbRowSchema>,
-): ApprovalOutcome
-{
-  return {
-    requestId: row.requestId,
-    status: row.status,
-    ...(row.requestedDecision === null ? {} : { requestedDecision: row.requestedDecision }),
-    ...(row.decision === null ? {} : { decision: row.decision }),
-    ...(row.detail === null ? {} : { detail: row.detail }),
-    ...(row.actionId === null ? {} : { actionId: row.actionId }),
-    ...(row.acceptanceEvidence === null ? {} : { acceptanceEvidence: row.acceptanceEvidence }),
-    updatedAt: row.updatedAt ?? row.createdAt,
-  }
-}
-
-function mapOrchestratePlanRow(
-  row: Schema.Schema.Type<typeof ProjectionThreadOrchestratePlanDbRowSchema>,
-): OrchestratePlanRevision
-{
-  return {
-    runId: row.runId,
-    revision: row.revision,
-    turnId: row.turnId,
-    workflow: row.workflow,
-    task: row.task,
-    stages: row.stages,
-    totalWorkers: row.totalWorkers,
-    maxWorkers: row.maxWorkers,
-    source: row.source,
-    status: row.status,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-  }
 }
 
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)

@@ -18,13 +18,13 @@ import { describe } from 'vite-plus/test'
 import {
   IMPORT_CONTINUATION_PRESERVED_BINDING_REASON,
   type ContinuationRequest,
-} from '../../../../apps/server/src/import/continuationContract.ts'
+} from '../../../../apps/server/src/import/continuation/continuationContract.ts'
 import {
   ImportContinuationDepError,
   makeImportContinuation,
   type ImportContinuationFactoryDeps,
   type ResolvedContinuationInstance,
-} from '../../../../apps/server/src/import/continuation.ts'
+} from '../../../../apps/server/src/import/continuation/continuation.ts'
 import type { ImportedSessionMeta } from '../../../../apps/server/src/import/types.ts'
 import type { ProviderRuntimeBinding } from '../../../../apps/server/src/provider/Services/ProviderSessionDirectory.ts'
 
