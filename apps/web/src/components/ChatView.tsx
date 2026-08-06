@@ -26,6 +26,11 @@ import {
   connectionStatusTitle,
   type EnvironmentConnectionPresentation,
 } from '@t3tools/client-runtime/connection'
+import {
+  type RespondToThreadOrchestratePlanInput,
+  respondToThreadOrchestratePlan,
+} from '@t3tools/client-runtime/operations'
+import { createEnvironmentCommand } from '@t3tools/client-runtime/state/runtime'
 import { effectiveSettled, effectiveSnoozed } from '@t3tools/client-runtime/state/thread-settled'
 import {
   parseScopedThreadKey,
@@ -194,6 +199,7 @@ import {
 import { appendPreviewAnnotationPrompt } from '../lib/previewAnnotation'
 import { appendReviewCommentsToPrompt, type ReviewCommentContext } from '../reviewCommentContext'
 import { environmentCatalog } from '../connection/catalog'
+import { connectionAtomRuntime } from '../connection/runtime'
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from '../terminalUiStateStore'
 import { useKnownTerminalSessions, useThreadRunningTerminalIds } from '../state/terminalSessions'
 import { projectEnvironment } from '../state/projects'
@@ -222,6 +228,7 @@ import { DraftHeroHeadline } from './chat/DraftHeroHeadline'
 import { ExpandedImageDialog } from './chat/ExpandedImageDialog'
 import { PullRequestThreadDialog } from './PullRequestThreadDialog'
 import { MessagesTimeline } from './chat/MessagesTimeline'
+import type { OrchestratePlanResponse } from './chat/OrchestratePlanCard'
 import { ChatHeader } from './chat/ChatHeader'
 import {
   PersistentThreadTerminalDrawer,
@@ -326,6 +333,12 @@ const EMPTY_ACTIVITIES: OrchestrationThreadActivity[] = []
 const EMPTY_PROVIDERS: ServerProvider[] = []
 const EMPTY_PROVIDER_SKILLS: ServerProvider['skills'] = []
 const EMPTY_PENDING_USER_INPUT_ANSWERS: Record<string, PendingUserInputDraftAnswer> = {}
+
+// keeps typed plan-gate responses on the environment-scoped command path
+const respondToOrchestratePlanCommand = createEnvironmentCommand(connectionAtomRuntime, {
+  label: 'environment-data:commands:thread:respond-to-orchestrate-plan',
+  execute: (input: RespondToThreadOrchestratePlanInput) => respondToThreadOrchestratePlan(input),
+})
 
 function useDraftHeroLayoutTransition(isDraftHeroState: boolean)
 {
@@ -646,6 +659,9 @@ function ChatViewContent(props: ChatViewProps)
     reportFailure: false,
   })
   const respondToThreadUserInput = useAtomCommand(threadEnvironment.respondToUserInput, {
+    reportFailure: false,
+  })
+  const dispatchOrchestratePlanResponse = useAtomCommand(respondToOrchestratePlanCommand, {
     reportFailure: false,
   })
   const revertThreadCheckpoint = useAtomCommand(threadEnvironment.revertCheckpoint, {
@@ -4737,11 +4753,19 @@ function ChatViewContent(props: ChatViewProps)
   const onEditOrchestratePlanInChat = useCallback(
     (reply: string) =>
     {
-      promptRef.current = reply
-      setComposerDraftPrompt(composerDraftTarget, reply)
+      // append instead of overwriting whatever the user already typed
+      const currentDraft = promptRef.current
+      const nextDraft =
+        currentDraft.length === 0
+          ? reply
+          : currentDraft.endsWith('\n')
+            ? `${currentDraft}${reply}`
+            : `${currentDraft}\n${reply}`
+      promptRef.current = nextDraft
+      setComposerDraftPrompt(composerDraftTarget, nextDraft)
       composerRef.current?.resetCursorState({
-        cursor: reply.length,
-        prompt: reply,
+        cursor: nextDraft.length,
+        prompt: nextDraft,
         detectTrigger: true,
       })
       scheduleComposerFocus()
@@ -4756,6 +4780,31 @@ function ChatViewContent(props: ChatViewProps)
       return dispatchSend(undefined, { bypassPlanFollowUp: true })
     },
     [dispatchSend, onEditOrchestratePlanInChat],
+  )
+
+  const onRespondOrchestratePlan = useCallback(
+    async (response: OrchestratePlanResponse): Promise<boolean> =>
+    {
+      if (activeThreadId === null) return false
+      const result = await dispatchOrchestratePlanResponse({
+        environmentId,
+        input: {
+          threadId: activeThreadId,
+          ...response,
+        },
+      })
+      if (result._tag === 'Failure' && !isAtomCommandInterrupted(result))
+      {
+        const error = squashAtomCommandFailure(result)
+        setThreadError(
+          activeThreadId,
+          error instanceof Error ? error.message : 'Failed to submit orchestrate plan response.',
+        )
+        return false
+      }
+      return result._tag === 'Success'
+    },
+    [activeThreadId, dispatchOrchestratePlanResponse, environmentId, setThreadError],
   )
 
   // the workers panel is the run surface; the card pins it to its own run
@@ -4773,16 +4822,20 @@ function ChatViewContent(props: ChatViewProps)
       environmentId,
       instanceEntries: orchestrateInstanceEntries,
       modelOptionsByInstance: orchestrateModelOptions,
+      orchestratePlans: activeThread?.orchestratePlans ?? [],
       onApprove: onApproveOrchestratePlan,
+      onRespond: onRespondOrchestratePlan,
       onEditInChat: onEditOrchestratePlanInChat,
       onOpenRun: activeThreadRef ? onOpenOrchestrateRun : undefined,
     }),
     [
       activeThreadRef,
+      activeThread?.orchestratePlans,
       environmentId,
       onApproveOrchestratePlan,
       onEditOrchestratePlanInChat,
       onOpenOrchestrateRun,
+      onRespondOrchestratePlan,
       orchestrateInstanceEntries,
       orchestrateModelOptions,
     ],

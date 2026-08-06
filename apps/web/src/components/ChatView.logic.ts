@@ -372,6 +372,7 @@ export function buildLocalDraftThread(
     checkpoints: [],
     activities: [],
     proposedPlans: [],
+    orchestratePlans: [],
   }
 }
 
@@ -381,6 +382,7 @@ export function buildLoadingThreadFromShell(shell: ThreadShell): Thread
     ...shell,
     messages: [],
     proposedPlans: [],
+    orchestratePlans: [],
     activities: [],
     checkpoints: [],
     deletedAt: null,

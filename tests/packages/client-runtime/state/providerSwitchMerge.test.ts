@@ -51,6 +51,7 @@ function makeDetail(overrides: Partial<EnvironmentThread> = {}): EnvironmentThre
     deletedAt: null,
     messages: [],
     proposedPlans: [],
+    orchestratePlans: [],
     activities: [],
     checkpoints: [],
     session: null,

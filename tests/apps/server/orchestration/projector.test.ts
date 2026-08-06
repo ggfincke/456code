@@ -110,6 +110,7 @@ describe('orchestration projector', () =>
         deletedAt: null,
         messages: [],
         proposedPlans: [],
+        orchestratePlans: [],
         activities: [],
         checkpoints: [],
         approvalOutcomes: [],

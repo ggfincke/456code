@@ -7,6 +7,7 @@ import {
   type OrchestrationEvent,
   type OrchestrationReadModel,
   type OrchestrationThread,
+  type ThreadOrchestratePlanResponseRequestedPayload,
   ThreadImportContinuationActivityPayload,
   type ThreadImportContinuationActivityPayload as ThreadImportContinuationActivityPayloadType,
 } from '@t3tools/contracts'
@@ -38,6 +39,11 @@ import {
 import { projectEvent } from './projector.ts'
 
 const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
+
+export type ThreadOrchestratePlanUpsertCommand = Extract<
+  OrchestrationCommand,
+  { readonly type: 'thread.orchestrate-plan.upsert' }
+>
 
 // session adoption takes seconds; a user message still unadopted after this
 // window is a failed/stale start, not pending work. Mirrors the client's
@@ -1128,6 +1134,86 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
       }
     }
 
+    case 'thread.orchestrate-plan.respond':
+    {
+      if (command.runId.trim().length === 0)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: 'Orchestrate plan run id must not be empty.',
+        })
+      }
+      if (!Number.isInteger(command.revision) || command.revision < 0)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: 'Orchestrate plan revision must be a non-negative integer.',
+        })
+      }
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      const runPlans = thread.orchestratePlans.filter((plan) => plan.runId === command.runId)
+      const targetPlan = runPlans.find((plan) => plan.revision === command.revision)
+      if (!targetPlan)
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Orchestrate plan '${command.runId}' revision '${command.revision}' does not exist on thread '${command.threadId}'.`,
+        })
+      }
+      const latestRevision = runPlans.reduce(
+        (revision, plan) => Math.max(revision, plan.revision),
+        command.revision,
+      )
+      if (command.revision !== latestRevision || targetPlan.status !== 'pending')
+      {
+        return yield* new OrchestrationCommandInvariantError({
+          commandType: command.type,
+          detail: `Orchestrate plan '${command.runId}' revision '${command.revision}' is stale or no longer pending.`,
+        })
+      }
+      // overrides must target real, distinct stages of the plan they edit
+      if (command.stageOverrides !== undefined)
+      {
+        const stageIds = new Set(targetPlan.stages.map((stage) => stage.id))
+        const seen = new Set<string>()
+        for (const override of command.stageOverrides)
+        {
+          if (!stageIds.has(override.stageId) || seen.has(override.stageId))
+          {
+            return yield* new OrchestrationCommandInvariantError({
+              commandType: command.type,
+              detail: `Orchestrate plan stage override '${override.stageId}' is unknown or duplicated for run '${command.runId}'.`,
+            })
+          }
+          seen.add(override.stageId)
+        }
+      }
+      const payload = {
+        threadId: command.threadId,
+        runId: command.runId,
+        revision: command.revision,
+        decision: command.decision,
+        ...(command.stageOverrides !== undefined ? { stageOverrides: command.stageOverrides } : {}),
+        ...(command.maxWorkers !== undefined ? { maxWorkers: command.maxWorkers } : {}),
+        ...(command.note !== undefined ? { note: command.note } : {}),
+        createdAt: command.createdAt,
+      } satisfies ThreadOrchestratePlanResponseRequestedPayload
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.orchestrate-plan-response-requested',
+        payload,
+      }
+    }
+
     case 'thread.user-input.respond':
     {
       yield* requireThread({
@@ -1612,6 +1698,40 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
         payload: {
           threadId: command.threadId,
           proposedPlan: command.proposedPlan,
+        },
+      }
+    }
+
+    case 'thread.orchestrate-plan.upsert':
+    {
+      const thread = yield* requireThread({
+        readModel,
+        command,
+        threadId: command.threadId,
+      })
+      // the serialized decider is the revision authority: concurrent tool
+      // calls can both compute the same next revision before either event
+      // commits, so a stale or colliding suggestion is bumped past the
+      // current max instead of overwriting an existing immutable revision
+      const maxExistingRevision = thread.orchestratePlans
+        .filter((existing) => existing.runId === command.plan.runId)
+        .reduce((max, existing) => Math.max(max, existing.revision), 0)
+      const plan =
+        command.plan.revision > maxExistingRevision
+          ? command.plan
+          : { ...command.plan, revision: maxExistingRevision + 1 }
+      return {
+        ...(yield* withEventBase({
+          aggregateKind: 'thread',
+          aggregateId: command.threadId,
+          occurredAt: command.createdAt,
+          commandId: command.commandId,
+        })),
+        type: 'thread.orchestrate-plan-upserted',
+        payload: {
+          threadId: command.threadId,
+          plan,
+          createdAt: command.createdAt,
         },
       }
     }

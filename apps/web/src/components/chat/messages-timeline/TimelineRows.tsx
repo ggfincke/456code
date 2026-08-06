@@ -61,6 +61,7 @@ import { getRenderablePatch, resolveFileDiffPath } from '../../../lib/diffRender
 import { type ProviderSwitchTimelineParty } from '../../../providerSwitchPresentation'
 import {
   deriveTimelineEntries,
+  formatDuration,
   workEntryIndicatesToolFailure,
   workEntryIndicatesToolNeutralStatus,
   workEntryIndicatesToolSuccess,
@@ -1355,6 +1356,43 @@ function toolWorkEntryHeading(workEntry: TimelineWorkEntry): string
   return capitalizePhrase(normalizeCompactToolLabel(workEntry.toolTitle))
 }
 
+function formatTokenCount(totalTokens: number): string
+{
+  if (totalTokens < 1_000)
+  {
+    return `${totalTokens} tok`
+  }
+  if (totalTokens < 1_000_000)
+  {
+    const compact = (totalTokens / 1_000).toFixed(totalTokens < 100_000 ? 1 : 0)
+    return `${compact.replace(/\.0$/, '')}k tok`
+  }
+  const compact = (totalTokens / 1_000_000).toFixed(totalTokens < 100_000_000 ? 1 : 0)
+  return `${compact.replace(/\.0$/, '')}m tok`
+}
+
+// model / tokens / tool count / duration / live last-tool line under subagent rows
+function taskMetadataParts(workEntry: TimelineWorkEntry): string[]
+{
+  if (!workEntry.taskId)
+  {
+    return []
+  }
+  const parts: string[] = []
+  if (workEntry.model) parts.push(workEntry.model)
+  if (workEntry.totalTokens !== undefined) parts.push(formatTokenCount(workEntry.totalTokens))
+  if (workEntry.toolUses !== undefined)
+  {
+    parts.push(`${workEntry.toolUses} ${workEntry.toolUses === 1 ? 'tool' : 'tools'}`)
+  }
+  if (workEntry.durationMs !== undefined) parts.push(formatDuration(workEntry.durationMs))
+  if (workEntry.toolLifecycleStatus === 'inProgress' && workEntry.lastToolName)
+  {
+    parts.push(workEntry.lastToolName)
+  }
+  return parts
+}
+
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation()
 
 const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
@@ -1377,6 +1415,7 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
       ? null
       : rawPreview
   const displayText = preview ? `${heading} - ${preview}` : heading
+  const metadataParts = taskMetadataParts(workEntry)
   const expandedBody = buildToolCallExpandedBody(workEntry, workspaceRoot)
   const canExpand = expandedBody !== null
   const showFailedIndicator = workEntryIndicatesToolFailure(workEntry)
@@ -1444,6 +1483,11 @@ const SimpleWorkEntryRow = memo(function SimpleWorkEntryRow(props: {
                 <span className="min-w-0 flex-1 truncate text-muted-foreground/55">{preview}</span>
               )}
             </p>
+            {metadataParts.length > 0 ? (
+              <p className="truncate text-[11px] leading-4 text-muted-foreground/55">
+                {metadataParts.join(' · ')}
+              </p>
+            ) : null}
           </div>
           <div className="flex shrink-0 items-center gap-px text-muted-foreground/55">
             <span

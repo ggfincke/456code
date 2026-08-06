@@ -2,6 +2,9 @@
 // renders an editable orchestration plan approval card
 import type {
   EnvironmentId,
+  OrchestratePlanDecision,
+  OrchestratePlanRevision,
+  OrchestratePlanStageOverride,
   ProviderInstanceId,
   WorkersJobStatus,
   WorkersJobSummary,
@@ -35,8 +38,10 @@ import {
   registerOrchestratePlanCard,
   setOrchestratePlanCardStatus,
   setOrchestratePlanMaxWorkers,
+  setOrchestratePlanNote,
   setOrchestrateStageEffort,
   setOrchestrateStageSelection,
+  setOrchestrateStageWorkers,
   subscribeOrchestratePlanStore,
 } from './orchestratePlanStore'
 import { ProviderInstanceIcon } from './ProviderInstanceIcon'
@@ -65,16 +70,28 @@ export interface OrchestratePlan
   validationError: string | null
 }
 
+export interface OrchestratePlanResponse
+{
+  readonly runId: OrchestratePlanRevision['runId']
+  readonly revision: number
+  readonly decision: OrchestratePlanDecision
+  readonly stageOverrides?: ReadonlyArray<OrchestratePlanStageOverride>
+  readonly maxWorkers?: number
+  readonly note?: string
+}
+
 /**
  * Callbacks and model-catalog data the chat view supplies so plan cards can
- * edit stage bindings with the app's regular model picker and send replies.
+ * edit stage bindings with the app's regular model picker and send responses.
  */
 export interface OrchestratePlanActions
 {
   environmentId: EnvironmentId
   instanceEntries: ReadonlyArray<ProviderInstanceEntry>
   modelOptionsByInstance: ReadonlyMap<ProviderInstanceId, ReadonlyArray<AppModelOption>>
+  orchestratePlans: ReadonlyArray<OrchestratePlanRevision>
   onApprove: (reply: string) => Promise<boolean>
+  onRespond: (response: OrchestratePlanResponse) => Promise<boolean>
   onEditInChat: (reply: string) => void
   onOpenRun?: ((runId: string) => void) | undefined
 }
@@ -376,6 +393,45 @@ function planContentText(plan: OrchestratePlan): string
   ])
 }
 
+function latestPersistedRevision(
+  revisions: ReadonlyArray<OrchestratePlanRevision>,
+  runId: string | null,
+): OrchestratePlanRevision | null
+{
+  if (runId === null) return null
+  let latest: OrchestratePlanRevision | null = null
+  for (const revision of revisions)
+  {
+    if (revision.runId === runId && (latest === null || revision.revision > latest.revision))
+    {
+      latest = revision
+    }
+  }
+  return latest
+}
+
+function persistedRevisionToPlan(revision: OrchestratePlanRevision): OrchestratePlan
+{
+  return {
+    workflow: revision.workflow,
+    task: revision.task,
+    stages: revision.stages.map((stage) => ({
+      id: stage.id,
+      provider: stage.provider,
+      model: stage.model ?? '',
+      ...(stage.effort === undefined ? {} : { effort: stage.effort }),
+      mode: stage.mode,
+      workers: stage.workers,
+      scope: stage.scope ?? '',
+      ...(stage.phase === undefined ? {} : { phase: stage.phase }),
+    })),
+    totalWorkers: revision.totalWorkers,
+    maxWorkers: revision.maxWorkers,
+    runId: revision.runId,
+    validationError: null,
+  }
+}
+
 // harnesses the worker broker can launch directly; models picked from other
 // providers are sent model-only and the orchestrator resolves the harness
 const BROKER_PROVIDERS = new Set(['codex', 'cursor', 'coral'])
@@ -388,6 +444,47 @@ function initialSelection(
   const entry =
     entries.find((candidate) => candidate.driverKind === stage.provider) ?? entries[0] ?? null
   return { provider: stage.provider, model: stage.model, instanceId: entry?.instanceId ?? null }
+}
+
+function buildPersistedStageOverrides(
+  plan: OrchestratePlan,
+  options: {
+    readonly selections: Readonly<Record<string, OrchestrateStageSelection>>
+    readonly efforts: Readonly<Record<string, string>>
+    readonly workers: Readonly<Record<string, number>>
+    readonly instanceEntries: ReadonlyArray<ProviderInstanceEntry>
+  },
+): OrchestratePlanStageOverride[]
+{
+  const overrides: OrchestratePlanStageOverride[] = []
+  for (const { rowKey, stage } of buildPlanRows(plan.stages))
+  {
+    const selection = options.selections[rowKey] ?? initialSelection(stage, options.instanceEntries)
+    const effort = options.efforts[rowKey] ?? stage.effort ?? ''
+    const workers = options.workers[rowKey] ?? stage.workers
+    const override: {
+      stageId: string
+      provider?: string
+      model?: string
+      effort?: string
+      workers?: number
+    } = { stageId: stage.id }
+
+    if (selection.provider !== stage.provider) override.provider = selection.provider
+    if (selection.model !== stage.model && selection.model !== '') override.model = selection.model
+    if (effort !== (stage.effort ?? '') && effort !== '') override.effort = effort
+    if (workers !== stage.workers) override.workers = workers
+    if (
+      override.provider !== undefined ||
+      override.model !== undefined ||
+      override.effort !== undefined ||
+      override.workers !== undefined
+    )
+    {
+      overrides.push(override)
+    }
+  }
+  return overrides
 }
 
 export function buildOrchestrateApprovalReply(
@@ -836,6 +933,7 @@ function StageModelPicker({
   onOpenChange,
   onSelect,
   onClear,
+  allowClear,
 }: {
   rowLabel: string
   selection: OrchestrateStageSelection
@@ -845,6 +943,7 @@ function StageModelPicker({
   onOpenChange: (open: boolean) => void
   onSelect: (instanceId: ProviderInstanceId, model: string) => void
   onClear: () => void
+  allowClear: boolean
 })
 {
   const activeEntry =
@@ -940,7 +1039,7 @@ function StageModelPicker({
           />
         </PopoverPopup>
       </Popover>
-      {isDefault ? null : (
+      {isDefault || !allowClear ? null : (
         <Button
           size="icon"
           variant="ghost"
@@ -964,14 +1063,28 @@ export function OrchestratePlanCard({
   actions: OrchestratePlanActions
 })
 {
-  const rows = useMemo(() => buildPlanRows(plan.stages), [plan.stages])
-  const contentKey = useMemo(() => hashOrchestratePlanText(planContentText(plan)), [plan])
   const runId = plan.runId ?? null
+  // the persisted revision (when the server has one) is the source of truth;
+  // the fence-parsed plan is only the fallback for hosts without persistence
+  const persistedRevision = useMemo(
+    () => latestPersistedRevision(actions.orchestratePlans, runId),
+    [actions.orchestratePlans, runId],
+  )
+  const displayPlan = useMemo(
+    () => (persistedRevision === null ? plan : persistedRevisionToPlan(persistedRevision)),
+    [persistedRevision, plan],
+  )
+  const rows = useMemo(() => buildPlanRows(displayPlan.stages), [displayPlan.stages])
+  const contentKey = useMemo(() => hashOrchestratePlanText(planContentText(plan)), [plan])
   const [timelineIdentity, setTimelineIdentity] = useState<OrchestratePlanTimelineIdentity | null>(
     null,
   )
-  const revisionKey = timelineIdentity?.revisionKey ?? `content:${contentKey}`
-  const draftKey = createOrchestratePlanCardStateKey(runId, revisionKey)
+  const emissionRevisionKey = timelineIdentity?.revisionKey ?? `content:${contentKey}`
+  const cardRevisionKey =
+    persistedRevision === null
+      ? emissionRevisionKey
+      : `persisted-revision:${persistedRevision.revision}`
+  const draftKey = createOrchestratePlanCardStateKey(runId, cardRevisionKey)
 
   const registerCardElement = useCallback(
     (element: HTMLElement | null) =>
@@ -997,18 +1110,34 @@ export function OrchestratePlanCard({
   const cardState = useSyncExternalStore(subscribeOrchestratePlanStore, () =>
     readOrchestratePlanCardState(draftKey),
   )
-  const superseded = useSyncExternalStore(subscribeOrchestratePlanStore, () =>
+  const emissionSuperseded = useSyncExternalStore(subscribeOrchestratePlanStore, () =>
     runId === null
       ? false
-      : isOrchestratePlanCardSuperseded(runId, revisionKey, timelineIdentity?.order),
+      : isOrchestratePlanCardSuperseded(runId, emissionRevisionKey, timelineIdentity?.order),
   )
   const startedRevision = useSyncExternalStore(subscribeOrchestratePlanStore, () =>
-    runId === null ? false : isOrchestratePlanRevisionStarted(runId, revisionKey),
+    runId === null ? false : isOrchestratePlanRevisionStarted(runId, cardRevisionKey),
   )
 
   const [openRowKey, setOpenRowKey] = useState<string | null>(null)
-  const maxWorkers = cardState.maxWorkers ?? plan.maxWorkers
+  const maxWorkers = cardState.maxWorkers ?? displayPlan.maxWorkers
   const status = cardState.status
+  const serverStatus = persistedRevision?.status ?? null
+  const compactSuperseded = persistedRevision !== null && emissionSuperseded
+  const superseded =
+    compactSuperseded ||
+    (persistedRevision === null ? emissionSuperseded : serverStatus === 'superseded')
+  const effectiveRows = useMemo(
+    () =>
+      rows.map((row) => ({
+        ...row,
+        stage: {
+          ...row.stage,
+          workers: cardState.workers?.[row.rowKey] ?? row.stage.workers,
+        },
+      })),
+    [cardState.workers, rows],
+  )
 
   // live run status: jobs carrying this plan's runId identify the launched
   // run, which also marks the plan approved across reloads; the query is
@@ -1028,14 +1157,18 @@ export function OrchestratePlanCard({
     if (runId === null) return [] as WorkersJobSummary[]
     return (workersData?.jobs ?? []).filter((job) => Option.getOrNull(job.run) === runId)
   }, [runId, workersData])
-  const jobsByRow = useMemo(() => partitionJobsByRow(rows, runJobs), [rows, runJobs])
-
-  const plannedTotal = Math.max(
-    plan.totalWorkers,
-    rows.reduce((sum, row) => sum + row.stage.workers, 0),
+  const jobsByRow = useMemo(
+    () => partitionJobsByRow(effectiveRows, runJobs),
+    [effectiveRows, runJobs],
   )
+
+  const selectedWorkerTotal = effectiveRows.reduce((sum, row) => sum + row.stage.workers, 0)
+  const plannedTotal =
+    persistedRevision === null
+      ? Math.max(displayPlan.totalWorkers, selectedWorkerTotal)
+      : selectedWorkerTotal
   const runStarted = runJobs.length > 0
-  const revisionStarted = runStarted && startedRevision
+  const revisionStarted = runStarted && (startedRevision || serverStatus === 'approved')
   const runActive = runJobs.some((job) => !TERMINAL_STATUSES.has(job.status))
   const finishedCount = runJobs.filter((job) => TERMINAL_STATUSES.has(job.status)).length
   const failedCount = runJobs.filter(
@@ -1054,12 +1187,17 @@ export function OrchestratePlanCard({
 
   const disabled =
     superseded ||
-    plan.validationError !== null ||
+    displayPlan.validationError !== null ||
     status === 'sending' ||
     status === 'sent' ||
-    revisionStarted
-  const maxWorkersValid = Number.isSafeInteger(maxWorkers) && maxWorkers >= 1
-  const reply = buildOrchestrateApprovalReply(plan, {
+    revisionStarted ||
+    (serverStatus !== null && serverStatus !== 'pending')
+  const minimumMaxWorkers = persistedRevision === null ? 1 : 0
+  const maxWorkersValid = Number.isSafeInteger(maxWorkers) && maxWorkers >= minimumMaxWorkers
+  const stageWorkersValid = effectiveRows.every(
+    (row) => Number.isSafeInteger(row.stage.workers) && row.stage.workers >= 0,
+  )
+  const reply = buildOrchestrateApprovalReply(displayPlan, {
     selections: cardState.selections,
     efforts: cardState.efforts,
     maxWorkers,
@@ -1083,10 +1221,54 @@ export function OrchestratePlanCard({
     {
       if (didSend && runId !== null)
       {
-        markOrchestratePlanRevisionStarted(runId, revisionKey)
+        markOrchestratePlanRevisionStarted(runId, cardRevisionKey)
       }
       // sending always clears, so a failed send leaves the card usable
       setOrchestratePlanCardStatus(draftKey, didSend ? 'sent' : 'idle', failure)
+    }
+  }
+
+  const handleRespond = async (decision: OrchestratePlanDecision) =>
+  {
+    if (persistedRevision === null) return
+    const note = cardState.note?.trim() ?? ''
+    if (decision === 'discuss' && note === '') return
+
+    const stageOverrides = buildPersistedStageOverrides(displayPlan, {
+      selections: cardState.selections,
+      efforts: cardState.efforts,
+      workers: cardState.workers ?? {},
+      instanceEntries: actions.instanceEntries,
+    })
+    setOrchestratePlanCardStatus(draftKey, 'sending')
+    let didSend = false
+    let failure: string | null = null
+    try
+    {
+      didSend = await actions.onRespond({
+        runId: persistedRevision.runId,
+        revision: persistedRevision.revision,
+        decision,
+        ...(stageOverrides.length === 0 ? {} : { stageOverrides }),
+        ...(maxWorkers === persistedRevision.maxWorkers ? {} : { maxWorkers }),
+        ...((decision === 'reject' || decision === 'discuss') && note !== '' ? { note } : {}),
+      })
+      if (!didSend) failure = 'The plan response was not sent. Try again.'
+    }
+    catch (error)
+    {
+      failure = error instanceof Error ? error.message : 'The plan response could not be sent.'
+    }
+    finally
+    {
+      if (didSend && decision === 'approve' && runId !== null)
+      {
+        markOrchestratePlanRevisionStarted(runId, cardRevisionKey)
+      }
+      // discuss leaves the revision pending server-side, so the card must stay
+      // actionable for a later approve/reject instead of locking on "sent"
+      const settledStatus = decision === 'discuss' ? 'idle' : 'sent'
+      setOrchestratePlanCardStatus(draftKey, didSend ? settledStatus : 'idle', failure)
     }
   }
 
@@ -1098,9 +1280,29 @@ export function OrchestratePlanCard({
     setOrchestratePlanCardStatus(draftKey, 'editing')
   }
 
-  const rowGroups = groupRowsByPhase(rows)
+  const rowGroups = groupRowsByPhase(effectiveRows)
   const hasPhases = rowGroups.some((group) => group.phase !== null)
   const openRunAction = runId !== null && actions.onOpenRun !== undefined ? actions.onOpenRun : null
+
+  if (compactSuperseded)
+  {
+    return (
+      <section
+        ref={registerCardElement}
+        data-orchestrate-plan="true"
+        data-orchestrate-plan-superseded="true"
+        className="relative left-1/2 my-2 flex w-[max(100%,calc(50%+50cqw-1.5rem))] -translate-x-1/2 items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-foreground opacity-60 shadow-sm"
+      >
+        <h3 className="truncate font-semibold text-sm">{displayPlan.workflow}</h3>
+        <Badge variant="secondary" size="sm">
+          Superseded
+        </Badge>
+        <span className="truncate text-muted-foreground text-xs">
+          A newer card owns this run response
+        </span>
+      </section>
+    )
+  }
 
   return (
     <section
@@ -1117,15 +1319,23 @@ export function OrchestratePlanCard({
     >
       <header className="border-b border-border bg-muted/30 px-4 py-2.5">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="font-semibold text-sm">{plan.workflow}</h3>
+          <h3 className="font-semibold text-sm">{displayPlan.workflow}</h3>
           {superseded ? (
             <Badge variant="secondary" size="sm">
               Superseded
             </Badge>
+          ) : serverStatus === 'approved' ? (
+            <Badge variant="success" size="sm">
+              Approved
+            </Badge>
+          ) : serverStatus === 'rejected' ? (
+            <Badge variant="error" size="sm">
+              Rejected
+            </Badge>
           ) : null}
         </div>
-        {plan.task === '' ? null : (
-          <p className="mt-0.5 text-muted-foreground text-xs">{plan.task}</p>
+        {displayPlan.task === '' ? null : (
+          <p className="mt-0.5 text-muted-foreground text-xs">{displayPlan.task}</p>
         )}
       </header>
       <div className="overflow-x-auto">
@@ -1235,6 +1445,7 @@ export function OrchestratePlanCard({
                             initialSelection({ ...stage, model: '' }, actions.instanceEntries),
                           )
                         }
+                        allowClear={persistedRevision === null || stage.model === ''}
                       />
                     </td>
                     <td className="whitespace-nowrap px-2 py-2">
@@ -1261,7 +1472,28 @@ export function OrchestratePlanCard({
                         {stage.mode}
                       </span>
                     </td>
-                    <td className="px-2 py-2 tabular-nums">{stage.workers}</td>
+                    <td className="px-2 py-2 tabular-nums">
+                      {persistedRevision === null ? (
+                        stage.workers
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          aria-label={`Workers for stage ${rowLabel}`}
+                          value={stage.workers}
+                          disabled={disabled}
+                          onChange={(event) =>
+                            setOrchestrateStageWorkers(
+                              draftKey,
+                              rowKey,
+                              event.currentTarget.valueAsNumber,
+                            )
+                          }
+                          className="h-7 w-16 rounded-md border border-input bg-background px-2 text-right tabular-nums outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                        />
+                      )}
+                    </td>
                     {revisionStarted ? (
                       <td className="whitespace-nowrap px-2 py-2">
                         <StageStatusCell
@@ -1297,7 +1529,7 @@ export function OrchestratePlanCard({
             Max workers
             <input
               type="number"
-              min={1}
+              min={minimumMaxWorkers}
               step={1}
               value={maxWorkers}
               disabled={disabled}
@@ -1309,7 +1541,23 @@ export function OrchestratePlanCard({
           </label>
         </div>
         <div className="flex flex-wrap items-center justify-end gap-2">
-          {revisionStarted ? (
+          {serverStatus === 'approved' ? (
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              <span className="font-medium text-emerald-700 dark:text-emerald-300">
+                This plan revision was approved
+              </span>
+              {revisionStarted ? (
+                <span className="text-muted-foreground">
+                  {finishedCount} of {plannedTotal} planned worker
+                  {plannedTotal === 1 ? '' : 's'} finished
+                </span>
+              ) : null}
+            </div>
+          ) : serverStatus === 'rejected' ? (
+            <span className="font-medium text-red-600 text-xs dark:text-red-400">
+              This plan revision was rejected
+            </span>
+          ) : revisionStarted ? (
             <div className="flex flex-wrap items-center gap-2 text-xs">
               {runFinished ? null : (
                 <span
@@ -1340,11 +1588,77 @@ export function OrchestratePlanCard({
             <span className="text-muted-foreground text-xs">
               Superseded by a newer plan for this run
             </span>
+          ) : persistedRevision !== null ? (
+            <>
+              {displayPlan.validationError === null && cardState.error === null ? null : (
+                <span role="alert" className="text-red-600 text-xs dark:text-red-400">
+                  {displayPlan.validationError ?? cardState.error}
+                </span>
+              )}
+              {status === 'editing' ? (
+                <span className="text-muted-foreground text-xs">
+                  Fallback reply appended to the composer
+                </span>
+              ) : status === 'sending' ? (
+                <span className="text-muted-foreground text-xs">Sending response…</span>
+              ) : status === 'sent' ? (
+                <span className="text-muted-foreground text-xs">Response sent</span>
+              ) : null}
+              <input
+                type="text"
+                value={cardState.note ?? ''}
+                disabled={disabled}
+                aria-label="Plan response note"
+                placeholder="Note (required to discuss)"
+                onChange={(event) => setOrchestratePlanNote(draftKey, event.currentTarget.value)}
+                className="h-7 min-w-44 flex-1 rounded-md border border-input bg-background px-2 text-xs outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+              />
+              <Button
+                type="button"
+                variant="link"
+                size="xs"
+                disabled={disabled || !maxWorkersValid || !stageWorkersValid}
+                onClick={handleEditInChat}
+              >
+                Edit in chat
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                size="sm"
+                disabled={
+                  disabled ||
+                  !maxWorkersValid ||
+                  !stageWorkersValid ||
+                  (cardState.note?.trim() ?? '') === ''
+                }
+                onClick={() => void handleRespond('discuss')}
+              >
+                Discuss
+              </Button>
+              <Button
+                type="button"
+                variant="destructive-outline"
+                size="sm"
+                disabled={disabled || !maxWorkersValid || !stageWorkersValid}
+                onClick={() => void handleRespond('reject')}
+              >
+                Reject
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                disabled={disabled || !maxWorkersValid || !stageWorkersValid}
+                onClick={() => void handleRespond('approve')}
+              >
+                Approve
+              </Button>
+            </>
           ) : (
             <>
-              {plan.validationError === null && cardState.error === null ? null : (
+              {displayPlan.validationError === null && cardState.error === null ? null : (
                 <span role="alert" className="text-red-600 text-xs dark:text-red-400">
-                  {plan.validationError ?? cardState.error}
+                  {displayPlan.validationError ?? cardState.error}
                 </span>
               )}
               {status === 'editing' ? (

@@ -1592,6 +1592,7 @@ describe('thread outbox', () =>
       deletedAt: null,
       messages: [],
       proposedPlans: [],
+      orchestratePlans: [],
       activities: [],
       checkpoints: [],
     } satisfies OrchestrationThread

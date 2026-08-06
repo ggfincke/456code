@@ -1,13 +1,16 @@
 // apps/server/src/provider/claude/ClaudeToolProjection.ts
 // projects Claude tools and tasks into canonical runtime views
 
+import type { AgentOutput } from '@anthropic-ai/claude-agent-sdk/sdk-tools'
 import type {
   CanonicalItemType,
   CanonicalRequestType,
   RuntimeContentStreamKind,
+  TaskUsageSnapshot,
 } from '@t3tools/contracts'
 
 import { encodeJsonStringForDiagnostics } from './ClaudeSdkMessages.ts'
+import { finiteNonNegativeInteger } from './ClaudeTokenUsage.ts'
 
 type ClaudeToolResultStreamKind = Extract<
   RuntimeContentStreamKind,
@@ -29,6 +32,7 @@ export function classifyToolItemType(toolName: string): CanonicalItemType
   if (
     normalized === 'task' ||
     normalized === 'agent' ||
+    normalized === 'workflow' ||
     normalized.includes('subagent') ||
     normalized.includes('sub-agent')
   )
@@ -194,6 +198,20 @@ export function summarizeToolRequest(
     return `${toolName}: ${command.trim().slice(0, 400)}`
   }
 
+  if (toolName === 'Workflow')
+  {
+    const name = readString(input.name)
+    const description = readString(input.description)
+    if (name)
+    {
+      return description ? `${name}: ${description}` : name
+    }
+    if (description)
+    {
+      return description
+    }
+  }
+
   // prefer a human-readable agent description or prompt over raw JSON
   const itemType = classifyToolItemType(toolName)
   if (itemType === 'collab_agent_tool_call')
@@ -217,7 +235,7 @@ export function summarizeToolRequest(
   return `${toolName}: ${serialized.slice(0, 397)}...`
 }
 
-export function titleForTool(itemType: CanonicalItemType): string
+export function titleForTool(itemType: CanonicalItemType, toolName: string): string
 {
   switch (itemType)
   {
@@ -228,7 +246,7 @@ export function titleForTool(itemType: CanonicalItemType): string
     case 'mcp_tool_call':
       return 'MCP tool call'
     case 'collab_agent_tool_call':
-      return 'Subagent task'
+      return toolName === 'Workflow' ? 'Workflow run' : 'Subagent task'
     case 'web_search':
       return 'Web search'
     case 'image_view':
@@ -277,5 +295,106 @@ export function toolResultStreamKind(
       return 'file_change_output'
     default:
       return undefined
+  }
+}
+
+// identity captured from a native Agent/Task/Workflow tool_use block; the
+// adapter correlates it with sdk task frames through the tool_use id
+export interface ClaudeNativeTaskTool
+{
+  readonly toolUseId: string
+  readonly toolName: 'Agent' | 'Task' | 'Workflow'
+  readonly subagentType?: string
+  readonly requestedModel?: string
+  readonly workflowName?: string
+  agentCompletion?: ClaudeAgentCompletion
+}
+
+export type CompletedClaudeAgentOutput = Extract<AgentOutput, { status: 'completed' }>
+
+export interface ClaudeAgentCompletion
+{
+  readonly agentId: string
+  readonly resolvedModel?: string
+  readonly tokenUsage: TaskUsageSnapshot
+  readonly totalToolUseCount: number
+  readonly totalDurationMs: number
+}
+
+function isClaudeNativeTaskToolName(
+  toolName: string,
+): toolName is ClaudeNativeTaskTool['toolName']
+{
+  return toolName === 'Agent' || toolName === 'Task' || toolName === 'Workflow'
+}
+
+export function makeClaudeNativeTaskTool(
+  toolName: string,
+  toolUseId: string,
+  input: Record<string, unknown>,
+  existing?: ClaudeNativeTaskTool,
+): ClaudeNativeTaskTool | undefined
+{
+  if (!isClaudeNativeTaskToolName(toolName))
+  {
+    return undefined
+  }
+
+  const subagentType =
+    readString(input.subagent_type) ??
+    (toolName === 'Workflow' ? undefined : readString(input.name))
+  const requestedModel = readString(input.model)
+  const workflowName = toolName === 'Workflow' ? readString(input.name) : undefined
+  return {
+    ...existing,
+    toolUseId,
+    toolName,
+    ...(subagentType ? { subagentType } : {}),
+    ...(requestedModel ? { requestedModel } : {}),
+    ...(workflowName ? { workflowName } : {}),
+  }
+}
+
+export function readCompletedClaudeAgentOutput(
+  value: Record<string, unknown> | undefined,
+): CompletedClaudeAgentOutput | undefined
+{
+  if (value?.status !== 'completed' || !readString(value.agentId))
+  {
+    return undefined
+  }
+
+  const totalTokens = finiteNonNegativeInteger(value.totalTokens)
+  const totalToolUseCount = finiteNonNegativeInteger(value.totalToolUseCount)
+  const totalDurationMs = finiteNonNegativeInteger(value.totalDurationMs)
+  if (
+    totalTokens === undefined ||
+    totalToolUseCount === undefined ||
+    totalDurationMs === undefined ||
+    !value.usage ||
+    typeof value.usage !== 'object' ||
+    Array.isArray(value.usage)
+  )
+  {
+    return undefined
+  }
+
+  return value as unknown as CompletedClaudeAgentOutput
+}
+
+export function makeClaudeAgentCompletion(
+  output: CompletedClaudeAgentOutput,
+): ClaudeAgentCompletion
+{
+  return {
+    agentId: output.agentId,
+    ...(readString(output.resolvedModel) ? { resolvedModel: output.resolvedModel } : {}),
+    tokenUsage: {
+      totalTokens: output.totalTokens,
+      toolUses: output.totalToolUseCount,
+      durationMs: output.totalDurationMs,
+    },
+    totalToolUseCount: output.totalToolUseCount,
+    totalDurationMs: output.totalDurationMs,
   }
 }

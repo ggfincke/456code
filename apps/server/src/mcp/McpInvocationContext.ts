@@ -10,7 +10,7 @@ import {
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
 
-export type McpCapability = 'preview' | 'proposal'
+export type McpCapability = 'preview' | 'proposal' | 'orchestrate'
 
 export interface McpInvocationScope
 {
@@ -30,7 +30,7 @@ export class McpInvocationContext extends Context.Service<
 {}
 
 export const requireMcpCapability = Effect.fn('mcp.requireCapability')(function* (
-  capability: McpCapability,
+  capability: Exclude<McpCapability, 'orchestrate'>,
 )
 {
   const invocation = yield* McpInvocationContext

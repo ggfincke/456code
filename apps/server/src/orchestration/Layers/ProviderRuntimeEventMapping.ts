@@ -64,9 +64,21 @@ function requestKindFromCanonicalRequestType(
   }
 }
 
+// tool.progress frames for subagent-owned tools carry "task:<id>" as summary
+export function taskIdFromToolProgressSummary(summary: string | undefined): string | undefined
+{
+  if (!summary?.startsWith('task:'))
+  {
+    return undefined
+  }
+  const taskId = summary.slice('task:'.length).trim()
+  return taskId.length > 0 ? taskId : undefined
+}
+
 export function runtimeEventToActivities(
   event: ProviderRuntimeEvent,
   taskTitle?: string,
+  parentToolUseId?: string,
 ): ReadonlyArray<OrchestrationThreadActivity>
 {
   const maybeSequence = (() =>
@@ -273,6 +285,11 @@ export function runtimeEventToActivities(
           payload: {
             taskId: event.payload.taskId,
             ...(event.payload.taskType ? { taskType: event.payload.taskType } : {}),
+            ...(event.payload.workflowName ? { workflowName: event.payload.workflowName } : {}),
+            ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.subagentType ? { subagentType: event.payload.subagentType } : {}),
+            ...(event.payload.model ? { model: event.payload.model } : {}),
             ...(event.payload.description
               ? { detail: truncateDetail(event.payload.description) }
               : {}),
@@ -304,6 +321,13 @@ export function runtimeEventToActivities(
             ...(event.payload.summary ? { summary: truncateDetail(event.payload.summary) } : {}),
             ...(event.payload.lastToolName ? { lastToolName: event.payload.lastToolName } : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+            ...(event.payload.tokenUsage !== undefined
+              ? { tokenUsage: event.payload.tokenUsage }
+              : {}),
+            ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.subagentType ? { subagentType: event.payload.subagentType } : {}),
+            ...(event.payload.model ? { model: event.payload.model } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -338,6 +362,65 @@ export function runtimeEventToActivities(
                 }
               : {}),
             ...(event.payload.usage !== undefined ? { usage: event.payload.usage } : {}),
+            ...(event.payload.tokenUsage !== undefined
+              ? { tokenUsage: event.payload.tokenUsage }
+              : {}),
+            ...(event.payload.totalToolUseCount !== undefined
+              ? { totalToolUseCount: event.payload.totalToolUseCount }
+              : {}),
+            ...(event.payload.totalDurationMs !== undefined
+              ? { totalDurationMs: event.payload.totalDurationMs }
+              : {}),
+            ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+            ...(event.payload.agentId ? { agentId: event.payload.agentId } : {}),
+            ...(event.payload.subagentType ? { subagentType: event.payload.subagentType } : {}),
+            ...(event.payload.model ? { model: event.payload.model } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ]
+    }
+
+    case 'tool.progress':
+    {
+      const taskId = taskIdFromToolProgressSummary(event.payload.summary)
+      const summary = taskId === undefined ? event.payload.summary : undefined
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: 'tool',
+          kind: 'tool.progress',
+          summary:
+            summary ??
+            (event.payload.toolName ? `${event.payload.toolName} in progress` : 'Tool in progress'),
+          payload: {
+            ...(event.payload.toolUseId ? { toolUseId: event.payload.toolUseId } : {}),
+            ...(event.payload.toolName ? { toolName: event.payload.toolName } : {}),
+            ...(parentToolUseId ? { parentToolUseId } : {}),
+            ...(event.payload.elapsedSeconds !== undefined
+              ? { elapsedSeconds: event.payload.elapsedSeconds }
+              : {}),
+            ...(summary ? { summary: truncateDetail(summary) } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ]
+    }
+
+    case 'tool.summary':
+    {
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: 'tool',
+          kind: 'tool.summary',
+          summary: truncateDetail(event.payload.summary, 120),
+          payload: {
+            summary: truncateDetail(event.payload.summary),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

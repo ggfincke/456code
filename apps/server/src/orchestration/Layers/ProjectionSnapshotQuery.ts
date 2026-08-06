@@ -10,6 +10,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestratePlanRevision,
   OrchestrationCheckpointFile,
   OrchestrationProposedPlanId,
   OrchestrationPendingHandoff,
@@ -91,6 +92,21 @@ const ProjectionThreadMessageDbRowSchema = ProjectionThreadMessage.mapFields(
   }),
 )
 const ProjectionThreadProposedPlanDbRowSchema = ProjectionThreadProposedPlan
+const ProjectionThreadOrchestratePlanDbRowSchema = Schema.Struct({
+  threadId: ThreadId,
+  runId: OrchestratePlanRevision.fields.runId,
+  revision: OrchestratePlanRevision.fields.revision,
+  turnId: OrchestratePlanRevision.fields.turnId,
+  workflow: OrchestratePlanRevision.fields.workflow,
+  task: OrchestratePlanRevision.fields.task,
+  stages: Schema.fromJsonString(OrchestratePlanRevision.fields.stages),
+  totalWorkers: OrchestratePlanRevision.fields.totalWorkers,
+  maxWorkers: OrchestratePlanRevision.fields.maxWorkers,
+  source: OrchestratePlanRevision.fields.source,
+  status: OrchestratePlanRevision.fields.status,
+  createdAt: OrchestratePlanRevision.fields.createdAt,
+  updatedAt: OrchestratePlanRevision.fields.updatedAt,
+})
 const ProjectionThreadDbRowSchema = ProjectionThread.mapFields(
   Struct.assign({
     modelSelection: Schema.fromJsonString(ModelSelection),
@@ -456,6 +472,26 @@ function mapApprovalOutcomeRow(
   }
 }
 
+function mapOrchestratePlanRow(
+  row: Schema.Schema.Type<typeof ProjectionThreadOrchestratePlanDbRowSchema>,
+): OrchestratePlanRevision
+{
+  return {
+    runId: row.runId,
+    revision: row.revision,
+    turnId: row.turnId,
+    workflow: row.workflow,
+    task: row.task,
+    stages: row.stages,
+    totalWorkers: row.totalWorkers,
+    maxWorkers: row.maxWorkers,
+    source: row.source,
+    status: row.status,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  }
+}
+
 function toPersistenceSqlOrDecodeError(sqlOperation: string, decodeOperation: string)
 {
   return (cause: unknown): ProjectionRepositoryError =>
@@ -746,6 +782,30 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           updated_at AS "updatedAt"
         FROM projection_thread_proposed_plans
         ORDER BY thread_id ASC, created_at ASC, plan_id ASC
+      `,
+  })
+
+  const listThreadOrchestratePlanRows = SqlSchema.findAll({
+    Request: Schema.Void,
+    Result: ProjectionThreadOrchestratePlanDbRowSchema,
+    execute: () =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          run_id AS "runId",
+          revision,
+          turn_id AS "turnId",
+          workflow,
+          task,
+          stages_json AS "stages",
+          total_workers AS "totalWorkers",
+          max_workers AS "maxWorkers",
+          source,
+          status,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_orchestrate_plans
+        ORDER BY thread_id ASC, created_at ASC, run_id ASC, revision ASC
       `,
   })
 
@@ -1160,6 +1220,31 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
       `,
   })
 
+  const listThreadOrchestratePlanRowsByThread = SqlSchema.findAll({
+    Request: ThreadIdLookupInput,
+    Result: ProjectionThreadOrchestratePlanDbRowSchema,
+    execute: ({ threadId }) =>
+      sql`
+        SELECT
+          thread_id AS "threadId",
+          run_id AS "runId",
+          revision,
+          turn_id AS "turnId",
+          workflow,
+          task,
+          stages_json AS "stages",
+          total_workers AS "totalWorkers",
+          max_workers AS "maxWorkers",
+          source,
+          status,
+          created_at AS "createdAt",
+          updated_at AS "updatedAt"
+        FROM projection_thread_orchestrate_plans
+        WHERE thread_id = ${threadId}
+        ORDER BY created_at ASC, run_id ASC, revision ASC
+      `,
+  })
+
   const listThreadActivityRowsByThread = SqlSchema.findAll({
     Request: ThreadIdLookupInput,
     Result: ProjectionThreadActivityDbRowSchema,
@@ -1327,6 +1412,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               ),
             ),
           ),
+          listThreadOrchestratePlanRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                'ProjectionSnapshotQuery.getSnapshot:listThreadOrchestratePlans:query',
+                'ProjectionSnapshotQuery.getSnapshot:listThreadOrchestratePlans:decodeRows',
+              ),
+            ),
+          ),
           listThreadActivityRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1384,6 +1477,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             threadRows,
             messageRows,
             proposedPlanRows,
+            orchestratePlanRows,
             activityRows,
             sessionRows,
             checkpointRows,
@@ -1395,6 +1489,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             {
               const messagesByThread = new Map<string, Array<OrchestrationMessage>>()
               const proposedPlansByThread = new Map<string, Array<OrchestrationProposedPlan>>()
+              const orchestratePlansByThread = new Map<string, Array<OrchestratePlanRevision>>()
               const activitiesByThread = new Map<string, Array<OrchestrationThreadActivity>>()
               const checkpointsByThread = new Map<string, Array<OrchestrationCheckpointSummary>>()
               const sessionsByThread = new Map<string, OrchestrationSession>()
@@ -1447,6 +1542,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                   updatedAt: row.updatedAt,
                 })
                 proposedPlansByThread.set(row.threadId, threadProposedPlans)
+              }
+
+              for (const row of orchestratePlanRows)
+              {
+                updatedAt = maxIso(updatedAt, row.updatedAt)
+                const threadOrchestratePlans = orchestratePlansByThread.get(row.threadId) ?? []
+                threadOrchestratePlans.push(mapOrchestratePlanRow(row))
+                orchestratePlansByThread.set(row.threadId, threadOrchestratePlans)
               }
 
               for (const row of activityRows)
@@ -1587,6 +1690,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 deletedAt: row.deletedAt,
                 messages: messagesByThread.get(row.threadId) ?? [],
                 proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
+                orchestratePlans: orchestratePlansByThread.get(row.threadId) ?? [],
                 activities: activitiesByThread.get(row.threadId) ?? [],
                 checkpoints: checkpointsByThread.get(row.threadId) ?? [],
                 session: sessionsByThread.get(row.threadId) ?? null,
@@ -1645,6 +1749,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               ),
             ),
           ),
+          listThreadOrchestratePlanRows(undefined).pipe(
+            Effect.mapError(
+              toPersistenceSqlOrDecodeError(
+                'ProjectionSnapshotQuery.getCommandReadModel:listThreadOrchestratePlans:query',
+                'ProjectionSnapshotQuery.getCommandReadModel:listThreadOrchestratePlans:decodeRows',
+              ),
+            ),
+          ),
           listCommandThreadActivityRows(undefined).pipe(
             Effect.mapError(
               toPersistenceSqlOrDecodeError(
@@ -1693,6 +1805,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             projectRows,
             threadRows,
             proposedPlanRows,
+            orchestratePlanRows,
             commandThreadActivityRows,
             sessionRows,
             latestTurnRows,
@@ -1736,6 +1849,15 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
               for (let index = 0; index < proposedPlanRows.length; index += 1)
               {
                 const row = proposedPlanRows[index]
+                if (!row)
+                {
+                  continue
+                }
+                updatedAt = maxIso(updatedAt, row.updatedAt)
+              }
+              for (let index = 0; index < orchestratePlanRows.length; index += 1)
+              {
+                const row = orchestratePlanRows[index]
                 if (!row)
                 {
                   continue
@@ -1798,6 +1920,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 latestTurnByThread.set(row.threadId, mapLatestTurn(row))
               }
               const proposedPlansByThread = new Map<string, Array<OrchestrationProposedPlan>>()
+              const orchestratePlansByThread = new Map<string, Array<OrchestratePlanRevision>>()
               const commandActivitiesByThread = new Map<
                 string,
                 Array<OrchestrationThreadActivity>
@@ -1823,6 +1946,17 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                 approvalOutcomesByThread.set(row.threadId, outcomes)
               }
 
+              for (let index = 0; index < orchestratePlanRows.length; index += 1)
+              {
+                const row = orchestratePlanRows[index]
+                if (!row)
+                {
+                  continue
+                }
+                const threadOrchestratePlans = orchestratePlansByThread.get(row.threadId) ?? []
+                threadOrchestratePlans.push(mapOrchestratePlanRow(row))
+                orchestratePlansByThread.set(row.threadId, threadOrchestratePlans)
+              }
               for (let index = 0; index < proposedPlanRows.length; index += 1)
               {
                 const row = proposedPlanRows[index]
@@ -1885,6 +2019,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
                   deletedAt: row.deletedAt,
                   messages: [],
                   proposedPlans: proposedPlansByThread.get(row.threadId) ?? [],
+                  orchestratePlans: orchestratePlansByThread.get(row.threadId) ?? [],
                   activities: commandActivitiesByThread.get(row.threadId) ?? [],
                   checkpoints: [],
                   session: sessionByThread.get(row.threadId) ?? null,
@@ -2407,7 +2542,9 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         return Option.none<ProjectionThreadCheckpointContext>()
       }
 
-      const checkpointRows = yield* listCheckpointRowsByThread({ threadId }).pipe(
+      const checkpointRows = yield* listCheckpointRowsByThread({
+        threadId,
+      }).pipe(
         Effect.mapError(
           toPersistenceSqlOrDecodeError(
             'ProjectionSnapshotQuery.getThreadCheckpointContext:listCheckpoints:query',
@@ -2555,6 +2692,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
         threadRow,
         messageRows,
         proposedPlanRows,
+        orchestratePlanRows,
         activityRows,
         checkpointRows,
         latestTurnRow,
@@ -2582,6 +2720,14 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
             toPersistenceSqlOrDecodeError(
               'ProjectionSnapshotQuery.getThreadDetailById:listPlans:query',
               'ProjectionSnapshotQuery.getThreadDetailById:listPlans:decodeRows',
+            ),
+          ),
+        ),
+        listThreadOrchestratePlanRowsByThread({ threadId }).pipe(
+          Effect.mapError(
+            toPersistenceSqlOrDecodeError(
+              'ProjectionSnapshotQuery.getThreadDetailById:listOrchestratePlans:query',
+              'ProjectionSnapshotQuery.getThreadDetailById:listOrchestratePlans:decodeRows',
             ),
           ),
         ),
@@ -2671,6 +2817,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           return message
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
+        orchestratePlans: orchestratePlanRows.map(mapOrchestratePlanRow),
         activities: activityRows.map((row) =>
         {
           const activity = {

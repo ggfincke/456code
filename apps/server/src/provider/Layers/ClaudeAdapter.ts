@@ -27,6 +27,7 @@ import {
   type ProviderSendTurnInput,
   type ProviderSession,
   type ThreadTokenUsageSnapshot,
+  type TaskUsageSnapshot,
   type ProviderUserInputAnswers,
   RuntimeItemId,
   RuntimeRequestId,
@@ -95,20 +96,25 @@ import {
   normalizeClaudeActiveTokenUsage,
   normalizeClaudeContextUsageApiSnapshot,
   normalizeClaudeTaskProgressTokenUsage,
+  normalizeClaudeTaskUsage,
   selectedClaudeContextWindow,
 } from '../claude/ClaudeTokenUsage.ts'
 import {
   classifyRequestType,
   classifyToolItemType,
+  type ClaudeNativeTaskTool,
   exitPlanCaptureKey,
   extractExitPlanModePlan,
   extractPlanStepsFromTodoInput,
   isClaudeTaskTool,
   isTodoTool,
+  makeClaudeAgentCompletion,
+  makeClaudeNativeTaskTool,
   normalizeClaudeTaskStatus,
   type PlanStep,
   planStepsFromClaudeTasks,
   readClaudeTaskFromResult,
+  readCompletedClaudeAgentOutput,
   readString,
   readStringArray,
   summarizeToolRequest,
@@ -204,6 +210,25 @@ interface ToolInFlight
   readonly input: Record<string, unknown>
   readonly partialInputJson: string
   readonly lastEmittedInputFingerprint?: string
+  readonly nativeTask?: ClaudeNativeTaskTool
+}
+
+interface ClaudeNativeTaskCompletion
+{
+  readonly status: 'completed' | 'failed' | 'stopped'
+  readonly summary?: string
+  readonly usage?: unknown
+  readonly tokenUsage?: TaskUsageSnapshot
+}
+
+interface ClaudeNativeTaskState
+{
+  readonly taskId: string
+  toolUseId?: string
+  subagentType?: string
+  taskType?: string
+  workflowName?: string
+  completion?: ClaudeNativeTaskCompletion
 }
 
 interface ClaudeTaskState
@@ -237,6 +262,8 @@ interface ClaudeSessionContext
   }>
   readonly inFlightTools: Map<number, ToolInFlight>
   readonly claudeTasks: Map<string, ClaudeTaskState>
+  readonly nativeTaskTools: Map<string, ClaudeNativeTaskTool>
+  readonly nativeTasks: Map<string, ClaudeNativeTaskState>
   turnState: ClaudeTurnState | undefined
   lastKnownContextWindow: number | undefined
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined
@@ -396,6 +423,48 @@ function asCanonicalTurnId(value: TurnId): TurnId
 function asRuntimeRequestId(value: ApprovalRequestId): RuntimeRequestId
 {
   return RuntimeRequestId.make(value)
+}
+
+// merge sdk task frames into the per-session native task state, preferring
+// fresh fields but falling back to what the correlated task tool captured
+function updateClaudeNativeTaskState(
+  context: ClaudeSessionContext,
+  input: {
+    readonly taskId: string
+    readonly toolUseId?: string
+    readonly subagentType?: string
+    readonly taskType?: string
+    readonly workflowName?: string
+  },
+): ClaudeNativeTaskState
+{
+  const state = context.nativeTasks.get(input.taskId) ?? {
+    taskId: input.taskId,
+  }
+  const toolUseId = input.toolUseId ?? state.toolUseId
+  const taskTool = toolUseId ? context.nativeTaskTools.get(toolUseId) : undefined
+
+  if (toolUseId)
+  {
+    state.toolUseId = toolUseId
+  }
+  const subagentType = input.subagentType ?? state.subagentType ?? taskTool?.subagentType
+  if (subagentType)
+  {
+    state.subagentType = subagentType
+  }
+  if (input.taskType)
+  {
+    state.taskType = input.taskType
+  }
+  const workflowName = input.workflowName ?? state.workflowName ?? taskTool?.workflowName
+  if (workflowName)
+  {
+    state.workflowName = workflowName
+  }
+
+  context.nativeTasks.set(input.taskId, state)
+  return state
 }
 
 function readClaudeResumeSessionIdCandidate(resumeCursor: unknown): string | undefined
@@ -1530,10 +1599,27 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     }
 
     const { event } = message
+    const isNestedFrame =
+      message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined
+
+    // nested subagent frames must never touch root tool tracking: the shared
+    // index-keyed in-flight map would let a subagent block at the same index
+    // replace or delete the root entry (breaking Agent -> task correlation)
+    // and leak subagent tool calls as root work-log items; subagent activity
+    // reaches the timeline through task events instead
+    if (
+      isNestedFrame &&
+      (event.type === 'content_block_start' ||
+        event.type === 'content_block_stop' ||
+        (event.type === 'content_block_delta' && event.delta.type === 'input_json_delta'))
+    )
+    {
+      return
+    }
 
     if (event.type === 'message_delta')
     {
-      if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined)
+      if (isNestedFrame)
       {
         return
       }
@@ -1552,6 +1638,14 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (event.type === 'content_block_delta')
     {
+      if (
+        isNestedFrame &&
+        (event.delta.type === 'text_delta' || event.delta.type === 'thinking_delta')
+      )
+      {
+        return
+      }
+
       if (
         (event.delta.type === 'text_delta' || event.delta.type === 'thinking_delta') &&
         context.turnState
@@ -1621,11 +1715,19 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         const partialInputJson = tool.partialInputJson + event.delta.partial_json
         const parsedInput = tryParseJsonRecord(partialInputJson)
         const detail = parsedInput ? summarizeToolRequest(tool.toolName, parsedInput) : tool.detail
+        const nativeTask = parsedInput
+          ? makeClaudeNativeTaskTool(tool.toolName, tool.itemId, parsedInput, tool.nativeTask)
+          : tool.nativeTask
         let nextTool: ToolInFlight = {
           ...tool,
           partialInputJson,
           ...(parsedInput ? { input: parsedInput } : {}),
           ...(detail ? { detail } : {}),
+          ...(nativeTask ? { nativeTask } : {}),
+        }
+        if (nativeTask)
+        {
+          context.nativeTaskTools.set(nativeTask.toolUseId, nativeTask)
         }
 
         const nextFingerprint =
@@ -1716,6 +1818,10 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       const { index, content_block: block } = event
       if (block.type === 'text')
       {
+        if (isNestedFrame)
+        {
+          return
+        }
         yield* ensureAssistantTextBlock(context, index, {
           fallbackText: extractContentBlockText(block),
         })
@@ -1740,18 +1846,24 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       const detail = summarizeToolRequest(toolName, toolInput)
       const inputFingerprint =
         Object.keys(toolInput).length > 0 ? toolInputFingerprint(toolInput) : undefined
+      const nativeTask = makeClaudeNativeTaskTool(toolName, itemId, toolInput)
 
       const tool: ToolInFlight = {
         itemId,
         itemType,
         toolName,
-        title: titleForTool(itemType),
+        title: titleForTool(itemType, toolName),
         detail,
         input: toolInput,
         partialInputJson: '',
         ...(inputFingerprint ? { lastEmittedInputFingerprint: inputFingerprint } : {}),
+        ...(nativeTask ? { nativeTask } : {}),
       }
       context.inFlightTools.set(index, tool)
+      if (nativeTask)
+      {
+        context.nativeTaskTools.set(nativeTask.toolUseId, nativeTask)
+      }
 
       const stamp = yield* makeEventStamp()
       yield* offerRuntimeEvent({
@@ -1786,6 +1898,10 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (event.type === 'content_block_stop')
     {
+      if (isNestedFrame)
+      {
+        return
+      }
       const { index } = event
       const assistantBlock = context.turnState?.assistantTextBlocks.get(index)
       if (assistantBlock)
@@ -1805,6 +1921,70 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     }
   })
 
+  // terminal task event enriched with whatever the correlated Agent tool
+  // result reported (agent id, resolved model, authoritative usage)
+  const emitClaudeNativeTaskCompleted = Effect.fn('emitClaudeNativeTaskCompleted')(function* (
+    context: ClaudeSessionContext,
+    state: ClaudeNativeTaskState,
+    input: {
+      readonly rawMethod: string
+      readonly rawPayload: unknown
+    },
+  )
+  {
+    if (!state.completion)
+    {
+      return
+    }
+
+    const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
+    const agentCompletion = taskTool?.agentCompletion
+    const stamp = yield* makeEventStamp()
+    yield* offerRuntimeEvent({
+      type: 'task.completed',
+      eventId: stamp.eventId,
+      provider: PROVIDER,
+      createdAt: stamp.createdAt,
+      threadId: context.session.threadId,
+      ...(context.turnState ? { turnId: asCanonicalTurnId(context.turnState.turnId) } : {}),
+      payload: {
+        taskId: RuntimeTaskId.make(state.taskId),
+        status: state.completion.status,
+        ...(state.completion.summary ? { summary: state.completion.summary } : {}),
+        ...(state.completion.usage ? { usage: state.completion.usage } : {}),
+        ...((agentCompletion?.tokenUsage ?? state.completion.tokenUsage)
+          ? {
+              tokenUsage: agentCompletion?.tokenUsage ?? state.completion.tokenUsage,
+            }
+          : {}),
+        ...(state.toolUseId ? { toolUseId: state.toolUseId } : {}),
+        ...(agentCompletion?.agentId ? { agentId: agentCompletion.agentId } : {}),
+        ...((state.subagentType ?? taskTool?.subagentType)
+          ? { subagentType: state.subagentType ?? taskTool?.subagentType }
+          : {}),
+        ...((agentCompletion?.resolvedModel ?? taskTool?.requestedModel)
+          ? {
+              model: agentCompletion?.resolvedModel ?? taskTool?.requestedModel,
+            }
+          : {}),
+        ...(agentCompletion
+          ? {
+              totalToolUseCount: agentCompletion.totalToolUseCount,
+              totalDurationMs: agentCompletion.totalDurationMs,
+            }
+          : {}),
+      },
+      providerRefs: nativeProviderRefs(context, {
+        providerItemId: state.toolUseId,
+      }),
+      raw: {
+        source: 'claude.sdk.message',
+        method: input.rawMethod,
+        payload: input.rawPayload,
+      },
+    })
+  })
+
   const handleUserMessage = Effect.fn('handleUserMessage')(function* (
     context: ClaudeSessionContext,
     message: SDKMessage,
@@ -1815,9 +1995,19 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       return
     }
 
-    if (context.turnState)
+    if (
+      context.turnState &&
+      (message.parent_tool_use_id === null || message.parent_tool_use_id === undefined)
+    )
     {
       context.turnState.items.push(message.message)
+    }
+
+    // nested subagent tool results must not resolve or delete root in-flight
+    // tool entries; the root Agent result itself arrives with a null parent
+    if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined)
+    {
+      return
     }
 
     for (const toolResult of toolResultBlocksFromUserMessage(message))
@@ -1930,6 +2120,33 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         })
       }
 
+      // an Agent tool result may land before or after its task_notification;
+      // emit the completion here only when the task state already closed
+      if (!toolResult.isError && tool.nativeTask?.toolName !== 'Workflow')
+      {
+        const agentOutput = readCompletedClaudeAgentOutput(toolUseResult)
+        if (agentOutput)
+        {
+          const nativeTask =
+            tool.nativeTask ?? makeClaudeNativeTaskTool(tool.toolName, tool.itemId, tool.input)
+          if (nativeTask)
+          {
+            nativeTask.agentCompletion = makeClaudeAgentCompletion(agentOutput)
+            context.nativeTaskTools.set(nativeTask.toolUseId, nativeTask)
+            const taskState = Array.from(context.nativeTasks.values()).find(
+              (state) => state.toolUseId === nativeTask.toolUseId,
+            )
+            if (taskState?.completion)
+            {
+              yield* emitClaudeNativeTaskCompleted(context, taskState, {
+                rawMethod: 'claude/user/agent-result',
+                rawPayload: message,
+              })
+            }
+          }
+        }
+      }
+
       context.inFlightTools.delete(index)
     }
   })
@@ -1940,6 +2157,11 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
   )
   {
     if (message.type !== 'assistant')
+    {
+      return
+    }
+
+    if (message.parent_tool_use_id !== null && message.parent_tool_use_id !== undefined)
     {
       return
     }
@@ -2160,17 +2382,39 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         })
         return
       case 'task_started':
+      {
+        const state = updateClaudeNativeTaskState(context, {
+          taskId: message.task_id,
+          ...(message.tool_use_id ? { toolUseId: message.tool_use_id } : {}),
+          ...(message.subagent_type ? { subagentType: message.subagent_type } : {}),
+          ...(message.task_type ? { taskType: message.task_type } : {}),
+          ...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
+        })
+        const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
         yield* offerRuntimeEvent({
           ...base,
           type: 'task.started',
           payload: {
             taskId: RuntimeTaskId.make(message.task_id),
             description: message.description,
-            ...(message.task_type ? { taskType: message.task_type } : {}),
+            ...(state.taskType ? { taskType: state.taskType } : {}),
+            ...(state.workflowName ? { workflowName: state.workflowName } : {}),
+            ...(state.toolUseId ? { toolUseId: state.toolUseId } : {}),
+            ...(state.subagentType ? { subagentType: state.subagentType } : {}),
+            ...(taskTool?.requestedModel ? { model: taskTool.requestedModel } : {}),
           },
         })
         return
+      }
       case 'task_progress':
+      {
+        const state = updateClaudeNativeTaskState(context, {
+          taskId: message.task_id,
+          ...(message.tool_use_id ? { toolUseId: message.tool_use_id } : {}),
+          ...(message.subagent_type ? { subagentType: message.subagent_type } : {}),
+        })
+        const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
+        const tokenUsage = normalizeClaudeTaskUsage(message.usage)
         yield* emitThreadTokenUsage(
           context,
           normalizeClaudeTaskProgressTokenUsage(message.usage, context),
@@ -2187,16 +2431,33 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
             description: message.description,
             ...(message.summary ? { summary: message.summary } : {}),
             ...(message.usage ? { usage: message.usage } : {}),
+            ...(tokenUsage ? { tokenUsage } : {}),
             ...(message.last_tool_name ? { lastToolName: message.last_tool_name } : {}),
+            ...(state.toolUseId ? { toolUseId: state.toolUseId } : {}),
+            ...(state.subagentType ? { subagentType: state.subagentType } : {}),
+            ...(taskTool?.requestedModel ? { model: taskTool.requestedModel } : {}),
           },
         })
         return
+      }
       // task state patch (status/backgrounded/end_time). No runtime mapping
       // yet — the terminal task_notification reports the outcome — but it
       // must not surface as an unknown-subtype warning row.
       case 'task_updated':
         return
       case 'task_notification':
+      {
+        const state = updateClaudeNativeTaskState(context, {
+          taskId: message.task_id,
+          ...(message.tool_use_id ? { toolUseId: message.tool_use_id } : {}),
+        })
+        const tokenUsage = normalizeClaudeTaskUsage(message.usage)
+        state.completion = {
+          status: message.status,
+          ...(message.summary ? { summary: message.summary } : {}),
+          ...(message.usage ? { usage: message.usage } : {}),
+          ...(tokenUsage ? { tokenUsage } : {}),
+        }
         yield* emitThreadTokenUsage(
           context,
           normalizeClaudeTaskProgressTokenUsage(message.usage, context),
@@ -2205,17 +2466,12 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
             rawPayload: message,
           },
         )
-        yield* offerRuntimeEvent({
-          ...base,
-          type: 'task.completed',
-          payload: {
-            taskId: RuntimeTaskId.make(message.task_id),
-            status: message.status,
-            ...(message.summary ? { summary: message.summary } : {}),
-            ...(message.usage ? { usage: message.usage } : {}),
-          },
+        yield* emitClaudeNativeTaskCompleted(context, state, {
+          rawMethod: 'claude/system/task_notification',
+          rawPayload: message,
         })
         return
+      }
       case 'files_persisted':
         yield* offerRuntimeEvent({
           ...base,
@@ -2882,6 +3138,8 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       const pendingUserInputs = new Map<ApprovalRequestId, PendingUserInput>()
       const inFlightTools = new Map<number, ToolInFlight>()
       const claudeTasks = new Map<string, ClaudeTaskState>()
+      const nativeTaskTools = new Map<string, ClaudeNativeTaskTool>()
+      const nativeTasks = new Map<string, ClaudeNativeTaskState>()
 
       const contextRef = yield* Ref.make<ClaudeSessionContext | undefined>(undefined)
 
@@ -3241,6 +3499,8 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           : {}),
         ...(Object.keys(settings).length > 0 ? { settings } : {}),
         includePartialMessages: true,
+        // TODO(config): expose forwardSubagentText setting
+        forwardSubagentText: true,
         canUseTool,
         env: claudeEnvironment,
         ...(input.cwd ? { additionalDirectories: [input.cwd] } : {}),
@@ -3344,6 +3604,8 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         turns: [],
         inFlightTools,
         claudeTasks,
+        nativeTaskTools,
+        nativeTasks,
         turnState: undefined,
         lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,
