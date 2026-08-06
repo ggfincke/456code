@@ -16,7 +16,7 @@ const showContextMenuFallbackMock =
     ) => Promise<T | null>
   >()
 
-vi.mock('../../../apps/web/src/contextMenuFallback', () => ({
+vi.mock('../../../apps/web/src/lib/contextMenuFallback', () => ({
   showContextMenuFallback: showContextMenuFallbackMock,
 }))
 

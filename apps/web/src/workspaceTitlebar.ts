@@ -1,5 +1,4 @@
 // apps/web/src/workspaceTitlebar.ts
-// expose collapsed sidebar titlebar inset class
+// expose the stable facade for workspace titlebar helpers
 
-export const COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS =
-  '[[data-sidebar-state=collapsed]_&]:pl-[var(--workspace-titlebar-content-left)]'
+export * from './lib/workspaceTitlebar'

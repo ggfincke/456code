@@ -63,7 +63,7 @@ import {
   threadJumpIndexFromCommand,
   threadTraversalDirectionFromCommand,
 } from '../keybindings'
-import { useShortcutModifierState } from '../shortcutModifierState'
+import { useShortcutModifierState } from '../lib/shortcutModifierState'
 import { isTerminalFocused } from '../lib/terminalFocus'
 import { isModelPickerOpen } from '../modelPickerVisibility'
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from '../terminalUiStateStore'
@@ -79,7 +79,7 @@ import {
   buildSidebarProjectSnapshots,
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
-} from '../sidebarProjectGrouping'
+} from '../lib/sidebarProjectGrouping'
 import { legacyProjectCwdPreferenceKey, useUiStateStore } from '../uiStateStore'
 import { useThreadSelectionStore } from '../threadSelectionStore'
 import { useThreadActions } from '../hooks/useThreadActions'
@@ -100,7 +100,7 @@ import { useAtomCommand } from '../state/use-atom-command'
 import { buildThreadRouteParams, resolveThreadRouteTarget } from '../threadRoutes'
 import { formatRelativeTimeLabel, parseTimestampDate } from '../timestampFormat'
 import type { SidebarThreadSummary } from '../types'
-import { importSourceDisplayName, importSourceDriverKind } from '../importSourcePresentation'
+import { importSourceDisplayName, importSourceDriverKind } from '../lib/importSourcePresentation'
 import { cn } from '~/lib/utils'
 import {
   formatWorkingDurationLabel,

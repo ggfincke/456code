@@ -20,7 +20,7 @@ import {
 import { useEnvironments } from '../state/environments'
 import { APP_DISPLAY_NAME } from '~/branding'
 import { cn } from '~/lib/utils'
-import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from '~/workspaceTitlebar'
+import { COLLAPSED_SIDEBAR_TITLEBAR_INSET_CLASS } from '~/lib/workspaceTitlebar'
 
 function ChatIndexRouteView()
 {

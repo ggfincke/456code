@@ -43,7 +43,7 @@ import {
 import { useDesktopUpdateState } from '../../../state/desktopUpdate'
 import { primaryServerObservabilityAtom, primaryServerProvidersAtom } from '../../../state/server'
 import { ProviderModelPicker } from '../../chat/ProviderModelPicker'
-import { TraitsPicker } from '../../chat/TraitsPicker'
+import { TraitsPicker } from '../../chat/composer/TraitsPicker'
 import { Button } from '../../ui/button'
 import { DraftInput } from '../../ui/draft-input'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../../ui/select'

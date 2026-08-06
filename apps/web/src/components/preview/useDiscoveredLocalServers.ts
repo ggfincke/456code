@@ -7,7 +7,7 @@ import { useMemo } from 'react'
 
 import type { EnvironmentId } from '@t3tools/contracts'
 import { resolveDiscoveredServerUrl } from '~/browser/browserTargetResolver'
-import { useDiscoveredPorts } from '~/portDiscoveryState'
+import { useDiscoveredPorts } from '~/lib/portDiscoveryState'
 
 export interface PreviewableServer extends DiscoveredLocalServer
 {

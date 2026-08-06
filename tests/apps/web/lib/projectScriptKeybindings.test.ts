@@ -4,7 +4,7 @@
 import { MAX_KEYBINDING_VALUE_LENGTH, type KeybindingCommand } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
 
-import { commandForProjectScript } from '../../../../apps/web/src/projectScripts'
+import { commandForProjectScript } from '../../../../apps/web/src/lib/projectScripts'
 import {
   decodeProjectScriptKeybindingRule,
   keybindingValueForCommand,

@@ -421,7 +421,7 @@ describe('orderItemsByPreferredIds', () =>
     // `projectOrder` is populated with physical keys (envId + cwd-derived)
     // by the store and by drag-end handlers. Readers must identify projects
     // with the same key format, or manual sort silently snaps back.
-    const { getProjectOrderKey } = await import('../../../../apps/web/src/logicalProject')
+    const { getProjectOrderKey } = await import('../../../../apps/web/src/lib/logicalProject')
     const projects = [
       {
         environmentId: EnvironmentId.make('environment-local'),

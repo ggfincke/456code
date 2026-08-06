@@ -4,8 +4,11 @@
 import type { ContextMenuItem, LocalApi } from '@t3tools/contracts'
 
 import { resetRequestLatencyStateForTests } from './rpc/requestLatencyState'
-import { showContextMenuFallback } from './contextMenuFallback'
-import { readBrowserClientSettings, writeBrowserClientSettings } from './clientPersistenceStorage'
+import { showContextMenuFallback } from './lib/contextMenuFallback'
+import {
+  readBrowserClientSettings,
+  writeBrowserClientSettings,
+} from './lib/clientPersistenceStorage'
 
 let cachedApi: LocalApi | undefined
 
