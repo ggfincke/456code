@@ -49,7 +49,7 @@ it.effect('stores only a token hash, resolves the bearer token, and revokes by t
 
     const resolved = yield* registry.resolve(token)
     expect(resolved?.threadId).toBe(threadId)
-    expect(resolved?.capabilities).toEqual(new Set(['preview', 'proposal']))
+    expect(resolved?.capabilities).toEqual(new Set(['preview', 'proposal', 'orchestrate']))
     expect(resolved?.activeTurnId).toBeUndefined()
 
     const turnId = TurnId.make('turn-1')

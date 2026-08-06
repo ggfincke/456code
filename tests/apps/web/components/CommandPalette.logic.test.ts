@@ -56,6 +56,7 @@ function makeThread(overrides: Partial<Thread> = {}): Thread
     session: null,
     messages: [],
     proposedPlans: [],
+    orchestratePlans: [],
     createdAt: '2026-03-01T00:00:00.000Z',
     archivedAt: null,
     origin: null,

@@ -339,13 +339,11 @@ export const OrchestratePlanStage = Schema.Struct({
 })
 export type OrchestratePlanStage = typeof OrchestratePlanStage.Type
 
-/**
- * One revision of an orchestrate model plan: the durable server-held
- * counterpart of the fenced `orchestrate-plan` block, written by the agent
- * through the orchestrate MCP toolkit (or backfilled from a fence) and
- * rendered by the plan card. Revisions are immutable; a re-gated plan for the
- * same run appends the next revision and supersedes earlier pending ones.
- */
+// one revision of an orchestrate model plan: the durable server-held
+// counterpart of the fenced `orchestrate-plan` block, written by the agent
+// through the orchestrate MCP toolkit (or backfilled from a fence) and
+// rendered by the plan card. revisions are immutable; a re-gated plan for the
+// same run appends the next revision and supersedes earlier pending ones.
 export const OrchestratePlanRevision = Schema.Struct({
   runId: OrchestratePlanRunId,
   revision: NonNegativeInt,
@@ -1104,12 +1102,12 @@ const ThreadProposedPlanUpsertCommand = Schema.Struct({
 
 // server-internal: dispatched by the orchestrate MCP toolkit after validation
 const ThreadOrchestratePlanUpsertCommand = Schema.Struct({
-  type: Schema.Literal("thread.orchestrate-plan.upsert"),
+  type: Schema.Literal('thread.orchestrate-plan.upsert'),
   commandId: CommandId,
   threadId: ThreadId,
   plan: OrchestratePlanRevision,
   createdAt: IsoDateTime,
-});
+})
 
 const ThreadTurnDiffCompleteCommand = Schema.Struct({
   type: Schema.Literal('thread.turn.diff.complete'),

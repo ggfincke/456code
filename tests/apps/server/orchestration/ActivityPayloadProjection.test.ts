@@ -89,6 +89,7 @@ function makeThread(activities: ReadonlyArray<OrchestrationThreadActivity>): Orc
     origin: null,
     messages: [],
     proposedPlans: [],
+    orchestratePlans: [],
     activities,
     checkpoints: [],
     session: null,
