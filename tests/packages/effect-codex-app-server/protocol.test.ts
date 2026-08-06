@@ -1,5 +1,5 @@
 // tests/packages/effect-codex-app-server/protocol.test.ts
-// verifies Codex app-server protocol routing, diagnostics, and termination
+// verifies Codex app-server protocol routing, framing, diagnostics, and termination
 
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
@@ -9,7 +9,7 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
-import { assert, it } from '@effect/vitest'
+import { assert, describe, it } from '@effect/vitest'
 
 import * as CodexError from '../../../packages/effect-codex-app-server/src/errors.ts'
 import * as CodexProtocol from '../../../packages/effect-codex-app-server/src/protocol.ts'
@@ -37,6 +37,129 @@ const decodeConsumeRateLimitResetCreditResponse = Schema.decodeUnknownEffect(
 
 it.layer(NodeServices.layer)('effect-codex-app-server protocol', (it) =>
 {
+  describe('Codex App Server process termination', () =>
+  {
+    it.effect('fails pending and later requests with the exact process-exit error', () =>
+      Effect.gen(function* ()
+      {
+        const { stdio, input, output } = yield* makeInMemoryStdio()
+        const processExitError = new CodexError.CodexAppServerProcessExitedError({
+          code: 9,
+          pid: 51,
+        })
+        const termination = yield* Deferred.make<CodexError.CodexAppServerError>()
+        const terminationCalls: Array<CodexError.CodexAppServerError> = []
+        const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({
+          stdio,
+          terminationError: Effect.succeed(processExitError),
+          onTermination: (error) =>
+            Effect.sync(() =>
+            {
+              terminationCalls.push(error)
+            }).pipe(Effect.andThen(Deferred.succeed(termination, error)), Effect.asVoid),
+        })
+
+        const pending = yield* transport.request('thread/start', {}).pipe(Effect.forkScoped)
+        assert.deepEqual(yield* decodeJson(yield* Queue.take(output)), {
+          id: 1,
+          method: 'thread/start',
+          params: {},
+        })
+
+        yield* Queue.end(input)
+
+        const pendingError = yield* Fiber.join(pending).pipe(
+          Effect.timeout('1 second'),
+          Effect.match({
+            onFailure: (error) => error,
+            onSuccess: () => assert.fail('Expected pending request to fail after process exit'),
+          }),
+        )
+        const terminationError = yield* Deferred.await(termination).pipe(Effect.timeout('1 second'))
+        const laterRequestError = yield* transport.request('thread/resume', {}).pipe(
+          Effect.timeout('1 second'),
+          Effect.match({
+            onFailure: (error) => error,
+            onSuccess: () => assert.fail('Expected post-exit request to fail'),
+          }),
+        )
+
+        assert.strictEqual(pendingError, processExitError)
+        assert.strictEqual(terminationError, processExitError)
+        assert.strictEqual(laterRequestError, processExitError)
+        assert.equal(terminationCalls.length, 1)
+        assert.strictEqual(terminationCalls[0], processExitError)
+      }),
+    )
+  })
+
+  describe('Codex App Server JSON-RPC framing', () =>
+  {
+    it.effect('routes blank, CRLF, split-code-point, and split-line chunks exactly', () =>
+      Effect.gen(function* ()
+      {
+        const { stdio, input, output } = yield* makeInMemoryStdio()
+        const transport = yield* CodexProtocol.makeCodexAppServerPatchedProtocol({ stdio })
+        const notifications =
+          yield* Deferred.make<ReadonlyArray<CodexProtocol.CodexAppServerIncomingNotification>>()
+
+        yield* transport.incomingNotifications.pipe(
+          Stream.take(1),
+          Stream.runCollect,
+          Effect.flatMap((chunk) => Deferred.succeed(notifications, chunk)),
+          Effect.forkScoped,
+        )
+
+        const pending = yield* transport.request('thread/start', {}).pipe(Effect.forkScoped)
+        yield* Queue.take(output)
+
+        const notification = {
+          method: 'item/agentMessage/delta',
+          params: {
+            delta: 'split at snowman ☃',
+            itemId: 'item-1',
+            threadId: 'thread-1',
+            turnId: 'turn-1',
+          },
+        }
+        const result = {
+          thread: {
+            id: 'thread-1',
+            title: 'chunked response',
+          },
+        }
+        const blankAndNotification = encoder.encode(
+          `\n${encodeUnknownJsonString(notification)}\r\n`,
+        )
+        const response = encoder.encode(`${encodeUnknownJsonString({ id: 1, result })}\n`)
+        const snowmanStart = blankAndNotification.findIndex(
+          (byte, index) =>
+            byte === 0xe2 &&
+            blankAndNotification[index + 1] === 0x98 &&
+            blankAndNotification[index + 2] === 0x83,
+        )
+        assert.isAtLeast(snowmanStart, 0)
+        const codePointSplit = snowmanStart + 1
+        const responseSplit = Math.floor(response.length / 2)
+
+        yield* Queue.offer(input, blankAndNotification.subarray(0, codePointSplit))
+        yield* Queue.offer(
+          input,
+          Uint8Array.from([
+            ...blankAndNotification.subarray(codePointSplit),
+            ...response.subarray(0, responseSplit),
+          ]),
+        )
+        yield* Queue.offer(input, response.subarray(responseSplit))
+
+        assert.deepEqual(yield* Deferred.await(notifications).pipe(Effect.timeout('1 second')), [
+          notification,
+        ])
+        assert.deepEqual(yield* Fiber.join(pending).pipe(Effect.timeout('1 second')), result)
+      }),
+    )
+  })
+
   it.effect('maps account usage responses to the upstream token usage schema', () =>
     Effect.gen(function* ()
     {

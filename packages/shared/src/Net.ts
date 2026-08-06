@@ -7,22 +7,12 @@ import * as Data from 'effect/Data'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Context from 'effect/Context'
-import * as Predicate from 'effect/Predicate'
 
 export class NetError extends Data.TaggedError('NetError')<{
   readonly message: string
   readonly cause?: unknown
 }>
 {}
-
-const isErrnoExceptionWithCode = (
-  cause: unknown,
-): cause is {
-  readonly code: string
-} =>
-  Predicate.isObject(cause) &&
-  Predicate.hasProperty(cause, 'code') &&
-  Predicate.isString(cause.code)
 
 const closeServer = (server: NodeNet.Server) =>
 {
@@ -62,8 +52,6 @@ export class NetService extends Context.Service<NetService, NetServiceShape>()(
 export const make = () =>
 {
   // returns true when a TCP server can bind to {host, port}.
-  // `EADDRNOTAVAIL` is treated as available so IPv6-absent hosts don't fail
-  // loopback availability checks.
   const canListenOnHost = (port: number, host: string): Effect.Effect<boolean> =>
     Effect.callback<boolean>((resume) =>
     {
@@ -81,11 +69,6 @@ export const make = () =>
 
       server.once('error', (cause) =>
       {
-        if (isErrnoExceptionWithCode(cause) && cause.code === 'EADDRNOTAVAIL')
-        {
-          settle(true)
-          return
-        }
         settle(false)
       })
 
@@ -156,7 +139,7 @@ export const make = () =>
       return yield* Effect.zipWith(
         canListenOnHost(port, '127.0.0.1'),
         canListenOnHost(port, '::1'),
-        (ipv4, ipv6) => ipv4 && ipv6,
+        (ipv4, ipv6) => ipv4 || ipv6,
       )
     })
 

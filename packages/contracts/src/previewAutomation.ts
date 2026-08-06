@@ -624,20 +624,32 @@ export const PreviewAutomationStreamEvent = Schema.Union([
 ])
 export type PreviewAutomationStreamEvent = typeof PreviewAutomationStreamEvent.Type
 
-export const PreviewAutomationResponse = Schema.Struct({
+const PreviewAutomationResponseFields = {
   clientId: PreviewAutomationClientId,
   connectionId: PreviewAutomationConnectionId,
   requestId: TrimmedNonEmptyString,
-  ok: Schema.Boolean,
-  result: Schema.optional(Schema.Unknown),
-  error: Schema.optional(
-    Schema.Struct({
-      _tag: TrimmedNonEmptyString,
-      message: Schema.String,
-      detail: Schema.optional(Schema.Unknown),
-    }),
-  ),
+}
+
+const PreviewAutomationResponseError = Schema.Struct({
+  _tag: TrimmedNonEmptyString,
+  message: Schema.String,
+  detail: Schema.optional(Schema.Unknown),
 })
+
+export const PreviewAutomationResponse = Schema.Union([
+  Schema.Struct({
+    ...PreviewAutomationResponseFields,
+    ok: Schema.Literal(true),
+    result: Schema.optional(Schema.Unknown),
+    error: Schema.optionalKey(Schema.Never),
+  }),
+  Schema.Struct({
+    ...PreviewAutomationResponseFields,
+    ok: Schema.Literal(false),
+    result: Schema.optionalKey(Schema.Never),
+    error: PreviewAutomationResponseError,
+  }),
+])
 export type PreviewAutomationResponse = typeof PreviewAutomationResponse.Type
 
 export class PreviewAutomationUnavailableError extends Schema.TaggedErrorClass<PreviewAutomationUnavailableError>()(

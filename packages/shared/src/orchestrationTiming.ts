@@ -55,6 +55,16 @@ export function deriveActiveWorkStartedAt(
   sendStartedAt: string | null,
 ): string | null
 {
+  const runningTurnId =
+    session?.orchestrationStatus === 'running' ? (session.activeTurnId ?? null) : null
+  if (runningTurnId !== null)
+  {
+    if (latestTurn?.turnId === runningTurnId)
+    {
+      return latestTurn.startedAt ?? sendStartedAt
+    }
+    return sendStartedAt
+  }
   if (!isLatestTurnSettled(latestTurn, session))
   {
     return latestTurn?.startedAt ?? sendStartedAt

@@ -42,21 +42,21 @@ export const makeKeyedCoalescingWorker = <K, V, E, R>(options: {
         Effect.flatMap(() =>
           TxRef.modify(stateRef, (state) =>
           {
-            const nextValue = state.latestByKey.get(key)
-            if (nextValue === undefined)
+            if (!state.latestByKey.has(key))
             {
               const activeKeys = new Set(state.activeKeys)
               activeKeys.delete(key)
               return [null, { ...state, activeKeys }] as const
             }
 
+            const nextValue = state.latestByKey.get(key) as V
             const latestByKey = new Map(state.latestByKey)
             latestByKey.delete(key)
-            return [nextValue, { ...state, latestByKey }] as const
+            return [{ value: nextValue }, { ...state, latestByKey }] as const
           }).pipe(Effect.tx),
         ),
         Effect.flatMap((nextValue) =>
-          nextValue === null ? Effect.void : processKey(key, nextValue),
+          nextValue === null ? Effect.void : processKey(key, nextValue.value),
         ),
       )
 
@@ -88,12 +88,12 @@ export const makeKeyedCoalescingWorker = <K, V, E, R>(options: {
           const queuedKeys = new Set(state.queuedKeys)
           queuedKeys.delete(key)
 
-          const value = state.latestByKey.get(key)
-          if (value === undefined)
+          if (!state.latestByKey.has(key))
           {
             return [null, { ...state, queuedKeys }] as const
           }
 
+          const value = state.latestByKey.get(key) as V
           const latestByKey = new Map(state.latestByKey)
           latestByKey.delete(key)
           const activeKeys = new Set(state.activeKeys)
@@ -120,8 +120,10 @@ export const makeKeyedCoalescingWorker = <K, V, E, R>(options: {
       TxRef.modify(stateRef, (state) =>
       {
         const latestByKey = new Map(state.latestByKey)
-        const existing = latestByKey.get(key)
-        latestByKey.set(key, existing === undefined ? value : options.merge(existing, value))
+        const nextValue = latestByKey.has(key)
+          ? options.merge(latestByKey.get(key) as V, value)
+          : value
+        latestByKey.set(key, nextValue)
 
         if (state.queuedKeys.has(key) || state.activeKeys.has(key))
         {

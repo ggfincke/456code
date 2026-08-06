@@ -217,8 +217,12 @@ const parseLenientJsonGetter = SchemaGetter.onSome((input: string) =>
     (match, stringLiteral: string | undefined) => (stringLiteral ? match : ''),
   )
 
-  // strip trailing commas before `}` or `]`.
-  stripped = stripped.replace(/,(\s*[}\]])/g, '$1')
+  // strip trailing commas while preserving comma-bracket text inside strings.
+  stripped = stripped.replace(
+    /("(?:[^"\\]|\\.)*")|,(\s*[}\]])/g,
+    (match, stringLiteral: string | undefined, suffix: string | undefined) =>
+      stringLiteral ? match : (suffix ?? match),
+  )
 
   return decodeJsonString(stripped).pipe(
     Effect.map(Option.some),

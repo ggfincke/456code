@@ -154,9 +154,10 @@ function parseRemoteHost(remoteUrl: string): string | null
     return null
   }
 
-  if (trimmed.startsWith('git@'))
+  const userSeparatorIndex = trimmed.includes('://') ? -1 : trimmed.indexOf('@')
+  if (userSeparatorIndex > 0)
   {
-    const hostWithPath = trimmed.slice('git@'.length)
+    const hostWithPath = trimmed.slice(userSeparatorIndex + 1)
     const separatorIndex = hostWithPath.search(/[:/]/)
     if (separatorIndex <= 0)
     {

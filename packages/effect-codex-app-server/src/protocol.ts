@@ -170,8 +170,14 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn('makeCodexAppServerPa
   {
     const scope = yield* Scope.Scope
     const outgoing = yield* Queue.unbounded<string, Cause.Done<void>>()
-    const incomingNotifications = yield* Queue.unbounded<CodexAppServerIncomingNotification>()
-    const incomingRequests = yield* Queue.unbounded<CodexAppServerIncomingRequest>()
+    const incomingNotifications = yield* Queue.unbounded<
+      CodexAppServerIncomingNotification,
+      Cause.Done<void>
+    >()
+    const incomingRequests = yield* Queue.unbounded<
+      CodexAppServerIncomingRequest,
+      Cause.Done<void>
+    >()
     const pending = yield* Ref.make(new Map<string, CodexAppServerPendingRequest>())
     const nextRequestId = yield* Ref.make(1)
     const remainder = yield* Ref.make('')
@@ -218,6 +224,8 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn('makeCodexAppServerPa
             yield* Ref.set(terminationError, error)
             yield* failAllPending(error)
             yield* Queue.end(outgoing)
+            yield* Queue.end(incomingNotifications)
+            yield* Queue.end(incomingRequests)
             if (options.onTermination)
             {
               yield* options.onTermination(error)
@@ -230,6 +238,12 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn('makeCodexAppServerPa
     const offerOutgoing = (message: Record<string, unknown>) =>
       Effect.gen(function* ()
       {
+        const terminated = yield* Ref.get(terminationError)
+        if (terminated !== undefined)
+        {
+          return yield* terminated
+        }
+
         yield* logProtocol({
           direction: 'outgoing',
           stage: 'decoded',
@@ -241,7 +255,19 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn('makeCodexAppServerPa
           stage: 'raw',
           payload: encoded,
         })
-        yield* Queue.offer(outgoing, encoded).pipe(Effect.asVoid)
+        const accepted = yield* Queue.offer(outgoing, encoded)
+        if (!accepted)
+        {
+          const error = yield* Ref.get(terminationError)
+          if (error !== undefined)
+          {
+            return yield* error
+          }
+          return yield* new CodexError.CodexAppServerTransportError({
+            operation: 'write-output-stream',
+            cause: new Error('Codex App Server output queue ended.'),
+          })
+        }
       })
 
     const removePending = (requestId: string) =>
@@ -323,9 +349,26 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn('makeCodexAppServerPa
         )
       })
 
+    // notification handlers run on a dedicated fiber so a handler awaiting a
+    // later response can never block the single stdin routing fiber that must
+    // deliver that response (megacore U-039); one sequential consumer preserves
+    // notification order, and per-notification handler failures are swallowed
+    // instead of killing the dispatch fiber
+    const notificationDispatch = yield* Queue.unbounded<CodexAppServerIncomingNotification>()
+    yield* Stream.fromQueue(notificationDispatch).pipe(
+      Stream.runForEach((notification) =>
+        // ignoreCause, not ignore: a defect (not just a typed failure) must not
+        // kill the dispatch fiber and silently strand every later notification
+        (options.onNotification ? options.onNotification(notification) : Effect.void).pipe(
+          Effect.ignoreCause({ log: true }),
+        ),
+      ),
+      Effect.forkIn(scope),
+    )
+
     const handleNotification = (notification: CodexAppServerIncomingNotification) =>
       Queue.offer(incomingNotifications, notification).pipe(
-        Effect.andThen(options.onNotification ? options.onNotification(notification) : Effect.void),
+        Effect.andThen(Queue.offer(notificationDispatch, notification)),
         Effect.asVoid,
       )
 
@@ -420,7 +463,17 @@ export const makeCodexAppServerPatchedProtocol = Effect.fn('makeCodexAppServerPa
       Effect.forkScoped,
     )
 
-    yield* Stream.fromQueue(outgoing).pipe(Stream.run(options.stdio.stdout()), Effect.forkScoped)
+    yield* Stream.fromQueue(outgoing).pipe(
+      Stream.run(options.stdio.stdout()),
+      Effect.matchEffect({
+        onFailure: (error) =>
+          handleTermination(() =>
+            Effect.succeed(normalizeIncomingError(error, 'write-output-stream')),
+          ),
+        onSuccess: () => Effect.void,
+      }),
+      Effect.forkScoped,
+    )
 
     const request = (method: string, payload?: unknown) =>
       Effect.gen(function* ()

@@ -112,6 +112,12 @@ interface RemoteRuntimeLaunch
   readonly remoteServerKind: 'external' | 'managed' | null
 }
 
+interface PendingRemoteRuntimeLaunch
+{
+  readonly deferred: Deferred.Deferred<RemoteRuntimeLaunch, SshEnvironmentEffectError>
+  readonly ownerTunnelKey: string
+}
+
 type SshEnvironmentEffectContext =
   | ChildProcessSpawner.ChildProcessSpawner
   | FileSystem.FileSystem
@@ -729,10 +735,7 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
   const managerScope = yield* Scope.Scope
   const tunnels = new Map<string, SshTunnelEntry>()
   const remoteRuntimeLeases = new Map<string, RemoteRuntimeLease>()
-  const pendingRemoteRuntimeLaunches = new Map<
-    string,
-    Deferred.Deferred<RemoteRuntimeLaunch, SshEnvironmentEffectError>
-  >()
+  const pendingRemoteRuntimeLaunches = new Map<string, PendingRemoteRuntimeLaunch>()
   const pendingTunnelEntries = new Map<
     string,
     Deferred.Deferred<SshTunnelEntry, SshEnvironmentEffectError>
@@ -743,6 +746,7 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
     SshEnvironmentEffectError
   >()
   const cancellingTunnelKeys = new Set<string>()
+  const activeDisconnects = new Map<string, Deferred.Deferred<void, SshEnvironmentEffectError>>()
   const authSecrets = new Map<string, string>()
 
   const closeTunnelEntry = Effect.fn('ssh/tunnel.closeTunnelEntry')(function* (
@@ -775,6 +779,13 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       return
     }
     cancellingTunnelKeys.add(key)
+    const runtimeKey = resolvedRemoteRuntimeKey(target)
+    const pendingLaunch = pendingRemoteRuntimeLaunches.get(runtimeKey)
+    const lease = remoteRuntimeLeases.get(runtimeKey)
+    if (pendingLaunch?.ownerTunnelKey === key && lease !== undefined && lease.tunnelKeys.size > 1)
+    {
+      yield* Effect.exit(Deferred.await(pendingLaunch.deferred))
+    }
     yield* FiberMap.remove(pendingTunnelCreators, key)
     pendingTunnelEntries.delete(key)
     cancellingTunnelKeys.delete(key)
@@ -962,11 +973,12 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       const pending = pendingRemoteRuntimeLaunches.get(input.runtimeKey)
       if (pending)
       {
-        return yield* Deferred.await(pending)
+        return yield* Deferred.await(pending.deferred)
       }
 
-      const deferred = yield* Deferred.make<RemoteRuntimeLaunch, SshEnvironmentEffectError>()
-      pendingRemoteRuntimeLaunches.set(input.runtimeKey, deferred)
+      const deferred = Deferred.makeUnsafe<RemoteRuntimeLaunch, SshEnvironmentEffectError>()
+      const pendingLaunch = { deferred, ownerTunnelKey: input.tunnelKey }
+      pendingRemoteRuntimeLaunches.set(input.runtimeKey, pendingLaunch)
       return yield* runWithSshAuth({
         key: input.tunnelKey,
         target: input.target,
@@ -976,11 +988,23 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
         Effect.onExit((exit) =>
           Effect.suspend(() =>
           {
-            if (pendingRemoteRuntimeLaunches.get(input.runtimeKey) !== deferred)
+            if (pendingRemoteRuntimeLaunches.get(input.runtimeKey) !== pendingLaunch)
             {
               return Effect.void
             }
             pendingRemoteRuntimeLaunches.delete(input.runtimeKey)
+            if (Exit.isSuccess(exit) && exit.value.remoteServerKind === 'managed')
+            {
+              const lease = remoteRuntimeLeases.get(input.runtimeKey)
+              if (lease && lease.ownerTarget === null)
+              {
+                remoteRuntimeLeases.set(input.runtimeKey, {
+                  ownerTarget: input.target,
+                  ownerTunnelKey: input.tunnelKey,
+                  tunnelKeys: lease.tunnelKeys,
+                })
+              }
+            }
             return Deferred.done(deferred, exit)
           }),
         ),
@@ -1034,15 +1058,6 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
         ...(input.runner === undefined ? {} : { runner: input.runner }),
       })
       const remotePort = remoteLaunch.remotePort
-      const lease = remoteRuntimeLeases.get(runtimeKey)
-      if (lease && lease.ownerTarget === null && remoteLaunch.remoteServerKind === 'managed')
-      {
-        remoteRuntimeLeases.set(runtimeKey, {
-          ownerTarget: input.resolvedTarget,
-          ownerTunnelKey: input.key,
-          tunnelKeys: lease.tunnelKeys,
-        })
-      }
       yield* Effect.logDebug('ssh.environment.remotePort.ready', {
         ...sshTargetLogFields(input.resolvedTarget),
         key: input.key,
@@ -1138,13 +1153,21 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       )
       if (Exit.isSuccess(readinessExit))
       {
-        yield* Effect.logDebug('ssh.environment.tunnel.reused', {
-          ...sshTargetLogFields(resolvedTarget),
-          key,
-          localPort: entry.localPort,
-          remotePort: entry.remotePort,
-        })
-        return entry
+        if (tunnels.get(key) === entry && !activeDisconnects.has(key))
+        {
+          yield* Effect.logDebug('ssh.environment.tunnel.reused', {
+            ...sshTargetLogFields(resolvedTarget),
+            key,
+            localPort: entry.localPort,
+            remotePort: entry.remotePort,
+          })
+          if (tunnels.get(key) !== entry || activeDisconnects.has(key))
+          {
+            return yield* makeSshTunnelCancelledError(resolvedTarget)
+          }
+          return entry
+        }
+        return yield* makeSshTunnelCancelledError(resolvedTarget)
       }
       yield* Effect.logWarning('ssh.environment.tunnel.existing.stale', {
         ...sshTargetLogFields(resolvedTarget),
@@ -1168,7 +1191,7 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       return yield* Deferred.await(pending)
     }
 
-    const deferred = yield* Deferred.make<SshTunnelEntry, SshEnvironmentEffectError>()
+    const deferred = Deferred.makeUnsafe<SshTunnelEntry, SshEnvironmentEffectError>()
     pendingTunnelEntries.set(key, deferred)
 
     const creator = createTunnelEntry({
@@ -1239,6 +1262,11 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       ...sshRunnerLogFields(runner),
       key,
     })
+    const activeDisconnect = activeDisconnects.get(key)
+    if (activeDisconnect)
+    {
+      yield* Deferred.await(activeDisconnect)
+    }
     const entry = yield* ensureTunnelEntry(key, resolvedTarget, runner)
 
     const pairingResult = requestOptions?.issuePairingToken
@@ -1258,6 +1286,10 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       remoteServerKind: entry.remoteServerKind,
       issuedPairingToken: pairingToken !== null,
     })
+    if (tunnels.get(key) !== entry || activeDisconnects.has(key))
+    {
+      return yield* makeSshTunnelCancelledError(resolvedTarget)
+    }
     return {
       target: entry.target,
       httpBaseUrl: entry.httpBaseUrl,
@@ -1280,31 +1312,52 @@ const makeSshEnvironmentManager = Effect.fn('ssh/tunnel.SshEnvironmentManager.ma
       ...(target.port !== null ? { port: target.port } : {}),
     }
     const key = targetConnectionKey(resolvedTarget)
-    const entry = tunnels.get(key) ?? null
-    const hadPendingTunnel = pendingTunnelEntries.has(key)
-    yield* Effect.logDebug('ssh.environment.disconnect.targetResolved', {
-      ...sshTargetLogFields(resolvedTarget),
-      key,
-      hasTunnel: entry !== null,
-      hasPendingTunnel: pendingTunnelEntries.has(key),
-    })
-    if (entry !== null)
+    const existingDisconnect = activeDisconnects.get(key)
+    if (existingDisconnect)
     {
-      yield* closeTunnelEntry(entry)
+      return yield* Deferred.await(existingDisconnect)
     }
-    yield* cancelPendingTunnelEntry(key, resolvedTarget)
-    if (entry === null && !hadPendingTunnel)
+    const disconnect = Deferred.makeUnsafe<void, SshEnvironmentEffectError>()
+    activeDisconnects.set(key, disconnect)
+    return yield* Effect.gen(function* ()
     {
-      yield* runWithSshAuth({
+      const entry = tunnels.get(key) ?? null
+      const hadPendingTunnel = pendingTunnelEntries.has(key)
+      yield* Effect.logDebug('ssh.environment.disconnect.targetResolved', {
+        ...sshTargetLogFields(resolvedTarget),
         key,
-        target: resolvedTarget,
-        operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions),
+        hasTunnel: entry !== null,
+        hasPendingTunnel: hadPendingTunnel,
       })
-    }
-    yield* Effect.logInfo('ssh.environment.disconnect.succeeded', {
-      ...sshTargetLogFields(resolvedTarget),
-      key,
-    })
+      if (entry !== null)
+      {
+        yield* closeTunnelEntry(entry)
+      }
+      yield* cancelPendingTunnelEntry(key, resolvedTarget)
+      if (entry === null && !hadPendingTunnel)
+      {
+        yield* runWithSshAuth({
+          key,
+          target: resolvedTarget,
+          operation: (authOptions) => stopRemoteServer(resolvedTarget, authOptions),
+        })
+      }
+      yield* Effect.logInfo('ssh.environment.disconnect.succeeded', {
+        ...sshTargetLogFields(resolvedTarget),
+        key,
+      })
+    }).pipe(
+      Effect.onExit((exit) =>
+        Effect.sync(() =>
+        {
+          if (activeDisconnects.get(key) === disconnect)
+          {
+            activeDisconnects.delete(key)
+          }
+          Deferred.doneUnsafe(disconnect, exit)
+        }),
+      ),
+    )
   })
 
   return SshEnvironmentManager.of({ ensureEnvironment, disconnectEnvironment })
