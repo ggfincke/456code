@@ -15,7 +15,7 @@ namespace. The server's `ProviderService` routes work through the provider adapt
 exposes one canonical provider event stream to orchestration.
 
 Five built-in provider drivers are registered in
-[`builtInDrivers.ts`](../../apps/server/src/provider/builtInDrivers.ts):
+[`builtInDrivers.ts`](../../apps/server/src/provider/catalog/builtInDrivers.ts):
 
 - Codex
 - Claude

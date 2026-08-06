@@ -121,10 +121,10 @@ Related bug groups solved together:
 Primary files:
 
 - `apps/server/src/wsServer.ts`
-- `apps/server/src/git/Layers/CodexTextGeneration.ts`
+- `apps/server/src/textGeneration/CodexTextGeneration.ts`
 - `apps/web/src/markdown-links.ts`
 - `apps/server/src/os-jank.ts`
-- `apps/server/src/git/Layers/GitCore.ts`
+- `apps/server/src/vcs/GitVcsDriverCore.ts`
 - `apps/server/src/keybindings.ts`
 
 Exit criteria:

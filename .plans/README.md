@@ -35,7 +35,8 @@ unapproved plan without guessing that it started.
 | [20-version-control-phase-2-source-control-provider-foundation.md](20-version-control-phase-2-source-control-provider-foundation.md) | proposed | Provider foundation design has migration steps but no execution ledger. |
 | [21-style-comments-and-structure-modernization.md](21-style-comments-and-structure-modernization.md) | completed | Phases 0-4 are complete; the remaining high-risk follow-ups continue under active plan 23. |
 | [22-core-review-remediation.md](22-core-review-remediation.md) | proposed | Durable remediation groups are preserved but remain re-verification and approval gated. |
-| [23-high-risk-large-file-boundaries.md](23-high-risk-large-file-boundaries.md) | active | `ChatView` terminal slice is complete; dispatch, WebSocket, and Claude units remain approval-gated. |
+| [23-high-risk-large-file-boundaries.md](23-high-risk-large-file-boundaries.md) | active | `ChatView` terminal + send/retry slices complete (send uncommitted); WebSocket assembly and Claude session/finalizer remain gated. |
+| [24-layout-execution-designs.md](24-layout-execution-designs.md) | active | Phase 3b designs; ChatView send/retry + Group K **done** (Phase 3c, uncommitted); remaining 3c bodies: Group N, D5. |
 | [README.md](README.md) | active | Maintained inventory and status index for the tracked planning surface. |
 | [branch-environment-picker-in-chatview-input.md](branch-environment-picker-in-chatview-input.md) | historical | Legacy renderer UX proposal with obsolete package paths and no closeout state. |
 | [effect-atom.md](effect-atom.md) | proposed | AtomRpc migration phases are specified without an implementation ledger. |

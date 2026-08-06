@@ -6,13 +6,20 @@
 ## Status
 
 Implementation checkpoint. Approval units 1 and 3-5 were completed on
-2026-08-02. Approval unit 2 completed the terminal, right-panel, draft-error,
-interrupt, and provider-switch seams, then paused at its documented stop
-condition before moving send/retry coordination. `ChatView.tsx` still owns that
-local-ref-heavy interaction and requires a new current-state design before it
-moves. This document supplies the dedicated designs required by Wave C of
-`.plans/21-style-comments-and-structure-modernization.md`; the stopped seam
-keeps its own regression surface and integration gate.
+2026-08-02. Approval unit 2 terminal / right-panel / interrupt / provider-switch
+seams landed 2026-08-02; send/retry closed in Phase 3c (2026-08-06, uncommitted)
+via `ChatSendPorts` on `useChatDispatchController`.
+
+**Phase 3c ChatView send/retry (2026-08-06, uncommitted):** `runSend` /
+`dispatchSend` / `onSend` moved into `useChatDispatchController` via typed
+`ChatSendPorts` (explicit named fields; no React context). Live sizes:
+`ChatView.tsx` **5759**, controller **1430**. Default `ChatView` export and
+plan 23 stop conditions for identity / promotion / scroll / context were
+honored. Integrated `test-t3-app` send/retry pass **deferred (AFK)**. Further
+`ws.ts` assembly and ClaudeAdapter session/finalizer HOLDs remain binding.
+
+This document supplies the dedicated designs required by Wave C of
+`.plans/21-style-comments-and-structure-modernization.md`.
 
 Baseline inspected on 2026-08-01:
 
@@ -304,14 +311,35 @@ formatting/comment/lint checks pass.
 ## Approval Units
 
 1. `ChatView` terminal slice - complete on 2026-08-02
-2. `ChatView` dispatch and panel controllers - partially complete on
-   2026-08-02; send/retry paused at the documented stop condition
+2. `ChatView` dispatch and panel controllers - complete on 2026-08-06
+   (send/retry via `ChatSendPorts`; integrated web pass deferred AFK)
 3. WebSocket authorization and one handler aggregate at a time - complete on
    2026-08-02
 4. Claude pure normalization modules - complete on 2026-08-02
 5. Claude SDK session lifecycle, only after a new current-state review -
    complete on 2026-08-02 as the approved bounded query-resource helper
 
-All five units were approved for implementation. Approval did not override the
-stop conditions; further send/retry extraction requires a new current-state
-design and regression gate.
+All five units were approved for implementation. Further `ws.ts` / ClaudeAdapter
+moves still require new designs under plan 24 HOLDs.
+
+### 2026-08-06 Phase 3b design addendum
+
+See `.plans/24-layout-execution-designs.md`.
+
+### 2026-08-06 Phase 3c checkpoint: ChatView send/retry complete
+
+Approval unit 2 send/retry seam closed by extending
+`useChatDispatchController` with `ChatSendPorts` and moving `runSend` /
+`dispatchSend` / `onSend` / `runSendRef` there. Pure helpers
+`formatOutgoingPrompt`, `IMAGE_ONLY_BOOTSTRAP_PROMPT`, and
+`shouldRestoreComposerDraftAfterSendFailure` live in `ChatView.logic`.
+Timeline scroll effects and optimistic-preview promotion effects stay in
+`ChatView.tsx`. Focused web tests: ChatView.logic + sendPorts + related
+composer/session suites (**170** passed). `test-t3-app` integrated pass
+deferred (AFK).
+
+1. **ChatView send/retry** — **Done** (uncommitted); shell **5759**,
+   controller **1430**.
+2. **ws / Claude further units** — **Hold** assembly and session/finalizer
+   ownership; optional terminal/workers handler aggregates only if staffing
+   justifies thinning (`ws.ts` **1208**, `ClaudeAdapter.ts` **3923**).

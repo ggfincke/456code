@@ -173,7 +173,7 @@ The file patch and changed-file summary for one turn. It is usually computed in 
 [17]: ../../apps/server/src/provider/Layers/CodexAdapter.ts
 [18]: ../architecture/runtime-modes.md
 [19]: ../../apps/server/src/checkpointing/CheckpointStore.ts
-[20]: ../../apps/server/src/checkpointing/CheckpointDiffQuery.ts
+[20]: ../../apps/server/src/orchestration/Layers/CheckpointDiffQuery.ts
 [21]: ../../apps/server/src/persistence/Services/ProjectionCheckpoints.ts
 [22]: ../../apps/server/src/checkpointing/Utils.ts
 [23]: ../../apps/server/src/checkpointing/Diffs.ts

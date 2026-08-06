@@ -148,8 +148,8 @@ Rewrite GitHub support as `GitHubSourceControlProvider`.
 
 Carry forward behavior from:
 
-- `apps/server/src/git/Layers/GitHubCli.ts`
-- `apps/server/src/git/Layers/GitHubCli.test.ts`
+- `apps/server/src/sourceControl/GitHub/GitHubCli.ts`
+- `tests/apps/server/sourceControl/GitHub/GitHubCli.test.ts`
 - `apps/server/src/git/githubPullRequests.ts`
 - GitHub-specific `GitManager` PR paths
 

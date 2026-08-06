@@ -97,8 +97,8 @@ Rewrite Git support against `VcsProcess`.
 
 Carry forward current behavior from:
 
-- `apps/server/src/git/Layers/GitCore.ts`
-- `apps/server/src/git/Layers/GitCore.test.ts`
+- `apps/server/src/vcs/GitVcsDriverCore.ts`
+- `tests/apps/server/vcs/GitVcsDriverCore.test.ts`
 - current Git status/branch/worktree contracts
 
 But split the implementation into smaller modules:
