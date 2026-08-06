@@ -4,20 +4,24 @@
 import {
   asRecord,
   asTrimmedString,
-  extractChangedFiles,
-  extractToolCommand,
-  extractWorkLogRequestKind,
+  deriveNormalizedWorkLogEntries,
+  mergeNormalizedWorkLogEntries,
   normalizeCompactToolLabel,
   stripTrailingExitCode,
+  workEntryIndicatesToolFailure as normalizedWorkEntryIndicatesToolFailure,
+  workEntryIndicatesToolNeutralStatus as normalizedWorkEntryIndicatesToolNeutralStatus,
+  workEntryIndicatesToolSuccess as normalizedWorkEntryIndicatesToolSuccess,
+  workLogEntryIsToolLike as normalizedWorkLogEntryIsToolLike,
+  type NormalizedWorkLogEntry,
+  type WorkLogToolLifecycleStatus,
 } from '@t3tools/client-runtime/thread-activity'
 import {
-  isToolLifecycleItemType,
   type OrchestrationLatestTurn,
   type OrchestrationThreadActivity,
   type ToolLifecycleItemType,
   type TurnId,
 } from '@t3tools/contracts'
-import { compareOrchestrationThreadActivities } from '@t3tools/shared/orchestrationActivityOrder'
+export { formatDuration, formatElapsed } from '@t3tools/shared/orchestrationTiming'
 
 import {
   PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND,
@@ -25,8 +29,7 @@ import {
 } from '../providerSwitchPresentation'
 import type { Thread } from '../types'
 import { requestKindFromRequestType, type PendingApproval } from './pending-turn'
-export type WorkLogToolLifecycleStatus =
-  'inProgress' | 'completed' | 'failed' | 'declined' | 'stopped'
+export type { WorkLogToolLifecycleStatus }
 
 export interface WorkLogEntry
 {
@@ -60,6 +63,7 @@ export interface WorkLogEntry
 
 interface DerivedWorkLogEntry extends WorkLogEntry
 {
+  turnId: TurnId | null
   activityKind: OrchestrationThreadActivity['kind']
   collapseKey?: string
   toolCallId?: string
@@ -69,190 +73,22 @@ interface DerivedWorkLogEntry extends WorkLogEntry
 
 export function workLogEntryIsToolLike(entry: WorkLogEntry): boolean
 {
-  if (entry.tone === 'tool' || entry.tone === 'error')
-  {
-    return true
-  }
-  if (entry.command !== undefined && entry.command.trim().length > 0)
-  {
-    return true
-  }
-  if (entry.requestKind !== undefined)
-  {
-    return true
-  }
-  return entry.itemType !== undefined && isToolLifecycleItemType(entry.itemType)
+  return normalizedWorkLogEntryIsToolLike(entry)
 }
 
-// heuristic: providers often emit successful lifecycle status while error text lives in `detail` / `command`.
-function toolDetailTextLooksLikeFailure(text: string): boolean
-{
-  const t = text.toLowerCase()
-  if (t.includes('file not found'))
-  {
-    return true
-  }
-  if (t.includes('no files found'))
-  {
-    return true
-  }
-  if (
-    t.includes('enoent') ||
-    t.includes('no such file or directory') ||
-    t.includes('no such file')
-  )
-  {
-    return true
-  }
-  if (t.includes('cannot find path') && t.includes('because it does not exist'))
-  {
-    return true
-  }
-  if (t.includes('commandnotfoundexception'))
-  {
-    return true
-  }
-  if (t.includes('is not recognized as the name of a cmdlet'))
-  {
-    return true
-  }
-  if (t.includes('is not recognized') && t.includes("the term '"))
-  {
-    return true
-  }
-  if (t.includes('a parameter cannot be found that matches parameter name'))
-  {
-    return true
-  }
-  if (t.includes('command not found'))
-  {
-    return true
-  }
-  if (/<exited with exit code\s+[1-9]\d*\s*>/i.test(text))
-  {
-    return true
-  }
-  if (/exit(?:ed)? with exit code\s+[1-9]\d*/i.test(text))
-  {
-    return true
-  }
-  if (/exit code\s*[:\s]\s*[1-9]\d*\b/i.test(text))
-  {
-    return true
-  }
-  return false
-}
-
-// true when the row should show a failure affordance (explicit status/tone or error-shaped tool output).
 export function workEntryIndicatesToolFailure(entry: WorkLogEntry): boolean
 {
-  if (entry.tone === 'error')
-  {
-    return true
-  }
-  const ls = entry.toolLifecycleStatus
-  if (ls === 'failed' || ls === 'declined')
-  {
-    return true
-  }
-  if (!workLogEntryIsToolLike(entry))
-  {
-    return false
-  }
-  const parts: string[] = []
-  if (entry.detail)
-  {
-    parts.push(entry.detail)
-  }
-  if (entry.command)
-  {
-    parts.push(entry.command)
-  }
-  const blob = parts.join('\n')
-  if (blob.length === 0)
-  {
-    return false
-  }
-  return toolDetailTextLooksLikeFailure(blob)
+  return normalizedWorkEntryIndicatesToolFailure(entry)
 }
 
-// tool/command row completed without failure (blue check affordance).
 export function workEntryIndicatesToolSuccess(entry: WorkLogEntry): boolean
 {
-  if (!workLogEntryIsToolLike(entry))
-  {
-    return false
-  }
-  if (workEntryIndicatesToolFailure(entry))
-  {
-    return false
-  }
-  if (entry.tone === 'thinking')
-  {
-    return false
-  }
-  const ls = entry.toolLifecycleStatus
-  if (ls === 'failed' || ls === 'declined')
-  {
-    return false
-  }
-  if (ls === 'inProgress')
-  {
-    return false
-  }
-  if (ls === 'stopped')
-  {
-    return false
-  }
-  return true
+  return normalizedWorkEntryIndicatesToolSuccess(entry)
 }
 
-// tool-like row with neither clear success nor failure (empty, incomplete, in progress, etc.).
 export function workEntryIndicatesToolNeutralStatus(entry: WorkLogEntry): boolean
 {
-  if (!workLogEntryIsToolLike(entry))
-  {
-    return false
-  }
-  if (workEntryIndicatesToolFailure(entry))
-  {
-    return false
-  }
-  if (workEntryIndicatesToolSuccess(entry))
-  {
-    return false
-  }
-  return true
-}
-
-export function formatDuration(durationMs: number): string
-{
-  if (!Number.isFinite(durationMs) || durationMs < 0) return '0ms'
-  if (durationMs < 1_000) return `${Math.max(1, Math.round(durationMs))}ms`
-  if (durationMs < 10_000)
-  {
-    const tenths = Math.round(durationMs / 100) / 10
-    // 9.95s+ rounds up to the next bucket — render "10s", not "10.0s".
-    return tenths >= 10 ? '10s' : `${tenths.toFixed(1)}s`
-  }
-  if (durationMs < 60_000) return `${Math.round(durationMs / 1_000)}s`
-  const minutes = Math.floor(durationMs / 60_000)
-  const seconds = Math.round((durationMs % 60_000) / 1_000)
-  if (seconds === 0) return `${minutes}m`
-  if (seconds === 60) return `${minutes + 1}m`
-  return `${minutes}m ${seconds}s`
-}
-
-export function formatElapsed(startIso: string, endIso: string | undefined): string | null
-{
-  if (!endIso) return null
-  const startedAt = Date.parse(startIso)
-  const endedAt = Date.parse(endIso)
-  if (Number.isNaN(startedAt) || Number.isNaN(endedAt) || endedAt < startedAt)
-  {
-    return null
-  }
-  return formatDuration(endedAt - startedAt)
+  return normalizedWorkEntryIndicatesToolNeutralStatus(entry)
 }
 
 type LatestTurnTiming = Pick<OrchestrationLatestTurn, 'turnId' | 'startedAt' | 'completedAt'>
@@ -295,20 +131,16 @@ export function deriveWorkLogEntries(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): WorkLogEntry[]
 {
-  const ordered = [...activities].toSorted(compareOrchestrationThreadActivities)
-  const entries: DerivedWorkLogEntry[] = []
-  for (const activity of ordered)
-  {
-    if (activity.kind === 'tool.started') continue
-    if (activity.kind === 'context-window.updated') continue
-    // switch outcomes render as timeline dividers instead of work-log rows
-    if (activity.kind === PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND) continue
-    if (activity.kind === PROVIDER_SWITCH_FAILED_ACTIVITY_KIND) continue
-    if (activity.summary === 'Checkpoint captured') continue
-    if (isPlanBoundaryToolActivity(activity)) continue
-    entries.push(toDerivedWorkLogEntry(activity))
-  }
-  return collapseDerivedWorkLogEntries(entries).map((entry) =>
+  return deriveNormalizedWorkLogEntries<DerivedWorkLogEntry>(activities, {
+    requestKindFromRequestType,
+    excludedActivityKinds: new Set([
+      PROVIDER_SWITCH_COMPLETED_ACTIVITY_KIND,
+      PROVIDER_SWITCH_FAILED_ACTIVITY_KIND,
+    ]),
+    includeTaskStarted: true,
+    mapEntry: mapWebWorkLogEntry,
+    finalizeEntries: collapseTaskWorkLogEntries,
+  }).map((entry) =>
   {
     const {
       activityKind,
@@ -321,51 +153,14 @@ export function deriveWorkLogEntries(
   })
 }
 
-function isPlanBoundaryToolActivity(activity: OrchestrationThreadActivity): boolean
+function mapWebWorkLogEntry(input: {
+  readonly activity: OrchestrationThreadActivity
+  readonly payload: Record<string, unknown> | null
+  readonly entry: NormalizedWorkLogEntry
+}): DerivedWorkLogEntry
 {
-  if (activity.kind !== 'tool.updated' && activity.kind !== 'tool.completed')
-  {
-    return false
-  }
-
-  const payload =
-    activity.payload && typeof activity.payload === 'object'
-      ? (activity.payload as Record<string, unknown>)
-      : null
-  return typeof payload?.detail === 'string' && payload.detail.startsWith('ExitPlanMode:')
-}
-
-function extractWorkLogToolLifecycleStatus(
-  payload: Record<string, unknown> | null,
-): WorkLogToolLifecycleStatus | undefined
-{
-  if (!payload)
-  {
-    return undefined
-  }
-  const s = payload.status
-  if (
-    s === 'inProgress' ||
-    s === 'completed' ||
-    s === 'failed' ||
-    s === 'declined' ||
-    s === 'stopped'
-  )
-  {
-    return s
-  }
-  return undefined
-}
-
-function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWorkLogEntry
-{
-  const payload =
-    activity.payload && typeof activity.payload === 'object'
-      ? (activity.payload as Record<string, unknown>)
-      : null
-  const commandPreview = extractToolCommand(payload)
-  const changedFiles = extractChangedFiles(payload)
-  const title = extractToolTitle(payload)
+  const { activity, payload } = input
+  const { detail: _baseDetail, ...base } = input.entry
   const isTaskActivity =
     activity.kind === 'task.started' ||
     activity.kind === 'task.progress' ||
@@ -386,70 +181,19 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     payload.detail.length > 0
       ? payload.detail
       : null
-  const taskLabel = taskSummary || taskDetailAsLabel
   const detail = isTaskActivity
-    ? !taskDetailAsLabel &&
-      payload &&
-      typeof payload.detail === 'string' &&
-      payload.detail.length > 0
+    ? !taskDetailAsLabel && typeof payload?.detail === 'string'
       ? stripTrailingExitCode(payload.detail).output
       : taskTextDetail
-    : extractToolDetail(payload, title ?? activity.summary)
-  const toolCallId = isTaskActivity ? null : extractToolCallId(payload)
+    : extractToolDetail(payload, input.entry.toolTitle ?? activity.summary, input.entry.itemType)
   const entry: DerivedWorkLogEntry = {
-    id: activity.id,
-    createdAt: activity.createdAt,
-    turnId: activity.turnId,
-    label: taskLabel || activity.summary,
+    ...base,
+    label: taskSummary ?? taskDetailAsLabel ?? activity.summary,
     tone:
       activity.kind === 'task.started' || activity.kind === 'task.progress'
         ? 'thinking'
-        : activity.tone === 'approval'
-          ? 'info'
-          : activity.tone,
-    activityKind: activity.kind,
-  }
-  const itemType = extractWorkLogItemType(payload)
-  const requestKind = extractWorkLogRequestKind(payload, requestKindFromRequestType)
-  if (detail)
-  {
-    entry.detail = detail
-  }
-  if (commandPreview.command)
-  {
-    entry.command = commandPreview.command
-  }
-  if (commandPreview.rawCommand)
-  {
-    entry.rawCommand = commandPreview.rawCommand
-  }
-  if (changedFiles.length > 0)
-  {
-    entry.changedFiles = changedFiles
-  }
-  if (title)
-  {
-    entry.toolTitle = title
-  }
-  if (itemType === 'mcp_tool_call')
-  {
-    const data = asRecord(payload?.data)
-    if (data?.item !== undefined)
-    {
-      entry.toolData = data.item
-    }
-  }
-  if (itemType)
-  {
-    entry.itemType = itemType
-  }
-  if (requestKind)
-  {
-    entry.requestKind = requestKind
-  }
-  if (toolCallId)
-  {
-    entry.toolCallId = toolCallId
+        : input.entry.tone,
+    ...(detail ? { detail } : {}),
   }
   if (isTaskActivity)
   {
@@ -483,31 +227,17 @@ function toDerivedWorkLogEntry(activity: OrchestrationThreadActivity): DerivedWo
     if (parentToolUseId) entry.parentToolUseId = parentToolUseId
     if (lastToolName) entry.lastToolName = lastToolName
   }
-  let toolLifecycleStatus = extractWorkLogToolLifecycleStatus(payload)
   if (
-    !toolLifecycleStatus &&
+    entry.toolLifecycleStatus === undefined &&
     (activity.kind === 'task.started' || activity.kind === 'task.progress')
   )
   {
-    toolLifecycleStatus = 'inProgress'
-  }
-  if (!toolLifecycleStatus && activity.kind === 'tool.completed')
-  {
-    toolLifecycleStatus = 'completed'
-  }
-  if (toolLifecycleStatus)
-  {
-    entry.toolLifecycleStatus = toolLifecycleStatus
-  }
-  const collapseKey = deriveToolLifecycleCollapseKey(entry)
-  if (collapseKey)
-  {
-    entry.collapseKey = collapseKey
+    entry.toolLifecycleStatus = 'inProgress'
   }
   return entry
 }
 
-function collapseDerivedWorkLogEntries(
+function collapseTaskWorkLogEntries(
   entries: ReadonlyArray<DerivedWorkLogEntry>,
 ): DerivedWorkLogEntry[]
 {
@@ -516,7 +246,6 @@ function collapseDerivedWorkLogEntries(
   // tool.progress rows update their owning task's last-tool label
   const taskIndexById = new Map<string, number>()
   const taskIdByToolUseId = new Map<string, string>()
-  let previousActivityWasNonTaskEntry = false
   for (const entry of entries)
   {
     if (entry.activityKind === 'tool.progress')
@@ -533,7 +262,6 @@ function collapseDerivedWorkLogEntries(
           collapsed[taskIndex] = { ...taskEntry, lastToolName: entry.lastToolName }
         }
       }
-      previousActivityWasNonTaskEntry = false
       continue
     }
     if (entry.taskId)
@@ -553,7 +281,7 @@ function collapseDerivedWorkLogEntries(
         )
         {
           collapsed[existingIndex] = {
-            ...mergeDerivedWorkLogEntries(previous, entry),
+            ...mergeNormalizedWorkLogEntries(previous, entry),
             id: previous.id,
             createdAt: previous.createdAt,
           }
@@ -566,135 +294,16 @@ function collapseDerivedWorkLogEntries(
       {
         taskIdByToolUseId.set(taskToolUseId, entry.taskId)
       }
-      previousActivityWasNonTaskEntry = false
-      continue
-    }
-    const previous = collapsed.at(-1)
-    if (
-      previousActivityWasNonTaskEntry &&
-      previous &&
-      shouldCollapseToolLifecycleEntries(previous, entry)
-    )
-    {
-      collapsed[collapsed.length - 1] = mergeDerivedWorkLogEntries(previous, entry)
       continue
     }
     collapsed.push(entry)
-    previousActivityWasNonTaskEntry = true
   }
   return collapsed
-}
-
-function shouldCollapseToolLifecycleEntries(
-  previous: DerivedWorkLogEntry,
-  next: DerivedWorkLogEntry,
-): boolean
-{
-  if (previous.activityKind !== 'tool.updated' && previous.activityKind !== 'tool.completed')
-  {
-    return false
-  }
-  if (next.activityKind !== 'tool.updated' && next.activityKind !== 'tool.completed')
-  {
-    return false
-  }
-  if (previous.activityKind === 'tool.completed')
-  {
-    return false
-  }
-  if (previous.collapseKey !== undefined && previous.collapseKey === next.collapseKey)
-  {
-    return true
-  }
-  return (
-    previous.toolCallId !== undefined &&
-    next.toolCallId === undefined &&
-    previous.itemType === next.itemType &&
-    normalizeCompactToolLabel(previous.toolTitle ?? previous.label) ===
-      normalizeCompactToolLabel(next.toolTitle ?? next.label)
-  )
-}
-
-function mergeDerivedWorkLogEntries(
-  previous: DerivedWorkLogEntry,
-  next: DerivedWorkLogEntry,
-): DerivedWorkLogEntry
-{
-  const changedFiles = mergeChangedFiles(previous.changedFiles, next.changedFiles)
-  const detail = next.detail ?? previous.detail
-  const command = next.command ?? previous.command
-  const rawCommand = next.rawCommand ?? previous.rawCommand
-  const toolTitle = next.toolTitle ?? previous.toolTitle
-  const itemType = next.itemType ?? previous.itemType
-  const requestKind = next.requestKind ?? previous.requestKind
-  const collapseKey = next.collapseKey ?? previous.collapseKey
-  const toolCallId = next.toolCallId ?? previous.toolCallId
-  const toolLifecycleStatus = next.toolLifecycleStatus ?? previous.toolLifecycleStatus
-  const toolData = next.toolData ?? previous.toolData
-  return {
-    ...previous,
-    ...next,
-    ...(detail ? { detail } : {}),
-    ...(command ? { command } : {}),
-    ...(rawCommand ? { rawCommand } : {}),
-    ...(changedFiles.length > 0 ? { changedFiles } : {}),
-    ...(toolTitle ? { toolTitle } : {}),
-    ...(itemType ? { itemType } : {}),
-    ...(requestKind ? { requestKind } : {}),
-    ...(collapseKey ? { collapseKey } : {}),
-    ...(toolCallId ? { toolCallId } : {}),
-    ...(toolLifecycleStatus !== undefined ? { toolLifecycleStatus } : {}),
-    ...(toolData !== undefined ? { toolData } : {}),
-  }
-}
-
-function mergeChangedFiles(
-  previous: ReadonlyArray<string> | undefined,
-  next: ReadonlyArray<string> | undefined,
-): string[]
-{
-  const merged = [...(previous ?? []), ...(next ?? [])]
-  if (merged.length === 0)
-  {
-    return []
-  }
-  return [...new Set(merged)]
-}
-
-function deriveToolLifecycleCollapseKey(entry: DerivedWorkLogEntry): string | undefined
-{
-  if (entry.activityKind !== 'tool.updated' && entry.activityKind !== 'tool.completed')
-  {
-    return undefined
-  }
-  if (entry.toolCallId)
-  {
-    return `tool:${entry.toolCallId}`
-  }
-  const normalizedLabel = normalizeCompactToolLabel(entry.toolTitle ?? entry.label)
-  const detail = entry.detail?.trim() ?? ''
-  const itemType = entry.itemType ?? ''
-  if (normalizedLabel.length === 0 && detail.length === 0 && itemType.length === 0)
-  {
-    return undefined
-  }
-  return [itemType, normalizedLabel, detail].join('\u001f')
 }
 
 function asNumber(value: unknown): number | null
 {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
-}
-
-function extractToolTitle(payload: Record<string, unknown> | null): string | null
-{
-  return asTrimmedString(payload?.title)
-}
-
-function extractToolCallId(payload: Record<string, unknown> | null): string | null
-{
-  const data = asRecord(payload?.data)
-  return asTrimmedString(data?.toolCallId)
 }
 
 function normalizeInlinePreview(value: string): string
@@ -775,13 +384,17 @@ function summarizeToolRawOutput(payload: Record<string, unknown> | null): string
   return null
 }
 
-function isCommandToolDetail(payload: Record<string, unknown> | null, heading: string): boolean
+function isCommandToolDetail(
+  payload: Record<string, unknown> | null,
+  heading: string,
+  itemType: ToolLifecycleItemType | undefined,
+): boolean
 {
   const data = asRecord(payload?.data)
   const kind = asTrimmedString(data?.kind)?.toLowerCase()
   const title = asTrimmedString(payload?.title ?? heading)?.toLowerCase()
   return (
-    extractWorkLogItemType(payload) === 'command_execution' ||
+    itemType === 'command_execution' ||
     kind === 'execute' ||
     title === 'terminal' ||
     title === 'ran command'
@@ -791,6 +404,7 @@ function isCommandToolDetail(payload: Record<string, unknown> | null, heading: s
 function extractToolDetail(
   payload: Record<string, unknown> | null,
   heading: string,
+  itemType: ToolLifecycleItemType | undefined,
 ): string | null
 {
   const rawDetail = asTrimmedString(payload?.detail)
@@ -803,7 +417,7 @@ function extractToolDetail(
     return detail
   }
 
-  if (isCommandToolDetail(payload, heading))
+  if (isCommandToolDetail(payload, heading, itemType))
   {
     return null
   }
@@ -819,15 +433,4 @@ function extractToolDetail(
   }
 
   return null
-}
-
-function extractWorkLogItemType(
-  payload: Record<string, unknown> | null,
-): WorkLogEntry['itemType'] | undefined
-{
-  if (typeof payload?.itemType === 'string' && isToolLifecycleItemType(payload.itemType))
-  {
-    return payload.itemType
-  }
-  return undefined
 }

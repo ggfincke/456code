@@ -1,7 +1,7 @@
 // apps/web/src/components/preview/previewConstants.ts
 // expose preview recent url limit
 
-export const PREVIEW_RECENT_URL_LIMIT = 10
+export { PREVIEW_RECENT_URL_LIMIT } from '~/browser/previewRuntimeConstants'
 
 // common Chromium error codes mapped to a short human label. Used by the
 // unreachable view to drop the raw `ERR_*` code in favour of friendlier copy.

@@ -9,7 +9,7 @@ import { useEffect, useMemo } from 'react'
 
 import { isElectron } from '~/env'
 import { useTheme } from '~/hooks/useTheme'
-import { useActivePreviewSessions } from '~/previewStateStore'
+import { useActivePreviewSessions } from './previewStateStore'
 
 import { readPreviewAnnotationTheme } from './annotationTheme'
 import { useBrowserPointerStore } from './browserPointerStore'

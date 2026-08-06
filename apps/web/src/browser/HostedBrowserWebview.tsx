@@ -7,8 +7,6 @@ import type { PreviewViewportSetting, ScopedThreadRef } from '@t3tools/contracts
 import { useShallow } from 'zustand/react/shallow'
 import { useCallback, useEffect, useRef, useState } from 'react'
 
-import { previewBridge } from '~/components/preview/previewBridge'
-import { usePreviewBridge } from '~/components/preview/usePreviewBridge'
 import { cn } from '~/lib/utils'
 
 import { stopBrowserRecording, useActiveBrowserRecordingTabId } from './browserRecording'
@@ -18,7 +16,9 @@ import { BrowserDeviceToolbar } from './BrowserDeviceToolbar'
 import { BrowserViewportResizeHandles } from './BrowserViewportResizeHandles'
 import { acquireDesktopTab, type AcquiredDesktopTab } from './desktopTabLifetime'
 import { resolveHostedBrowserWebviewWrapperStyle } from './hostedBrowserWebviewStyle'
+import { previewBridge } from './previewBridge'
 import { usePreviewWebviewConfig } from './previewWebviewConfigState'
+import { usePreviewBridge } from './usePreviewBridge'
 import { useBrowserViewportResize } from './useBrowserViewportResize'
 
 interface ElectronWebview extends HTMLElement

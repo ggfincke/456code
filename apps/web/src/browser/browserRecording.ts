@@ -9,9 +9,9 @@ import { useAtomValue } from '@effect/atom-react'
 import * as Schema from 'effect/Schema'
 import { Atom } from 'effect/unstable/reactivity'
 
-import { previewBridge } from '~/components/preview/previewBridge'
 import { appAtomRegistry } from '~/rpc/atomRegistry'
 import { useBrowserSurfaceStore } from './browserSurfaceStore'
+import { previewBridge } from './previewBridge'
 
 export class BrowserRecordingUnavailableError extends Schema.TaggedErrorClass<BrowserRecordingUnavailableError>()(
   'BrowserRecordingUnavailableError',

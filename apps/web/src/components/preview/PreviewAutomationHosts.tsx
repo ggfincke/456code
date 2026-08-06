@@ -34,6 +34,7 @@ import {
 } from '~/previewStateStore'
 import { useRightPanelStore } from '~/rightPanelStore'
 import { resolveBrowserNavigationTarget } from '~/browser/browserTargetResolver'
+import { previewBridge } from '~/browser/previewBridge'
 import {
   readActiveBrowserRecordingTabId,
   startBrowserRecording,
@@ -47,7 +48,6 @@ import { previewEnvironment } from '~/state/preview'
 import { useAtomQueryRunner } from '~/state/use-atom-query-runner'
 import { useAtomCommand } from '~/state/use-atom-command'
 
-import { previewBridge } from './previewBridge'
 import {
   PreviewAutomationNavigationTimeoutError,
   PreviewAutomationOperationError,

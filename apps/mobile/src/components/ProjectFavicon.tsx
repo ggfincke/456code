@@ -30,12 +30,13 @@ export function ProjectFavicon(props: {
 })
 {
   const size = props.size ?? 42
-  const faviconUrl = useAssetUrl(
+  const faviconState = useAssetUrl(
     props.environmentId,
     props.workspaceRoot === null || props.workspaceRoot === undefined
       ? null
       : { _tag: 'project-favicon', cwd: props.workspaceRoot },
   )
+  const faviconUrl = faviconState._tag === 'Success' ? faviconState.url : null
   const renderableFaviconUrl = isProjectFaviconFallbackUrl(faviconUrl) ? null : faviconUrl
   const cacheKey =
     renderableFaviconUrl && props.workspaceRoot

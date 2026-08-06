@@ -17,7 +17,7 @@ import type {
 } from '@t3tools/contracts'
 import { useAtomSet, useAtomValue } from '@effect/atom-react'
 import { AsyncResult } from 'effect/unstable/reactivity'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { ActivityIndicator, FlatList, Platform, Pressable, View } from 'react-native'
 import type { SwipeableMethods } from 'react-native-gesture-handler/ReanimatedSwipeable'
 import { useSafeAreaInsets } from 'react-native-safe-area-context'
@@ -30,7 +30,6 @@ import type { SavedRemoteConnection } from '../../lib/connection'
 import { scopedProjectKey } from '../../lib/scopedEntities'
 import { NATIVE_LIQUID_GLASS_SUPPORTED } from '../../native/native-glass'
 import { mobilePreferencesAtom, updateMobilePreferencesAtom } from '../../state/preferences'
-import { environmentServerConfigsAtom } from '../../state/server'
 import type { PendingNewTask } from '../../state/use-pending-new-tasks'
 import {
   PendingTaskListRow,
@@ -39,12 +38,8 @@ import {
   ThreadListShowMoreRow,
 } from '../threads/thread-list-items'
 import { ThreadListV2Row } from '../threads/thread-list-v2-items'
-import {
-  buildThreadListV2Items,
-  THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
-  THREAD_LIST_V2_SETTLED_PAGE_COUNT,
-  type ThreadListV2Item,
-} from '../threads/threadListV2'
+import { THREAD_LIST_V2_SETTLED_PAGE_COUNT, type ThreadListV2Item } from '../threads/threadListV2'
+import { useThreadListV2State } from '../threads/use-thread-list-v2-state'
 import type { HomeListFilterMenuEnvironment } from './home-list-filter-menu'
 import {
   buildHomeListLayout,
@@ -445,36 +440,6 @@ export function HomeScreen(props: HomeScreenProps)
           ),
     [v2ScopedProjectGroup],
   )
-  // thread List v2 (beta): one flat list in creation order, no grouping.
-  // settled threads collapse into a recency tail below the card block.
-  // settled threads stay in the live shell stream (settled ≠ archived), so
-  // the partition works directly off live shells — no snapshot merging or
-  // optimistic holds.
-  // PR states stream in per-row (rows own the VCS subscriptions); a merged or
-  // closed PR auto-settles its thread on the next partition (mirrors web).
-  const [changeRequestStateByKey, setChangeRequestStateByKey] = useState<
-    ReadonlyMap<string, 'open' | 'closed' | 'merged'>
-  >(() => new Map())
-  const handleChangeRequestState = useCallback(
-    (threadKey: string, state: 'open' | 'closed' | 'merged' | null) =>
-    {
-      setChangeRequestStateByKey((current) =>
-      {
-        if ((current.get(threadKey) ?? null) === state) return current
-        const next = new Map(current)
-        if (state === null)
-        {
-          next.delete(threadKey)
-        }
-        else
-        {
-          next.set(threadKey, state)
-        }
-        return next
-      })
-    },
-    [],
-  )
   const handleSettleThread = useCallback(
     (thread: EnvironmentThreadShell) =>
     {
@@ -484,113 +449,20 @@ export function HomeScreen(props: HomeScreenProps)
   )
   const handleDeleteThread = props.onDeleteThread
   const handleUnsettleThread = props.onUnsettleThread
-  // the settled tail renders in pages; expansion resets when the filter
-  // context changes so environment/search flips never inherit a deep page.
-  const [settledVisibleCount, setSettledVisibleCount] = useState(
-    THREAD_LIST_V2_SETTLED_INITIAL_COUNT,
-  )
-  const settledResetKey = `${props.selectedEnvironmentId ?? 'all'}:${v2ProjectScopeKey ?? 'all'}:${props.searchQuery.trim()}`
-  const lastSettledResetKeyRef = useRef(settledResetKey)
-  if (lastSettledResetKeyRef.current !== settledResetKey)
-  {
-    lastSettledResetKeyRef.current = settledResetKey
-    setSettledVisibleCount(THREAD_LIST_V2_SETTLED_INITIAL_COUNT)
-  }
-  const showMoreSettled = useCallback(
-    () => setSettledVisibleCount((count) => count + THREAD_LIST_V2_SETTLED_PAGE_COUNT),
-    [],
-  )
-  // now is quantized to the minute and ticks so the inactivity auto-settle
-  // boundary is actually crossed while the app stays open (mirrors web);
-  // without a clock dependency the partition memoizes a frozen "now".
-  const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16))
-  // snooze wake times are second-precise; a counter bumped exactly at the
-  // next wake boundary re-runs the partition with a fresh clock so a woken
-  // thread reappears immediately instead of on the next minute tick.
-  const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0)
-  useEffect(() =>
-  {
-    if (!threadListV2Enabled) return
-    // refresh immediately on enable: the mount-time value can be hours old
-    // by the time the beta is switched on, which would misclassify the
-    // inactivity auto-settle boundary until the first tick.
-    setNowMinute(new Date().toISOString().slice(0, 16))
-    const id = setInterval(() => setNowMinute(new Date().toISOString().slice(0, 16)), 60_000)
-    return () => clearInterval(id)
-  }, [threadListV2Enabled])
-  // threads on servers without the settlement capability never classify as
-  // settled (the user could neither un-settle nor pin them).
-  const serverConfigs = useAtomValue(environmentServerConfigsAtom)
-  const settlementEnvironmentIds = useMemo(() =>
-  {
-    const supported = new Set<EnvironmentId>()
-    for (const [environmentId, config] of serverConfigs)
-    {
-      if (config.environment.capabilities.threadSettlement === true)
-      {
-        supported.add(environmentId)
-      }
-    }
-    return supported
-  }, [serverConfigs])
-  const snoozeEnvironmentIds = useMemo(() =>
-  {
-    const supported = new Set<EnvironmentId>()
-    for (const [environmentId, config] of serverConfigs)
-    {
-      if (config.environment.capabilities.threadSnooze === true)
-      {
-        supported.add(environmentId)
-      }
-    }
-    return supported
-  }, [serverConfigs])
-  const threadListV2Layout = useMemo(() =>
-  {
-    if (!threadListV2Enabled)
-      return { items: [], hiddenSettledCount: 0, snoozedCount: 0, nextSnoozeWakeAt: null }
-    // settled threads are live shells; archived threads keep their original
-    // "hidden from lists" meaning.
-    return buildThreadListV2Items({
-      threads: props.threads.filter((thread) => thread.archivedAt === null),
-      environmentId: props.selectedEnvironmentId,
-      projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
-      searchQuery: props.searchQuery,
-      changeRequestStateByKey,
-      settlementEnvironmentIds,
-      snoozeEnvironmentIds,
-      settledLimit: settledVisibleCount,
-      now: `${nowMinute}:00.000Z`,
-      snoozeNow: new Date().toISOString(),
-    })
-  }, [
-    changeRequestStateByKey,
-    nowMinute,
-    snoozeWakeTick,
-    settledVisibleCount,
+  const {
+    handleChangeRequestState,
+    layout: threadListV2Layout,
+    serverConfigs,
     settlementEnvironmentIds,
-    snoozeEnvironmentIds,
-    props.searchQuery,
-    props.selectedEnvironmentId,
-    props.threads,
-    threadListV2Enabled,
-    v2ScopedProjectGroup,
-  ])
-  // re-partition the moment the earliest snooze expires (clamped to the
-  // signed-32-bit setTimeout range; far-future wakes re-arm at the clamp).
-  const nextSnoozeWakeAt = threadListV2Layout.nextSnoozeWakeAt
-  useEffect(() =>
-  {
-    if (nextSnoozeWakeAt === null) return
-    const wakeAtMs = Date.parse(nextSnoozeWakeAt)
-    if (Number.isNaN(wakeAtMs)) return
-    const delayMs = Math.min(Math.max(0, wakeAtMs - Date.now()) + 50, 2_147_483_647)
-    const id = setTimeout(() => bumpSnoozeWakeTick((tick) => tick + 1), delayMs)
-    return () => clearTimeout(id)
-    // snoozeWakeTick must re-arm the timer even when nextSnoozeWakeAt is
-    // unchanged: after a clamped fire (wake beyond the 32-bit setTimeout
-    // range) the boundary string is identical and the chain would die.
-  }, [nextSnoozeWakeAt, snoozeWakeTick])
+    showMoreSettled,
+  } = useThreadListV2State({
+    enabled: threadListV2Enabled,
+    threads: props.threads,
+    environmentId: props.selectedEnvironmentId,
+    projectRefs: v2ScopedProjectGroup === null ? null : v2ScopedProjectGroup.projectRefs,
+    projectScopeKey: v2ProjectScopeKey,
+    searchQuery: props.searchQuery,
+  })
   const threadListV2Items = threadListV2Layout.items
 
   const renderV2Item = useCallback(

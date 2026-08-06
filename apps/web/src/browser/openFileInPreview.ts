@@ -19,7 +19,7 @@ import {
   applyPreviewServerSnapshot,
   isPreviewSupportedInRuntime,
   rememberPreviewUrl,
-} from '~/previewStateStore'
+} from './previewStateStore'
 import { useRightPanelStore } from '~/rightPanelStore'
 
 export const isBrowserPreviewFile = (path: string): boolean =>

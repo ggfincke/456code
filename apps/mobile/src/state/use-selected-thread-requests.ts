@@ -81,8 +81,8 @@ export function useSelectedThreadRequests()
     [selectedThread],
   )
   const activePendingApprovals = useMemo(
-    () => derivePendingApprovals(sortedActivities),
-    [sortedActivities],
+    () => derivePendingApprovals(sortedActivities, selectedThread?.approvalOutcomes),
+    [selectedThread?.approvalOutcomes, sortedActivities],
   )
   const activePendingApproval = activePendingApprovals[0] ?? null
   const activePendingUserInputs = useMemo(
