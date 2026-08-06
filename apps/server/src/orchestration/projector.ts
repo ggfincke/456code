@@ -867,6 +867,27 @@ export function projectEvent(
         }
       })
 
+    case 'thread.session-stop-requested':
+    {
+      const thread = nextBase.threads.find((entry) => entry.id === event.payload.threadId)
+      if (!thread?.session)
+      {
+        return Effect.succeed(nextBase)
+      }
+      return Effect.succeed({
+        ...nextBase,
+        threads: updateThread(nextBase.threads, event.payload.threadId, {
+          session: {
+            ...thread.session,
+            status: 'stopped',
+            activeTurnId: null,
+            updatedAt: event.payload.createdAt,
+          },
+          updatedAt: event.occurredAt,
+        }),
+      })
+    }
+
     case 'thread.session-set':
       return Effect.gen(function* ()
       {

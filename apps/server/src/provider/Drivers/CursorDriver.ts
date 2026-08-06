@@ -150,7 +150,7 @@ export const CursorDriver: ProviderDriver<CursorSettings, CursorDriverEnv> = {
 
       const adapter = yield* makeCursorAdapter(effectiveConfig, {
         environment: processEnv,
-        enableAbnormalTermination: false,
+        enableAbnormalTermination: true,
         ...(eventLoggers.native ? { nativeEventLogger: eventLoggers.native } : {}),
         instanceId,
       })

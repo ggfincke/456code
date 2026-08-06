@@ -21,6 +21,7 @@ import * as Schema from 'effect/Schema'
 import { OrchestrationCommandInvariantError } from './Errors.ts'
 import {
   listThreadsByProjectId,
+  requireActiveThread,
   requireActiveProjectWorkspaceRootAbsent,
   requireActiveProject,
   requireProject,
@@ -931,7 +932,7 @@ export const decideOrchestrationCommand = Effect.fn('decideOrchestrationCommand'
 
     case 'thread.turn.start':
     {
-      const targetThread = yield* requireThread({
+      const targetThread = yield* requireActiveThread({
         readModel,
         command,
         threadId: command.threadId,

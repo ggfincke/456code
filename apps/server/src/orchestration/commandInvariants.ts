@@ -188,6 +188,26 @@ export function requireThreadNotArchived(input: {
   )
 }
 
+export function requireActiveThread(input: {
+  readonly readModel: OrchestrationReadModel
+  readonly command: OrchestrationCommand
+  readonly threadId: ThreadId
+}): Effect.Effect<OrchestrationThread, OrchestrationCommandInvariantError>
+{
+  return requireThreadNotArchived(input).pipe(
+    Effect.flatMap((thread) =>
+      thread.deletedAt === null
+        ? Effect.succeed(thread)
+        : Effect.fail(
+            invariantError(
+              input.command.type,
+              `Thread '${input.threadId}' is deleted and cannot handle command '${input.command.type}'.`,
+            ),
+          ),
+    ),
+  )
+}
+
 export function requireThreadAbsent(input: {
   readonly readModel: OrchestrationReadModel
   readonly command: OrchestrationCommand

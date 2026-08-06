@@ -9,6 +9,8 @@ import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Result from 'effect/Result'
 
+import { ServerSettingsService } from '../serverSettings.ts'
+
 const BROKER_NAME_PATTERN = /^worker[-_ ]?broker$/i
 const CODEX_BROKER_SECTION_PATTERN = /^\s*\[mcp_servers\.(["']?)([^\]"']+)\1\]\s*$/gm
 
@@ -42,6 +44,26 @@ function hasCodexBrokerConfig(value: string): boolean
   return false
 }
 
+function configHomePath(value: unknown): string | undefined
+{
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const homePath = (value as { readonly homePath?: unknown }).homePath
+  if (typeof homePath !== 'string') return undefined
+  const trimmed = homePath.trim()
+  return trimmed.length > 0 ? trimmed : undefined
+}
+
+function resolveConfigDirectory(path: Path.Path, directory: string, home?: string): string
+{
+  const expanded =
+    home && directory === '~'
+      ? home
+      : home && directory.startsWith('~/')
+        ? path.join(home, directory.slice(2))
+        : directory
+  return path.resolve(expanded)
+}
+
 export const readWorkersReadiness = Effect.fn('WorkersReadiness.read')(function* (
   stateDir: string,
 )
@@ -53,45 +75,83 @@ export const readWorkersReadiness = Effect.fn('WorkersReadiness.read')(function*
     .exists(stateDir)
     .pipe(Effect.orElseSucceed(() => false as boolean))
   const home = environment.HOME?.trim()
+  const settingsService = yield* Effect.serviceOption(ServerSettingsService)
+  const settings = Option.isSome(settingsService)
+    ? yield* settingsService.value.getSettings.pipe(Effect.option)
+    : Option.none()
+  const configuredClaudeHomes = Option.isSome(settings)
+    ? [
+        settings.value.providers.claudeAgent.homePath.trim(),
+        ...Object.values(settings.value.providerInstances).flatMap((instance) =>
+          instance.driver === 'claudeAgent'
+            ? [
+                configHomePath(instance.config) ?? '',
+                ...(instance.environment ?? [])
+                  .filter((entry) => entry.name === 'CLAUDE_CONFIG_DIR')
+                  .map((entry) => entry.value.trim()),
+              ]
+            : [],
+        ),
+      ].filter((value) => value.length > 0)
+    : []
+  const claudeConfigPaths = Array.from(
+    new Set(
+      [environment.CLAUDE_CONFIG_DIR?.trim(), ...configuredClaudeHomes, home]
+        .filter((value): value is string => value !== undefined && value.length > 0)
+        .map((directory) =>
+          path.join(resolveConfigDirectory(path, directory, home), '.claude.json'),
+        ),
+    ),
+  )
+  const codexHome = environment.CODEX_HOME?.trim() || (home ? path.join(home, '.codex') : null)
+  const codexConfigPath = codexHome ? path.join(codexHome, 'config.toml') : null
 
-  if (!home)
+  if (claudeConfigPaths.length === 0 && codexConfigPath === null)
   {
     return {
       stateDir,
       stateDirExists,
       brokerConfigured: false,
       brokerConfigSource: Option.none(),
-      message: Option.some('The provider home directory could not be resolved from HOME.'),
+      message: Option.some('The provider configuration directories could not be resolved.'),
     }
   }
 
-  const claudeConfigPath = path.join(home, '.claude.json')
-  const codexHome = environment.CODEX_HOME?.trim() || path.join(home, '.codex')
-  const codexConfigPath = path.join(codexHome, 'config.toml')
-  const configs = yield* Effect.all(
-    {
-      claude: fileSystem.readFileString(claudeConfigPath).pipe(Effect.result),
-      codex: fileSystem.readFileString(codexConfigPath).pipe(Effect.result),
-    },
-    { concurrency: 2 },
+  const claudeConfigs = yield* Effect.forEach(
+    claudeConfigPaths,
+    (configPath) =>
+      fileSystem.readFileString(configPath).pipe(
+        Effect.result,
+        Effect.map((result) => ({ configPath, result })),
+      ),
+    { concurrency: 'unbounded' },
   )
-
-  if (Result.isSuccess(configs.claude))
+  for (const config of claudeConfigs)
   {
-    const parsed = parseJson(configs.claude.success)
+    if (Result.isFailure(config.result)) continue
+    const parsed = parseJson(config.result.success)
     if (Option.isSome(parsed) && hasClaudeBrokerConfig(parsed.value))
     {
       return {
         stateDir,
         stateDirExists,
         brokerConfigured: true,
-        brokerConfigSource: Option.some(claudeConfigPath),
+        brokerConfigSource: Option.some(config.configPath),
         message: Option.none(),
       }
     }
   }
 
-  if (Result.isSuccess(configs.codex) && hasCodexBrokerConfig(configs.codex.success))
+  const codexConfig =
+    codexConfigPath === null
+      ? null
+      : yield* fileSystem.readFileString(codexConfigPath).pipe(Effect.result)
+  if (
+    codexConfigPath !== null &&
+    codexConfig !== null &&
+    Result.isSuccess(codexConfig) &&
+    hasCodexBrokerConfig(codexConfig.success)
+  )
   {
     return {
       stateDir,
@@ -108,7 +168,12 @@ export const readWorkersReadiness = Effect.fn('WorkersReadiness.read')(function*
     brokerConfigured: false,
     brokerConfigSource: Option.none(),
     message: Option.some(
-      `No worker-broker MCP server was found in '${claudeConfigPath}' or '${codexConfigPath}'.`,
+      `No worker-broker MCP server was found in ${[
+        ...claudeConfigPaths,
+        ...(codexConfigPath === null ? [] : [codexConfigPath]),
+      ]
+        .map((configPath) => `'${configPath}'`)
+        .join(' or ')}.`,
     ),
   }
 })

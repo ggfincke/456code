@@ -62,7 +62,7 @@ export const make = Effect.gen(function* ()
   )
   {
     const list = yield* store.list(input)
-    const allRuns = yield* store.listRuns({})
+    const allRuns = WorkerBrokerStore.runsFromWorkersList(list)
     const run = input.run?.trim()
     const runs =
       run === undefined
