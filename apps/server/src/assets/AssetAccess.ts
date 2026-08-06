@@ -40,7 +40,7 @@ import {
   timingSafeEqualBase64Url,
 } from '../auth/utils.ts'
 import * as ServerSecretStore from '../auth/ServerSecretStore.ts'
-import { resolveAttachmentPathById } from '../attachmentStore.ts'
+import { resolveAttachmentPathById } from '../attachments/attachmentStore.ts'
 import * as ServerConfig from '../config.ts'
 import * as ProjectFaviconResolver from '../project/ProjectFaviconResolver.ts'
 import * as WorkspacePaths from '../workspace/WorkspacePaths.ts'

@@ -27,7 +27,7 @@ import * as Layer from 'effect/Layer'
 import * as Schema from 'effect/Schema'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 import {
   captureExactGitSnapshot,
   EXACT_GIT_SNAPSHOT_MAX_BYTE_COUNT,

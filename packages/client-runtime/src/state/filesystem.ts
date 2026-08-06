@@ -1,20 +1,4 @@
 // packages/client-runtime/src/state/filesystem.ts
-// manage create filesystem environment atoms state
+// re-export filesystem from nested state owner
 
-import { WS_METHODS } from '@t3tools/contracts'
-import { Atom } from 'effect/unstable/reactivity'
-
-import { createEnvironmentRpcQueryAtomFamily } from './runtime.ts'
-import type { EnvironmentRegistry } from '../connection/registry.ts'
-
-export function createFilesystemEnvironmentAtoms<R, E>(
-  runtime: Atom.AtomRuntime<EnvironmentRegistry | R, E>,
-)
-{
-  return {
-    browse: createEnvironmentRpcQueryAtomFamily(runtime, {
-      label: 'environment-data:filesystem:browse',
-      tag: WS_METHODS.filesystemBrowse,
-    }),
-  }
-}
+export * from './workspace/filesystem.ts'

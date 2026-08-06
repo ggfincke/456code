@@ -14,7 +14,7 @@ import {
   VcsProcessSpawnError,
   VcsProcessTimeoutError,
 } from '@t3tools/contracts'
-import * as ProcessRunner from '../../../../apps/server/src/processRunner.ts'
+import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import * as VcsProcess from '../../../../apps/server/src/vcs/VcsProcess.ts'
 
 const run = (input: VcsProcess.VcsProcessInput) =>

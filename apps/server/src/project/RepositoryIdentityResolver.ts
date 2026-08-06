@@ -13,7 +13,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 
 const DEFAULT_REPOSITORY_IDENTITY_CACHE_CAPACITY = 512
 const DEFAULT_POSITIVE_CACHE_TTL = Duration.minutes(1)
@@ -57,7 +57,7 @@ function pickPrimaryRemote(
   remotes: ReadonlyMap<string, string>,
 ): { readonly remoteName: string; readonly remoteUrl: string } | null
 {
-  for (const preferredRemoteName of ['upstream', 'origin'] as const)
+  for (const preferredRemoteName of ['origin', 'upstream'] as const)
   {
     const remoteUrl = remotes.get(preferredRemoteName)
     if (remoteUrl)

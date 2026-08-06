@@ -1,3 +1,4 @@
 // packages/client-runtime/src/state/threadRetention.ts
-// state across short subscriber gaps without keeping every opened thread alive
-export const THREAD_STATE_IDLE_TTL_MS = 5 * 60_000
+// re-export threadRetention from nested state owner
+
+export * from './threads/threadRetention.ts'

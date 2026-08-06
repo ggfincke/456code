@@ -18,7 +18,7 @@ import {
   HostProcessPlatform,
 } from '@t3tools/shared/hostProcess'
 
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 import { ensurePinnedRuntimeInstalled, pinnedRuntimePaths } from './pinnedRuntime.ts'
 
 // installs 456code as a per-user boot service. Linux-only for now: systemd

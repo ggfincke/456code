@@ -19,7 +19,6 @@ import {
 import * as Cache from 'effect/Cache'
 import * as Cause from 'effect/Cause'
 import * as Crypto from 'effect/Crypto'
-import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
@@ -45,292 +44,44 @@ import {
   taskIdFromToolProgressSummary,
   toTurnId,
 } from './ProviderRuntimeEventMapping.ts'
+import {
+  BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY,
+  BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL,
+  BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY,
+  BUFFERED_PROPOSED_PLAN_BY_ID_TTL,
+  MAX_BUFFERED_ASSISTANT_CHARS,
+  TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY,
+  TASK_DESCRIPTION_BY_TASK_TTL,
+  TASK_TOOL_USE_ID_BY_TASK_CACHE_CAPACITY,
+  TASK_TOOL_USE_ID_BY_TASK_TTL,
+  TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
+  TURN_MESSAGE_IDS_BY_TURN_TTL,
+  type AssistantSegmentState,
+  findTaskTitleInActivities,
+  findTaskToolUseIdInActivities,
+  providerTaskKey,
+  providerTurnKey,
+} from './ProviderRuntimeIngestionBuffers.ts'
+import {
+  assistantSegmentBaseKeyFromEvent,
+  assistantSegmentMessageId,
+  findMessageById,
+  findProposedPlanById,
+  hasAssistantMessageForTurn,
+  hasCheckpointForTurn,
+  hasRenderableAssistantText,
+  maxCheckpointTurnCount,
+  normalizeProposedPlanMarkdown,
+  normalizeRuntimeTurnState,
+  orchestrationSessionStatusFromRuntimeState,
+  proposedPlanIdFromEvent,
+  sameId,
+  sessionStatusAllowsActiveTurn,
+} from './ProviderRuntimeIngestionMap.ts'
 
 export { runtimeEventToActivities }
 
-const providerTurnKey = (threadId: ThreadId, turnId: TurnId) => `${threadId}:${turnId}`
-const providerTaskKey = (threadId: ThreadId, taskId: string) => `${threadId}:${taskId}`
-
-// fallback when the in-memory description cache no longer has the task name
-// (server restart, session-exit sweep, TTL/capacity eviction): earlier
-// task.started/task.progress activities for the task are persisted with it.
-function findTaskTitleInActivities(
-  activities: ReadonlyArray<OrchestrationThreadActivity> | undefined,
-  taskId: string,
-): string | undefined
-{
-  if (!activities)
-  {
-    return undefined
-  }
-  for (let index = activities.length - 1; index >= 0; index -= 1)
-  {
-    const activity = activities[index]
-    if (!activity || (activity.kind !== 'task.started' && activity.kind !== 'task.progress'))
-    {
-      continue
-    }
-    const payload =
-      activity.payload && typeof activity.payload === 'object'
-        ? (activity.payload as { taskId?: unknown; title?: unknown; detail?: unknown })
-        : undefined
-    if (payload?.taskId !== taskId)
-    {
-      continue
-    }
-    const title =
-      typeof payload.title === 'string'
-        ? payload.title
-        : activity.kind === 'task.started' && typeof payload.detail === 'string'
-          ? payload.detail
-          : undefined
-    if (title && title.trim().length > 0)
-    {
-      return title
-    }
-  }
-  return undefined
-}
-
-// walk newest-first for the task's most recent recorded tool_use id
-function findTaskToolUseIdInActivities(
-  activities: ReadonlyArray<OrchestrationThreadActivity> | undefined,
-  taskId: string,
-): string | undefined
-{
-  if (!activities)
-  {
-    return undefined
-  }
-  for (let index = activities.length - 1; index >= 0; index -= 1)
-  {
-    const activity = activities[index]
-    if (!activity || !activity.kind.startsWith('task.'))
-    {
-      continue
-    }
-    const payload =
-      activity.payload && typeof activity.payload === 'object'
-        ? (activity.payload as { taskId?: unknown; toolUseId?: unknown })
-        : undefined
-    if (
-      payload?.taskId === taskId &&
-      typeof payload.toolUseId === 'string' &&
-      payload.toolUseId.length > 0
-    )
-    {
-      return payload.toolUseId
-    }
-  }
-  return undefined
-}
-
-interface AssistantSegmentState
-{
-  baseKey: string
-  nextSegmentIndex: number
-  activeMessageId: MessageId | null
-}
-
-const TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY = 10_000
-const TURN_MESSAGE_IDS_BY_TURN_TTL = Duration.minutes(120)
-const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_CACHE_CAPACITY = 20_000
-const BUFFERED_MESSAGE_TEXT_BY_MESSAGE_ID_TTL = Duration.minutes(120)
-const BUFFERED_PROPOSED_PLAN_BY_ID_CACHE_CAPACITY = 10_000
-const BUFFERED_PROPOSED_PLAN_BY_ID_TTL = Duration.minutes(120)
-const TASK_DESCRIPTION_BY_TASK_CACHE_CAPACITY = 10_000
-const TASK_DESCRIPTION_BY_TASK_TTL = Duration.minutes(120)
-const TASK_TOOL_USE_ID_BY_TASK_CACHE_CAPACITY = 10_000
-const TASK_TOOL_USE_ID_BY_TASK_TTL = Duration.minutes(120)
-const MAX_BUFFERED_ASSISTANT_CHARS = 24_000
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== '0'
-
-function sameId(left: string | null | undefined, right: string | null | undefined): boolean
-{
-  if (left === null || left === undefined || right === null || right === undefined)
-  {
-    return false
-  }
-  return left === right
-}
-
-function hasAssistantMessageForTurn(
-  messages: ReadonlyArray<OrchestrationMessage>,
-  turnId: TurnId,
-  options?: { readonly streamingOnly?: boolean },
-): boolean
-{
-  for (let index = 0; index < messages.length; index += 1)
-  {
-    const message = messages[index]
-    if (!message)
-    {
-      continue
-    }
-    if (message.role !== 'assistant' || message.turnId !== turnId)
-    {
-      continue
-    }
-    if (options?.streamingOnly === true && !message.streaming)
-    {
-      continue
-    }
-    return true
-  }
-  return false
-}
-
-function findMessageById(
-  messages: ReadonlyArray<OrchestrationMessage>,
-  messageId: MessageId,
-): OrchestrationMessage | undefined
-{
-  for (let index = 0; index < messages.length; index += 1)
-  {
-    const message = messages[index]
-    if (message?.id === messageId)
-    {
-      return message
-    }
-  }
-  return undefined
-}
-
-function findProposedPlanById(
-  proposedPlans: ReadonlyArray<
-    Pick<OrchestrationProposedPlan, 'id' | 'createdAt' | 'implementedAt' | 'implementationThreadId'>
-  >,
-  planId: string,
-):
-  | Pick<OrchestrationProposedPlan, 'id' | 'createdAt' | 'implementedAt' | 'implementationThreadId'>
-  | undefined
-  {
-  for (let index = 0; index < proposedPlans.length; index += 1)
-  {
-    const proposedPlan = proposedPlans[index]
-    if (proposedPlan?.id === planId)
-    {
-      return proposedPlan
-    }
-  }
-  return undefined
-}
-
-function hasCheckpointForTurn(
-  checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
-  turnId: TurnId,
-): boolean
-{
-  for (let index = 0; index < checkpoints.length; index += 1)
-  {
-    if (checkpoints[index]?.turnId === turnId)
-    {
-      return true
-    }
-  }
-  return false
-}
-
-function maxCheckpointTurnCount(
-  checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>,
-): number
-{
-  let maxTurnCount = 0
-  for (let index = 0; index < checkpoints.length; index += 1)
-  {
-    const checkpoint = checkpoints[index]
-    if (checkpoint && checkpoint.checkpointTurnCount > maxTurnCount)
-    {
-      maxTurnCount = checkpoint.checkpointTurnCount
-    }
-  }
-  return maxTurnCount
-}
-
-function normalizeProposedPlanMarkdown(planMarkdown: string | undefined): string | undefined
-{
-  const trimmed = planMarkdown?.trim()
-  if (!trimmed)
-  {
-    return undefined
-  }
-  return trimmed
-}
-
-function hasRenderableAssistantText(text: string | undefined): boolean
-{
-  return (text?.trim().length ?? 0) > 0
-}
-
-function proposedPlanIdFromEvent(event: ProviderRuntimeEvent, threadId: ThreadId): string
-{
-  const turnId = toTurnId(event.turnId)
-  if (turnId)
-  {
-    return proposedPlanIdForTurn(threadId, turnId)
-  }
-  if (event.itemId)
-  {
-    return `plan:${threadId}:item:${event.itemId}`
-  }
-  return `plan:${threadId}:event:${event.eventId}`
-}
-
-function assistantSegmentBaseKeyFromEvent(event: ProviderRuntimeEvent): string
-{
-  return String(event.itemId ?? event.turnId ?? event.eventId)
-}
-
-function assistantSegmentMessageId(baseKey: string, segmentIndex: number): MessageId
-{
-  return MessageId.make(
-    segmentIndex === 0 ? `assistant:${baseKey}` : `assistant:${baseKey}:segment:${segmentIndex}`,
-  )
-}
-function normalizeRuntimeTurnState(
-  value: string | undefined,
-): 'completed' | 'failed' | 'interrupted' | 'cancelled'
-{
-  switch (value)
-  {
-    case 'failed':
-    case 'interrupted':
-    case 'cancelled':
-    case 'completed':
-      return value
-    default:
-      return 'completed'
-  }
-}
-
-function orchestrationSessionStatusFromRuntimeState(
-  state: 'starting' | 'running' | 'waiting' | 'ready' | 'interrupted' | 'stopped' | 'error',
-): 'starting' | 'running' | 'ready' | 'interrupted' | 'stopped' | 'error'
-{
-  switch (state)
-  {
-    case 'starting':
-      return 'starting'
-    case 'running':
-    case 'waiting':
-      return 'running'
-    case 'ready':
-      return 'ready'
-    case 'interrupted':
-      return 'interrupted'
-    case 'stopped':
-      return 'stopped'
-    case 'error':
-      return 'error'
-  }
-}
-
-function sessionStatusAllowsActiveTurn(
-  status: ReturnType<typeof orchestrationSessionStatusFromRuntimeState>,
-): boolean
-{
-  return status === 'starting' || status === 'running'
-}
 
 const make = Effect.gen(function* ()
 {

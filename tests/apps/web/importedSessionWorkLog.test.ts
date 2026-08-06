@@ -72,7 +72,7 @@ interface CompactorModule
   compactImportedSession: (session: ImportedSession) => ImportedSession
 }
 
-const compactorModulePath = '../../../apps/server/src/import/compactImportedSession.ts'
+const compactorModulePath = '../../../apps/server/src/import/continuation/compactImportedSession.ts'
 
 async function loadCompactor(): Promise<CompactorModule>
 {
@@ -179,7 +179,7 @@ describe('imported session work-log compatibility', () =>
   it('renders full Codex reasoning, command output, and changed filenames', async () =>
   {
     const parser = await loadParser(
-      '../../../apps/server/src/import/codexRolloutParser.ts',
+      '../../../apps/server/src/import/parsers/codexRolloutParser.ts',
       'parseCodexRollout',
     )
     const session = parser.parse({
@@ -224,7 +224,7 @@ describe('imported session work-log compatibility', () =>
   it('renders Claude reasoning, command input/output, and edit filenames', async () =>
   {
     const parser = await loadParser(
-      '../../../apps/server/src/import/claudeSessionParser.ts',
+      '../../../apps/server/src/import/parsers/claudeSessionParser.ts',
       'parseClaudeSession',
     )
     const session = parser.parse({
@@ -310,7 +310,7 @@ describe('imported session work-log compatibility', () =>
   it('renders OpenCode fixture reasoning and completed command details', async () =>
   {
     const parser = await loadOpenCodeParser(
-      '../../../apps/server/src/import/openCodeSessionParser.ts',
+      '../../../apps/server/src/import/parsers/openCodeSessionParser.ts',
     )
     const session = parser.parseOpenCodeSessionBundle({
       sourcePath: '/opencode/storage/session/prj_fixture/ses_imported.json',
@@ -362,7 +362,7 @@ describe('imported session work-log compatibility', () =>
 
   it('renders distinct ACP thoughts, plans, failed tool detail, and unfinished warnings', async () =>
   {
-    const parser = await loadAcpParser('../../../apps/server/src/import/acpImport.ts')
+    const parser = await loadAcpParser('../../../apps/server/src/import/parsers/acpImport.ts')
     const nativeSessionId = 'acp-render-session'
     const session = parser.normalizeAcpSessionReplay({
       descriptor: {

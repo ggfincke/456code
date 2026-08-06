@@ -67,7 +67,19 @@ import {
   parseAttachmentIdFromRelativePath,
   parseThreadSegmentFromAttachmentId,
   toSafeThreadAttachmentSegment,
-} from '../../attachmentStore.ts'
+} from '../../attachments/attachmentStore.ts'
+
+import {
+  deriveHasActionableProposedPlan,
+  derivePendingUserInputCountFromActivities,
+  extractActivityRequestId,
+  settledTurnStateForSessionStatus,
+} from './ProjectionDerivedState.ts'
+import {
+  retainProjectionActivitiesAfterRevert,
+  retainProjectionMessagesAfterRevert,
+  retainProjectionProposedPlansAfterRevert,
+} from './ProjectionRevertRetention.ts'
 
 export const ORCHESTRATION_PROJECTOR_NAMES = {
   projects: 'projection.projects',
@@ -118,25 +130,6 @@ type ProjectorName =
 // turn state to settle still-running turns with when their session leaves the
 // "running" status, or null while the session is (re)starting or running and
 // turns must stay unsettled.
-function settledTurnStateForSessionStatus(
-  status: OrchestrationSessionStatus,
-): 'completed' | 'interrupted' | 'error' | null
-{
-  switch (status)
-  {
-    case 'idle':
-    case 'ready':
-      return 'completed'
-    case 'error':
-      return 'error'
-    case 'interrupted':
-    case 'stopped':
-      return 'interrupted'
-    case 'starting':
-    case 'running':
-      return null
-  }
-}
 
 interface ProjectorDefinition
 {
@@ -174,238 +167,6 @@ const materializeAttachmentsForProjection = Effect.fn('materializeAttachmentsFor
   (input: { readonly attachments: ReadonlyArray<ChatAttachment> }) =>
     Effect.succeed(input.attachments.length === 0 ? [] : input.attachments),
 )
-
-function extractActivityRequestId(payload: unknown): ApprovalRequestId | null
-{
-  if (typeof payload !== 'object' || payload === null)
-  {
-    return null
-  }
-  const requestId = (payload as Record<string, unknown>).requestId
-  return typeof requestId === 'string' ? ApprovalRequestId.make(requestId) : null
-}
-
-function derivePendingUserInputCountFromActivities(
-  activities: ReadonlyArray<ProjectionThreadActivity>,
-): number
-{
-  const openRequestIds = new Set<string>()
-  const ordered = [...activities].toSorted(
-    (left, right) =>
-      left.createdAt.localeCompare(right.createdAt) ||
-      left.activityId.localeCompare(right.activityId),
-  )
-
-  for (const activity of ordered)
-  {
-    const requestId = extractActivityRequestId(activity.payload)
-    if (requestId === null)
-    {
-      continue
-    }
-    const payload =
-      typeof activity.payload === 'object' && activity.payload !== null
-        ? (activity.payload as Record<string, unknown>)
-        : null
-    const detail = typeof payload?.detail === 'string' ? payload.detail.toLowerCase() : null
-
-    if (activity.kind === 'user-input.requested')
-    {
-      openRequestIds.add(requestId)
-      continue
-    }
-
-    if (activity.kind === 'user-input.resolved')
-    {
-      openRequestIds.delete(requestId)
-      continue
-    }
-
-    if (
-      activity.kind === 'provider.user-input.respond.failed' &&
-      detail !== null &&
-      (detail.includes('stale pending user-input request') ||
-        detail.includes('unknown pending user-input request') ||
-        detail.includes('unknown pending user input request') ||
-        detail.includes('unknown pending codex user input request'))
-    )
-    {
-      openRequestIds.delete(requestId)
-    }
-  }
-
-  return openRequestIds.size
-}
-
-function deriveHasActionableProposedPlan(input: {
-  readonly latestTurnId: string | null
-  readonly proposedPlans: ReadonlyArray<ProjectionThreadProposedPlan>
-}): boolean
-{
-  const sorted = [...input.proposedPlans].toSorted(
-    (left, right) =>
-      left.updatedAt.localeCompare(right.updatedAt) || left.planId.localeCompare(right.planId),
-  )
-
-  let latestForTurn: ProjectionThreadProposedPlan | null = null
-  if (input.latestTurnId !== null)
-  {
-    for (let index = sorted.length - 1; index >= 0; index -= 1)
-    {
-      const plan = sorted[index]
-      if (plan?.turnId === input.latestTurnId)
-      {
-        latestForTurn = plan
-        break
-      }
-    }
-  }
-  if (latestForTurn !== null)
-  {
-    return latestForTurn.implementedAt === null
-  }
-
-  const latestPlan = sorted.at(-1) ?? null
-  return latestPlan !== null && latestPlan.implementedAt === null
-}
-
-function retainProjectionMessagesAfterRevert(
-  messages: ReadonlyArray<ProjectionThreadMessage>,
-  turns: ReadonlyArray<ProjectionTurn>,
-  turnCount: number,
-): ReadonlyArray<ProjectionThreadMessage>
-{
-  const retainedMessageIds = new Set<string>()
-  const retainedTurnIds = new Set<string>()
-  const keptTurns = turns.filter(
-    (turn) =>
-      turn.turnId !== null &&
-      turn.checkpointTurnCount !== null &&
-      turn.checkpointTurnCount <= turnCount,
-  )
-  for (const turn of keptTurns)
-  {
-    if (turn.turnId !== null)
-    {
-      retainedTurnIds.add(turn.turnId)
-    }
-    if (turn.pendingMessageId !== null)
-    {
-      retainedMessageIds.add(turn.pendingMessageId)
-    }
-    if (turn.assistantMessageId !== null)
-    {
-      retainedMessageIds.add(turn.assistantMessageId)
-    }
-  }
-
-  for (const message of messages)
-  {
-    if (message.role === 'system')
-    {
-      retainedMessageIds.add(message.messageId)
-      continue
-    }
-    if (message.turnId !== null && retainedTurnIds.has(message.turnId))
-    {
-      retainedMessageIds.add(message.messageId)
-    }
-  }
-
-  const retainedUserCount = messages.filter(
-    (message) => message.role === 'user' && retainedMessageIds.has(message.messageId),
-  ).length
-  const missingUserCount = Math.max(0, turnCount - retainedUserCount)
-  if (missingUserCount > 0)
-  {
-    const fallbackUserMessages = messages
-      .filter(
-        (message) =>
-          message.role === 'user' &&
-          !retainedMessageIds.has(message.messageId) &&
-          (message.turnId === null || retainedTurnIds.has(message.turnId)),
-      )
-      .toSorted(
-        (left, right) =>
-          left.createdAt.localeCompare(right.createdAt) ||
-          left.messageId.localeCompare(right.messageId),
-      )
-      .slice(0, missingUserCount)
-    for (const message of fallbackUserMessages)
-    {
-      retainedMessageIds.add(message.messageId)
-    }
-  }
-
-  const retainedAssistantCount = messages.filter(
-    (message) => message.role === 'assistant' && retainedMessageIds.has(message.messageId),
-  ).length
-  const missingAssistantCount = Math.max(0, turnCount - retainedAssistantCount)
-  if (missingAssistantCount > 0)
-  {
-    const fallbackAssistantMessages = messages
-      .filter(
-        (message) =>
-          message.role === 'assistant' &&
-          !retainedMessageIds.has(message.messageId) &&
-          (message.turnId === null || retainedTurnIds.has(message.turnId)),
-      )
-      .toSorted(
-        (left, right) =>
-          left.createdAt.localeCompare(right.createdAt) ||
-          left.messageId.localeCompare(right.messageId),
-      )
-      .slice(0, missingAssistantCount)
-    for (const message of fallbackAssistantMessages)
-    {
-      retainedMessageIds.add(message.messageId)
-    }
-  }
-
-  return messages.filter((message) => retainedMessageIds.has(message.messageId))
-}
-
-function retainProjectionActivitiesAfterRevert(
-  activities: ReadonlyArray<ProjectionThreadActivity>,
-  turns: ReadonlyArray<ProjectionTurn>,
-  turnCount: number,
-): ReadonlyArray<ProjectionThreadActivity>
-{
-  const retainedTurnIds = new Set<string>(
-    turns
-      .filter(
-        (turn) =>
-          turn.turnId !== null &&
-          turn.checkpointTurnCount !== null &&
-          turn.checkpointTurnCount <= turnCount,
-      )
-      .flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
-  )
-  return activities.filter(
-    (activity) => activity.turnId === null || retainedTurnIds.has(activity.turnId),
-  )
-}
-
-function retainProjectionProposedPlansAfterRevert(
-  proposedPlans: ReadonlyArray<ProjectionThreadProposedPlan>,
-  turns: ReadonlyArray<ProjectionTurn>,
-  turnCount: number,
-): ReadonlyArray<ProjectionThreadProposedPlan>
-{
-  const retainedTurnIds = new Set<string>(
-    turns
-      .filter(
-        (turn) =>
-          turn.turnId !== null &&
-          turn.checkpointTurnCount !== null &&
-          turn.checkpointTurnCount <= turnCount,
-      )
-      .flatMap((turn) => (turn.turnId === null ? [] : [turn.turnId])),
-  )
-  return proposedPlans.filter(
-    (proposedPlan) => proposedPlan.turnId === null || retainedTurnIds.has(proposedPlan.turnId),
-  )
-}
 
 function retainProjectionOrchestratePlansAfterRevert(
   orchestratePlans: ReadonlyArray<ProjectionThreadOrchestratePlanDbRow>,

@@ -35,7 +35,7 @@ import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawne
 import * as EffectAcpErrors from 'effect-acp/errors'
 import type * as EffectAcpSchema from 'effect-acp/schema'
 
-import { resolveAttachmentPath } from '../../attachmentStore.ts'
+import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
 import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import {

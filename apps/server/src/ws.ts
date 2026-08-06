@@ -51,7 +51,7 @@ import {
   OrchestrationCommandInvariantError,
   OrchestrationCommandPreviouslyRejectedError,
 } from './orchestration/Errors.ts'
-import * as ImportContinuation from './import/continuationContract.ts'
+import * as ImportContinuation from './import/continuation/continuationContract.ts'
 import * as WorkspaceMdxDocument from './mdx/WorkspaceMdxDocument.ts'
 import * as CartographerEmbedBroker from './cartographer/CartographerEmbedBroker.ts'
 import * as ProposalGenerationService from './proposal/ProposalGenerationService.ts'
@@ -65,7 +65,7 @@ import { makeVcsRpcHandlers } from './ws/handlers/vcsHandlers.ts'
 import { makeWorkspaceRpcHandlers } from './ws/handlers/workspaceHandlers.ts'
 import { makeRpcAuthorization, toAuthAccessStreamEvent } from './ws/rpcAuthorization.ts'
 import * as ProviderRegistry from './provider/Services/ProviderRegistry.ts'
-import * as ProviderMaintenanceRunner from './provider/providerMaintenanceRunner.ts'
+import * as ProviderMaintenanceRunner from './provider/maintenance/providerMaintenanceRunner.ts'
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
 import * as ServerRuntimeStartup from './serverRuntimeStartup.ts'
 import * as ServerSettings from './serverSettings.ts'

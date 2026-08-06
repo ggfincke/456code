@@ -1,33 +1,4 @@
 // apps/web/src/commandPaletteBus.ts
-// without owning its React state
-const COMMAND_PALETTE_OPEN_EVENT = '456code:open-command-palette'
+// expose the stable facade for command palette bus helpers
 
-export interface CommandPaletteOpenDetail
-{
-  readonly open?: 'add-project' | 'new-thread-in'
-}
-
-export function openCommandPalette(detail?: CommandPaletteOpenDetail): void
-{
-  window.dispatchEvent(new CustomEvent(COMMAND_PALETTE_OPEN_EVENT, detail ? { detail } : undefined))
-}
-
-export function onOpenCommandPalette(
-  listener: (detail: CommandPaletteOpenDetail) => void,
-): () => void
-{
-  const handler = (event: Event) =>
-  {
-    listener((event as CustomEvent<CommandPaletteOpenDetail>).detail ?? {})
-  }
-  window.addEventListener(COMMAND_PALETTE_OPEN_EVENT, handler)
-  return () => window.removeEventListener(COMMAND_PALETTE_OPEN_EVENT, handler)
-}
-
-// read at event time so consumers do not subscribe to transient dialog state.
-export function isCommandPaletteOpen(): boolean
-{
-  return (
-    typeof document !== 'undefined' && document.querySelector('[data-command-palette]') !== null
-  )
-}
+export * from './stores/commandPaletteBus'

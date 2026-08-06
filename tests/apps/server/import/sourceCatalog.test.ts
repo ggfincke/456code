@@ -26,8 +26,8 @@ import {
   resolveAcpImportSourceCatalog,
   resolveImportSourcePath,
   resolveSourceCatalog,
-} from '../../../../apps/server/src/import/sourceCatalog.ts'
-import { makeImportByteBudget } from '../../../../apps/server/src/import/resourceLimits.ts'
+} from '../../../../apps/server/src/import/discovery/sourceCatalog.ts'
+import { makeImportByteBudget } from '../../../../apps/server/src/import/discovery/resourceLimits.ts'
 import { fileContinuationIdentity } from '../../../../apps/server/src/provider/continuationIdentity.ts'
 
 const CODEX = ProviderDriverKind.make('codex')

@@ -29,7 +29,7 @@ import {
   ImportContinuationDeps,
   type ContinuationOutcome,
   type ContinuationRequest,
-} from '../../../../apps/server/src/import/continuationContract.ts'
+} from '../../../../apps/server/src/import/continuation/continuationContract.ts'
 import {
   ACP_IMPORT_REQUEST_DEADLINE_MS,
   ImportServiceDeps,
@@ -41,8 +41,8 @@ import {
 import type {
   AcpImportBatchLoadResult,
   AcpImportedSession,
-} from '../../../../apps/server/src/import/acpImport.ts'
-import type { ImportFileSourceDescriptor } from '../../../../apps/server/src/import/sourceCatalog.ts'
+} from '../../../../apps/server/src/import/parsers/acpImport.ts'
+import type { ImportFileSourceDescriptor } from '../../../../apps/server/src/import/discovery/sourceCatalog.ts'
 import type { ImportSource } from '../../../../apps/server/src/import/types.ts'
 import { fileContinuationIdentity } from '../../../../apps/server/src/provider/continuationIdentity.ts'
 import type {

@@ -51,10 +51,10 @@ import {
   readProviderStatusCache,
   resolveProviderStatusCachePath,
   writeProviderStatusCache,
-} from '../providerStatusCache.ts'
-import type { ProviderInstance } from '../ProviderDriver.ts'
-import { makeManualOnlyProviderMaintenanceCapabilities } from '../providerMaintenance.ts'
-import type { ProviderSnapshotSource } from '../builtInProviderCatalog.ts'
+} from '../maintenance/providerStatusCache.ts'
+import type { ProviderInstance } from '../catalog/ProviderDriver.ts'
+import { makeManualOnlyProviderMaintenanceCapabilities } from '../maintenance/providerMaintenance.ts'
+import type { ProviderSnapshotSource } from '../catalog/builtInProviderCatalog.ts'
 
 interface LiveProviderSnapshotSource extends ProviderSnapshotSource
 {

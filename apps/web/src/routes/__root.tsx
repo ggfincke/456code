@@ -27,7 +27,7 @@ import {
   ToastProvider,
   toastManager,
 } from '../components/ui/toast'
-import { resolveAndPersistPreferredEditor } from '../editorPreferences'
+import { resolveAndPersistPreferredEditor } from '../lib/editorPreferences'
 import { useClientSettings } from '../hooks/useSettings'
 import {
   deriveLogicalProjectKeyFromSettings,

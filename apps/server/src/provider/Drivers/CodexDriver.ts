@@ -40,20 +40,20 @@ import { ProviderDriverError } from '../Errors.ts'
 import { makeCodexAdapter } from '../Layers/CodexAdapter.ts'
 import { checkCodexProviderStatus, makePendingCodexProvider } from '../Layers/CodexProvider.ts'
 import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
-import { makeManagedServerProvider } from '../makeManagedServerProvider.ts'
-import type { ProviderDriver, ProviderInstance } from '../ProviderDriver.ts'
+import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
+import type { ProviderDriver, ProviderInstance } from '../catalog/ProviderDriver.ts'
 import type { ServerProviderDraft } from '../providerSnapshot.ts'
-import { mergeProviderInstanceEnvironment } from '../ProviderInstanceEnvironment.ts'
+import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makePackageManagedProviderMaintenanceResolver,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from '../providerMaintenance.ts'
+} from '../maintenance/providerMaintenance.ts'
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from '../providerUpdateSettings.ts'
+} from '../maintenance/providerUpdateSettings.ts'
 import { materializeCodexShadowHome, resolveCodexHomeLayout } from './CodexHomeLayout.ts'
 const decodeCodexSettings = Schema.decodeSync(CodexSettings)
 

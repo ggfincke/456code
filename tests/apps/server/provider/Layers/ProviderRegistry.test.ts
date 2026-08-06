@@ -52,11 +52,11 @@ import * as ServerSettingsModule from '../../../../../apps/server/src/serverSett
 import {
   readProviderStatusCache,
   resolveProviderStatusCachePath,
-} from '../../../../../apps/server/src/provider/providerStatusCache.ts'
-import type { ProviderInstance } from '../../../../../apps/server/src/provider/ProviderDriver.ts'
+} from '../../../../../apps/server/src/provider/maintenance/providerStatusCache.ts'
+import type { ProviderInstance } from '../../../../../apps/server/src/provider/catalog/ProviderDriver.ts'
 import * as ProviderInstanceRegistry from '../../../../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts'
 import * as ProviderRegistry from '../../../../../apps/server/src/provider/Services/ProviderRegistry.ts'
-import { makeManualOnlyProviderMaintenanceCapabilities } from '../../../../../apps/server/src/provider/providerMaintenance.ts'
+import { makeManualOnlyProviderMaintenanceCapabilities } from '../../../../../apps/server/src/provider/maintenance/providerMaintenance.ts'
 const decodeServerSettings = Schema.decodeSync(ServerSettings)
 const encodeServerSettings = Schema.encodeSync(ServerSettings)
 const encodedDefaultServerSettings = encodeServerSettings(DEFAULT_SERVER_SETTINGS)

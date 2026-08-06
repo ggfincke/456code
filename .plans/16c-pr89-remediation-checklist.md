@@ -256,7 +256,7 @@ Counts: active `51` (`valid=33`, `partially-valid=18`), closed-invalid `6`
   - Verdict: `valid`
   - Severity: `Medium`
   - Area: `Edge-case parsing/platform behavior`
-  - File: `apps/server/src/git/Layers/GitCore.ts:41`
+  - File: `apps/server/src/vcs/GitVcsDriverCore.ts:41`
   - Threads: PRRT_kwDORLtfbc5w1CxT
   - Audit note: Braced rename parsing still breaks paths like src/{old => new}/file.ts.
 
@@ -310,7 +310,7 @@ Counts: active `51` (`valid=33`, `partially-valid=18`), closed-invalid `6`
   - Verdict: `valid`
   - Severity: `Low`
   - Area: `Edge-case parsing/platform behavior`
-  - File: `apps/server/src/git/Layers/CodexTextGeneration.ts:136`
+  - File: `apps/server/src/textGeneration/CodexTextGeneration.ts:136`
   - Threads: PRRT_kwDORLtfbc5w1GPo
   - Audit note: Chunk-by-chunk UTF-8 decode can still corrupt split multibyte characters.
 

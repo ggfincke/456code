@@ -13,7 +13,7 @@ import * as Schema from 'effect/Schema'
 
 import packageJson from '../../package.json' with { type: 'json' }
 import * as ServerConfig from '../config.ts'
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 import { resolveServerEnvironmentLabel } from './ServerEnvironmentLabel.ts'
 
 export class ServerEnvironmentIdPersistenceError extends Schema.TaggedErrorClass<ServerEnvironmentIdPersistenceError>()(

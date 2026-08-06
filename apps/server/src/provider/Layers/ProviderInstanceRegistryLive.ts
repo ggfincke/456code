@@ -59,7 +59,7 @@ import {
   ProviderInstanceRegistryMutator,
   type ProviderInstanceRegistryMutatorShape,
 } from '../Services/ProviderInstanceRegistryMutator.ts'
-import type { AnyProviderDriver, ProviderInstance } from '../ProviderDriver.ts'
+import type { AnyProviderDriver, ProviderInstance } from '../catalog/ProviderDriver.ts'
 
 /**
  * Live registry entry: the materialized `ProviderInstance` + the fresh

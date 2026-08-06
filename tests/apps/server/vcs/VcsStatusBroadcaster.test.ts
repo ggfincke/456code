@@ -25,7 +25,7 @@ import type {
 import { GitManagerError } from '@t3tools/contracts'
 
 import * as VcsStatusBroadcaster from '../../../../apps/server/src/vcs/VcsStatusBroadcaster.ts'
-import * as GitWorkflowService from '../../../../apps/server/src/git/GitWorkflowService.ts'
+import * as GitStatusReader from '../../../../apps/server/src/vcs/GitStatusReader.ts'
 
 const baseLocalStatus: VcsStatusLocalResult = {
   isRepo: true,
@@ -78,7 +78,7 @@ function makeTestLayer(state: {
   return VcsStatusBroadcaster.layer.pipe(
     Layer.provideMerge(NodeServices.layer),
     Layer.provide(
-      Layer.mock(GitWorkflowService.GitWorkflowService)({
+      Layer.mock(GitStatusReader.GitStatusReader)({
         localStatus: () =>
           Effect.sync(() =>
           {
@@ -199,7 +199,7 @@ describe('VcsStatusBroadcaster', () =>
     const testLayer = VcsStatusBroadcaster.layer.pipe(
       Layer.provideMerge(NodeServices.layer),
       Layer.provide(
-        Layer.mock(GitWorkflowService.GitWorkflowService)({
+        Layer.mock(GitStatusReader.GitStatusReader)({
           localStatus: () =>
             Effect.sync(() =>
             {
@@ -315,7 +315,7 @@ describe('VcsStatusBroadcaster', () =>
     const testLayer = VcsStatusBroadcaster.layer.pipe(
       Layer.provideMerge(NodeServices.layer),
       Layer.provide(
-        Layer.mock(GitWorkflowService.GitWorkflowService)({
+        Layer.mock(GitStatusReader.GitStatusReader)({
           localStatus: (input) =>
             Effect.sync(() =>
             {
@@ -340,7 +340,7 @@ describe('VcsStatusBroadcaster', () =>
             {
               state.remoteInvalidationCalls += 1
             }),
-        } satisfies Partial<GitWorkflowService.GitWorkflowService['Service']>),
+        } satisfies Partial<GitStatusReader.GitStatusReader['Service']>),
       ),
     )
 
@@ -495,7 +495,7 @@ describe('VcsStatusBroadcaster', () =>
     const testLayer = VcsStatusBroadcaster.layer.pipe(
       Layer.provideMerge(NodeServices.layer),
       Layer.provide(
-        Layer.mock(GitWorkflowService.GitWorkflowService)({
+        Layer.mock(GitStatusReader.GitStatusReader)({
           localStatus: () =>
             Effect.sync(() =>
             {
@@ -707,7 +707,7 @@ describe('VcsStatusBroadcaster', () =>
     const testLayer = VcsStatusBroadcaster.layer.pipe(
       Layer.provideMerge(NodeServices.layer),
       Layer.provide(
-        Layer.mock(GitWorkflowService.GitWorkflowService)({
+        Layer.mock(GitStatusReader.GitStatusReader)({
           localStatus: () =>
             Effect.sync(() =>
             {
@@ -741,7 +741,7 @@ describe('VcsStatusBroadcaster', () =>
             {
               state.remoteInvalidationCalls += 1
             }),
-        } satisfies Partial<GitWorkflowService.GitWorkflowService['Service']>),
+        } satisfies Partial<GitStatusReader.GitStatusReader['Service']>),
       ),
     )
 

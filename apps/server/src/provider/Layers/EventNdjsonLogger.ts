@@ -16,7 +16,7 @@ import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 import * as SynchronizedRef from 'effect/SynchronizedRef'
 
-import { toSafeThreadAttachmentSegment } from '../../attachmentStore.ts'
+import { toSafeThreadAttachmentSegment } from '../../attachments/attachmentStore.ts'
 
 const DEFAULT_MAX_BYTES = 10 * 1024 * 1024
 const DEFAULT_MAX_FILES = 10

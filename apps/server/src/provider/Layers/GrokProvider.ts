@@ -31,7 +31,7 @@ import {
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
-} from '../providerMaintenance.ts'
+} from '../maintenance/providerMaintenance.ts'
 import { makeGrokAcpRuntime, resolveGrokAcpBaseModelId } from '../acp/GrokAcpSupport.ts'
 
 const GROK_PRESENTATION = {

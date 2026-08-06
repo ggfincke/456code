@@ -22,7 +22,7 @@ import {
 } from './http.ts'
 import { fixPath } from './os-jank.ts'
 import { websocketRpcRouteLayer } from './ws.ts'
-import { ImportContinuationLive } from './import/continuation.ts'
+import { ImportContinuationLive } from './import/continuation/continuation.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import { layerConfig as SqlitePersistenceLayerLive } from './persistence/Layers/Sqlite.ts'
 import { ImportReplacementIntentRepositoryLive } from './persistence/Layers/ImportReplacementIntents.ts'
@@ -49,7 +49,7 @@ import * as McpSessionRegistry from './mcp/McpSessionRegistry.ts'
 import * as PreviewAutomationBroker from './mcp/PreviewAutomationBroker.ts'
 import * as PreviewManager from './preview/Manager.ts'
 import * as PortScanner from './preview/PortScanner.ts'
-import * as ProcessRunner from './processRunner.ts'
+import * as ProcessRunner from './process/processRunner.ts'
 import * as GitManager from './git/GitManager.ts'
 import * as Keybindings from './keybindings.ts'
 import * as ServerRuntimeStartup from './serverRuntimeStartup.ts'
@@ -73,6 +73,7 @@ import * as VcsProjectConfig from './vcs/VcsProjectConfig.ts'
 import * as VcsProcess from './vcs/VcsProcess.ts'
 import * as VcsProvisioningService from './vcs/VcsProvisioningService.ts'
 import * as VcsStatusBroadcaster from './vcs/VcsStatusBroadcaster.ts'
+import * as GitStatusReaderLive from './git/GitStatusReaderLive.ts'
 import * as GitWorkflowService from './git/GitWorkflowService.ts'
 import * as ReviewService from './review/ReviewService.ts'
 import * as SourceControlDiscovery from './sourceControl/SourceControlDiscovery.ts'
@@ -226,9 +227,15 @@ const GitLayerLive = Layer.empty.pipe(
   Layer.provideMerge(GitVcsDriver.layer),
 )
 
+const GitStatusReaderLayerLive = GitStatusReaderLive.layer.pipe(
+  Layer.provideMerge(VcsDriverRegistryLayerLive),
+  Layer.provideMerge(GitLayerLive),
+)
+
 const GitWorkflowLayerLive = GitWorkflowService.layer.pipe(
   Layer.provideMerge(VcsDriverRegistryLayerLive),
   Layer.provideMerge(GitLayerLive),
+  Layer.provideMerge(GitStatusReaderLayerLive),
 )
 
 const SourceControlRepositoryServiceLayerLive = SourceControlRepositoryService.layer.pipe(
@@ -248,7 +255,7 @@ const VcsLayerLive = Layer.empty.pipe(
   Layer.provideMerge(GitWorkflowLayerLive),
   Layer.provideMerge(ReviewLayerLive),
   Layer.provideMerge(SourceControlRepositoryServiceLayerLive),
-  Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitWorkflowLayerLive))),
+  Layer.provideMerge(VcsStatusBroadcaster.layer.pipe(Layer.provide(GitStatusReaderLayerLive))),
 )
 
 const CheckpointingLayerLive = Layer.empty.pipe(

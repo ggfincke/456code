@@ -10,7 +10,7 @@ import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 
-import * as ProcessRunner from '../../../../apps/server/src/processRunner.ts'
+import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import {
   ensurePinnedRuntimeInstalled,
   pinnedRuntimePaths,

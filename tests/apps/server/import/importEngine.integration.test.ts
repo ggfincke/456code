@@ -32,13 +32,13 @@ import {
   ImportContinuationDeps,
   type ContinuationOutcome,
   type ContinuationRequest,
-} from '../../../../apps/server/src/import/continuationContract.ts'
+} from '../../../../apps/server/src/import/continuation/continuationContract.ts'
 import {
   ImportServiceDeps,
   type ImportServiceDepsShape,
   make as makeImportService,
 } from '../../../../apps/server/src/import/importService.ts'
-import type { ImportFileSourceDescriptor } from '../../../../apps/server/src/import/sourceCatalog.ts'
+import type { ImportFileSourceDescriptor } from '../../../../apps/server/src/import/discovery/sourceCatalog.ts'
 import type { ImportSource } from '../../../../apps/server/src/import/types.ts'
 import { fileContinuationIdentity } from '../../../../apps/server/src/provider/continuationIdentity.ts'
 

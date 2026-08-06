@@ -7,7 +7,7 @@ import * as NodeFS from 'node:fs'
 
 import { describe, expect, it } from '@effect/vitest'
 
-import { parseCodexRollout } from '../../../../apps/server/src/import/codexRolloutParser.ts'
+import { parseCodexRollout } from '../../../../apps/server/src/import/parsers/codexRolloutParser.ts'
 
 function fixture(name: string): string
 {

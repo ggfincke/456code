@@ -13,7 +13,7 @@ import { type CodexSettings, type ModelSelection } from '@t3tools/contracts'
 import { sanitizeBranchFragment, sanitizeFeatureBranchName } from '@t3tools/shared/git'
 import { resolveSpawnCommand } from '@t3tools/shared/shell'
 
-import { resolveAttachmentPath } from '../attachmentStore.ts'
+import { resolveAttachmentPath } from '../attachments/attachmentStore.ts'
 import * as ServerConfig from '../config.ts'
 import { expandHomePath } from '../pathExpansion.ts'
 import { codexExecLaunchArgs, resolveCodexLaunchArgs } from '../provider/Layers/codexLaunchArgs.ts'

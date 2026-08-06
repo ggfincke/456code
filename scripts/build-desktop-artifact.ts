@@ -15,6 +15,22 @@ import {
   resolveWebAssetBrandForChannel,
   type WebAssetBrand,
 } from './lib/brand-assets.ts'
+import {
+  BuildArch,
+  BuildPlatform,
+  DESKTOP_ASAR_UNPACK,
+  STAGE_INSTALL_ARGS,
+  createStagePatchedDependencies,
+  createStageWorkspaceConfig,
+  resolveDesktopBuildIconAssets,
+  resolveDesktopProductName as resolveDesktopProductNameFromHelpers,
+  resolveDesktopUpdateChannel,
+  resolveDesktopWebAssetBrand,
+  resolveFffNativeDependencies,
+  resolveMockUpdateServerUrl,
+  resolvePackageManagerUserAgent,
+  type DesktopBuildIconAssets,
+} from './lib/desktop-build-helpers.ts'
 import { getDefaultBuildArch } from './lib/build-target-arch.ts'
 import { resolveCatalogDependencies } from './lib/resolve-catalog.ts'
 
@@ -32,11 +48,28 @@ import * as Stream from 'effect/Stream'
 import { Command, Flag } from 'effect/unstable/cli'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 
+export {
+  BuildArch,
+  BuildPlatform,
+  DESKTOP_ASAR_UNPACK,
+  STAGE_INSTALL_ARGS,
+  createStagePatchedDependencies,
+  createStageWorkspaceConfig,
+  resolveDesktopBuildIconAssets,
+  resolveDesktopUpdateChannel,
+  resolveDesktopWebAssetBrand,
+  resolveFffNativeDependencies,
+  resolveMockUpdateServerUrl,
+  resolvePackageManagerUserAgent,
+} from './lib/desktop-build-helpers.ts'
+
+export function resolveDesktopProductName(version: string): string
+{
+  return resolveDesktopProductNameFromHelpers(version, desktopPackageJson.productName ?? '456code')
+}
+
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const
 const DESKTOP_APP_ID = 'com.ggfincke.456code'
-
-const BuildPlatform = Schema.Literals(['mac', 'linux', 'win'])
-const BuildArch = Schema.Literals(['arm64', 'x64', 'universal'])
 
 const WorkspaceConfig = Schema.Struct({
   catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -79,13 +112,6 @@ const readWorkspaceConfig = Effect.fn('readWorkspaceConfig')(function* ()
   const workspaceYaml = yield* fs.readFileString(path.join(repoRoot, 'pnpm-workspace.yaml'))
   return yield* decodeWorkspaceConfig(workspaceYaml)
 })
-
-interface DesktopBuildIconAssets
-{
-  readonly macIconPng: string
-  readonly linuxIconPng: string
-  readonly windowsIconIco: string
-}
 
 interface PlatformConfig
 {
@@ -581,99 +607,6 @@ interface StagePackageJson
   }
 }
 
-export const STAGE_INSTALL_ARGS = ['install', '--prod'] as const
-export const DESKTOP_ASAR_UNPACK = ['node_modules/@ff-labs/fff-bin-*/**/*'] as const
-
-export function resolveFffNativeDependencies(
-  platform: typeof BuildPlatform.Type,
-  arch: typeof BuildArch.Type,
-  version: string,
-): Record<string, string>
-{
-  const architectures = arch === 'universal' ? (['arm64', 'x64'] as const) : [arch]
-
-  if (platform === 'mac')
-  {
-    return Object.fromEntries(
-      architectures.map((architecture) => [`@ff-labs/fff-bin-darwin-${architecture}`, version]),
-    )
-  }
-
-  if (platform === 'win')
-  {
-    return Object.fromEntries(
-      architectures.map((architecture) => [`@ff-labs/fff-bin-win32-${architecture}`, version]),
-    )
-  }
-
-  return Object.fromEntries(
-    architectures.flatMap((architecture) =>
-      ['gnu', 'musl'].map((libc) => [`@ff-labs/fff-bin-linux-${architecture}-${libc}`, version]),
-    ),
-  )
-}
-
-export function createStageWorkspaceConfig(input: {
-  readonly platform: typeof BuildPlatform.Type
-  readonly arch: typeof BuildArch.Type
-  readonly allowBuilds?: Record<string, boolean>
-  readonly patchedDependencies?: Record<string, string>
-  readonly overrides?: Record<string, string>
-}): StageWorkspaceConfig
-{
-  const { platform, arch, allowBuilds, patchedDependencies, overrides } = input
-  const hostOs = platform === 'mac' ? 'darwin' : platform === 'win' ? 'win32' : 'linux'
-  const hostCpu = arch === 'universal' ? ['arm64', 'x64'] : [arch]
-  // linux AppImages and Windows WSL backends both execute a Linux/glibc Node
-  // process that loads Linux-native optional deps at runtime (e.g.
-  // @yuuang/ffi-rs-linux-x64-gnu). Keep libc explicit so pnpm includes those
-  // optional packages in the staged production install.
-  const supportedArchitectures =
-    platform === 'linux'
-      ? {
-          os: [hostOs],
-          cpu: hostCpu,
-          libc: ['glibc'],
-        }
-      : platform === 'win'
-        ? {
-            os: Array.from(new Set([hostOs, 'linux'])),
-            cpu: hostCpu,
-            libc: ['glibc'],
-          }
-        : {
-            os: [hostOs],
-            cpu: hostCpu,
-          }
-
-  return {
-    supportedArchitectures,
-    ...(allowBuilds && Object.keys(allowBuilds).length > 0 ? { allowBuilds } : {}),
-    ...(patchedDependencies && Object.keys(patchedDependencies).length > 0
-      ? { patchedDependencies }
-      : {}),
-    ...(overrides && Object.keys(overrides).length > 0 ? { overrides } : {}),
-  }
-}
-
-export function createStagePatchedDependencies(
-  patchedDependencies: Record<string, string>,
-  dependencies: Record<string, unknown>,
-): Record<string, string>
-{
-  return Object.fromEntries(
-    Object.entries(patchedDependencies).filter(([patchKey]) =>
-      Object.hasOwn(dependencies, getPatchedDependencyPackageName(patchKey)),
-    ),
-  )
-}
-
-function getPatchedDependencyPackageName(patchKey: string): string
-{
-  const versionSeparator = patchKey.lastIndexOf('@')
-  return versionSeparator > 0 ? patchKey.slice(0, versionSeparator) : patchKey
-}
-
 const AzureTrustedSigningOptionsConfig = Config.all({
   publisherName: Config.string('AZURE_TRUSTED_SIGNING_PUBLISHER_NAME'),
   endpoint: Config.string('AZURE_TRUSTED_SIGNING_ENDPOINT'),
@@ -1078,11 +1011,6 @@ export const resolveGitHubPublishConfig = Effect.fn('resolveGitHubPublishConfig'
   }
 })
 
-export function resolveDesktopUpdateChannel(version: string): 'latest' | 'nightly'
-{
-  return /-nightly\.\d{8}\.\d+$/.test(version) ? 'nightly' : 'latest'
-}
-
 // a locally packaged artifact carries the same version as a shipped one, so the
 // only reliable signal is where it was built. GitHub Actions always sets CI, so
 // release.yml keeps the released artwork & everything else is treated as local.
@@ -1095,75 +1023,9 @@ export const resolveIsLocalDesktopBuild = Effect.fn('resolveIsLocalDesktopBuild'
   return normalized === '' || normalized === 'false' || normalized === '0'
 })
 
-export function resolveDesktopWebAssetBrand(version: string, isLocalBuild: boolean): WebAssetBrand
-{
-  if (isLocalBuild)
-  {
-    return 'development'
-  }
-
-  return resolveWebAssetBrandForChannel(resolveDesktopUpdateChannel(version))
-}
-
-export function resolveDesktopBuildIconAssets(
-  version: string,
-  isLocalBuild: boolean,
-): DesktopBuildIconAssets
-{
-  // local wins over the version channel: the point of the ocean mark is telling
-  // a self-built app apart in the Dock, including when the version says nightly
-  if (isLocalBuild)
-  {
-    return {
-      macIconPng: BRAND_ASSET_PATHS.developmentDesktopIconPng,
-      linuxIconPng: BRAND_ASSET_PATHS.developmentUniversalIconPng,
-      windowsIconIco: BRAND_ASSET_PATHS.developmentWindowsIconIco,
-    }
-  }
-
-  if (resolveDesktopUpdateChannel(version) === 'nightly')
-  {
-    return {
-      macIconPng: BRAND_ASSET_PATHS.nightlyMacIconPng,
-      linuxIconPng: BRAND_ASSET_PATHS.nightlyLinuxIconPng,
-      windowsIconIco: BRAND_ASSET_PATHS.nightlyWindowsIconIco,
-    }
-  }
-
-  return {
-    macIconPng: BRAND_ASSET_PATHS.productionMacIconPng,
-    linuxIconPng: BRAND_ASSET_PATHS.productionLinuxIconPng,
-    windowsIconIco: BRAND_ASSET_PATHS.productionWindowsIconIco,
-  }
-}
-
-export function resolveMockUpdateServerUrl(mockUpdateServerPort: number | undefined): string
-{
-  return `http://localhost:${mockUpdateServerPort ?? 3000}`
-}
-
 // electron Builder detects pnpm from npm_config_user_agent, whose value uses
 // user-agent syntax (pnpm/11.10.0) rather than packageManager syntax
 // (pnpm@11.10.0).
-export function resolvePackageManagerUserAgent(packageManager: string): string
-{
-  const trimmed = packageManager.trim()
-  const versionSeparator = trimmed.lastIndexOf('@')
-  if (versionSeparator <= 0 || versionSeparator === trimmed.length - 1)
-  {
-    return trimmed
-  }
-
-  return `${trimmed.slice(0, versionSeparator)}/${trimmed.slice(versionSeparator + 1)}`
-}
-
-export function resolveDesktopProductName(version: string): string
-{
-  return resolveDesktopUpdateChannel(version) === 'nightly'
-    ? '456code (Nightly)'
-    : (desktopPackageJson.productName ?? '456code')
-}
-
 export const createBuildConfig = Effect.fn('createBuildConfig')(function* (
   platform: typeof BuildPlatform.Type,
   target: string,

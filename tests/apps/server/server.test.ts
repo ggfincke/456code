@@ -86,12 +86,13 @@ import {
   makeSourceControlDiscoveryLayer,
 } from '../../../apps/server/src/server.ts'
 import { resolveAvailableEditorsForConfig } from '../../../apps/server/src/ws.ts'
-import { ImportContinuationDepsUnbound } from '../../../apps/server/src/import/continuationContract.ts'
+import { ImportContinuationDepsUnbound } from '../../../apps/server/src/import/continuation/continuationContract.ts'
 import { ImportReplacementIntentRepository } from '../../../apps/server/src/persistence/Services/ImportReplacementIntents.ts'
 import { OrchestrationProjectionPipeline } from '../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts'
 import { AttachmentLifecycleRepository } from '../../../apps/server/src/persistence/Services/AttachmentLifecycle.ts'
 import * as CheckpointDiffQuery from '../../../apps/server/src/orchestration/Services/CheckpointDiffQuery.ts'
 import * as GitManager from '../../../apps/server/src/git/GitManager.ts'
+import * as GitStatusReaderLive from '../../../apps/server/src/git/GitStatusReaderLive.ts'
 import * as Keybindings from '../../../apps/server/src/keybindings.ts'
 import * as ExternalLauncher from '../../../apps/server/src/process/externalLauncher.ts'
 import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
@@ -100,7 +101,7 @@ import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration
 import { SqlitePersistenceMemory } from '../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import { PersistenceSqlError } from '../../../apps/server/src/persistence/Errors.ts'
 import * as ProviderRegistry from '../../../apps/server/src/provider/Services/ProviderRegistry.ts'
-import { makeManualOnlyProviderMaintenanceCapabilities } from '../../../apps/server/src/provider/providerMaintenance.ts'
+import { makeManualOnlyProviderMaintenanceCapabilities } from '../../../apps/server/src/provider/maintenance/providerMaintenance.ts'
 import * as ServerLifecycleEvents from '../../../apps/server/src/serverLifecycleEvents.ts'
 import * as ServerRuntimeStartup from '../../../apps/server/src/serverRuntimeStartup.ts'
 import * as ServerSettings from '../../../apps/server/src/serverSettings.ts'
@@ -557,10 +558,15 @@ const buildAppUnderTest = (options?: {
         Layer.provide(ProjectFileLoader.layer),
       ),
     )
+    const gitStatusReaderLayer = GitStatusReaderLive.layer.pipe(
+      Layer.provideMerge(vcsDriverRegistryLayer),
+      Layer.provideMerge(gitManagerLayer),
+    )
     const gitWorkflowLayer = GitWorkflowService.layer.pipe(
       Layer.provideMerge(vcsDriverRegistryLayer),
       Layer.provideMerge(gitVcsDriverLayer),
       Layer.provideMerge(gitManagerLayer),
+      Layer.provideMerge(gitStatusReaderLayer),
     )
     const vcsProvisioningLayer = VcsProvisioningService.layer.pipe(
       Layer.provide(vcsDriverRegistryLayer),
@@ -577,7 +583,7 @@ const buildAppUnderTest = (options?: {
       ? Layer.mock(VcsStatusBroadcaster.VcsStatusBroadcaster)({
           ...options.layers.vcsStatusBroadcaster,
         })
-      : VcsStatusBroadcaster.layer.pipe(Layer.provide(gitWorkflowLayer))
+      : VcsStatusBroadcaster.layer.pipe(Layer.provide(gitStatusReaderLayer))
 
     const servedRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,

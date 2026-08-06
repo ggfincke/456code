@@ -6,7 +6,7 @@ import { describe, expect, it } from '@effect/vitest'
 import {
   deterministicId,
   deterministicSortableMessageId,
-} from '../../../../apps/server/src/import/ids.ts'
+} from '../../../../apps/server/src/import/continuation/ids.ts'
 
 describe('deterministicId', () =>
 {

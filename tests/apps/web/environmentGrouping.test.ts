@@ -10,12 +10,12 @@ import {
   derivePhysicalProjectKey,
   getProjectOrderKey,
   resolveProjectGroupingMode,
-} from '../../../apps/web/src/logicalProject'
+} from '../../../apps/web/src/lib/logicalProject'
 import {
   buildPhysicalToLogicalProjectKeyMap,
   buildSidebarProjectPickerEntries,
   buildSidebarProjectSnapshots,
-} from '../../../apps/web/src/sidebarProjectGrouping'
+} from '../../../apps/web/src/lib/sidebarProjectGrouping'
 import { orderItemsByPreferredIds } from '../../../apps/web/src/components/Sidebar.logic'
 import { legacyProjectCwdPreferenceKey } from '../../../apps/web/src/uiStateStore'
 import type { Project } from '../../../apps/web/src/types'

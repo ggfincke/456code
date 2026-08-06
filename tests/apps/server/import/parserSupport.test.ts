@@ -11,7 +11,7 @@ import {
   JsonlParseLimitError,
   materializeWarnings,
   type WarningState,
-} from '../../../../apps/server/src/import/parserSupport.ts'
+} from '../../../../apps/server/src/import/parsers/parserSupport.ts'
 import type { ImportedRecord } from '../../../../apps/server/src/import/types.ts'
 
 function pushImportedRecord(records: ImportedRecord[], record: ImportedRecord): void

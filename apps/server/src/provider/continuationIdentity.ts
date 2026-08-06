@@ -25,7 +25,7 @@ import * as FileSystem from 'effect/FileSystem'
 import {
   HOST_PATH_PLATFORM,
   normalizeProviderProcessEnvironment,
-} from './ProviderInstanceEnvironment.ts'
+} from './catalog/ProviderInstanceEnvironment.ts'
 
 interface RootResolutionOptions
 {

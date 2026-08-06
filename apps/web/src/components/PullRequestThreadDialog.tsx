@@ -13,8 +13,9 @@ import {
 } from '~/lib/sourceControlActions'
 import { cn } from '~/lib/utils'
 import { parsePullRequestReference } from '~/pullRequestReference'
-import { getSourceControlPresentation } from '~/sourceControlPresentation'
+import { getSourceControlPresentation } from '~/lib/sourceControlPresentation'
 import { useEnvironmentQuery } from '~/state/query'
+import { resolveSourceControlIcon } from './sourceControlIcons'
 import { vcsEnvironment } from '~/state/vcs'
 import { Button } from './ui/button'
 import {
@@ -72,7 +73,7 @@ export function PullRequestThreadDialog({
     [gitStatus?.sourceControlProvider],
   )
   const terminology = sourceControlPresentation.terminology
-  const SourceControlIcon = sourceControlPresentation.Icon
+  const SourceControlIcon = resolveSourceControlIcon(sourceControlPresentation.icon)
 
   useEffect(() =>
   {

@@ -39,7 +39,12 @@ const watchedDirectories = [
   },
   { directory: '../server/dist', files: new Set(['bin.mjs']) },
 ]
-const annotationSourceFiles = new Set(['Annotation.css', 'PickPreload.ts'])
+const annotationSourceFiles = new Set([
+  'Annotation.css',
+  'PickPreload.ts',
+  'PickChrome.ts',
+  'PickGeometry.ts',
+])
 const annotationBuildScript = NodePath.join(
   desktopDir,
   'scripts',

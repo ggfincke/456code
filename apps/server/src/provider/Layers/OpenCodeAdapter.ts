@@ -29,7 +29,7 @@ import * as Stream from 'effect/Stream'
 import type { OpencodeClient, Part, PermissionRequest, QuestionRequest } from '@opencode-ai/sdk/v2'
 import { getModelSelectionStringOptionValue } from '@t3tools/shared/model'
 
-import { resolveAttachmentPath } from '../../attachmentStore.ts'
+import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
 import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'

@@ -23,7 +23,7 @@ import type * as PubSub from 'effect/PubSub'
 import type * as Scope from 'effect/Scope'
 import type * as Stream from 'effect/Stream'
 
-import type { ProviderInstance } from '../ProviderDriver.ts'
+import type { ProviderInstance } from '../catalog/ProviderDriver.ts'
 
 export interface ProviderInstanceRegistryShape
 {

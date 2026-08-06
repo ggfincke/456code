@@ -87,7 +87,7 @@ import {
 } from '../state/entities'
 import { selectThreadTerminalUiState, useTerminalUiStateStore } from '../terminalUiStateStore'
 import { useThreadRunningTerminalIds } from '../state/terminalSessions'
-import { useThreadDiscoveredPorts } from '../portDiscoveryState'
+import { useThreadDiscoveredPorts } from '../lib/portDiscoveryState'
 import { openDiscoveredPort } from './preview/openDiscoveredPort'
 import { useAtomCommand } from '../state/use-atom-command'
 import { previewEnvironment } from '../state/preview'
@@ -105,7 +105,7 @@ import {
   threadTraversalDirectionFromCommand,
 } from '../keybindings'
 import { isModelPickerOpen } from '../modelPickerVisibility'
-import { useShortcutModifierState } from '../shortcutModifierState'
+import { useShortcutModifierState } from '../lib/shortcutModifierState'
 import { readLocalApi } from '../localApi'
 import { useComposerDraftStore } from '../composerDraftStore'
 import { useNewThreadHandler } from '../hooks/useHandleNewThread'
@@ -206,7 +206,7 @@ import {
   buildSidebarProjectSnapshots,
   type SidebarProjectGroupMember,
   type SidebarProjectSnapshot,
-} from '../sidebarProjectGrouping'
+} from '../lib/sidebarProjectGrouping'
 const SIDEBAR_SORT_LABELS: Record<SidebarProjectSortOrder, string> = {
   updated_at: 'Last user message',
   created_at: 'Created at',

@@ -51,7 +51,7 @@ import {
   type ProviderAdapterError,
 } from '../Errors.ts'
 import { type CodexAdapterShape } from '../Services/CodexAdapter.ts'
-import { resolveAttachmentPath } from '../../attachmentStore.ts'
+import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
 import {
   CodexResumeCursorSchema,

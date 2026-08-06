@@ -1,8 +1,4 @@
 // apps/web/src/pairingUrl.ts
-// resolve pairing token from url
+// expose the stable facade for pairing url helpers
 
-export {
-  getPairingTokenFromUrl,
-  setPairingTokenOnUrl,
-  stripPairingTokenFromUrl,
-} from '@t3tools/shared/remote'
+export * from './connection/pairingUrl'

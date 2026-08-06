@@ -7,7 +7,7 @@ import type { ChatAttachment, ModelSelection, ProviderInstanceId } from '@t3tool
 import { TextGenerationError } from '@t3tools/contracts'
 
 import * as ProviderInstanceRegistry from '../provider/Services/ProviderInstanceRegistry.ts'
-import type { ProviderInstance } from '../provider/ProviderDriver.ts'
+import type { ProviderInstance } from '../provider/catalog/ProviderDriver.ts'
 import type { TextGenerationPolicy } from './TextGenerationPolicy.ts'
 
 export interface CommitMessageGenerationInput

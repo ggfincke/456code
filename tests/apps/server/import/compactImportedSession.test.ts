@@ -3,7 +3,7 @@
 
 import { describe, expect, it } from '@effect/vitest'
 
-import { compactImportedSession } from '../../../../apps/server/src/import/compactImportedSession.ts'
+import { compactImportedSession } from '../../../../apps/server/src/import/continuation/compactImportedSession.ts'
 import type {
   ImportedActivityRecord,
   ImportedSession,

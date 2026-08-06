@@ -8,7 +8,7 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import type * as EffectAcpSchema from 'effect-acp/schema'
 
-import { resolveAttachmentPath } from '../attachmentStore.ts'
+import { resolveAttachmentPath } from '../attachments/attachmentStore.ts'
 import type { TextGenerationOp } from './TextGeneration.ts'
 
 const isTextGenerationError = Schema.is(TextGenerationError)

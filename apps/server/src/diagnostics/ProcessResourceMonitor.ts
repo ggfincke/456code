@@ -17,7 +17,7 @@ import * as Option from 'effect/Option'
 import * as Ref from 'effect/Ref'
 import * as Schema from 'effect/Schema'
 
-import * as ProcessRunner from '../processRunner.ts'
+import * as ProcessRunner from '../process/processRunner.ts'
 import * as ProcessDiagnostics from './ProcessDiagnostics.ts'
 
 const SAMPLE_INTERVAL_MS = 5_000

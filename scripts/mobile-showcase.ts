@@ -11,30 +11,59 @@ import * as NodePath from 'node:path'
 import * as NodeProcess from 'node:process'
 import * as NodeURL from 'node:url'
 
-import { PNG } from 'pngjs'
-
 import showcaseConfig, {
   type ShowcaseAppearance,
   type ShowcaseAndroidDevice,
   type ShowcaseConfig,
   type ShowcaseDevice,
   type ShowcaseIosDevice,
-  type ShowcaseStoreAssetSpec,
   SHOWCASE_SCENES,
   type ShowcaseScene,
 } from './mobile-showcase.config.ts'
 import {
   SHOWCASE_ENVIRONMENTS,
   SHOWCASE_PROJECTS,
-  SHOWCASE_TERMINAL_ID,
-  SHOWCASE_THREAD_ID,
   seedShowcaseEnvironment,
 } from './mobile-showcase-environment.ts'
+import {
+  normalizeStorePng,
+  showcaseCaptureDirectory,
+  validateStoreAsset,
+  validateStoreAssetCount,
+} from './lib/showcase-assets.ts'
+import {
+  APP_SCHEME,
+  encodeAndroidPairingUrls,
+  parsePairingCredentialOutput,
+  parseShowcaseCliArgs,
+  planShowcaseCaptures,
+  resolveAndroidSdkRoot,
+  selectLanIpv4Address,
+  type ShowcaseCapture,
+} from './lib/showcase-plan.ts'
+
+export {
+  normalizeStorePng,
+  readPngDimensions,
+  readPngMetadata,
+  showcaseCaptureDirectory,
+  validateStoreAsset,
+  validateStoreAssetCount,
+} from './lib/showcase-assets.ts'
+export {
+  encodeAndroidPairingUrls,
+  parsePairingCredentialOutput,
+  parseShowcaseCliArgs,
+  planShowcaseCaptures,
+  resolveAndroidSdkRoot,
+  selectLanIpv4Address,
+  showcaseSceneUrl,
+  type ShowcaseCapture,
+} from './lib/showcase-plan.ts'
 
 const REPO_ROOT = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), '..')
 const MOBILE_ROOT = NodePath.join(REPO_ROOT, 'apps/mobile')
 const ANDROID_PACKAGE = 'com.ggfincke.code456.dev'
-const APP_SCHEME = 'code456-dev'
 const IOS_READY_FILENAME = 'Code456ShowcaseReadyScene'
 const SERVER_HOST = '0.0.0.0'
 const IOS_SIMULATOR_ARCH = NodeProcess.arch === 'arm64' ? 'arm64' : 'x86_64'
@@ -46,17 +75,6 @@ const ANDROID_APK_PATH = NodePath.join(
   MOBILE_ROOT,
   'android/app/build/outputs/apk/debug/app-debug.apk',
 )
-export function resolveAndroidSdkRoot(
-  environment: Readonly<Record<string, string | undefined>>,
-  platform: NodeJS.Platform = NodeProcess.platform,
-): string
-{
-  const configured = environment.ANDROID_HOME ?? environment.ANDROID_SDK_ROOT
-  if (configured) return configured
-  const home = environment.HOME ?? environment.USERPROFILE ?? ''
-  return NodePath.join(home, platform === 'darwin' ? 'Library/Android/sdk' : 'Android/Sdk')
-}
-
 const ANDROID_SDK_ROOT = resolveAndroidSdkRoot(NodeProcess.env)
 const MOBILE_BUILD_ENV = {
   ...NodeProcess.env,
@@ -69,26 +87,6 @@ const MOBILE_BUILD_ENV = {
       ? '/Applications/Android Studio.app/Contents/jbr/Contents/Home'
       : undefined),
   NODE_ENV: 'development',
-}
-
-interface CliOptions
-{
-  readonly platforms: ReadonlySet<ShowcaseDevice['platform']>
-  readonly deviceIds: ReadonlySet<string>
-  readonly scenes: ReadonlySet<ShowcaseScene>
-  readonly appearances: ReadonlySet<ShowcaseAppearance>
-  readonly skipBuild: boolean
-  readonly skipMetro: boolean
-  readonly keepRunning: boolean
-  readonly validateOnly: boolean
-  readonly list: boolean
-}
-
-export interface ShowcaseCapture
-{
-  readonly device: ShowcaseDevice
-  readonly scenes: ReadonlyArray<ShowcaseScene>
-  readonly appearance: ShowcaseAppearance
 }
 
 interface IosCaptureCleanup
@@ -105,23 +103,6 @@ interface AndroidCaptureCleanup
   readonly startedByRunner: boolean
 }
 
-interface NetworkAddress
-{
-  readonly address: string
-  readonly family: string
-  readonly internal: boolean
-}
-
-export function selectLanIpv4Address(addresses: ReadonlyArray<NetworkAddress>): string | null
-{
-  return (
-    addresses.find(
-      ({ address, family, internal }) =>
-        family === 'IPv4' && !internal && !address.startsWith('169.254.'),
-    )?.address ?? null
-  )
-}
-
 function lanIpv4Address(): string
 {
   const address = selectLanIpv4Address(
@@ -132,124 +113,6 @@ function lanIpv4Address(): string
     throw new Error('No LAN IPv4 address is available for the iOS Simulator to reach Metro.')
   }
   return address
-}
-
-export interface PngMetadata
-{
-  readonly width: number
-  readonly height: number
-  readonly bitDepth: number
-  readonly colorType: number
-  readonly hasAlpha: boolean
-}
-
-export function readPngMetadata(bytes: Uint8Array): PngMetadata
-{
-  const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10]
-  if (bytes.byteLength < 26 || !pngSignature.every((value, index) => bytes[index] === value))
-  {
-    throw new Error('Captured file is not a valid PNG.')
-  }
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  const colorType = view.getUint8(25)
-  return {
-    width: view.getUint32(16),
-    height: view.getUint32(20),
-    bitDepth: view.getUint8(24),
-    colorType,
-    hasAlpha: colorType === 4 || colorType === 6,
-  }
-}
-
-export function readPngDimensions(bytes: Uint8Array): {
-  readonly width: number
-  readonly height: number
-}
-{
-  const { width, height } = readPngMetadata(bytes)
-  return { width, height }
-}
-
-export function normalizeStorePng(bytes: Uint8Array): Buffer
-{
-  const png = PNG.sync.read(Buffer.from(bytes))
-  return PNG.sync.write(png, {
-    bitDepth: 8,
-    colorType: 2,
-    inputColorType: 6,
-    inputHasAlpha: true,
-  })
-}
-
-export function validateStoreAsset(
-  spec: ShowcaseStoreAssetSpec,
-  bytes: Uint8Array,
-  label = 'Screenshot',
-): PngMetadata
-{
-  const metadata = readPngMetadata(bytes)
-  if (metadata.width !== spec.width || metadata.height !== spec.height)
-  {
-    throw new Error(
-      `${label} is ${metadata.width}×${metadata.height}; ${spec.store} requires ${spec.width}×${spec.height}.`,
-    )
-  }
-  if (metadata.bitDepth !== 8 || metadata.colorType !== 2 || metadata.hasAlpha)
-  {
-    throw new Error(
-      `${label} must be an 8-bit, 24-bit RGB PNG without alpha (found bit depth ${metadata.bitDepth}, color type ${metadata.colorType}).`,
-    )
-  }
-  if (spec.maximumFileSizeBytes && bytes.byteLength > spec.maximumFileSizeBytes)
-  {
-    throw new Error(
-      `${label} is ${bytes.byteLength} bytes; ${spec.store} allows at most ${spec.maximumFileSizeBytes} bytes.`,
-    )
-  }
-  if (spec.store === 'google-play')
-  {
-    const shortestSide = Math.min(metadata.width, metadata.height)
-    const longestSide = Math.max(metadata.width, metadata.height)
-    if (shortestSide < 320 || longestSide > 3_840 || longestSide > shortestSide * 2)
-    {
-      throw new Error(
-        `${label} does not meet Google Play's 320–3,840 px bounds and 2:1 maximum aspect ratio.`,
-      )
-    }
-    if (metadata.width * 16 !== metadata.height * 9)
-    {
-      throw new Error(`${label} must use Google Play's recommended portrait 9:16 aspect ratio.`)
-    }
-  }
-  return metadata
-}
-
-export function validateStoreAssetCount(
-  spec: ShowcaseStoreAssetSpec,
-  count: number,
-  requireMinimum: boolean,
-): void
-{
-  if (count > spec.maximumUploadCount)
-  {
-    throw new Error(
-      `${spec.directory} contains ${count} screenshots; ${spec.store} allows at most ${spec.maximumUploadCount}.`,
-    )
-  }
-  if (requireMinimum && count < spec.minimumUploadCount)
-  {
-    throw new Error(
-      `${spec.directory} contains ${count} screenshots; ${spec.store} requires at least ${spec.minimumUploadCount}.`,
-    )
-  }
-}
-
-export function showcaseCaptureDirectory(
-  outputDirectory: string,
-  capture: Pick<ShowcaseCapture, 'device' | 'appearance'>,
-): string
-{
-  return NodePath.join(outputDirectory, capture.device.storeAsset.directory, capture.appearance)
 }
 
 async function finalizeCapture(destination: string, device: ShowcaseDevice): Promise<void>
@@ -285,162 +148,6 @@ async function validateCaptureSet(
   NodeProcess.stdout.write(
     `Validated ${files.length} upload-ready ${capture.device.storeAsset.store} screenshots in ${NodePath.relative(REPO_ROOT, directory)}/\n`,
   )
-}
-
-function argumentValue(args: ReadonlyArray<string>, index: number, flag: string): string
-{
-  const value = args[index + 1]
-  if (!value || value.startsWith('--'))
-  {
-    throw new Error(`${flag} requires a value.`)
-  }
-  return value
-}
-
-export function parseShowcaseCliArgs(args: ReadonlyArray<string>): CliOptions
-{
-  const platforms = new Set<ShowcaseDevice['platform']>()
-  const deviceIds = new Set<string>()
-  const scenes = new Set<ShowcaseScene>()
-  const appearances = new Set<ShowcaseAppearance>()
-  let skipBuild = false
-  let skipMetro = false
-  let keepRunning = false
-  let validateOnly = false
-  let list = false
-
-  for (let index = 0; index < args.length; index += 1)
-  {
-    const argument = args[index]
-    if (argument === '--platform')
-    {
-      const value = argumentValue(args, index, argument)
-      if (value !== 'ios' && value !== 'android' && value !== 'all')
-      {
-        throw new Error(`Unsupported platform '${value}'. Use ios, android, or all.`)
-      }
-      if (value === 'all')
-      {
-        platforms.add('ios')
-        platforms.add('android')
-      }
-      else
-      {
-        platforms.add(value)
-      }
-      index += 1
-    }
-    else if (argument === '--device')
-    {
-      deviceIds.add(argumentValue(args, index, argument))
-      index += 1
-    }
-    else if (argument === '--scene')
-    {
-      const value = argumentValue(args, index, argument)
-      if (!SHOWCASE_SCENES.includes(value as ShowcaseScene))
-      {
-        throw new Error(`Unsupported scene '${value}'. Use ${SHOWCASE_SCENES.join(', ')}.`)
-      }
-      scenes.add(value as ShowcaseScene)
-      index += 1
-    }
-    else if (argument === '--appearance')
-    {
-      const value = argumentValue(args, index, argument)
-      if (value !== 'light' && value !== 'dark' && value !== 'both')
-      {
-        throw new Error(`Unsupported appearance '${value}'. Use light, dark, or both.`)
-      }
-      if (value === 'both')
-      {
-        appearances.add('light')
-        appearances.add('dark')
-      }
-      else
-      {
-        appearances.add(value)
-      }
-      index += 1
-    }
-    else if (argument === '--skip-build')
-    {
-      skipBuild = true
-    }
-    else if (argument === '--skip-metro')
-    {
-      skipMetro = true
-    }
-    else if (argument === '--keep-running')
-    {
-      keepRunning = true
-    }
-    else if (argument === '--validate-only')
-    {
-      validateOnly = true
-    }
-    else if (argument === '--list')
-    {
-      list = true
-    }
-    else if (argument === '--help' || argument === '-h')
-    {
-      list = true
-    }
-    else
-    {
-      throw new Error(`Unknown option '${argument}'.`)
-    }
-  }
-
-  return {
-    platforms,
-    deviceIds,
-    scenes,
-    appearances,
-    skipBuild,
-    skipMetro,
-    keepRunning,
-    validateOnly,
-    list,
-  }
-}
-
-export function planShowcaseCaptures(
-  config: ShowcaseConfig,
-  options: Pick<CliOptions, 'platforms' | 'deviceIds' | 'scenes' | 'appearances'>,
-): ReadonlyArray<ShowcaseCapture>
-{
-  const captures = config.devices
-    .filter((device) => options.platforms.size === 0 || options.platforms.has(device.platform))
-    .filter((device) => options.deviceIds.size === 0 || options.deviceIds.has(device.id))
-    .flatMap((device) =>
-    {
-      const appearances = options.appearances.size === 0 ? [device.appearance] : options.appearances
-      return [...appearances].map((appearance) => ({
-        device,
-        appearance,
-        scenes:
-          options.scenes.size === 0
-            ? device.scenes
-            : device.scenes.filter((scene) => options.scenes.has(scene)),
-      }))
-    })
-    .filter((capture) => capture.scenes.length > 0)
-
-  const knownDeviceIds = new Set(config.devices.map((device) => device.id))
-  for (const id of options.deviceIds)
-  {
-    if (!knownDeviceIds.has(id))
-    {
-      throw new Error(`Unknown device '${id}'. Run with --list to see configured devices.`)
-    }
-  }
-  if (captures.length === 0)
-  {
-    throw new Error('No captures match the selected platform, device, and scene filters.')
-  }
-  return captures
 }
 
 function printUsage(config: ShowcaseConfig): void
@@ -678,24 +385,6 @@ function startShowcaseServer(
   )
 }
 
-export function parsePairingCredentialOutput(output: string): string
-{
-  const jsonStart = output.indexOf('{')
-  const jsonEnd = output.lastIndexOf('}')
-  if (jsonStart === -1 || jsonEnd < jsonStart)
-  {
-    throw new Error('Pairing credential command did not return JSON.')
-  }
-  const parsed = JSON.parse(output.slice(jsonStart, jsonEnd + 1)) as {
-    readonly credential?: unknown
-  }
-  if (typeof parsed.credential !== 'string' || parsed.credential.length === 0)
-  {
-    throw new Error('Pairing credential command returned no credential.')
-  }
-  return parsed.credential
-}
-
 async function issuePairingCredential(baseDir: string): Promise<string>
 {
   const output = await commandOutput(
@@ -711,24 +400,6 @@ function buildShowcasePairingUrl(host: string, port: number, credential: string)
   const url = new URL(`http://${host}:${port}/`)
   url.hash = new URLSearchParams([['token', credential]]).toString()
   return url.toString()
-}
-
-export function showcaseSceneUrl(scene: ShowcaseScene, environmentId: string): string
-{
-  if (scene === 'threads') return `${APP_SCHEME}://`
-  if (scene === 'environments') return `${APP_SCHEME}://settings/environments`
-  const threadPath = `threads/${encodeURIComponent(environmentId)}/${SHOWCASE_THREAD_ID}`
-  if (scene === 'thread') return `${APP_SCHEME}://${threadPath}`
-  if (scene === 'terminal')
-  {
-    return `${APP_SCHEME}://${threadPath}/terminal?terminalId=${SHOWCASE_TERMINAL_ID}`
-  }
-  return `${APP_SCHEME}://${threadPath}/review`
-}
-
-export function encodeAndroidPairingUrls(pairingUrls: ReadonlyArray<string>): string
-{
-  return `json-uri:${encodeURIComponent(JSON.stringify(pairingUrls))}`
 }
 
 function startMetro(config: ShowcaseConfig): NodeChildProcess.ChildProcess

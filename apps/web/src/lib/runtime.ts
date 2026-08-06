@@ -2,7 +2,7 @@
 // coordinate remote http runtime
 
 import * as ManagedRuntime from 'effect/ManagedRuntime'
-import type * as Effect from 'effect/Effect'
+import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 import * as Socket from 'effect/unstable/socket/Socket'
 
@@ -42,14 +42,44 @@ const makePrimaryHttpRuntime = () =>
     PrimaryEnvironmentHttpClient.layer.pipe(Layer.provide(primaryEnvironmentHttpLayer)),
   )
 
-let primaryHttpRuntime = makePrimaryHttpRuntime()
+const PRIMARY_HTTP_REQUEST_TIMEOUT = '10 seconds'
+
+interface PrimaryHttpRuntimeGeneration
+{
+  readonly runtime: ReturnType<typeof makePrimaryHttpRuntime>
+  activeRequests: number
+}
+
+function makePrimaryHttpRuntimeGeneration(): PrimaryHttpRuntimeGeneration
+{
+  return {
+    runtime: makePrimaryHttpRuntime(),
+    activeRequests: 0,
+  }
+}
+
+let primaryHttpRuntimeGeneration = makePrimaryHttpRuntimeGeneration()
 
 export type PrimaryHttpEffectRunner = <A, E>(
   effect: Effect.Effect<A, E, PrimaryEnvironmentHttpClient.PrimaryEnvironmentHttpClient>,
 ) => Promise<A>
 
-const livePrimaryHttpRunner: PrimaryHttpEffectRunner = (effect) =>
-  primaryHttpRuntime.runPromise(effect)
+const livePrimaryHttpRunner: PrimaryHttpEffectRunner = async (effect) =>
+{
+  const generation = primaryHttpRuntimeGeneration
+  generation.activeRequests += 1
+  try
+  {
+    return await generation.runtime.runPromise(
+      effect.pipe(Effect.timeout(PRIMARY_HTTP_REQUEST_TIMEOUT)),
+    )
+  }
+  finally
+  {
+    generation.activeRequests -= 1
+    disposeRetiredPrimaryHttpRuntime(generation)
+  }
+}
 
 let primaryHttpRunner = livePrimaryHttpRunner
 
@@ -59,9 +89,18 @@ export const runPrimaryHttp = <A, E>(
 
 export function invalidatePrimaryHttpRuntime(): void
 {
-  const previous = primaryHttpRuntime
-  primaryHttpRuntime = makePrimaryHttpRuntime()
-  previous.dispose()
+  const previous = primaryHttpRuntimeGeneration
+  primaryHttpRuntimeGeneration = makePrimaryHttpRuntimeGeneration()
+  disposeRetiredPrimaryHttpRuntime(previous)
+}
+
+function disposeRetiredPrimaryHttpRuntime(generation: PrimaryHttpRuntimeGeneration): void
+{
+  if (generation === primaryHttpRuntimeGeneration || generation.activeRequests > 0)
+  {
+    return
+  }
+  void generation.runtime.dispose()
 }
 
 export function __setPrimaryHttpRunnerForTests(runner?: PrimaryHttpEffectRunner): void

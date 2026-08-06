@@ -18,7 +18,7 @@ import {
   resolveAppModelSelectionState,
 } from '../../modelSelection'
 import { primaryServerProvidersAtom } from '../../state/server'
-import { ProviderModelPicker } from '../chat/ProviderModelPicker'
+import { ProviderModelPicker } from '../chat/model-picker/ProviderModelPicker'
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from '../ui/select'
 import { Switch } from '../ui/switch'
 import { Textarea } from '../ui/textarea'

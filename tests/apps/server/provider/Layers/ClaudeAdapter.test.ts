@@ -35,7 +35,7 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import * as TestClock from 'effect/testing/TestClock'
 
-import { attachmentRelativePath } from '../../../../../apps/server/src/attachmentStore.ts'
+import { attachmentRelativePath } from '../../../../../apps/server/src/attachments/attachmentStore.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { ServerSettingsService } from '../../../../../apps/server/src/serverSettings.ts'
 import {

@@ -54,7 +54,7 @@ import * as Queue from 'effect/Queue'
 import * as Ref from 'effect/Ref'
 import * as Stream from 'effect/Stream'
 
-import { resolveAttachmentPath } from '../../attachmentStore.ts'
+import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
 import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import {

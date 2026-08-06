@@ -19,7 +19,7 @@ import {
   importSessionsAnnouncement,
   nextImportCandidateVisibleCount,
   resolveCandidateProviderSelection,
-} from '../../../../../apps/web/src/components/settings/ImportSessionsPanel'
+} from '../../../../../apps/web/src/components/settings/ImportSessionsPanel.logic'
 import { deriveProviderInstanceEntries } from '../../../../../apps/web/src/providerInstances'
 
 const now = '2026-07-25T12:00:00.000Z'

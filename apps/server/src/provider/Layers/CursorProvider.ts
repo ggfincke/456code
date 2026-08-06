@@ -46,7 +46,7 @@ import {
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   type ProviderMaintenanceCapabilities,
-} from '../providerMaintenance.ts'
+} from '../maintenance/providerMaintenance.ts'
 import * as AcpSessionRuntime from '../acp/AcpSessionRuntime.ts'
 import { CursorListAvailableModelsResponse } from '../acp/CursorAcpExtension.ts'
 

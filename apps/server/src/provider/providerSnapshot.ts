@@ -17,8 +17,8 @@ import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 import { normalizeCustomModelSlug } from '@t3tools/shared/model'
-import { isWindowsCommandNotFound } from '../processRunner.ts'
-import { createProviderVersionAdvisory } from './providerMaintenance.ts'
+import { isWindowsCommandNotFound } from '../process/processRunner.ts'
+import { createProviderVersionAdvisory } from './maintenance/providerMaintenance.ts'
 import { collectUint8StreamText } from '../stream/collectUint8StreamText.ts'
 
 export const DEFAULT_TIMEOUT_MS = 4_000

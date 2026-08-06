@@ -8,7 +8,7 @@ import {
   makeImportCountBudget,
   partitionAcpImportBytePolicy,
   reserveNormalizedImportResources,
-} from '../../../../apps/server/src/import/resourceLimits.ts'
+} from '../../../../apps/server/src/import/discovery/resourceLimits.ts'
 
 describe('ACP import byte policy partition', () =>
 {

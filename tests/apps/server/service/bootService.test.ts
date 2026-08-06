@@ -18,7 +18,7 @@ import {
 } from '@t3tools/shared/hostProcess'
 
 import { reconcileService } from '../../../../apps/server/src/cli/service.ts'
-import * as ProcessRunner from '../../../../apps/server/src/processRunner.ts'
+import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import * as BootService from '../../../../apps/server/src/service/bootService.ts'
 
 const isUnsupportedError = Schema.is(BootService.BootServiceUnsupportedError)

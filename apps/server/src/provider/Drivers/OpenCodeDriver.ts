@@ -37,22 +37,22 @@ import {
   makePendingOpenCodeProvider,
 } from '../Layers/OpenCodeProvider.ts'
 import { ProviderEventLoggers } from '../Layers/ProviderEventLoggers.ts'
-import { makeManagedServerProvider } from '../makeManagedServerProvider.ts'
+import { makeManagedServerProvider } from '../catalog/makeManagedServerProvider.ts'
 import { OpenCodeRuntime } from '../opencodeRuntime.ts'
-import { type ProviderDriver, type ProviderInstance } from '../ProviderDriver.ts'
+import { type ProviderDriver, type ProviderInstance } from '../catalog/ProviderDriver.ts'
 import type { ServerProviderDraft } from '../providerSnapshot.ts'
-import { mergeProviderInstanceEnvironment } from '../ProviderInstanceEnvironment.ts'
+import { mergeProviderInstanceEnvironment } from '../catalog/ProviderInstanceEnvironment.ts'
 import {
   enrichProviderSnapshotWithVersionAdvisory,
   makePackageManagedProviderMaintenanceResolver,
   normalizeCommandPath,
   resolveProviderMaintenanceCapabilitiesEffect,
-} from '../providerMaintenance.ts'
+} from '../maintenance/providerMaintenance.ts'
 import {
   haveProviderSnapshotSettingsChanged,
   makeProviderSnapshotSettingsSource,
   type ProviderSnapshotSettings,
-} from '../providerUpdateSettings.ts'
+} from '../maintenance/providerUpdateSettings.ts'
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings)
 
 const DRIVER_KIND = ProviderDriverKind.make('opencode')
