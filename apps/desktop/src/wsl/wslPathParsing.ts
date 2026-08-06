@@ -14,8 +14,8 @@ export interface WslConfig
 }
 
 // literal space — \s would also match \n/\t/\r and corrupt UNC paths like \\wsl.localhost\<distro>\...
-// trailing char must also be \w so hand-edited config like "Ubuntu " / "Ubuntu-" / "Ubuntu." rejects.
-export const DISTRO_NAME_PATTERN = /^\w(?:[\w \-.]*\w)?$/
+// trailing char must be a unicode word character so invalid punctuation still rejects.
+export const DISTRO_NAME_PATTERN = /^[\p{L}\p{N}_](?:[\p{L}\p{N}\p{M}_ \-.]*[\p{L}\p{N}\p{M}_])?$/u
 
 export function parseWslDistroList(stdout: Buffer): readonly WslDistro[]
 {

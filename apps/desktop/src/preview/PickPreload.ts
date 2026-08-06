@@ -17,6 +17,7 @@ import type {
 } from '@t3tools/contracts'
 
 import { previewAnnotationStyles } from './AnnotationStyles.generated.ts'
+import { computeLabelPosition } from './PickLabelPosition.ts'
 import {
   ANNOTATION_CAPTURED_CHANNEL,
   ANNOTATION_THEME_CHANNEL,
@@ -246,7 +247,16 @@ function updateSelectedVisual(target: SelectedElement): void
   positionBox(target.outline, rectFromDomRect(rect))
   target.label.textContent = describeRawElement(target.element)
   target.label.style.display = 'block'
-  target.label.style.transform = `translate(${Math.max(4, rect.left)}px, ${Math.max(4, rect.top - 22)}px)`
+  const labelPosition = computeLabelPosition({
+    targetLeft: rect.left,
+    targetTop: rect.top,
+    targetBottom: rect.bottom,
+    labelWidth: target.label.offsetWidth,
+    labelHeight: target.label.offsetHeight,
+    viewportWidth: window.innerWidth,
+    viewportHeight: window.innerHeight,
+  })
+  target.label.style.transform = `translate(${labelPosition.x}px, ${labelPosition.y}px)`
 }
 
 function toStackFrame(frame: {
