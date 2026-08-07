@@ -1106,6 +1106,48 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   --sidebar-stage-fade: var(--card);
 }
 
+/* published palettes also override the local tokens owned by each sidebar */
+:root[data-environment-theme="true"],
+:root[data-environment-theme="true"] [data-sidebar-version="v1"],
+:root[data-environment-theme="true"] [data-sidebar-version="v2"] {
+  --background: var(--app-theme-canvas);
+  --app-chrome-background: var(--app-theme-chrome);
+  --foreground: var(--app-theme-text);
+  --surface-raised: var(--app-theme-surface-raised);
+  --card: var(--app-theme-surface);
+  --card-foreground: var(--app-theme-text);
+  --popover: var(--app-theme-surface-overlay);
+  --popover-foreground: var(--app-theme-text);
+  --primary: var(--app-theme-accent);
+  --primary-foreground: var(--app-theme-accent-foreground);
+  --secondary: var(--app-theme-secondary);
+  --secondary-foreground: var(--app-theme-secondary-foreground);
+  --muted: var(--app-theme-muted);
+  --muted-foreground: var(--app-theme-muted-foreground);
+  --accent: var(--app-theme-accent-surface);
+  --accent-foreground: var(--app-theme-accent-surface-foreground);
+  --destructive: var(--app-theme-error);
+  --destructive-foreground: var(--app-theme-error-foreground);
+  --warning: var(--app-theme-warning);
+  --warning-foreground: var(--app-theme-warning-foreground);
+  --border: var(--app-theme-border);
+  --input: var(--app-theme-input);
+  --ring: var(--app-theme-focus);
+  --sidebar: var(--app-theme-sidebar);
+  --sidebar-foreground: var(--app-theme-sidebar-foreground);
+  --sidebar-muted-foreground: var(--app-theme-sidebar-muted-foreground);
+  --sidebar-control-surface: var(--app-theme-sidebar-control-surface);
+  --sidebar-row-hover: var(--app-theme-sidebar-row-hover);
+  --sidebar-row-active: var(--app-theme-sidebar-row-active);
+  --sidebar-row-selected: var(--app-theme-sidebar-row-selected);
+  --sidebar-border: var(--app-theme-sidebar-border);
+  --sidebar-stage-fade: var(--app-theme-sidebar);
+  --selection-background: var(--app-theme-terminal-selection-background);
+  --caret-color: var(--app-theme-terminal-cursor);
+  --scrollbar-thumb: var(--app-theme-terminal-scrollbar);
+  --scrollbar-thumb-hover: var(--app-theme-terminal-scrollbar-hover);
+}
+
 :root.ocean {
   color-scheme: dark;
 
