@@ -22,9 +22,25 @@ afterEach(() =>
 
 describe('environment palette colors', () =>
 {
+  it('canonicalizes bounded literal CSS colors and rejects references or nonfinite values', () =>
+  {
+    expect(toCanonicalThemeColor('rgb(255 0 0)')).toBe(toCanonicalThemeColor('#ff0000'))
+    expect(toCanonicalThemeColor('oklch(0.5 0.1 390 / 0.5)')).toBe('oklch(0.5 0.1 30 / 0.5)')
+    for (const value of [
+      'var(--color)',
+      'currentColor',
+      '#fff; color:red',
+      'oklch(0.5 1e999 0)',
+      ' '.repeat(65),
+    ])
+    {
+      expect(toCanonicalThemeColor(value)).toBeNull()
+    }
+  })
+
   it('keeps exact seeds and lets only known valid role overrides win', () =>
   {
-    const generated = createManagedThemeColors('dark', '#112233', '#6688aa', { exactSeeds: true })
+    const generated = createManagedThemeColors('dark', '#112233', '#6688aa')
     expect(generated.canvas).toBe(toCanonicalThemeColor('#112233'))
     expect(generated.accent).toBe(toCanonicalThemeColor('#6688aa'))
     const colors = applyThemeColorOverrides(generated, {
