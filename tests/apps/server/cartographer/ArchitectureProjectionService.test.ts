@@ -628,6 +628,68 @@ describe('ArchitectureProjectionService', () =>
     }),
   )
 
+  it.effect('resolves standing path-scope chips from retained atlas files', () =>
+    Effect.gen(function* ()
+    {
+      const root = yield* Effect.promise(() =>
+        makeTemporaryRoot('456code-architecture-path-scope-'),
+      )
+      const atlasIndex = index(root)
+      const service = yield* ArchitectureProjectionService.make.pipe(
+        Effect.provide(
+          dependencyLayer({
+            root,
+            rebuild: {
+              retainPublishedIndex: () =>
+                Effect.succeed({
+                  projectId,
+                  root,
+                  outDir: root,
+                  graphPath: NodePath.join(root, 'graph.json'),
+                  generation,
+                  graphDigest,
+                  builtAt: createdAt,
+                  index: atlasIndex,
+                }),
+            },
+          }),
+        ),
+      )
+
+      const fileScope = yield* service.architecturePathScope(authority, {
+        threadId,
+        projectId,
+        paths: ['src/api.ts'],
+      })
+      expect(fileScope).toMatchObject({
+        version: 1,
+        source: standingSource(),
+        chips: [
+          {
+            role: 'touched',
+            level: 'systems',
+            id: 'systems:runtime',
+            label: 'Runtime',
+          },
+          { role: 'touched', level: 'blocks', id: 'blocks:api', label: 'API' },
+          { role: 'context', level: 'blocks', id: 'blocks:store', label: 'Store' },
+        ],
+      })
+
+      const directoryScope = yield* service.architecturePathScope(authority, {
+        threadId,
+        projectId,
+        paths: ['src'],
+        generationId: generation,
+      })
+      expect(directoryScope.chips.map((chip) => `${chip.role}:${chip.id}`)).toEqual([
+        'touched:systems:runtime',
+        'touched:blocks:api',
+        'touched:blocks:store',
+      ])
+    }),
+  )
+
   it.effect('reports missing system and block scopes as missing targets', () =>
     Effect.gen(function* ()
     {
@@ -912,6 +974,113 @@ describe('ArchitectureProjectionService', () =>
         code: 'identity-mismatch',
       })
       expect(neighborhoodInputs).toHaveLength(1)
+    }),
+  )
+
+  it.effect('serves a historical diff neighborhood when the sealed base tree is absent', () =>
+    Effect.gen(function* ()
+    {
+      const root = yield* Effect.promise(() =>
+        makeTemporaryRoot('456code-architecture-neighborhood-base-'),
+      )
+      const diffAnalysisId = DiffAnalysisId.make('diff-analysis-historical-base')
+      const baseGraphDigest = `sha256:${'c'.repeat(64)}`
+      const headGraphDigest = `sha256:${'d'.repeat(64)}`
+      const retainCalls: Array<{ readonly sourceSide?: 'base' | 'head' }> = []
+      const neighborhoodInputs: unknown[] = []
+      const service = yield* ArchitectureProjectionService.make.pipe(
+        Effect.provide(
+          dependencyLayer({
+            root,
+            diffs: {
+              retainReadyImpactTarget: (input) =>
+                Effect.sync(() =>
+                {
+                  retainCalls.push('sourceSide' in input ? { sourceSide: input.sourceSide } : {})
+                  return {
+                    generation: null as never,
+                    diff: null,
+                    impactDigest: `sha256:${'f'.repeat(64)}`,
+                    legacy: false,
+                    repositoryRoot: root,
+                    baseTreeOid: 'base-tree',
+                    headTreeOid: 'head-tree',
+                    baseGraphDigest,
+                    headGraphDigest,
+                    baseRoot: null,
+                    headRoot: root,
+                  }
+                }),
+            },
+            queries: {
+              blastRadius: (_authority, input) =>
+                Effect.sync(() =>
+                {
+                  neighborhoodInputs.push(input)
+                  return {
+                    version: 1,
+                    graph: { generatedAt: createdAt },
+                    target: input.target,
+                    precision: 'file',
+                    direction: input.direction ?? 'both',
+                    maxDepth: input.maxDepth ?? 4,
+                    upstream: { items: ['src/consumer.ts'], total: 1, omitted: 0 },
+                    downstream: { items: [], total: 0, omitted: 0 },
+                    impactedFileCount: 1,
+                  }
+                }),
+            },
+          }),
+        ),
+      )
+      const diffBase = {
+        kind: 'diff-analysis' as const,
+        threadId,
+        diffAnalysisId,
+        side: 'base' as const,
+        graphDigest: baseGraphDigest,
+      }
+
+      const neighborhood = yield* service.architectureNeighborhood(authority, {
+        threadId,
+        source: diffBase,
+        target: 'src/value.ts',
+        direction: 'upstream',
+        maxDepth: 2,
+      })
+      expect(neighborhood).toMatchObject({
+        source: diffBase,
+        target: 'src/value.ts',
+        direction: 'upstream',
+        maxDepth: 2,
+        upstream: { items: ['src/consumer.ts'], total: 1, omitted: 0 },
+      })
+      expect(neighborhoodInputs).toEqual([
+        {
+          context: {
+            kind: 'diff-analysis',
+            diffAnalysisId,
+            graph: 'base',
+          },
+          target: 'src/value.ts',
+          direction: 'upstream',
+          maxDepth: 2,
+        },
+      ])
+      expect(retainCalls).toEqual([{}])
+
+      const missingBaseTree = yield* service
+        .architectureSource(authority, {
+          threadId,
+          source: diffBase,
+          relativePath: 'src/value.ts',
+        })
+        .pipe(Effect.flip)
+      expect(missingBaseTree).toMatchObject({
+        operation: 'architecture_source',
+        code: 'context-not-ready',
+      })
+      expect(retainCalls).toEqual([{}, { sourceSide: 'base' }])
     }),
   )
 })

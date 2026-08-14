@@ -457,6 +457,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           lead_model_selection_json AS "leadModelSelection",
           status,
           source_sequence AS "sourceSequence",
+          architecture_paths_json AS "architecturePaths",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_orchestrate_plans
@@ -1110,6 +1111,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           lead_model_selection_json AS "leadModelSelection",
           status,
           source_sequence AS "sourceSequence",
+          architecture_paths_json AS "architecturePaths",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_orchestrate_plans
@@ -3040,7 +3042,6 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           return message
         }),
         proposedPlans: proposedPlanRows.map(mapProposedPlanRow),
-        orchestratePlans: orchestratePlanRows.map(mapOrchestratePlanRow),
         activities: activityRows.map((row) =>
         {
           const activity = {
@@ -3058,6 +3059,7 @@ const makeProjectionSnapshotQuery = Effect.gen(function* ()
           }
           return activity
         }),
+        orchestratePlans: orchestratePlanRows.map(mapOrchestratePlanRow),
         checkpoints: checkpointRows.map((row) => ({
           turnId: row.turnId,
           checkpointTurnCount: row.checkpointTurnCount,

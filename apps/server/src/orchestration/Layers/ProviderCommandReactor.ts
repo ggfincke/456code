@@ -13,6 +13,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInteractionMode,
+  coerceRuntimeMode,
   normalizeCollaborationMode,
   toWireInteractionMode,
   type OrchestrationSession,
@@ -20,7 +21,7 @@ import {
   ThreadId,
   type ThreadOrchestratePlanResponseRequestedPayload,
   ProviderSession,
-  type RuntimeMode,
+  RuntimeMode,
   type ThreadImportContinuationAuthority,
   type TurnId,
 } from '@t3tools/contracts'
@@ -348,6 +349,7 @@ const ProviderActionPayloadSchema = Schema.fromJsonString(
           Schema.String,
           Schema.Struct({
             sessionModelSwitch: Schema.Literals(['in-session', 'unsupported']),
+            supportedRuntimeModes: Schema.optional(Schema.NonEmptyArray(RuntimeMode)),
           }),
         ),
         recoverableById: Schema.Record(Schema.String, Schema.Boolean),
@@ -648,6 +650,8 @@ const make = Effect.gen(function* ()
     readonly turnId: TurnId | null
     readonly createdAt: string
     readonly requestId?: string
+    readonly runId?: string
+    readonly revision?: number
     readonly approvalOutcome?: {
       readonly requestId: string
       readonly status: 'stale-terminal' | 'unknown'
@@ -674,6 +678,8 @@ const make = Effect.gen(function* ()
             payload: {
               detail: input.detail,
               ...(input.requestId ? { requestId: input.requestId } : {}),
+              ...(input.runId === undefined ? {} : { runId: input.runId }),
+              ...(input.revision === undefined ? {} : { revision: input.revision }),
               ...(input.approvalOutcome === undefined
                 ? {}
                 : { approvalOutcome: input.approvalOutcome }),
@@ -1000,7 +1006,6 @@ const make = Effect.gen(function* ()
       return yield* Effect.die(new Error(`Thread '${threadId}' was not found in read model.`))
     }
 
-    const desiredRuntimeMode = thread.runtimeMode
     const requestedModelSelection = options?.modelSelection
     const resolveActiveSession = (threadId: ThreadId) =>
       Effect.succeed(
@@ -1033,6 +1038,10 @@ const make = Effect.gen(function* ()
         : thread.modelSelection.instanceId
     const desiredModelSelection = requestedModelSelection ?? thread.modelSelection
     const desiredInstanceId = desiredModelSelection.instanceId
+    const desiredRuntimeMode = coerceRuntimeMode(
+      thread.runtimeMode,
+      requireActiveEnvironment().capabilitiesById[desiredInstanceId]?.supportedRuntimeModes,
+    )
     const currentInfo = yield* getPlannedInstanceInfo(currentInstanceId).pipe(
       Effect.mapError(
         () =>
@@ -1242,7 +1251,7 @@ const make = Effect.gen(function* ()
       thread.session && thread.session.status !== 'stopped' && activeSession ? thread.id : null
     if (existingSessionThreadId && activeSession !== undefined)
     {
-      const runtimeModeChanged = thread.runtimeMode !== thread.session?.runtimeMode
+      const runtimeModeChanged = desiredRuntimeMode !== thread.session?.runtimeMode
       const cwdChanged = effectiveCwd !== activeSession?.cwd
       const sessionModelSwitch = (yield* getPlannedCapabilities(desiredInstanceId))
         .sessionModelSwitch
@@ -2089,19 +2098,11 @@ const make = Effect.gen(function* ()
     {
       return
     }
-    const hasSession = thread.session && thread.session.status !== 'stopped'
-    if (!hasSession)
-    {
-      return yield* appendProviderFailureActivity({
-        threadId: event.payload.threadId,
-        kind: 'provider.orchestrate-plan.respond.failed',
-        summary: 'Provider orchestrate plan response failed',
-        detail: 'No active provider session is bound to this thread.',
-        turnId: null,
-        createdAt: event.payload.createdAt,
-      })
-    }
 
+    // plan respond is a new turn w/ a canonical envelope, not a live pending-map
+    // reply. stopped sessions resume through sendTurn instead of hard-failing.
+    // catchCause records the failure and frees the revision; don't park the
+    // lane as unknown or a retry Approve never reaches sendTurn.
     const collaborationMode = normalizeCollaborationMode(thread.interactionMode, thread.orchestrate)
     yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
@@ -2110,9 +2111,9 @@ const make = Effect.gen(function* ()
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.flatMap((built) =>
-        invokeProvider(
-          providerService.sendTurn(built.request, undefined, activeEffectContext),
-        ).pipe(
+        invokeProvider(providerService.sendTurn(built.request, undefined, activeEffectContext), {
+          trackIndeterminate: false,
+        }).pipe(
           Effect.flatMap(() =>
             built.handoffDeliveryMarker === undefined
               ? Effect.void
@@ -2132,6 +2133,8 @@ const make = Effect.gen(function* ()
           detail: Cause.pretty(cause),
           turnId: null,
           createdAt: event.payload.createdAt,
+          runId: event.payload.runId,
+          revision: event.payload.revision,
         }),
       ),
     )
@@ -2394,10 +2397,12 @@ const make = Effect.gen(function* ()
     const thread = Option.getOrNull(
       yield* projectionSnapshotQuery.getThreadDetailById(event.payload.threadId),
     )
+    // persisted approve resumes via sendTurn, which needs instance routing like turn start
     const requiresRuntimeSnapshot =
       event.type === 'thread.runtime-mode-set' ||
       event.type === 'thread.turn-start-requested' ||
-      event.type === 'thread.provider-switch-requested'
+      event.type === 'thread.provider-switch-requested' ||
+      event.type === 'thread.orchestrate-plan-response-requested'
     const project =
       thread === null || !requiresRuntimeSnapshot
         ? null

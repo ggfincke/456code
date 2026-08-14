@@ -9,7 +9,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as Stream from 'effect/Stream'
-import { McpSchema, McpServer } from 'effect/unstable/ai'
+import { AiError, McpSchema, McpServer } from 'effect/unstable/ai'
 import {
   HttpBody,
   HttpClient,
@@ -322,6 +322,36 @@ it.effect('registers annotated tools and preserves authenticated request context
       expect(press.content).toEqual([{ type: 'text', text: 'null' }])
     }),
   ).pipe(Effect.provide(TestLayer)),
+)
+
+it.effect('maps architecture parameter validation to structured invalid-patch', () =>
+  Effect.gen(function* ()
+  {
+    const cause = Cause.fail(
+      AiError.make({
+        module: 'Toolkit',
+        method: 'architecture_propose_patch.handle',
+        reason: new AiError.ToolParameterValidationError({
+          toolName: 'architecture_propose_patch',
+          toolParams: { path: 'src/a.ts' },
+          description: 'Expected { from, to }',
+        }),
+      }),
+    )
+    const result = yield* McpHttpServer.architectureToolCallFailure('architecture_propose_patch')(
+      cause,
+    )
+
+    expect(result.isError).toBe(true)
+    expect(result.structuredContent).toMatchObject({
+      error: {
+        _tag: 'ArchitectureToolError',
+        operation: 'architecture_propose_patch',
+        code: 'invalid-patch',
+        detail: 'Expected { from, to }',
+      },
+    })
+  }),
 )
 
 it.effect('masks unexpected architecture tool failures and preserves interruption', () =>

@@ -73,9 +73,12 @@ const GROK_SOURCE_ENVIRONMENT_NAMES = [
   'XDG_DATA_HOME',
 ] as const
 
+const CORAL_SOURCE_ENVIRONMENT_NAMES = ['CORAL_HOME', 'HOME', 'PATH', 'PATHEXT'] as const
+
 const ACP_PATH_SOURCE_ENVIRONMENT_NAMES = new Set([
   'CURSOR_CONFIG_DIR',
   'CURSOR_DATA_DIR',
+  'CORAL_HOME',
   'GROK_HOME',
   'HOME',
   'XDG_CONFIG_HOME',
@@ -577,7 +580,9 @@ export function acpContinuationEnvironment(
       ? CURSOR_SOURCE_ENVIRONMENT_NAMES
       : driverKind === 'grok'
         ? GROK_SOURCE_ENVIRONMENT_NAMES
-        : []
+        : driverKind === 'coral'
+          ? CORAL_SOURCE_ENVIRONMENT_NAMES
+          : []
   const environment: NodeJS.ProcessEnv = {}
   for (const variable of instanceEnvironment ?? [])
   {

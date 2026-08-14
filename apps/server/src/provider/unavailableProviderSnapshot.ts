@@ -18,6 +18,7 @@ import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
 
 import { buildServerProvider } from './providerSnapshot.ts'
+import { providerCapabilitiesForDriver } from './providerCapabilities.ts'
 
 export interface UnavailableProviderSnapshotInput
 {
@@ -47,8 +48,15 @@ export function buildUnavailableProviderSnapshot(
     const checkedAt = input.checkedAt ?? (yield* nowIso)
     const displayName = input.displayName?.trim() || (input.driverKind as string)
 
+    const driver =
+      typeof input.driverKind === 'string'
+        ? ProviderDriverKind.make(input.driverKind)
+        : input.driverKind
     const base = buildServerProvider({
-      presentation: { displayName },
+      presentation: {
+        displayName,
+        capabilities: providerCapabilitiesForDriver(driver),
+      },
       enabled: false,
       checkedAt,
       models: [],
@@ -66,10 +74,7 @@ export function buildUnavailableProviderSnapshot(
       ...base,
       instanceId: input.instanceId,
       ...(input.accentColor ? { accentColor: input.accentColor } : {}),
-      driver:
-        typeof input.driverKind === 'string'
-          ? ProviderDriverKind.make(input.driverKind)
-          : input.driverKind,
+      driver,
       availability: 'unavailable',
       unavailableReason: input.reason,
     }

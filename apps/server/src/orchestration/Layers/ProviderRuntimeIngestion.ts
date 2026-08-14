@@ -922,13 +922,20 @@ const make = Effect.gen(function* ()
       return null
     }
 
+    // skip listSessions unless a source plan is pending; it takes the instance lock
+    const pending = yield* getSourceProposedPlanReferenceForPendingTurnStart(threadId)
+    if (pending === null)
+    {
+      return null
+    }
+
     const expectedTurnId = yield* getExpectedProviderTurnIdForThread(threadId)
     if (!sameId(expectedTurnId, eventTurnId))
     {
       return null
     }
 
-    return yield* getSourceProposedPlanReferenceForPendingTurnStart(threadId)
+    return pending
   })
 
   const markSourceProposedPlanImplemented = Effect.fn('markSourceProposedPlanImplemented')(

@@ -12,6 +12,7 @@ import * as NodeRuntime from '@effect/platform-node/NodeRuntime'
 
 import * as EffectAcpAgent from 'effect-acp/agent'
 import * as AcpError from 'effect-acp/errors'
+import * as AcpProviderExtensions from 'effect-acp/provider-extensions'
 import type * as AcpSchema from 'effect-acp/schema'
 
 const requestLogPath = process.env.T3_ACP_REQUEST_LOG_PATH
@@ -31,6 +32,12 @@ const omitXAiPromptCompleteStopReason =
   process.env.T3_ACP_OMIT_XAI_PROMPT_COMPLETE_STOP_REASON === '1'
 const failLoadSession = process.env.T3_ACP_FAIL_LOAD_SESSION === '1'
 const emitLoadReplay = process.env.T3_ACP_EMIT_LOAD_REPLAY === '1'
+const advertiseResume = process.env.T3_ACP_ADVERTISE_RESUME === '1'
+const advertisedAuthMethodIds = (process.env.T3_ACP_AUTH_METHOD_IDS ?? '')
+  .split(',')
+  .map((methodId) => methodId.trim())
+  .filter((methodId) => methodId.length > 0)
+const coralModes = process.env.T3_ACP_CORAL_MODES === '1'
 const hangLoadSessionAfterReplay = process.env.T3_ACP_HANG_LOAD_SESSION_AFTER_REPLAY === '1'
 const delayLoadSessionAfterReplay = process.env.T3_ACP_DELAY_LOAD_SESSION_AFTER_REPLAY === '1'
 const loadSessionDelayMs = Number(process.env.T3_ACP_LOAD_SESSION_DELAY_MS ?? '5000')
@@ -54,8 +61,9 @@ const permissionOptionIds = {
 }
 const sessionId = 'mock-session-1'
 
-let currentModeId = 'ask'
+let currentModeId = coralModes ? 'default' : 'ask'
 let currentModelId = 'default'
+let currentCoralRuntimeMode = 'approval-required'
 let parameterizedModelPicker = false
 let currentReasoning = 'medium'
 let currentContext = '272k'
@@ -239,6 +247,18 @@ function configOptions(): ReadonlyArray<AcpSchema.SessionConfigOption>
         { value: 'gpt-5.3-codex[reasoning=medium,fast=false]', name: 'Codex 5.3' },
       ],
     },
+    ...(coralModes
+      ? [
+          {
+            id: 'coral.runtime-mode',
+            name: 'Coral runtime mode',
+            category: 'mode',
+            type: 'select' as const,
+            currentValue: currentCoralRuntimeMode,
+            options: [{ value: 'approval-required', name: 'Approval required' }],
+          },
+        ]
+      : []),
   ]
 }
 
@@ -276,23 +296,25 @@ function availableModels(): ReadonlyArray<{
   }))
 }
 
-const availableModes: ReadonlyArray<AcpSchema.SessionMode> = [
-  {
-    id: 'ask',
-    name: 'Ask',
-    description: 'Request permission before making any changes',
-  },
-  {
-    id: 'architect',
-    name: 'Architect',
-    description: 'Design and plan software systems without implementation',
-  },
-  {
-    id: 'code',
-    name: 'Code',
-    description: 'Write and modify code with full tool access',
-  },
-]
+const availableModes: ReadonlyArray<AcpSchema.SessionMode> = coralModes
+  ? [{ id: 'default', name: 'Default' }]
+  : [
+      {
+        id: 'ask',
+        name: 'Ask',
+        description: 'Request permission before making any changes',
+      },
+      {
+        id: 'architect',
+        name: 'Architect',
+        description: 'Design and plan software systems without implementation',
+      },
+      {
+        id: 'code',
+        name: 'Code',
+        description: 'Write and modify code with full tool access',
+      },
+    ]
 
 function modeState(): AcpSchema.SessionModeState
 {
@@ -302,12 +324,12 @@ function modeState(): AcpSchema.SessionModeState
   }
 }
 
-const grokAcpModels: ReadonlyArray<AcpSchema.ModelInfo> = [
+const grokAcpModels: ReadonlyArray<AcpProviderExtensions.ModelInfo> = [
   { modelId: 'grok-build', name: 'Grok Build' },
   { modelId: 'grok-mock-alt', name: 'Grok Mock Alt' },
 ]
 
-function modelState(): AcpSchema.SessionModelState
+function modelState(): AcpProviderExtensions.SessionModelState
 {
   const modelId = grokAcpModels.some((model) => model.modelId === currentModelId)
     ? currentModelId
@@ -329,7 +351,18 @@ const program = Effect.gen(function* ()
         request.clientCapabilities?._meta?.parameterizedModelPicker === true
       return {
         protocolVersion: 1,
-        agentCapabilities: { loadSession: true },
+        agentCapabilities: {
+          loadSession: true,
+          ...(advertiseResume ? { sessionCapabilities: { resume: {} } } : {}),
+        },
+        ...(advertisedAuthMethodIds.length > 0
+          ? {
+              authMethods: advertisedAuthMethodIds.map((id) => ({
+                id,
+                name: `Mock ${id}`,
+              })),
+            }
+          : {}),
       }
     }),
   )
@@ -412,22 +445,33 @@ const program = Effect.gen(function* ()
     }),
   )
 
-  yield* agent.handleSetSessionModel((request) =>
-    Effect.gen(function* ()
-    {
-      if (!grokAcpModels.some((model) => model.modelId === request.modelId))
-      {
-        return yield* AcpError.AcpRequestError.invalidParams(
-          `Unknown mock model id: ${request.modelId}`,
-          {
-            method: 'session/set_model',
-            params: request,
-          },
-        )
-      }
-      currentModelId = request.modelId
-      return {}
+  yield* agent.handleResumeSession(() =>
+    Effect.succeed({
+      modes: modeState(),
+      models: modelState(),
+      configOptions: configOptions(),
     }),
+  )
+
+  yield* agent.handleExtRequest(
+    AcpProviderExtensions.GROK_SET_SESSION_MODEL_METHOD,
+    AcpProviderExtensions.SetSessionModelRequest,
+    (request) =>
+      Effect.gen(function* ()
+      {
+        if (!grokAcpModels.some((model) => model.modelId === request.modelId))
+        {
+          return yield* AcpError.AcpRequestError.invalidParams(
+            `Unknown mock model id: ${request.modelId}`,
+            {
+              method: AcpProviderExtensions.GROK_SET_SESSION_MODEL_METHOD,
+              params: request,
+            },
+          )
+        }
+        currentModelId = request.modelId
+        return {}
+      }),
   )
 
   // the adapter now switches modes via the typed session/set_mode rpc
@@ -477,6 +521,10 @@ const program = Effect.gen(function* ()
       if (request.configId === 'model' && typeof request.value === 'string')
       {
         currentModelId = request.value
+      }
+      if (request.configId === 'coral.runtime-mode' && typeof request.value === 'string')
+      {
+        currentCoralRuntimeMode = request.value
       }
       if (request.configId === 'reasoning' && typeof request.value === 'string')
       {

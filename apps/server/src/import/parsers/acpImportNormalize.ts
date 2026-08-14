@@ -8,6 +8,7 @@ import * as NodeCrypto from 'node:crypto'
 
 import type { ToolLifecycleItemType } from '@t3tools/contracts'
 import { deriveToolActivityPresentation } from '@t3tools/shared/toolActivity'
+import type { SessionModelsExtension } from 'effect-acp/provider-extensions'
 import type * as EffectAcpSchema from 'effect-acp/schema'
 
 import {
@@ -749,7 +750,7 @@ export function timestampRecords(
 export function normalizeAcpSessionReplay(input: {
   readonly descriptor: AcpImportCatalogEntry
   readonly notifications: ReadonlyArray<EffectAcpSchema.SessionNotification>
-  readonly loadResponse: EffectAcpSchema.LoadSessionResponse
+  readonly loadResponse: EffectAcpSchema.LoadSessionResponse & SessionModelsExtension
   readonly foreignNotificationCount?: number
 }): AcpImportedSession
 {

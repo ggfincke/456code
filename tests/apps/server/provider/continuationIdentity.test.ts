@@ -8,6 +8,7 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Path from 'effect/Path'
 
+import { buildCoralAcpSpawnInput } from '../../../../apps/server/src/provider/acp/CoralAcpSupport.ts'
 import { buildCursorAcpSpawnInput } from '../../../../apps/server/src/provider/acp/CursorAcpSupport.ts'
 import { buildGrokAcpSpawnInput } from '../../../../apps/server/src/provider/acp/GrokAcpSupport.ts'
 import {
@@ -27,6 +28,7 @@ import {
 
 const CODEX = ProviderDriverKind.make('codex')
 const CLAUDE = ProviderDriverKind.make('claudeAgent')
+const CORAL = ProviderDriverKind.make('coral')
 const CURSOR = ProviderDriverKind.make('cursor')
 const GROK = ProviderDriverKind.make('grok')
 const OPENCODE = ProviderDriverKind.make('opencode')
@@ -199,6 +201,27 @@ it.layer(NodeServices.layer)('provider continuation identity', (it) =>
         command: route.command,
         args: route.args,
         env: acpContinuationEnvironment(GROK, route.env ?? {}, undefined),
+      })
+    }
+
+    const coralIdentity = (
+      ollamaHost: string,
+      environment: NodeJS.ProcessEnv,
+      cwd = '/workspace/a',
+    ) =>
+    {
+      const route = buildCoralAcpSpawnInput(
+        {
+          binaryPath: 'coral',
+          ollamaHost,
+        },
+        cwd,
+        environment,
+      )
+      return acpContinuationIdentity(CORAL, {
+        command: route.command,
+        args: route.args,
+        env: acpContinuationEnvironment(CORAL, route.env ?? {}, undefined),
       })
     }
 
@@ -486,6 +509,41 @@ it.layer(NodeServices.layer)('provider continuation identity', (it) =>
         )
         expect(first).not.toEqual(grokIdentity({ ...baseEnvironment, PATH: '/tools/b' }))
         expect(first.continuationKey).not.toContain('grok-api-secret-a')
+        expect(first.continuationKey).not.toContain('/tools/a')
+      }),
+    )
+
+    it.effect('isolates Coral continuation by host, home, and executable route only', () =>
+      Effect.sync(() =>
+      {
+        const baseEnvironment = {
+          CORAL_HOME: '/accounts/coral',
+          PATH: '/tools/a',
+          TMPDIR: '/tmp/one',
+        }
+        const first = coralIdentity('https://ollama.example/a', baseEnvironment)
+        const incidentalChange = coralIdentity(
+          'https://ollama.example/a',
+          { ...baseEnvironment, TMPDIR: '/tmp/two' },
+          '/workspace/b',
+        )
+
+        expect(first).toEqual(incidentalChange)
+        expect(first).not.toEqual(coralIdentity('https://ollama.example/b', baseEnvironment))
+        expect(first).not.toEqual(
+          coralIdentity('https://ollama.example/a', {
+            ...baseEnvironment,
+            CORAL_HOME: '/accounts/other-coral',
+          }),
+        )
+        expect(first).not.toEqual(
+          coralIdentity('https://ollama.example/a', {
+            ...baseEnvironment,
+            PATH: '/tools/b',
+          }),
+        )
+        expect(first.continuationKey).not.toContain('ollama.example')
+        expect(first.continuationKey).not.toContain('/accounts/coral')
         expect(first.continuationKey).not.toContain('/tools/a')
       }),
     )

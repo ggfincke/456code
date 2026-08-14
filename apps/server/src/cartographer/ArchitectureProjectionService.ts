@@ -24,6 +24,8 @@ import {
   type ArchitectureToolErrorCode,
   type CartographerGetArchitectureNeighborhoodInput,
   type CartographerGetArchitectureNeighborhoodResult,
+  type CartographerGetArchitecturePathScopeInput,
+  type CartographerGetArchitecturePathScopeResult,
   type CartographerGetArchitectureScopeInput,
   type CartographerGetArchitectureScopeResult,
   type CartographerGetArchitectureSourceInput,
@@ -57,6 +59,7 @@ import {
 import * as ProposalGenerationService from '../proposal/ProposalGenerationService.ts'
 import * as ArchitectureQueryService from './ArchitectureQueryService.ts'
 import * as AtlasRebuildService from './AtlasRebuildService.ts'
+import { resolveArchitecturePathScope } from './architecturePathResolver.ts'
 import * as DiffAnalysisService from './DiffAnalysisService.ts'
 import * as ProjectAtlasStatusBroadcaster from './ProjectAtlasStatusBroadcaster.ts'
 
@@ -87,6 +90,10 @@ export interface ArchitectureProjectionServiceShape
     authority: ArchitectureQueryService.ArchitectureQueryAuthority,
     input: CartographerGetArchitectureNeighborhoodInput,
   ) => Effect.Effect<CartographerGetArchitectureNeighborhoodResult, ArchitectureToolError>
+  readonly architecturePathScope: (
+    authority: ArchitectureQueryService.ArchitectureQueryAuthority,
+    input: CartographerGetArchitecturePathScopeInput,
+  ) => Effect.Effect<CartographerGetArchitecturePathScopeResult, ArchitectureToolError>
   readonly architectureSource: (
     authority: ArchitectureQueryService.ArchitectureQueryAuthority,
     input: CartographerGetArchitectureSourceInput,
@@ -770,6 +777,16 @@ export const make = Effect.gen(function* ()
             'The diff graph digest does not match the retained analysis.',
           )
         }
+        const selector = {
+          kind: 'diff-analysis' as const,
+          diffAnalysisId: source.diffAnalysisId,
+          graph: source.side,
+        }
+        // neighborhood never reads the retained tree; historical base seals omit it
+        if (operation !== 'architecture_source')
+        {
+          return { selector }
+        }
         const retainedRoot = source.side === 'base' ? target.baseRoot : target.headRoot
         if (retainedRoot === null)
         {
@@ -781,11 +798,7 @@ export const make = Effect.gen(function* ()
           )
         }
         return {
-          selector: {
-            kind: 'diff-analysis',
-            diffAnalysisId: source.diffAnalysisId,
-            graph: source.side,
-          },
+          selector,
           retainedRoot,
         }
       }
@@ -831,6 +844,35 @@ export const make = Effect.gen(function* ()
         )
       },
     )
+
+  const architecturePathScope: ArchitectureProjectionServiceShape['architecturePathScope'] =
+    Effect.fn('ArchitectureProjectionService.architecturePathScope')(function* (authority, input)
+    {
+      const operation = 'architecture_path_scope'
+      return yield* Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const authorized = yield* resolveAuthority(authority, operation)
+          const target = yield* retainStandingIndex(
+            authorized,
+            input.projectId,
+            input.generationId,
+            undefined,
+            operation,
+          )
+          return {
+            version: 1 as const,
+            source: sourceIdentity(input.projectId, target.generation, target.graphDigest),
+            chips: resolveArchitecturePathScope(target.index, input.paths),
+          }
+        }),
+      ).pipe(
+        withMetrics({
+          timer: architectureProjectionReadDuration,
+          attributes: { kind: 'path-scope' },
+        }),
+      )
+    })
 
   const architectureSource: ArchitectureProjectionServiceShape['architectureSource'] = Effect.fn(
     'ArchitectureProjectionService.architectureSource',
@@ -911,6 +953,7 @@ export const make = Effect.gen(function* ()
     repositoryMap,
     architectureScope,
     architectureNeighborhood,
+    architecturePathScope,
     architectureSource,
   })
 })

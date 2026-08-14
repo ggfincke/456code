@@ -4,6 +4,7 @@
 // @effect-diagnostics nodeBuiltinImport:off preferSchemaOverJson:off
 
 import * as NodeChildProcess from 'node:child_process'
+import * as NodeCrypto from 'node:crypto'
 import * as NodeFSP from 'node:fs/promises'
 import * as NodeOS from 'node:os'
 import * as NodePath from 'node:path'
@@ -421,6 +422,118 @@ it.effect('single-flights a tree pair and retains both verified immutable roots'
             cwd: fixture.cwd,
             baseDir,
             analyzer: makeAnalyzer(analyzerCalls),
+          }),
+        ),
+      )
+    }),
+  ),
+)
+
+it.effect('retains a planted labels-only legacy impact without requiring GraphDiff', () =>
+  Effect.scoped(
+    Effect.gen(function* ()
+    {
+      yield* TestClock.setTime(fixedEpoch)
+      const fixture = yield* Effect.promise(initializeRepository)
+      const baseDir = yield* Effect.promise(() =>
+        NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-diff-analysis-legacy-impact-')),
+      )
+      yield* Effect.addFinalizer(() =>
+        Effect.promise(() =>
+          Promise.all([
+            NodeFSP.rm(fixture.cwd, { recursive: true, force: true }),
+            NodeFSP.rm(baseDir, { recursive: true, force: true }),
+          ]),
+        ).pipe(Effect.ignore),
+      )
+      const source: DiffAnalysisSource = {
+        sourceKind: 'tree-pair',
+        cwd: fixture.cwd,
+        baseTreeOid: fixture.baseTreeOid,
+        headTreeOid: fixture.headTreeOid,
+      }
+
+      yield* Effect.gen(function* ()
+      {
+        const service = yield* DiffAnalysisService.DiffAnalysisService
+        const repository = yield* DiffAnalysisGenerationRepository
+        const requested = yield* service.request({ source, workspaceRoot: fixture.cwd })
+        const ready = yield* waitForTerminal(service, { source, workspaceRoot: fixture.cwd })
+        assert.equal(ready.state, 'ready')
+
+        const row = Option.getOrThrow(
+          yield* repository.getById({ diffAnalysisId: requested.diffAnalysisId }),
+        )
+        const legacyBytes = Buffer.from(
+          JSON.stringify({
+            baseGitRef: row.baseAnalyzerRef,
+            headGitRef: row.headAnalyzerRef,
+            changed: true,
+          }),
+        )
+        const digest = NodeCrypto.createHash('sha256').update(legacyBytes).digest('hex')
+        const nativePlantedPath = NodePath.join(
+          row.artifactRoot,
+          `impact.graph-diff-v1.${digest}.json`,
+        )
+        const legacyPlantedPath = NodePath.join(row.artifactRoot, `impact.${digest}.json`)
+        yield* Effect.promise(() =>
+          Promise.all([
+            NodeFSP.writeFile(nativePlantedPath, legacyBytes),
+            NodeFSP.writeFile(legacyPlantedPath, legacyBytes),
+          ]),
+        )
+        const persistImpactPath = (impactPath: string) =>
+          repository.update({
+            diffAnalysisId: row.diffAnalysisId,
+            state: row.state,
+            headRootPath: row.headRootPath,
+            baseGraphPath: row.baseGraphPath,
+            headGraphPath: row.headGraphPath,
+            impactPath,
+            artifactByteLength: row.artifactByteLength,
+            errorCode: row.errorCode,
+            updatedAt: row.updatedAt,
+          })
+
+        yield* persistImpactPath(nativePlantedPath)
+        const nativeTarget = yield* Effect.scoped(
+          service.retainReadyTarget({
+            diffAnalysisId: requested.diffAnalysisId,
+            workspaceRoot: fixture.cwd,
+          }),
+        ).pipe(Effect.flip)
+        assert.equal(nativeTarget.code, 'artifact-invalid')
+        const nativeImpact = yield* Effect.scoped(
+          service.retainReadyImpactTarget({
+            diffAnalysisId: requested.diffAnalysisId,
+            workspaceRoot: fixture.cwd,
+          }),
+        ).pipe(Effect.flip)
+        assert.equal(nativeImpact.code, 'artifact-invalid')
+
+        yield* persistImpactPath(legacyPlantedPath)
+        const target = yield* Effect.scoped(
+          service.retainReadyTarget({
+            diffAnalysisId: requested.diffAnalysisId,
+            workspaceRoot: fixture.cwd,
+          }),
+        )
+        assert.equal(target.impactPath, legacyPlantedPath)
+        const impact = yield* Effect.scoped(
+          service.retainReadyImpactTarget({
+            diffAnalysisId: requested.diffAnalysisId,
+            workspaceRoot: fixture.cwd,
+          }),
+        )
+        assert.equal(impact.legacy, true)
+        assert.equal(impact.diff, null)
+      }).pipe(
+        Effect.provide(
+          makeTestLayer({
+            cwd: fixture.cwd,
+            baseDir,
+            analyzer: makeAnalyzer({ value: 0 }),
           }),
         ),
       )

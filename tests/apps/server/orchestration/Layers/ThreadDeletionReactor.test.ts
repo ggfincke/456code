@@ -45,6 +45,7 @@ import {
   type ProviderSessionIdentityCapture,
   type ProviderServiceShape,
 } from '../../../../../apps/server/src/provider/Services/ProviderService.ts'
+import { CODEX_PROVIDER_CAPABILITIES } from '../../../../../apps/server/src/provider/providerCapabilities.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import * as TerminalManager from '../../../../../apps/server/src/terminal/Manager.ts'
 import { expectedProviderGenerationStopKeys } from '../../support/threadLifecycleGenerationClose.ts'
@@ -195,7 +196,7 @@ function makeLayer(state: HarnessState)
     resumeAdmissionAfterHandoff: Effect.void,
     shutdown: Effect.succeed(0),
     listSessions: () => Effect.succeed([]),
-    getCapabilities: () => Effect.succeed({ sessionModelSwitch: 'in-session' }),
+    getCapabilities: () => Effect.succeed(CODEX_PROVIDER_CAPABILITIES),
     getInstanceInfo: (instanceId) =>
     {
       const driverKind = ProviderDriverKind.make(String(instanceId))

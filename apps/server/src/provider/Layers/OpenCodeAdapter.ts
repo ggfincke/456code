@@ -32,6 +32,7 @@ import { getModelSelectionStringOptionValue } from '@t3tools/shared/model'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
+import { OPENCODE_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
 import { makeKeyedSemaphore } from './KeyedSemaphore.ts'
 import {
@@ -1929,9 +1930,7 @@ export function makeOpenCodeAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: {
-        sessionModelSwitch: 'in-session',
-      },
+      capabilities: OPENCODE_PROVIDER_CAPABILITIES,
       startSession,
       sendTurn,
       interruptTurn,

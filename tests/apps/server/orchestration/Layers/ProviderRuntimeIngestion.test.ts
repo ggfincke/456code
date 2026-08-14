@@ -51,6 +51,7 @@ import {
   ProviderService,
   type ProviderServiceShape,
 } from '../../../../../apps/server/src/provider/Services/ProviderService.ts'
+import { CODEX_PROVIDER_CAPABILITIES } from '../../../../../apps/server/src/provider/providerCapabilities.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
@@ -143,7 +144,7 @@ function createProviderServiceHarness()
     resumeAdmissionAfterHandoff: Effect.void,
     shutdown: Effect.succeed(0),
     listSessions: () => Effect.succeed([...runtimeSessions]),
-    getCapabilities: () => Effect.succeed({ sessionModelSwitch: 'in-session' }),
+    getCapabilities: () => Effect.succeed(CODEX_PROVIDER_CAPABILITIES),
     getInstanceInfo: (instanceId) =>
     {
       const driverKind = ProviderDriverKind.make(String(instanceId))

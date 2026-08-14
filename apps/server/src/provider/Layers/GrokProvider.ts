@@ -7,7 +7,7 @@ import {
   type ServerProvider,
   type ServerProviderModel,
 } from '@t3tools/contracts'
-import type * as EffectAcpSchema from 'effect-acp/schema'
+import type { SessionModelState } from 'effect-acp/provider-extensions'
 import { causeErrorTag } from '@t3tools/shared/observability'
 import * as Crypto from 'effect/Crypto'
 import * as DateTime from 'effect/DateTime'
@@ -33,9 +33,11 @@ import {
   type ProviderMaintenanceCapabilities,
 } from '../maintenance/providerMaintenance.ts'
 import { makeGrokAcpRuntime, resolveGrokAcpBaseModelId } from '../acp/GrokAcpSupport.ts'
+import { GROK_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 
 const GROK_PRESENTATION = {
   displayName: 'Grok',
+  capabilities: GROK_PROVIDER_CAPABILITIES,
   badgeLabel: 'Early Access',
   showInteractionModeToggle: false,
   requiresNewThreadForModelChange: true,
@@ -107,7 +109,7 @@ function grokModelsFromSettings(
 }
 
 function buildGrokDiscoveredModelsFromSessionModelState(
-  modelState: EffectAcpSchema.SessionModelState | null | undefined,
+  modelState: SessionModelState | null | undefined,
 ): ReadonlyArray<ServerProviderModel>
 {
   if (!modelState || modelState.availableModels.length === 0)

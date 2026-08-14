@@ -26,9 +26,11 @@ import {
   type OpenCodeInventory,
 } from '../opencodeRuntime.ts'
 import type { Agent, ProviderListResponse } from '@opencode-ai/sdk/v2'
+import { OPENCODE_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 
 const OPENCODE_PRESENTATION = {
   displayName: 'OpenCode',
+  capabilities: OPENCODE_PROVIDER_CAPABILITIES,
   showInteractionModeToggle: false,
 } as const
 const MINIMUM_OPENCODE_VERSION = '1.14.19'

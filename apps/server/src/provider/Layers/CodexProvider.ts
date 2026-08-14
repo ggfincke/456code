@@ -37,6 +37,7 @@ import {
   type ServerProviderDraft,
 } from '../providerSnapshot.ts'
 import { expandHomePath } from '../../pathExpansion.ts'
+import { CODEX_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 import packageJson from '../../../package.json' with { type: 'json' }
 const isCodexAppServerSpawnError = Schema.is(CodexErrors.CodexAppServerSpawnError)
 
@@ -45,6 +46,7 @@ const CODEX_USAGE_PROBE_TIMEOUT_MS = 4_000
 
 const CODEX_PRESENTATION = {
   displayName: 'Codex',
+  capabilities: CODEX_PROVIDER_CAPABILITIES,
   showInteractionModeToggle: true,
 } as const
 

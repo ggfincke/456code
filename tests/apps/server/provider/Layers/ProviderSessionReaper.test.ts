@@ -3,11 +3,14 @@
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import {
+  EventId,
   ProjectId,
-  ThreadId,
-  TurnId,
   ProviderDriverKind,
   ProviderInstanceId,
+  RuntimeTaskId,
+  ThreadId,
+  TurnId,
+  type ProviderRuntimeEvent,
 } from '@t3tools/contracts'
 import * as Clock from 'effect/Clock'
 import * as DateTime from 'effect/DateTime'
@@ -25,12 +28,15 @@ import { SqlitePersistenceMemory } from '../../../../../apps/server/src/persiste
 import * as ProviderSessionRuntime from '../../../../../apps/server/src/persistence/Services/ProviderSessionRuntime.ts'
 import * as ProviderSessionRuntimeLayers from '../../../../../apps/server/src/persistence/Layers/ProviderSessionRuntime.ts'
 import { ProviderValidationError } from '../../../../../apps/server/src/provider/Errors.ts'
+import { ProviderBackgroundTaskRegistryLive } from '../../../../../apps/server/src/provider/Layers/ProviderBackgroundTaskRegistry.ts'
+import { ProviderBackgroundTaskRegistry } from '../../../../../apps/server/src/provider/Services/ProviderBackgroundTaskRegistry.ts'
 import { ProviderSessionReaper } from '../../../../../apps/server/src/provider/Services/ProviderSessionReaper.ts'
 import {
   ProviderService,
   type ProviderSessionIdentityCapture,
   type ProviderServiceShape,
 } from '../../../../../apps/server/src/provider/Services/ProviderService.ts'
+import { CODEX_PROVIDER_CAPABILITIES } from '../../../../../apps/server/src/provider/providerCapabilities.ts'
 import { ProviderSessionDirectoryLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts'
 import { makeProviderSessionReaperLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionReaper.ts'
 import { makeProjectionSnapshotQueryStub } from '../../projectionSnapshotQueryTestHelpers.ts'
@@ -81,6 +87,11 @@ function makeReadModel(
       readonly lastError: string | null
       readonly updatedAt: string
     } | null
+    readonly orchestratePlans?: ReadonlyArray<{
+      readonly runId: string
+      readonly revision: number
+      readonly status: 'pending' | 'approved' | 'rejected' | 'superseded'
+    }>
   }>,
 )
 {
@@ -127,6 +138,21 @@ function makeReadModel(
       session: thread.session,
       activities: [],
       proposedPlans: [],
+      orchestratePlans: (thread.orchestratePlans ?? []).map((plan) => ({
+        runId: plan.runId,
+        revision: plan.revision,
+        turnId: null,
+        workflow: 'implementation',
+        task: plan.runId,
+        stages: [],
+        totalWorkers: 0,
+        maxWorkers: 1,
+        source: 'tool' as const,
+        leadModelSelection: null,
+        status: plan.status,
+        createdAt: now,
+        updatedAt: now,
+      })),
       checkpoints: [],
       deletedAt: null,
     })),
@@ -136,7 +162,9 @@ function makeReadModel(
 describe('ProviderSessionReaper', () =>
 {
   let runtime: ManagedRuntime.ManagedRuntime<
-    ProviderSessionReaper | ProviderSessionRuntime.ProviderSessionRuntimeRepository,
+    | ProviderBackgroundTaskRegistry
+    | ProviderSessionReaper
+    | ProviderSessionRuntime.ProviderSessionRuntimeRepository,
     unknown
   > | null = null
   let scope: Scope.Closeable | null = null
@@ -158,21 +186,40 @@ describe('ProviderSessionReaper', () =>
   async function createHarness(input: {
     readonly readModel: ReturnType<typeof makeReadModel>
     readonly providerIdentities?: ReadonlyArray<ProviderSessionIdentityCapture>
-    readonly stopSessionImplementation?: (input: {
-      readonly threadId: ThreadId
-    }) => ReturnType<ProviderServiceShape['stopSession']>
+    readonly stopSessionIfExactImplementation?: (
+      identity: Parameters<ProviderServiceShape['stopSessionIfExact']>[0],
+    ) => ReturnType<ProviderServiceShape['stopSessionIfExact']>
   })
   {
-    const stoppedThreadIds = new Set<ThreadId>()
     const providerIdentities = [...(input.providerIdentities ?? [])]
-    const stopSession = vi.fn<ProviderServiceShape['stopSession']>(
+    const stopSession = vi.fn<ProviderServiceShape['stopSession']>(() => Effect.void)
+    const stopSessionIfExact = vi.fn<ProviderServiceShape['stopSessionIfExact']>((identity) =>
+      input.stopSessionIfExactImplementation
+        ? input.stopSessionIfExactImplementation(identity)
+        : Effect.sync(() =>
+          {
+            const identityIndex = providerIdentities.findIndex(
+              (current) =>
+                current.provider === identity.provider &&
+                current.providerInstanceId === identity.providerInstanceId &&
+                current.threadId === identity.threadId &&
+                current.sessionGeneration === identity.sessionGeneration,
+            )
+            if (identityIndex === -1)
+              {
+              return false
+            }
+            providerIdentities.splice(identityIndex, 1)
+            return true
+          }),
+    )
+    const captureSessionIdentities = vi.fn<ProviderServiceShape['captureSessionIdentities']>(
       (request) =>
-        (input.stopSessionImplementation
-          ? input.stopSessionImplementation(request)
-          : Effect.sync(() =>
-            {
-              stoppedThreadIds.add(request.threadId)
-            })) as ReturnType<ProviderServiceShape['stopSession']>,
+        Effect.succeed(
+          providerIdentities.filter(
+            (identity) => request?.threadId === undefined || identity.threadId === request.threadId,
+          ),
+        ),
     )
 
     const providerService: ProviderServiceShape = {
@@ -193,12 +240,7 @@ describe('ProviderSessionReaper', () =>
             ),
           ),
         ),
-      captureSessionIdentities: (request) =>
-        Effect.succeed(
-          providerIdentities.filter(
-            (identity) => request?.threadId === undefined || identity.threadId === request.threadId,
-          ),
-        ),
+      captureSessionIdentities,
       getSessionIdentityState: () => Effect.succeed(Option.none()),
       matchesSessionIdentity: (identity) =>
         Effect.succeed(
@@ -210,29 +252,12 @@ describe('ProviderSessionReaper', () =>
               current.sessionGeneration === identity.sessionGeneration,
           ),
         ),
-      stopSessionIfExact: vi.fn((identity) =>
-        Effect.sync(() =>
-        {
-          const identityIndex = providerIdentities.findIndex(
-            (current) =>
-              current.provider === identity.provider &&
-              current.providerInstanceId === identity.providerInstanceId &&
-              current.threadId === identity.threadId &&
-              current.sessionGeneration === identity.sessionGeneration,
-          )
-          if (identityIndex === -1)
-          {
-            return false
-          }
-          providerIdentities.splice(identityIndex, 1)
-          return true
-        }),
-      ),
+      stopSessionIfExact,
       getAdmissionHandoffHighWater: Effect.succeed(null),
       resumeAdmissionAfterHandoff: Effect.void,
       shutdown: Effect.succeed(0),
       listSessions: () => Effect.succeed([]),
-      getCapabilities: () => Effect.succeed({ sessionModelSwitch: 'in-session' }),
+      getCapabilities: () => Effect.succeed(CODEX_PROVIDER_CAPABILITIES),
       getInstanceInfo: (instanceId) =>
       {
         const driverKind = ProviderDriverKind.make(String(instanceId))
@@ -259,6 +284,18 @@ describe('ProviderSessionReaper', () =>
     const providerSessionDirectoryLayer = ProviderSessionDirectoryLive.pipe(
       Layer.provide(runtimeRepositoryLayer),
     )
+    const getThreadShellById = vi.fn((threadId: ThreadId) =>
+      Effect.succeed(
+        input.readModel.threads.find((thread) => thread.id === threadId)
+          ? Option.some(input.readModel.threads.find((thread) => thread.id === threadId)!)
+          : Option.none(),
+      ),
+    )
+    const getThreadDetailById = vi.fn((threadId: ThreadId) =>
+    {
+      const thread = input.readModel.threads.find((entry) => entry.id === threadId)
+      return Effect.succeed(thread === undefined ? Option.none() : Option.some(thread as never))
+    })
     const layer = makeProviderSessionReaperLive({
       inactivityThresholdMs: 1_000,
       sweepIntervalMs: 60_000,
@@ -266,16 +303,13 @@ describe('ProviderSessionReaper', () =>
       Layer.provideMerge(providerSessionDirectoryLayer),
       Layer.provideMerge(runtimeRepositoryLayer),
       Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
+      Layer.provideMerge(ProviderBackgroundTaskRegistryLive),
       Layer.provideMerge(
         Layer.succeed(
           ProjectionSnapshotQuery,
           makeProjectionSnapshotQueryStub({
-            getThreadShellById: (threadId) =>
-              Effect.succeed(
-                input.readModel.threads.find((thread) => thread.id === threadId)
-                  ? Option.some(input.readModel.threads.find((thread) => thread.id === threadId)!)
-                  : Option.none(),
-              ),
+            getThreadShellById,
+            getThreadDetailById,
           }),
         ),
       ),
@@ -285,9 +319,11 @@ describe('ProviderSessionReaper', () =>
     runtime = ManagedRuntime.make(layer)
     return {
       stopSession,
-      stopSessionIfExact: providerService.stopSessionIfExact,
-      stoppedThreadIds,
+      stopSessionIfExact,
       providerIdentities,
+      getThreadShellById,
+      getThreadDetailById,
+      captureSessionIdentities,
     }
   }
 
@@ -333,9 +369,62 @@ describe('ProviderSessionReaper', () =>
     expect(harness.stopSession).not.toHaveBeenCalled()
   })
 
-  it('reaps stale persisted sessions without active turns', async () =>
+  it('keeps a durable orphan alive while its exact generation has background work', async () =>
   {
-    const threadId = ThreadId.make('thread-reaper-stale')
+    const threadId = ThreadId.make('thread-reaper-live-background-orphan')
+    const provider = ProviderDriverKind.make('claudeAgent')
+    const providerInstanceId = ProviderInstanceId.make('claudeAgent')
+    const identity: ProviderSessionIdentityCapture = {
+      provider,
+      providerInstanceId,
+      threadId,
+      sessionGeneration: 6,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
+    const harness = await createHarness({
+      readModel: makeReadModel([]),
+      providerIdentities: [identity],
+    })
+    const backgroundTasks = await runtime!.runPromise(
+      Effect.service(ProviderBackgroundTaskRegistry),
+    )
+    await runtime!.runPromise(
+      backgroundTasks.observeAcceptedRuntimeEvent(identity, {
+        type: 'task.started',
+        eventId: EventId.make('evt-reaper-live-background-orphan-started'),
+        provider,
+        providerInstanceId,
+        createdAt: identity.createdAt,
+        threadId,
+        payload: {
+          taskId: RuntimeTaskId.make('task-reaper-live-background-orphan'),
+        },
+      } satisfies ProviderRuntimeEvent),
+    )
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper))
+    scope = await runtime!.runPromise(Scope.make('sequential'))
+    await runtime!.runPromise(reaper.start().pipe(Scope.provide(scope)))
+    await waitFor(() => harness.captureSessionIdentities.mock.calls.length === 1)
+    await runtime!.runPromise(drainFibers)
+
+    expect(harness.stopSessionIfExact).not.toHaveBeenCalled()
+    expect(harness.providerIdentities).toEqual([identity])
+    expect(await runtime!.runPromise(backgroundTasks.hasLiveTasks(identity))).toBe(true)
+  })
+
+  it('skips a stale exact generation while an admitted background task is live', async () =>
+  {
+    const threadId = ThreadId.make('thread-reaper-live-background-task')
+    const provider = ProviderDriverKind.make('claudeAgent')
+    const providerInstanceId = ProviderInstanceId.make('claudeAgent')
+    const identity: ProviderSessionIdentityCapture = {
+      provider,
+      providerInstanceId,
+      threadId,
+      sessionGeneration: 3,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
     const now = '2026-01-01T00:00:00.000Z'
     const harness = await createHarness({
       readModel: makeReadModel([
@@ -352,16 +441,97 @@ describe('ProviderSessionReaper', () =>
           },
         },
       ]),
+      providerIdentities: [identity],
     })
     const repository = await runtime!.runPromise(
       Effect.service(ProviderSessionRuntime.ProviderSessionRuntimeRepository),
+    )
+    const backgroundTasks = await runtime!.runPromise(
+      Effect.service(ProviderBackgroundTaskRegistry),
     )
 
     await runtime!.runPromise(
       repository.upsert({
         threadId,
         providerName: 'claudeAgent',
-        providerInstanceId: null,
+        providerInstanceId,
+        adapterKey: 'claudeAgent',
+        runtimeMode: 'full-access',
+        status: 'running',
+        lastSeenAt: '2026-04-14T00:00:00.000Z',
+        resumeCursor: null,
+        runtimePayload: null,
+      }),
+    )
+    await runtime!.runPromise(
+      backgroundTasks.observeAcceptedRuntimeEvent(identity, {
+        type: 'task.started',
+        eventId: EventId.make('evt-reaper-live-background-task-started'),
+        provider,
+        providerInstanceId,
+        createdAt: now,
+        threadId,
+        payload: {
+          taskId: RuntimeTaskId.make('task-reaper-live-background'),
+        },
+      } satisfies ProviderRuntimeEvent),
+    )
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper))
+    scope = await runtime!.runPromise(Scope.make('sequential'))
+    await runtime!.runPromise(reaper.start().pipe(Scope.provide(scope)))
+
+    await waitFor(() => harness.getThreadShellById.mock.calls.length === 1)
+    await runtime!.runPromise(drainFibers)
+
+    expect(harness.stopSessionIfExact).not.toHaveBeenCalled()
+    expect(harness.stopSession).not.toHaveBeenCalled()
+    expect(await runtime!.runPromise(backgroundTasks.hasLiveTasks(identity))).toBe(true)
+  })
+
+  it('reaps a stale exact generation after its background task completes', async () =>
+  {
+    const threadId = ThreadId.make('thread-reaper-stale')
+    const provider = ProviderDriverKind.make('claudeAgent')
+    const providerInstanceId = ProviderInstanceId.make('claudeAgent')
+    const identity: ProviderSessionIdentityCapture = {
+      provider,
+      providerInstanceId,
+      threadId,
+      sessionGeneration: 4,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
+    const taskId = RuntimeTaskId.make('task-reaper-stale')
+    const now = '2026-01-01T00:00:00.000Z'
+    const harness = await createHarness({
+      readModel: makeReadModel([
+        {
+          id: threadId,
+          session: {
+            threadId,
+            status: 'ready',
+            providerName: 'claudeAgent',
+            runtimeMode: 'full-access',
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+        },
+      ]),
+      providerIdentities: [identity],
+    })
+    const repository = await runtime!.runPromise(
+      Effect.service(ProviderSessionRuntime.ProviderSessionRuntimeRepository),
+    )
+    const backgroundTasks = await runtime!.runPromise(
+      Effect.service(ProviderBackgroundTaskRegistry),
+    )
+
+    await runtime!.runPromise(
+      repository.upsert({
+        threadId,
+        providerName: 'claudeAgent',
+        providerInstanceId,
         adapterKey: 'claudeAgent',
         runtimeMode: 'full-access',
         status: 'running',
@@ -372,19 +542,124 @@ describe('ProviderSessionReaper', () =>
         runtimePayload: null,
       }),
     )
+    await runtime!.runPromise(
+      backgroundTasks.observeAcceptedRuntimeEvent(identity, {
+        type: 'task.progress',
+        eventId: EventId.make('evt-reaper-stale-task-progress'),
+        provider,
+        providerInstanceId,
+        createdAt: now,
+        threadId,
+        payload: {
+          taskId,
+          description: 'Background work is still running.',
+        },
+      } satisfies ProviderRuntimeEvent),
+    )
 
     const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper))
-    scope = await Effect.runPromise(Scope.make('sequential'))
-    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)))
+    scope = await runtime!.runPromise(Scope.make('sequential'))
+    await runtime!.runPromise(reaper.start().pipe(Scope.provide(scope)))
 
-    await waitFor(() => harness.stopSession.mock.calls.length === 1)
+    await waitFor(() => harness.getThreadShellById.mock.calls.length === 1)
+    await runtime!.runPromise(drainFibers)
+    expect(harness.stopSessionIfExact).not.toHaveBeenCalled()
 
-    // reaper stops are now fenced by the bound provider instance (megacore U-067)
-    expect(harness.stopSession.mock.calls[0]?.[0]).toEqual({
+    await runtime!.runPromise(Scope.close(scope, Exit.void))
+    scope = null
+    await runtime!.runPromise(
+      backgroundTasks.observeAcceptedRuntimeEvent(identity, {
+        type: 'task.completed',
+        eventId: EventId.make('evt-reaper-stale-task-completed'),
+        provider,
+        providerInstanceId,
+        createdAt: now,
+        threadId,
+        payload: {
+          taskId,
+          status: 'completed',
+        },
+      } satisfies ProviderRuntimeEvent),
+    )
+    expect(await runtime!.runPromise(backgroundTasks.hasLiveTasks(identity))).toBe(false)
+
+    scope = await runtime!.runPromise(Scope.make('sequential'))
+    await runtime!.runPromise(reaper.start().pipe(Scope.provide(scope)))
+    await waitFor(() => harness.stopSessionIfExact.mock.calls.length === 1)
+
+    expect(harness.stopSessionIfExact.mock.calls[0]?.[0]).toEqual(identity)
+    expect(harness.stopSession).not.toHaveBeenCalled()
+  })
+
+  it('isolates background work and exits by provider session generation', async () =>
+  {
+    const threadId = ThreadId.make('thread-reaper-generation-isolation')
+    const provider = ProviderDriverKind.make('claudeAgent')
+    const providerInstanceId = ProviderInstanceId.make('claudeAgent')
+    const oldIdentity: ProviderSessionIdentityCapture = {
+      provider,
+      providerInstanceId,
       threadId,
-      expectedProviderInstanceId: ProviderInstanceId.make('claudeAgent'),
-    })
-    expect(harness.stoppedThreadIds.has(threadId)).toBe(true)
+      sessionGeneration: 7,
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
+    const replacementIdentity: ProviderSessionIdentityCapture = {
+      ...oldIdentity,
+      sessionGeneration: 8,
+      createdAt: '2026-01-01T00:00:01.000Z',
+    }
+    const taskId = RuntimeTaskId.make('task-reaper-generation-isolation')
+    await createHarness({ readModel: makeReadModel([]) })
+    const backgroundTasks = await runtime!.runPromise(
+      Effect.service(ProviderBackgroundTaskRegistry),
+    )
+
+    await runtime!.runPromise(
+      backgroundTasks.observeAcceptedRuntimeEvent(oldIdentity, {
+        type: 'task.started',
+        eventId: EventId.make('evt-reaper-old-generation-task-started'),
+        provider,
+        providerInstanceId,
+        createdAt: oldIdentity.createdAt,
+        threadId,
+        payload: { taskId },
+      } satisfies ProviderRuntimeEvent),
+    )
+    expect(await runtime!.runPromise(backgroundTasks.hasLiveTasks(oldIdentity))).toBe(true)
+    expect(await runtime!.runPromise(backgroundTasks.hasLiveTasks(replacementIdentity))).toBe(false)
+
+    await runtime!.runPromise(
+      backgroundTasks.observeAcceptedRuntimeEvent(replacementIdentity, {
+        type: 'task.progress',
+        eventId: EventId.make('evt-reaper-replacement-task-progress'),
+        provider,
+        providerInstanceId,
+        createdAt: replacementIdentity.createdAt,
+        threadId,
+        payload: {
+          taskId,
+          description: 'Replacement generation work is still running.',
+        },
+      } satisfies ProviderRuntimeEvent),
+    )
+    await runtime!.runPromise(
+      backgroundTasks.observeAcceptedRuntimeEvent(oldIdentity, {
+        type: 'session.exited',
+        eventId: EventId.make('evt-reaper-old-generation-exited'),
+        provider,
+        providerInstanceId,
+        createdAt: '2026-01-01T00:00:02.000Z',
+        threadId,
+        payload: {
+          reason: 'Old generation exited.',
+          recoverable: false,
+          exitKind: 'graceful',
+        },
+      } satisfies ProviderRuntimeEvent),
+    )
+
+    expect(await runtime!.runPromise(backgroundTasks.hasLiveTasks(oldIdentity))).toBe(false)
+    expect(await runtime!.runPromise(backgroundTasks.hasLiveTasks(replacementIdentity))).toBe(true)
   })
 
   it('skips stale sessions when the thread still has an active turn', async () =>
@@ -433,6 +708,66 @@ describe('ProviderSessionReaper', () =>
     await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)))
     await Effect.runPromise(drainFibers)
 
+    expect(harness.stopSession).not.toHaveBeenCalled()
+    const remaining = await runtime!.runPromise(repository.getByThreadId({ threadId }))
+    expect(Option.isSome(remaining)).toBe(true)
+  })
+
+  it('skips stale sessions while the thread has a pending orchestrate plan', async () =>
+  {
+    const threadId = ThreadId.make('thread-reaper-pending-plan')
+    const now = '2026-01-01T00:00:00.000Z'
+    const harness = await createHarness({
+      readModel: makeReadModel([
+        {
+          id: threadId,
+          session: {
+            threadId,
+            status: 'ready',
+            providerName: 'claudeAgent',
+            runtimeMode: 'full-access',
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+          orchestratePlans: [
+            {
+              runId: 'run-pending-plan',
+              revision: 1,
+              status: 'pending',
+            },
+          ],
+        },
+      ]),
+    })
+    const repository = await runtime!.runPromise(
+      Effect.service(ProviderSessionRuntime.ProviderSessionRuntimeRepository),
+    )
+
+    await runtime!.runPromise(
+      repository.upsert({
+        threadId,
+        providerName: 'claudeAgent',
+        providerInstanceId: null,
+        adapterKey: 'claudeAgent',
+        runtimeMode: 'full-access',
+        status: 'running',
+        lastSeenAt: '2026-04-14T00:00:00.000Z',
+        resumeCursor: {
+          opaque: 'resume-pending-plan',
+        },
+        runtimePayload: null,
+      }),
+    )
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper))
+    scope = await Effect.runPromise(Scope.make('sequential'))
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)))
+
+    await waitFor(() => harness.getThreadDetailById.mock.calls.length === 1)
+    await runtime!.runPromise(drainFibers)
+
+    expect(harness.stopSessionIfExact).not.toHaveBeenCalled()
     expect(harness.stopSession).not.toHaveBeenCalled()
     const remaining = await runtime!.runPromise(repository.getByThreadId({ threadId }))
     expect(Option.isSome(remaining)).toBe(true)
@@ -545,16 +880,17 @@ describe('ProviderSessionReaper', () =>
       reapedThreadSuffix: 'success',
       blockedResumeCursor: 'resume-failure',
       reapedResumeCursor: 'resume-success',
-      stopSessionImplementation:
-        (blockedThreadId: ThreadId) => (request: { threadId: ThreadId }) =>
-          request.threadId === blockedThreadId
+      stopSessionIfExactImplementation:
+        (blockedThreadId: ThreadId) =>
+        (identity: Parameters<ProviderServiceShape['stopSessionIfExact']>[0]) =>
+          identity.threadId === blockedThreadId
             ? Effect.fail(
                 new ProviderValidationError({
                   operation: 'ProviderSessionReaper.test',
                   issue: 'simulated stop failure',
                 }),
               )
-            : Effect.void,
+            : Effect.succeed(true),
     },
     {
       label: 'defects',
@@ -562,11 +898,12 @@ describe('ProviderSessionReaper', () =>
       reapedThreadSuffix: 'after-defect',
       blockedResumeCursor: 'resume-defect',
       reapedResumeCursor: 'resume-after-defect',
-      stopSessionImplementation:
-        (blockedThreadId: ThreadId) => (request: { threadId: ThreadId }) =>
-          request.threadId === blockedThreadId
+      stopSessionIfExactImplementation:
+        (blockedThreadId: ThreadId) =>
+        (identity: Parameters<ProviderServiceShape['stopSessionIfExact']>[0]) =>
+          identity.threadId === blockedThreadId
             ? Effect.die(new Error('simulated stop defect'))
-            : Effect.void,
+            : Effect.succeed(true),
     },
   ])(
     'continues reaping other sessions when one stop attempt $label',
@@ -575,7 +912,7 @@ describe('ProviderSessionReaper', () =>
       reapedThreadSuffix,
       blockedResumeCursor,
       reapedResumeCursor,
-      stopSessionImplementation,
+      stopSessionIfExactImplementation,
     }) =>
     {
       const blockedThreadId = ThreadId.make(`thread-reaper-stop-${blockedThreadSuffix}`)
@@ -608,7 +945,23 @@ describe('ProviderSessionReaper', () =>
             },
           },
         ]),
-        stopSessionImplementation: stopSessionImplementation(blockedThreadId),
+        providerIdentities: [
+          {
+            provider: ProviderDriverKind.make('claudeAgent'),
+            providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+            threadId: blockedThreadId,
+            sessionGeneration: 11,
+            createdAt: now,
+          },
+          {
+            provider: ProviderDriverKind.make('codex'),
+            providerInstanceId: ProviderInstanceId.make('codex'),
+            threadId: reapedThreadId,
+            sessionGeneration: 12,
+            createdAt: now,
+          },
+        ],
+        stopSessionIfExactImplementation: stopSessionIfExactImplementation(blockedThreadId),
       })
       const repository = await runtime!.runPromise(
         Effect.service(ProviderSessionRuntime.ProviderSessionRuntimeRepository),
@@ -649,12 +1002,13 @@ describe('ProviderSessionReaper', () =>
       scope = await Effect.runPromise(Scope.make('sequential'))
       await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)))
 
-      await waitFor(() => harness.stopSession.mock.calls.length === 2)
+      await waitFor(() => harness.stopSessionIfExact.mock.calls.length === 2)
 
-      expect(harness.stopSession.mock.calls.map(([request]) => request.threadId)).toEqual([
+      expect(harness.stopSessionIfExact.mock.calls.map(([identity]) => identity.threadId)).toEqual([
         blockedThreadId,
         reapedThreadId,
       ])
+      expect(harness.stopSession).not.toHaveBeenCalled()
     },
   )
 })

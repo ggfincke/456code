@@ -326,6 +326,19 @@ function impactLabelsMatch(
   return value?.baseGitRef === expectedBaseGitRef && value.headGitRef === expectedHeadGitRef
 }
 
+// stem `impact` is labels-only; native `impact.graph-diff-v1` still requires GraphDiff
+function impactStemMatches(
+  bytes: Uint8Array,
+  fileName: string,
+  expectedBaseGitRef: string,
+  expectedHeadGitRef: string,
+): boolean
+{
+  return fileName.startsWith('impact.graph-diff-v1.')
+    ? impactArtifactMatches(bytes, expectedBaseGitRef, expectedHeadGitRef)
+    : impactLabelsMatch(bytes, expectedBaseGitRef, expectedHeadGitRef)
+}
+
 // the contract source is a discriminated union; normalization only trims and
 // lowercases identity-bearing fields so cache keys stay stable
 function normalizeSource(source: DiffAnalysisSource): NormalizedSource
@@ -1892,10 +1905,17 @@ export const make = Effect.gen(function* ()
         return value?.repoRoot === '.' && value.gitRef === row.headAnalyzerRef
       },
     )
+    const impactPath = row.impactPath
     const impact = yield* verifyArtifact(
-      row.impactPath,
+      impactPath,
       /^impact(?:\.graph-diff-v1)?\.([0-9a-f]{64})\.json$/u,
-      (bytes) => impactArtifactMatches(bytes, row.baseAnalyzerRef, row.headAnalyzerRef),
+      (bytes) =>
+        impactStemMatches(
+          bytes,
+          path.basename(impactPath),
+          row.baseAnalyzerRef,
+          row.headAnalyzerRef,
+        ),
     )
     if (
       artifactObject(base.bytes)?.gitRef !== row.baseAnalyzerRef ||
@@ -1978,9 +1998,12 @@ export const make = Effect.gen(function* ()
       })
       if (
         sha256(bytes) !== match[2] ||
-        !(match[1] === 'impact'
-          ? impactLabelsMatch(bytes, row.baseAnalyzerRef, row.headAnalyzerRef)
-          : impactArtifactMatches(bytes, row.baseAnalyzerRef, row.headAnalyzerRef))
+        !impactStemMatches(
+          bytes,
+          path.basename(impactPath),
+          row.baseAnalyzerRef,
+          row.headAnalyzerRef,
+        )
       )
       {
         return yield* fail('artifact-invalid', 'The sealed diff impact identity is invalid.')

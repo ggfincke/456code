@@ -20,6 +20,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ProviderSessionStartInput,
+  RuntimeTaskId,
   ThreadId,
   TurnId,
 } from '@t3tools/contracts'
@@ -55,11 +56,16 @@ import type {
   ProviderEffectContext,
 } from '../../../../../apps/server/src/provider/Services/ProviderAdapter.ts'
 import * as ProviderAdapterRegistry from '../../../../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts'
+import { ProviderBackgroundTaskRegistry } from '../../../../../apps/server/src/provider/Services/ProviderBackgroundTaskRegistry.ts'
 import * as ProviderInstanceRegistryMutator from '../../../../../apps/server/src/provider/Services/ProviderInstanceRegistryMutator.ts'
 import * as ProviderService from '../../../../../apps/server/src/provider/Services/ProviderService.ts'
+import { ProviderSessionReaper } from '../../../../../apps/server/src/provider/Services/ProviderSessionReaper.ts'
 import * as ProviderSessionDirectory from '../../../../../apps/server/src/provider/Services/ProviderSessionDirectory.ts'
+import { ProviderBackgroundTaskRegistryLive } from '../../../../../apps/server/src/provider/Layers/ProviderBackgroundTaskRegistry.ts'
 import { makeProviderServiceLive } from '../../../../../apps/server/src/provider/Layers/ProviderService.ts'
+import { makeProviderSessionReaperLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionReaper.ts'
 import { ORCHESTRATE_MODE_INSTRUCTIONS } from '../../../../../apps/server/src/provider/CollaborationModeInstructions.ts'
+import { providerCapabilitiesForDriver } from '../../../../../apps/server/src/provider/providerCapabilities.ts'
 import * as ProviderEventLoggers from '../../../../../apps/server/src/provider/Layers/ProviderEventLoggers.ts'
 import { ProviderSessionDirectoryLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
@@ -100,6 +106,7 @@ const claudeAgentInstanceId = ProviderInstanceId.make('claudeAgent')
 const CODEX_DRIVER = ProviderDriverKind.make('codex')
 const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make('claudeAgent')
 const CURSOR_DRIVER = ProviderDriverKind.make('cursor')
+const CORAL_DRIVER = ProviderDriverKind.make('coral')
 
 const providerRuntimeInboxMemoryLive = ProviderRuntimeInboxLive.pipe(
   Layer.provide(SqlitePersistenceMemory),
@@ -111,6 +118,7 @@ const makeProviderServiceInboxBackedLive = (
   runtimeInboxLayer = Layer.fresh(providerRuntimeInboxMemoryLive),
 ) =>
   makeProviderServiceLive(options).pipe(
+    Layer.provide(ProviderBackgroundTaskRegistryLive),
     Layer.provide(runtimeInboxLayer),
     Layer.provideMerge(lifecycleLayer),
     Layer.provide(NodeServices.layer),
@@ -343,9 +351,7 @@ function makeFakeCodexAdapter(provider: ProviderDriverKind = CODEX_DRIVER)
 
   const adapter: ProviderAdapterShape<ProviderAdapterError> = {
     provider,
-    capabilities: {
-      sessionModelSwitch: 'in-session',
-    },
+    capabilities: providerCapabilitiesForDriver(provider),
     startSession,
     sendTurn,
     interruptTurn,
@@ -1121,6 +1127,32 @@ it.effect('ProviderServiceLive rejects new sessions for disabled providers', () 
     assert.instanceOf(failure, ProviderValidationError)
     assert.include(failure.issue, "Provider instance 'claudeAgent' is disabled")
     assert.equal(claude.startSession.mock.calls.length, 0)
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
+it.effect('ProviderServiceLive coerces unsupported Coral runtime modes before startSession', () =>
+  Effect.gen(function* ()
+  {
+    const coralInstanceId = ProviderInstanceId.make('coral')
+    const coral = makeFakeCodexAdapter(CORAL_DRIVER)
+    const registry = makeAdapterRegistryMock({
+      [CORAL_DRIVER]: coral.adapter,
+    })
+
+    const session = yield* Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      return yield* provider.startSession(asThreadId('thread-coral-mode-coerce'), {
+        provider: CORAL_DRIVER,
+        providerInstanceId: coralInstanceId,
+        threadId: asThreadId('thread-coral-mode-coerce'),
+        runtimeMode: 'full-access',
+      })
+    }).pipe(Effect.provide(makeProviderServiceTestLayer(registry)))
+
+    assert.equal(session.runtimeMode, 'approval-required')
+    assert.equal(coral.startSession.mock.calls.length, 1)
+    assert.equal(coral.startSession.mock.calls[0]?.[0].runtimeMode, 'approval-required')
   }).pipe(Effect.provide(NodeServices.layer)),
 )
 
@@ -2107,6 +2139,7 @@ it.effect('ProviderServiceLive keeps persisted resumable sessions on startup', (
 
     const providerLayer = makeProviderServiceLive().pipe(
       Layer.provide(providerThreadLifecycleTestLayer),
+      Layer.provide(ProviderBackgroundTaskRegistryLive),
       Layer.provide(McpSessionRegistry.disabledLayer),
       Layer.provide(ProviderRuntimeInboxLive),
       Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
@@ -2182,6 +2215,7 @@ it.effect(
       )
       const firstProviderLayer = makeProviderServiceLive().pipe(
         Layer.provide(providerThreadLifecycleTestLayer),
+        Layer.provide(ProviderBackgroundTaskRegistryLive),
         Layer.provide(McpSessionRegistry.disabledLayer),
         Layer.provide(ProviderRuntimeInboxLive),
         Layer.provide(
@@ -2282,6 +2316,7 @@ it.effect(
       )
       const secondProviderLayer = makeProviderServiceLive().pipe(
         Layer.provide(providerThreadLifecycleTestLayer),
+        Layer.provide(ProviderBackgroundTaskRegistryLive),
         Layer.provide(McpSessionRegistry.disabledLayer),
         Layer.provide(ProviderRuntimeInboxLive),
         Layer.provide(
@@ -2547,7 +2582,8 @@ routing.layer('ProviderServiceLive routing', (it) =>
       assert.match(sent?.input ?? '', /architecture_blast_radius/)
       assert.match(sent?.input ?? '', /orchestratePlan: \{ runId, revision \}/)
       assert.match(sent?.input ?? '', /same committed .*runId.* and .*revision/)
-      assert.match(sent?.input ?? '', /fence, not a .*proposed_plan.* block/)
+      assert.match(sent?.input ?? '', /non-empty decided edit set/)
+      assert.match(sent?.input ?? '', /standing-project/)
 
       yield* provider.stopSession({ threadId })
       routing.claude.startSession.mockClear()
@@ -3390,6 +3426,185 @@ routing.layer('ProviderServiceLive routing', (it) =>
   )
 })
 
+it.effect('shares accepted background-task liveness with the exact session reaper', () =>
+  Effect.gen(function* ()
+  {
+    const taskStartedEventId = asEventId('evt-background-task-accepted-once')
+    const taskCompletedEventId = asEventId('evt-background-task-completed')
+    const taskId = RuntimeTaskId.make('task-background-reaper-integration')
+    const taskStartedAppendEntered = yield* Deferred.make<void>()
+    const releaseTaskStartedAppend = yield* Deferred.make<void>()
+    const duplicateTaskStartedObserved = yield* Deferred.make<void>()
+    const reaperReadDirectoryBinding = yield* Deferred.make<void>()
+    const codex = makeFakeCodexAdapter()
+    const registry = makeAdapterRegistryMock({ [CODEX_DRIVER]: codex.adapter })
+    let taskStartedAppendCount = 0
+    let reaperStarted = false
+
+    const runtimeInboxLayer = Layer.effect(
+      ProviderRuntimeInbox,
+      Effect.gen(function* ()
+      {
+        const inbox = yield* ProviderRuntimeInbox
+        return ProviderRuntimeInbox.of({
+          ...inbox,
+          append: (input) =>
+            Effect.gen(function* ()
+            {
+              if (input.sourceEventId === taskStartedEventId)
+              {
+                taskStartedAppendCount += 1
+                if (taskStartedAppendCount === 1)
+                {
+                  yield* Deferred.succeed(taskStartedAppendEntered, undefined)
+                  yield* Deferred.await(releaseTaskStartedAppend)
+                }
+              }
+
+              const result = yield* inbox.append(input)
+              if (input.sourceEventId === taskStartedEventId && result.duplicate)
+              {
+                yield* Deferred.succeed(duplicateTaskStartedObserved, undefined)
+              }
+              return result
+            }),
+        })
+      }),
+    ).pipe(Layer.provide(Layer.fresh(providerRuntimeInboxMemoryLive)))
+
+    const runtimeRepositoryLayer = ProviderSessionRuntimeLayers.layer.pipe(
+      Layer.provide(SqlitePersistenceMemory),
+    )
+    const directoryLayer = ProviderSessionDirectoryLive.pipe(Layer.provide(runtimeRepositoryLayer))
+    const lifecycleLayer = Layer.merge(
+      ThreadArchiveLifecyclePermitLive,
+      Layer.mock(ProjectionSnapshotQuery)({
+        getThreadShellById: () =>
+          Effect.sync(() => reaperStarted).pipe(
+            Effect.flatMap((started) =>
+              started
+                ? Deferred.succeed(reaperReadDirectoryBinding, undefined).pipe(
+                    Effect.as(Option.some(null as never)),
+                  )
+                : Effect.succeed(Option.some(null as never)),
+            ),
+          ),
+        getThreadDetailById: () => Effect.succeed(Option.some({ orchestratePlans: [] } as never)),
+      }),
+    )
+    const backgroundTasksLayer = Layer.fresh(ProviderBackgroundTaskRegistryLive)
+    const providerLayer = makeProviderServiceLive().pipe(
+      Layer.provide(runtimeInboxLayer),
+      Layer.provide(Layer.succeed(ProviderAdapterRegistry.ProviderAdapterRegistry, registry)),
+      Layer.provide(defaultServerSettingsLayer),
+      Layer.provide(McpSessionRegistry.disabledLayer),
+      Layer.provide(AnalyticsServiceLayers.layerTest),
+      Layer.provide(
+        Layer.succeed(
+          ProviderEventLoggers.ProviderEventLoggers,
+          ProviderEventLoggers.NoOpProviderEventLoggers,
+        ),
+      ),
+      Layer.provideMerge(directoryLayer),
+      Layer.provideMerge(lifecycleLayer),
+      Layer.provideMerge(backgroundTasksLayer),
+      Layer.provideMerge(NodeServices.layer),
+    )
+    const integratedLayer = makeProviderSessionReaperLive({
+      inactivityThresholdMs: 1,
+      sweepIntervalMs: 60_000,
+    }).pipe(Layer.provideMerge(providerLayer))
+
+    yield* Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const provider = yield* ProviderService.ProviderService
+        const backgroundTasks = yield* ProviderBackgroundTaskRegistry
+        const reaper = yield* ProviderSessionReaper
+        const threadId = asThreadId('thread-background-reaper-integration')
+        yield* provider.startSession(threadId, {
+          provider: CODEX_DRIVER,
+          providerInstanceId: codexInstanceId,
+          threadId,
+          runtimeMode: 'full-access',
+        })
+        const captured = yield* provider.captureSessionIdentity({ threadId })
+        assert.equal(Option.isSome(captured), true)
+        if (Option.isNone(captured)) return
+        const identity = captured.value
+
+        const taskStarted: LegacyProviderRuntimeEvent = {
+          type: 'task.started',
+          eventId: taskStartedEventId,
+          provider: CODEX_DRIVER,
+          createdAt: '2026-01-01T00:00:00.000Z',
+          threadId,
+          payload: { taskId },
+        }
+        const taskStartedPublished = yield* Stream.take(provider.streamEvents, 1).pipe(
+          Stream.runDrain,
+          Effect.forkChild,
+        )
+        yield* Effect.yieldNow
+        yield* codex.emitEffect(taskStarted)
+        yield* Deferred.await(taskStartedAppendEntered)
+        assert.equal(yield* backgroundTasks.hasLiveTasks(identity), false)
+
+        yield* Deferred.succeed(releaseTaskStartedAppend, undefined)
+        yield* Fiber.join(taskStartedPublished)
+        assert.equal(yield* backgroundTasks.hasLiveTasks(identity), true)
+
+        yield* advanceTestClock(10)
+        reaperStarted = true
+        yield* reaper.start()
+        yield* Deferred.await(reaperReadDirectoryBinding)
+        yield* Effect.forEach(Array.from({ length: 10 }), () => Effect.yieldNow, {
+          discard: true,
+        })
+        assert.equal(codex.stopSession.mock.calls.length, 0)
+        assert.equal(yield* provider.matchesSessionIdentity(identity), true)
+
+        const taskCompletedPublished = yield* Stream.take(provider.streamEvents, 1).pipe(
+          Stream.runDrain,
+          Effect.forkChild,
+        )
+        yield* Effect.yieldNow
+        yield* codex.emitEffect({
+          type: 'task.completed',
+          eventId: taskCompletedEventId,
+          provider: CODEX_DRIVER,
+          createdAt: '2026-01-01T00:00:01.000Z',
+          threadId,
+          payload: {
+            taskId,
+            status: 'completed',
+          },
+        })
+        yield* Fiber.join(taskCompletedPublished)
+        assert.equal(yield* backgroundTasks.hasLiveTasks(identity), false)
+
+        yield* codex.emitEffect(taskStarted)
+        yield* Deferred.await(duplicateTaskStartedObserved)
+        assert.equal(yield* backgroundTasks.hasLiveTasks(identity), false)
+
+        const sessionExitedPublished = yield* provider.streamEvents.pipe(
+          Stream.filter((event) => event.type === 'session.exited'),
+          Stream.take(1),
+          Stream.runDrain,
+          Effect.forkChild,
+        )
+        yield* Effect.yieldNow
+        yield* reaper.start()
+        yield* Fiber.join(sessionExitedPublished)
+
+        assert.equal(codex.stopSession.mock.calls.length, 1)
+        assert.equal(yield* provider.matchesSessionIdentity(identity), false)
+        assert.equal(yield* backgroundTasks.hasLiveTasks(identity), false)
+      }).pipe(Effect.provide(integratedLayer)),
+    )
+  }).pipe(Effect.provide(NodeServices.layer)),
+)
+
 const fanout = makeProviderServiceLayer()
 fanout.layer('ProviderServiceLive fanout', (it) =>
 {
@@ -3437,6 +3652,74 @@ fanout.layer('ProviderServiceLive fanout', (it) =>
         ),
         true,
       )
+    }),
+  )
+
+  it.effect('refreshes lastSeenAt on turn.completed and session ready', () =>
+    Effect.gen(function* ()
+    {
+      const provider = yield* ProviderService.ProviderService
+      const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory
+      const threadId = asThreadId('thread-last-seen')
+      yield* provider.startSession(threadId, {
+        provider: ProviderDriverKind.make('codex'),
+        providerInstanceId: codexInstanceId,
+        threadId,
+        runtimeMode: 'full-access',
+      })
+
+      const initialBinding = yield* directory.getBinding(threadId)
+      assert.equal(Option.isSome(initialBinding), true)
+      if (Option.isNone(initialBinding)) return
+      const initialLastSeenAt = initialBinding.value.lastSeenAt
+
+      const turnCompleted = yield* provider.streamEvents.pipe(
+        Stream.filter((event) => event.type === 'turn.completed'),
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.forkChild,
+      )
+      yield* advanceTestClock(1_000)
+      fanout.codex.emit({
+        type: 'turn.completed',
+        eventId: asEventId('evt-last-seen-turn'),
+        provider: ProviderDriverKind.make('codex'),
+        createdAt: '2026-01-01T00:00:01.000Z',
+        threadId,
+        turnId: asTurnId('turn-last-seen'),
+        status: 'completed',
+      })
+      yield* Fiber.join(turnCompleted)
+
+      const afterTurn = yield* directory.getBinding(threadId)
+      assert.equal(Option.isSome(afterTurn), true)
+      if (Option.isNone(afterTurn)) return
+      const afterTurnLastSeenAt = afterTurn.value.lastSeenAt
+      assert.notEqual(afterTurnLastSeenAt, initialLastSeenAt)
+
+      const sessionReady = yield* provider.streamEvents.pipe(
+        Stream.filter(
+          (event) => event.type === 'session.state.changed' && event.payload.state === 'ready',
+        ),
+        Stream.take(1),
+        Stream.runDrain,
+        Effect.forkChild,
+      )
+      yield* advanceTestClock(1_000)
+      fanout.codex.emit({
+        type: 'session.state.changed',
+        eventId: asEventId('evt-last-seen-ready'),
+        provider: ProviderDriverKind.make('codex'),
+        createdAt: '2026-01-01T00:00:02.000Z',
+        threadId,
+        payload: { state: 'ready' },
+      })
+      yield* Fiber.join(sessionReady)
+
+      const afterReady = yield* directory.getBinding(threadId)
+      assert.equal(Option.isSome(afterReady), true)
+      if (Option.isNone(afterReady)) return
+      assert.notEqual(afterReady.value.lastSeenAt, afterTurnLastSeenAt)
     }),
   )
 

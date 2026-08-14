@@ -40,6 +40,7 @@ unapproved plan without guessing that it started.
 | [25-t3code-upstream-selective-porting.md](25-t3code-upstream-selective-porting.md) | proposed | Implementation-ready manual adaptation plan for all 17 accepted commits from the 35-commit upstream t3code review window. |
 | [26-cartographer-absorption.md](26-cartographer-absorption.md) | completed / presentation superseded | Preserves the original absorption and remediation record; native resources retired the iframe, context URL, and browser-origin acceptance surface. |
 | [27-native-architecture-impact.md](27-native-architecture-impact.md) | completed / presentation superseded | Preserves the intermediate native Impact plus Advanced Atlas release; the maintained integration is now fully native and iframe-free. |
+| [28-coral-provider-integration.md](28-coral-provider-integration.md) | Early Access Core shipped | Disabled-by-default Coral driver; Phase 2 HTTP MCP/Orchestrate parked; Phases 3–4 not this release. |
 | [README.md](README.md) | active | Maintained inventory and status index for the tracked planning surface. |
 | [branch-environment-picker-in-chatview-input.md](branch-environment-picker-in-chatview-input.md) | historical | Legacy renderer UX proposal with obsolete package paths and no closeout state. |
 | [effect-atom.md](effect-atom.md) | proposed | AtomRpc migration phases are specified without an implementation ledger. |

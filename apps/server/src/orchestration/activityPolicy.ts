@@ -8,6 +8,7 @@ export const COMMAND_RELEVANT_THREAD_ACTIVITY_KINDS = [
   'user-input.resolved',
   'provider.approval.respond.failed',
   'provider.user-input.respond.failed',
+  'provider.orchestrate-plan.respond.failed',
 ] as const
 
 export const COMMAND_RELEVANT_THREAD_ACTIVITY_KIND_SET: ReadonlySet<string> = new Set(

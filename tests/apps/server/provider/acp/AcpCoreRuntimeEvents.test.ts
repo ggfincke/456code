@@ -158,4 +158,53 @@ describe('AcpCoreRuntimeEvents', () =>
       },
     })
   })
+
+  it.each(['search_code', 'grep', 'glob'])(
+    'classifies Coral %s calls as repository search from the exact raw tool name',
+    (toolName) =>
+    {
+      const event = makeAcpToolCallEvent({
+        stamp: { eventId: 'event-search' as never, createdAt: '2026-03-27T00:00:00.000Z' },
+        provider: ProviderDriverKind.make('coral'),
+        threadId: 'thread-1' as never,
+        turnId: TurnId.make('turn-1'),
+        toolCall: {
+          toolCallId: `tool-${toolName}`,
+          kind: 'search',
+          status: 'completed',
+          data: {
+            rawInput: { toolName, query: 'needle' },
+          },
+        },
+        rawPayload: { sessionId: 'session-1' },
+      })
+
+      expect(event.payload.itemType).toBe('repository_search')
+    },
+  )
+
+  it('keeps generic ACP search and fetch calls classified as web search', () =>
+  {
+    const stamp = {
+      eventId: 'event-web-search' as never,
+      createdAt: '2026-03-27T00:00:00.000Z',
+    }
+    const makeToolCall = (kind: 'search' | 'fetch', rawInput: unknown) =>
+      makeAcpToolCallEvent({
+        stamp,
+        provider: ProviderDriverKind.make('cursor'),
+        threadId: 'thread-1' as never,
+        turnId: TurnId.make('turn-1'),
+        toolCall: {
+          toolCallId: `tool-${kind}`,
+          kind,
+          status: 'completed',
+          data: { rawInput },
+        },
+        rawPayload: { sessionId: 'session-1' },
+      })
+
+    expect(makeToolCall('search', { toolName: 'web_search' }).payload.itemType).toBe('web_search')
+    expect(makeToolCall('fetch', { toolName: 'glob' }).payload.itemType).toBe('web_search')
+  })
 })

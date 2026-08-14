@@ -341,13 +341,15 @@ describe('buildCodexDeveloperInstructions', () =>
     NodeAssert.match(instructions, /core collaboration mode, not a user-level skill/)
     NodeAssert.match(instructions, /Before any .*start_worker.* call/)
     NodeAssert.match(instructions, /orchestrate-plan/)
-    NodeAssert.match(instructions, /capture its committed .*runId, revision/)
+    NodeAssert.match(instructions, /capture its committed .*revision/)
     NodeAssert.match(
       instructions,
       /proposal_preview_upsert.*orchestratePlan: \{ runId, revision \}/,
     )
     NodeAssert.match(instructions, /same committed .*runId.* and .*revision/)
-    NodeAssert.match(instructions, /fence, not a .*proposed_plan.* block, is the timeline anchor/)
+    NodeAssert.match(instructions, /non-empty decided edit set/)
+    NodeAssert.match(instructions, /standing-project/)
+    NodeAssert.match(instructions, /never treat .*path.* or .*specifier/)
     NodeAssert.match(instructions, /code456/)
     NodeAssert.match(instructions, /preview_status/)
     NodeAssert.match(instructions, /preview_open/)

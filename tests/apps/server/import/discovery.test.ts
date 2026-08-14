@@ -94,6 +94,10 @@ function isolatedImportSettings(
         ...DEFAULT_SERVER_SETTINGS.providers.opencode,
         enabled: false,
       },
+      coral: {
+        ...DEFAULT_SERVER_SETTINGS.providers.coral,
+        enabled: false,
+      },
     },
     providerInstances,
   }

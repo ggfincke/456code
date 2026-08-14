@@ -48,6 +48,7 @@ import {
 import { resolveClaudeSdkExecutablePath } from '../Drivers/ClaudeExecutable.ts'
 import { makeClaudeEnvironment } from '../Drivers/ClaudeHome.ts'
 import { discoverClaudeSkills } from '../Drivers/ClaudeSkills.ts'
+import { CLAUDE_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 
 const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabilities({
   optionDescriptors: [],
@@ -55,6 +56,7 @@ const DEFAULT_CLAUDE_MODEL_CAPABILITIES: ModelCapabilities = createModelCapabili
 
 const CLAUDE_PRESENTATION = {
   displayName: 'Claude',
+  capabilities: CLAUDE_PROVIDER_CAPABILITIES,
   showInteractionModeToggle: true,
 } as const
 const MINIMUM_CLAUDE_OPUS_5_VERSION = '2.1.219'

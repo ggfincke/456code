@@ -12,7 +12,7 @@
 //
 //  2. **Many drivers, one registry** — the "all drivers slice" describe
 //     block below configures one instance of every shipped driver
-//     (`codex`, `claudeAgent`, `cursor`, `grok`, `opencode`) in a single
+//     (`codex`, `claudeAgent`, `coral`, `cursor`, `grok`, `opencode`) in a single
 //     `ProviderInstanceConfigMap` and asserts the registry boots them all
 //     without cross-contamination. This proves the driver SPI is uniform
 //     across every provider — any driver plugs into the registry through
@@ -20,7 +20,7 @@
 //
 // every instance in these tests is configured with `enabled: false` so the
 // provider-status checks short-circuit to pending/disabled snapshots
-// without trying to spawn real `codex` / `claude` / `agent` / `grok` / `opencode`
+// without trying to spawn real `codex` / `claude` / `coral` / `agent` / `grok` / `opencode`
 // binaries. That keeps the assertions focused on registry routing
 // behaviour rather than the runtime details of each provider.
 import { describe, expect, it } from '@effect/vitest'
@@ -28,6 +28,7 @@ import * as NodeServices from '@effect/platform-node/NodeServices'
 import {
   type ClaudeSettings,
   type CodexSettings,
+  type CoralSettings,
   type CursorSettings,
   type GrokSettings,
   type OpenCodeSettings,
@@ -45,6 +46,7 @@ import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { ServerSettingsService } from '../../../../../apps/server/src/serverSettings.ts'
 import { ClaudeDriver } from '../../../../../apps/server/src/provider/Drivers/ClaudeDriver.ts'
 import { CodexDriver } from '../../../../../apps/server/src/provider/Drivers/CodexDriver.ts'
+import { CoralDriver } from '../../../../../apps/server/src/provider/Drivers/CoralDriver.ts'
 import { CursorDriver } from '../../../../../apps/server/src/provider/Drivers/CursorDriver.ts'
 import { GrokDriver } from '../../../../../apps/server/src/provider/Drivers/GrokDriver.ts'
 import { OpenCodeDriver } from '../../../../../apps/server/src/provider/Drivers/OpenCodeDriver.ts'
@@ -86,6 +88,14 @@ const makeCursorConfig = (overrides: Partial<CursorSettings>): CursorSettings =>
   binaryPath: 'cursor-agent',
   apiEndpoint: '',
   customModels: [],
+  ...overrides,
+})
+
+const makeCoralConfig = (overrides: Partial<CoralSettings>): CoralSettings => ({
+  enabled: false,
+  binaryPath: 'coral',
+  ollamaHost: 'http://localhost:11434',
+  homePath: '',
   ...overrides,
 })
 
@@ -267,12 +277,14 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
     {
       const codexId = ProviderInstanceId.make('codex_default')
       const claudeId = ProviderInstanceId.make('claude_default')
+      const coralId = ProviderInstanceId.make('coral_default')
       const cursorId = ProviderInstanceId.make('cursor_default')
       const grokId = ProviderInstanceId.make('grok_default')
       const openCodeId = ProviderInstanceId.make('opencode_default')
 
       const codexDriverKind = ProviderDriverKind.make('codex')
       const claudeDriverKind = ProviderDriverKind.make('claudeAgent')
+      const coralDriverKind = ProviderDriverKind.make('coral')
       const cursorDriverKind = ProviderDriverKind.make('cursor')
       const grokDriverKind = ProviderDriverKind.make('grok')
       const openCodeDriverKind = ProviderDriverKind.make('opencode')
@@ -292,6 +304,12 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
             homePath: '/home/julius/.claude-work',
             launchArgs: '--verbose',
           }),
+        },
+        [coralId]: {
+          driver: coralDriverKind,
+          displayName: 'Coral',
+          enabled: false,
+          config: makeCoralConfig({ homePath: '/home/julius/.coral' }),
         },
         [cursorId]: {
           driver: cursorDriverKind,
@@ -314,7 +332,7 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
       }
 
       const { registry } = yield* makeProviderInstanceRegistry({
-        drivers: [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver],
+        drivers: [CodexDriver, ClaudeDriver, CoralDriver, CursorDriver, GrokDriver, OpenCodeDriver],
         configMap,
       })
 
@@ -324,9 +342,9 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
       expect(unavailable).toEqual([])
 
       const instances = yield* registry.listInstances
-      expect(instances).toHaveLength(5)
+      expect(instances).toHaveLength(6)
       expect(instances.map((instance) => instance.instanceId).toSorted()).toEqual(
-        [codexId, claudeId, cursorId, grokId, openCodeId].toSorted(),
+        [codexId, claudeId, coralId, cursorId, grokId, openCodeId].toSorted(),
       )
 
       // instance lookup by id resolves each instance to its own bundle —
@@ -334,16 +352,19 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
       // model. Each driver's bundle carries its advertised `driverKind`.
       const codex = yield* registry.getInstance(codexId)
       const claude = yield* registry.getInstance(claudeId)
+      const coral = yield* registry.getInstance(coralId)
       const cursor = yield* registry.getInstance(cursorId)
       const grok = yield* registry.getInstance(grokId)
       const openCode = yield* registry.getInstance(openCodeId)
       expect(codex?.driverKind).toBe(codexDriverKind)
       expect(claude?.driverKind).toBe(claudeDriverKind)
+      expect(coral?.driverKind).toBe(coralDriverKind)
       expect(cursor?.driverKind).toBe(cursorDriverKind)
       expect(grok?.driverKind).toBe(grokDriverKind)
       expect(openCode?.driverKind).toBe(openCodeDriverKind)
       expect(codex?.displayName).toBe('Codex')
       expect(claude?.displayName).toBe('Claude')
+      expect(coral?.displayName).toBe('Coral')
       expect(cursor?.displayName).toBe('Cursor')
       expect(grok?.displayName).toBe('Grok')
       expect(openCode?.displayName).toBe('OpenCode')
@@ -356,6 +377,7 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
       const adapters = [
         codex!.adapter,
         claude!.adapter,
+        coral!.adapter,
         cursor!.adapter,
         grok!.adapter,
         openCode!.adapter,
@@ -364,6 +386,7 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
       const textGenerations = [
         codex!.textGeneration,
         claude!.textGeneration,
+        coral!.textGeneration,
         cursor!.textGeneration,
         grok!.textGeneration,
         openCode!.textGeneration,
@@ -372,6 +395,7 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
       const snapshots = [
         codex!.snapshot,
         claude!.snapshot,
+        coral!.snapshot,
         cursor!.snapshot,
         grok!.snapshot,
         openCode!.snapshot,
@@ -398,6 +422,12 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
         claude?.continuationIdentity.continuationKey,
       )
 
+      const coralSnapshot = yield* coral!.snapshot.getSnapshot
+      expect(coralSnapshot.instanceId).toBe(coralId)
+      expect(coralSnapshot.driver).toBe(coralDriverKind)
+      expect(coralSnapshot.enabled).toBe(false)
+      expect(coralSnapshot.continuation?.groupKey).toBe(coral?.continuationIdentity.continuationKey)
+
       const cursorSnapshot = yield* cursor!.snapshot.getSnapshot
       expect(cursorSnapshot.instanceId).toBe(cursorId)
       expect(cursorSnapshot.driver).toBe(cursorDriverKind)
@@ -422,12 +452,13 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
     }).pipe(Effect.provide(testLayer)),
   )
 
-  it.live('changes all five same-instance identities when their source config changes', () =>
+  it.live('changes all six same-instance identities when their source config changes', () =>
     Effect.gen(function* ()
     {
       const ids = {
         codex: ProviderInstanceId.make('codex_source'),
         claude: ProviderInstanceId.make('claude_source'),
+        coral: ProviderInstanceId.make('coral_source'),
         cursor: ProviderInstanceId.make('cursor_source'),
         grok: ProviderInstanceId.make('grok_source'),
         openCode: ProviderInstanceId.make('opencode_source'),
@@ -450,6 +481,14 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
           enabled: false,
           config: makeClaudeConfig({ homePath: `/accounts/${suffix}/.claude` }),
         },
+        [ids.coral]: {
+          driver: ProviderDriverKind.make('coral'),
+          enabled: false,
+          config: makeCoralConfig({
+            homePath: `/accounts/${suffix}/.coral`,
+            ollamaHost: `https://ollama-${suffix}.example`,
+          }),
+        },
         [ids.cursor]: {
           driver: ProviderDriverKind.make('cursor'),
           enabled: false,
@@ -468,7 +507,14 @@ describe('ProviderInstanceRegistryLive — all drivers slice', () =>
           config: makeOpenCodeConfig({ serverUrl: `https://opencode-${suffix}.example` }),
         },
       })
-      const drivers = [CodexDriver, ClaudeDriver, CursorDriver, GrokDriver, OpenCodeDriver] as const
+      const drivers = [
+        CodexDriver,
+        ClaudeDriver,
+        CoralDriver,
+        CursorDriver,
+        GrokDriver,
+        OpenCodeDriver,
+      ] as const
       const first = yield* makeProviderInstanceRegistry({
         drivers,
         configMap: configMap('a'),

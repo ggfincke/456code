@@ -10,6 +10,7 @@ import {
   IsoDateTime,
   MessageId,
   NonNegativeInt,
+  OrchestrateArchitecturePaths,
   OrchestratePlanRevision,
   OrchestratePlanRunId,
   OrchestrateRunExecution,
@@ -74,6 +75,7 @@ export const ProjectionThreadOrchestratePlanDbRowSchema = Schema.Struct({
   leadModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
   status: OrchestratePlanRevision.fields.status,
   sourceSequence: Schema.NullOr(NonNegativeInt),
+  architecturePaths: Schema.NullOr(Schema.fromJsonString(OrchestrateArchitecturePaths)),
   createdAt: OrchestratePlanRevision.fields.createdAt,
   updatedAt: OrchestratePlanRevision.fields.updatedAt,
 })
@@ -347,6 +349,9 @@ export function mapOrchestratePlanRow(
     leadModelSelection: row.leadModelSelection,
     status: row.status,
     ...(row.sourceSequence === null ? {} : { sourceSequence: row.sourceSequence }),
+    ...(row.architecturePaths === null || row.architecturePaths.length === 0
+      ? {}
+      : { architecturePaths: row.architecturePaths }),
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   }

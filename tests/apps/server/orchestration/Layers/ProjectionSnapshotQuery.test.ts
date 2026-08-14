@@ -19,6 +19,7 @@ import * as SqlClient from 'effect/unstable/sql/SqlClient'
 
 import { SqlitePersistenceMemory } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import ProjectionThreadCommandActivityIndexesMigration from '../../../../../apps/server/src/persistence/Migrations/036_ProjectionThreadCommandActivityIndexes.ts'
+import HealOrchestratePlanRespondFailureMigration from '../../../../../apps/server/src/persistence/Migrations/069_HealOrchestratePlanRespondFailure.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import { decideOrchestrationCommand } from '../../../../../apps/server/src/orchestration/decider.ts'
 import { ORCHESTRATION_PROJECTOR_NAMES } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
@@ -2377,6 +2378,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
       `
 
       yield* ProjectionThreadCommandActivityIndexesMigration
+      yield* HealOrchestratePlanRespondFailureMigration
 
       const retainedRows = yield* sql.unsafe<{ readonly activityId: string }>(
         COMMAND_THREAD_ACTIVITY_QUERY_SQL,

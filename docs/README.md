@@ -27,5 +27,8 @@
   - [Authenticated runtime recovery](./operations/runtime-recovery.md)
   - [Checkpoint identity and revert recovery](./operations/checkpoint-recovery.md)
   - [Server storage ownership and migration recovery](./operations/storage-recovery.md)
-- [Providers](./providers/codex.md)
+- Providers
+  - [Codex](./providers/codex.md)
+  - [Claude](./providers/claude.md)
+  - [Coral](./providers/coral.md)
 - [Reference](./reference/encyclopedia.md)

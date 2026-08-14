@@ -7,6 +7,8 @@ import {
   ProjectId,
   ProviderDriverKind,
   ThreadId,
+  TurnId,
+  type OrchestratePlanRevision,
   type OrchestrationEvent,
 } from '@t3tools/contracts'
 import { describe, expect, it } from '@effect/vitest'
@@ -14,7 +16,9 @@ import * as Effect from 'effect/Effect'
 
 import {
   createEmptyReadModel,
+  healOrchestratePlansAfterFailedEnvelope,
   projectEvent,
+  revertOrchestratePlansAfterRespondFailure,
 } from '../../../../apps/server/src/orchestration/projector.ts'
 
 function makeEvent(input: {
@@ -1746,4 +1750,75 @@ describe('orchestration projector', () =>
       expect(model.threads[0]?.pendingHandoff).toEqual(pendingHandoff)
     }),
   )
+})
+
+const makePlan = (overrides: Partial<OrchestratePlanRevision> = {}): OrchestratePlanRevision => ({
+  runId: 'run-1',
+  revision: 1,
+  turnId: TurnId.make('turn-1'),
+  workflow: 'review',
+  task: 'Review the implementation.',
+  stages: [
+    {
+      id: 'stage-1',
+      provider: 'codex',
+      model: null,
+      mode: 'read',
+      workers: 1,
+    },
+  ],
+  totalWorkers: 1,
+  maxWorkers: 1,
+  source: 'tool',
+  leadModelSelection: null,
+  status: 'pending',
+  createdAt: '2026-08-13T17:42:00.000Z',
+  updatedAt: '2026-08-13T17:42:00.000Z',
+  ...overrides,
+})
+
+describe('orchestrate plan respond-failure revert', () =>
+{
+  it('reverts the newest occupied plan when the failure payload has no runId', () =>
+  {
+    const approved = makePlan({
+      status: 'approved',
+      updatedAt: '2026-08-13T17:42:59.386Z',
+    })
+    const pendingSibling = makePlan({
+      runId: 'run-older',
+      revision: 1,
+      status: 'pending',
+      updatedAt: '2026-08-13T17:40:00.000Z',
+    })
+    const next = revertOrchestratePlansAfterRespondFailure(
+      [pendingSibling, approved],
+      { detail: 'No active provider session is bound to this thread.' },
+      '2026-08-13T17:42:59.386Z',
+    )
+    expect(next.map((plan) => [plan.runId, plan.status])).toEqual([
+      ['run-older', 'pending'],
+      ['run-1', 'pending'],
+    ])
+  })
+
+  it('leaves a later successful approve in place when healing an older failure', () =>
+  {
+    const healed = healOrchestratePlansAfterFailedEnvelope(
+      [
+        makePlan({
+          status: 'approved',
+          updatedAt: '2026-08-13T18:00:00.000Z',
+        }),
+      ],
+      [
+        {
+          kind: 'provider.orchestrate-plan.respond.failed',
+          payload: { detail: 'No active provider session is bound to this thread.' },
+          createdAt: '2026-08-13T17:42:59.386Z',
+        },
+      ],
+    )
+    expect(healed[0]?.status).toBe('approved')
+  })
 })

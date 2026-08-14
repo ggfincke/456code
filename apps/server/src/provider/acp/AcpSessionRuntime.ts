@@ -13,6 +13,7 @@ import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as Queue from 'effect/Queue'
 import * as Ref from 'effect/Ref'
+import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 import * as Semaphore from 'effect/Semaphore'
 import * as Stream from 'effect/Stream'
@@ -22,6 +23,11 @@ import * as EffectAcpClient from 'effect-acp/client'
 import * as EffectAcpErrors from 'effect-acp/errors'
 import type * as EffectAcpSchema from 'effect-acp/schema'
 import type * as EffectAcpProtocol from 'effect-acp/protocol'
+import {
+  GROK_SET_SESSION_MODEL_METHOD,
+  type SessionModelsExtension,
+  SetSessionModelResponse,
+} from 'effect-acp/provider-extensions'
 import { resolveSpawnCommand } from '@t3tools/shared/shell'
 
 import {
@@ -54,6 +60,21 @@ export type AcpSessionRuntimeEvent = AcpParsedSessionEvent | AcpSessionEventStre
 
 const defaultSessionLoadTimeout = Duration.seconds(90)
 const defaultSessionLoadReplayIdleGap = Duration.seconds(2)
+const decodeSetSessionModelResponseSchema = Schema.decodeUnknownEffect(SetSessionModelResponse)
+const decodeSetSessionModelResponse = (value: unknown) =>
+  decodeSetSessionModelResponseSchema(value).pipe(
+    Effect.mapError((cause) =>
+      EffectAcpErrors.AcpRequestError.internalError(
+        'ACP provider extension returned an invalid session/set_model response',
+        undefined,
+        {
+          method: GROK_SET_SESSION_MODEL_METHOD,
+          operation: 'receive-response',
+          cause,
+        },
+      ),
+    ),
+  )
 
 export interface AcpSpawnInput
 {
@@ -68,7 +89,9 @@ export interface AcpSessionRuntimeOptions
   readonly spawn: AcpSpawnInput
   readonly cwd: string
   readonly resumeSessionId?: string
-  readonly requireSessionLoadResponse?: boolean
+  readonly sessionSetup?: 'continuation' | 'import'
+  // continuation defaults to load fallback; native-only agents can reject incompatible peers
+  readonly continuationFallback?: 'load' | 'reject'
   readonly sessionLoadTimeout?: Duration.Input
   readonly sessionLoadReplayIdleGap?: Duration.Input
   readonly clientCapabilities?: EffectAcpSchema.InitializeRequest['clientCapabilities']
@@ -76,7 +99,7 @@ export interface AcpSessionRuntimeOptions
     readonly name: string
     readonly version: string
   }
-  readonly authMethodId: string
+  readonly authMethodId?: string
   readonly mcpServers?: ReadonlyArray<EffectAcpSchema.McpServer>
   readonly requestLogger?: (event: AcpSessionRequestLogEvent) => Effect.Effect<void, never>
   readonly protocolLogging?: {
@@ -100,9 +123,9 @@ export interface AcpSessionRuntimeStartResult
   readonly sessionId: string
   readonly initializeResult: EffectAcpSchema.InitializeResponse
   readonly sessionSetupResult:
-    | EffectAcpSchema.LoadSessionResponse
-    | EffectAcpSchema.NewSessionResponse
-    | EffectAcpSchema.ResumeSessionResponse
+    | (EffectAcpSchema.LoadSessionResponse & SessionModelsExtension)
+    | (EffectAcpSchema.NewSessionResponse & SessionModelsExtension)
+    | (EffectAcpSchema.ResumeSessionResponse & SessionModelsExtension)
   readonly modelConfigId: string | undefined
 }
 
@@ -112,8 +135,8 @@ export class AcpSessionRuntime extends Context.Service<
     // registers a handler for `session/request_permission`.
     // @see https://agentclientprotocol.com/protocol/schema#session/request_permission
     readonly handleRequestPermission: EffectAcpClient.AcpClient['Service']['handleRequestPermission']
-    // registers a handler for `session/elicitation`.
-    // @see https://agentclientprotocol.com/protocol/schema#session/elicitation
+    // registers a handler for the unstable v1 `elicitation/create` request.
+    // @see https://agentclientprotocol.com/protocol/elicitation
     readonly handleElicitation: EffectAcpClient.AcpClient['Service']['handleElicitation']
     // registers a handler for `fs/read_text_file`.
     // @see https://agentclientprotocol.com/protocol/schema#fs/read_text_file
@@ -139,8 +162,8 @@ export class AcpSessionRuntime extends Context.Service<
     // registers a handler for `session/update`.
     // @see https://agentclientprotocol.com/protocol/schema#session/update
     readonly handleSessionUpdate: EffectAcpClient.AcpClient['Service']['handleSessionUpdate']
-    // registers a handler for `session/elicitation/complete`.
-    // @see https://agentclientprotocol.com/protocol/schema#session/elicitation/complete
+    // registers a handler for the unstable v1 `elicitation/complete` notification.
+    // @see https://agentclientprotocol.com/protocol/elicitation
     readonly handleElicitationComplete: EffectAcpClient.AcpClient['Service']['handleElicitationComplete']
     // registers a fallback extension request handler.
     // @see https://agentclientprotocol.com/protocol/extensibility
@@ -194,7 +217,7 @@ export class AcpSessionRuntime extends Context.Service<
     // @see https://agentclientprotocol.com/protocol/schema#session/set_model
     readonly setSessionModel: (
       modelId: string,
-    ) => Effect.Effect<EffectAcpSchema.SetSessionModelResponse, EffectAcpErrors.AcpError>
+    ) => Effect.Effect<SetSessionModelResponse, EffectAcpErrors.AcpError>
     // sends a generic ACP extension request and records it through the request logger.
     // @see https://agentclientprotocol.com/protocol/extensibility
     readonly request: (
@@ -477,9 +500,9 @@ export const make = (
     const updateConfigOptions = (
       response:
         | EffectAcpSchema.SetSessionConfigOptionResponse
-        | EffectAcpSchema.LoadSessionResponse
-        | EffectAcpSchema.NewSessionResponse
-        | EffectAcpSchema.ResumeSessionResponse,
+        | (EffectAcpSchema.LoadSessionResponse & SessionModelsExtension)
+        | (EffectAcpSchema.NewSessionResponse & SessionModelsExtension)
+        | (EffectAcpSchema.ResumeSessionResponse & SessionModelsExtension),
     ): Effect.Effect<void> => Ref.set(configOptionsRef, sessionConfigOptionsFromSetup(response))
 
     const updateCurrentModeId = (modeId: string): Effect.Effect<void> =>
@@ -541,122 +564,198 @@ export const make = (
         acp.agent.initialize(initializePayload),
       )
 
-      const authenticatePayload = {
-        methodId: options.authMethodId,
-      } satisfies EffectAcpSchema.AuthenticateRequest
+      const advertisedAuthMethods = initializeResult.authMethods ?? []
+      if (advertisedAuthMethods.length > 0)
+      {
+        if (options.authMethodId === undefined)
+        {
+          return yield* new EffectAcpErrors.AcpRequestError({
+            code: -32602,
+            errorMessage:
+              'ACP agent requires an advertised authentication method, but none was configured',
+            data: {
+              advertisedMethodIds: advertisedAuthMethods.map((method) => method.id),
+            },
+          })
+        }
+        const advertisedAuthMethod = advertisedAuthMethods.find(
+          (method) => method.id === options.authMethodId,
+        )
+        if (!advertisedAuthMethod)
+        {
+          return yield* new EffectAcpErrors.AcpRequestError({
+            code: -32602,
+            errorMessage: `ACP agent did not advertise configured authentication method "${options.authMethodId}"`,
+            data: {
+              configuredMethodId: options.authMethodId,
+              advertisedMethodIds: advertisedAuthMethods.map((method) => method.id),
+            },
+          })
+        }
+        const authenticatePayload = {
+          methodId: advertisedAuthMethod.id,
+        } satisfies EffectAcpSchema.AuthenticateRequest
 
-      yield* runLoggedRequest(
-        'authenticate',
-        authenticatePayload,
-        acp.agent.authenticate(authenticatePayload),
-      )
+        yield* runLoggedRequest(
+          'authenticate',
+          authenticatePayload,
+          acp.agent.authenticate(authenticatePayload),
+        )
+      }
 
       let sessionId: string
       let sessionSetupResult:
-        | EffectAcpSchema.LoadSessionResponse
-        | EffectAcpSchema.NewSessionResponse
-        | EffectAcpSchema.ResumeSessionResponse
+        | (EffectAcpSchema.LoadSessionResponse & SessionModelsExtension)
+        | (EffectAcpSchema.NewSessionResponse & SessionModelsExtension)
+        | (EffectAcpSchema.ResumeSessionResponse & SessionModelsExtension)
       if (options.resumeSessionId)
       {
-        const loadPayload = {
-          sessionId: options.resumeSessionId,
-          cwd: options.cwd,
-          mcpServers: options.mcpServers ?? [],
-        } satisfies EffectAcpSchema.LoadSessionRequest
-        const sessionLoadTimeout = Duration.fromInputUnsafe(
-          options.sessionLoadTimeout ?? defaultSessionLoadTimeout,
-        )
-        const sessionLoadReplayIdleGap = Duration.fromInputUnsafe(
-          options.sessionLoadReplayIdleGap ?? defaultSessionLoadReplayIdleGap,
-        )
-
-        yield* Ref.set(
-          sessionLoadGateRef,
-          Option.some({
-            active: true,
-            sessionId: options.resumeSessionId,
-            lastActivityAtMillis: undefined,
-            idleGap: sessionLoadReplayIdleGap,
-            initializeResult,
-          }),
-        )
-
-        sessionId = options.resumeSessionId
-        sessionSetupResult = yield* Effect.gen(function* ()
+        const isImport = options.sessionSetup === 'import'
+        const supportsResume =
+          initializeResult.agentCapabilities?.sessionCapabilities?.resume != null
+        const supportsLoad = initializeResult.agentCapabilities?.loadSession === true
+        if (isImport && !supportsLoad)
         {
-          yield* logRequest({
-            method: 'session/load',
-            payload: loadPayload,
-            status: 'started',
+          return yield* new EffectAcpErrors.AcpRequestError({
+            code: -32601,
+            errorMessage: 'ACP agent does not advertise replay-capable session/load support',
+            data: { sessionId: options.resumeSessionId },
           })
-
-          const loadSession = options.requireSessionLoadResponse
-            ? acp.agent.loadSession(loadPayload)
-            : Effect.gen(function* ()
-              {
-                const loadFiber = yield* acp.agent
-                  .loadSession(loadPayload)
-                  .pipe(Effect.forkIn(runtimeScope))
-                const idleFiber = yield* waitForSessionLoadReplayIdle({
-                  gateRef: sessionLoadGateRef,
-                }).pipe(Effect.forkIn(runtimeScope))
-                const outcome = yield* Effect.raceFirst(
-                  Fiber.join(loadFiber).pipe(
-                    Effect.map((response) => ({ _tag: 'loaded' as const, response })),
-                  ),
-                  Fiber.join(idleFiber).pipe(
-                    Effect.map((response) => ({ _tag: 'replay-idle' as const, response })),
-                  ),
-                ).pipe(
-                  Effect.onInterrupt(() => Fiber.interrupt(loadFiber).pipe(Effect.asVoid)),
-                  Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)),
-                )
-                if (outcome._tag === 'replay-idle')
-                  {
-                  yield* Fiber.join(loadFiber).pipe(
-                    Effect.flatMap(updateConfigOptions),
-                    Effect.ignore,
-                    Effect.forkIn(runtimeScope),
-                  )
-                }
-                return outcome.response
-              })
-          const loaded = yield* loadSession.pipe(
-            Effect.timeoutOption(sessionLoadTimeout),
-            Effect.flatMap((result) =>
-              Option.match(result, {
-                onNone: () =>
-                  Effect.fail(
-                    new EffectAcpErrors.AcpTransportError({
-                      operation: 'call-rpc',
-                      method: 'session/load',
-                      detail: 'session/load timed out waiting for RPC response or replay idle gap',
-                      cause: undefined,
-                    }),
-                  ),
-                onSome: Effect.succeed,
-              }),
-            ),
-            Effect.tap((result) =>
-              logRequest({
-                method: 'session/load',
-                payload: loadPayload,
-                status: 'succeeded',
-                result,
-              }),
-            ),
-            Effect.onError((cause) =>
-              logRequest({
-                method: 'session/load',
-                payload: loadPayload,
-                status: 'failed',
-                cause,
-              }),
-            ),
+        }
+        if (!isImport && !supportsResume && options.continuationFallback === 'reject')
+        {
+          return yield* new EffectAcpErrors.AcpRequestError({
+            code: -32601,
+            errorMessage: 'ACP agent does not advertise required session/resume support',
+            data: { sessionId: options.resumeSessionId },
+          })
+        }
+        if (!isImport && !supportsResume && !supportsLoad)
+        {
+          return yield* new EffectAcpErrors.AcpRequestError({
+            code: -32601,
+            errorMessage: 'ACP agent does not advertise session/resume or session/load support',
+            data: { sessionId: options.resumeSessionId },
+          })
+        }
+        if (!isImport && supportsResume)
+        {
+          const resumePayload = {
+            sessionId: options.resumeSessionId,
+            cwd: options.cwd,
+            mcpServers: options.mcpServers ?? [],
+          } satisfies EffectAcpSchema.ResumeSessionRequest
+          const resumed = yield* runLoggedRequest(
+            'session/resume',
+            resumePayload,
+            acp.agent.resumeSession(resumePayload),
+          )
+          sessionId = options.resumeSessionId
+          sessionSetupResult = resumed
+        }
+        else
+        {
+          const loadPayload = {
+            sessionId: options.resumeSessionId,
+            cwd: options.cwd,
+            mcpServers: options.mcpServers ?? [],
+          } satisfies EffectAcpSchema.LoadSessionRequest
+          const sessionLoadTimeout = Duration.fromInputUnsafe(
+            options.sessionLoadTimeout ?? defaultSessionLoadTimeout,
+          )
+          const sessionLoadReplayIdleGap = Duration.fromInputUnsafe(
+            options.sessionLoadReplayIdleGap ?? defaultSessionLoadReplayIdleGap,
           )
 
-          return loaded
-        }).pipe(Effect.ensuring(Ref.set(sessionLoadGateRef, Option.none())))
+          yield* Ref.set(
+            sessionLoadGateRef,
+            Option.some({
+              active: true,
+              sessionId: options.resumeSessionId,
+              lastActivityAtMillis: undefined,
+              idleGap: sessionLoadReplayIdleGap,
+              initializeResult,
+            }),
+          )
+
+          sessionId = options.resumeSessionId
+          sessionSetupResult = yield* Effect.gen(function* ()
+          {
+            yield* logRequest({
+              method: 'session/load',
+              payload: loadPayload,
+              status: 'started',
+            })
+
+            const loadSession = isImport
+              ? acp.agent.loadSession(loadPayload)
+              : Effect.gen(function* ()
+                {
+                  const loadFiber = yield* acp.agent
+                    .loadSession(loadPayload)
+                    .pipe(Effect.forkIn(runtimeScope))
+                  const idleFiber = yield* waitForSessionLoadReplayIdle({
+                    gateRef: sessionLoadGateRef,
+                  }).pipe(Effect.forkIn(runtimeScope))
+                  const outcome = yield* Effect.raceFirst(
+                    Fiber.join(loadFiber).pipe(
+                      Effect.map((response) => ({ _tag: 'loaded' as const, response })),
+                    ),
+                    Fiber.join(idleFiber).pipe(
+                      Effect.map((response) => ({ _tag: 'replay-idle' as const, response })),
+                    ),
+                  ).pipe(
+                    Effect.onInterrupt(() => Fiber.interrupt(loadFiber).pipe(Effect.asVoid)),
+                    Effect.ensuring(Fiber.interrupt(idleFiber).pipe(Effect.ignore)),
+                  )
+                  yield* outcome._tag === 'replay-idle'
+                    ? Fiber.join(loadFiber).pipe(
+                        Effect.flatMap(updateConfigOptions),
+                        Effect.ignore,
+                        Effect.forkIn(runtimeScope),
+                        Effect.asVoid,
+                      )
+                    : Effect.void
+                  return outcome.response
+                })
+            const loaded = yield* loadSession.pipe(
+              Effect.timeoutOption(sessionLoadTimeout),
+              Effect.flatMap((result) =>
+                Option.match(result, {
+                  onNone: () =>
+                    Effect.fail(
+                      new EffectAcpErrors.AcpTransportError({
+                        operation: 'call-rpc',
+                        method: 'session/load',
+                        detail:
+                          'session/load timed out waiting for RPC response or replay idle gap',
+                        cause: undefined,
+                      }),
+                    ),
+                  onSome: Effect.succeed,
+                }),
+              ),
+              Effect.tap((result) =>
+                logRequest({
+                  method: 'session/load',
+                  payload: loadPayload,
+                  status: 'succeeded',
+                  result,
+                }),
+              ),
+              Effect.onError((cause) =>
+                logRequest({
+                  method: 'session/load',
+                  payload: loadPayload,
+                  status: 'failed',
+                  cause,
+                }),
+              ),
+            )
+
+            return loaded
+          }).pipe(Effect.ensuring(Ref.set(sessionLoadGateRef, Option.none())))
+        }
       }
       else
       {
@@ -849,12 +948,12 @@ export const make = (
             const requestPayload = {
               sessionId: started.sessionId,
               modelId,
-            } satisfies EffectAcpSchema.SetSessionModelRequest
+            }
             return runLoggedRequest(
-              'session/set_model',
+              GROK_SET_SESSION_MODEL_METHOD,
               requestPayload,
-              acp.agent.setSessionModel(requestPayload),
-            )
+              acp.raw.request(GROK_SET_SESSION_MODEL_METHOD, requestPayload),
+            ).pipe(Effect.flatMap(decodeSetSessionModelResponse))
           }),
         ),
       request: (method, payload) =>
