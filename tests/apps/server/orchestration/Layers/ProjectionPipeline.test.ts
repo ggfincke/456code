@@ -11,9 +11,11 @@ import {
   ThreadId,
   TurnId,
   ProviderInstanceId,
+  type OrchestrateRunExecution,
 } from '@t3tools/contracts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import { assert, it } from '@effect/vitest'
+import * as DateTime from 'effect/DateTime'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
@@ -36,7 +38,10 @@ import {
   makeSqlitePersistenceLive,
   SqlitePersistenceMemory,
 } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
-import { OrchestrationEventStore } from '../../../../../apps/server/src/persistence/Services/OrchestrationEventStore.ts'
+import {
+  OrchestrationEventStore,
+  type OrchestrationEventStoreShape,
+} from '../../../../../apps/server/src/persistence/Services/OrchestrationEventStore.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
 import {
@@ -48,8 +53,10 @@ import { OrchestrationEngineService } from '../../../../../apps/server/src/orche
 import { OrchestrationProjectionPipeline } from '../../../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts'
 import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
+import { makeTestServerStorageLeaseLayer } from '../../support/serverStorageLease.ts'
 
 const decodeUnknownJsonString = Schema.decodeUnknownSync(Schema.UnknownFromJsonString)
+const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonString)
 
 const makeProjectionPipelinePrefixedTestLayer = (prefix: string) =>
   Layer.merge(OrchestrationProjectionPipelineLive, AttachmentCleanupReactorLive).pipe(
@@ -100,6 +107,140 @@ const stageOwnedAttachment = Effect.fn('stageOwnedAttachment')(function* (input:
     now: input.now,
   })
 })
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-run-execution-jobs-')))(
+  'OrchestrationProjectionPipeline run execution jobs',
+  (it) =>
+  {
+    it.effect('accepts exact job replay and rejects conflicting immutable binding', () =>
+      Effect.gen(function* ()
+      {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline
+        const eventStore = yield* OrchestrationEventStore
+        const sql = yield* SqlClient.SqlClient
+        const threadId = ThreadId.make('thread-run-execution-jobs')
+        const sourceTurnId = TurnId.make('turn-run-execution-jobs')
+        const now = '2026-08-09T02:00:00.000Z'
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
+        const makeExecution = (
+          runId: string,
+          planRevision: number,
+          jobs: OrchestrateRunExecution['jobs'] = [],
+        ): OrchestrateRunExecution => ({
+          threadId,
+          runId,
+          planRevision,
+          sourceTurnId,
+          sourceSequence: planRevision,
+          repositoryRoot: '/repo',
+          repositoryCommonDir: '/repo/.git',
+          baseOid: 'base-oid',
+          lifecycle: 'active',
+          availability: jobs.length === 0 ? 'unavailable' : 'available',
+          integrationRoot: jobs.length === 0 ? null : '/repo/worktrees/run',
+          integrationCommonDir: jobs.length === 0 ? null : '/repo/.git',
+          integrationBranch: jobs.length === 0 ? null : 'run-branch',
+          integrationOid: jobs.length === 0 ? null : 'head-oid',
+          observedHeadOid: jobs.length === 0 ? null : 'head-oid',
+          finalHeadOid: null,
+          closeReason: null,
+          current: true,
+          admittedAt: now,
+          updatedAt: now,
+          terminalAt: null,
+          jobs,
+        })
+        const job = {
+          jobId: 'job-exact-binding',
+          status: 'completed' as const,
+          requestRunId: 'run-1',
+          requestRepositoryRoot: '/repo',
+          resultRepositoryRoot: '/repo/worktrees/run',
+          repositoryCommonDir: '/repo/.git',
+          baseOid: 'base-oid',
+          headOid: 'head-oid',
+          worktreeRoot: '/repo/worktrees/run',
+          branch: 'run-branch',
+          boundAt: now,
+        }
+        const first = makeExecution('run-1', 1)
+        const bound = makeExecution('run-1', 1, [job])
+
+        yield* appendAndProject({
+          type: 'thread.orchestrate-run-execution-admitted',
+          eventId: EventId.make('evt-run-execution-admit-1'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make('cmd-run-execution-admit-1'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-run-execution-admit-1'),
+          metadata: {},
+          payload: { execution: first },
+        })
+        for (const suffix of ['first', 'replay'] as const)
+        {
+          yield* appendAndProject({
+            type: 'thread.orchestrate-run-execution-updated',
+            eventId: EventId.make(`evt-run-execution-update-${suffix}`),
+            aggregateKind: 'thread',
+            aggregateId: threadId,
+            occurredAt: now,
+            commandId: CommandId.make(`cmd-run-execution-update-${suffix}`),
+            causationEventId: null,
+            correlationId: CorrelationId.make(`cmd-run-execution-update-${suffix}`),
+            metadata: {},
+            payload: { execution: bound },
+          })
+        }
+
+        const second = makeExecution('run-2', 1)
+        yield* appendAndProject({
+          type: 'thread.orchestrate-run-execution-admitted',
+          eventId: EventId.make('evt-run-execution-admit-2'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make('cmd-run-execution-admit-2'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-run-execution-admit-2'),
+          metadata: {},
+          payload: { execution: second },
+        })
+        const conflict = yield* appendAndProject({
+          type: 'thread.orchestrate-run-execution-updated',
+          eventId: EventId.make('evt-run-execution-conflict'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: now,
+          commandId: CommandId.make('cmd-run-execution-conflict'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-run-execution-conflict'),
+          metadata: {},
+          payload: {
+            execution: makeExecution('run-2', 1, [
+              { ...job, requestRunId: 'run-2', boundAt: '2026-08-09T02:01:00.000Z' },
+            ]),
+          },
+        }).pipe(Effect.result)
+        assert.strictEqual(conflict._tag, 'Failure')
+
+        const bindings = yield* sql<{
+          readonly jobId: string
+          readonly runId: string
+          readonly boundAt: string
+        }>`
+          SELECT job_id AS "jobId", run_id AS "runId", bound_at AS "boundAt"
+          FROM projection_orchestrate_execution_jobs
+        `
+        assert.deepEqual(bindings, [{ jobId: 'job-exact-binding', runId: 'run-1', boundAt: now }])
+      }),
+    )
+  },
+)
 
 const BaseTestLayer = makeProjectionPipelinePrefixedTestLayer('t3-projection-pipeline-test-')
 
@@ -291,75 +432,119 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
       assert.deepEqual(unsettledRows, [{ settledOverride: 'active', settledAt: null }])
     }),
   )
-})
 
-it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-base-')))(
-  'OrchestrationProjectionPipeline',
-  (it) =>
-  {
-    it.effect('stores message attachment references without mutating payloads', () =>
-      Effect.gen(function* ()
+  it.effect('upserts replacement worker verdict activities during projection replay', () =>
+    Effect.gen(function* ()
+    {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline
+      const eventStore = yield* OrchestrationEventStore
+      const sql = yield* SqlClient.SqlClient
+      const now = '2026-08-06T12:00:00.000Z'
+      const threadId = ThreadId.make('thread-worker-verdict-upsert')
+      const activityId = EventId.make('worker-verdict:run-1:job-1')
+
+      yield* eventStore.append({
+        type: 'project.created',
+        eventId: EventId.make('event-worker-verdict-upsert-project'),
+        aggregateKind: 'project',
+        aggregateId: ProjectId.make('project-worker-verdict-upsert'),
+        occurredAt: now,
+        commandId: CommandId.make('command-worker-verdict-upsert-project'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('command-worker-verdict-upsert-project'),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make('project-worker-verdict-upsert'),
+          title: 'Worker verdict projection',
+          workspaceRoot: '/tmp/worker-verdict-upsert',
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+      yield* eventStore.append({
+        type: 'thread.created',
+        eventId: EventId.make('event-worker-verdict-upsert-thread'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: now,
+        commandId: CommandId.make('command-worker-verdict-upsert-thread'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('command-worker-verdict-upsert-thread'),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make('project-worker-verdict-upsert'),
+          title: 'Thread',
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5.6',
+          },
+          runtimeMode: 'full-access',
+          interactionMode: 'default',
+          branch: null,
+          worktreePath: null,
+          origin: null,
+          createdAt: now,
+          updatedAt: now,
+        },
+      })
+      for (const [index, verdict] of ['needs changes', 'approved'].entries())
       {
-        const projectionPipeline = yield* OrchestrationProjectionPipeline
-        const eventStore = yield* OrchestrationEventStore
-        const sql = yield* SqlClient.SqlClient
-        const now = '2026-01-01T00:00:00.000Z'
-
         yield* eventStore.append({
-          type: 'thread.message-sent',
-          eventId: EventId.make('evt-attachments'),
+          type: 'thread.activity-appended',
+          eventId: EventId.make(`event-worker-verdict-upsert-${index}`),
           aggregateKind: 'thread',
-          aggregateId: ThreadId.make('thread-attachments'),
-          occurredAt: now,
-          commandId: CommandId.make('cmd-attachments'),
+          aggregateId: threadId,
+          occurredAt: `2026-08-06T12:00:0${index + 1}.000Z`,
+          commandId: CommandId.make(`command-worker-verdict-upsert-${index}`),
           causationEventId: null,
-          correlationId: CommandId.make('cmd-attachments'),
+          correlationId: CorrelationId.make(`command-worker-verdict-upsert-${index}`),
           metadata: {},
           payload: {
-            threadId: ThreadId.make('thread-attachments'),
-            messageId: MessageId.make('message-attachments'),
-            role: 'user',
-            text: 'Inspect this',
-            attachments: [
-              {
-                type: 'image',
-                id: 'thread-attachments-att-1',
-                name: 'example.png',
-                mimeType: 'image/png',
-                sizeBytes: 5,
-              },
-            ],
-            turnId: null,
-            streaming: false,
-            createdAt: now,
-            updatedAt: now,
+            threadId,
+            activity: {
+              id: activityId,
+              tone: 'info',
+              kind: 'orchestrate.worker.verdict',
+              summary: 'Worker verdict',
+              payload: { runId: 'run-1', jobId: 'job-1', verdict },
+              turnId: null,
+              createdAt: `2026-08-06T12:00:0${index + 1}.000Z`,
+            },
           },
         })
+      }
 
-        yield* projectionPipeline.bootstrap
+      yield* projectionPipeline.bootstrap
 
-        const rows = yield* sql<{
-          readonly attachmentsJson: string | null
-        }>`
-            SELECT
-              attachments_json AS "attachmentsJson"
-            FROM projection_thread_messages
-            WHERE message_id = 'message-attachments'
-          `
-        assert.equal(rows.length, 1)
-        assert.deepEqual(decodeUnknownJsonString(rows[0]?.attachmentsJson ?? 'null'), [
-          {
-            type: 'image',
-            id: 'thread-attachments-att-1',
-            name: 'example.png',
-            mimeType: 'image/png',
-            sizeBytes: 5,
-          },
-        ])
-      }),
-    )
-  },
-)
+      const rows = yield* sql<{
+        readonly activityId: string
+        readonly payloadJson: string
+        readonly turnId: string | null
+      }>`
+        SELECT
+          activity_id AS "activityId",
+          payload_json AS "payloadJson",
+          turn_id AS "turnId"
+        FROM projection_thread_activities
+        WHERE thread_id = ${threadId}
+      `
+      assert.deepEqual(rows, [
+        {
+          activityId,
+          payloadJson: encodeUnknownJsonString({
+            runId: 'run-1',
+            jobId: 'job-1',
+            verdict: 'approved',
+          }),
+          turnId: null,
+        },
+      ])
+    }),
+  )
+})
 
 it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-projection-attachments-safe-')))(
   'OrchestrationProjectionPipeline',
@@ -2149,6 +2334,70 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
     }),
   )
 
+  // shared project+thread seed for stale pending-request clearance (approval vs user-input)
+  const seedStalePendingThread = <A, E, R>(
+    appendAndProject: (
+      event: Parameters<OrchestrationEventStoreShape['append']>[0],
+    ) => Effect.Effect<A, E, R>,
+    slug: string,
+    at: string,
+  ) =>
+    Effect.gen(function* ()
+    {
+      const projectId = ProjectId.make(`project-${slug}`)
+      const threadId = ThreadId.make(`thread-${slug}`)
+      const threadAt = DateTime.formatIso(
+        DateTime.addDuration(DateTime.makeUnsafe(at), Duration.seconds(1)),
+      )
+      yield* appendAndProject({
+        type: 'project.created',
+        eventId: EventId.make(`evt-${slug}-1`),
+        aggregateKind: 'project',
+        aggregateId: projectId,
+        occurredAt: at,
+        commandId: CommandId.make(`cmd-${slug}-1`),
+        causationEventId: null,
+        correlationId: CorrelationId.make(`cmd-${slug}-1`),
+        metadata: {},
+        payload: {
+          projectId,
+          title: `Project ${slug}`,
+          workspaceRoot: `/tmp/project-${slug}`,
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: at,
+          updatedAt: at,
+        },
+      })
+      yield* appendAndProject({
+        type: 'thread.created',
+        eventId: EventId.make(`evt-${slug}-2`),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: threadAt,
+        commandId: CommandId.make(`cmd-${slug}-2`),
+        causationEventId: null,
+        correlationId: CorrelationId.make(`cmd-${slug}-2`),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId,
+          title: `Thread ${slug}`,
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5-codex',
+          },
+          runtimeMode: 'approval-required',
+          interactionMode: 'default',
+          branch: null,
+          worktreePath: null,
+          createdAt: threadAt,
+          updatedAt: threadAt,
+        },
+      })
+      return { projectId, threadId }
+    })
+
   it.effect('clears stale pending approvals from projected shell summaries', () =>
     Effect.gen(function* ()
     {
@@ -2160,66 +2409,24 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
           .append(event)
           .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
 
-      yield* appendAndProject({
-        type: 'project.created',
-        eventId: EventId.make('evt-stale-approval-1'),
-        aggregateKind: 'project',
-        aggregateId: ProjectId.make('project-stale-approval'),
-        occurredAt: '2026-02-26T12:30:00.000Z',
-        commandId: CommandId.make('cmd-stale-approval-1'),
-        causationEventId: null,
-        correlationId: CorrelationId.make('cmd-stale-approval-1'),
-        metadata: {},
-        payload: {
-          projectId: ProjectId.make('project-stale-approval'),
-          title: 'Project Stale Approval',
-          workspaceRoot: '/tmp/project-stale-approval',
-          defaultModelSelection: null,
-          scripts: [],
-          createdAt: '2026-02-26T12:30:00.000Z',
-          updatedAt: '2026-02-26T12:30:00.000Z',
-        },
-      })
-
-      yield* appendAndProject({
-        type: 'thread.created',
-        eventId: EventId.make('evt-stale-approval-2'),
-        aggregateKind: 'thread',
-        aggregateId: ThreadId.make('thread-stale-approval'),
-        occurredAt: '2026-02-26T12:30:01.000Z',
-        commandId: CommandId.make('cmd-stale-approval-2'),
-        causationEventId: null,
-        correlationId: CorrelationId.make('cmd-stale-approval-2'),
-        metadata: {},
-        payload: {
-          threadId: ThreadId.make('thread-stale-approval'),
-          projectId: ProjectId.make('project-stale-approval'),
-          title: 'Thread Stale Approval',
-          modelSelection: {
-            instanceId: ProviderInstanceId.make('codex'),
-            model: 'gpt-5-codex',
-          },
-          runtimeMode: 'approval-required',
-          interactionMode: 'default',
-          branch: null,
-          worktreePath: null,
-          createdAt: '2026-02-26T12:30:01.000Z',
-          updatedAt: '2026-02-26T12:30:01.000Z',
-        },
-      })
+      const { threadId } = yield* seedStalePendingThread(
+        appendAndProject,
+        'stale-approval',
+        '2026-02-26T12:30:00.000Z',
+      )
 
       yield* appendAndProject({
         type: 'thread.activity-appended',
         eventId: EventId.make('evt-stale-approval-3'),
         aggregateKind: 'thread',
-        aggregateId: ThreadId.make('thread-stale-approval'),
+        aggregateId: threadId,
         occurredAt: '2026-02-26T12:30:02.000Z',
         commandId: CommandId.make('cmd-stale-approval-3'),
         causationEventId: null,
         correlationId: CorrelationId.make('cmd-stale-approval-3'),
         metadata: {},
         payload: {
-          threadId: ThreadId.make('thread-stale-approval'),
+          threadId,
           activity: {
             id: EventId.make('activity-stale-approval-requested'),
             tone: 'approval',
@@ -2239,14 +2446,14 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
         type: 'thread.activity-appended',
         eventId: EventId.make('evt-stale-approval-4'),
         aggregateKind: 'thread',
-        aggregateId: ThreadId.make('thread-stale-approval'),
+        aggregateId: threadId,
         occurredAt: '2026-02-26T12:30:03.000Z',
         commandId: CommandId.make('cmd-stale-approval-4'),
         causationEventId: null,
         correlationId: CorrelationId.make('cmd-stale-approval-4'),
         metadata: {},
         payload: {
-          threadId: ThreadId.make('thread-stale-approval'),
+          threadId,
           activity: {
             id: EventId.make('activity-stale-approval-failed'),
             tone: 'error',
@@ -2287,7 +2494,7 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
       }>`
         SELECT pending_approval_count AS "pendingApprovalCount"
         FROM projection_threads
-        WHERE thread_id = 'thread-stale-approval'
+        WHERE thread_id = ${threadId}
       `
       assert.deepEqual(threadRows, [{ pendingApprovalCount: 0 }])
     }),
@@ -2304,66 +2511,24 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
           .append(event)
           .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
 
-      yield* appendAndProject({
-        type: 'project.created',
-        eventId: EventId.make('evt-stale-user-input-1'),
-        aggregateKind: 'project',
-        aggregateId: ProjectId.make('project-stale-user-input'),
-        occurredAt: '2026-02-26T12:35:00.000Z',
-        commandId: CommandId.make('cmd-stale-user-input-1'),
-        causationEventId: null,
-        correlationId: CorrelationId.make('cmd-stale-user-input-1'),
-        metadata: {},
-        payload: {
-          projectId: ProjectId.make('project-stale-user-input'),
-          title: 'Project Stale User Input',
-          workspaceRoot: '/tmp/project-stale-user-input',
-          defaultModelSelection: null,
-          scripts: [],
-          createdAt: '2026-02-26T12:35:00.000Z',
-          updatedAt: '2026-02-26T12:35:00.000Z',
-        },
-      })
-
-      yield* appendAndProject({
-        type: 'thread.created',
-        eventId: EventId.make('evt-stale-user-input-2'),
-        aggregateKind: 'thread',
-        aggregateId: ThreadId.make('thread-stale-user-input'),
-        occurredAt: '2026-02-26T12:35:01.000Z',
-        commandId: CommandId.make('cmd-stale-user-input-2'),
-        causationEventId: null,
-        correlationId: CorrelationId.make('cmd-stale-user-input-2'),
-        metadata: {},
-        payload: {
-          threadId: ThreadId.make('thread-stale-user-input'),
-          projectId: ProjectId.make('project-stale-user-input'),
-          title: 'Thread Stale User Input',
-          modelSelection: {
-            instanceId: ProviderInstanceId.make('codex'),
-            model: 'gpt-5-codex',
-          },
-          runtimeMode: 'approval-required',
-          interactionMode: 'default',
-          branch: null,
-          worktreePath: null,
-          createdAt: '2026-02-26T12:35:01.000Z',
-          updatedAt: '2026-02-26T12:35:01.000Z',
-        },
-      })
+      const { threadId } = yield* seedStalePendingThread(
+        appendAndProject,
+        'stale-user-input',
+        '2026-02-26T12:35:00.000Z',
+      )
 
       yield* appendAndProject({
         type: 'thread.activity-appended',
         eventId: EventId.make('evt-stale-user-input-3'),
         aggregateKind: 'thread',
-        aggregateId: ThreadId.make('thread-stale-user-input'),
+        aggregateId: threadId,
         occurredAt: '2026-02-26T12:35:02.000Z',
         commandId: CommandId.make('cmd-stale-user-input-3'),
         causationEventId: null,
         correlationId: CorrelationId.make('cmd-stale-user-input-3'),
         metadata: {},
         payload: {
-          threadId: ThreadId.make('thread-stale-user-input'),
+          threadId,
           activity: {
             id: EventId.make('activity-stale-user-input-requested'),
             tone: 'info',
@@ -2395,14 +2560,14 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
         type: 'thread.activity-appended',
         eventId: EventId.make('evt-stale-user-input-4'),
         aggregateKind: 'thread',
-        aggregateId: ThreadId.make('thread-stale-user-input'),
+        aggregateId: threadId,
         occurredAt: '2026-02-26T12:35:03.000Z',
         commandId: CommandId.make('cmd-stale-user-input-4'),
         causationEventId: null,
         correlationId: CorrelationId.make('cmd-stale-user-input-4'),
         metadata: {},
         payload: {
-          threadId: ThreadId.make('thread-stale-user-input'),
+          threadId,
           activity: {
             id: EventId.make('activity-stale-user-input-failed'),
             tone: 'error',
@@ -2419,12 +2584,13 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
         },
       })
 
+      // user-input request kind clears the shell pending count (distinct from approval.requested)
       const threadRows = yield* sql<{
         readonly pendingUserInputCount: number
       }>`
         SELECT pending_user_input_count AS "pendingUserInputCount"
         FROM projection_threads
-        WHERE thread_id = 'thread-stale-user-input'
+        WHERE thread_id = ${threadId}
       `
       assert.deepEqual(threadRows, [{ pendingUserInputCount: 0 }])
     }),
@@ -2817,6 +2983,329 @@ it.layer(BaseTestLayer)('OrchestrationProjectionPipeline', (it) =>
       ])
     }),
   )
+
+  it.effect('prunes only reverted orchestrate plans and their exact proposal links', () =>
+    Effect.gen(function* ()
+    {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline
+      const eventStore = yield* OrchestrationEventStore
+      const sql = yield* SqlClient.SqlClient
+      const threadId = ThreadId.make('thread-orchestrate-revert')
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
+
+      yield* appendAndProject({
+        type: 'project.created',
+        eventId: EventId.make('evt-orchestrate-revert-1'),
+        aggregateKind: 'project',
+        aggregateId: ProjectId.make('project-orchestrate-revert'),
+        occurredAt: '2026-08-07T13:00:00.000Z',
+        commandId: CommandId.make('cmd-orchestrate-revert-1'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-orchestrate-revert-1'),
+        metadata: {},
+        payload: {
+          projectId: ProjectId.make('project-orchestrate-revert'),
+          title: 'Project Orchestrate Revert',
+          workspaceRoot: '/tmp/project-orchestrate-revert',
+          defaultModelSelection: null,
+          scripts: [],
+          createdAt: '2026-08-07T13:00:00.000Z',
+          updatedAt: '2026-08-07T13:00:00.000Z',
+        },
+      })
+      yield* appendAndProject({
+        type: 'thread.created',
+        eventId: EventId.make('evt-orchestrate-revert-2'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-08-07T13:00:01.000Z',
+        commandId: CommandId.make('cmd-orchestrate-revert-2'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-orchestrate-revert-2'),
+        metadata: {},
+        payload: {
+          threadId,
+          projectId: ProjectId.make('project-orchestrate-revert'),
+          title: 'Thread Orchestrate Revert',
+          modelSelection: {
+            instanceId: ProviderInstanceId.make('codex'),
+            model: 'gpt-5-codex',
+          },
+          runtimeMode: 'full-access',
+          branch: null,
+          worktreePath: null,
+          createdAt: '2026-08-07T13:00:01.000Z',
+          updatedAt: '2026-08-07T13:00:01.000Z',
+        },
+      })
+
+      for (const turn of [
+        { id: 'turn-orchestrate-keep', count: 1, suffix: '3' },
+        { id: 'turn-orchestrate-prune', count: 2, suffix: '4' },
+      ] as const)
+      {
+        yield* appendAndProject({
+          type: 'thread.turn-diff-completed',
+          eventId: EventId.make(`evt-orchestrate-revert-${turn.suffix}`),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: `2026-08-07T13:00:0${turn.count + 1}.000Z`,
+          commandId: CommandId.make(`cmd-orchestrate-revert-${turn.suffix}`),
+          causationEventId: null,
+          correlationId: CorrelationId.make(`cmd-orchestrate-revert-${turn.suffix}`),
+          metadata: {},
+          payload: {
+            threadId,
+            turnId: TurnId.make(turn.id),
+            checkpointTurnCount: turn.count,
+            checkpointRef: CheckpointRef.make(
+              `refs/t3/checkpoints/thread-orchestrate-revert/turn/${turn.count}`,
+            ),
+            status: 'ready',
+            files: [],
+            assistantMessageId: MessageId.make(`assistant-orchestrate-${turn.count}`),
+            completedAt: `2026-08-07T13:00:0${turn.count + 1}.000Z`,
+          },
+        })
+      }
+
+      for (const [index, plan] of [
+        { runId: 'run-orchestrate-keep', turnId: TurnId.make('turn-orchestrate-keep') },
+        { runId: 'run-orchestrate-prune', turnId: TurnId.make('turn-orchestrate-prune') },
+        { runId: 'run-orchestrate-null', turnId: null },
+      ].entries())
+      {
+        const occurredAt = `2026-08-07T13:00:0${index + 4}.000Z`
+        yield* appendAndProject({
+          type: 'thread.orchestrate-plan-upserted',
+          eventId: EventId.make(`evt-orchestrate-revert-plan-${index}`),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt,
+          commandId: CommandId.make(`cmd-orchestrate-revert-plan-${index}`),
+          causationEventId: null,
+          correlationId: CorrelationId.make(`cmd-orchestrate-revert-plan-${index}`),
+          metadata: {},
+          payload: {
+            threadId,
+            plan: {
+              runId: plan.runId,
+              revision: 1,
+              turnId: plan.turnId,
+              workflow: 'implementation',
+              task: plan.runId,
+              stages: [],
+              totalWorkers: 0,
+              maxWorkers: 1,
+              source: 'tool',
+              status: 'pending',
+              createdAt: occurredAt,
+              updatedAt: occurredAt,
+            },
+            createdAt: occurredAt,
+          },
+        })
+      }
+
+      yield* sql`
+        INSERT INTO proposals (
+          proposal_id,
+          environment_id,
+          project_id,
+          source_thread_id,
+          producer_session_id,
+          producer_instance_id,
+          repository_identity_json,
+          worktree_root_path,
+          worktree_git_dir,
+          worktree_git_common_dir,
+          created_at,
+          updated_at
+        )
+        VALUES (
+          'proposal-orchestrate-revert',
+          'environment-orchestrate-revert',
+          'project-orchestrate-revert',
+          ${threadId},
+          'session-orchestrate-revert',
+          'codex',
+          '{}',
+          '/tmp/project-orchestrate-revert',
+          '/tmp/project-orchestrate-revert/.git',
+          '/tmp/project-orchestrate-revert/.git',
+          '2026-08-07T13:00:08.000Z',
+          '2026-08-07T13:00:08.000Z'
+        )
+      `
+      yield* sql`
+        INSERT INTO proposal_blobs (sha256, content, byte_length, created_at)
+        VALUES (
+          'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          X'',
+          0,
+          '2026-08-07T13:00:08.000Z'
+        )
+      `
+      const runIds = [
+        'run-orchestrate-keep',
+        'run-orchestrate-prune',
+        'run-orchestrate-null',
+      ] as const
+      for (const [index, runId] of runIds.entries())
+      {
+        const revision = index + 1
+        yield* sql`
+          INSERT INTO proposal_revisions (
+            revision_id,
+            proposal_id,
+            revision,
+            head_commit_oid,
+            base_tree_oid,
+            base_retained_ref,
+            base_file_count,
+            base_byte_count,
+            snapshot_policy_json,
+            proposed_tree_oid,
+            proposed_retained_ref,
+            manifest_json,
+            manifest_sha256,
+            diff_sha256,
+            diff_byte_length,
+            created_at
+          )
+          VALUES (
+            ${`revision-orchestrate-revert-${revision}`},
+            'proposal-orchestrate-revert',
+            ${revision},
+            'dddddddddddddddddddddddddddddddddddddddd',
+            'dddddddddddddddddddddddddddddddddddddddd',
+            ${`refs/base/${revision}`},
+            0,
+            0,
+            '{}',
+            'dddddddddddddddddddddddddddddddddddddddd',
+            ${`refs/proposed/${revision}`},
+            '{}',
+            'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+            0,
+            '2026-08-07T13:00:08.000Z'
+          )
+        `
+        yield* sql`
+          INSERT INTO proposal_orchestrate_plan_links (
+            proposal_id,
+            proposal_revision,
+            source_thread_id,
+            run_id,
+            orchestrate_revision,
+            created_at
+          )
+          VALUES (
+            'proposal-orchestrate-revert',
+            ${revision},
+            ${threadId},
+            ${runId},
+            1,
+            '2026-08-07T13:00:08.000Z'
+          )
+        `
+      }
+
+      yield* appendAndProject({
+        type: 'thread.reverted',
+        eventId: EventId.make('evt-orchestrate-revert-9'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt: '2026-08-07T13:00:09.000Z',
+        commandId: CommandId.make('cmd-orchestrate-revert-9'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-orchestrate-revert-9'),
+        metadata: {},
+        payload: { threadId, turnCount: 1 },
+      })
+
+      const projected = yield* sql<{ readonly runId: string; readonly turnId: string | null }>`
+        SELECT run_id AS "runId", turn_id AS "turnId"
+        FROM projection_thread_orchestrate_plans
+        WHERE thread_id = ${threadId}
+        ORDER BY run_id
+      `
+      assert.deepEqual(projected, [
+        { runId: 'run-orchestrate-keep', turnId: 'turn-orchestrate-keep' },
+        { runId: 'run-orchestrate-null', turnId: null },
+      ])
+      const links = yield* sql<{ readonly runId: string }>`
+        SELECT run_id AS "runId"
+        FROM proposal_orchestrate_plan_links
+        WHERE source_thread_id = ${threadId}
+        ORDER BY run_id
+      `
+      assert.deepEqual(links, [
+        { runId: 'run-orchestrate-keep' },
+        { runId: 'run-orchestrate-null' },
+      ])
+
+      // rebuild the dependent projections from sequence zero to prove turns
+      // exist before the orchestrate revert projector consults them.
+      yield* sql`
+        INSERT INTO proposal_orchestrate_plan_links (
+          proposal_id,
+          proposal_revision,
+          source_thread_id,
+          run_id,
+          orchestrate_revision,
+          created_at
+        )
+        VALUES (
+          'proposal-orchestrate-revert',
+          2,
+          ${threadId},
+          'run-orchestrate-prune',
+          1,
+          '2026-08-07T13:00:08.000Z'
+        )
+      `
+      yield* sql`DELETE FROM projection_thread_orchestrate_plans WHERE thread_id = ${threadId}`
+      yield* sql`DELETE FROM projection_turns WHERE thread_id = ${threadId}`
+      yield* sql`
+        DELETE FROM projection_state
+        WHERE projector IN (
+          ${ORCHESTRATION_PROJECTOR_NAMES.threadTurns},
+          ${ORCHESTRATION_PROJECTOR_NAMES.threadOrchestratePlans}
+        )
+      `
+
+      yield* projectionPipeline.bootstrap
+
+      const rebuiltPlans = yield* sql<{
+        readonly runId: string
+        readonly turnId: string | null
+      }>`
+        SELECT run_id AS "runId", turn_id AS "turnId"
+        FROM projection_thread_orchestrate_plans
+        WHERE thread_id = ${threadId}
+        ORDER BY run_id
+      `
+      assert.deepEqual(rebuiltPlans, [
+        { runId: 'run-orchestrate-keep', turnId: 'turn-orchestrate-keep' },
+        { runId: 'run-orchestrate-null', turnId: null },
+      ])
+      const rebuiltLinks = yield* sql<{ readonly runId: string }>`
+        SELECT run_id AS "runId"
+        FROM proposal_orchestrate_plan_links
+        WHERE source_thread_id = ${threadId}
+        ORDER BY run_id
+      `
+      assert.deepEqual(rebuiltLinks, [
+        { runId: 'run-orchestrate-keep' },
+        { runId: 'run-orchestrate-null' },
+      ])
+    }),
+  )
 })
 
 it.layer(makeProjectionPipelinePrefixedTestLayer('t3-pending-turn-terminal-test-'))(
@@ -2893,8 +3382,10 @@ it.layer(makeProjectionPipelinePrefixedTestLayer('t3-pending-turn-terminal-test-
 it.effect('restores pending turn-start metadata across projection pipeline restart', () =>
   Effect.gen(function* ()
   {
-    const { dbPath } = yield* ServerConfig
-    const persistenceLayer = makeSqlitePersistenceLive(dbPath)
+    const { baseDir, dbPath } = yield* ServerConfig
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath).pipe(
+      Layer.provideMerge(makeTestServerStorageLeaseLayer(baseDir)),
+    )
     const firstProjectionLayer = OrchestrationProjectionPipelineLive.pipe(
       Layer.provideMerge(OrchestrationEventStoreLive),
       Layer.provideMerge(persistenceLayer),
@@ -3227,6 +3718,122 @@ engineLayer('OrchestrationProjectionPipeline via engine dispatch', (it) =>
           scriptsJson:
             '[{"id":"script-1","name":"Build","command":"bun run build","icon":"build","runOnWorktreeCreate":false}]',
           defaultModelSelection: '{"instanceId":"codex","model":"gpt-5"}',
+        },
+      ])
+    }),
+  )
+})
+
+it.layer(
+  Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-checkpoint-identity-projection-')),
+)('OrchestrationProjectionPipeline checkpoint identity', (it) =>
+{
+  it.effect('projects turn zero and preserves authoritative identity across legacy replay', () =>
+    Effect.gen(function* ()
+    {
+      const projectionPipeline = yield* OrchestrationProjectionPipeline
+      const eventStore = yield* OrchestrationEventStore
+      const sql = yield* SqlClient.SqlClient
+      const threadId = ThreadId.make('thread-checkpoint-identity')
+      const occurredAt = '2026-08-09T00:00:00.000Z'
+      const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+        eventStore
+          .append(event)
+          .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
+
+      yield* appendAndProject({
+        type: 'thread.checkpoint-baseline-recorded',
+        eventId: EventId.make('evt-checkpoint-identity-1'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt,
+        commandId: CommandId.make('cmd-checkpoint-identity-1'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-checkpoint-identity-1'),
+        metadata: {},
+        payload: {
+          threadId,
+          checkpointTurnCount: 0,
+          checkpointRef: CheckpointRef.make('refs/t3/checkpoint/thread-checkpoint-identity/0'),
+          checkpointCaptureRoot: '/capture/baseline',
+          checkpointRepositoryCommonDir: '/capture/repository/.git',
+          checkpointCommitOid: '0000000000000000000000000000000000000000',
+          capturedAt: occurredAt,
+        },
+      })
+      yield* appendAndProject({
+        type: 'thread.turn-diff-completed',
+        eventId: EventId.make('evt-checkpoint-identity-2'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt,
+        commandId: CommandId.make('cmd-checkpoint-identity-2'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-checkpoint-identity-2'),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId: TurnId.make('turn-checkpoint-identity'),
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make('refs/t3/checkpoint/thread-checkpoint-identity/1'),
+          status: 'ready',
+          files: [],
+          assistantMessageId: null,
+          completedAt: occurredAt,
+          checkpointCaptureRoot: '/capture/turn-one',
+          checkpointRepositoryCommonDir: '/capture/repository/.git',
+          checkpointCommitOid: '1111111111111111111111111111111111111111',
+        },
+      })
+      yield* appendAndProject({
+        type: 'thread.turn-diff-completed',
+        eventId: EventId.make('evt-checkpoint-identity-3'),
+        aggregateKind: 'thread',
+        aggregateId: threadId,
+        occurredAt,
+        commandId: CommandId.make('cmd-checkpoint-identity-3'),
+        causationEventId: null,
+        correlationId: CorrelationId.make('cmd-checkpoint-identity-3'),
+        metadata: {},
+        payload: {
+          threadId,
+          turnId: TurnId.make('turn-checkpoint-identity'),
+          checkpointTurnCount: 1,
+          checkpointRef: CheckpointRef.make('refs/t3/checkpoint/thread-checkpoint-identity/1'),
+          status: 'missing',
+          files: [],
+          assistantMessageId: null,
+          completedAt: occurredAt,
+        },
+      })
+
+      const identities = yield* sql<{
+        readonly turnCount: number
+        readonly captureRoot: string | null
+        readonly commonDir: string | null
+        readonly commitOid: string | null
+      }>`
+        SELECT
+          checkpoint_turn_count AS "turnCount",
+          checkpoint_capture_root AS "captureRoot",
+          checkpoint_repository_common_dir AS "commonDir",
+          checkpoint_commit_oid AS "commitOid"
+        FROM projection_checkpoint_identities
+        WHERE thread_id = ${threadId}
+        ORDER BY checkpoint_turn_count
+      `
+      assert.deepEqual(identities, [
+        {
+          turnCount: 0,
+          captureRoot: '/capture/baseline',
+          commonDir: '/capture/repository/.git',
+          commitOid: '0000000000000000000000000000000000000000',
+        },
+        {
+          turnCount: 1,
+          captureRoot: '/capture/turn-one',
+          commonDir: '/capture/repository/.git',
+          commitOid: '1111111111111111111111111111111111111111',
         },
       ])
     }),

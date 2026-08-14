@@ -21,9 +21,6 @@ export type RuntimeMode = typeof RuntimeMode.Type
 export const StartupPresentation = Schema.Literals(['browser', 'headless'])
 export type StartupPresentation = typeof StartupPresentation.Type
 
-export const CartographerReconciliationMode = Schema.Literals(['off', 'report', 'delete'])
-export type CartographerReconciliationMode = typeof CartographerReconciliationMode.Type
-
 export const ProposalReconciliationMode = Schema.Literals(['off', 'report', 'delete'])
 export type ProposalReconciliationMode = typeof ProposalReconciliationMode.Type
 
@@ -86,8 +83,6 @@ export class ServerConfig extends Context.Service<
     readonly logWebSocketEvents: boolean
     readonly tailscaleServeEnabled: boolean
     readonly tailscaleServePort: number
-    readonly cartographerReconciliationMode?: CartographerReconciliationMode
-    readonly cartographerReconciliationDeleteEnabled?: boolean
     readonly proposalReconciliationMode?: ProposalReconciliationMode
     readonly proposalReconciliationDeleteEnabled?: boolean
   }
@@ -197,8 +192,6 @@ const makeTest = Effect.fn('ServerConfig.makeTest')(function* (
     logWebSocketEvents: false,
     tailscaleServeEnabled: false,
     tailscaleServePort: 443,
-    cartographerReconciliationMode: 'report',
-    cartographerReconciliationDeleteEnabled: false,
     proposalReconciliationMode: 'report',
     proposalReconciliationDeleteEnabled: false,
     port: 0,

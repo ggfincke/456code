@@ -13,6 +13,8 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderInteractionMode,
+  normalizeCollaborationMode,
+  toWireInteractionMode,
   type OrchestrationSession,
   type OrchestrationThreadActivity,
   ThreadId,
@@ -36,6 +38,7 @@ import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 
 import * as CheckpointStore from '../../checkpointing/CheckpointStore.ts'
+import { CheckpointIdentityResolver } from '../../checkpointing/CheckpointIdentity.ts'
 import { checkpointRefForThreadTurn, resolveThreadWorkspaceCwd } from '../../checkpointing/Utils.ts'
 import { increment, orchestrationEventsProcessedTotal } from '../../observability/Metrics.ts'
 import {
@@ -491,6 +494,7 @@ const make = Effect.gen(function* ()
   const providerService = yield* ProviderService
   const providerRegistry = yield* ProviderRegistry
   const checkpointStore = yield* CheckpointStore.CheckpointStore
+  const checkpointIdentity = yield* CheckpointIdentityResolver
   const gitWorkflow = yield* GitWorkflowService
   const vcsStatusBroadcaster = yield* VcsStatusBroadcaster
   const textGeneration = yield* TextGeneration
@@ -1316,6 +1320,7 @@ const make = Effect.gen(function* ()
     readonly importContinuationAuthority?: ThreadImportContinuationAuthority
     readonly modelSelection?: ModelSelection
     readonly interactionMode?: ProviderInteractionMode
+    readonly orchestrate?: boolean
     readonly createdAt: string
   })
   {
@@ -1383,6 +1388,10 @@ const make = Effect.gen(function* ()
             }
           : requestedModelSelection
         : input.modelSelection
+    const collaborationMode = normalizeCollaborationMode(
+      input.interactionMode ?? thread.interactionMode,
+      input.orchestrate ?? thread.orchestrate,
+    )
 
     return {
       request: {
@@ -1390,7 +1399,7 @@ const make = Effect.gen(function* ()
         ...(preparedInput.providerInput ? { input: preparedInput.providerInput } : {}),
         ...(normalizedAttachments.length > 0 ? { attachments: normalizedAttachments } : {}),
         ...(modelForTurn !== undefined ? { modelSelection: modelForTurn } : {}),
-        ...(input.interactionMode !== undefined ? { interactionMode: input.interactionMode } : {}),
+        ...toWireInteractionMode(collaborationMode),
       },
       ...(preparedInput.deliveryMarker !== undefined
         ? { handoffDeliveryMarker: preparedInput.deliveryMarker }
@@ -1402,6 +1411,7 @@ const make = Effect.gen(function* ()
     'maybeGenerateAndRenameWorktreeBranchForFirstTurn',
   )(function* (input: {
     readonly threadId: ThreadId
+    readonly sourceSequence: number
     readonly branch: string | null
     readonly worktreePath: string | null
     readonly messageText: string
@@ -1437,13 +1447,19 @@ const make = Effect.gen(function* ()
       if (targetBranch === oldBranch) return
 
       const renamed = yield* gitWorkflow.renameBranch({ cwd, oldBranch, newBranch: targetBranch })
-      yield* orchestrationEngine.dispatch({
-        type: 'thread.meta.update',
-        commandId: yield* serverCommandId('worktree-branch-rename'),
-        threadId: input.threadId,
-        branch: renamed.branch,
-        worktreePath: cwd,
-      })
+      yield* orchestrationEngine.dispatchInternal(
+        {
+          type: 'thread.meta.update',
+          commandId: yield* serverCommandId('worktree-branch-rename'),
+          threadId: input.threadId,
+          branch: renamed.branch,
+          worktreePath: cwd,
+        },
+        {
+          sourceKind: 'domain-event',
+          sourceSequence: input.sourceSequence,
+        },
+      )
       yield* vcsStatusBroadcaster.refreshStatus(cwd).pipe(Effect.ignoreCause({ log: true }))
     }).pipe(
       Effect.catchCause((cause) =>
@@ -1460,6 +1476,7 @@ const make = Effect.gen(function* ()
   const maybeGenerateThreadTitleForFirstTurn = Effect.fn('maybeGenerateThreadTitleForFirstTurn')(
     function* (input: {
       readonly threadId: ThreadId
+      readonly sourceSequence: number
       readonly cwd: string
       readonly messageText: string
       readonly attachments?: ReadonlyArray<ChatAttachment>
@@ -1487,12 +1504,18 @@ const make = Effect.gen(function* ()
           return
         }
 
-        yield* orchestrationEngine.dispatch({
-          type: 'thread.meta.update',
-          commandId: yield* serverCommandId('thread-title-rename'),
-          threadId: input.threadId,
-          title: generated.title,
-        })
+        yield* orchestrationEngine.dispatchInternal(
+          {
+            type: 'thread.meta.update',
+            commandId: yield* serverCommandId('thread-title-rename'),
+            threadId: input.threadId,
+            title: generated.title,
+          },
+          {
+            sourceKind: 'domain-event',
+            sourceSequence: input.sourceSequence,
+          },
+        )
       }).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning('provider command reactor failed to generate or rename thread title', {
@@ -1578,6 +1601,9 @@ const make = Effect.gen(function* ()
         ? { modelSelection: event.payload.modelSelection }
         : {}),
       interactionMode: event.payload.interactionMode,
+      ...(event.payload.orchestrate !== undefined
+        ? { orchestrate: event.payload.orchestrate }
+        : {}),
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.map(Option.some),
@@ -2076,10 +2102,11 @@ const make = Effect.gen(function* ()
       })
     }
 
+    const collaborationMode = normalizeCollaborationMode(thread.interactionMode, thread.orchestrate)
     yield* buildSendTurnRequestForThread({
       threadId: event.payload.threadId,
       messageText: buildOrchestratePlanResponseEnvelope(event.payload),
-      interactionMode: 'orchestrate',
+      ...toWireInteractionMode({ ...collaborationMode, orchestrate: true }),
       createdAt: event.payload.createdAt,
     }).pipe(
       Effect.flatMap((built) =>
@@ -2235,7 +2262,7 @@ const make = Effect.gen(function* ()
   // publish the pre-turn snapshot at the provider boundary so neither the
   // provider session nor the turn can mutate workspace bytes first
   const ensurePreTurnBaselineBeforeProvider = Effect.fn('ensurePreTurnBaselineBeforeProvider')(
-    function* ()
+    function* (capturedAt: string)
     {
       const environment = requireActiveEnvironment()
       const thread = environment.thread
@@ -2261,17 +2288,41 @@ const make = Effect.gen(function* ()
         cwd: checkpointCwd,
         checkpointRef,
       })
-      if (baselineExists)
+      let publishedCommitOid: string | undefined
+      if (!baselineExists)
       {
-        return
+        // the ref is the reusable half of the transaction. retries publish only
+        // when absent, but always replay the deterministic domain record below.
+        const publication = yield* checkpointStore.captureCheckpoint({
+          cwd: checkpointCwd,
+          checkpointRef,
+          expected: { kind: 'absent' },
+        })
+        if (publication.outcome === 'published')
+        {
+          publishedCommitOid = publication.commitOid
+        }
       }
 
-      // a concurrent checkpoint lane may win this CAS; either outcome means a
-      // durable baseline exists before provider execution is allowed to proceed
-      yield* checkpointStore.captureCheckpoint({
+      // the event is committed before provider invocation so turn zero has the
+      // same durable root/common-dir/OID evidence as every completed turn
+      const identity = yield* checkpointIdentity.resolveCapture({
         cwd: checkpointCwd,
         checkpointRef,
-        expected: { kind: 'absent' },
+        checkpointTurnCount: currentTurnCount,
+        ...(publishedCommitOid === undefined ? {} : { expectedCommitOid: publishedCommitOid }),
+      })
+      yield* orchestrationEngine.dispatch({
+        type: 'thread.checkpoint.baseline.record',
+        commandId: yield* serverCommandId('checkpoint-baseline-record'),
+        threadId: thread.id,
+        checkpointTurnCount: currentTurnCount,
+        checkpointRef,
+        checkpointCaptureRoot: identity.checkpointCaptureRoot,
+        checkpointRepositoryCommonDir: identity.checkpointRepositoryCommonDir,
+        checkpointCommitOid: identity.checkpointCommitOid,
+        capturedAt,
+        createdAt: capturedAt,
       })
     },
   )
@@ -2676,7 +2727,7 @@ const make = Effect.gen(function* ()
         {
           if (providerEvent.type === 'thread.turn-start-requested')
           {
-            yield* ensurePreTurnBaselineBeforeProvider()
+            yield* ensurePreTurnBaselineBeforeProvider(providerEvent.payload.createdAt)
           }
           return yield* processDomainEvent(providerEvent)
         }
@@ -2704,6 +2755,7 @@ const make = Effect.gen(function* ()
         {
           return yield* maybeGenerateAndRenameWorktreeBranchForFirstTurn({
             threadId: thread.id,
+            sourceSequence: providerEvent.sequence,
             branch: thread.branch,
             worktreePath: thread.worktreePath,
             messageText: message.text,
@@ -2712,6 +2764,7 @@ const make = Effect.gen(function* ()
         }
         return yield* maybeGenerateThreadTitleForFirstTurn({
           threadId: thread.id,
+          sourceSequence: providerEvent.sequence,
           cwd: activeEnvironment.titleGenerationCwd,
           messageText: message.text,
           ...(message.attachments === undefined ? {} : { attachments: message.attachments }),

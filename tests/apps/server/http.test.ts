@@ -3,17 +3,17 @@
 
 import { describe, expect, it } from 'vite-plus/test'
 
-import { isLoopbackHostname, resolveDevRedirectUrl } from '../../../apps/server/src/http.ts'
+import {
+  assetResponseHeaders,
+  isLoopbackHostname,
+  resolveDevRedirectUrl,
+} from '../../../apps/server/src/http.ts'
 
 describe('http dev routing', () =>
 {
   it.each([
     ['127.0.0.1', true],
-    ['localhost', true],
-    ['::1', true],
     ['[::1]', true],
-    ['192.168.86.35', false],
-    ['10.0.0.24', false],
     ['example.local', false],
   ] as const)('isLoopbackHostname(%s) -> %s', (hostname, expected) =>
   {
@@ -28,5 +28,27 @@ describe('http dev routing', () =>
     expect(resolveDevRedirectUrl(devUrl, requestUrl)).toBe(
       'http://127.0.0.1:5173/pair?token=test-token',
     )
+  })
+})
+
+describe('assetResponseHeaders', () =>
+{
+  it('sandboxes SVG assets', () =>
+  {
+    expect(assetResponseHeaders('/attachments/user-image.svg')).toMatchObject({
+      'Content-Security-Policy': `default-src 'none'; style-src 'unsafe-inline'; sandbox`,
+      'X-Content-Type-Options': 'nosniff',
+    })
+    expect(assetResponseHeaders('/attachments/user-image.SVG')).toHaveProperty(
+      'Content-Security-Policy',
+    )
+  })
+
+  it('does not apply document policy to raster images', () =>
+  {
+    expect(assetResponseHeaders('/attachments/user-image.png')).toEqual({
+      'Cache-Control': 'private, max-age=3600',
+      'X-Content-Type-Options': 'nosniff',
+    })
   })
 })

@@ -164,6 +164,10 @@ const make = Effect.gen(function* ()
       RETRY_CAP_MS,
       RETRY_BASE_MS * 2 ** Math.max(0, action.attemptCount - 1),
     )
+    if (status !== 'retryable' && lane.definition.onBlocked !== undefined)
+    {
+      yield* lane.definition.onBlocked({ action, cause, status })
+    }
     yield* delivery.recordOutcome({
       actionId: action.actionId,
       ownerId: lane.ownerId,

@@ -25,6 +25,10 @@ export type PlanStep = {
 export function classifyToolItemType(toolName: string): CanonicalItemType
 {
   const normalized = toolName.toLowerCase()
+  if (normalized.includes('mcp'))
+  {
+    return 'mcp_tool_call'
+  }
   if (normalized.includes('agent'))
   {
     return 'collab_agent_tool_call'
@@ -48,21 +52,22 @@ export function classifyToolItemType(toolName: string): CanonicalItemType
   {
     return 'command_execution'
   }
+  // the read-only veto comes first because 'file' matches read_file,
+  // get_file_metadata and search_files just as well as write_file, and a
+  // file_change row is read downstream as evidence that the turn wrote something.
+  // the unlowercased name goes in so camelCase still splits into words
   if (
-    normalized.includes('edit') ||
-    normalized.includes('write') ||
-    normalized.includes('file') ||
-    normalized.includes('patch') ||
-    normalized.includes('replace') ||
-    normalized.includes('create') ||
-    normalized.includes('delete')
+    !isReadOnlyToolName(toolName) &&
+    (normalized.includes('edit') ||
+      normalized.includes('write') ||
+      normalized.includes('file') ||
+      normalized.includes('patch') ||
+      normalized.includes('replace') ||
+      normalized.includes('create') ||
+      normalized.includes('delete'))
   )
   {
     return 'file_change'
-  }
-  if (normalized.includes('mcp'))
-  {
-    return 'mcp_tool_call'
   }
   if (normalized.includes('websearch') || normalized.includes('web search'))
   {
@@ -75,17 +80,39 @@ export function classifyToolItemType(toolName: string): CanonicalItemType
   return 'dynamic_tool_call'
 }
 
+// the read families an mcp server names its tools after: read_file,
+// list_recent_files, searchFiles, get_file_metadata. every one of them carries a
+// path argument and none of them writes it
+const READ_ONLY_TOOL_WORDS: ReadonlySet<string> = new Set([
+  'read',
+  'reads',
+  'view',
+  'views',
+  'grep',
+  'glob',
+  'search',
+  'searches',
+  'list',
+  'lists',
+  'get',
+  'fetch',
+])
+
+// whole words rather than substrings: 'read' sits inside 'spreadsheet' and
+// 'thread', and vetoing create_spreadsheet as a read would be the same class of
+// mistake in the other direction
+function toolNameWords(toolName: string): ReadonlyArray<string>
+{
+  return toolName
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((word) => word.length > 0)
+}
+
 function isReadOnlyToolName(toolName: string): boolean
 {
-  const normalized = toolName.toLowerCase()
-  return (
-    normalized === 'read' ||
-    normalized.includes('read file') ||
-    normalized.includes('view') ||
-    normalized.includes('grep') ||
-    normalized.includes('glob') ||
-    normalized.includes('search')
-  )
+  return toolNameWords(toolName).some((word) => READ_ONLY_TOOL_WORDS.has(word))
 }
 
 export function classifyRequestType(toolName: string): CanonicalRequestType

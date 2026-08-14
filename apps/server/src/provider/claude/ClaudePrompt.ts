@@ -3,6 +3,7 @@
 
 import type { SDKUserMessage } from '@anthropic-ai/claude-agent-sdk'
 import type { ModelSelection, ProviderInstanceId } from '@t3tools/contracts'
+import { isBareProviderSlashCommand } from '@t3tools/shared/composerTrigger'
 import {
   applyClaudePromptEffortPrefix,
   getModelSelectionStringOptionValue,
@@ -41,10 +42,16 @@ export function buildPromptText(
   input: {
     readonly input?: string | undefined
     readonly modelSelection?: ModelSelection | undefined
+    readonly attachments?: ReadonlyArray<unknown> | undefined
   },
   boundInstanceId: ProviderInstanceId,
 ): string
 {
+  const text = input.input?.trim() ?? ''
+  if ((input.attachments?.length ?? 0) === 0 && isBareProviderSlashCommand(text))
+  {
+    return text
+  }
   const rawEffort =
     input.modelSelection?.instanceId === boundInstanceId
       ? getModelSelectionStringOptionValue(input.modelSelection, 'effort')
@@ -54,7 +61,7 @@ export function buildPromptText(
   const caps = getClaudeModelCapabilities(claudeModel)
 
   const promptEffort = resolvePromptInjectedEffort(caps, rawEffort)
-  return applyClaudePromptEffortPrefix(input.input?.trim() ?? '', promptEffort)
+  return applyClaudePromptEffortPrefix(text, promptEffort)
 }
 
 export function buildUserMessage(input: {

@@ -16,6 +16,10 @@ const bundledPackagePrefixes = [
 
 export function shouldBundleCliDependency(id: string): boolean
 {
+  if (id === '@t3tools/cartographer-core' || id.startsWith('@t3tools/cartographer-core/'))
+  {
+    return false
+  }
   return bundledPackagePrefixes.some((prefix) => id.startsWith(prefix))
 }
 
@@ -28,7 +32,7 @@ export default mergeConfig(
       tasks: {
         build: {
           command: 'node scripts/cli.ts build',
-          dependsOn: ['@t3tools/web#build'],
+          dependsOn: ['@t3tools/cartographer-core#build', '@t3tools/web#build'],
           cache: false,
         },
       },

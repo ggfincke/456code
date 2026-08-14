@@ -2,7 +2,7 @@
 // verify server runtime startup behavior
 
 import * as NodeServices from '@effect/platform-node/NodeServices'
-import { DEFAULT_MODEL, ProjectId, ProviderInstanceId, ThreadId } from '@t3tools/contracts'
+import { ProjectId, ThreadId } from '@t3tools/contracts'
 import { assert, it } from '@effect/vitest'
 import * as Crypto from 'effect/Crypto'
 import * as Deferred from 'effect/Deferred'
@@ -15,6 +15,7 @@ import * as Stream from 'effect/Stream'
 import * as TestClock from 'effect/testing/TestClock'
 
 import * as ServerConfig from '../../../apps/server/src/config.ts'
+import * as ImportService from '../../../apps/server/src/import/importService.ts'
 import { PersistenceSqlError } from '../../../apps/server/src/persistence/Errors.ts'
 import * as ProposalRetainedRefReconciler from '../../../apps/server/src/proposal/ProposalRetainedRefReconciler.ts'
 import * as OrchestrationEngine from '../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
@@ -22,29 +23,6 @@ import * as ProjectionSnapshotQuery from '../../../apps/server/src/orchestration
 import * as AnalyticsService from '../../../apps/server/src/telemetry/Services/AnalyticsService.ts'
 import * as ServerRuntimeStartup from '../../../apps/server/src/serverRuntimeStartup.ts'
 import { makeProjectionSnapshotQueryStub } from './projectionSnapshotQueryTestHelpers.ts'
-
-const emptyReconciliationReport = {
-  reportVersion: 1,
-  enumerated: 0,
-  candidates: 0,
-  live: 0,
-  grace: 0,
-  malformed: 0,
-  manualSkip: 0,
-  budgetExceeded: false,
-  deleteAttempted: 0,
-  deleteSucceeded: 0,
-  deleteFailed: 0,
-  items: [],
-} as const
-
-it('uses the canonical Codex default for auto-bootstrapped model selection', () =>
-{
-  assert.deepStrictEqual(ServerRuntimeStartup.getAutoBootstrapDefaultModelSelection(), {
-    instanceId: ProviderInstanceId.make('codex'),
-    model: DEFAULT_MODEL,
-  })
-})
 
 it.effect('enqueueCommand waits for readiness and then drains queued work', () =>
   Effect.scoped(
@@ -164,58 +142,6 @@ it.effect('enqueueCommand fails queued work when readiness fails', () =>
   ),
 )
 
-it.effect('runs cartographer embed reconciliation before command readiness', () =>
-  Effect.scoped(
-    Effect.gen(function* ()
-    {
-      const events = yield* Ref.make<ReadonlyArray<string>>([])
-      const commandGate = yield* ServerRuntimeStartup.makeCommandGate
-
-      yield* ServerRuntimeStartup.runCartographerEmbedReconciliation(
-        Ref.update(events, (current) => [...current, 'reconciliation']).pipe(
-          Effect.as(emptyReconciliationReport),
-        ),
-      )
-      yield* Ref.update(events, (current) => [...current, 'command-ready'])
-      yield* commandGate.signalCommandReady
-
-      assert.deepStrictEqual(yield* Ref.get(events), ['reconciliation', 'command-ready'])
-      yield* commandGate.awaitCommandReady
-    }),
-  ),
-)
-
-it.effect('bounds cartographer embed reconciliation to 250 ms', () =>
-  Effect.scoped(
-    Effect.gen(function* ()
-    {
-      const reconciliationFiber = yield* ServerRuntimeStartup.runCartographerEmbedReconciliation(
-        Effect.never,
-      ).pipe(Effect.forkScoped)
-      yield* Effect.yieldNow
-      yield* TestClock.adjust('250 millis')
-
-      yield* Fiber.join(reconciliationFiber)
-    }).pipe(Effect.provide(TestClock.layer())),
-  ),
-)
-
-it.effect('does not let a cartographer reconciliation defect fail command readiness', () =>
-  Effect.scoped(
-    Effect.gen(function* ()
-    {
-      const commandGate = yield* ServerRuntimeStartup.makeCommandGate
-
-      yield* ServerRuntimeStartup.runCartographerEmbedReconciliation(
-        Effect.die('reconciliation defect'),
-      )
-      yield* commandGate.signalCommandReady
-
-      yield* commandGate.awaitCommandReady
-    }),
-  ),
-)
-
 it.effect('launchStartupHeartbeat does not block the caller while counts are loading', () =>
   Effect.scoped(
     Effect.gen(function* ()
@@ -242,6 +168,71 @@ it.effect('launchStartupHeartbeat does not block the caller while counts are loa
       )
     }),
   ),
+)
+
+it.effect('inventories import replacements before source-independent startup recovery', () =>
+  Effect.gen(function* ()
+  {
+    const calls = yield* Ref.make<ReadonlyArray<string>>([])
+    const emptyReport: ImportService.ImportReplacementRecoveryReport = {
+      openIntentCount: 0,
+      recoveredCount: 0,
+      awaitingSourceRetryCount: 0,
+      manualCount: 0,
+      blockedCount: 0,
+      items: [],
+    }
+
+    yield* ServerRuntimeStartup.runImportReplacementStartupRecovery.pipe(
+      Effect.provideService(
+        ImportService.ImportService,
+        ImportService.ImportService.of({
+          importSessions: () => Effect.die('startup must not execute an import request'),
+          inspectOpenReplacementIntents: Ref.update(calls, (items) => [...items, 'inventory']).pipe(
+            Effect.as(emptyReport),
+          ),
+          recoverOpenReplacementIntents: Ref.update(calls, (items) => [...items, 'recover']).pipe(
+            Effect.as(emptyReport),
+          ),
+        }),
+      ),
+    )
+
+    assert.deepStrictEqual(yield* Ref.get(calls), ['inventory', 'recover'])
+  }),
+)
+
+it.effect('does not recover import replacements when read-only inventory fails', () =>
+  Effect.gen(function* ()
+  {
+    const recoveryCount = yield* Ref.make(0)
+    const inventoryError = new PersistenceSqlError({
+      operation: 'serverRuntimeStartup.test.import-inventory',
+    })
+    const error = yield* ServerRuntimeStartup.runImportReplacementStartupRecovery.pipe(
+      Effect.provideService(
+        ImportService.ImportService,
+        ImportService.ImportService.of({
+          importSessions: () => Effect.die('startup must not execute an import request'),
+          inspectOpenReplacementIntents: Effect.fail(inventoryError),
+          recoverOpenReplacementIntents: Ref.update(recoveryCount, (count) => count + 1).pipe(
+            Effect.as({
+              openIntentCount: 0,
+              recoveredCount: 0,
+              awaitingSourceRetryCount: 0,
+              manualCount: 0,
+              blockedCount: 0,
+              items: [],
+            }),
+          ),
+        }),
+      ),
+      Effect.flip,
+    )
+
+    assert.equal(error, inventoryError)
+    assert.equal(yield* Ref.get(recoveryCount), 0)
+  }),
 )
 
 it.effect('proposal retained-ref reconciliation failure cannot fail startup readiness', () =>
@@ -341,6 +332,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets returns existing project and threa
           Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
             Effect.as({ sequence: 1 }),
           ),
+        dispatchInternal: () => Effect.succeed({ sequence: 1 }),
         streamDomainEvents: Stream.empty,
         streamDomainEventsForAggregate: () => Stream.empty,
         latestSequence: Effect.succeed(0),
@@ -378,6 +370,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets creates a project and thread when 
           Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
             Effect.as({ sequence: 1 }),
           ),
+        dispatchInternal: () => Effect.succeed({ sequence: 1 }),
         streamDomainEvents: Stream.empty,
         streamDomainEventsForAggregate: () => Stream.empty,
         latestSequence: Effect.succeed(0),
@@ -420,6 +413,7 @@ it.effect('resolveAutoBootstrapWelcomeTargets preserves typed UUID generation fa
           Ref.update(dispatchCalls, (calls) => [...calls, command.type]).pipe(
             Effect.as({ sequence: 1 }),
           ),
+        dispatchInternal: () => Effect.succeed({ sequence: 1 }),
         streamDomainEvents: Stream.empty,
         streamDomainEventsForAggregate: () => Stream.empty,
         latestSequence: Effect.succeed(0),

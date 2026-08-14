@@ -19,6 +19,7 @@ import {
   readEnvironmentFromWindowsShell,
   readPathFromLaunchctl,
   readPathFromLoginShell,
+  prepareSpawnCommandForPlatform,
   resolveCommandPath,
   resolveKnownWindowsCliDirs,
   resolveSpawnCommand,
@@ -61,6 +62,39 @@ describe('extractPathFromShellOutput', () =>
   it('returns null when the markers are missing', () =>
   {
     expect(extractPathFromShellOutput('/opt/homebrew/bin /usr/bin')).toBeNull()
+  })
+})
+
+describe('prepareSpawnCommandForPlatform', () =>
+{
+  it('escapes Windows command shims and dynamic paths before enabling shell mode', () =>
+  {
+    const command = prepareSpawnCommandForPlatform(
+      'C:\\Users\\Build User\\npm & tools\\npm.cmd',
+      ['install', 'C:\\release smoke\\456code & preview.tgz'],
+      'win32',
+    )
+
+    expect(command.shell).toBe(true)
+    expect(command.command).not.toContain(' & ')
+    expect(command.command).toContain('^&')
+    expect(command.args[1]).not.toContain(' & ')
+    expect(command.args[1]).toContain('^&')
+  })
+
+  it('keeps POSIX commands and arguments out of shell mode', () =>
+  {
+    expect(
+      prepareSpawnCommandForPlatform(
+        '/tmp/release smoke/npm',
+        ['install', '/tmp/a & b.tgz'],
+        'linux',
+      ),
+    ).toEqual({
+      command: '/tmp/release smoke/npm',
+      args: ['install', '/tmp/a & b.tgz'],
+      shell: false,
+    })
   })
 })
 

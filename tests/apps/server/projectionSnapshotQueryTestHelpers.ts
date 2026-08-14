@@ -26,10 +26,16 @@ export const makeProjectionSnapshotQueryStub = (
     Effect.die('unexpected ProjectionSnapshotQuery.getThreadCheckpointContext'),
   getFullThreadDiffContext: () =>
     Effect.die('unexpected ProjectionSnapshotQuery.getFullThreadDiffContext'),
+  getCheckpointIdentity: () =>
+    Effect.die('unexpected ProjectionSnapshotQuery.getCheckpointIdentity'),
   getThreadShellById: () => Effect.die('unexpected ProjectionSnapshotQuery.getThreadShellById'),
   isThreadImportFinalized: () =>
     Effect.die('unexpected ProjectionSnapshotQuery.isThreadImportFinalized'),
   getThreadDetailById: () => Effect.die('unexpected ProjectionSnapshotQuery.getThreadDetailById'),
+  getOrchestrateRunExecution: () =>
+    Effect.die('unexpected ProjectionSnapshotQuery.getOrchestrateRunExecution'),
+  getCurrentOrchestrateRunExecution: () =>
+    Effect.die('unexpected ProjectionSnapshotQuery.getCurrentOrchestrateRunExecution'),
   getThreadDetailSnapshot: () =>
     Effect.die('unexpected ProjectionSnapshotQuery.getThreadDetailSnapshot'),
   ...overrides,

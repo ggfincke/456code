@@ -13,13 +13,16 @@ import * as Schema from 'effect/Schema'
 import { Command, Flag } from 'effect/unstable/cli'
 import { ChildProcess, ChildProcessSpawner } from 'effect/unstable/process'
 
+import cartographerCorePackageJson from '../../../packages/cartographer-core/package.json' with { type: 'json' }
 import {
   DEVELOPMENT_ICON_OVERRIDES,
   resolveWebAssetBrandForPackageVersion,
   resolveWebIconOverrides,
 } from '../../../scripts/lib/brand-assets.ts'
-import { resolveCatalogDependencies } from '../../../scripts/lib/resolve-catalog.ts'
-import { fromJsonStringPretty } from '@t3tools/shared/schemaJson'
+import {
+  assertPackedServerArchive,
+  stageServerPublishPackage,
+} from '../../../scripts/lib/server-publish-package.ts'
 import { fromYaml } from '@t3tools/shared/schemaYaml'
 import { resolveSpawnCommand } from '@t3tools/shared/shell'
 import serverPackageJson from '../package.json' with { type: 'json' }
@@ -28,33 +31,13 @@ import {
   ServerCliCommandExitError,
   ServerCliDevelopmentIconSourceMissingError,
   ServerCliDevelopmentIconTargetMissingError,
+  ServerCliPackOutputError,
   ServerCliPublishIconSourceMissingError,
   ServerCliPublishIconTargetMissingError,
 } from './cliErrors.ts'
 
-interface PackageJson
-{
-  name: string
-  repository: {
-    type: string
-    url: string
-    directory: string
-  }
-  bin: Record<string, string>
-  type: string
-  version: string
-  engines: Record<string, string>
-  files: string[]
-  dependencies: Record<string, string>
-  overrides: Record<string, string>
-}
-
-const PackageJsonPrettyJson = fromJsonStringPretty(Schema.Unknown)
-const encodePackageJson = Schema.encodeEffect(PackageJsonPrettyJson)
-
 const WorkspaceConfig = Schema.Struct({
   catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
-  overrides: Schema.optional(Schema.Record(Schema.String, Schema.String)),
 })
 type WorkspaceConfig = typeof WorkspaceConfig.Type
 const decodeWorkspaceConfig = Schema.decodeEffect(fromYaml(WorkspaceConfig))
@@ -101,6 +84,7 @@ const preparePublishIcons = Effect.fn('preparePublishIcons')(function* (
   const icons = resolveWebIconOverrides(brand, 'dist/client').map((override) => ({
     sourcePath: path.join(repoRoot, override.sourceRelativePath),
     targetPath: path.join(serverDir, override.targetRelativePath),
+    targetRelativePath: override.targetRelativePath,
   }))
 
   for (const icon of icons)
@@ -116,10 +100,7 @@ const preparePublishIcons = Effect.fn('preparePublishIcons')(function* (
   }
 
   return yield* Effect.forEach(icons, (icon) =>
-    Effect.all({
-      original: fs.readFile(icon.targetPath),
-      publish: fs.readFile(icon.sourcePath),
-    }).pipe(Effect.map((contents) => ({ ...icon, ...contents }))),
+    fs.readFile(icon.sourcePath).pipe(Effect.map((publish) => ({ ...icon, publish }))),
   )
 })
 
@@ -200,23 +181,19 @@ interface PublishCommandConfig
   readonly tag: string
   readonly provenance: boolean
   readonly dryRun: boolean
+  readonly verbose: boolean
 }
 
-const createVpPmPublishArgs = (config: PublishCommandConfig): ReadonlyArray<string> =>
+const createNpmPublishArgs = (
+  config: PublishCommandConfig,
+  archivePath: string,
+): ReadonlyArray<string> =>
 {
-  const args = [
-    'publish',
-    '--filter',
-    '456code',
-    '--access',
-    config.access,
-    '--tag',
-    config.tag,
-    '--no-git-checks',
-  ]
+  const args = ['publish', archivePath, '--access', config.access, '--tag', config.tag]
 
   if (config.provenance) args.push('--provenance')
   if (config.dryRun) args.push('--dry-run')
+  if (!config.verbose) args.push('--loglevel', 'error')
 
   return args
 }
@@ -238,88 +215,128 @@ const publishCmd = Command.make(
       const fs = yield* FileSystem.FileSystem
       const repoRoot = yield* RepoRoot
       const serverDir = path.join(repoRoot, 'apps/server')
-      const packageJsonPath = path.join(serverDir, 'package.json')
 
       // assert build assets exist
-      for (const relPath of ['dist/bin.mjs', 'dist/client/index.html'])
+      for (const relPath of [
+        'apps/server/dist/bin.mjs',
+        'apps/server/dist/client/index.html',
+        'packages/cartographer-core/dist/index.js',
+        'packages/cartographer-core/dist/contracts/index.js',
+        'packages/cartographer-core/dist/server.js',
+        'packages/cartographer-core/dist/cli/index.js',
+        'packages/cartographer-core/dist/mcp/bin.js',
+        'packages/cartographer-core/dist/mcp/server.js',
+      ])
       {
-        const abs = path.join(serverDir, relPath)
+        const abs = path.join(repoRoot, relPath)
         if (!(yield* fs.exists(abs)))
         {
           return yield* new ServerCliBuildAssetMissingError({ assetPath: abs })
         }
       }
 
-      yield* Effect.acquireUseRelease(
-        // acquire: resolve publish metadata and read every original before mutation.
-        Effect.gen(function* ()
-        {
-          const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version)
-          const workspaceConfig = yield* readWorkspaceConfig()
-          const workspaceCatalog = workspaceConfig.catalog ?? {}
-          const workspaceOverrides = workspaceConfig.overrides ?? {}
-          const pkg: PackageJson = {
-            name: serverPackageJson.name,
-            repository: serverPackageJson.repository,
-            bin: serverPackageJson.bin,
-            type: serverPackageJson.type,
-            version,
-            engines: serverPackageJson.engines,
-            files: serverPackageJson.files,
-            dependencies: resolveCatalogDependencies(
-              serverPackageJson.dependencies,
-              workspaceCatalog,
-              'apps/server',
-            ),
-            overrides: resolveCatalogDependencies(
-              workspaceOverrides,
-              workspaceCatalog,
-              'apps/server',
-            ),
-          }
+      const version = Option.getOrElse(config.appVersion, () => serverPackageJson.version)
+      const workspaceConfig = yield* readWorkspaceConfig()
+      const publishRoot = yield* fs.makeTempDirectoryScoped({ prefix: '456code-npm-publish-' })
+      const stageDirectory = path.join(publishRoot, 'package')
+      const packDirectory = path.join(publishRoot, 'packed')
+      const cartographerDeployDirectory = path.join(publishRoot, 'cartographer-core-deploy')
+      const icons = yield* preparePublishIcons(repoRoot, serverDir, version)
 
-          return {
-            packageJsonString: yield* encodePackageJson(pkg),
-            originalPackageJson: yield* fs.readFile(packageJsonPath),
-            icons: yield* preparePublishIcons(repoRoot, serverDir, version),
-          }
+      const deployArgs = [
+        '--config.node-linker=hoisted',
+        '--config.allow-unused-patches=true',
+        '--ignore-scripts',
+        '--frozen-lockfile',
+        '--filter',
+        cartographerCorePackageJson.name,
+        'deploy',
+        '--prod',
+        '--legacy',
+        cartographerDeployDirectory,
+      ]
+      const deployCommand = yield* resolveSpawnCommand('pnpm', deployArgs)
+      yield* Effect.log('[cli] Staging the lockfile-backed Cartographer dependency closure')
+      yield* runCommand(
+        ChildProcess.make(deployCommand.command, deployCommand.args, {
+          cwd: repoRoot,
+          stdout: config.verbose ? 'inherit' : 'ignore',
+          stderr: 'inherit',
+          shell: deployCommand.shell,
         }),
-        // use: pnpm publish from the workspace root so pnpm-only workspace
-        // config, including override selectors, is interpreted correctly.
-        (resource) =>
-          Effect.gen(function* ()
-          {
-            yield* fs.writeFileString(packageJsonPath, `${resource.packageJsonString}\n`)
-            for (const icon of resource.icons)
-            {
-              yield* fs.writeFile(icon.targetPath, icon.publish)
-            }
-            yield* Effect.log('[cli] Applied package metadata and publish icon overrides')
+      )
 
-            const args = createVpPmPublishArgs(config)
-            const spawnCommand = yield* resolveSpawnCommand('vp', ['pm', ...args])
+      stageServerPublishPackage({
+        repoRoot,
+        stageDirectory,
+        version,
+        serverManifest: serverPackageJson,
+        cartographerCoreManifest: cartographerCorePackageJson,
+        workspaceCatalog: workspaceConfig.catalog ?? {},
+        cartographerDependencyClosureDirectory: path.join(
+          cartographerDeployDirectory,
+          'node_modules',
+        ),
+      })
+      for (const icon of icons)
+      {
+        yield* fs.writeFile(path.join(stageDirectory, icon.targetRelativePath), icon.publish)
+      }
+      yield* Effect.log('[cli] Staged package metadata, Cartographer runtime, and publish icons')
 
-            yield* Effect.log(`[cli] Running: vp pm ${args.join(' ')}`)
-            yield* runCommand(
-              ChildProcess.make(spawnCommand.command, spawnCommand.args, {
-                cwd: repoRoot,
-                stdout: config.verbose ? 'inherit' : 'ignore',
-                stderr: 'inherit',
-                shell: spawnCommand.shell,
-              }),
-            )
-          }),
-        // release: restore every file even if applying overrides or publishing fails.
-        (resource) =>
-          Effect.gen(function* ()
-          {
-            yield* fs.writeFile(packageJsonPath, resource.originalPackageJson)
-            for (const icon of resource.icons)
-            {
-              yield* fs.writeFile(icon.targetPath, icon.original)
-            }
-            if (config.verbose) yield* Effect.log('[cli] Restored original publish assets')
-          }),
+      yield* fs.makeDirectory(packDirectory, { recursive: true })
+      const packArgs = [
+        'pack',
+        '--pack-destination',
+        packDirectory,
+        ...(config.verbose ? [] : ['--loglevel', 'error']),
+      ]
+      const packCommand = yield* resolveSpawnCommand('npm', packArgs)
+      yield* Effect.log(`[cli] Running: npm ${packArgs.join(' ')}`)
+      yield* runCommand(
+        ChildProcess.make(packCommand.command, packCommand.args, {
+          cwd: stageDirectory,
+          stdout: config.verbose ? 'inherit' : 'ignore',
+          stderr: 'inherit',
+          shell: packCommand.shell,
+        }),
+      )
+
+      const archiveFiles = (yield* fs.readDirectory(packDirectory)).filter((entry) =>
+        entry.endsWith('.tgz'),
+      )
+      if (archiveFiles.length !== 1)
+      {
+        return yield* new ServerCliPackOutputError({ packDirectory, archiveFiles })
+      }
+      const archivePath = path.join(packDirectory, archiveFiles[0]!)
+      assertPackedServerArchive(archivePath)
+
+      const smokeScript = path.join(repoRoot, 'scripts/smoke-packed-cli.ts')
+      yield* Effect.log('[cli] Validating the exact packed archive in clean npm and pnpm consumers')
+      yield* runCommand(
+        ChildProcess.make(process.execPath, [smokeScript, '--archive', archivePath], {
+          cwd: repoRoot,
+          stdout: config.verbose ? 'inherit' : 'ignore',
+          stderr: 'inherit',
+          shell: false,
+        }),
+      )
+      yield* Effect.log('[cli] Exact packed archive validation passed')
+
+      const publishArgs = createNpmPublishArgs(config, archivePath)
+      const publishCommand = yield* resolveSpawnCommand('npm', publishArgs)
+      yield* Effect.log(`[cli] Running: npm ${publishArgs.join(' ')}`)
+      yield* runCommand(
+        ChildProcess.make(publishCommand.command, publishCommand.args, {
+          cwd: publishRoot,
+          stdout: config.verbose ? 'inherit' : 'ignore',
+          stderr: 'inherit',
+          shell: publishCommand.shell,
+        }),
+      )
+      yield* Effect.log(
+        config.dryRun ? '[cli] npm publish dry run passed' : '[cli] npm publish passed',
       )
     }),
 ).pipe(Command.withDescription('Publish the server package to npm.'))

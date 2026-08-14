@@ -32,24 +32,20 @@ const decodeAutomationStatus = Schema.decodeUnknownSync(PreviewAutomationStatus)
 
 describe('PreviewNavStatus', () =>
 {
-  it('decodes Loading', () =>
+  it('decodes Loading and rejects empty url', () =>
   {
     expect(decodeNavStatus({ _tag: 'Loading', url: 'http://localhost:5173/', title: '' })).toEqual({
       _tag: 'Loading',
       url: 'http://localhost:5173/',
       title: '',
     })
-  })
-
-  it('rejects empty url', () =>
-  {
     expect(() => decodeNavStatus({ _tag: 'Loading', url: '', title: '' })).toThrow()
   })
 })
 
 describe('PreviewViewportSetting', () =>
 {
-  it('decodes fill, freeform, and preset modes', () =>
+  it('decodes fill/freeform/preset modes and rejects unsafe dimensions', () =>
   {
     expect(decodeViewport({ _tag: 'fill' })).toEqual({ _tag: 'fill' })
     expect(decodeViewport({ _tag: 'freeform', width: 1024, height: 768 })).toEqual({
@@ -65,10 +61,7 @@ describe('PreviewViewportSetting', () =>
         height: 852,
       }),
     ).toMatchObject({ _tag: 'preset', presetId: 'iphone-15-pro' })
-  })
 
-  it('rejects unsafe dimensions and oversized render areas', () =>
-  {
     expect(() => decodeViewport({ _tag: 'freeform', width: 100, height: 800 })).toThrow()
     expect(() => decodeViewport({ _tag: 'freeform', width: 3840, height: 3840 })).toThrow()
   })

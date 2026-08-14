@@ -67,7 +67,7 @@ describe('provider slug validation (shared by driver + instance ids)', () =>
 
 describe('ProviderInstanceRef', () =>
 {
-  it('decodes a driver ref', () =>
+  it('decodes a driver ref and rejects invalid driver slugs', () =>
   {
     const ref = decodeProviderInstanceRef({
       instanceId: 'codex_work',
@@ -75,10 +75,7 @@ describe('ProviderInstanceRef', () =>
     })
     expect(ref.instanceId).toBe('codex_work')
     expect(ref.driver).toBe('codex')
-  })
 
-  it('rejects refs whose driver field is not a valid slug', () =>
-  {
     expect(() =>
       decodeProviderInstanceRef({
         instanceId: 'codex',

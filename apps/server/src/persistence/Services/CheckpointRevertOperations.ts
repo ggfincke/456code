@@ -8,8 +8,10 @@ import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 
 import type { PersistenceSqlError } from '../Errors.ts'
+import { ProviderRuntimeSessionIdentity } from './ProviderRuntimeInbox.ts'
 
 export const CheckpointRevertPhase = Schema.Literals([
+  'requested',
   'admitted',
   'target-staged',
   'restore-ready',
@@ -37,16 +39,22 @@ export const CheckpointRevertOperation = Schema.Struct({
   threadId: Schema.String,
   targetRef: Schema.String,
   targetTurnCount: NonNegativeInt,
+  requestSourceSequence: NonNegativeInt,
+  providerInboxHighWater: NonNegativeInt,
   targetTree: Schema.NullOr(Schema.String),
-  cwd: Schema.String,
+  cwd: Schema.NullOr(Schema.String),
+  checkpointCaptureRoot: Schema.NullOr(Schema.String),
   repositoryCommonDir: Schema.NullOr(Schema.String),
+  checkpointCommitOid: Schema.NullOr(Schema.String),
   stagePath: Schema.NullOr(Schema.String),
   phase: CheckpointRevertPhase,
   attemptCount: NonNegativeInt,
   lastError: Schema.NullOr(Schema.String),
-  providerInstanceId: Schema.NullOr(Schema.String),
+  provider: Schema.NullOr(ProviderRuntimeSessionIdentity.fields.provider),
+  providerInstanceId: Schema.NullOr(ProviderRuntimeSessionIdentity.fields.providerInstanceId),
   providerSessionId: Schema.NullOr(Schema.String),
-  providerThreadId: Schema.NullOr(Schema.String),
+  providerThreadId: Schema.NullOr(ProviderRuntimeSessionIdentity.fields.threadId),
+  providerSessionGeneration: Schema.NullOr(ProviderRuntimeSessionIdentity.fields.sessionGeneration),
   providerOutcome: Schema.NullOr(CheckpointRevertProviderOutcome),
   providerOutcomeJson: Schema.NullOr(Schema.String),
   projectionStatus: Schema.NullOr(Schema.String),
@@ -63,12 +71,30 @@ export interface CheckpointRevertResumableOperation extends CheckpointRevertOper
   readonly manualRequired: boolean
 }
 
+export const ReserveCheckpointRevertInput = Schema.Struct({
+  operationId: Schema.String,
+  threadId: Schema.String,
+  targetRef: Schema.String,
+  targetTurnCount: NonNegativeInt,
+  requestSourceSequence: NonNegativeInt,
+  providerInboxHighWater: NonNegativeInt,
+  now: Schema.String,
+})
+export type ReserveCheckpointRevertInput = typeof ReserveCheckpointRevertInput.Type
+
 export const AdmitCheckpointRevertInput = Schema.Struct({
   operationId: Schema.String,
   threadId: Schema.String,
   targetRef: Schema.String,
   targetTurnCount: NonNegativeInt,
+  requestSourceSequence: NonNegativeInt,
+  providerInboxHighWater: NonNegativeInt,
   cwd: Schema.String,
+  checkpointCaptureRoot: Schema.String,
+  repositoryCommonDir: Schema.String,
+  checkpointCommitOid: Schema.String,
+  providerIdentity: ProviderRuntimeSessionIdentity,
+  providerSessionId: Schema.NullOr(Schema.String),
   now: Schema.String,
 })
 export type AdmitCheckpointRevertInput = typeof AdmitCheckpointRevertInput.Type
@@ -76,14 +102,17 @@ export type AdmitCheckpointRevertInput = typeof AdmitCheckpointRevertInput.Type
 export const CheckpointRevertLookupInput = Schema.Struct({ id: Schema.String })
 export type CheckpointRevertLookupInput = typeof CheckpointRevertLookupInput.Type
 
+export const CheckpointRevertSequenceLookupInput = Schema.Struct({
+  sequence: NonNegativeInt,
+})
+export type CheckpointRevertSequenceLookupInput = typeof CheckpointRevertSequenceLookupInput.Type
+
 export const CheckpointRevertTransitionPatch = Schema.Struct({
   targetTree: Schema.optional(Schema.NullOr(Schema.String)),
   repositoryCommonDir: Schema.optional(Schema.NullOr(Schema.String)),
   stagePath: Schema.optional(Schema.NullOr(Schema.String)),
   lastError: Schema.optional(Schema.NullOr(Schema.String)),
-  providerInstanceId: Schema.optional(Schema.NullOr(Schema.String)),
   providerSessionId: Schema.optional(Schema.NullOr(Schema.String)),
-  providerThreadId: Schema.optional(Schema.NullOr(Schema.String)),
   providerOutcome: Schema.optional(Schema.NullOr(CheckpointRevertProviderOutcome)),
   providerOutcomeJson: Schema.optional(Schema.NullOr(Schema.String)),
   projectionStatus: Schema.optional(Schema.NullOr(Schema.String)),
@@ -105,9 +134,7 @@ export const RecordCheckpointRevertProviderOutcomeInput = Schema.Struct({
   operationId: Schema.String,
   outcome: CheckpointRevertProviderOutcome,
   outcomeJson: Schema.NullOr(Schema.String),
-  providerInstanceId: Schema.NullOr(Schema.String),
   providerSessionId: Schema.NullOr(Schema.String),
-  providerThreadId: Schema.NullOr(Schema.String),
   now: Schema.String,
 })
 export type RecordCheckpointRevertProviderOutcomeInput =
@@ -172,6 +199,9 @@ export type CheckpointRevertOperationsError =
 
 export interface CheckpointRevertOperationsShape
 {
+  readonly reserve: (
+    input: ReserveCheckpointRevertInput,
+  ) => Effect.Effect<CheckpointRevertOperation, CheckpointRevertOperationsError>
   readonly admit: (
     input: AdmitCheckpointRevertInput,
   ) => Effect.Effect<CheckpointRevertOperation, CheckpointRevertOperationsError>
@@ -180,6 +210,9 @@ export interface CheckpointRevertOperationsShape
   ) => Effect.Effect<Option.Option<CheckpointRevertOperation>, PersistenceSqlError>
   readonly getById: (
     operationId: string,
+  ) => Effect.Effect<Option.Option<CheckpointRevertOperation>, PersistenceSqlError>
+  readonly getRequestedBySourceSequence: (
+    sourceSequence: number,
   ) => Effect.Effect<Option.Option<CheckpointRevertOperation>, PersistenceSqlError>
   readonly casTransition: (
     input: CasCheckpointRevertTransitionInput,

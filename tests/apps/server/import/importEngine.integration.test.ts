@@ -35,6 +35,7 @@ import {
 } from '../../../../apps/server/src/import/continuation/continuationContract.ts'
 import {
   ImportServiceDeps,
+  type ImportRequestContext,
   type ImportServiceDepsShape,
   make as makeImportService,
 } from '../../../../apps/server/src/import/importService.ts'
@@ -228,7 +229,7 @@ function makeService(input: {
   readonly sourceDescriptors: ReadonlyArray<ImportFileSourceDescriptor>
   readonly continuationRequests: ContinuationRequest[]
   readonly dispatch?: ImportServiceDepsShape['dispatch']
-  readonly resolveTarget?: ImportServiceDepsShape['resolveImportTarget']
+  readonly resolveTarget?: ImportRequestContext['resolveImportTarget']
   readonly fallbackModelSelection?: ModelSelection
   readonly verifyReplacementThread?: NonNullable<ImportServiceDepsShape['verifyReplacementThread']>
   readonly cleanupDeletedThreadAttachments?: NonNullable<
@@ -279,7 +280,17 @@ function makeService(input: {
             }),
           ),
         normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(NodePath.resolve(workspaceRoot)),
-        resolveImportTarget: input.resolveTarget ?? resolveImportTarget,
+        resolveImportWorkspaceRoot: (request) =>
+          Effect.succeed({
+            workspaceRoot: NodePath.resolve(
+              request.existingWorkspaceRoot ??
+                request.recordedWorkspaceRoot ??
+                input.harness.workspaceDir,
+            ),
+            ...(request.originalWorkspaceRoot === undefined
+              ? {}
+              : { originalWorkspaceRoot: request.originalWorkspaceRoot }),
+          }),
         threadExistsInShell: (threadId) =>
           input.harness.snapshotQuery
             .getShellSnapshot()
@@ -332,12 +343,16 @@ function makeService(input: {
                 sourceVisible: source !== null,
               })),
             )),
-        fallbackModelSelection: input.fallbackModelSelection ?? {
-          instanceId: CODEX_INSTANCE_ID,
-          model: 'gpt-default',
-        },
-        sourceDescriptors: input.sourceDescriptors,
-        loadAcpSessionsBatch: () => Effect.succeed([]),
+        loadRequestContext: () =>
+          Effect.succeed({
+            fallbackModelSelection: input.fallbackModelSelection ?? {
+              instanceId: CODEX_INSTANCE_ID,
+              model: 'gpt-default',
+            },
+            sourceDescriptors: input.sourceDescriptors,
+            resolveImportTarget: input.resolveTarget ?? resolveImportTarget,
+            loadAcpSessionsBatch: () => Effect.succeed([]),
+          }),
       }),
     ),
     Effect.provideService(
@@ -1224,7 +1239,7 @@ it.live('serializes native identity claims while isolating exact provider choice
           },
         ]
         const continuationRequests: ContinuationRequest[] = []
-        const resolveTarget: ImportServiceDepsShape['resolveImportTarget'] = (
+        const resolveTarget: ImportRequestContext['resolveImportTarget'] = (
           _driver,
           requestedInstanceId,
           compatibleInstanceIds,

@@ -8,7 +8,7 @@ import * as Schema from 'effect/Schema'
 
 import { writeFileStringAtomically } from './atomicWrite.ts'
 import type * as ServerConfig from './config.ts'
-import { formatHostForUrl, isWildcardHost } from './startupAccess.ts'
+import { formatHostForUrl, isWildcardHost } from './environment/accessHost.ts'
 
 export const PersistedServerRuntimeState = Schema.Struct({
   version: Schema.Literal(1),
@@ -17,6 +17,7 @@ export const PersistedServerRuntimeState = Schema.Struct({
   port: Schema.Int,
   origin: Schema.String,
   startedAt: Schema.String,
+  storageLeaseToken: Schema.optional(Schema.String),
 })
 export type PersistedServerRuntimeState = typeof PersistedServerRuntimeState.Type
 
@@ -52,6 +53,7 @@ const runtimeOriginForConfig = (
 export const makePersistedServerRuntimeState = (input: {
   readonly config: Pick<ServerConfig.ServerConfig['Service'], 'host'>
   readonly port: number
+  readonly storageLeaseToken?: string | undefined
 }): Effect.Effect<PersistedServerRuntimeState> =>
   Effect.map(DateTime.now, (now) => ({
     version: 1,
@@ -60,6 +62,9 @@ export const makePersistedServerRuntimeState = (input: {
     port: input.port,
     origin: runtimeOriginForConfig(input.config, input.port),
     startedAt: DateTime.formatIso(now),
+    ...(input.storageLeaseToken === undefined
+      ? {}
+      : { storageLeaseToken: input.storageLeaseToken }),
   }))
 
 export const persistServerRuntimeState = (input: {
@@ -69,6 +74,7 @@ export const persistServerRuntimeState = (input: {
   writeFileStringAtomically({
     filePath: input.path,
     contents: `${JSON.stringify(input.state)}\n`,
+    mode: 0o600,
   }).pipe(
     Effect.mapError(
       (cause) =>
@@ -115,7 +121,8 @@ const runtimeStatesMatch = (
   left.host === right.host &&
   left.port === right.port &&
   left.origin === right.origin &&
-  left.startedAt === right.startedAt
+  left.startedAt === right.startedAt &&
+  left.storageLeaseToken === right.storageLeaseToken
 
 const isServerRuntimeStateOwnerAlive = (pid: number): Effect.Effect<boolean> =>
   Effect.sync(() =>

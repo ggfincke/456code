@@ -144,24 +144,6 @@ it.layer(TestLayer, { excludeTestServices: true })('WorkspaceEntries', (it) =>
 
   describe('search', () =>
   {
-    it.effect('filters and ranks entries by query', () =>
-      Effect.gen(function* ()
-      {
-        const cwd = yield* makeTempDir({ prefix: 't3code-workspace-query-' })
-        yield* writeTextFile(cwd, 'src/components/Composer.tsx')
-        yield* writeTextFile(cwd, 'src/components/composePrompt.ts')
-        yield* writeTextFile(cwd, 'docs/composition.md')
-
-        const result = yield* searchWorkspaceEntries({ cwd, query: 'compo', limit: 5 })
-
-        expect(result.entries.length).toBeGreaterThan(0)
-        expect(result.entries.some((entry) => entry.path === 'src/components')).toBe(true)
-        expect(result.entries.every((entry) => entry.path.toLowerCase().includes('compo'))).toBe(
-          true,
-        )
-      }),
-    )
-
     it.effect('supports fuzzy subsequence queries for composer path search', () =>
       Effect.gen(function* ()
       {
@@ -169,6 +151,7 @@ it.layer(TestLayer, { excludeTestServices: true })('WorkspaceEntries', (it) =>
         yield* writeTextFile(cwd, 'src/components/Composer.tsx')
         yield* writeTextFile(cwd, 'src/components/composePrompt.ts')
         yield* writeTextFile(cwd, 'docs/composition.md')
+        yield* writeTextFile(cwd, 'docs/readme.md')
 
         const result = yield* searchWorkspaceEntries({ cwd, query: 'cmp', limit: 10 })
         const paths = result.entries.map((entry) => entry.path)
@@ -176,6 +159,12 @@ it.layer(TestLayer, { excludeTestServices: true })('WorkspaceEntries', (it) =>
         expect(result.entries.length).toBeGreaterThan(0)
         expect(paths).toContain('src/components')
         expect(paths).toContain('src/components/Composer.tsx')
+
+        const filtered = yield* searchWorkspaceEntries({ cwd, query: 'compo', limit: 5 })
+        expect(filtered.entries.length).toBeGreaterThan(0)
+        expect(filtered.entries.every((entry) => entry.path.toLowerCase().includes('compo'))).toBe(
+          true,
+        )
       }),
     )
 

@@ -16,6 +16,9 @@ it('prefers localhost when no explicit host is configured', () =>
 {
   expect(resolveHeadlessConnectionHost(undefined)).toBe('localhost')
   expect(resolveHeadlessConnectionString(undefined, 3773)).toBe('http://localhost:3773')
+  expect(resolveListeningPort({ port: 4123 }, 3773)).toBe(4123)
+  expect(resolveListeningPort('pipe', 3773)).toBe(3773)
+  expect(resolveListeningPort(null, 3773)).toBe(3773)
 })
 
 it('keeps explicit bind hosts in the connection string', () =>
@@ -52,13 +55,6 @@ it('resolves wildcard hosts to a concrete external interface when one is availab
   expect(connectionString).toBe('http://192.168.1.42:3773')
 })
 
-it('prefers the actual bound port when an http server address is available', () =>
-{
-  expect(resolveListeningPort({ port: 4123 }, 3773)).toBe(4123)
-  expect(resolveListeningPort('pipe', 3773)).toBe(3773)
-  expect(resolveListeningPort(null, 3773)).toBe(3773)
-})
-
 it('builds a pairing URL that embeds the token in the hash', () =>
 {
   expect(buildPairingUrl('http://192.168.1.42:3773', 'PAIRCODE')).toBe(
@@ -66,24 +62,20 @@ it('builds a pairing URL that embeds the token in the hash', () =>
   )
 })
 
-it('renders terminal QR codes as a multi-line unicode block grid', () =>
-{
-  const qrCode = renderTerminalQrCode('http://192.168.1.42:3773/pair#token=PAIRCODE')
-
-  assert.isTrue(qrCode.includes('█'))
-  assert.isTrue(qrCode.split('\n').length > 10)
-})
-
 it('formats headless serve output with the connection string, token, pairing url, and qr code', () =>
 {
+  const pairingUrl = 'http://192.168.1.42:3773/pair#token=PAIRCODE'
   const output = formatHeadlessServeOutput({
     connectionString: 'http://192.168.1.42:3773',
     token: 'PAIRCODE',
-    pairingUrl: 'http://192.168.1.42:3773/pair#token=PAIRCODE',
+    pairingUrl,
   })
+  const qrCode = renderTerminalQrCode(pairingUrl)
 
   expect(output).toContain('Connection string: http://192.168.1.42:3773')
   expect(output).toContain('Token: PAIRCODE')
-  expect(output).toContain('Pairing URL: http://192.168.1.42:3773/pair#token=PAIRCODE')
+  expect(output).toContain(`Pairing URL: ${pairingUrl}`)
   assert.isTrue(output.includes('█') || output.includes('▀') || output.includes('▄'))
+  assert.isTrue(qrCode.includes('█'))
+  assert.isTrue(qrCode.split('\n').length > 10)
 })

@@ -23,10 +23,13 @@ import {
 import { fixPath } from './os-jank.ts'
 import { websocketRpcRouteLayer } from './ws.ts'
 import { ImportContinuationLive } from './import/continuation/continuation.ts'
+import * as ImportRuntime from './import/importRuntime.ts'
 import * as ExternalLauncher from './process/externalLauncher.ts'
 import { layerConfig as SqlitePersistenceLayerLive } from './persistence/Layers/Sqlite.ts'
 import { ImportReplacementIntentRepositoryLive } from './persistence/Layers/ImportReplacementIntents.ts'
+import { DiffAnalysisGenerationRepositoryLive } from './persistence/Layers/DiffAnalysisGenerations.ts'
 import * as ServerLifecycleEvents from './serverLifecycleEvents.ts'
+import * as ServerStorageLease from './serverStorageLease.ts'
 import * as AnalyticsService from './telemetry/Layers/AnalyticsService.ts'
 import { ProviderSessionDirectoryLive } from './provider/Layers/ProviderSessionDirectory.ts'
 import * as ProviderSessionRuntime from './persistence/Layers/ProviderSessionRuntime.ts'
@@ -37,6 +40,8 @@ import { ProviderSessionReaperLive } from './provider/Layers/ProviderSessionReap
 import * as OpenCodeRuntime from './provider/opencodeRuntime.ts'
 import * as CheckpointDiffQuery from './orchestration/Layers/CheckpointDiffQuery.ts'
 import * as CheckpointStore from './checkpointing/CheckpointStore.ts'
+import * as CheckpointIdentity from './checkpointing/CheckpointIdentity.ts'
+import { RuntimeRecoveryRoutesLayer } from './recovery/runtimeLayer.ts'
 import * as AzureDevOpsCli from './sourceControl/AzureDevOps/AzureDevOpsCli.ts'
 import * as BitbucketApi from './sourceControl/Bitbucket/BitbucketApi.ts'
 import * as GitHubCli from './sourceControl/GitHub/GitHubCli.ts'
@@ -58,7 +63,12 @@ import { RuntimeReceiptBusLive } from './orchestration/Layers/RuntimeReceiptBus.
 import { ProviderRuntimeIngestionLive } from './orchestration/Layers/ProviderRuntimeIngestion.ts'
 import { ProviderCommandReactorLive } from './orchestration/Layers/ProviderCommandReactor.ts'
 import { CheckpointReactorLive } from './orchestration/Layers/CheckpointReactor.ts'
+import { ArchitectureAutoAnalysisReactorLive } from './orchestration/Layers/ArchitectureAutoAnalysisReactor.ts'
+import { OrchestrationProjectionSnapshotQueryLive } from './orchestration/Layers/ProjectionSnapshotQuery.ts'
+import { ThreadArchiveReactorLive } from './orchestration/Layers/ThreadArchiveReactor.ts'
 import { ThreadDeletionReactorLive } from './orchestration/Layers/ThreadDeletionReactor.ts'
+import { ProjectAtlasLifecycleReactorLive } from './orchestration/Layers/ProjectAtlasLifecycleReactor.ts'
+import { ProjectAtlasLifecycleReactor } from './orchestration/Services/ProjectAtlasLifecycleReactor.ts'
 import { ProviderRegistryLive } from './provider/Layers/ProviderRegistry.ts'
 import * as ServerSettings from './serverSettings.ts'
 import * as ProjectFaviconResolver from './project/ProjectFaviconResolver.ts'
@@ -99,8 +109,15 @@ import {
 import { orchestrationHttpApiLayer } from './orchestration/http.ts'
 import * as NetService from '@t3tools/shared/Net'
 import { disableTailscaleServe, ensureTailscaleServe } from '@t3tools/tailscale'
-import * as CartographerEmbedBroker from './cartographer/CartographerEmbedBroker.ts'
-import { cartographerEmbedRouteLayer } from './cartographer/CartographerHttp.ts'
+import * as CartographerAnalyzer from './cartographer/CartographerAnalyzer.ts'
+import * as ArchitectureQueryService from './cartographer/ArchitectureQueryService.ts'
+import * as ArchitectureProjectionService from './cartographer/ArchitectureProjectionService.ts'
+import * as AtlasRebuildService from './cartographer/AtlasRebuildService.ts'
+import * as AtlasRebuildSuggestionService from './cartographer/AtlasRebuildSuggestionService.ts'
+import * as CurrentWorktreeArchitectureService from './cartographer/CurrentWorktreeArchitectureService.ts'
+import * as DiffAnalysisService from './cartographer/DiffAnalysisService.ts'
+import * as ProjectArchitectureLifecycleService from './cartographer/ProjectArchitectureLifecycleService.ts'
+import * as ProjectAtlasStatusBroadcaster from './cartographer/ProjectAtlasStatusBroadcaster.ts'
 import * as ProposalGenerationService from './proposal/ProposalGenerationService.ts'
 import * as ProposalImplementationAttemptService from './proposal/ProposalImplementationAttemptService.ts'
 import * as ProposalService from './proposal/ProposalService.ts'
@@ -133,6 +150,7 @@ const HttpServerLive = Layer.unwrap(
   Effect.gen(function* ()
   {
     const config = yield* ServerConfig.ServerConfig
+    yield* ServerStorageLease.assertLeasedStoragePath(config.baseDir)
     if (typeof Bun !== 'undefined')
     {
       const BunHttpServer = yield* Effect.promise(
@@ -150,7 +168,7 @@ const HttpServerLive = Layer.unwrap(
         Effect.promise(() => import('@effect/platform-node/NodeHttpServer')),
         Effect.promise(() => import('node:http')),
       ])
-      return NodeHttpServer.layer(NodeHttp.createServer, {
+      return NodeHttpServer.layer(() => NodeHttp.createServer(), {
         host: config.host ?? '127.0.0.1',
         port: config.port,
         gracefulShutdownTimeout: HTTP_PREEMPTIVE_SHUTDOWN_GRACE_MS,
@@ -180,12 +198,33 @@ const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(ProviderRuntimeIngestionLive),
   Layer.provideMerge(ProviderCommandReactorLive),
   Layer.provideMerge(CheckpointReactorLive),
+  Layer.provideMerge(ArchitectureAutoAnalysisReactorLive),
+  Layer.provideMerge(ThreadArchiveReactorLive),
   Layer.provideMerge(ThreadDeletionReactorLive),
+  Layer.provideMerge(
+    Layer.effectDiscard(
+      Effect.gen(function* ()
+      {
+        const lifecycle = yield* ProjectAtlasLifecycleReactor
+        const suggestions = yield* AtlasRebuildSuggestionService.AtlasRebuildSuggestionService
+        yield* lifecycle.start()
+        yield* suggestions.start()
+      }),
+    ).pipe(
+      Layer.provideMerge(ProjectAtlasLifecycleReactorLive),
+      Layer.provideMerge(AtlasRebuildSuggestionService.layer),
+    ),
+  ),
   Layer.provideMerge(RuntimeReceiptBusLive),
 )
 
 const ProviderSessionDirectoryLayerLive = ProviderSessionDirectoryLive.pipe(
   Layer.provide(ProviderSessionRuntime.layer),
+)
+
+// one scoped broker instance feeds both provider launch and mcp authentication
+const McpCredentialBrokerLayerLive = Layer.fresh(
+  McpSessionRegistry.enabledLayer.pipe(Layer.provide(ServerEnvironment.layer)),
 )
 
 // `ProviderAdapterRegistryLive` is now a facade that resolves kind -> adapter
@@ -261,6 +300,7 @@ const VcsLayerLive = Layer.empty.pipe(
 const CheckpointingLayerLive = Layer.empty.pipe(
   Layer.provideMerge(CheckpointDiffQuery.layer),
   Layer.provideMerge(CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistryLayerLive))),
+  Layer.provideMerge(CheckpointIdentity.layer),
 )
 
 const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.layer))
@@ -268,6 +308,7 @@ const PortScannerLayerLive = PortScanner.layer.pipe(Layer.provide(ProcessRunner.
 const TerminalLayerLive = TerminalManager.layer.pipe(
   Layer.provide(PtyAdapterLive),
   Layer.provide(PortScannerLayerLive),
+  Layer.provide(OrchestrationLayerLive),
 )
 
 const PreviewLayerLive = Layer.empty.pipe(
@@ -275,16 +316,66 @@ const PreviewLayerLive = Layer.empty.pipe(
   Layer.provideMerge(PortScannerLayerLive),
 )
 
+const CartographerAnalyzerLayerLive = CartographerAnalyzer.layer.pipe(
+  Layer.provide(ProcessRunner.layer),
+)
+
+const ProposalGenerationLayerLive = ProposalGenerationService.layer.pipe(
+  Layer.provideMerge(ProposalService.layer),
+  Layer.provideMerge(ProcessRunner.layer),
+  Layer.provideMerge(CartographerAnalyzerLayerLive),
+)
+
+const ProjectAtlasStatusLayerLive = ProjectAtlasStatusBroadcaster.layer
+
+const DiffAnalysisLayerLive = DiffAnalysisService.layer.pipe(
+  Layer.provideMerge(CartographerAnalyzerLayerLive),
+  Layer.provideMerge(DiffAnalysisGenerationRepositoryLive),
+  Layer.provideMerge(GitVcsDriver.layer),
+  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
+  Layer.provideMerge(ServerEnvironment.layer),
+  Layer.provideMerge(RepositoryIdentityResolver.layer),
+  Layer.provideMerge(PersistenceLayerLive),
+)
+
+const AtlasRebuildLayerLive = AtlasRebuildService.layer.pipe(
+  Layer.provideMerge(CartographerAnalyzerLayerLive),
+)
+
+const CurrentWorktreeArchitectureLayerLive = CurrentWorktreeArchitectureService.layer.pipe(
+  Layer.provideMerge(CartographerAnalyzerLayerLive),
+)
+
+const ProjectArchitectureLifecycleLayerLive = ProjectArchitectureLifecycleService.layer.pipe(
+  Layer.provideMerge(CartographerAnalyzerLayerLive),
+  Layer.provideMerge(AtlasRebuildLayerLive),
+  Layer.provideMerge(ProjectAtlasStatusLayerLive),
+)
+
+const ArchitectureQueryLayerLive = ArchitectureQueryService.layer.pipe(
+  Layer.provideMerge(CurrentWorktreeArchitectureLayerLive),
+  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
+  Layer.provideMerge(ServerEnvironment.layer),
+  Layer.provideMerge(RepositoryIdentityResolver.layer),
+  Layer.provideMerge(PersistenceLayerLive),
+)
+
+const ArchitectureProjectionLayerLive = ArchitectureProjectionService.layer.pipe(
+  Layer.provideMerge(ArchitectureQueryLayerLive),
+  Layer.provideMerge(AtlasRebuildLayerLive),
+  Layer.provideMerge(ProjectAtlasStatusLayerLive),
+  Layer.provideMerge(ProposalGenerationLayerLive),
+  Layer.provideMerge(DiffAnalysisLayerLive),
+  Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
+  Layer.provideMerge(ServerEnvironment.layer),
+)
+
 const ProposalPreviewLayerLive = Layer.mergeAll(
-  ProposalGenerationService.layer.pipe(
-    Layer.provideMerge(ProposalService.layer),
-    Layer.provideMerge(ProcessRunner.layer),
-  ),
+  ProposalGenerationLayerLive,
   ProposalImplementationAttemptService.layer.pipe(
     Layer.provideMerge(ProposalService.layer),
     Layer.provideMerge(ProcessRunner.layer),
   ),
-  CartographerEmbedBroker.layer,
   ProposalRetainedRefAttemptStore.layer,
   ProposalRetainedRefReconciler.layer.pipe(Layer.provide(ProposalRetainedRefAttemptStore.layer)),
 )
@@ -352,7 +443,13 @@ const RuntimeCoreDependenciesLive = ReactorLayerLive.pipe(
   Layer.provideMerge(ProjectFaviconResolverLayerLive),
   Layer.provideMerge(RepositoryIdentityResolver.layer),
   Layer.provideMerge(ProposalPreviewLayerLive),
+  Layer.provideMerge(DiffAnalysisLayerLive),
   Layer.provideMerge(ServerEnvironment.layer),
+).pipe(
+  Layer.provideMerge(ArchitectureQueryLayerLive),
+  Layer.provideMerge(ArchitectureProjectionLayerLive),
+  Layer.provideMerge(CurrentWorktreeArchitectureLayerLive),
+  Layer.provideMerge(ProjectArchitectureLifecycleLayerLive),
   Layer.provideMerge(AuthLayerLive),
   Layer.provideMerge(ServerSecretStore.layer),
 )
@@ -365,7 +462,12 @@ export const SourceControlDiscoveryLayerLive = makeSourceControlDiscoveryLayer(
   RuntimeCoreDependenciesLive,
 )
 
-const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
+const ImportRuntimeLayerLive = ImportRuntime.layer.pipe(
+  Layer.provide(ImportContinuationLive),
+  Layer.provideMerge(RuntimeCoreDependenciesLive),
+)
+
+const RuntimeDependenciesLive = ImportRuntimeLayerLive.pipe(
   // Misc.
   Layer.provideMerge(ProcessDiagnostics.layer),
   Layer.provideMerge(ProcessResourceMonitor.layer),
@@ -380,6 +482,7 @@ const RuntimeDependenciesLive = RuntimeCoreDependenciesLive.pipe(
 
 const RuntimeServicesLive = ServerRuntimeStartup.layer.pipe(
   Layer.provideMerge(RuntimeDependenciesLive),
+  Layer.provideMerge(McpCredentialBrokerLayerLive),
 )
 
 // the contract's `EnvironmentHttpApi` still carries the T3 Connect group for
@@ -401,17 +504,18 @@ export const makeRoutesLayer = Layer.mergeAll(
     ),
     otlpTracesProxyRouteLayer,
     assetRouteLayer,
-    cartographerEmbedRouteLayer,
+    RuntimeRecoveryRoutesLayer,
     staticAndDevRouteLayer,
     websocketRpcRouteLayer,
   ),
-  McpHttpServer.layer.pipe(Layer.provide(McpSessionRegistry.layer)),
+  McpHttpServer.layer,
 ).pipe(Layer.provide(PreviewAutomationBroker.layer), Layer.provide(browserApiCorsLayer))
 
 export const makeServerLayer = Layer.unwrap(
   Effect.gen(function* ()
   {
     const config = yield* ServerConfig.ServerConfig
+    const storageLease = yield* ServerStorageLease.ServerStorageLease
 
     yield* fixPath()
 
@@ -437,6 +541,7 @@ export const makeServerLayer = Layer.unwrap(
           const state = yield* makePersistedServerRuntimeState({
             config,
             port: address.port,
+            storageLeaseToken: storageLease.owner.token,
           })
           yield* persistServerRuntimeState({
             path: config.serverRuntimeStatePath,
@@ -516,12 +621,9 @@ export const makeServerLayer = Layer.unwrap(
     )
 
     return serverApplicationLayer.pipe(
-      // the ws import handlers read ImportContinuationDeps from context when
-      // present (inert fallback otherwise); providing it here keeps provider
-      // services out of makeRoutesLayer requirements so test graphs stay small
-      Layer.provide(ImportContinuationLive),
       Layer.provide(SourceControlDiscoveryLayerLive),
       Layer.provideMerge(RuntimeServicesLive),
+      Layer.provide(RepositoryIdentityResolver.layer),
       Layer.provideMerge(HttpServerLive),
       Layer.provide(ObservabilityLive),
       Layer.provideMerge(FetchHttpClient.layer),
@@ -531,5 +633,5 @@ export const makeServerLayer = Layer.unwrap(
   }),
 )
 
-// important: Only `ServerConfig` should be provided by the CLI layer!!! Don't let other requirements leak into the launch layer.
+// important: only config and its pre-acquired storage lease belong in the CLI launch layer
 export const runServer = Layer.launch(makeServerLayer)

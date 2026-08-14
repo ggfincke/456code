@@ -23,6 +23,7 @@ import * as ProviderSessionRuntime from '../../../../../apps/server/src/persiste
 import * as ProviderSessionRuntimeLayers from '../../../../../apps/server/src/persistence/Layers/ProviderSessionRuntime.ts'
 import { ProviderSessionDirectory } from '../../../../../apps/server/src/provider/Services/ProviderSessionDirectory.ts'
 import { ProviderSessionDirectoryLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts'
+import { makeTestServerStorageLeaseLayer } from '../../support/serverStorageLease.ts'
 
 function makeDirectoryLayer<E, R>(persistenceLayer: Layer.Layer<SqlClient.SqlClient, E, R>)
 {
@@ -331,7 +332,11 @@ it.layer(makeDirectoryLayer(SqlitePersistenceMemory))('ProviderSessionDirectoryL
     {
       const tempDir = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 't3-provider-directory-'))
       const dbPath = NodePath.join(tempDir, 'orchestration.sqlite')
-      const directoryLayer = makeDirectoryLayer(makeSqlitePersistenceLive(dbPath))
+      const directoryLayer = makeDirectoryLayer(
+        makeSqlitePersistenceLive(dbPath).pipe(
+          Layer.provideMerge(makeTestServerStorageLeaseLayer(tempDir)),
+        ),
+      )
 
       const threadId = ThreadId.make('thread-restart')
 

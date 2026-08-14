@@ -37,6 +37,7 @@ const asCheckpointRef = (value: string): CheckpointRef => CheckpointRef.make(val
 const clearProjectionTables = (sql: SqlClient.SqlClient) =>
   Effect.gen(function* ()
   {
+    yield* sql`DELETE FROM projection_checkpoint_identities`
     yield* sql`DELETE FROM projection_thread_messages`
     yield* sql`DELETE FROM projection_thread_activities`
     yield* sql`DELETE FROM projection_thread_proposed_plans`
@@ -332,6 +333,8 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           createdAt: '2026-02-24T00:00:02.000Z',
           updatedAt: '2026-02-24T00:00:03.000Z',
           archivedAt: null,
+          archiveGeneration: 0,
+          orchestrateRunExecution: null,
           settledOverride: null,
           settledAt: null,
           snoozedUntil: null,
@@ -450,6 +453,7 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           createdAt: '2026-02-24T00:00:02.000Z',
           updatedAt: '2026-02-24T00:00:03.000Z',
           archivedAt: null,
+          orchestrateRunExecution: null,
           settledOverride: null,
           settledAt: null,
           snoozedUntil: null,
@@ -1331,6 +1335,36 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
             '[]'
           )
       `
+      yield* sql`
+        INSERT INTO projection_checkpoint_identities (
+          thread_id,
+          checkpoint_turn_count,
+          checkpoint_ref,
+          checkpoint_capture_root,
+          checkpoint_repository_common_dir,
+          checkpoint_commit_oid,
+          captured_at
+        )
+        VALUES
+          (
+            'thread-context',
+            0,
+            'checkpoint-zero',
+            '/tmp/capture-zero',
+            '/tmp/repository/.git',
+            '0000000000000000000000000000000000000000',
+            '2026-03-02T00:00:03.000Z'
+          ),
+          (
+            'thread-context',
+            1,
+            'checkpoint-a',
+            '/tmp/capture-one',
+            '/tmp/repository/.git',
+            '1111111111111111111111111111111111111111',
+            '2026-03-02T00:00:04.000Z'
+          )
+      `
 
       const context = yield* snapshotQuery.getThreadCheckpointContext(
         ThreadId.make('thread-context'),
@@ -1343,6 +1377,13 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
           projectId: asProjectId('project-context'),
           workspaceRoot: '/tmp/context-workspace',
           worktreePath: '/tmp/context-worktree',
+          baselineCheckpointIdentity: {
+            checkpointTurnCount: 0,
+            checkpointRef: asCheckpointRef('checkpoint-zero'),
+            checkpointCaptureRoot: '/tmp/capture-zero',
+            checkpointRepositoryCommonDir: '/tmp/repository/.git',
+            checkpointCommitOid: '0000000000000000000000000000000000000000',
+          },
           checkpoints: [
             {
               turnId: asTurnId('turn-1'),
@@ -1352,6 +1393,9 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
               files: [],
               assistantMessageId: null,
               completedAt: '2026-03-02T00:00:04.000Z',
+              checkpointCaptureRoot: '/tmp/capture-one',
+              checkpointRepositoryCommonDir: '/tmp/repository/.git',
+              checkpointCommitOid: '1111111111111111111111111111111111111111',
             },
             {
               turnId: asTurnId('turn-2'),
@@ -1364,6 +1408,30 @@ projectionSnapshotLayer('ProjectionSnapshotQuery', (it) =>
             },
           ],
         })
+      }
+
+      const fullContext = yield* snapshotQuery.getFullThreadDiffContext(
+        ThreadId.make('thread-context'),
+        2,
+      )
+      assert.equal(fullContext._tag, 'Some')
+      if (fullContext._tag === 'Some')
+      {
+        assert.deepEqual(fullContext.value.fromCheckpointIdentity, {
+          checkpointTurnCount: 0,
+          checkpointRef: asCheckpointRef('checkpoint-zero'),
+          checkpointCaptureRoot: '/tmp/capture-zero',
+          checkpointRepositoryCommonDir: '/tmp/repository/.git',
+          checkpointCommitOid: '0000000000000000000000000000000000000000',
+        })
+        assert.deepEqual(fullContext.value.toCheckpointIdentity, {
+          checkpointTurnCount: 2,
+          checkpointRef: asCheckpointRef('checkpoint-b'),
+          checkpointCaptureRoot: null,
+          checkpointRepositoryCommonDir: null,
+          checkpointCommitOid: null,
+        })
+        assert.equal(fullContext.value.toCheckpointRef, asCheckpointRef('checkpoint-b'))
       }
     }),
   )

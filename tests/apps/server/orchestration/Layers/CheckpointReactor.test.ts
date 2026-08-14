@@ -41,6 +41,8 @@ import { it } from '@effect/vitest'
 import { afterEach, describe, expect, vi } from 'vite-plus/test'
 
 import * as CheckpointStore from '../../../../../apps/server/src/checkpointing/CheckpointStore.ts'
+import * as CheckpointIdentity from '../../../../../apps/server/src/checkpointing/CheckpointIdentity.ts'
+import * as GitVcsDriver from '../../../../../apps/server/src/vcs/GitVcsDriver.ts'
 import * as VcsDriverRegistry from '../../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
 import * as VcsProcess from '../../../../../apps/server/src/vcs/VcsProcess.ts'
 import { VcsStatusBroadcaster } from '../../../../../apps/server/src/vcs/VcsStatusBroadcaster.ts'
@@ -65,6 +67,11 @@ import {
   type OrchestrationEngineShape,
 } from '../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
 import { CheckpointReactor } from '../../../../../apps/server/src/orchestration/Services/CheckpointReactor.ts'
+import { DurableReactorRunner } from '../../../../../apps/server/src/orchestration/Services/DurableReactorRunner.ts'
+import {
+  PROVIDER_RUNTIME_INGESTION_REACTOR_ID,
+  ProviderRuntimeInboxRunner,
+} from '../../../../../apps/server/src/orchestration/Services/ProviderRuntimeInboxRunner.ts'
 import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import {
   ProviderService,
@@ -74,12 +81,21 @@ import type { ProviderAdapterCapabilities } from '../../../../../apps/server/src
 import { ProviderAdapterRequestError } from '../../../../../apps/server/src/provider/Errors.ts'
 import { checkpointRefForThreadTurn } from '../../../../../apps/server/src/checkpointing/Utils.ts'
 import {
+  checkpointRevertOperationId,
+  encodeProviderRollbackJournalDetail,
+} from '../../../../../apps/server/src/orchestration/Layers/CheckpointRollbackJournal.ts'
+import {
   ProposalImplementationAttemptService,
   type BeginImplementationAttemptInput,
 } from '../../../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import * as WorkspaceEntries from '../../../../../apps/server/src/workspace/WorkspaceEntries.ts'
 import * as WorkspacePaths from '../../../../../apps/server/src/workspace/WorkspacePaths.ts'
+import { ProviderRuntimeInbox } from '../../../../../apps/server/src/persistence/Services/ProviderRuntimeInbox.ts'
+import {
+  makeProviderRuntimeInboxTestAdmission,
+  ProviderRuntimeInboxTestInfrastructureLive,
+} from '../../support/providerRuntimeInbox.ts'
 
 const asProjectId = (value: string): ProjectId => ProjectId.make(value)
 const asTurnId = (value: string): TurnId => TurnId.make(value)
@@ -120,9 +136,20 @@ function createProviderServiceHarness(
 )
 {
   const now = '2026-01-01T00:00:00.000Z'
+  const providerInstanceId = ProviderInstanceId.make('codex')
+  const threadId = ThreadId.make('thread-1')
+  let sessionGeneration = 1
+  let sessionOpen = hasSession
+  let nativeTurnCount = 2
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>())
+  let appendRuntimeEvent:
+    ((event: ProviderRuntimeEvent) => Effect.Effect<unknown, Error>) | undefined
+  let admissionTail = Promise.resolve()
   const rollbackConversation = vi.fn(
-    (_input: { readonly threadId: ThreadId; readonly numTurns: number }) =>
+    (_input: {
+      readonly threadId: ThreadId
+      readonly numTurns: number
+    }): Effect.Effect<void, ProviderAdapterRequestError> =>
       rollbackDefects
         ? Effect.die(new Error('Provider rollback outcome is ambiguous.'))
         : rollbackFailure === undefined
@@ -138,15 +165,45 @@ function createProviderServiceHarness(
 
   const unsupported = <A>(): Effect.Effect<A> =>
     Effect.die(new Error('Unsupported provider call in test'))
+  const currentIdentity = () => ({
+    provider: ProviderDriverKind.make(providerName),
+    providerInstanceId,
+    threadId,
+    sessionGeneration,
+  })
+  const matchesCurrentIdentity = (identity: ReturnType<typeof currentIdentity>) =>
+    identity.providerInstanceId === providerInstanceId &&
+    identity.threadId === threadId &&
+    identity.sessionGeneration === sessionGeneration
+  const rollbackConversationIfExact = vi.fn(
+    (input: {
+      readonly identity: ReturnType<typeof currentIdentity>
+      readonly numTurns: number
+    }) =>
+      matchesCurrentIdentity(input.identity)
+        ? rollbackConversation({
+            threadId: input.identity.threadId,
+            numTurns: input.numTurns,
+          }).pipe(
+            Effect.tap(() =>
+              Effect.sync(() =>
+                {
+                nativeTurnCount = Math.max(0, nativeTurnCount - input.numTurns)
+              }),
+            ),
+            Effect.as(true),
+          )
+        : Effect.succeed(false),
+  )
   const listSessions = () =>
-    hasSession
+    sessionOpen
       ? Effect.succeed([
           {
             provider: providerName,
-            providerInstanceId: ProviderInstanceId.make('codex'),
+            providerInstanceId,
             status: 'ready',
             runtimeMode: 'full-access',
-            threadId: ThreadId.make('thread-1'),
+            threadId,
             cwd: sessionCwd,
             createdAt: now,
             updatedAt: now,
@@ -160,6 +217,39 @@ function createProviderServiceHarness(
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
+    captureSessionIdentity: (input) =>
+      sessionOpen &&
+      (input.expectedProviderInstanceId === undefined ||
+        input.expectedProviderInstanceId === providerInstanceId)
+        ? Effect.succeed(Option.some({ ...currentIdentity(), createdAt: now }))
+        : Effect.succeed(Option.none()),
+    captureSessionIdentities: () => Effect.succeed([]),
+    getSessionIdentityState: (identity) =>
+      matchesCurrentIdentity(identity)
+        ? Effect.succeed(
+            Option.some({
+              ...currentIdentity(),
+              status: sessionOpen ? ('open' as const) : ('closed' as const),
+              openedSequence: null,
+              closedSequence: sessionOpen ? null : 0,
+              consumersCompletedAt: null,
+              createdAt: now,
+              updatedAt: now,
+            }),
+          )
+        : Effect.succeed(Option.none()),
+    matchesSessionIdentity: (identity) =>
+      Effect.succeed(sessionOpen && matchesCurrentIdentity(identity)),
+    stopSessionIfExact: (identity) =>
+      Effect.sync(() =>
+      {
+        if (!sessionOpen || !matchesCurrentIdentity(identity)) return false
+        sessionOpen = false
+        return true
+      }),
+    getAdmissionHandoffHighWater: Effect.succeed(null),
+    resumeAdmissionAfterHandoff: Effect.void,
+    shutdown: Effect.succeed(0),
     listSessions,
     getCapabilities: () =>
       Effect.succeed({
@@ -178,6 +268,13 @@ function createProviderServiceHarness(
         },
       }),
     rollbackConversation,
+    rollbackConversationIfExact,
+    getConversationTurnCountIfExact: (identity) =>
+      Effect.succeed(
+        sessionOpen && matchesCurrentIdentity(identity)
+          ? Option.some(nativeTurnCount)
+          : Option.none(),
+      ),
     get streamEvents()
     {
       return Stream.fromPubSub(runtimeEventPubSub)
@@ -194,13 +291,46 @@ function createProviderServiceHarness(
       ...raw,
       providerInstanceId: raw.providerInstanceId ?? ProviderInstanceId.make(String(raw.provider)),
     }
-    Effect.runSync(PubSub.publish(runtimeEventPubSub, stamped))
+    if (appendRuntimeEvent === undefined)
+    {
+      Effect.runSync(PubSub.publish(runtimeEventPubSub, stamped))
+      return
+    }
+    admissionTail = admissionTail.then(() =>
+      Effect.runPromise(
+        appendRuntimeEvent!(stamped).pipe(
+          Effect.andThen(PubSub.publish(runtimeEventPubSub, stamped)),
+          Effect.asVoid,
+        ),
+      ),
+    )
   }
 
   return {
     service,
     rollbackConversation,
+    rollbackConversationIfExact,
+    replaceSessionGeneration: () =>
+    {
+      sessionGeneration += 1
+      sessionOpen = true
+    },
+    get sessionGeneration()
+    {
+      return sessionGeneration
+    },
+    setNativeTurnCount: (turnCount: number) =>
+    {
+      nativeTurnCount = turnCount
+    },
     emit,
+    setAdmission: (
+      append: (event: ProviderRuntimeEvent) => Effect.Effect<unknown, Error>,
+    ): void =>
+    {
+      appendRuntimeEvent = append
+    },
+    flushAdmissions: (): Promise<void> => admissionTail,
   }
 }
 
@@ -334,6 +464,20 @@ function gitShowFileAtRef(cwd: string, ref: string, filePath: string): string
   return runGit(cwd, ['show', `${ref}:${filePath}`])
 }
 
+function capturedIdentityForRef(cwd: string, checkpointRef: string)
+{
+  const root = NodeFS.realpathSync(runGit(cwd, ['rev-parse', '--show-toplevel']).trim())
+  const rawCommonDir = runGit(cwd, ['rev-parse', '--git-common-dir']).trim()
+  const commonDir = NodeFS.realpathSync(
+    NodePath.isAbsolute(rawCommonDir) ? rawCommonDir : NodePath.resolve(cwd, rawCommonDir),
+  )
+  return {
+    checkpointCaptureRoot: root,
+    checkpointRepositoryCommonDir: commonDir,
+    checkpointCommitOid: runGit(cwd, ['rev-parse', `${checkpointRef}^{commit}`]).trim(),
+  }
+}
+
 function unsupportedCheckpointStoreCall<A>(): Effect.Effect<A>
 {
   return Effect.die(new Error('Unsupported checkpoint store call in test'))
@@ -369,7 +513,10 @@ describe('CheckpointReactor', () =>
     | ProjectionSnapshotQuery
     | ServerConfig
     | SqlClient.SqlClient
-    | TestClock.TestClock,
+    | TestClock.TestClock
+    | ProviderRuntimeInbox
+    | DurableReactorRunner
+    | ProviderRuntimeInboxRunner,
     unknown
   > | null = null
   let scope: Scope.Closeable | null = null
@@ -419,6 +566,7 @@ describe('CheckpointReactor', () =>
       readonly consumedRevisions: Array<number>
     }
     readonly startReactor?: boolean
+    readonly advanceRuntimeIngestion?: boolean
   })
   {
     const cwd = createGitRepository()
@@ -477,6 +625,7 @@ describe('CheckpointReactor', () =>
     const liveCheckpointStoreLayer = CheckpointStore.layer.pipe(
       Layer.provide(VcsDriverRegistry.layer),
     )
+    const checkpointIdentityLayer = CheckpointIdentity.layer.pipe(Layer.provide(GitVcsDriver.layer))
     const checkpointStoreCalls = options?.checkpointStoreCalls
     const checkpointRefs = new Set<string>()
     const checkpointStoreLayer =
@@ -563,11 +712,13 @@ describe('CheckpointReactor', () =>
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provideMerge(ProviderRuntimeInboxTestInfrastructureLive),
       Layer.provideMerge(RuntimeReceiptBusLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(checkpointRevertOperationsLayer),
       Layer.provideMerge(vcsStatusBroadcasterLayer),
       Layer.provideMerge(checkpointStoreLayer),
+      Layer.provideMerge(checkpointIdentityLayer),
       Layer.provideMerge(VcsDriverRegistry.layer),
       Layer.provideMerge(
         WorkspaceEntries.layer.pipe(
@@ -584,6 +735,7 @@ describe('CheckpointReactor', () =>
     )
 
     runtime = ManagedRuntime.make(layer)
+    const admission = await runtime.runPromise(makeProviderRuntimeInboxTestAdmission)
     await runtime.runPromise(TestClock.setTime(FIXTURE_TIME_MS))
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService))
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery))
@@ -598,16 +750,78 @@ describe('CheckpointReactor', () =>
     const delivery = await runtime.runPromise(Effect.service(OrchestrationReactorDelivery))
     scope = await Effect.runPromise(Scope.make('sequential'))
     const reactorScope = scope
+    const durableRunner = await runtime.runPromise(Effect.service(DurableReactorRunner))
+    const runtimeInboxRunner = await runtime.runPromise(Effect.service(ProviderRuntimeInboxRunner))
+    // this harness does not compose ProviderCommandReactor; a no-op durable
+    // lane preserves its real persisted cursor/barrier contract for reverts
+    await Effect.runPromise(
+      durableRunner
+        .start({
+          reactorId: 'provider-command',
+          operationVersion: 1,
+          plan: () => Effect.succeed([]),
+          execute: () => Effect.succeed({ status: 'succeeded' }),
+          classify: () => 'retryable',
+          onLeaseExpiry: 'retryable',
+        })
+        .pipe(Scope.provide(reactorScope)),
+    )
+    await Effect.runPromise(
+      runtimeInboxRunner
+        .start({
+          consumerId: PROVIDER_RUNTIME_INGESTION_REACTOR_ID,
+          operationVersion: 1,
+          process: (record) =>
+            Effect.succeed({
+              stateVersion: record.sequence,
+              stateJson: `{"throughSequence":${record.sequence}}`,
+              sessionBufferTerminal: record.eventType === 'session.exited',
+            }),
+          restore: () => Effect.void,
+          classify: () => 'retryable',
+        })
+        .pipe(Scope.provide(reactorScope)),
+    )
+    const advanceRuntimeIngestionEffect = runtimeInboxRunner.drain(
+      PROVIDER_RUNTIME_INGESTION_REACTOR_ID,
+    )
+    const advanceRuntimeIngestion = (): Promise<void> =>
+      runtime!.runPromise(advanceRuntimeIngestionEffect)
+    let reactorStarted = false
     const startReactor = async () =>
     {
       await Effect.runPromise(reactor.start().pipe(Scope.provide(reactorScope)))
+      reactorStarted = true
       await Effect.runPromise(Effect.sleep('10 millis'))
     }
     if (options?.startReactor ?? true)
     {
       await startReactor()
     }
-    const drain = () => Effect.runPromise(reactor.drain)
+    provider.setAdmission((event) =>
+      admission
+        .append(event)
+        .pipe(
+          Effect.tap(() =>
+            (options?.advanceRuntimeIngestion ?? true)
+              ? advanceRuntimeIngestionEffect.pipe(
+                  Effect.andThen(
+                    Effect.suspend(() => (reactorStarted ? reactor.drain : Effect.void)),
+                  ),
+                )
+              : Effect.void,
+          ),
+        ),
+    )
+    const drain = async (drainOptions?: { readonly advanceRuntimeIngestion?: boolean }) =>
+    {
+      await provider.flushAdmissions()
+      if (drainOptions?.advanceRuntimeIngestion ?? options?.advanceRuntimeIngestion ?? true)
+      {
+        await advanceRuntimeIngestion()
+      }
+      await Effect.runPromise(reactor.drain)
+    }
     const readDurableState = () =>
       runtime!.runPromise(
         Effect.gen(function* ()
@@ -637,6 +851,30 @@ describe('CheckpointReactor', () =>
             WHERE reactor_id = 'checkpoint-domain'
           `
           return { actions, progress: progress[0] }
+        }),
+      )
+    const readRuntimeCheckpointState = () =>
+      runtime!.runPromise(
+        Effect.gen(function* ()
+        {
+          const sql = yield* SqlClient.SqlClient
+          const actions = yield* sql<{
+            readonly sourceSequence: number
+            readonly status: string
+            readonly availableAt: string
+            readonly lastError: string | null
+          }>`
+            SELECT
+              source_sequence AS "sourceSequence",
+              status,
+              available_at AS "availableAt",
+              last_error AS "lastError"
+            FROM orchestration_reactor_actions
+            WHERE reactor_id = 'provider-runtime-checkpoint'
+            ORDER BY source_sequence ASC
+          `
+          const progress = yield* delivery.getProgress('provider-runtime-checkpoint')
+          return { actions, progress }
         }),
       )
 
@@ -711,7 +949,9 @@ describe('CheckpointReactor', () =>
       delivery,
       drain,
       startReactor,
+      advanceRuntimeIngestion,
       readDurableState,
+      readRuntimeCheckpointState,
     }
   }
 
@@ -808,6 +1048,19 @@ describe('CheckpointReactor', () =>
         createdAt,
       }),
     )
+    const baselineRef = checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0)
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.checkpoint.baseline.record',
+        commandId: CommandId.make(`${commandPrefix}-baseline`),
+        threadId: ThreadId.make('thread-1'),
+        checkpointTurnCount: 0,
+        checkpointRef: baselineRef,
+        ...capturedIdentityForRef(harness.cwd, baselineRef),
+        capturedAt: createdAt,
+        createdAt,
+      }),
+    )
     for (const turnCount of [1, 2])
     {
       await Effect.runPromise(
@@ -821,6 +1074,10 @@ describe('CheckpointReactor', () =>
           status: 'ready',
           files: [],
           checkpointTurnCount: turnCount,
+          ...capturedIdentityForRef(
+            harness.cwd,
+            checkpointRefForThreadTurn(ThreadId.make('thread-1'), turnCount),
+          ),
           createdAt,
         }),
       )
@@ -858,6 +1115,7 @@ describe('CheckpointReactor', () =>
       createdAt: '2026-01-01T00:00:00.000Z',
       threadId: ThreadId.make('thread-1'),
       turnId: asTurnId('turn-1'),
+      payload: {},
     })
     await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0))
 
@@ -934,6 +1192,7 @@ describe('CheckpointReactor', () =>
       createdAt: providerStartedAt,
       threadId,
       turnId,
+      payload: {},
     })
     await harness.drain()
 
@@ -983,6 +1242,7 @@ describe('CheckpointReactor', () =>
       createdAt: providerStartedAt,
       threadId,
       turnId,
+      payload: {},
     })
     await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(threadId, 0))
     await harness.drain()
@@ -1054,6 +1314,7 @@ describe('CheckpointReactor', () =>
       createdAt: '2026-01-01T00:00:00.000Z',
       threadId: ThreadId.make('thread-1'),
       turnId: asTurnId('turn-main'),
+      payload: {},
     })
     await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0))
 
@@ -1364,6 +1625,49 @@ describe('CheckpointReactor', () =>
     )
   })
 
+  it('waits for same-sequence ingestion progress before consuming a checkpoint event', async () =>
+  {
+    const harness = await createHarness({
+      seedFilesystemCheckpoints: false,
+      advanceRuntimeIngestion: false,
+    })
+    const checkpointRef = checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0)
+
+    harness.provider.emit({
+      type: 'turn.started',
+      eventId: EventId.make('evt-checkpoint-waits-for-ingestion'),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt: '2026-01-01T00:00:00.000Z',
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-checkpoint-waits-for-ingestion'),
+      payload: {},
+    })
+
+    await harness.drain({ advanceRuntimeIngestion: false })
+    expect(
+      Option.getOrThrow(
+        await Effect.runPromise(harness.delivery.getProgress('provider-runtime-checkpoint')),
+      ).cursorSequence,
+    ).toBe(0)
+    expect(gitRefExists(harness.cwd, checkpointRef)).toBe(false)
+    expect((await harness.readRuntimeCheckpointState()).actions).toEqual([])
+
+    await harness.drain({ advanceRuntimeIngestion: true })
+    expect(
+      Option.getOrThrow(
+        await Effect.runPromise(harness.delivery.getProgress('provider-runtime-checkpoint')),
+      ).cursorSequence,
+    ).toBe(1)
+    expect(gitRefExists(harness.cwd, checkpointRef)).toBe(true)
+    expect((await harness.readRuntimeCheckpointState()).actions).toEqual([
+      expect.objectContaining({
+        sourceSequence: 1,
+        status: 'succeeded',
+        lastError: null,
+      }),
+    ])
+  })
+
   it('continues processing runtime events after a single checkpoint runtime failure', async () =>
   {
     const nonRepositorySessionCwd = NodeFS.mkdtempSync(
@@ -1414,12 +1718,14 @@ describe('CheckpointReactor', () =>
       createdAt: '2026-01-01T00:00:00.000Z',
       threadId: ThreadId.make('thread-1'),
       turnId: asTurnId('turn-after-runtime-failure'),
+      payload: {},
     })
 
     await waitForGitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0))
     expect(
       gitRefExists(harness.cwd, checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0)),
     ).toBe(true)
+    await harness.drain()
   })
 
   it('replays a placeholder capture event appended before start', async () =>
@@ -1468,9 +1774,10 @@ describe('CheckpointReactor', () =>
     ).toBe(true)
   })
 
-  it('executes provider revert and emits thread.reverted for checkpoint revert requests', async () =>
+  it('uses the provider-native turn count and settled checkpoint refs for revert', async () =>
   {
     const harness = await createHarness()
+    harness.provider.setNativeTurnCount(3)
     const createdAt = '2026-01-01T00:00:00.000Z'
     const phases: string[] = []
     const admit = harness.checkpointRevertOperations.admit
@@ -1532,6 +1839,10 @@ describe('CheckpointReactor', () =>
         status: 'ready',
         files: [],
         checkpointTurnCount: 1,
+        ...capturedIdentityForRef(
+          harness.cwd,
+          checkpointRefForThreadTurn(ThreadId.make('thread-1'), 1),
+        ),
         createdAt,
       }),
     )
@@ -1546,6 +1857,10 @@ describe('CheckpointReactor', () =>
         status: 'ready',
         files: [],
         checkpointTurnCount: 2,
+        ...capturedIdentityForRef(
+          harness.cwd,
+          checkpointRefForThreadTurn(ThreadId.make('thread-1'), 2),
+        ),
         createdAt,
       }),
     )
@@ -1559,6 +1874,12 @@ describe('CheckpointReactor', () =>
         createdAt,
       }),
     )
+    await harness.drain()
+    const completedRevert = await Effect.runPromise(
+      harness.checkpointRevertOperations.getById('checkpoint-revert:cmd-revert-request'),
+    )
+    expect(Option.isSome(completedRevert)).toBe(true)
+    if (Option.isSome(completedRevert)) expect(completedRevert.value.phase).toBe('completed')
 
     await waitForEvent(harness.engine, (event) => event.type === 'thread.reverted')
     const thread = await waitForThread(harness.readModel, (entry) => entry.checkpoints.length === 1)
@@ -1567,11 +1888,14 @@ describe('CheckpointReactor', () =>
     expect(thread.checkpoints).toHaveLength(1)
     expect(thread.checkpoints[0]?.checkpointTurnCount).toBe(1)
     expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1)
-    // rollback is now fenced by the bound provider instance (megacore U-073)
-    expect(harness.provider.rollbackConversation).toHaveBeenCalledWith({
-      threadId: ThreadId.make('thread-1'),
-      numTurns: 1,
-      expectedProviderInstanceId: ProviderInstanceId.make('codex'),
+    expect(harness.provider.rollbackConversationIfExact).toHaveBeenCalledWith({
+      identity: {
+        provider: ProviderDriverKind.make('codex'),
+        providerInstanceId: ProviderInstanceId.make('codex'),
+        threadId: ThreadId.make('thread-1'),
+        sessionGeneration: 1,
+      },
+      numTurns: 2,
     })
     expect(NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')).toBe('v2\n')
     const operation = await waitForRevertOperation(
@@ -1580,6 +1904,7 @@ describe('CheckpointReactor', () =>
       (candidate) => candidate.phase === 'completed',
     )
     expect(operation.providerOutcome).toBe('exact')
+    expect(operation.providerSessionGeneration).toBe(1)
     expect(operation.cleanupStatus).toBe('completed')
     // stale-ref deletion is the last, post-projection cleanup step, so it is
     // only guaranteed once the operation reaches 'completed'
@@ -1590,24 +1915,210 @@ describe('CheckpointReactor', () =>
       'admitted',
       'target-staged',
       'restore-ready',
-      'restore-started',
-      'filesystem-restored',
       'provider-pending',
       'provider-outcome-recorded',
+      'restore-started',
+      'filesystem-restored',
       'projection-finalized',
       'cleanup-pending',
       'completed',
     ])
   })
 
-  it('resumes a restore-started operation and converges the staged filesystem restore', async () =>
+  it('marks a changed provider generation manual after the write-ahead marker without calling the adapter', async () =>
+  {
+    const harness = await createHarness()
+    const createdAt = '2026-01-01T00:00:00.000Z'
+    await seedRevertTimeline(harness, 'cmd-provider-generation-mismatch')
+    const casTransition = harness.checkpointRevertOperations.casTransition
+    let generationReplaced = false
+    vi.spyOn(harness.checkpointRevertOperations, 'casTransition').mockImplementation((input) =>
+      casTransition(input).pipe(
+        Effect.tap(() =>
+          Effect.sync(() =>
+          {
+            if (!generationReplaced && input.nextPhase === 'target-staged')
+            {
+              harness.provider.replaceSessionGeneration()
+              generationReplaced = true
+            }
+          }),
+        ),
+      ),
+    )
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.checkpoint.revert',
+        commandId: CommandId.make('cmd-provider-generation-mismatch-revert'),
+        threadId: ThreadId.make('thread-1'),
+        turnCount: 1,
+        createdAt,
+      }),
+    )
+
+    const operation = await waitForRevertOperation(
+      harness.checkpointRevertOperations,
+      'checkpoint-revert:cmd-provider-generation-mismatch-revert',
+      (candidate) => candidate.phase === 'manual-required',
+    )
+    const events = await Effect.runPromise(
+      Stream.runCollect(harness.engine.readEvents(0)).pipe(
+        Effect.map((chunk) => Array.from(chunk)),
+      ),
+    )
+
+    expect(generationReplaced).toBe(true)
+    expect(harness.provider.sessionGeneration).toBe(2)
+    expect(operation.providerSessionGeneration).toBe(1)
+    expect(operation.providerOutcome).toBe('manual-unknown')
+    expect(operation.manualResumePhase).toBe('provider-outcome-recorded')
+    expect(harness.provider.rollbackConversationIfExact).not.toHaveBeenCalled()
+    expect(harness.provider.rollbackConversation).not.toHaveBeenCalled()
+    expect(events.some((event) => event.type === 'thread.reverted')).toBe(false)
+  })
+
+  it('marks a legacy provider-generation-less journal manual before staging', async () =>
   {
     const harness = await createHarness({ startReactor: false })
     const createdAt = '2026-01-01T00:00:00.000Z'
     const threadId = ThreadId.make('thread-1')
     const targetRef = checkpointRefForThreadTurn(threadId, 1)
+    const operationId = 'checkpoint-revert:legacy-provider-generation'
+    await seedRevertTimeline(harness, 'cmd-legacy-provider-generation')
+    const capturedIdentity = capturedIdentityForRef(harness.cwd, targetRef)
+    const beforeContents = NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')
+    const stageCheckpointTree = vi.spyOn(harness.checkpointStore, 'stageCheckpointTree')
+
+    await runtime!.runPromise(
+      Effect.gen(function* ()
+      {
+        const sql = yield* SqlClient.SqlClient
+        yield* sql`
+          INSERT INTO checkpoint_revert_operations (
+            operation_id,
+            thread_id,
+            target_ref,
+            target_turn_count,
+            request_source_sequence,
+            provider_inbox_high_water,
+            cwd,
+            checkpoint_capture_root,
+            repository_common_dir,
+            checkpoint_commit_oid,
+            provider_kind,
+            provider_instance_id,
+            provider_thread_id,
+            phase,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${operationId},
+            ${threadId},
+            ${targetRef},
+            1,
+            1,
+            0,
+            ${harness.cwd},
+            ${capturedIdentity.checkpointCaptureRoot},
+            ${capturedIdentity.checkpointRepositoryCommonDir},
+            ${capturedIdentity.checkpointCommitOid},
+            'codex',
+            'codex',
+            ${threadId},
+            'admitted',
+            ${createdAt},
+            ${createdAt}
+          )
+        `
+      }),
+    )
+
+    await harness.startReactor()
+    const operation = await waitForRevertOperation(
+      harness.checkpointRevertOperations,
+      operationId,
+      (candidate) => candidate.phase === 'manual-required',
+    )
+
+    expect(operation.providerSessionGeneration).toBeNull()
+    expect(operation.manualResumePhase).toBeNull()
+    expect(stageCheckpointTree).not.toHaveBeenCalled()
+    expect(harness.provider.rollbackConversationIfExact).not.toHaveBeenCalled()
+    expect(harness.provider.rollbackConversation).not.toHaveBeenCalled()
+    expect(NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')).toBe(
+      beforeContents,
+    )
+  })
+
+  it('rejects ref identity mismatch before journal admission or staged tree writes', async () =>
+  {
+    const harness = await createHarness()
+    const createdAt = '2026-01-01T00:00:00.000Z'
+    await seedRevertTimeline(harness, 'cmd-identity-mismatch')
+    const targetRef = checkpointRefForThreadTurn(ThreadId.make('thread-1'), 1)
+    const replacementRef = checkpointRefForThreadTurn(ThreadId.make('thread-1'), 2)
+    const replacementOid = runGit(harness.cwd, ['rev-parse', `${replacementRef}^{commit}`]).trim()
+    runGit(harness.cwd, ['update-ref', targetRef, replacementOid])
+    const beforeContents = NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')
+    const stageCheckpointTree = vi.spyOn(harness.checkpointStore, 'stageCheckpointTree')
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.checkpoint.revert',
+        commandId: CommandId.make('cmd-identity-mismatch-revert'),
+        threadId: ThreadId.make('thread-1'),
+        turnCount: 1,
+        createdAt,
+      }),
+    )
+    const thread = await waitForThread(harness.readModel, (candidate) =>
+      candidate.activities.some((activity) => activity.kind === 'checkpoint.revert.failed'),
+    )
+    await harness.drain()
+
+    const operation = await Effect.runPromise(
+      harness.checkpointRevertOperations.getById('checkpoint-revert:cmd-identity-mismatch-revert'),
+    )
+    expect(Option.isSome(operation)).toBe(true)
+    if (Option.isSome(operation))
+    {
+      expect(operation.value.phase).toBe('aborted')
+      expect(operation.value.cwd).toBeNull()
+    }
+    expect(stageCheckpointTree).not.toHaveBeenCalled()
+    expect(
+      NodeFS.existsSync(
+        NodePath.join(
+          harness.serverConfig.stateDir,
+          'checkpoint-reverts',
+          encodeURIComponent('checkpoint-revert:cmd-identity-mismatch-revert'),
+        ),
+      ),
+    ).toBe(false)
+    expect(NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')).toBe(
+      beforeContents,
+    )
+    expect(thread.activities.some((activity) => activity.kind === 'checkpoint.revert.failed')).toBe(
+      true,
+    )
+  })
+
+  it('resumes restore-started after durable provider completion without repeating rollback', async () =>
+  {
+    const alternateSessionCwd = createGitRepository()
+    tempDirs.push(alternateSessionCwd)
+    const harness = await createHarness({
+      startReactor: false,
+      providerSessionCwd: alternateSessionCwd,
+    })
+    const createdAt = '2026-01-01T00:00:00.000Z'
+    const threadId = ThreadId.make('thread-1')
+    const targetRef = checkpointRefForThreadTurn(threadId, 1)
     const operationId = 'checkpoint-revert:cmd-resume-mid-restore'
     await seedRevertTimeline(harness, 'cmd-resume-mid-restore')
+    const capturedIdentity = capturedIdentityForRef(harness.cwd, targetRef)
 
     const stagePath = NodePath.join(
       harness.serverConfig.stateDir,
@@ -1619,20 +2130,29 @@ describe('CheckpointReactor', () =>
       harness.checkpointStore.stageCheckpointTree({
         cwd: harness.cwd,
         ref: targetRef,
+        commitOid: capturedIdentity.checkpointCommitOid,
         stagePath,
       }),
     )
-    const commonDirOutput = runGit(harness.cwd, ['rev-parse', '--git-common-dir']).trim()
-    const repositoryCommonDir = NodePath.isAbsolute(commonDirOutput)
-      ? commonDirOutput
-      : NodePath.resolve(harness.cwd, commonDirOutput)
     const admitted = await Effect.runPromise(
       harness.checkpointRevertOperations.admit({
         operationId,
         threadId,
         targetRef,
         targetTurnCount: 1,
+        requestSourceSequence: 1,
+        providerInboxHighWater: 0,
         cwd: harness.cwd,
+        checkpointCaptureRoot: capturedIdentity.checkpointCaptureRoot,
+        repositoryCommonDir: capturedIdentity.checkpointRepositoryCommonDir,
+        checkpointCommitOid: capturedIdentity.checkpointCommitOid,
+        providerIdentity: {
+          provider: ProviderDriverKind.make('codex'),
+          providerInstanceId: ProviderInstanceId.make('codex'),
+          threadId,
+          sessionGeneration: 1,
+        },
+        providerSessionId: null,
         now: createdAt,
       }),
     )
@@ -1643,7 +2163,6 @@ describe('CheckpointReactor', () =>
         nextPhase: 'target-staged',
         patch: {
           targetTree: verification.treeOid,
-          repositoryCommonDir,
           stagePath,
         },
         now: createdAt,
@@ -1661,6 +2180,38 @@ describe('CheckpointReactor', () =>
       harness.checkpointRevertOperations.casTransition({
         operationId,
         expectedPhase: ready.phase,
+        nextPhase: 'provider-pending',
+        now: createdAt,
+      }),
+    )
+    const providerOutcome = await Effect.runPromise(
+      harness.checkpointRevertOperations.recordProviderOutcome({
+        operationId,
+        outcome: 'exact',
+        outcomeJson: encodeProviderRollbackJournalDetail({
+          version: 1,
+          capability: 'exact',
+          state: 'recorded',
+          rolledBackTurns: 1,
+          staleRefs: [checkpointRefForThreadTurn(threadId, 2)],
+          detail: null,
+        }),
+        providerSessionId: null,
+        now: createdAt,
+      }),
+    )
+    await Effect.runPromise(
+      harness.provider.service.stopSessionIfExact({
+        provider: ProviderDriverKind.make('codex'),
+        providerInstanceId: ProviderInstanceId.make('codex'),
+        threadId,
+        sessionGeneration: 1,
+      }),
+    )
+    await Effect.runPromise(
+      harness.checkpointRevertOperations.casTransition({
+        operationId,
+        expectedPhase: providerOutcome.phase,
         nextPhase: 'restore-started',
         now: createdAt,
       }),
@@ -1669,11 +2220,13 @@ describe('CheckpointReactor', () =>
       harness.checkpointStore.applyStagedRestore({
         cwd: harness.cwd,
         ref: targetRef,
+        commitOid: capturedIdentity.checkpointCommitOid,
         stagePath,
       }),
     )
     expect(NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')).toBe('v2\n')
 
+    const applyStagedRestore = vi.spyOn(harness.checkpointStore, 'applyStagedRestore')
     await harness.startReactor()
     const operation = await waitForRevertOperation(
       harness.checkpointRevertOperations,
@@ -1682,9 +2235,20 @@ describe('CheckpointReactor', () =>
     )
 
     expect(operation.providerOutcome).toBe('exact')
+    expect(operation.cwd).toBe(harness.cwd)
+    expect(operation.checkpointCommitOid).toBe(capturedIdentity.checkpointCommitOid)
+    expect(applyStagedRestore).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: harness.cwd,
+        commitOid: capturedIdentity.checkpointCommitOid,
+      }),
+    )
     expect(NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')).toBe('v2\n')
+    expect(NodeFS.readFileSync(NodePath.join(alternateSessionCwd, 'README.md'), 'utf8')).toBe(
+      'v1\n',
+    )
     expect(NodeFS.existsSync(stagePath)).toBe(false)
-    expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(1)
+    expect(harness.provider.rollbackConversation).not.toHaveBeenCalled()
   })
 
   it('completes with a recorded warning when provider rollback is known unsupported', async () =>
@@ -1758,7 +2322,7 @@ describe('CheckpointReactor', () =>
     expect(
       thread?.activities.some((activity) => activity.kind === 'checkpoint.revert.failed'),
     ).toBe(true)
-    expect(NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')).toBe('v2\n')
+    expect(NodeFS.readFileSync(NodePath.join(harness.cwd, 'README.md'), 'utf8')).toBe('v3\n')
   })
 
   it('keeps cleanup retryable after projection finalization without undoing restore', async () =>
@@ -1817,24 +2381,43 @@ describe('CheckpointReactor', () =>
         threadId: ThreadId.make('thread-1'),
         targetRef: checkpointRefForThreadTurn(ThreadId.make('thread-1'), 1),
         targetTurnCount: 1,
+        requestSourceSequence: 1,
+        providerInboxHighWater: 0,
         cwd: harness.cwd,
+        checkpointCaptureRoot: harness.cwd,
+        repositoryCommonDir: (() =>
+        {
+          const value = runGit(harness.cwd, ['rev-parse', '--git-common-dir']).trim()
+          return NodePath.isAbsolute(value) ? value : NodePath.resolve(harness.cwd, value)
+        })(),
+        checkpointCommitOid: runGit(harness.cwd, [
+          'rev-parse',
+          checkpointRefForThreadTurn(ThreadId.make('thread-1'), 1),
+        ]).trim(),
+        providerIdentity: {
+          provider: ProviderDriverKind.make('codex'),
+          providerInstanceId: ProviderInstanceId.make('codex'),
+          threadId: ThreadId.make('thread-1'),
+          sessionGeneration: 1,
+        },
+        providerSessionId: null,
         now: createdAt,
       }),
     )
 
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.checkpoint.revert',
-        commandId: CommandId.make('cmd-conflicting-revert'),
-        threadId: ThreadId.make('thread-1'),
-        turnCount: 0,
-        createdAt,
-      }),
+    const rejected = await Effect.runPromise(
+      Effect.result(
+        harness.engine.dispatch({
+          type: 'thread.checkpoint.revert',
+          commandId: CommandId.make('cmd-conflicting-revert'),
+          threadId: ThreadId.make('thread-1'),
+          turnCount: 0,
+          createdAt,
+        }),
+      ),
     )
+    expect(rejected._tag).toBe('Failure')
 
-    const thread = await waitForThread(harness.readModel, (candidate) =>
-      candidate.activities.some((activity) => activity.kind === 'checkpoint.revert.failed'),
-    )
     const conflicting = await Effect.runPromise(
       harness.checkpointRevertOperations.getById('checkpoint-revert:cmd-conflicting-revert'),
     )
@@ -1842,9 +2425,6 @@ describe('CheckpointReactor', () =>
       harness.checkpointRevertOperations.getActiveByThread(ThreadId.make('thread-1')),
     )
 
-    expect(thread.activities.some((activity) => activity.kind === 'checkpoint.revert.failed')).toBe(
-      true,
-    )
     expect(Option.isNone(conflicting)).toBe(true)
     expect(Option.isSome(active) && active.value.operationId).toBe(
       'checkpoint-revert:cmd-active-revert',
@@ -1887,6 +2467,10 @@ describe('CheckpointReactor', () =>
           status: 'ready',
           files: [],
           checkpointTurnCount: turnCount,
+          ...capturedIdentityForRef(
+            harness.cwd,
+            checkpointRefForThreadTurn(ThreadId.make('thread-1'), turnCount),
+          ),
           createdAt,
         }),
       )
@@ -1941,6 +2525,20 @@ describe('CheckpointReactor', () =>
       }),
     )
 
+    const baselineRef = checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0)
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.checkpoint.baseline.record',
+        commandId: CommandId.make('cmd-inline-revert-baseline'),
+        threadId: ThreadId.make('thread-1'),
+        checkpointTurnCount: 0,
+        checkpointRef: baselineRef,
+        ...capturedIdentityForRef(harness.cwd, baselineRef),
+        capturedAt: createdAt,
+        createdAt,
+      }),
+    )
+
     await Effect.runPromise(
       harness.engine.dispatch({
         type: 'thread.turn.diff.complete',
@@ -1952,6 +2550,10 @@ describe('CheckpointReactor', () =>
         status: 'ready',
         files: [],
         checkpointTurnCount: 1,
+        ...capturedIdentityForRef(
+          harness.cwd,
+          checkpointRefForThreadTurn(ThreadId.make('thread-1'), 1),
+        ),
         createdAt,
       }),
     )
@@ -1966,6 +2568,10 @@ describe('CheckpointReactor', () =>
         status: 'ready',
         files: [],
         checkpointTurnCount: 2,
+        ...capturedIdentityForRef(
+          harness.cwd,
+          checkpointRefForThreadTurn(ThreadId.make('thread-1'), 2),
+        ),
         createdAt,
       }),
     )
@@ -1979,6 +2585,8 @@ describe('CheckpointReactor', () =>
         createdAt,
       }),
     )
+    await harness.drain()
+    harness.provider.replaceSessionGeneration()
     await Effect.runPromise(
       harness.engine.dispatch({
         type: 'thread.checkpoint.revert',
@@ -1992,15 +2600,23 @@ describe('CheckpointReactor', () =>
     await harness.drain()
 
     expect(harness.provider.rollbackConversation).toHaveBeenCalledTimes(2)
-    expect(harness.provider.rollbackConversation.mock.calls[0]?.[0]).toEqual({
-      threadId: ThreadId.make('thread-1'),
+    expect(harness.provider.rollbackConversationIfExact.mock.calls[0]?.[0]).toEqual({
+      identity: {
+        provider: ProviderDriverKind.make('codex'),
+        providerInstanceId: ProviderInstanceId.make('codex'),
+        threadId: ThreadId.make('thread-1'),
+        sessionGeneration: 1,
+      },
       numTurns: 1,
-      expectedProviderInstanceId: ProviderInstanceId.make('codex'),
     })
-    expect(harness.provider.rollbackConversation.mock.calls[1]?.[0]).toEqual({
-      threadId: ThreadId.make('thread-1'),
+    expect(harness.provider.rollbackConversationIfExact.mock.calls[1]?.[0]).toEqual({
+      identity: {
+        provider: ProviderDriverKind.make('codex'),
+        providerInstanceId: ProviderInstanceId.make('codex'),
+        threadId: ThreadId.make('thread-1'),
+        sessionGeneration: 2,
+      },
       numTurns: 1,
-      expectedProviderInstanceId: ProviderInstanceId.make('codex'),
     })
   })
 
@@ -2027,5 +2643,68 @@ describe('CheckpointReactor', () =>
       true,
     )
     expect(harness.provider.rollbackConversation).not.toHaveBeenCalled()
+  })
+
+  it('replays a requested revert from its authoritative event before starting the domain lane', async () =>
+  {
+    const harness = await createHarness({ startReactor: false })
+    await seedRevertTimeline(harness, 'cmd-requested-restart')
+    const commandId = CommandId.make('cmd-requested-restart-revert')
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.checkpoint.revert',
+        commandId,
+        threadId: ThreadId.make('thread-1'),
+        turnCount: 1,
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+
+    const operationId = checkpointRevertOperationId(commandId)
+    expect(
+      Option.getOrThrow(
+        await Effect.runPromise(harness.checkpointRevertOperations.getById(operationId)),
+      ).phase,
+    ).toBe('requested')
+
+    await harness.startReactor()
+    await harness.drain()
+
+    const completed = await waitForRevertOperation(
+      harness.checkpointRevertOperations,
+      operationId,
+      (operation) => operation.phase === 'completed',
+    )
+    expect(completed.requestSourceSequence).toBeGreaterThan(0)
+    expect(harness.provider.rollbackConversationIfExact).toHaveBeenCalledTimes(1)
+  })
+
+  it('aborts a requested fence whose authoritative event is missing during restart recovery', async () =>
+  {
+    const harness = await createHarness({ startReactor: false })
+    const operationId = 'checkpoint-revert:missing-authoritative-event'
+    await Effect.runPromise(
+      harness.checkpointRevertOperations.reserve({
+        operationId,
+        threadId: 'thread-1',
+        targetRef: checkpointRefForThreadTurn(ThreadId.make('thread-1'), 1),
+        targetTurnCount: 1,
+        requestSourceSequence: 999,
+        providerInboxHighWater: 0,
+        now: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+
+    await harness.startReactor()
+
+    const aborted = await waitForRevertOperation(
+      harness.checkpointRevertOperations,
+      operationId,
+      (operation) => operation.phase === 'aborted',
+    )
+    expect(aborted.cwd).toBeNull()
+    expect(aborted.lastError).toContain('authoritative request event')
+    expect(harness.provider.rollbackConversationIfExact).not.toHaveBeenCalled()
   })
 })

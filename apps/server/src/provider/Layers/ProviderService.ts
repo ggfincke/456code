@@ -10,7 +10,10 @@
 // it does not implement provider protocol details (adapter concern).
 //
 // @module ProviderServiceLive
+import * as NodeCrypto from 'node:crypto'
+
 import {
+  EventId,
   ModelSelection,
   NonNegativeInt,
   ProviderContinuationIdentity,
@@ -28,14 +31,23 @@ import {
   type ProviderSession,
 } from '@t3tools/contracts'
 import { causeErrorTag } from '@t3tools/shared/observability'
+import { stableStringify } from '@t3tools/shared/relaySigning'
+import * as Cause from 'effect/Cause'
+import * as Crypto from 'effect/Crypto'
 import * as DateTime from 'effect/DateTime'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
 import * as PubSub from 'effect/PubSub'
+import * as Queue from 'effect/Queue'
 import * as Ref from 'effect/Ref'
+import * as Result from 'effect/Result'
 import * as Schema from 'effect/Schema'
 import * as SchemaIssue from 'effect/SchemaIssue'
+import * as Semaphore from 'effect/Semaphore'
+import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
 
 import {
@@ -49,32 +61,89 @@ import {
   withMetrics,
 } from '../../observability/Metrics.ts'
 import { type ProviderAdapterError, ProviderValidationError } from '../Errors.ts'
-import type { ProviderAdapterShape, ProviderEffectContext } from '../Services/ProviderAdapter.ts'
+import type {
+  ProviderAdapterRuntimeEvent,
+  ProviderAdapterRuntimeSessionBinding,
+  ProviderAdapterSessionStartInput,
+  ProviderAdapterShape,
+  ProviderEffectContext,
+} from '../Services/ProviderAdapter.ts'
 import * as ProviderAdapterRegistry from '../Services/ProviderAdapterRegistry.ts'
 import * as ProviderService from '../Services/ProviderService.ts'
 import * as ProviderSessionDirectory from '../Services/ProviderSessionDirectory.ts'
 import { type EventNdjsonLogger } from './EventNdjsonLogger.ts'
 import * as ProviderEventLoggers from './ProviderEventLoggers.ts'
 import * as AnalyticsService from '../../telemetry/Services/AnalyticsService.ts'
-import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import * as McpSessionRegistry from '../../mcp/McpSessionRegistry.ts'
 import { applyOrchestrateModeInstructions } from '../CollaborationModeInstructions.ts'
 import { observeHiddenTurnRuntimeEvent } from '../HiddenTurnRegistry.ts'
+import {
+  ProviderRuntimeInbox,
+  ProviderRuntimeInboxAdmissionError,
+  type ProviderRuntimeInboxAppendResult,
+  type ProviderRuntimeInboxSession,
+  type ProviderRuntimeSessionIdentity,
+} from '../../persistence/Services/ProviderRuntimeInbox.ts'
+import type { PersistenceSqlError } from '../../persistence/Errors.ts'
+import { ProjectionSnapshotQuery } from '../../orchestration/Services/ProjectionSnapshotQuery.ts'
+import { ThreadArchiveLifecyclePermit } from '../../orchestration/Services/ThreadArchiveLifecyclePermit.ts'
+import {
+  ProviderInstanceLifecycleReconcileError,
+  ProviderInstanceRegistryMutator,
+  type ProviderInstanceRegistryLifecycleOwner,
+  type ProviderInstanceRegistryMutatorShape,
+} from '../Services/ProviderInstanceRegistryMutator.ts'
+import { makeKeyedSemaphore } from './KeyedSemaphore.ts'
 const isModelSelection = Schema.is(ModelSelection)
 const isProviderContinuationIdentity = Schema.is(ProviderContinuationIdentity)
+const isProviderRuntimeInboxAdmissionError = Schema.is(ProviderRuntimeInboxAdmissionError)
 
 /**
- * Hook for tests that want to override the canonical event logger pulled
- * from `ProviderEventLoggers`. Production wiring leaves this undefined and
- * reads the logger off the tag.
+ * Construction overrides for focused service tests. Production wiring
+ * injects the registry mutator explicitly so settings retirement cannot
+ * bypass provider lifecycle ownership.
  */
 export interface ProviderServiceLiveOptions
 {
   readonly canonicalEventLogger?: EventNdjsonLogger
+  readonly registryMutator?: ProviderInstanceRegistryMutatorShape
 }
 
 type ProviderServiceMethod<Name extends keyof ProviderService.ProviderService['Service']> =
   ProviderService.ProviderService['Service'][Name]
+
+type RuntimeEventAdmissionError = ProviderRuntimeInboxAdmissionError | ProviderValidationError
+
+type AdapterReconciliation =
+  | { readonly _tag: 'ready' }
+  | { readonly _tag: 'quarantined' }
+  | { readonly _tag: 'waiting' }
+  | {
+      readonly _tag: 'retry-cleanup'
+      readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+    }
+
+type QuarantinedAdapterState = Map<
+  ProviderInstanceId,
+  {
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+    readonly cleanupState: 'pending' | 'running' | 'complete'
+    readonly reconcileAfterCleanup: boolean
+  }
+>
+
+interface AdapterRoutingState
+{
+  readonly subscribed: Map<
+    ProviderInstanceId,
+    {
+      readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+      readonly fiber: Fiber.Fiber<void, never>
+    }
+  >
+  readonly quarantined: QuarantinedAdapterState
+  readonly reconfiguring: ReadonlySet<ProviderInstanceId>
+}
 
 const ProviderRollbackConversationInput = Schema.Struct({
   threadId: ThreadId,
@@ -246,6 +315,20 @@ const correlateRuntimeEventWithInstance = (
   return { ...event, providerInstanceId: source.instanceId }
 }
 
+const validateRuntimeEventBinding = (
+  binding: ProviderAdapterRuntimeSessionBinding,
+  event: ProviderRuntimeEvent,
+): void =>
+{
+  const providerInstanceId = dieOnMissingBindingInstanceId('ProviderService.streamEvents', event)
+  if (binding.providerInstanceId !== providerInstanceId || binding.threadId !== event.threadId)
+  {
+    throw new Error(
+      `ProviderService.streamEvents: runtime event '${event.eventId}' does not match its originating provider session binding.`,
+    )
+  }
+}
+
 const makeProviderService = Effect.fn('makeProviderService')(function* (
   options?: ProviderServiceLiveOptions,
 )
@@ -259,32 +342,525 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   const canonicalEventLogger = options?.canonicalEventLogger ?? eventLoggers.canonical
 
   const registry = yield* ProviderAdapterRegistry.ProviderAdapterRegistry
+  const contextualRegistryMutator = yield* Effect.serviceOption(ProviderInstanceRegistryMutator)
+  const registryMutator =
+    options?.registryMutator === undefined
+      ? contextualRegistryMutator
+      : Option.some(options.registryMutator)
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory
+  const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry
+  const runtimeInbox = yield* ProviderRuntimeInbox
+  const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
+  const threadArchiveLifecyclePermit = yield* ThreadArchiveLifecyclePermit
+  const subscriptionScope = yield* Scope.make()
+  yield* Effect.addFinalizer((exit) => Scope.close(subscriptionScope, exit))
+  const crypto = yield* Crypto.Crypto
   const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>()
+  const adapterReconcileWakeups = yield* PubSub.unbounded<void>()
+  const sessionLifecycleLocks = yield* makeKeyedSemaphore<ThreadId>()
+  const adapterLifecycleLocks = yield* makeKeyedSemaphore<ProviderInstanceId>()
+  const shuttingDown = yield* Ref.make(false)
+  const shutdownHighWater = yield* Ref.make<Option.Option<number>>(Option.none())
+  const shutdownGate = yield* Semaphore.make(1)
+  const providerInstanceMutationGate = yield* Semaphore.make(1)
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
-  const prepareMcpSession = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
-    McpSessionRegistry.issueActiveMcpCredential({ threadId, providerInstanceId }).pipe(
-      Effect.tap((credential) =>
-        credential
-          ? Effect.sync(() => McpProviderSession.setMcpProviderSession(credential.config))
-          : Effect.void,
+  const admissionOwnerId = yield* crypto.randomUUIDv4
+  const admission = yield* runtimeInbox.claimAdmissionOwner({
+    ownerId: admissionOwnerId,
+    now: yield* nowIso,
+  })
+  const beginRuntimeSession = Effect.fn('ProviderService.beginRuntimeSession')(function* (
+    provider: ProviderDriverKind,
+    providerInstanceId: ProviderInstanceId,
+    threadId: ThreadId,
+  )
+  {
+    const session = yield* runtimeInbox.beginSession({
+      ownerId: admissionOwnerId,
+      ownerGeneration: admission.ownerGeneration,
+      provider,
+      providerInstanceId,
+      threadId,
+      now: yield* nowIso,
+    })
+    return session
+  })
+  const beginRuntimeSessionForService = (
+    operation: string,
+    provider: ProviderDriverKind,
+    providerInstanceId: ProviderInstanceId,
+    threadId: ThreadId,
+  ) =>
+    beginRuntimeSession(provider, providerInstanceId, threadId).pipe(
+      Effect.mapError((cause) =>
+        toValidationError(
+          operation,
+          'Unable to establish durable provider session identity.',
+          cause,
+        ),
       ),
     )
-  const clearMcpSession = (threadId: ThreadId) =>
-    McpSessionRegistry.revokeActiveMcpThread(threadId).pipe(
-      Effect.tap(() => Effect.sync(() => McpProviderSession.clearMcpProviderSession(threadId))),
-    )
-
-  const publishRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Effect.succeed(event).pipe(
-      Effect.tap((canonicalEvent) =>
-        canonicalEventLogger
-          ? canonicalEventLogger.write(canonicalEvent, canonicalEvent.threadId)
-          : Effect.void,
+  const prepareMcpSession = (
+    threadId: ThreadId,
+    providerInstanceId: ProviderInstanceId,
+    providerSessionGeneration: number,
+  ) =>
+    mcpSessionRegistry
+      .issue({ threadId, providerInstanceId, providerSessionGeneration })
+      .pipe(Effect.map((credential) => credential?.config))
+  const clearExactMcpSession = (identity: ProviderAdapterRuntimeSessionBinding) =>
+    mcpSessionRegistry.revokeExact({
+      threadId: identity.threadId,
+      providerInstanceId: identity.providerInstanceId,
+      providerSessionGeneration: identity.sessionGeneration,
+    })
+  const requireRunning = (operation: string) =>
+    Ref.get(shuttingDown).pipe(
+      Effect.filterOrFail(
+        (value) => !value,
+        () => toValidationError(operation, 'Provider runtime shutdown has started.'),
       ),
-      Effect.flatMap((canonicalEvent) => PubSub.publish(runtimeEventPubSub, canonicalEvent)),
       Effect.asVoid,
     )
+
+  const requireActiveThread = (operation: string, threadId: ThreadId) =>
+    projectionSnapshotQuery.getThreadShellById(threadId).pipe(
+      Effect.mapError((cause) =>
+        toValidationError(
+          operation,
+          `Unable to confirm that thread '${threadId}' is active before creating a provider lifecycle.`,
+          cause,
+        ),
+      ),
+      Effect.filterOrFail(Option.isSome, () =>
+        toValidationError(
+          operation,
+          `Thread '${threadId}' is archived, deleted, or unavailable; provider lifecycle creation is not allowed.`,
+        ),
+      ),
+      Effect.asVoid,
+    )
+
+  const withActiveThreadLifecycle = <A, E, R>(
+    operation: string,
+    threadId: ThreadId,
+    effect: Effect.Effect<A, E, R>,
+  ) =>
+    threadArchiveLifecyclePermit.withPermit(
+      threadId,
+      requireActiveThread(operation, threadId).pipe(Effect.andThen(effect)),
+    )
+
+  const admitRuntimeEvent: (
+    binding: ProviderAdapterRuntimeSessionBinding,
+    event: ProviderRuntimeEvent,
+  ) => Effect.Effect<ProviderRuntimeInboxAppendResult, RuntimeEventAdmissionError> = Effect.fn(
+    'ProviderService.admitRuntimeEvent',
+  )(function* (binding: ProviderAdapterRuntimeSessionBinding, event: ProviderRuntimeEvent)
+  {
+    yield* Effect.sync(() => validateRuntimeEventBinding(binding, event))
+    const providerInstanceId = dieOnMissingBindingInstanceId(
+      'ProviderService.admitRuntimeEvent',
+      event,
+    )
+    const eventJson = stableStringify(event)
+    const eventDigest = NodeCrypto.createHash('sha256').update(eventJson).digest('hex')
+    const receivedAt = yield* nowIso
+    let attempt = 0
+    while (true)
+    {
+      const result = yield* Effect.result(
+        runtimeInbox.append({
+          ownerId: admissionOwnerId,
+          ownerGeneration: admission.ownerGeneration,
+          provider: event.provider,
+          providerInstanceId,
+          threadId: event.threadId,
+          sessionGeneration: binding.sessionGeneration,
+          sourceEventId: event.eventId,
+          eventType: event.type,
+          eventCreatedAt: event.createdAt,
+          receivedAt,
+          eventJson,
+          eventDigest,
+        }),
+      )
+      if (Result.isSuccess(result))
+      {
+        return result.success
+      }
+      if (
+        isProviderRuntimeInboxAdmissionError(result.failure) &&
+        result.failure.reason !== 'fenced'
+      )
+      {
+        yield* Effect.logError('provider runtime admission terminated its provider subscription', {
+          eventId: event.eventId,
+          eventType: event.type,
+          reason: result.failure.reason,
+          detail: result.failure.detail,
+        })
+        return yield* result.failure
+      }
+      attempt += 1
+      if (attempt === 1 || attempt % 20 === 0)
+      {
+        yield* Effect.logError('provider runtime admission is backpressured', {
+          eventId: event.eventId,
+          eventType: event.type,
+          attempt,
+          cause: result.failure.message,
+        })
+      }
+      yield* Effect.sleep(250)
+    }
+  })
+
+  const publishRuntimeEvent = (
+    binding: ProviderAdapterRuntimeSessionBinding,
+    event: ProviderRuntimeEvent,
+  ): Effect.Effect<void, RuntimeEventAdmissionError> =>
+    admitRuntimeEvent(binding, event).pipe(
+      Effect.flatMap((result) =>
+        result.duplicate
+          ? Effect.void
+          : observeHiddenTurnRuntimeEvent(event).pipe(
+              Effect.andThen(
+                increment(providerRuntimeEventsTotal, {
+                  provider: event.provider,
+                  eventType: event.type,
+                }),
+              ),
+              Effect.andThen(
+                canonicalEventLogger
+                  ? canonicalEventLogger.write(event, event.threadId)
+                  : Effect.void,
+              ),
+              Effect.andThen(PubSub.publish(runtimeEventPubSub, event)),
+              Effect.asVoid,
+            ),
+      ),
+      Effect.tap(() =>
+        event.type === 'session.exited' ? clearExactMcpSession(binding) : Effect.void,
+      ),
+    )
+
+  const matchesRuntimeSessionIdentity = (identity: ProviderRuntimeSessionIdentity) =>
+    runtimeInbox
+      .matchesCurrentSession(identity)
+      .pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            'ProviderService.matchesSessionIdentity',
+            'Unable to read durable provider session identity.',
+            cause,
+          ),
+        ),
+      )
+
+  const awaitSessionExit = Effect.fn('ProviderService.awaitSessionExit')(function* (
+    identity: ProviderRuntimeSessionIdentity,
+  )
+  {
+    return yield* Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const wakeups = yield* Queue.dropping<void>(1)
+        yield* Stream.runForEach(runtimeInbox.wakeups, () => Queue.offer(wakeups, undefined)).pipe(
+          Effect.forkScoped,
+        )
+        yield* Effect.yieldNow
+        for (let attempt = 0; attempt < 200; attempt += 1)
+        {
+          if (!(yield* matchesRuntimeSessionIdentity(identity)))
+          {
+            return
+          }
+          yield* Effect.raceFirst(Queue.take(wakeups), Effect.sleep(50))
+        }
+        return yield* toValidationError(
+          'ProviderService.stopSessionIfExact',
+          `Provider session '${identity.providerInstanceId}:${identity.threadId}' generation ${identity.sessionGeneration} did not publish a durably admitted terminal event within 10 seconds.`,
+        )
+      }),
+    )
+  })
+
+  const adapterHasExactSession = Effect.fn('ProviderService.adapterHasExactSession')(function* (
+    operation: string,
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+    identity: ProviderRuntimeSessionIdentity,
+  )
+  {
+    if (!(yield* adapter.hasSession(identity.threadId)))
+    {
+      return false
+    }
+    const binding = yield* adapter.getSessionRuntimeBinding(identity.threadId)
+    if (
+      binding === undefined ||
+      binding.providerInstanceId !== identity.providerInstanceId ||
+      binding.threadId !== identity.threadId ||
+      binding.sessionGeneration !== identity.sessionGeneration
+    )
+    {
+      return yield* toValidationError(
+        operation,
+        'The adapter owns a live session whose durable generation does not match the lifecycle operation.',
+      )
+    }
+    return true
+  })
+
+  const ensureExactTerminalAdmission = Effect.fn('ProviderService.ensureExactTerminalAdmission')(
+    function* (input: {
+      readonly identity: ProviderRuntimeSessionIdentity
+      readonly provider: ProviderDriverKind
+      readonly eventIdPrefix: string
+      readonly reason: string
+      readonly exitKind: 'graceful' | 'error'
+    })
+    {
+      yield* publishRuntimeEvent(input.identity, {
+        type: 'session.exited',
+        eventId: EventId.make(
+          `${input.eventIdPrefix}:${input.identity.providerInstanceId}:${input.identity.threadId}:${input.identity.sessionGeneration}`,
+        ),
+        provider: input.provider,
+        providerInstanceId: input.identity.providerInstanceId,
+        threadId: input.identity.threadId,
+        createdAt: yield* nowIso,
+        payload: {
+          reason: input.reason,
+          recoverable: false,
+          exitKind: input.exitKind,
+        },
+      }).pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            'ProviderService.ensureExactTerminalAdmission',
+            'Unable to durably admit an exact provider terminal event.',
+            cause,
+          ),
+        ),
+      )
+    },
+  )
+
+  interface AllocatedRuntimeSession
+  {
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+    readonly identity: ProviderRuntimeSessionIdentity
+    readonly runtimeSession: ProviderRuntimeInboxSession
+  }
+
+  const compensateAllocatedRuntimeSession = Effect.fn(
+    'ProviderService.compensateAllocatedRuntimeSession',
+  )(function* (input: {
+    readonly operation: string
+    readonly allocated: AllocatedRuntimeSession
+    readonly context?: ProviderEffectContext
+  })
+  {
+    const { adapter, identity } = input.allocated
+    const wasActive = yield* adapterHasExactSession(input.operation, adapter, identity)
+    const stopExit = yield* Effect.exit(
+      wasActive
+        ? input.context === undefined
+          ? adapter.stopSession(identity.threadId)
+          : adapter.stopSession(identity.threadId, input.context)
+        : Effect.void,
+    )
+    const stillActive = yield* Effect.exit(
+      adapterHasExactSession(input.operation, adapter, identity),
+    )
+    if (Exit.isFailure(stillActive))
+    {
+      return yield* Exit.isFailure(stopExit)
+        ? Effect.failCause(Cause.combine(stopExit.cause, stillActive.cause))
+        : Effect.failCause(stillActive.cause)
+    }
+    if (stillActive.value)
+    {
+      return yield* Exit.isFailure(stopExit)
+        ? Effect.failCause(stopExit.cause)
+        : toValidationError(
+            input.operation,
+            'The failed provider start still owns a live adapter session; its durable generation remains open for exact cleanup.',
+          )
+    }
+
+    const terminalExit = yield* Effect.exit(
+      wasActive
+        ? awaitSessionExit(identity)
+        : ensureExactTerminalAdmission({
+            identity,
+            provider: identity.provider,
+            eventIdPrefix: 'provider-session-start-compensated-before-adapter',
+            reason: 'Provider session start failed before an adapter lifecycle was established',
+            exitKind: 'error',
+          }).pipe(Effect.andThen(awaitSessionExit(identity))),
+    )
+
+    if (Exit.isSuccess(terminalExit))
+    {
+      const currentBinding = Option.getOrUndefined(yield* directory.getBinding(identity.threadId))
+      if (currentBinding?.providerInstanceId === identity.providerInstanceId)
+      {
+        yield* directory.upsert({
+          threadId: identity.threadId,
+          provider: identity.provider,
+          providerInstanceId: identity.providerInstanceId,
+          status: 'stopped',
+          runtimePayload: {
+            activeTurnId: null,
+            lastRuntimeEvent: 'provider.start.compensated',
+            lastRuntimeEventAt: yield* nowIso,
+          },
+        })
+      }
+    }
+
+    if (Exit.isFailure(stopExit))
+    {
+      return yield* Exit.isFailure(terminalExit)
+        ? Effect.failCause(Cause.combine(stopExit.cause, terminalExit.cause))
+        : Effect.failCause(stopExit.cause)
+    }
+    if (Exit.isFailure(terminalExit))
+    {
+      return yield* Effect.failCause(terminalExit.cause)
+    }
+  })
+
+  const withAllocatedRuntimeSession = <A, E, R>(input: {
+    readonly operation: string
+    readonly provider: ProviderDriverKind
+    readonly providerInstanceId: ProviderInstanceId
+    readonly threadId: ThreadId
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+    readonly context?: ProviderEffectContext
+    readonly use: (allocated: AllocatedRuntimeSession) => Effect.Effect<A, E, R>
+  }) =>
+    Effect.acquireUseRelease(
+      beginRuntimeSessionForService(
+        input.operation,
+        input.provider,
+        input.providerInstanceId,
+        input.threadId,
+      ).pipe(
+        Effect.map((runtimeSession): AllocatedRuntimeSession => ({
+          adapter: input.adapter,
+          identity: {
+            provider: runtimeSession.provider,
+            providerInstanceId: input.providerInstanceId,
+            threadId: input.threadId,
+            sessionGeneration: runtimeSession.sessionGeneration,
+          },
+          runtimeSession,
+        })),
+      ),
+      input.use,
+      (allocated, exit) =>
+        Exit.isSuccess(exit)
+          ? Effect.void
+          : compensateAllocatedRuntimeSession({
+              operation: input.operation,
+              allocated,
+              ...(input.context === undefined ? {} : { context: input.context }),
+            }),
+    )
+
+  const stopRuntimeSessionForAdapterStart = Effect.fn(
+    'ProviderService.stopRuntimeSessionForAdapterStart',
+  )(function* (input: {
+    readonly operation: string
+    readonly providerInstanceId: ProviderInstanceId
+    readonly threadId: ThreadId
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+    readonly context?: ProviderEffectContext
+  })
+  {
+    const active = yield* input.adapter.hasSession(input.threadId)
+    const current = yield* runtimeInbox
+      .getCurrentSession({
+        providerInstanceId: input.providerInstanceId,
+        threadId: input.threadId,
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            input.operation,
+            'Unable to read durable provider session identity.',
+            cause,
+          ),
+        ),
+      )
+    if (active)
+    {
+      const adapterBinding = yield* input.adapter.getSessionRuntimeBinding(input.threadId)
+      if (
+        adapterBinding === undefined ||
+        Option.isNone(current) ||
+        adapterBinding.providerInstanceId !== input.providerInstanceId ||
+        adapterBinding.threadId !== input.threadId ||
+        adapterBinding.sessionGeneration !== current.value.sessionGeneration
+      )
+      {
+        return yield* toValidationError(
+          input.operation,
+          `Active provider session '${input.providerInstanceId}:${input.threadId}' has no matching durable generation and cannot be replaced safely.`,
+        )
+      }
+      const oldIdentity: ProviderRuntimeSessionIdentity = {
+        ...adapterBinding,
+        provider: current.value.provider,
+      }
+      const stop =
+        input.context === undefined
+          ? input.adapter.stopSession(input.threadId)
+          : input.adapter.stopSession(input.threadId, input.context)
+      yield* stop
+      yield* awaitSessionExit(oldIdentity)
+      return Option.some(oldIdentity)
+    }
+    if (Option.isSome(current))
+    {
+      const oldIdentity: ProviderRuntimeSessionIdentity = {
+        provider: current.value.provider,
+        providerInstanceId: input.providerInstanceId,
+        threadId: input.threadId,
+        sessionGeneration: current.value.sessionGeneration,
+      }
+      const createdAt = yield* nowIso
+      yield* publishRuntimeEvent(oldIdentity, {
+        type: 'session.exited',
+        eventId: EventId.make(
+          `provider-session-superseded:${input.providerInstanceId}:${input.threadId}:${oldIdentity.sessionGeneration}`,
+        ),
+        provider: oldIdentity.provider,
+        providerInstanceId: input.providerInstanceId,
+        threadId: input.threadId,
+        createdAt,
+        payload: {
+          reason: 'Superseded before starting a fresh provider session',
+          recoverable: false,
+          exitKind: 'graceful',
+        },
+      }).pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            input.operation,
+            'Unable to close the prior provider generation.',
+            cause,
+          ),
+        ),
+      )
+      yield* awaitSessionExit(oldIdentity)
+      return Option.some(oldIdentity)
+    }
+    return Option.none<ProviderRuntimeSessionIdentity>()
+  })
 
   const requireBindingInstanceId = (
     operation: string,
@@ -428,27 +1004,6 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           ),
         )
 
-  const processRuntimeEvent = (
-    source: {
-      readonly instanceId: ProviderInstanceId
-      readonly provider: ProviderDriverKind
-    },
-    event: ProviderRuntimeEvent,
-  ): Effect.Effect<void> =>
-    Effect.sync(() => correlateRuntimeEventWithInstance(source, event)).pipe(
-      Effect.flatMap((canonicalEvent) =>
-        observeHiddenTurnRuntimeEvent(canonicalEvent).pipe(
-          Effect.andThen(
-            increment(providerRuntimeEventsTotal, {
-              provider: canonicalEvent.provider,
-              eventType: canonicalEvent.type,
-            }),
-          ),
-          Effect.andThen(publishRuntimeEvent(canonicalEvent)),
-        ),
-      ),
-    )
-
   // `subscribedAdapters` is our source-of-truth for "which instance adapters
   // are currently wired into the runtime event bus". It both tracks the set
   // of live subscriptions (so `reconcileInstanceSubscriptions` can diff and
@@ -457,13 +1012,456 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   // `runStopAll` — replacing the pre-Slice-D startup snapshot so hot-added
   // instances become visible to those call sites as soon as settings edits
   // land.
-  const subscribedAdapters = yield* Ref.make(
-    new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>(),
+  const adapterRoutingState = yield* Ref.make<AdapterRoutingState>({
+    subscribed: new Map(),
+    quarantined: new Map(),
+    reconfiguring: new Set(),
+  })
+
+  const getAdapterEntries = Ref.get(adapterRoutingState).pipe(
+    Effect.map((state) =>
+      Array.from(
+        state.subscribed,
+        ([instanceId, subscription]) => [instanceId, subscription.adapter] as const,
+      ),
+    ),
   )
 
-  const getAdapterEntries = Ref.get(subscribedAdapters).pipe(
-    Effect.map((map) => Array.from(map.entries())),
-  )
+  const requireHealthyAdapter = (
+    operation: string,
+    instanceId: ProviderInstanceId,
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+  ) =>
+    Ref.get(adapterRoutingState).pipe(
+      Effect.filterOrFail(
+        (state) =>
+          !state.quarantined.has(instanceId) &&
+          !state.reconfiguring.has(instanceId) &&
+          state.subscribed.get(instanceId)?.adapter === adapter,
+        () =>
+          toValidationError(
+            operation,
+            `Provider instance '${instanceId}' is quarantined, reconfiguring, or has no healthy durable runtime-event subscription. Reconcile or rebuild the provider instance before sending more work.`,
+          ),
+      ),
+      Effect.asVoid,
+    )
+
+  const requireAdmittingAdapter = (
+    operation: string,
+    instanceId: ProviderInstanceId,
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+  ) =>
+    Ref.get(adapterRoutingState).pipe(
+      Effect.filterOrFail(
+        (state) =>
+          !state.quarantined.has(instanceId) &&
+          state.subscribed.get(instanceId)?.adapter === adapter,
+        () =>
+          toValidationError(
+            operation,
+            `Provider instance '${instanceId}' has no lifecycle-owned durable runtime-event subscription.`,
+          ),
+      ),
+      Effect.asVoid,
+    )
+
+  const beginAdapterQuarantine = (
+    instanceId: ProviderInstanceId,
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+  ) =>
+    Effect.gen(function* ()
+    {
+      const claim = yield* Ref.modify(adapterRoutingState, (current) =>
+      {
+        const existing = current.quarantined.get(instanceId)
+        if (
+          current.subscribed.get(instanceId)?.adapter !== adapter &&
+          existing?.adapter !== adapter
+        )
+        {
+          return ['stale' as const, current]
+        }
+        if (existing !== undefined && existing.adapter !== adapter)
+        {
+          return ['blocked' as const, current]
+        }
+        if (existing?.cleanupState === 'running' || existing?.cleanupState === 'complete')
+        {
+          return ['already-owned' as const, current]
+        }
+        const quarantined = new Map(current.quarantined)
+        quarantined.set(instanceId, {
+          adapter,
+          cleanupState: 'running',
+          reconcileAfterCleanup: false,
+        })
+        const subscribed = new Map(current.subscribed)
+        if (subscribed.get(instanceId)?.adapter === adapter)
+        {
+          subscribed.delete(instanceId)
+        }
+        return ['cleanup-owned' as const, { ...current, subscribed, quarantined }]
+      })
+      if (claim === 'blocked')
+      {
+        return yield* toValidationError(
+          'ProviderService.quarantineAdapter',
+          `Provider instance '${instanceId}' cannot quarantine a replacement adapter before the prior quarantined adapter is durably closed.`,
+        )
+      }
+      if (claim !== 'cleanup-owned')
+      {
+        return false
+      }
+      return true
+    })
+
+  const markAdapterQuarantinePending = (
+    instanceId: ProviderInstanceId,
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+  ) =>
+    Ref.update(adapterRoutingState, (current) =>
+    {
+      const existing = current.quarantined.get(instanceId)
+      if (existing !== undefined || current.subscribed.get(instanceId)?.adapter !== adapter)
+      {
+        return current
+      }
+      const subscribed = new Map(current.subscribed)
+      subscribed.delete(instanceId)
+      const quarantined = new Map(current.quarantined)
+      quarantined.set(instanceId, {
+        adapter,
+        cleanupState: 'pending',
+        reconcileAfterCleanup: false,
+      })
+      return { ...current, subscribed, quarantined }
+    })
+
+  const updateAdapterQuarantineCleanupState = (
+    instanceId: ProviderInstanceId,
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+    cleanupState: 'pending' | 'complete',
+  ) =>
+    Ref.modify(adapterRoutingState, (current) =>
+    {
+      const existing = current.quarantined.get(instanceId)
+      if (existing?.adapter !== adapter)
+      {
+        return [false, current]
+      }
+      const quarantined = new Map(current.quarantined)
+      quarantined.set(instanceId, {
+        adapter,
+        cleanupState,
+        reconcileAfterCleanup: false,
+      })
+      return [existing.reconcileAfterCleanup, { ...current, quarantined }]
+    })
+
+  const prepareAdapterReconciliation = (
+    instanceId: ProviderInstanceId,
+    currentAdapter: ProviderAdapterShape<ProviderAdapterError>,
+  ) =>
+    Ref.modify(
+      adapterRoutingState,
+      (current): readonly [AdapterReconciliation, AdapterRoutingState] =>
+      {
+        const existing = current.quarantined.get(instanceId)
+        if (existing === undefined)
+        {
+          return [{ _tag: 'ready' }, current]
+        }
+        if (existing.adapter === currentAdapter)
+        {
+          return [{ _tag: 'quarantined' }, current]
+        }
+        if (existing.cleanupState === 'running')
+        {
+          if (existing.reconcileAfterCleanup)
+          {
+            return [{ _tag: 'waiting' }, current]
+          }
+          const quarantined = new Map(current.quarantined)
+          quarantined.set(instanceId, { ...existing, reconcileAfterCleanup: true })
+          return [{ _tag: 'waiting' }, { ...current, quarantined }]
+        }
+        if (existing.cleanupState === 'pending')
+        {
+          return [{ _tag: 'retry-cleanup', adapter: existing.adapter }, current]
+        }
+        const quarantined = new Map(current.quarantined)
+        quarantined.delete(instanceId)
+        return [{ _tag: 'ready' }, { ...current, quarantined }]
+      },
+    )
+
+  const cleanupQuarantinedAdapter = (
+    instanceId: ProviderInstanceId,
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+    cause: unknown,
+  ): Effect.Effect<void, PersistenceSqlError | ProviderValidationError> =>
+    Effect.gen(function* ()
+    {
+      yield* Effect.logError('provider adapter quarantined after durable admission failure', {
+        providerInstanceId: instanceId,
+        provider: adapter.provider,
+        cause,
+      })
+
+      const sessions = yield* runtimeInbox.listOpenSessions(instanceId)
+      const stopResult = yield* Effect.exit(adapter.stopAll())
+      const closeResults = yield* Effect.forEach(
+        sessions,
+        (session) =>
+          Effect.exit(
+            Effect.gen(function* ()
+            {
+              const identity: ProviderRuntimeSessionIdentity = {
+                provider: session.provider,
+                providerInstanceId: instanceId,
+                threadId: session.threadId,
+                sessionGeneration: session.sessionGeneration,
+              }
+              if (
+                yield* adapterHasExactSession(
+                  'ProviderService.quarantineAdapter',
+                  adapter,
+                  identity,
+                )
+              )
+              {
+                return yield* toValidationError(
+                  'ProviderService.quarantineAdapter',
+                  `Provider generation '${instanceId}:${session.threadId}:${session.sessionGeneration}' remains live after adapter quarantine cleanup.`,
+                )
+              }
+              yield* ensureExactTerminalAdmission({
+                identity,
+                provider: identity.provider,
+                eventIdPrefix: 'provider-runtime-quarantined-after-adapter-stop',
+                reason: 'Provider runtime-event admission failed and quarantined the adapter',
+                exitKind: 'error',
+              })
+              yield* awaitSessionExit(identity)
+            }),
+          ),
+        { concurrency: 'unbounded' },
+      )
+      const cleanupFailures = [
+        ...closeResults.flatMap((result) =>
+          Exit.isFailure(result) ? [Cause.squash(result.cause)] : [],
+        ),
+        ...(Exit.isFailure(stopResult) ? [Cause.squash(stopResult.cause)] : []),
+      ]
+      if (cleanupFailures.length > 0)
+      {
+        yield* Effect.logError('quarantined provider adapter cleanup remains incomplete', {
+          providerInstanceId: instanceId,
+          failures: cleanupFailures.map((failure) =>
+            failure instanceof Error ? failure.message : String(failure),
+          ),
+        })
+        return yield* toValidationError(
+          'ProviderService.quarantineAdapter',
+          `Provider instance '${instanceId}' remains quarantined because ${cleanupFailures.length} durable close or adapter stop operation(s) failed.`,
+          new AggregateError(cleanupFailures),
+        )
+      }
+    }).pipe(
+      Effect.onExit((exit) =>
+        updateAdapterQuarantineCleanupState(
+          instanceId,
+          adapter,
+          Exit.isSuccess(exit) ? 'complete' : 'pending',
+        ).pipe(
+          Effect.flatMap((shouldReconcile) =>
+            shouldReconcile
+              ? PubSub.publish(adapterReconcileWakeups, undefined).pipe(Effect.asVoid)
+              : Effect.void,
+          ),
+        ),
+      ),
+    )
+
+  const quarantineAdapter = (
+    instanceId: ProviderInstanceId,
+    adapter: ProviderAdapterShape<ProviderAdapterError>,
+    cause: unknown,
+  ): Effect.Effect<void, PersistenceSqlError | ProviderValidationError> =>
+    adapterLifecycleLocks.withPermit(
+      instanceId,
+      Effect.gen(function* ()
+      {
+        if (!(yield* beginAdapterQuarantine(instanceId, adapter)))
+        {
+          return
+        }
+        yield* cleanupQuarantinedAdapter(instanceId, adapter, cause)
+      }).pipe(
+        Effect.tapCause((cleanupCause) =>
+          Effect.logError('provider adapter quarantine cleanup failed closed', {
+            providerInstanceId: instanceId,
+            cause: cleanupCause,
+          }),
+        ),
+      ),
+    )
+
+  const stopRuntimeSessionIfExactWithinThreadPermit = Effect.fn(
+    'ProviderService.stopRuntimeSessionIfExactWithinThreadPermit',
+  )(function* (identity: ProviderRuntimeSessionIdentity, context?: ProviderEffectContext)
+  {
+    const stopped = yield* adapterLifecycleLocks.withPermit(
+      identity.providerInstanceId,
+      Effect.gen(function* ()
+      {
+        yield* requireRunning('ProviderService.stopSessionIfExact')
+        if (!(yield* matchesRuntimeSessionIdentity(identity)))
+        {
+          return false
+        }
+
+        const routing = yield* Ref.get(adapterRoutingState)
+        const subscribed = routing.subscribed.get(identity.providerInstanceId)?.adapter
+        const quarantined = routing.quarantined.get(identity.providerInstanceId)?.adapter
+        if (subscribed !== undefined && quarantined !== undefined && subscribed !== quarantined)
+        {
+          return yield* toValidationError(
+            'ProviderService.stopSessionIfExact',
+            `Provider instance '${identity.providerInstanceId}' has ambiguous live adapter ownership and cannot be stopped safely.`,
+          )
+        }
+
+        const adapter = subscribed ?? quarantined
+        if (adapter === undefined)
+        {
+          const registeredRoute = yield* Effect.option(
+            registry.getRoute(identity.providerInstanceId),
+          )
+          if (Option.isSome(registeredRoute))
+          {
+            return yield* toValidationError(
+              'ProviderService.stopSessionIfExact',
+              `Provider instance '${identity.providerInstanceId}' is registered but has no lifecycle-owned adapter route.`,
+            )
+          }
+          yield* ensureExactTerminalAdmission({
+            identity,
+            provider: identity.provider,
+            eventIdPrefix: 'provider-session-exact-stopped-without-adapter',
+            reason: 'Exact provider generation closed without a live adapter route',
+            exitKind: 'graceful',
+          })
+          yield* awaitSessionExit(identity)
+          return true
+        }
+        if (adapter.provider !== identity.provider)
+        {
+          return yield* toValidationError(
+            'ProviderService.stopSessionIfExact',
+            `Provider instance '${identity.providerInstanceId}' changed driver from '${identity.provider}' to '${adapter.provider}' and cannot be stopped through the replacement route.`,
+          )
+        }
+
+        const isActive = yield* adapter.hasSession(identity.threadId)
+        if (isActive)
+        {
+          const adapterBinding = yield* adapter.getSessionRuntimeBinding(identity.threadId)
+          if (
+            adapterBinding === undefined ||
+            adapterBinding.providerInstanceId !== identity.providerInstanceId ||
+            adapterBinding.threadId !== identity.threadId ||
+            adapterBinding.sessionGeneration !== identity.sessionGeneration ||
+            !(yield* matchesRuntimeSessionIdentity(identity))
+          )
+          {
+            return false
+          }
+          const stop =
+            context === undefined
+              ? adapter.stopSession(identity.threadId)
+              : adapter.stopSession(identity.threadId, context)
+          yield* stop
+          yield* awaitSessionExit(identity)
+        }
+        else
+        {
+          yield* ensureExactTerminalAdmission({
+            identity,
+            provider: identity.provider,
+            eventIdPrefix: 'provider-session-exact-stopped-inactive',
+            reason: 'Exact provider generation stopped after the adapter was already inactive',
+            exitKind: 'graceful',
+          })
+          yield* awaitSessionExit(identity)
+        }
+        return true
+      }),
+    )
+    if (stopped === false)
+    {
+      return false
+    }
+
+    const currentBinding = Option.getOrUndefined(yield* directory.getBinding(identity.threadId))
+    if (currentBinding?.providerInstanceId === identity.providerInstanceId)
+    {
+      yield* directory.upsert({
+        threadId: identity.threadId,
+        provider: identity.provider,
+        providerInstanceId: identity.providerInstanceId,
+        status: 'stopped',
+        runtimePayload: {
+          activeTurnId: null,
+        },
+      })
+    }
+    yield* analytics.record('provider.session.stopped', {
+      provider: identity.provider,
+      exactGeneration: true,
+    })
+    return true
+  })
+
+  const processRuntimeEvent = (
+    source: {
+      readonly instanceId: ProviderInstanceId
+      readonly provider: ProviderDriverKind
+      readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+    },
+    envelope: ProviderAdapterRuntimeEvent,
+  ) =>
+    Effect.uninterruptible(
+      requireAdmittingAdapter(
+        'ProviderService.processRuntimeEvent',
+        source.instanceId,
+        source.adapter,
+      ).pipe(
+        Effect.andThen(
+          Effect.sync(() =>
+          {
+            if (envelope.binding.providerInstanceId !== source.instanceId)
+            {
+              throw new Error(
+                `ProviderService.streamEvents: adapter route '${source.instanceId}' emitted a binding for '${envelope.binding.providerInstanceId}'.`,
+              )
+            }
+            const event = correlateRuntimeEventWithInstance(source, envelope.event)
+            validateRuntimeEventBinding(envelope.binding, event)
+            return { binding: envelope.binding, event }
+          }),
+        ),
+        Effect.flatMap(({ binding, event }) => publishRuntimeEvent(binding, event)),
+      ),
+    ).pipe(
+      Effect.tapCause((cause) =>
+        Cause.hasInterruptsOnly(cause)
+          ? Effect.void
+          : markAdapterQuarantinePending(source.instanceId, source.adapter),
+      ),
+    )
 
   // rebuild the map of id -> adapter from the registry and fork a new event
   // subscription for every instance that is either brand new or whose adapter
@@ -473,9 +1471,12 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   // adapter's `streamEvents` source terminates when the old scope closes.
   const reconcileInstanceSubscriptions = Effect.gen(function* ()
   {
-    const previous = yield* Ref.get(subscribedAdapters)
+    if (yield* Ref.get(shuttingDown))
+    {
+      return
+    }
     const currentIds = yield* registry.listInstances()
-    const next = new Map<ProviderInstanceId, ProviderAdapterShape<ProviderAdapterError>>()
+    const currentIdSet = new Set(currentIds)
     for (const id of currentIds)
     {
       const adapterOption = yield* registry
@@ -483,28 +1484,264 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         .pipe(Effect.tapError(Effect.logWarning), Effect.option)
       if (Option.isNone(adapterOption)) continue
       const adapter = adapterOption.value
-      next.set(id, adapter)
-      if (previous.get(id) !== adapter)
-      {
-        yield* Stream.runForEach(adapter.streamEvents, (event) =>
-          processRuntimeEvent(
+      yield* adapterLifecycleLocks.withPermit(
+        id,
+        Effect.gen(function* ()
+        {
+          let reconciliation = yield* prepareAdapterReconciliation(id, adapter)
+          if (reconciliation._tag === 'retry-cleanup')
+          {
+            const claimed = yield* beginAdapterQuarantine(id, reconciliation.adapter)
+            if (claimed)
             {
-              instanceId: id,
-              provider: adapter.provider,
-            },
-            event,
-          ),
-        ).pipe(Effect.forkScoped)
+              const cleanup = yield* Effect.exit(
+                cleanupQuarantinedAdapter(
+                  id,
+                  reconciliation.adapter,
+                  'provider instance reconciliation retried incomplete quarantine cleanup',
+                ),
+              )
+              if (Exit.isFailure(cleanup))
+              {
+                yield* Effect.logError('provider adapter quarantine cleanup failed closed', {
+                  providerInstanceId: id,
+                  cause: cleanup.cause,
+                })
+                return
+              }
+            }
+            reconciliation = yield* prepareAdapterReconciliation(id, adapter)
+          }
+          if (reconciliation._tag !== 'ready' || (yield* Ref.get(shuttingDown)))
+          {
+            return
+          }
+          const currentSubscription = (yield* Ref.get(adapterRoutingState)).subscribed.get(id)
+          if (currentSubscription?.adapter === adapter)
+          {
+            return
+          }
+          const fiber = yield* Stream.runForEach(adapter.streamEvents, (event) =>
+            processRuntimeEvent(
+              {
+                instanceId: id,
+                provider: adapter.provider,
+                adapter,
+              },
+              event,
+            ),
+          ).pipe(
+            Effect.catchCause((cause) =>
+              Cause.hasInterruptsOnly(cause)
+                ? Effect.interrupt
+                : quarantineAdapter(id, adapter, Cause.squash(cause)).pipe(
+                    Effect.catchCause((cleanupCause) =>
+                      Effect.logError('provider adapter subscription terminated after quarantine', {
+                        providerInstanceId: id,
+                        cause: cleanupCause,
+                      }),
+                    ),
+                  ),
+            ),
+            Effect.forkIn(subscriptionScope, { startImmediately: false }),
+          )
+          const previous = yield* Ref.modify(adapterRoutingState, (current) =>
+          {
+            const prior = current.subscribed.get(id)
+            const subscribed = new Map(current.subscribed)
+            subscribed.set(id, { adapter, fiber })
+            return [prior, { ...current, subscribed }]
+          })
+          if (previous !== undefined)
+          {
+            yield* Fiber.interrupt(previous.fiber)
+          }
+          yield* Effect.yieldNow
+        }),
+      )
+    }
+
+    const routedIds = Array.from((yield* Ref.get(adapterRoutingState)).subscribed.keys())
+    for (const id of routedIds)
+    {
+      if (currentIdSet.has(id)) continue
+      const removed = yield* adapterLifecycleLocks.withPermit(
+        id,
+        Ref.modify(adapterRoutingState, (current) =>
+        {
+          const previous = current.subscribed.get(id)
+          const subscribed = new Map(current.subscribed)
+          subscribed.delete(id)
+          return [previous, { ...current, subscribed }]
+        }),
+      )
+      if (removed !== undefined)
+      {
+        yield* Fiber.interrupt(removed.fiber)
       }
     }
-    yield* Ref.set(subscribedAdapters, next)
+    yield* Ref.update(adapterRoutingState, (current) =>
+    {
+      const quarantined = new Map(current.quarantined)
+      for (const [id, state] of quarantined)
+      {
+        if (!currentIdSet.has(id) && state.cleanupState === 'complete')
+        {
+          quarantined.delete(id)
+        }
+      }
+      return quarantined.size === current.quarantined.size ? current : { ...current, quarantined }
+    })
   })
-
   const instanceChanges = yield* registry.subscribeChanges
+  const quarantineCleanupChanges = yield* PubSub.subscribe(adapterReconcileWakeups)
+  const subscriptionReconciliationGate = yield* Semaphore.make(1)
+  const reconcileChangedInstanceSubscriptions = subscriptionReconciliationGate.withPermits(1)(
+    reconcileInstanceSubscriptions,
+  )
   yield* reconcileInstanceSubscriptions
+  if (Option.isSome(registryMutator))
+  {
+    const lifecycleOwner: ProviderInstanceRegistryLifecycleOwner = {
+      aroundMutation: (instanceIds, mutation) =>
+        providerInstanceMutationGate.withPermits(1)(
+          Effect.gen(function* ()
+          {
+            if (yield* Ref.get(shuttingDown))
+            {
+              return yield* new ProviderInstanceLifecycleReconcileError({
+                detail: 'provider shutdown has started; settings-driven route mutation is fenced',
+              })
+            }
+            const uniqueIds = Array.from(new Set(instanceIds)).sort()
+            const routes = yield* Effect.forEach(uniqueIds, (instanceId) =>
+              registry.getRoute(instanceId).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderInstanceLifecycleReconcileError({
+                      detail: `unable to resolve retiring provider instance '${instanceId}'`,
+                      cause,
+                    }),
+                ),
+              ),
+            )
+            const marked = yield* Ref.modify(adapterRoutingState, (current) =>
+            {
+              const routeMismatch = routes.find(
+                (route) => current.subscribed.get(route.info.instanceId)?.adapter !== route.adapter,
+              )
+              if (routeMismatch !== undefined)
+              {
+                return [routeMismatch.info.instanceId, current] as const
+              }
+              const reconfiguring = new Set(current.reconfiguring)
+              for (const instanceId of uniqueIds)
+              {
+                reconfiguring.add(instanceId)
+              }
+              return [undefined, { ...current, reconfiguring }] as const
+            })
+            if (marked !== undefined)
+            {
+              return yield* new ProviderInstanceLifecycleReconcileError({
+                detail: `provider instance '${marked}' has no exact lifecycle-owned subscription to retire`,
+              })
+            }
+
+            const clearReconfiguring = Ref.update(adapterRoutingState, (current) =>
+            {
+              const reconfiguring = new Set(current.reconfiguring)
+              for (const instanceId of uniqueIds)
+              {
+                reconfiguring.delete(instanceId)
+              }
+              return { ...current, reconfiguring }
+            })
+
+            return yield* Effect.gen(function* ()
+            {
+              for (const instanceId of uniqueIds)
+              {
+                yield* adapterLifecycleLocks.withPermit(instanceId, Effect.void)
+              }
+
+              for (const instanceId of uniqueIds)
+              {
+                const sessions = yield* runtimeInbox.listOpenSessions(instanceId).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderInstanceLifecycleReconcileError({
+                        detail: `unable to enumerate durable generations for retiring provider instance '${instanceId}'`,
+                        cause,
+                      }),
+                  ),
+                )
+                for (const session of sessions)
+                {
+                  const identity: ProviderRuntimeSessionIdentity = {
+                    provider: session.provider,
+                    providerInstanceId: session.providerInstanceId,
+                    threadId: session.threadId,
+                    sessionGeneration: session.sessionGeneration,
+                  }
+                  yield* sessionLifecycleLocks.withPermit(
+                    identity.threadId,
+                    stopRuntimeSessionIfExactWithinThreadPermit(identity).pipe(
+                      Effect.mapError(
+                        (cause) =>
+                          new ProviderInstanceLifecycleReconcileError({
+                            detail: `unable to durably close provider generation '${identity.providerInstanceId}:${identity.threadId}:${identity.sessionGeneration}' before route retirement`,
+                            cause,
+                          }),
+                      ),
+                    ),
+                  )
+                }
+                const remaining = yield* runtimeInbox.listOpenSessions(instanceId).pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderInstanceLifecycleReconcileError({
+                        detail: `unable to verify durable generations for retiring provider instance '${instanceId}'`,
+                        cause,
+                      }),
+                  ),
+                )
+                if (remaining.length > 0)
+                {
+                  return yield* new ProviderInstanceLifecycleReconcileError({
+                    detail: `provider instance '${instanceId}' still owns ${remaining.length} open durable generation(s) after route retirement cleanup`,
+                  })
+                }
+              }
+
+              const value = yield* Effect.uninterruptible(mutation)
+              yield* subscriptionReconciliationGate.withPermits(1)(
+                reconcileInstanceSubscriptions.pipe(
+                  Effect.mapError(
+                    (cause) =>
+                      new ProviderInstanceLifecycleReconcileError({
+                        detail:
+                          'provider route mutation completed but subscription ownership did not',
+                        cause,
+                      }),
+                  ),
+                ),
+              )
+              return value
+            }).pipe(Effect.ensuring(clearReconfiguring))
+          }),
+        ),
+    }
+    yield* registryMutator.value.registerLifecycleOwner(lifecycleOwner)
+    yield* Effect.addFinalizer(() => registryMutator.value.unregisterLifecycleOwner(lifecycleOwner))
+  }
   yield* Stream.runForEach(
     Stream.fromSubscription(instanceChanges),
-    () => reconcileInstanceSubscriptions,
+    () => reconcileChangedInstanceSubscriptions,
+  ).pipe(Effect.forkScoped)
+  yield* Stream.runForEach(
+    Stream.fromSubscription(quarantineCleanupChanges),
+    () => reconcileChangedInstanceSubscriptions,
   ).pipe(Effect.forkScoped)
 
   const recoverSessionForThread = Effect.fn('recoverSessionForThread')(function* (input: {
@@ -524,6 +1761,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     })
     return yield* Effect.gen(function* ()
     {
+      yield* requireRunning(input.operation)
       yield* requireContinuationRoute(input.operation, input.route)
       const persistedContinuationIdentity = readPersistedContinuationIdentity(
         input.binding.runtimePayload,
@@ -556,6 +1794,36 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
               `Adapter/provider mismatch while adopting recovered thread '${input.binding.threadId}'. Expected '${input.route.adapter.provider}', received '${existing.provider}'.`,
             )
           }
+          const adapterBinding = yield* input.route.adapter.getSessionRuntimeBinding(
+            input.binding.threadId,
+          )
+          const durableSession = yield* runtimeInbox
+            .getCurrentSession({
+              providerInstanceId: bindingInstanceId,
+              threadId: input.binding.threadId,
+            })
+            .pipe(
+              Effect.mapError((cause) =>
+                toValidationError(
+                  input.operation,
+                  'Unable to verify the active adapter session generation.',
+                  cause,
+                ),
+              ),
+            )
+          if (
+            adapterBinding === undefined ||
+            Option.isNone(durableSession) ||
+            adapterBinding.providerInstanceId !== bindingInstanceId ||
+            adapterBinding.threadId !== input.binding.threadId ||
+            adapterBinding.sessionGeneration !== durableSession.value.sessionGeneration
+          )
+          {
+            return yield* toValidationError(
+              input.operation,
+              `Active provider session '${bindingInstanceId}:${input.binding.threadId}' has no matching durable generation and cannot be adopted safely.`,
+            )
+          }
           yield* upsertSessionBinding(
             { ...existing, providerInstanceId: bindingInstanceId },
             input.binding.threadId,
@@ -581,43 +1849,62 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       const persistedCwd = readPersistedCwd(input.binding.runtimePayload)
       const persistedModelSelection = readPersistedModelSelection(input.binding.runtimePayload)
 
-      yield* prepareMcpSession(input.binding.threadId, bindingInstanceId)
-      const resumeInput = {
-        threadId: input.binding.threadId,
+      return yield* withAllocatedRuntimeSession({
+        operation: input.operation,
         provider: input.binding.provider,
         providerInstanceId: bindingInstanceId,
-        ...(persistedCwd ? { cwd: persistedCwd } : {}),
-        ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
-        ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
-        runtimeMode: input.binding.runtimeMode ?? 'full-access',
-      } satisfies typeof ProviderSessionStartInput.Type
-      const resume =
-        input.context === undefined
-          ? input.route.adapter.startSession(resumeInput)
-          : input.route.adapter.startSession(resumeInput, input.context)
-      const resumed = yield* resume.pipe(
-        Effect.onError(() => clearMcpSession(input.binding.threadId)),
-      )
-      if (resumed.provider !== input.route.adapter.provider)
-      {
-        yield* clearMcpSession(input.binding.threadId)
-        return yield* toValidationError(
-          input.operation,
-          `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${input.route.adapter.provider}', received '${resumed.provider}'.`,
-        )
-      }
+        threadId: input.binding.threadId,
+        adapter: input.route.adapter,
+        ...(input.context === undefined ? {} : { context: input.context }),
+        use: (allocated) =>
+          Effect.gen(function* ()
+          {
+            const mcp = yield* prepareMcpSession(
+              input.binding.threadId,
+              bindingInstanceId,
+              allocated.runtimeSession.sessionGeneration,
+            )
+            const resumeInput = {
+              threadId: input.binding.threadId,
+              provider: input.binding.provider,
+              providerInstanceId: bindingInstanceId,
+              ...(persistedCwd ? { cwd: persistedCwd } : {}),
+              ...(persistedModelSelection ? { modelSelection: persistedModelSelection } : {}),
+              ...(hasResumeCursor ? { resumeCursor: input.binding.resumeCursor } : {}),
+              runtimeMode: input.binding.runtimeMode ?? 'full-access',
+              ...(mcp === undefined ? {} : { mcp }),
+              runtimeSessionBinding: {
+                providerInstanceId: bindingInstanceId,
+                threadId: input.binding.threadId,
+                sessionGeneration: allocated.runtimeSession.sessionGeneration,
+              },
+            } satisfies ProviderAdapterSessionStartInput
+            const resume =
+              input.context === undefined
+                ? input.route.adapter.startSession(resumeInput)
+                : input.route.adapter.startSession(resumeInput, input.context)
+            const resumed = yield* resume
+            if (resumed.provider !== input.route.adapter.provider)
+            {
+              return yield* toValidationError(
+                input.operation,
+                `Adapter/provider mismatch while recovering thread '${input.binding.threadId}'. Expected '${input.route.adapter.provider}', received '${resumed.provider}'.`,
+              )
+            }
 
-      yield* upsertSessionBinding(
-        { ...resumed, providerInstanceId: bindingInstanceId },
-        input.binding.threadId,
-        { continuationIdentity: input.route.info.continuationIdentity },
-      )
-      yield* analytics.record('provider.session.recovered', {
-        provider: resumed.provider,
-        strategy: 'resume-thread',
-        hasResumeCursor: resumed.resumeCursor !== undefined,
+            yield* upsertSessionBinding(
+              { ...resumed, providerInstanceId: bindingInstanceId },
+              input.binding.threadId,
+              { continuationIdentity: input.route.info.continuationIdentity },
+            )
+            yield* analytics.record('provider.session.recovered', {
+              provider: resumed.provider,
+              strategy: 'resume-thread',
+              hasResumeCursor: resumed.resumeCursor !== undefined,
+            })
+            return { adapter: input.route.adapter, session: resumed } as const
+          }),
       })
-      return { adapter: input.route.adapter, session: resumed } as const
     }).pipe(
       withMetrics({
         counter: providerSessionsTotal,
@@ -628,14 +1915,19 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     )
   })
 
-  const resolveRoutableSession = Effect.fn('resolveRoutableSession')(function* (input: {
+  interface ResolveRoutableSessionInput
+  {
     readonly threadId: ThreadId
     readonly operation: string
     readonly allowRecovery: boolean
     readonly expectedProviderInstanceId?: ProviderInstanceId
     readonly routingAuthority?: ProviderService.ProviderRoutingAuthority
     readonly context?: ProviderEffectContext
-  })
+  }
+
+  const resolveRoutableSession = Effect.fn('resolveRoutableSession')(function* (
+    input: ResolveRoutableSessionInput,
+  )
   {
     const bindingOption = yield* directory.getBinding(input.threadId)
     const binding = Option.getOrUndefined(bindingOption)
@@ -658,6 +1950,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       )
     }
     const route = yield* registry.getRoute(instanceId)
+    yield* requireHealthyAdapter(input.operation, instanceId, route.adapter)
     const persistedContinuationIdentity = readPersistedContinuationIdentity(binding.runtimePayload)
     yield* validateAdapterRoute({
       operation: input.operation,
@@ -704,47 +1997,101 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     } as const
   })
 
-  const stopStaleSessionsForThread = Effect.fn('stopStaleSessionsForThread')(function* (input: {
+  const withProviderInstanceLifecycle = <A, E, R>(
+    input: {
+      readonly threadId: ThreadId
+      readonly operation: string
+      readonly requireActiveThread: boolean
+    },
+    effect: Effect.Effect<A, E, R>,
+  ) =>
+    Effect.gen(function* ()
+    {
+      const preflightBinding = Option.getOrUndefined(yield* directory.getBinding(input.threadId))
+      if (preflightBinding !== undefined)
+      {
+        const preflightInstanceId = yield* requireBindingInstanceId(
+          input.operation,
+          preflightBinding,
+        )
+        const routing = yield* Ref.get(adapterRoutingState)
+        if (routing.reconfiguring.has(preflightInstanceId))
+        {
+          return yield* toValidationError(
+            input.operation,
+            `Provider instance '${preflightInstanceId}' is reconfiguring; commands admitted after the retirement fence are rejected.`,
+          )
+        }
+      }
+      const run = sessionLifecycleLocks.withPermit(
+        input.threadId,
+        Effect.gen(function* ()
+        {
+          const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId))
+          if (binding === undefined)
+          {
+            return yield* toValidationError(
+              input.operation,
+              `Cannot route thread '${input.threadId}' because no persisted provider binding exists.`,
+            )
+          }
+          const instanceId = yield* requireBindingInstanceId(input.operation, binding)
+          return yield* adapterLifecycleLocks.withPermit(
+            instanceId,
+            requireRunning(input.operation).pipe(Effect.andThen(effect)),
+          )
+        }),
+      )
+      return yield* input.requireActiveThread
+        ? withActiveThreadLifecycle(input.operation, input.threadId, run)
+        : run
+    })
+
+  const stopOutgoingRuntimeSessionsWithinThreadPermit = Effect.fn(
+    'ProviderService.stopOutgoingRuntimeSessionsWithinThreadPermit',
+  )(function* (input: {
     readonly threadId: ThreadId
-    readonly currentInstanceId: ProviderInstanceId
+    readonly incomingInstanceId: ProviderInstanceId
     readonly context?: ProviderEffectContext
   })
   {
-    const currentAdapters = yield* getAdapterEntries
-    yield* Effect.forEach(
-      currentAdapters,
-      ([instanceId, adapter]) =>
-        instanceId === input.currentInstanceId
-          ? Effect.void
-          : Effect.gen(function* ()
-            {
-              const hasSession = yield* adapter.hasSession(input.threadId)
-              if (!hasSession)
-                {
-                return
-              }
-
-              const stop =
-                input.context === undefined
-                  ? adapter.stopSession(input.threadId)
-                  : adapter.stopSession(input.threadId, input.context)
-              yield* stop.pipe(
-                Effect.tap(() =>
-                  analytics.record('provider.session.stopped', {
-                    provider: adapter.provider,
-                  }),
-                ),
-                Effect.catchCause((cause) =>
-                  Effect.logWarning('provider.session.stop-stale-failed', {
-                    threadId: input.threadId,
-                    provider: adapter.provider,
-                    cause,
-                  }),
-                ),
-              )
-            }),
-      { discard: true },
-    )
+    const openSessions = yield* runtimeInbox
+      .listAllOpenSessions()
+      .pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            'ProviderService.startSession',
+            'Unable to enumerate durable outgoing provider generations before switching.',
+            cause,
+          ),
+        ),
+      )
+    for (const session of openSessions)
+    {
+      if (
+        session.threadId !== input.threadId ||
+        session.providerInstanceId === input.incomingInstanceId
+      )
+      {
+        continue
+      }
+      const stopped = yield* stopRuntimeSessionIfExactWithinThreadPermit(
+        {
+          provider: session.provider,
+          providerInstanceId: session.providerInstanceId,
+          threadId: session.threadId,
+          sessionGeneration: session.sessionGeneration,
+        },
+        input.context,
+      )
+      if (!stopped)
+      {
+        return yield* toValidationError(
+          'ProviderService.startSession',
+          `Outgoing provider generation '${session.providerInstanceId}:${session.threadId}:${session.sessionGeneration}' changed before it could be stopped.`,
+        )
+      }
+    }
   })
 
   const startSession: ProviderServiceMethod<'startSession'> = Effect.fn('startSession')(
@@ -767,138 +2114,239 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         'provider.thread_id': threadId,
         'provider.runtime_mode': parsed.runtimeMode,
       })
-      return yield* Effect.gen(function* ()
-      {
-        const route = yield* registry.getRoute(resolvedInstanceId)
-        const instanceInfo = route.info
-        const resolvedProvider = instanceInfo.driverKind
-        metricProvider = resolvedProvider
-        if (parsed.provider !== undefined && parsed.provider !== resolvedProvider)
-        {
-          return yield* toValidationError(
-            'ProviderService.startSession',
-            `Provider instance '${resolvedInstanceId}' belongs to driver '${resolvedProvider}', not '${parsed.provider}'.`,
-          )
-        }
-        const input = {
-          ...parsed,
+      return yield* withActiveThreadLifecycle(
+        'ProviderService.startSession',
+        threadId,
+        sessionLifecycleLocks.withPermit(
           threadId,
-          provider: resolvedProvider,
-        }
-        if (!instanceInfo.enabled)
-        {
-          return yield* toValidationError(
-            'ProviderService.startSession',
-            `Provider instance '${resolvedInstanceId}' is disabled in 456code settings.`,
-          )
-        }
-        const persistedBinding = Option.getOrUndefined(yield* directory.getBinding(threadId))
-        const persistedContinuationIdentity =
-          persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? readPersistedContinuationIdentity(persistedBinding.runtimePayload)
-            : undefined
-        yield* validateAdapterRoute({
-          operation: 'ProviderService.startSession',
-          instanceId: resolvedInstanceId,
-          expectedProvider: resolvedProvider,
-          route,
-          ...(persistedContinuationIdentity === undefined ? {} : { persistedContinuationIdentity }),
-          ...(routingAuthority !== undefined ? { routingAuthority } : {}),
-        })
-        const effectiveResumeCursor =
-          input.resumeCursor ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? persistedBinding.resumeCursor
-            : undefined)
-        const effectiveCwd =
-          input.cwd ??
-          (persistedBinding?.providerInstanceId === resolvedInstanceId
-            ? readPersistedCwd(persistedBinding.runtimePayload)
-            : undefined)
-        if (
-          route.info.continuationUnavailableReason !== undefined &&
-          (routingAuthority !== undefined || effectiveResumeCursor !== undefined)
-        )
-        {
-          return yield* toValidationError(
-            'ProviderService.startSession',
-            `Provider instance '${route.info.instanceId}' cannot safely continue sessions because ${route.info.continuationUnavailableReason}.`,
-          )
-        }
-        yield* Effect.annotateCurrentSpan({
-          'provider.kind': resolvedProvider,
-          'provider.resume_cursor.source':
-            input.resumeCursor !== undefined
-              ? 'request'
-              : effectiveResumeCursor !== undefined &&
+          Effect.gen(function* ()
+          {
+            const prepareIncomingRoute = (expectedProvider?: ProviderDriverKind) =>
+              Effect.gen(function* ()
+              {
+                yield* requireRunning('ProviderService.startSession')
+                const route = yield* registry.getRoute(resolvedInstanceId)
+                yield* requireHealthyAdapter(
+                  'ProviderService.startSession',
+                  resolvedInstanceId,
+                  route.adapter,
+                )
+                const resolvedProvider = expectedProvider ?? route.info.driverKind
+                metricProvider = resolvedProvider
+                if (parsed.provider !== undefined && parsed.provider !== resolvedProvider)
+                {
+                  return yield* toValidationError(
+                    'ProviderService.startSession',
+                    `Provider instance '${resolvedInstanceId}' belongs to driver '${resolvedProvider}', not '${parsed.provider}'.`,
+                  )
+                }
+                const input = {
+                  ...parsed,
+                  threadId,
+                  provider: resolvedProvider,
+                }
+                const persistedBinding = Option.getOrUndefined(
+                  yield* directory.getBinding(threadId),
+                )
+                const persistedContinuationIdentity =
                   persistedBinding?.providerInstanceId === resolvedInstanceId
-                ? 'persisted'
-                : 'none',
-          'provider.resume_cursor.present': effectiveResumeCursor !== undefined,
-          'provider.cwd.source':
-            input.cwd !== undefined
-              ? 'request'
-              : effectiveCwd !== undefined &&
-                  persistedBinding?.providerInstanceId === resolvedInstanceId
-                ? 'persisted'
-                : 'none',
-          'provider.cwd.effective': effectiveCwd ?? '',
-        })
-        const adapter = route.adapter
-        yield* prepareMcpSession(threadId, resolvedInstanceId)
-        const adapterInput = {
-          ...input,
-          providerInstanceId: resolvedInstanceId,
-          ...(effectiveCwd !== undefined ? { cwd: effectiveCwd } : {}),
-          ...(effectiveResumeCursor !== undefined ? { resumeCursor: effectiveResumeCursor } : {}),
-        }
-        const start =
-          context === undefined
-            ? adapter.startSession(adapterInput)
-            : adapter.startSession(adapterInput, context)
-        const session = yield* start.pipe(Effect.onError(() => clearMcpSession(threadId)))
+                    ? readPersistedContinuationIdentity(persistedBinding.runtimePayload)
+                    : undefined
+                yield* validateAdapterRoute({
+                  operation: 'ProviderService.startSession',
+                  instanceId: resolvedInstanceId,
+                  expectedProvider: resolvedProvider,
+                  route,
+                  ...(persistedContinuationIdentity === undefined
+                    ? {}
+                    : { persistedContinuationIdentity }),
+                  ...(routingAuthority !== undefined ? { routingAuthority } : {}),
+                })
+                const effectiveResumeCursor =
+                  input.resumeCursor ??
+                  (persistedBinding?.providerInstanceId === resolvedInstanceId
+                    ? persistedBinding.resumeCursor
+                    : undefined)
+                const effectiveCwd =
+                  input.cwd ??
+                  (persistedBinding?.providerInstanceId === resolvedInstanceId
+                    ? readPersistedCwd(persistedBinding.runtimePayload)
+                    : undefined)
+                if (
+                  route.info.continuationUnavailableReason !== undefined &&
+                  (routingAuthority !== undefined || effectiveResumeCursor !== undefined)
+                )
+                {
+                  return yield* toValidationError(
+                    'ProviderService.startSession',
+                    `Provider instance '${route.info.instanceId}' cannot safely continue sessions because ${route.info.continuationUnavailableReason}.`,
+                  )
+                }
+                return {
+                  route,
+                  input,
+                  effectiveCwd,
+                  effectiveResumeCursor,
+                  persistedBinding,
+                  resolvedProvider,
+                }
+              })
 
-        if (session.provider !== adapter.provider)
-        {
-          yield* clearMcpSession(threadId)
-          return yield* toValidationError(
-            'ProviderService.startSession',
-            `Adapter/provider mismatch: requested '${adapter.provider}', received '${session.provider}'.`,
-          )
-        }
-        const sessionWithInstance = {
-          ...session,
-          providerInstanceId: resolvedInstanceId,
-        }
+            const preflight = yield* adapterLifecycleLocks.withPermit(
+              resolvedInstanceId,
+              prepareIncomingRoute(),
+            )
+            yield* stopOutgoingRuntimeSessionsWithinThreadPermit({
+              threadId,
+              incomingInstanceId: resolvedInstanceId,
+              ...(context !== undefined ? { context } : {}),
+            })
+            yield* adapterLifecycleLocks.withPermit(
+              resolvedInstanceId,
+              Effect.gen(function* ()
+              {
+                const prepared = yield* prepareIncomingRoute(preflight.resolvedProvider)
+                yield* stopRuntimeSessionForAdapterStart({
+                  operation: 'ProviderService.startSession',
+                  providerInstanceId: resolvedInstanceId,
+                  threadId,
+                  adapter: prepared.route.adapter,
+                  ...(context === undefined ? {} : { context }),
+                })
+              }),
+            )
+            return yield* adapterLifecycleLocks.withPermit(
+              resolvedInstanceId,
+              Effect.gen(function* ()
+              {
+                const prepared = yield* prepareIncomingRoute(preflight.resolvedProvider)
+                const route = prepared.route
+                yield* Effect.annotateCurrentSpan({
+                  'provider.kind': prepared.resolvedProvider,
+                  'provider.resume_cursor.source':
+                    prepared.input.resumeCursor !== undefined
+                      ? 'request'
+                      : prepared.effectiveResumeCursor !== undefined &&
+                          prepared.persistedBinding?.providerInstanceId === resolvedInstanceId
+                        ? 'persisted'
+                        : 'none',
+                  'provider.resume_cursor.present': prepared.effectiveResumeCursor !== undefined,
+                  'provider.cwd.source':
+                    prepared.input.cwd !== undefined
+                      ? 'request'
+                      : prepared.effectiveCwd !== undefined &&
+                          prepared.persistedBinding?.providerInstanceId === resolvedInstanceId
+                        ? 'persisted'
+                        : 'none',
+                  'provider.cwd.effective': prepared.effectiveCwd ?? '',
+                })
+                if (yield* route.adapter.hasSession(threadId))
+                {
+                  return yield* toValidationError(
+                    'ProviderService.startSession',
+                    `Provider session '${resolvedInstanceId}:${threadId}' became active again before its replacement generation could start.`,
+                  )
+                }
+                const durableCurrent = yield* runtimeInbox
+                  .getCurrentSession({
+                    providerInstanceId: resolvedInstanceId,
+                    threadId,
+                  })
+                  .pipe(
+                    Effect.mapError((cause) =>
+                      toValidationError(
+                        'ProviderService.startSession',
+                        'Unable to verify that the prior provider generation closed.',
+                        cause,
+                      ),
+                    ),
+                  )
+                if (Option.isSome(durableCurrent))
+                {
+                  return yield* toValidationError(
+                    'ProviderService.startSession',
+                    `Prior provider generation '${resolvedInstanceId}:${threadId}:${durableCurrent.value.sessionGeneration}' remains open.`,
+                  )
+                }
 
-        yield* stopStaleSessionsForThread({
-          threadId,
-          currentInstanceId: resolvedInstanceId,
-          ...(context !== undefined ? { context } : {}),
-        })
-        yield* upsertSessionBinding(sessionWithInstance, threadId, {
-          continuationIdentity: route.info.continuationIdentity,
-          modelSelection: input.modelSelection,
-        })
-        yield* analytics.record('provider.session.started', {
-          provider: sessionWithInstance.provider,
-          runtimeMode: input.runtimeMode,
-          hasResumeCursor: sessionWithInstance.resumeCursor !== undefined,
-          hasCwd: typeof effectiveCwd === 'string' && effectiveCwd.trim().length > 0,
-          hasModel:
-            typeof input.modelSelection?.model === 'string' &&
-            input.modelSelection.model.trim().length > 0,
-        })
+                return yield* withAllocatedRuntimeSession({
+                  operation: 'ProviderService.startSession',
+                  provider: prepared.resolvedProvider,
+                  providerInstanceId: resolvedInstanceId,
+                  threadId,
+                  adapter: route.adapter,
+                  ...(context === undefined ? {} : { context }),
+                  use: (allocated) =>
+                    Effect.gen(function* ()
+                    {
+                      const mcp = yield* prepareMcpSession(
+                        threadId,
+                        resolvedInstanceId,
+                        allocated.runtimeSession.sessionGeneration,
+                      )
+                      const adapterInput = {
+                        ...prepared.input,
+                        providerInstanceId: resolvedInstanceId,
+                        ...(prepared.effectiveCwd !== undefined
+                          ? { cwd: prepared.effectiveCwd }
+                          : {}),
+                        ...(prepared.effectiveResumeCursor !== undefined
+                          ? { resumeCursor: prepared.effectiveResumeCursor }
+                          : {}),
+                        ...(mcp === undefined ? {} : { mcp }),
+                        runtimeSessionBinding: {
+                          providerInstanceId: resolvedInstanceId,
+                          threadId,
+                          sessionGeneration: allocated.runtimeSession.sessionGeneration,
+                        },
+                      }
+                      const start =
+                        context === undefined
+                          ? route.adapter.startSession(adapterInput)
+                          : route.adapter.startSession(adapterInput, context)
+                      const session = yield* start
+                      if (session.provider !== route.adapter.provider)
+                      {
+                        return yield* toValidationError(
+                          'ProviderService.startSession',
+                          `Adapter/provider mismatch: requested '${route.adapter.provider}', received '${session.provider}'.`,
+                        )
+                      }
+                      const sessionWithInstance = {
+                        ...session,
+                        providerInstanceId: resolvedInstanceId,
+                      }
 
-        return sessionWithInstance
-      }).pipe(
-        withMetrics({
-          counter: providerSessionsTotal,
-          attributes: () =>
-            providerMetricAttributes(metricProvider, {
-              operation: 'start',
+                      yield* upsertSessionBinding(sessionWithInstance, threadId, {
+                        continuationIdentity: route.info.continuationIdentity,
+                        modelSelection: prepared.input.modelSelection,
+                      })
+                      yield* analytics.record('provider.session.started', {
+                        provider: sessionWithInstance.provider,
+                        runtimeMode: prepared.input.runtimeMode,
+                        hasResumeCursor: sessionWithInstance.resumeCursor !== undefined,
+                        hasCwd:
+                          typeof prepared.effectiveCwd === 'string' &&
+                          prepared.effectiveCwd.trim().length > 0,
+                        hasModel:
+                          typeof prepared.input.modelSelection?.model === 'string' &&
+                          prepared.input.modelSelection.model.trim().length > 0,
+                      })
+                      return sessionWithInstance
+                    }),
+                })
+              }),
+            )
+          }).pipe(
+            withMetrics({
+              counter: providerSessionsTotal,
+              attributes: () =>
+                providerMetricAttributes(metricProvider, {
+                  operation: 'start',
+                }),
             }),
-        }),
+          ),
+        ),
       )
     },
   )
@@ -931,65 +2379,76 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       })
       let metricProvider = 'unknown'
       let metricModel = input.modelSelection?.model
-      return yield* Effect.gen(function* ()
-      {
-        const routed = yield* resolveRoutableSession({
+      return yield* withProviderInstanceLifecycle(
+        {
           threadId: input.threadId,
           operation: 'ProviderService.sendTurn',
-          allowRecovery: true,
-          ...(routingAuthority !== undefined ? { routingAuthority } : {}),
-          ...(context !== undefined ? { context } : {}),
-        })
-        metricProvider = routed.adapter.provider
-        metricModel = input.modelSelection?.model
-        yield* Effect.annotateCurrentSpan({
-          'provider.kind': routed.adapter.provider,
-          ...(input.modelSelection?.model ? { 'provider.model': input.modelSelection.model } : {}),
-        })
-        // turns keep the existing credential alive because running agents cannot accept rotation
-        yield* McpSessionRegistry.touchActiveMcpThread(input.threadId)
-        // clear the prior turn before starting another so overlapping mcp calls fail closed
-        yield* McpSessionRegistry.bindActiveMcpTurn(input.threadId)
-        const adapterInput =
-          routed.adapter.provider === 'codex' ? input : applyOrchestrateModeInstructions(input)
-        const turn = yield* context === undefined
-          ? routed.adapter.sendTurn(adapterInput)
-          : routed.adapter.sendTurn(adapterInput, context)
-        yield* McpSessionRegistry.bindActiveMcpTurn(input.threadId, turn.turnId)
-        yield* directory.upsert({
-          threadId: input.threadId,
-          provider: routed.adapter.provider,
-          providerInstanceId: routed.instanceId,
-          status: 'running',
-          ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
-          runtimePayload: {
-            ...(input.modelSelection !== undefined ? { modelSelection: input.modelSelection } : {}),
-            activeTurnId: turn.turnId,
-            lastRuntimeEvent: 'provider.sendTurn',
-            lastRuntimeEventAt: yield* nowIso,
-          },
-        })
-        yield* analytics.record('provider.turn.sent', {
-          provider: routed.adapter.provider,
-          model: input.modelSelection?.model,
-          interactionMode: input.interactionMode,
-          attachmentCount: input.attachments.length,
-          hasInput: typeof input.input === 'string' && input.input.trim().length > 0,
-        })
-        return turn
-      }).pipe(
-        withMetrics({
-          counter: providerTurnsTotal,
-          timer: providerTurnDuration,
-          attributes: () =>
-            providerTurnMetricAttributes({
-              provider: metricProvider,
-              model: metricModel,
-              extra: {
-                operation: 'send',
-              },
-            }),
-        }),
+          requireActiveThread: true,
+        },
+        Effect.gen(function* ()
+        {
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: 'ProviderService.sendTurn',
+            allowRecovery: true,
+            ...(routingAuthority !== undefined ? { routingAuthority } : {}),
+            ...(context !== undefined ? { context } : {}),
+          })
+          metricProvider = routed.adapter.provider
+          metricModel = input.modelSelection?.model
+          yield* Effect.annotateCurrentSpan({
+            'provider.kind': routed.adapter.provider,
+            ...(input.modelSelection?.model
+              ? { 'provider.model': input.modelSelection.model }
+              : {}),
+          })
+          // turns keep the existing credential alive because running agents cannot accept rotation
+          yield* mcpSessionRegistry.touch(input.threadId)
+          // clear the prior turn before starting another so overlapping mcp calls fail closed
+          yield* mcpSessionRegistry.bindActiveTurn(input.threadId)
+          const adapterInput =
+            routed.adapter.provider === 'codex' ? input : applyOrchestrateModeInstructions(input)
+          const turn = yield* context === undefined
+            ? routed.adapter.sendTurn(adapterInput)
+            : routed.adapter.sendTurn(adapterInput, context)
+          yield* mcpSessionRegistry.bindActiveTurn(input.threadId, turn.turnId)
+          yield* directory.upsert({
+            threadId: input.threadId,
+            provider: routed.adapter.provider,
+            providerInstanceId: routed.instanceId,
+            status: 'running',
+            ...(turn.resumeCursor !== undefined ? { resumeCursor: turn.resumeCursor } : {}),
+            runtimePayload: {
+              ...(input.modelSelection !== undefined
+                ? { modelSelection: input.modelSelection }
+                : {}),
+              activeTurnId: turn.turnId,
+              lastRuntimeEvent: 'provider.sendTurn',
+              lastRuntimeEventAt: yield* nowIso,
+            },
+          })
+          yield* analytics.record('provider.turn.sent', {
+            provider: routed.adapter.provider,
+            model: input.modelSelection?.model,
+            interactionMode: input.interactionMode,
+            attachmentCount: input.attachments.length,
+            hasInput: typeof input.input === 'string' && input.input.trim().length > 0,
+          })
+          return turn
+        }).pipe(
+          withMetrics({
+            counter: providerTurnsTotal,
+            timer: providerTurnDuration,
+            attributes: () =>
+              providerTurnMetricAttributes({
+                provider: metricProvider,
+                model: metricModel,
+                extra: {
+                  operation: 'send',
+                },
+              }),
+          }),
+        ),
       )
     },
   )
@@ -1003,35 +2462,42 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         payload: rawInput,
       })
       let metricProvider = 'unknown'
-      return yield* Effect.gen(function* ()
-      {
-        const routed = yield* resolveRoutableSession({
+      return yield* withProviderInstanceLifecycle(
+        {
           threadId: input.threadId,
           operation: 'ProviderService.interruptTurn',
-          allowRecovery: true,
-          ...(context !== undefined ? { context } : {}),
-        })
-        metricProvider = routed.adapter.provider
-        yield* Effect.annotateCurrentSpan({
-          'provider.operation': 'interrupt-turn',
-          'provider.kind': routed.adapter.provider,
-          'provider.thread_id': input.threadId,
-          'provider.turn_id': input.turnId,
-        })
-        yield* context === undefined
-          ? routed.adapter.interruptTurn(routed.threadId, input.turnId)
-          : routed.adapter.interruptTurn(routed.threadId, input.turnId, context)
-        yield* analytics.record('provider.turn.interrupted', {
-          provider: routed.adapter.provider,
-        })
-      }).pipe(
-        withMetrics({
-          counter: providerTurnsTotal,
-          outcomeAttributes: () =>
-            providerMetricAttributes(metricProvider, {
-              operation: 'interrupt',
-            }),
-        }),
+          requireActiveThread: true,
+        },
+        Effect.gen(function* ()
+        {
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: 'ProviderService.interruptTurn',
+            allowRecovery: true,
+            ...(context !== undefined ? { context } : {}),
+          })
+          metricProvider = routed.adapter.provider
+          yield* Effect.annotateCurrentSpan({
+            'provider.operation': 'interrupt-turn',
+            'provider.kind': routed.adapter.provider,
+            'provider.thread_id': input.threadId,
+            'provider.turn_id': input.turnId,
+          })
+          yield* context === undefined
+            ? routed.adapter.interruptTurn(routed.threadId, input.turnId)
+            : routed.adapter.interruptTurn(routed.threadId, input.turnId, context)
+          yield* analytics.record('provider.turn.interrupted', {
+            provider: routed.adapter.provider,
+          })
+        }).pipe(
+          withMetrics({
+            counter: providerTurnsTotal,
+            outcomeAttributes: () =>
+              providerMetricAttributes(metricProvider, {
+                operation: 'interrupt',
+              }),
+          }),
+        ),
       )
     },
   )
@@ -1045,41 +2511,48 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         payload: rawInput,
       })
       let metricProvider = 'unknown'
-      return yield* Effect.gen(function* ()
-      {
-        const routed = yield* resolveRoutableSession({
+      return yield* withProviderInstanceLifecycle(
+        {
           threadId: input.threadId,
           operation: 'ProviderService.respondToRequest',
-          allowRecovery: true,
-          ...(context !== undefined ? { context } : {}),
-        })
-        metricProvider = routed.adapter.provider
-        yield* Effect.annotateCurrentSpan({
-          'provider.operation': 'respond-to-request',
-          'provider.kind': routed.adapter.provider,
-          'provider.thread_id': input.threadId,
-          'provider.request_id': input.requestId,
-        })
-        yield* context === undefined
-          ? routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision)
-          : routed.adapter.respondToRequest(
-              routed.threadId,
-              input.requestId,
-              input.decision,
-              context,
-            )
-        yield* analytics.record('provider.request.responded', {
-          provider: routed.adapter.provider,
-          decision: input.decision,
-        })
-      }).pipe(
-        withMetrics({
-          counter: providerTurnsTotal,
-          outcomeAttributes: () =>
-            providerMetricAttributes(metricProvider, {
-              operation: 'approval-response',
-            }),
-        }),
+          requireActiveThread: true,
+        },
+        Effect.gen(function* ()
+        {
+          const routed = yield* resolveRoutableSession({
+            threadId: input.threadId,
+            operation: 'ProviderService.respondToRequest',
+            allowRecovery: true,
+            ...(context !== undefined ? { context } : {}),
+          })
+          metricProvider = routed.adapter.provider
+          yield* Effect.annotateCurrentSpan({
+            'provider.operation': 'respond-to-request',
+            'provider.kind': routed.adapter.provider,
+            'provider.thread_id': input.threadId,
+            'provider.request_id': input.requestId,
+          })
+          yield* context === undefined
+            ? routed.adapter.respondToRequest(routed.threadId, input.requestId, input.decision)
+            : routed.adapter.respondToRequest(
+                routed.threadId,
+                input.requestId,
+                input.decision,
+                context,
+              )
+          yield* analytics.record('provider.request.responded', {
+            provider: routed.adapter.provider,
+            decision: input.decision,
+          })
+        }).pipe(
+          withMetrics({
+            counter: providerTurnsTotal,
+            outcomeAttributes: () =>
+              providerMetricAttributes(metricProvider, {
+                operation: 'approval-response',
+              }),
+          }),
+        ),
       )
     },
   )
@@ -1094,37 +2567,44 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       payload: rawInput,
     })
     let metricProvider = 'unknown'
-    return yield* Effect.gen(function* ()
-    {
-      const routed = yield* resolveRoutableSession({
+    return yield* withProviderInstanceLifecycle(
+      {
         threadId: input.threadId,
         operation: 'ProviderService.respondToUserInput',
-        allowRecovery: true,
-        ...(context !== undefined ? { context } : {}),
-      })
-      metricProvider = routed.adapter.provider
-      yield* Effect.annotateCurrentSpan({
-        'provider.operation': 'respond-to-user-input',
-        'provider.kind': routed.adapter.provider,
-        'provider.thread_id': input.threadId,
-        'provider.request_id': input.requestId,
-      })
-      yield* context === undefined
-        ? routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers)
-        : routed.adapter.respondToUserInput(
-            routed.threadId,
-            input.requestId,
-            input.answers,
-            context,
-          )
-    }).pipe(
-      withMetrics({
-        counter: providerTurnsTotal,
-        outcomeAttributes: () =>
-          providerMetricAttributes(metricProvider, {
-            operation: 'user-input-response',
-          }),
-      }),
+        requireActiveThread: true,
+      },
+      Effect.gen(function* ()
+      {
+        const routed = yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: 'ProviderService.respondToUserInput',
+          allowRecovery: true,
+          ...(context !== undefined ? { context } : {}),
+        })
+        metricProvider = routed.adapter.provider
+        yield* Effect.annotateCurrentSpan({
+          'provider.operation': 'respond-to-user-input',
+          'provider.kind': routed.adapter.provider,
+          'provider.thread_id': input.threadId,
+          'provider.request_id': input.requestId,
+        })
+        yield* context === undefined
+          ? routed.adapter.respondToUserInput(routed.threadId, input.requestId, input.answers)
+          : routed.adapter.respondToUserInput(
+              routed.threadId,
+              input.requestId,
+              input.answers,
+              context,
+            )
+      }).pipe(
+        withMetrics({
+          counter: providerTurnsTotal,
+          outcomeAttributes: () =>
+            providerMetricAttributes(metricProvider, {
+              operation: 'user-input-response',
+            }),
+        }),
+      ),
     )
   })
 
@@ -1137,70 +2617,272 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
         payload: rawInput,
       })
       let metricProvider = 'unknown'
-      return yield* Effect.gen(function* ()
-      {
-        const routed = yield* resolveRoutableSession({
-          threadId: input.threadId,
-          operation: 'ProviderService.stopSession',
-          allowRecovery: false,
-          ...(context !== undefined ? { context } : {}),
-        })
-        if (
-          input.expectedProviderInstanceId !== undefined &&
-          routed.instanceId !== input.expectedProviderInstanceId
-        )
+      yield* sessionLifecycleLocks.withPermit(
+        input.threadId,
+        Effect.gen(function* ()
         {
-          return
-        }
-        metricProvider = routed.adapter.provider
-        yield* Effect.annotateCurrentSpan({
-          'provider.operation': 'stop-session',
-          'provider.kind': routed.adapter.provider,
-          'provider.thread_id': input.threadId,
-        })
-        if (routed.isActive)
-        {
-          yield* context === undefined
-            ? routed.adapter.stopSession(routed.threadId)
-            : routed.adapter.stopSession(routed.threadId, context)
-        }
-        yield* clearMcpSession(input.threadId)
-        yield* directory.upsert({
-          threadId: input.threadId,
-          provider: routed.adapter.provider,
-          providerInstanceId: routed.instanceId,
-          status: 'stopped',
-          runtimePayload: {
-            activeTurnId: null,
-          },
-        })
-        yield* analytics.record('provider.session.stopped', {
-          provider: routed.adapter.provider,
-        })
-      }).pipe(
-        withMetrics({
-          counter: providerSessionsTotal,
-          outcomeAttributes: () =>
-            providerMetricAttributes(metricProvider, {
-              operation: 'stop',
+          const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId))
+          if (binding === undefined)
+          {
+            return yield* toValidationError(
+              'ProviderService.stopSession',
+              `Cannot route thread '${input.threadId}' because no persisted provider binding exists.`,
+            )
+          }
+          const instanceId = yield* requireBindingInstanceId('ProviderService.stopSession', binding)
+          const stopped = yield* adapterLifecycleLocks.withPermit(
+            instanceId,
+            Effect.gen(function* ()
+            {
+              yield* requireRunning('ProviderService.stopSession')
+              const routed = yield* resolveRoutableSession({
+                threadId: input.threadId,
+                operation: 'ProviderService.stopSession',
+                allowRecovery: false,
+                ...(context !== undefined ? { context } : {}),
+              })
+              if (
+                routed.instanceId !== instanceId ||
+                (input.expectedProviderInstanceId !== undefined &&
+                  routed.instanceId !== input.expectedProviderInstanceId)
+              )
+              {
+                return
+              }
+              metricProvider = routed.adapter.provider
+              yield* Effect.annotateCurrentSpan({
+                'provider.operation': 'stop-session',
+                'provider.kind': routed.adapter.provider,
+                'provider.thread_id': input.threadId,
+              })
+              const current = yield* runtimeInbox
+                .getCurrentSession({
+                  providerInstanceId: routed.instanceId,
+                  threadId: input.threadId,
+                })
+                .pipe(
+                  Effect.mapError((cause) =>
+                    toValidationError(
+                      'ProviderService.stopSession',
+                      'Unable to read the durable provider session identity before stopping.',
+                      cause,
+                    ),
+                  ),
+                )
+              const identity = Option.map(current, (session): ProviderRuntimeSessionIdentity => ({
+                provider: session.provider,
+                providerInstanceId: routed.instanceId,
+                threadId: input.threadId,
+                sessionGeneration: session.sessionGeneration,
+              }))
+              if (routed.isActive)
+              {
+                const activeIdentity = Option.isSome(identity)
+                  ? identity.value
+                  : yield* toValidationError(
+                      'ProviderService.stopSession',
+                      'The active adapter session has no durable provider generation.',
+                    )
+                const adapterBinding = yield* routed.adapter.getSessionRuntimeBinding(
+                  input.threadId,
+                )
+                if (
+                  adapterBinding === undefined ||
+                  adapterBinding.providerInstanceId !== activeIdentity.providerInstanceId ||
+                  adapterBinding.threadId !== activeIdentity.threadId ||
+                  adapterBinding.sessionGeneration !== activeIdentity.sessionGeneration
+                )
+                {
+                  return yield* toValidationError(
+                    'ProviderService.stopSession',
+                    'The active adapter session does not match its durable provider generation.',
+                  )
+                }
+                const stop =
+                  context === undefined
+                    ? routed.adapter.stopSession(routed.threadId)
+                    : routed.adapter.stopSession(routed.threadId, context)
+                yield* stop
+                yield* awaitSessionExit(activeIdentity)
+              }
+              else if (Option.isSome(identity))
+              {
+                const createdAt = yield* nowIso
+                yield* publishRuntimeEvent(identity.value, {
+                  type: 'session.exited',
+                  eventId: EventId.make(
+                    `provider-session-stopped-inactive:${routed.instanceId}:${input.threadId}:${identity.value.sessionGeneration}`,
+                  ),
+                  provider: identity.value.provider,
+                  providerInstanceId: routed.instanceId,
+                  threadId: input.threadId,
+                  createdAt,
+                  payload: {
+                    reason: 'Stopped after the provider adapter was already inactive',
+                    recoverable: false,
+                    exitKind: 'graceful',
+                  },
+                }).pipe(
+                  Effect.mapError((cause) =>
+                    toValidationError(
+                      'ProviderService.stopSession',
+                      'Unable to durably close the inactive provider session.',
+                      cause,
+                    ),
+                  ),
+                )
+                yield* awaitSessionExit(identity.value)
+              }
+              return {
+                identity,
+                provider: routed.adapter.provider,
+                providerInstanceId: routed.instanceId,
+              }
             }),
-        }),
+          )
+          if (stopped === undefined)
+          {
+            return
+          }
+          yield* directory.upsert({
+            threadId: input.threadId,
+            provider: stopped.provider,
+            providerInstanceId: stopped.providerInstanceId,
+            status: 'stopped',
+            runtimePayload: {
+              activeTurnId: null,
+            },
+          })
+          yield* analytics.record('provider.session.stopped', {
+            provider: stopped.provider,
+          })
+        }).pipe(
+          withMetrics({
+            counter: providerSessionsTotal,
+            outcomeAttributes: () =>
+              providerMetricAttributes(metricProvider, {
+                operation: 'stop',
+              }),
+          }),
+        ),
       )
     },
   )
+
+  const matchesSessionIdentity: ProviderServiceMethod<'matchesSessionIdentity'> = (identity) =>
+    matchesRuntimeSessionIdentity(identity)
+
+  const getSessionIdentityState: ProviderServiceMethod<'getSessionIdentityState'> = (identity) =>
+    runtimeInbox
+      .getSession(identity)
+      .pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            'ProviderService.getSessionIdentityState',
+            'Unable to read the durable provider session generation.',
+            cause,
+          ),
+        ),
+      )
+
+  const captureSessionIdentity: ProviderServiceMethod<'captureSessionIdentity'> = Effect.fn(
+    'captureSessionIdentity',
+  )(function* (input)
+  {
+    const binding = Option.getOrUndefined(yield* directory.getBinding(input.threadId))
+    if (binding === undefined)
+    {
+      return Option.none<ProviderService.ProviderSessionIdentityCapture>()
+    }
+    const providerInstanceId = yield* requireBindingInstanceId(
+      'ProviderService.captureSessionIdentity',
+      binding,
+    )
+    if (
+      input.expectedProviderInstanceId !== undefined &&
+      input.expectedProviderInstanceId !== providerInstanceId
+    )
+    {
+      return Option.none<ProviderService.ProviderSessionIdentityCapture>()
+    }
+    const current = yield* runtimeInbox
+      .getCurrentSession({ providerInstanceId, threadId: input.threadId })
+      .pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            'ProviderService.captureSessionIdentity',
+            'Unable to read durable provider session identity.',
+            cause,
+          ),
+        ),
+      )
+    return Option.map(current, (session): ProviderService.ProviderSessionIdentityCapture => ({
+      provider: session.provider,
+      providerInstanceId,
+      threadId: input.threadId,
+      sessionGeneration: session.sessionGeneration,
+      createdAt: session.createdAt,
+    }))
+  })
+
+  const captureSessionIdentities: ProviderServiceMethod<'captureSessionIdentities'> = Effect.fn(
+    'captureSessionIdentities',
+  )(function* (input)
+  {
+    const sessions = yield* runtimeInbox
+      .listAllOpenSessions()
+      .pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            'ProviderService.captureSessionIdentities',
+            'Unable to enumerate durable provider session identities.',
+            cause,
+          ),
+        ),
+      )
+    return sessions
+      .filter((session) => input?.threadId === undefined || session.threadId === input.threadId)
+      .map((session): ProviderService.ProviderSessionIdentityCapture => ({
+        provider: session.provider,
+        providerInstanceId: session.providerInstanceId,
+        threadId: session.threadId,
+        sessionGeneration: session.sessionGeneration,
+        createdAt: session.createdAt,
+      }))
+  })
+
+  const stopSessionIfExact: ProviderServiceMethod<'stopSessionIfExact'> = Effect.fn(
+    'stopSessionIfExact',
+  )(function* (identity, context)
+  {
+    return yield* sessionLifecycleLocks.withPermit(
+      identity.threadId,
+      stopRuntimeSessionIfExactWithinThreadPermit(identity, context),
+    )
+  })
 
   const listSessions: ProviderServiceMethod<'listSessions'> = Effect.fn('listSessions')(
     function* ()
     {
       const currentAdapters = yield* getAdapterEntries
       const sessionsByProvider = yield* Effect.forEach(currentAdapters, ([instanceId, adapter]) =>
-        adapter.listSessions().pipe(
-          Effect.map((sessions) =>
-            sessions.map((session) => ({
+        adapterLifecycleLocks.withPermit(
+          instanceId,
+          Effect.gen(function* ()
+          {
+            const routing = yield* Ref.get(adapterRoutingState)
+            if (
+              routing.quarantined.has(instanceId) ||
+              routing.subscribed.get(instanceId)?.adapter !== adapter
+            )
+            {
+              return []
+            }
+            return (yield* adapter.listSessions()).map((session) => ({
               ...session,
               providerInstanceId: instanceId,
-            })),
-          ),
+            }))
+          }),
         ),
       )
       const activeSessions = sessionsByProvider.flatMap((sessions) => sessions)
@@ -1286,7 +2968,18 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
   )
 
   const getCapabilities: ProviderServiceMethod<'getCapabilities'> = (instanceId) =>
-    registry.getByInstance(instanceId).pipe(Effect.map((adapter) => adapter.capabilities))
+    adapterLifecycleLocks.withPermit(
+      instanceId,
+      registry
+        .getByInstance(instanceId)
+        .pipe(
+          Effect.flatMap((adapter) =>
+            requireHealthyAdapter('ProviderService.getCapabilities', instanceId, adapter).pipe(
+              Effect.as(adapter.capabilities),
+            ),
+          ),
+        ),
+    )
 
   const getInstanceInfo: ProviderServiceMethod<'getInstanceInfo'> = (instanceId) =>
     registry.getInstanceInfo(instanceId)
@@ -1322,70 +3015,386 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       return
     }
     let metricProvider = 'unknown'
-    return yield* Effect.gen(function* ()
-    {
-      const routed = yield* resolveRoutableSession({
+    return yield* withProviderInstanceLifecycle(
+      {
         threadId: input.threadId,
         operation: 'ProviderService.rollbackConversation',
-        allowRecovery: true,
-        expectedProviderInstanceId: input.expectedProviderInstanceId,
-        ...(context !== undefined ? { context } : {}),
-      })
-      metricProvider = routed.adapter.provider
-      yield* Effect.annotateCurrentSpan({
-        'provider.operation': 'rollback-conversation',
-        'provider.kind': routed.adapter.provider,
-        'provider.thread_id': input.threadId,
-        'provider.rollback_turns': input.numTurns,
-      })
-      yield* context === undefined
-        ? routed.adapter.rollbackThread(routed.threadId, input.numTurns)
-        : routed.adapter.rollbackThread(routed.threadId, input.numTurns, context)
-      yield* analytics.record('provider.conversation.rolled_back', {
-        provider: routed.adapter.provider,
-        turns: input.numTurns,
-      })
-    }).pipe(
-      withMetrics({
-        counter: providerTurnsTotal,
-        outcomeAttributes: () =>
-          providerMetricAttributes(metricProvider, {
-            operation: 'rollback',
+        requireActiveThread: true,
+      },
+      Effect.gen(function* ()
+      {
+        const routed = yield* resolveRoutableSession({
+          threadId: input.threadId,
+          operation: 'ProviderService.rollbackConversation',
+          allowRecovery: true,
+          expectedProviderInstanceId: input.expectedProviderInstanceId,
+          ...(context !== undefined ? { context } : {}),
+        })
+        metricProvider = routed.adapter.provider
+        yield* Effect.annotateCurrentSpan({
+          'provider.operation': 'rollback-conversation',
+          'provider.kind': routed.adapter.provider,
+          'provider.thread_id': input.threadId,
+          'provider.rollback_turns': input.numTurns,
+        })
+        yield* context === undefined
+          ? routed.adapter.rollbackThread(routed.threadId, input.numTurns)
+          : routed.adapter.rollbackThread(routed.threadId, input.numTurns, context)
+        yield* analytics.record('provider.conversation.rolled_back', {
+          provider: routed.adapter.provider,
+          turns: input.numTurns,
+        })
+      }).pipe(
+        withMetrics({
+          counter: providerTurnsTotal,
+          outcomeAttributes: () =>
+            providerMetricAttributes(metricProvider, {
+              operation: 'rollback',
+            }),
+        }),
+      ),
+    )
+  })
+
+  const rollbackConversationIfExact: ProviderServiceMethod<'rollbackConversationIfExact'> =
+    Effect.fn('rollbackConversationIfExact')(function* (input, context)
+    {
+      if (input.numTurns === 0)
+      {
+        return yield* matchesSessionIdentity(input.identity)
+      }
+      return yield* withActiveThreadLifecycle(
+        'ProviderService.rollbackConversationIfExact',
+        input.identity.threadId,
+        sessionLifecycleLocks.withPermit(
+          input.identity.threadId,
+          adapterLifecycleLocks.withPermit(
+            input.identity.providerInstanceId,
+            Effect.gen(function* ()
+            {
+              yield* requireRunning('ProviderService.rollbackConversationIfExact')
+              if (!(yield* matchesSessionIdentity(input.identity)))
+              {
+                return false
+              }
+              const binding = Option.getOrUndefined(
+                yield* directory.getBinding(input.identity.threadId),
+              )
+              if (binding?.providerInstanceId !== input.identity.providerInstanceId)
+              {
+                return false
+              }
+              const route = yield* registry.getRoute(input.identity.providerInstanceId)
+              yield* requireHealthyAdapter(
+                'ProviderService.rollbackConversationIfExact',
+                input.identity.providerInstanceId,
+                route.adapter,
+              )
+              if (!(yield* route.adapter.hasSession(input.identity.threadId)))
+              {
+                return false
+              }
+              const adapterBinding = yield* route.adapter.getSessionRuntimeBinding(
+                input.identity.threadId,
+              )
+              if (
+                adapterBinding === undefined ||
+                adapterBinding.providerInstanceId !== input.identity.providerInstanceId ||
+                adapterBinding.threadId !== input.identity.threadId ||
+                adapterBinding.sessionGeneration !== input.identity.sessionGeneration ||
+                !(yield* matchesSessionIdentity(input.identity))
+              )
+              {
+                return false
+              }
+              yield* context === undefined
+                ? route.adapter.rollbackThread(input.identity.threadId, input.numTurns)
+                : route.adapter.rollbackThread(input.identity.threadId, input.numTurns, context)
+              yield* analytics.record('provider.conversation.rolled_back', {
+                provider: route.adapter.provider,
+                turns: input.numTurns,
+                exactGeneration: true,
+              })
+              return true
+            }),
+          ),
+        ),
+      )
+    })
+
+  const getConversationTurnCountIfExact: ProviderServiceMethod<'getConversationTurnCountIfExact'> =
+    Effect.fn('getConversationTurnCountIfExact')(function* (identity)
+    {
+      return yield* withActiveThreadLifecycle(
+        'ProviderService.getConversationTurnCountIfExact',
+        identity.threadId,
+        sessionLifecycleLocks.withPermit(
+          identity.threadId,
+          adapterLifecycleLocks.withPermit(
+            identity.providerInstanceId,
+            Effect.gen(function* ()
+            {
+              yield* requireRunning('ProviderService.getConversationTurnCountIfExact')
+              if (!(yield* matchesSessionIdentity(identity)))
+              {
+                return Option.none<number>()
+              }
+              const route = yield* registry.getRoute(identity.providerInstanceId)
+              yield* requireHealthyAdapter(
+                'ProviderService.getConversationTurnCountIfExact',
+                identity.providerInstanceId,
+                route.adapter,
+              )
+              if (
+                route.adapter.provider !== identity.provider ||
+                !(yield* adapterHasExactSession(
+                  'ProviderService.getConversationTurnCountIfExact',
+                  route.adapter,
+                  identity,
+                ))
+              )
+              {
+                return Option.none<number>()
+              }
+              const snapshot = yield* route.adapter.readThread(identity.threadId)
+              return Option.some(snapshot.turns.length)
+            }),
+          ),
+        ),
+      )
+    })
+
+  interface ShutdownAdapterEntry
+  {
+    readonly instanceId: ProviderInstanceId
+    readonly adapter: ProviderAdapterShape<ProviderAdapterError>
+  }
+
+  const collectShutdownAdapters = Effect.fn('ProviderService.collectShutdownAdapters')(
+    function* ()
+    {
+      const state = yield* Ref.get(adapterRoutingState)
+      const entries: ShutdownAdapterEntry[] = []
+      const add = (
+        instanceId: ProviderInstanceId,
+        adapter: ProviderAdapterShape<ProviderAdapterError>,
+      ) =>
+      {
+        if (
+          !entries.some((entry) => entry.instanceId === instanceId && entry.adapter === adapter)
+        )
+        {
+          entries.push({ instanceId, adapter })
+        }
+      }
+      for (const [instanceId, adapter] of state.subscribed)
+      {
+        add(instanceId, adapter.adapter)
+      }
+      for (const [instanceId, quarantine] of state.quarantined)
+      {
+        add(instanceId, quarantine.adapter)
+      }
+      for (const instanceId of yield* registry.listInstances())
+      {
+        add(instanceId, yield* registry.getByInstance(instanceId))
+      }
+      return entries
+    },
+  )
+
+  const stopShutdownAdapter = Effect.fn('ProviderService.stopShutdownAdapter')(function* (
+    entry: ShutdownAdapterEntry,
+  )
+  {
+    return yield* adapterLifecycleLocks.withPermit(
+      entry.instanceId,
+      Effect.gen(function* ()
+      {
+        const sessions = yield* entry.adapter.listSessions()
+        const identities = yield* Effect.forEach(sessions, (session) =>
+          Effect.gen(function* ()
+          {
+            const storedBinding = yield* entry.adapter.getSessionRuntimeBinding(session.threadId)
+            if (
+              storedBinding === undefined ||
+              storedBinding.providerInstanceId !== entry.instanceId ||
+              storedBinding.threadId !== session.threadId
+            )
+            {
+              yield* Effect.logWarning('provider shutdown found an unbound adapter session', {
+                providerInstanceId: entry.instanceId,
+                provider: entry.adapter.provider,
+                threadId: session.threadId,
+              })
+              return Option.none<ProviderRuntimeSessionIdentity>()
+            }
+            const current = yield* runtimeInbox
+              .getCurrentSession({
+                providerInstanceId: entry.instanceId,
+                threadId: session.threadId,
+              })
+              .pipe(
+                Effect.mapError((cause) =>
+                  toValidationError(
+                    'ProviderService.shutdown',
+                    'Unable to compare an adapter session with its durable generation.',
+                    cause,
+                  ),
+                ),
+              )
+            const exactIdentity = Option.filter(
+              Option.map(current, (durable): ProviderRuntimeSessionIdentity => ({
+                provider: durable.provider,
+                providerInstanceId: durable.providerInstanceId,
+                threadId: durable.threadId,
+                sessionGeneration: durable.sessionGeneration,
+              })),
+              (durable) => durable.sessionGeneration === storedBinding.sessionGeneration,
+            )
+            if (Option.isSome(exactIdentity))
+            {
+              const directoryBinding = Option.getOrUndefined(
+                yield* directory.getBinding(session.threadId),
+              )
+              if (directoryBinding?.providerInstanceId === entry.instanceId)
+              {
+                yield* upsertSessionBinding(
+                  { ...session, providerInstanceId: entry.instanceId },
+                  session.threadId,
+                  {
+                    lastRuntimeEvent: 'provider.stopAll',
+                    lastRuntimeEventAt: yield* nowIso,
+                  },
+                )
+              }
+            }
+            return exactIdentity
           }),
+        )
+        yield* entry.adapter.stopAll()
+        const closingIdentities = identities.filter(Option.isSome).map((identity) => identity.value)
+        yield* Effect.forEach(closingIdentities, awaitSessionExit, {
+          concurrency: 'unbounded',
+          discard: true,
+        })
+        return closingIdentities
       }),
     )
   })
 
-  const runStopAll = Effect.fn('runStopAll')(function* ()
-  {
-    const threadIds = yield* directory.listThreadIds()
-    const currentAdapters = yield* getAdapterEntries
-    const activeSessions = yield* Effect.forEach(currentAdapters, ([instanceId, adapter]) =>
-      adapter.listSessions().pipe(
-        Effect.map((sessions) =>
-          sessions.map((session) => ({
-            ...session,
-            providerInstanceId: instanceId,
-          })),
+  const readAllOpenRuntimeSessions = runtimeInbox
+    .listAllOpenSessions()
+    .pipe(
+      Effect.mapError((cause) =>
+        toValidationError(
+          'ProviderService.shutdown',
+          'Unable to enumerate durable provider sessions during shutdown.',
+          cause,
         ),
       ),
-    ).pipe(Effect.map((sessionsByAdapter) => sessionsByAdapter.flatMap((sessions) => sessions)))
-    yield* Effect.forEach(activeSessions, (session) =>
-      Effect.flatMap(nowIso, (lastRuntimeEventAt) =>
-        upsertSessionBinding(session, session.threadId, {
-          lastRuntimeEvent: 'provider.stopAll',
-          lastRuntimeEventAt,
+    )
+
+  const runStopAll = Effect.fn('runStopAll')(function* ()
+  {
+    const stoppedAdapters: ShutdownAdapterEntry[] = []
+    const closingIdentities: ProviderRuntimeSessionIdentity[] = []
+
+    // bounded follow-up passes catch a registry replacement that completed
+    // while shutdown was waiting for an in-flight adapter lifecycle operation.
+    for (let pass = 0; pass < 4; pass += 1)
+    {
+      const entries = yield* collectShutdownAdapters()
+      const pending = entries.filter(
+        (entry) =>
+          !stoppedAdapters.some(
+            (stopped) =>
+              stopped.instanceId === entry.instanceId && stopped.adapter === entry.adapter,
+          ),
+      )
+      for (const entry of pending)
+      {
+        closingIdentities.push(...(yield* stopShutdownAdapter(entry)))
+        stoppedAdapters.push(entry)
+      }
+      if (pending.length === 0)
+      {
+        break
+      }
+    }
+
+    const unstableAdapters = (yield* collectShutdownAdapters()).filter(
+      (entry) =>
+        !stoppedAdapters.some(
+          (stopped) => stopped.instanceId === entry.instanceId && stopped.adapter === entry.adapter,
+        ),
+    )
+    if (unstableAdapters.length > 0)
+    {
+      return yield* toValidationError(
+        'ProviderService.shutdown',
+        'Provider registry continued replacing adapters while shutdown was quiescing admission sources.',
+      )
+    }
+
+    const subscriptionFibers = yield* Ref.modify(adapterRoutingState, (current) => [
+      Array.from(current.subscribed.values(), (subscription) => subscription.fiber),
+      { ...current, subscribed: new Map() },
+    ])
+    yield* Fiber.interruptAll(subscriptionFibers)
+
+    // an in-flight quarantine owns the same keyed permit, so this barrier
+    // joins every cleanup before the durable orphan pass and admission fence.
+    const cleanupBarriers = yield* collectShutdownAdapters()
+    yield* Effect.forEach(
+      new Set(cleanupBarriers.map((entry) => entry.instanceId)),
+      (instanceId) => adapterLifecycleLocks.withPermit(instanceId, Effect.void),
+      { discard: true },
+    )
+
+    // after every live adapter has stopped, close crash-orphaned durable
+    // generations directly with their immutable admission identity.
+    const orphanedSessions = yield* readAllOpenRuntimeSessions
+    yield* Effect.forEach(
+      orphanedSessions,
+      (session) =>
+        Effect.gen(function* ()
+        {
+          const identity: ProviderRuntimeSessionIdentity = {
+            provider: session.provider,
+            providerInstanceId: session.providerInstanceId,
+            threadId: session.threadId,
+            sessionGeneration: session.sessionGeneration,
+          }
+          yield* ensureExactTerminalAdmission({
+            identity,
+            provider: identity.provider,
+            eventIdPrefix: 'provider-shutdown-orphaned',
+            reason: 'Closed a durable provider generation without a live adapter context',
+            exitKind: 'graceful',
+          })
+          yield* awaitSessionExit(identity)
         }),
-      ),
-    ).pipe(Effect.asVoid)
-    yield* Effect.forEach(currentAdapters, ([, adapter]) => adapter.stopAll()).pipe(Effect.asVoid)
-    yield* McpSessionRegistry.revokeAllActiveMcpCredentials()
-    McpProviderSession.clearAllMcpProviderSessions()
-    const bindings = yield* directory.listBindings().pipe(Effect.orElseSucceed(() => []))
+      { concurrency: 'unbounded', discard: true },
+    )
+
+    const remainingOpen = yield* readAllOpenRuntimeSessions
+    if (remainingOpen.length > 0)
+    {
+      return yield* toValidationError(
+        'ProviderService.shutdown',
+        `Provider shutdown cannot fence admission while ${remainingOpen.length} durable generation(s) remain open.`,
+      )
+    }
+
+    const bindings = yield* directory.listBindings()
     yield* Effect.forEach(bindings, (binding) =>
       Effect.gen(function* ()
       {
-        const providerInstanceId = dieOnMissingBindingInstanceId('ProviderService.stopAll', binding)
+        const providerInstanceId = yield* requireBindingInstanceId(
+          'ProviderService.shutdown',
+          binding,
+        )
         return yield* directory.upsert({
           threadId: binding.threadId,
           provider: binding.provider,
@@ -1400,13 +3409,99 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       }),
     ).pipe(Effect.asVoid)
     yield* analytics.record('provider.sessions.stopped_all', {
-      sessionCount: threadIds.length,
+      sessionCount: bindings.length,
     })
     yield* analytics.flush
-  })
+  }, Effect.ensuring(mcpSessionRegistry.revokeAll))
+
+  const shutdown: ProviderServiceMethod<'shutdown'> = shutdownGate.withPermits(1)(
+    providerInstanceMutationGate.withPermits(1)(
+      Effect.gen(function* ()
+      {
+        const completed = yield* Ref.get(shutdownHighWater)
+        if (Option.isSome(completed))
+        {
+          return completed.value
+        }
+        yield* Ref.set(shuttingDown, true)
+        return yield* subscriptionReconciliationGate.withPermits(1)(
+          Effect.gen(function* ()
+          {
+            yield* runStopAll()
+            const admissionState = yield* runtimeInbox
+              .setAdmissionMode({
+                ownerId: admissionOwnerId,
+                ownerGeneration: admission.ownerGeneration,
+                mode: 'fenced',
+                now: yield* nowIso,
+              })
+              .pipe(
+                Effect.mapError((cause) =>
+                  toValidationError(
+                    'ProviderService.shutdown',
+                    'Unable to fence provider admission and capture its high-water.',
+                    cause,
+                  ),
+                ),
+              )
+            const highWater = admissionState.highWaterSequence ?? admissionState.nextSequence - 1
+            yield* Ref.set(shutdownHighWater, Option.some(highWater))
+            return highWater
+          }),
+        )
+      }),
+    ),
+  )
+
+  const getAdmissionHandoffHighWater: ProviderServiceMethod<'getAdmissionHandoffHighWater'> =
+    runtimeInbox.getAdmissionState.pipe(
+      Effect.flatMap((state) =>
+      {
+        if (
+          state.activeOwnerId !== admissionOwnerId ||
+          state.ownerGeneration !== admission.ownerGeneration
+        )
+        {
+          return Effect.fail(
+            toValidationError(
+              'ProviderService.getAdmissionHandoffHighWater',
+              'Provider admission ownership changed before startup handoff completed.',
+            ),
+          )
+        }
+        return Effect.succeed(
+          state.mode === 'fenced' ? (state.highWaterSequence ?? state.nextSequence - 1) : null,
+        )
+      }),
+      Effect.mapError((cause) =>
+        toValidationError(
+          'ProviderService.getAdmissionHandoffHighWater',
+          'Unable to read the persisted provider admission handoff.',
+          cause,
+        ),
+      ),
+    )
+
+  const resumeAdmissionAfterHandoff: ProviderServiceMethod<'resumeAdmissionAfterHandoff'> =
+    runtimeInbox
+      .resumeAdmissionAfterHandoff({
+        ownerId: admissionOwnerId,
+        ownerGeneration: admission.ownerGeneration,
+        now: yield* nowIso,
+      })
+      .pipe(
+        Effect.mapError((cause) =>
+          toValidationError(
+            'ProviderService.resumeAdmissionAfterHandoff',
+            'Unable to resume provider admission after durable consumer handoff.',
+            cause,
+          ),
+        ),
+        Effect.asVoid,
+      )
 
   yield* Effect.addFinalizer(() =>
-    runStopAll().pipe(
+    shutdown.pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning('failed to stop provider service', {
           errorTag: causeErrorTag(cause),
@@ -1422,14 +3517,23 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     respondToRequest,
     respondToUserInput,
     stopSession,
+    captureSessionIdentity,
+    captureSessionIdentities,
+    matchesSessionIdentity,
+    getSessionIdentityState,
+    stopSessionIfExact,
+    getAdmissionHandoffHighWater,
+    resumeAdmissionAfterHandoff,
+    shutdown,
     listSessions,
     getCapabilities,
     getInstanceInfo,
     hasRecoverableSession,
     rollbackConversation,
-    // each access creates a fresh PubSub subscription so that multiple
-    // consumers (ProviderRuntimeIngestion, CheckpointReactor, etc.) each
-    // independently receive all runtime events.
+    rollbackConversationIfExact,
+    getConversationTurnCountIfExact,
+    // each access creates a fresh compatibility/observability subscription.
+    // state-changing consumers replay only from the durable runtime inbox.
     get streamEvents(): ProviderServiceMethod<'streamEvents'>
     {
       return Stream.fromPubSub(runtimeEventPubSub)
@@ -1439,7 +3543,11 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
 
 export const ProviderServiceLive = Layer.effect(
   ProviderService.ProviderService,
-  makeProviderService(),
+  Effect.gen(function* ()
+  {
+    const registryMutator = yield* ProviderInstanceRegistryMutator
+    return yield* makeProviderService({ registryMutator })
+  }),
 )
 
 export function makeProviderServiceLive(options?: ProviderServiceLiveOptions)

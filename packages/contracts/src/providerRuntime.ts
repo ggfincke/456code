@@ -52,11 +52,14 @@ const ProviderRefs = Schema.Struct({
 })
 export type ProviderRefs = typeof ProviderRefs.Type
 
+// 'compacting' is typed rather than sniffed out of a reason string so the
+// timeline can show a compaction while it runs instead of freezing silently
 const RuntimeSessionState = Schema.Literals([
   'starting',
   'ready',
   'running',
   'waiting',
+  'compacting',
   'stopped',
   'error',
 ])
@@ -291,8 +294,19 @@ const ThreadStartedPayload = Schema.Struct({
 })
 export type ThreadStartedPayload = typeof ThreadStartedPayload.Type
 
+// what a compaction actually did, parsed by the adapter. without this the
+// numbers stay buried in the raw detail blob & the row reads 'Context compacted'
+const ThreadCompactionSummary = Schema.Struct({
+  trigger: Schema.Literals(['manual', 'auto']),
+  preTokens: Schema.optional(NonNegativeInt),
+  postTokens: Schema.optional(NonNegativeInt),
+  durationMs: Schema.optional(NonNegativeInt),
+})
+export type ThreadCompactionSummary = typeof ThreadCompactionSummary.Type
+
 const ThreadStateChangedPayload = Schema.Struct({
   state: RuntimeThreadState,
+  compaction: Schema.optional(ThreadCompactionSummary),
   detail: Schema.optional(Schema.Unknown),
 })
 export type ThreadStateChangedPayload = typeof ThreadStateChangedPayload.Type
@@ -567,7 +581,25 @@ const AccountUpdatedPayload = Schema.Struct({
 })
 export type AccountUpdatedPayload = typeof AccountUpdatedPayload.Type
 
+// provider-neutral pre-failure signal. 'allowed_warning' is what a provider
+// streams before it starts rejecting turns; 'allowed' is the steady state
+const RateLimitStatus = Schema.Literals(['allowed', 'allowed_warning', 'rejected'])
+export type RateLimitStatus = typeof RateLimitStatus.Type
+
+const RateLimitWindowSnapshot = Schema.Struct({
+  // provider-native window id, e.g. 'seven_day_overage_included'
+  windowId: Schema.optional(TrimmedNonEmptyStringSchema),
+  status: RateLimitStatus,
+  // percent of the window consumed, 0-100
+  utilization: Schema.optional(Schema.Number),
+  resetsAt: Schema.optional(IsoDateTime),
+})
+export type RateLimitWindowSnapshot = typeof RateLimitWindowSnapshot.Type
+
+// the untyped `rateLimits` blob had no consumer & no shape, so a provider's
+// pre-failure warning was received and discarded. `snapshot` is the readable half
 const AccountRateLimitsUpdatedPayload = Schema.Struct({
+  snapshot: Schema.optional(RateLimitWindowSnapshot),
   rateLimits: Schema.Unknown,
 })
 export type AccountRateLimitsUpdatedPayload = typeof AccountRateLimitsUpdatedPayload.Type

@@ -3,6 +3,7 @@
 
 import {
   AuthAdministrativeScopes,
+  AuthOrchestrationRecoverScope,
   AuthSessionId,
   AuthStandardClientScopes,
 } from '@t3tools/contracts'
@@ -23,6 +24,7 @@ import {
   formatSessionList,
 } from '../cliAuthFormat.ts'
 import * as ServerConfig from '../config.ts'
+import * as ServerStorageLease from '../serverStorageLease.ts'
 import {
   authLocationFlags,
   type CliAuthLocationFlags,
@@ -37,24 +39,27 @@ const runWithEnvironmentAuth = <A, E>(
     readonly quietLogs?: boolean
   },
 ) =>
-  Effect.gen(function* ()
-  {
-    const logLevel = yield* GlobalFlag.LogLevel
-    const config = yield* resolveCliAuthConfig(flags, logLevel)
-    const minimumLogLevel = options?.quietLogs ? 'Error' : config.logLevel
-    return yield* Effect.gen(function* ()
+  Effect.scoped(
+    Effect.gen(function* ()
     {
-      const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth
-      return yield* run(environmentAuth)
-    }).pipe(
-      Effect.provide(
-        Layer.mergeAll(EnvironmentAuth.runtimeLayer).pipe(
-          Layer.provide(ServerConfig.layer(config)),
-          Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
+      const logLevel = yield* GlobalFlag.LogLevel
+      const { config, storageLease } = yield* resolveCliAuthConfig(flags, logLevel)
+      const minimumLogLevel = options?.quietLogs ? 'Error' : config.logLevel
+      return yield* Effect.gen(function* ()
+      {
+        const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth
+        return yield* run(environmentAuth)
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(EnvironmentAuth.runtimeLayer).pipe(
+            Layer.provide(ServerConfig.layer(config)),
+            Layer.provide(ServerStorageLease.layer(storageLease)),
+            Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
+          ),
         ),
-      ),
-    )
-  })
+      )
+    }),
+  )
 
 const ttlFlag = Flag.string('ttl').pipe(
   Flag.withSchema(DurationFromString),
@@ -100,6 +105,13 @@ const baseUrlFlag = Flag.string('base-url').pipe(
 
 const tokenOnlyFlag = Flag.boolean('token-only').pipe(
   Flag.withDescription('Print only the issued bearer token.'),
+  Flag.withDefault(false),
+)
+
+const recoveryScopeFlag = Flag.boolean('recovery').pipe(
+  Flag.withDescription(
+    'Explicitly grant the administrative orchestration recovery scope to this token.',
+  ),
   Flag.withDefault(false),
 )
 
@@ -190,6 +202,7 @@ const sessionIssueCommand = Command.make('issue', {
   label: labelFlag,
   subject: subjectFlag,
   tokenOnly: tokenOnlyFlag,
+  recovery: recoveryScopeFlag,
   json: jsonFlag,
 }).pipe(
   Command.withDescription('Issue a scoped bearer access token for headless or remote clients.'),
@@ -200,7 +213,9 @@ const sessionIssueCommand = Command.make('issue', {
         Effect.gen(function* ()
         {
           const issued = yield* environmentAuth.issueSession({
-            scopes: AuthAdministrativeScopes,
+            scopes: flags.recovery
+              ? [...AuthAdministrativeScopes, AuthOrchestrationRecoverScope]
+              : AuthAdministrativeScopes,
             ...(Option.isSome(flags.ttl) ? { ttl: flags.ttl.value } : {}),
             ...(Option.isSome(flags.label) ? { label: flags.label.value } : {}),
             ...(Option.isSome(flags.subject) ? { subject: flags.subject.value } : {}),

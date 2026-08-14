@@ -2,12 +2,14 @@
 // builds orchestration websocket rpc handlers from narrow concrete dependencies
 
 import {
-  CommandId,
+  type CheckpointIdentityErrorCode,
   type ClientOrchestrationCommand,
   type OrchestrationCommand,
   OrchestrationDispatchCommandError,
   type OrchestrationEvent,
   OrchestrationGetFullThreadDiffError,
+  OrchestrationGetRunDiffError,
+  OrchestrationGetRunExecutionDiffV1Error,
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   type OrchestrationShellStreamEvent,
@@ -19,26 +21,20 @@ import {
 } from '@t3tools/contracts'
 import * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
-import type * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
-import type * as Path from 'effect/Path'
 import * as Queue from 'effect/Queue'
 import * as Stream from 'effect/Stream'
-import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
 import * as CheckpointDiffQuery from '../../orchestration/Services/CheckpointDiffQuery.ts'
 import * as ServerConfig from '../../config.ts'
+import * as ImportDiscovery from '../../import/discovery/discovery.ts'
+import * as ImportService from '../../import/importService.ts'
 import { normalizeDispatchCommand } from '../../orchestration/Normalizer.ts'
 import type * as OrchestrationEngine from '../../orchestration/Services/OrchestrationEngine.ts'
-import type { OrchestrationProjectionPipeline } from '../../orchestration/Services/ProjectionPipeline.ts'
 import type * as ProjectionSnapshotQuery from '../../orchestration/Services/ProjectionSnapshotQuery.ts'
-import type { ImportReplacementIntentRepository } from '../../persistence/Services/ImportReplacementIntents.ts'
-import * as ImportContinuation from '../../import/continuation/continuationContract.ts'
-import type * as ProviderRegistry from '../../provider/Services/ProviderRegistry.ts'
+import * as ServerRuntimeStartup from '../../serverRuntimeStartup.ts'
 import type * as ServerSettings from '../../serverSettings.ts'
-import type * as TerminalManager from '../../terminal/Manager.ts'
-import type * as WorkspacePaths from '../../workspace/WorkspacePaths.ts'
 import type { makeRpcAuthorization } from '../rpcAuthorization.ts'
 import { makeOrchestrationImportHandlers } from './orchestrationImportHandlers.ts'
 import {
@@ -51,6 +47,8 @@ type OrchestrationRpcMethod =
   | typeof ORCHESTRATION_WS_METHODS.dispatchCommand
   | typeof ORCHESTRATION_WS_METHODS.getTurnDiff
   | typeof ORCHESTRATION_WS_METHODS.getFullThreadDiff
+  | typeof ORCHESTRATION_WS_METHODS.getRunDiff
+  | typeof ORCHESTRATION_WS_METHODS.getRunExecutionDiffV1
   | typeof ORCHESTRATION_WS_METHODS.subscribeShell
   | typeof ORCHESTRATION_WS_METHODS.importScan
   | typeof ORCHESTRATION_WS_METHODS.importSessions
@@ -58,29 +56,72 @@ type OrchestrationRpcMethod =
   | typeof ORCHESTRATION_WS_METHODS.subscribeThread
 type OrchestrationRpcHandlers = Pick<WsRpcHandlers, OrchestrationRpcMethod>
 
+function checkpointIdentityFailure(cause: unknown): {
+  readonly code: CheckpointIdentityErrorCode
+  readonly message: string
+} | null
+{
+  if (typeof cause !== 'object' || cause === null || !('_tag' in cause))
+  {
+    return null
+  }
+  const message =
+    cause instanceof Error ? cause.message : 'Checkpoint identity verification failed.'
+  switch (cause._tag)
+  {
+    case 'CheckpointCaptureIdentityMissingError':
+      return { code: 'checkpoint-identity-missing', message }
+    case 'CheckpointRepositoryMismatchError':
+      return { code: 'checkpoint-repository-mismatch', message }
+    case 'CheckpointRefOidMismatchError':
+      return { code: 'checkpoint-ref-oid-mismatch', message }
+    case 'CheckpointCaptureRootUnavailableError':
+      return { code: 'checkpoint-root-unavailable', message }
+    case 'CheckpointDestructiveLegacyRefusalError':
+      return { code: 'checkpoint-destructive-legacy-refusal', message }
+    default:
+      return null
+  }
+}
+
+function runExecutionFailure(cause: unknown): {
+  readonly code: ConstructorParameters<typeof OrchestrationGetRunExecutionDiffV1Error>[0]['code']
+  readonly message: string
+}
+{
+  const message = cause instanceof Error ? cause.message : 'Run execution verification failed.'
+  if (typeof cause !== 'object' || cause === null || !('_tag' in cause))
+  {
+    return { code: 'execution-repository-unavailable', message }
+  }
+  switch (cause._tag)
+  {
+    case 'CheckpointRunExecutionNotFoundError':
+      return { code: 'execution-not-found', message }
+    case 'CheckpointRunExecutionHeadUnavailableError':
+      return { code: 'execution-head-unavailable', message }
+    case 'RepositoryRevisionMismatchError':
+      return { code: 'execution-repository-mismatch', message }
+    case 'RepositoryRevisionOidMismatchError':
+      return { code: 'execution-oid-mismatch', message }
+    default:
+      return { code: 'execution-repository-unavailable', message }
+  }
+}
+
 interface OrchestrationRpcHandlerDependencies
 {
   readonly checkpointDiffQuery: CheckpointDiffQuery.CheckpointDiffQuery['Service']
-  readonly childProcessSpawner: ChildProcessSpawner.ChildProcessSpawner['Service']
   readonly config: ServerConfig.ServerConfig['Service']
-  readonly importContinuationFromContext: Layer.Layer<
-    ImportContinuation.ImportContinuationDeps,
-    never,
-    ImportContinuation.ImportContinuationDeps
-  >
-  readonly importReplacementIntents: ImportReplacementIntentRepository['Service']
+  readonly importDiscovery: ImportDiscovery.ImportDiscovery['Service']
+  readonly importService: ImportService.ImportService['Service']
   readonly orchestrationEngine: OrchestrationEngine.OrchestrationEngineService['Service']
-  readonly path: Path.Path
-  readonly projectionPipeline: OrchestrationProjectionPipeline['Service']
   readonly projectionSnapshotQuery: ProjectionSnapshotQuery.ProjectionSnapshotQuery['Service']
-  readonly providerRegistry: ProviderRegistry.ProviderRegistry['Service']
   readonly serverSettings: ServerSettings.ServerSettingsService['Service']
-  readonly terminalManager: TerminalManager.TerminalManager['Service']
-  readonly workspacePaths: WorkspacePaths.WorkspacePaths['Service']
+  readonly startup: ServerRuntimeStartup.ServerRuntimeStartup['Service']
   readonly dispatchNormalizedCommand: (
     command: OrchestrationCommand,
   ) => Effect.Effect<{ readonly sequence: number }, OrchestrationDispatchCommandError>
-  readonly nowIso: Effect.Effect<string>
   readonly prevalidateImportContinuationProvider: (
     command: ClientOrchestrationCommand,
   ) => Effect.Effect<void, OrchestrationDispatchCommandError>
@@ -94,20 +135,14 @@ interface OrchestrationRpcHandlerDependencies
 
 export function makeOrchestrationRpcHandlers({
   checkpointDiffQuery,
-  childProcessSpawner,
   config,
-  importContinuationFromContext,
-  importReplacementIntents,
+  importDiscovery,
+  importService,
   orchestrationEngine,
-  path,
-  projectionPipeline,
   projectionSnapshotQuery,
-  providerRegistry,
   serverSettings,
-  terminalManager,
-  workspacePaths,
+  startup,
   dispatchNormalizedCommand,
-  nowIso,
   prevalidateImportContinuationProvider,
   toDispatchCommandError,
   observeRpcEffect,
@@ -342,55 +377,7 @@ export function makeOrchestrationRpcHandlers({
         {
           yield* prevalidateImportContinuationProvider(command)
           const normalizedCommand = yield* normalizeDispatchCommand(command)
-          const shouldStopSessionAfterArchive =
-            normalizedCommand.type === 'thread.archive'
-              ? yield* projectionSnapshotQuery.getThreadShellById(normalizedCommand.threadId).pipe(
-                  Effect.map(
-                    Option.match({
-                      onNone: () => false,
-                      onSome: (thread) =>
-                        thread.session !== null && thread.session.status !== 'stopped',
-                    }),
-                  ),
-                  Effect.orElseSucceed(() => false),
-                )
-              : false
           const result = yield* dispatchNormalizedCommand(normalizedCommand)
-          if (normalizedCommand.type === 'thread.archive')
-          {
-            if (shouldStopSessionAfterArchive)
-            {
-              yield* Effect.gen(function* ()
-              {
-                const stopCommand = yield* normalizeDispatchCommand({
-                  type: 'thread.session.stop',
-                  commandId: CommandId.make(
-                    `session-stop-for-archive:${normalizedCommand.commandId}`,
-                  ),
-                  threadId: normalizedCommand.threadId,
-                  createdAt: yield* nowIso,
-                })
-
-                yield* dispatchNormalizedCommand(stopCommand)
-              }).pipe(
-                Effect.catchCause((cause) =>
-                  Effect.logWarning('failed to stop provider session during archive', {
-                    threadId: normalizedCommand.threadId,
-                    cause,
-                  }),
-                ),
-              )
-            }
-
-            yield* terminalManager.close({ threadId: normalizedCommand.threadId }).pipe(
-              Effect.catch((error) =>
-                Effect.logWarning('failed to close thread terminals after archive', {
-                  threadId: normalizedCommand.threadId,
-                  error: error.message,
-                }),
-              ),
-            )
-          }
           return result
         }).pipe(
           Effect.mapError((cause) =>
@@ -403,13 +390,15 @@ export function makeOrchestrationRpcHandlers({
       observeRpcEffect(
         ORCHESTRATION_WS_METHODS.getTurnDiff,
         checkpointDiffQuery.getTurnDiff(input).pipe(
-          Effect.mapError(
-            (cause) =>
-              new OrchestrationGetTurnDiffError({
-                message: 'Failed to load turn diff',
-                cause,
-              }),
-          ),
+          Effect.mapError((cause) =>
+          {
+            const identityFailure = checkpointIdentityFailure(cause)
+            return new OrchestrationGetTurnDiffError({
+              message: identityFailure?.message ?? 'Failed to load turn diff',
+              ...(identityFailure === null ? {} : { code: identityFailure.code }),
+              cause,
+            })
+          }),
         ),
         { 'rpc.aggregate': 'orchestration' },
       ),
@@ -417,13 +406,45 @@ export function makeOrchestrationRpcHandlers({
       observeRpcEffect(
         ORCHESTRATION_WS_METHODS.getFullThreadDiff,
         checkpointDiffQuery.getFullThreadDiff(input).pipe(
+          Effect.mapError((cause) =>
+          {
+            const identityFailure = checkpointIdentityFailure(cause)
+            return new OrchestrationGetFullThreadDiffError({
+              message: identityFailure?.message ?? 'Failed to load full thread diff',
+              ...(identityFailure === null ? {} : { code: identityFailure.code }),
+              cause,
+            })
+          }),
+        ),
+        { 'rpc.aggregate': 'orchestration' },
+      ),
+    [ORCHESTRATION_WS_METHODS.getRunDiff]: (input) =>
+      observeRpcEffect(
+        ORCHESTRATION_WS_METHODS.getRunDiff,
+        checkpointDiffQuery.getRunDiff(input).pipe(
           Effect.mapError(
             (cause) =>
-              new OrchestrationGetFullThreadDiffError({
-                message: 'Failed to load full thread diff',
+              new OrchestrationGetRunDiffError({
+                message: 'Failed to load run diff',
                 cause,
               }),
           ),
+        ),
+        { 'rpc.aggregate': 'orchestration' },
+      ),
+    [ORCHESTRATION_WS_METHODS.getRunExecutionDiffV1]: (input) =>
+      observeRpcEffect(
+        ORCHESTRATION_WS_METHODS.getRunExecutionDiffV1,
+        checkpointDiffQuery.getRunExecutionDiffV1(input).pipe(
+          Effect.mapError((cause) =>
+          {
+            const failure = runExecutionFailure(cause)
+            return new OrchestrationGetRunExecutionDiffV1Error({
+              message: failure.message,
+              code: failure.code,
+              cause,
+            })
+          }),
         ),
         { 'rpc.aggregate': 'orchestration' },
       ),
@@ -555,17 +576,11 @@ export function makeOrchestrationRpcHandlers({
         { 'rpc.aggregate': 'orchestration' },
       ),
     ...makeOrchestrationImportHandlers({
-      childProcessSpawner,
       config,
-      importContinuationFromContext,
-      importReplacementIntents,
-      path,
-      projectionPipeline,
-      projectionSnapshotQuery,
-      providerRegistry,
+      importDiscovery,
+      importService,
       serverSettings,
-      workspacePaths,
-      dispatchNormalizedCommand,
+      startup,
       toDispatchCommandError,
       observeRpcEffect,
     }),

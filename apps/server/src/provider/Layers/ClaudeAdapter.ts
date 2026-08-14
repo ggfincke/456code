@@ -8,8 +8,10 @@ import {
   type PermissionUpdate,
   type SDKMessage,
   type SDKConversationResetMessage,
+  type SDKAssistantMessageError,
   type SDKResultMessage,
   type SettingSource,
+  type TerminalReason,
 } from '@anthropic-ai/claude-agent-sdk'
 import { parseCliArgs } from '@t3tools/shared/cliArgs'
 import {
@@ -25,6 +27,7 @@ import {
   type ProviderRuntimeEvent,
   type ProviderRuntimeTurnStatus,
   type ProviderSendTurnInput,
+  normalizeCollaborationMode,
   type ProviderSession,
   type ThreadTokenUsageSnapshot,
   type TaskUsageSnapshot,
@@ -49,6 +52,7 @@ import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as FileSystem from 'effect/FileSystem'
 import * as Fiber from 'effect/Fiber'
+import * as Option from 'effect/Option'
 import * as Path from 'effect/Path'
 import * as Queue from 'effect/Queue'
 import * as Ref from 'effect/Ref'
@@ -56,7 +60,6 @@ import * as Stream from 'effect/Stream'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
-import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import {
   buildClaudeImageContentBlock,
   buildPromptText,
@@ -90,6 +93,7 @@ import {
   claudeTotalProcessedTokens,
   claudeUsageInputTokens,
   claudeUsageOutputTokens,
+  compactBoundaryMetadata,
   compactBoundaryTokenUsageSnapshot,
   lastClaudeUsageIteration,
   maxClaudeContextWindowFromModelUsage,
@@ -139,6 +143,10 @@ import {
   type ProviderAdapterError,
 } from '../Errors.ts'
 import { type ClaudeAdapterShape } from '../Services/ClaudeAdapter.ts'
+import type {
+  ProviderAdapterRuntimeEvent,
+  ProviderAdapterRuntimeSessionBinding,
+} from '../Services/ProviderAdapter.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
 
 const PROVIDER = ProviderDriverKind.make('claudeAgent')
@@ -158,6 +166,7 @@ interface ClaudeResumeAttempt
 {
   readonly sessionId: string
   usable: boolean
+  handshakePending: boolean
 }
 
 interface ClaudeTurnState
@@ -242,6 +251,7 @@ interface ClaudeTaskState
 interface ClaudeSessionContext
 {
   session: ProviderSession
+  readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
   promptQueue: Queue.Queue<PromptQueueItem>
   query: ClaudeQueryRuntime
   readonly baseQueryOptions: ClaudeQueryOptions
@@ -268,6 +278,12 @@ interface ClaudeSessionContext
   lastKnownContextWindow: number | undefined
   lastKnownTokenUsage: ThreadTokenUsageSnapshot | undefined
   lastKnownTotalProcessedTokens: number | undefined
+  // status + window of the last rate-limit frame we surfaced, so a re-streamed
+  // snapshot does not append a duplicate row on every tick
+  lastRateLimitKey: string | undefined
+  // a terminal model refusal raises its error before the result frame arrives;
+  // the frame itself carries no failing reason, so the turn has to be told
+  terminalRefusal: string | undefined
   lastAssistantUuid: string | undefined
   lastThreadStartedId: string | undefined
   stopped: boolean
@@ -286,6 +302,20 @@ export interface ClaudeAdapterLiveOptions
 function isUuid(value: string): boolean
 {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+}
+
+// the SDK types resetsAt as a bare `number` with no documented unit. treat anything under the
+// year-2001 millisecond boundary as epoch seconds so a seven-day reset does not render as 1970
+function claudeResetsAtToIso(value: number): string | undefined
+{
+  if (!Number.isFinite(value) || value <= 0)
+  {
+    return undefined
+  }
+  return Option.match(DateTime.make(value > 1e12 ? value : value * 1_000), {
+    onNone: () => undefined,
+    onSome: DateTime.formatIso,
+  })
 }
 
 function isSyntheticClaudeThreadId(value: string): boolean
@@ -401,9 +431,13 @@ function isInterruptedResult(result: SDKResultMessage): boolean
     return true
   }
 
+  // deliberately not gated on `is_error === false`. An abort the SDK also flags as an error is
+  // still an abort, and requiring the flag to be clear is what let a user-pressed Stop fall
+  // through to 'failed' and surface its raw internal diagnostic as a provider crash. The
+  // remaining conjuncts -- an execution-phase result carrying explicit abort text -- are what
+  // make this specific
   return (
     result.subtype === 'error_during_execution' &&
-    result.is_error === false &&
     (errors.includes('request was aborted') ||
       errors.includes('interrupted by user') ||
       errors.includes('aborted'))
@@ -698,14 +732,64 @@ const buildUserMessageEffect = Effect.fn('buildUserMessageEffect')(function* (
   return buildUserMessage({ sdkContent })
 })
 
+// a stopped stream and a hook-blocked turn are non-completions, not provider errors: they end the
+// turn without anything having gone wrong, so they must not raise an error banner
+const INTERRUPTING_TERMINAL_REASONS = new Set<TerminalReason>([
+  'aborted_streaming',
+  'aborted_tools',
+  'hook_stopped',
+  'stop_hook_prevented',
+])
+
+// reasons that end a turn against the user's intent. everything absent from both sets --
+// 'completed', 'max_turns', 'background_requested', 'tool_deferred' -- is a real completion
+const FAILING_TERMINAL_REASONS = new Set<TerminalReason>([
+  'api_error',
+  'blocking_limit',
+  'budget_exhausted',
+  'image_error',
+  'malformed_tool_use_exhausted',
+  'model_error',
+  'prompt_too_long',
+  'rapid_refill_breaker',
+  'structured_output_retry_exhausted',
+  'tool_deferred_unavailable',
+  'turn_setup_failed',
+])
+
+// `subtype: 'success'` means the SDK reached a terminal frame, NOT that the turn succeeded. The
+// same frame carries `is_error`, `api_error_status` (429) and `terminal_reason`, and a usage-limit
+// kill sets those while leaving the subtype alone. Reading only the subtype is what projected a
+// 3 h 26 m death as a clean completion: session ready, lastError null, turn state 'completed'.
 function turnStatusFromResult(result: SDKResultMessage): ProviderRuntimeTurnStatus
 {
   if (result.subtype === 'success')
   {
+    const terminalReason = result.terminal_reason
+    if (terminalReason !== undefined && INTERRUPTING_TERMINAL_REASONS.has(terminalReason))
+    {
+      return 'interrupted'
+    }
+    if (terminalReason !== undefined && FAILING_TERMINAL_REASONS.has(terminalReason))
+    {
+      return 'failed'
+    }
+    // no reason given, but the frame still reports a transport or API failure
+    if (result.is_error || (result.api_error_status ?? null) !== null)
+    {
+      return 'failed'
+    }
     return 'completed'
   }
 
   const errors = resultErrorsText(result)
+  // an abort reason is authoritative over the free-text error scan below, which is what
+  // misread a user-pressed Stop as a provider error and surfaced its raw diagnostic string
+  const errorTerminalReason = result.terminal_reason
+  if (errorTerminalReason !== undefined && INTERRUPTING_TERMINAL_REASONS.has(errorTerminalReason))
+  {
+    return 'interrupted'
+  }
   if (isInterruptedResult(result))
   {
     return 'interrupted'
@@ -715,6 +799,80 @@ function turnStatusFromResult(result: SDKResultMessage): ProviderRuntimeTurnStat
     return 'cancelled'
   }
   return 'failed'
+}
+
+// SDKResultSuccess carries no `errors` array, so a turn that failed inside a success frame has no
+// message to show; name the cause instead of falling back to a bare 'Claude turn failed.'
+function successResultErrorMessage(result: SDKResultMessage): string | undefined
+{
+  if (result.subtype !== 'success')
+  {
+    return undefined
+  }
+  switch (result.terminal_reason)
+  {
+    case 'blocking_limit':
+    case 'rapid_refill_breaker':
+      // deliberately no reset estimate: the limit that killed the run this fix came from was a
+      // seven-day overage window, and promising a short wait would have been wrong by days
+      return 'Claude usage limit reached. The turn stopped before it finished; check your plan usage for when it resets.'
+    case 'budget_exhausted':
+      return 'The configured budget was exhausted. The turn stopped before it finished.'
+    case 'prompt_too_long':
+      return 'The prompt exceeded the model context window. The turn stopped before it finished.'
+    default:
+      break
+  }
+  const apiErrorStatus = result.api_error_status ?? null
+  if (apiErrorStatus !== null)
+  {
+    return apiErrorStatus === 429
+      ? 'Claude rate limited this request (HTTP 429). The turn stopped before it finished.'
+      : `Claude returned HTTP ${apiErrorStatus}. The turn stopped before it finished.`
+  }
+  return result.terminal_reason === undefined
+    ? undefined
+    : `Claude ended the turn early (${result.terminal_reason}).`
+}
+
+// the CLI writes internal breadcrumbs such as `[ede_diagnostic] result_type=user last_content_type=…`
+// into `errors`. They are machine telemetry, not prose, and putting one straight into the thread's
+// error banner is how a user-pressed Stop came to read like a provider crash
+const INTERNAL_DIAGNOSTIC_RE = /^\[[a-z0-9_]+\]/i
+
+function presentableResultError(error: string | undefined): string | undefined
+{
+  const trimmed = error?.trim() ?? ''
+  if (trimmed.length === 0 || INTERNAL_DIAGNOSTIC_RE.test(trimmed))
+  {
+    return undefined
+  }
+  return trimmed
+}
+
+// a Record rather than a switch so a new SDK union member fails the build here instead of
+// silently degrading to a generic message
+const ASSISTANT_ERROR_MESSAGES: Record<SDKAssistantMessageError, string> = {
+  authentication_failed:
+    'Claude authentication failed. Reconnect this provider instance, then retry the turn.',
+  billing_error: 'Claude reported a billing problem on this account, so the turn stopped.',
+  invalid_request: 'Claude rejected this request as invalid, so the turn stopped.',
+  max_output_tokens: 'The response reached the model output-token limit and stopped early.',
+  model_not_found: 'The selected Claude model is not available to this account.',
+  oauth_org_not_allowed: "This Claude account's organization is not permitted to use this client.",
+  overloaded: 'Claude is overloaded and could not take this request. Retry the turn.',
+  // no reset estimate on purpose: the limit behind this fix was a seven-day overage window, and
+  // any "try again shortly" copy would have been wrong by days
+  rate_limit:
+    'Claude usage limit reached. The turn stopped before it finished; check your plan usage for when it resets.',
+  server_error: 'Claude returned a server error, so the turn stopped.',
+  unknown: 'Claude ended this response with an unspecified error.',
+}
+
+function assistantErrorMessage(error: SDKAssistantMessageError): string
+{
+  // a newer CLI can send a member these types were not built against
+  return ASSISTANT_ERROR_MESSAGES[error] ?? `Claude reported an error (${error}).`
 }
 
 function nativeProviderRefs(
@@ -802,7 +960,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       : undefined)
 
   const sessions = new Map<ThreadId, ClaudeSessionContext>()
-  const runtimeEventQueue = yield* Queue.unbounded<ProviderRuntimeEvent>()
+  const runtimeEventQueue = yield* Queue.unbounded<ProviderAdapterRuntimeEvent>()
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
   const randomUUIDv4 = crypto.randomUUIDv4.pipe(
@@ -819,8 +977,14 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
   const nextEventId = Effect.map(randomUUIDv4, (id) => EventId.make(id))
   const makeEventStamp = () => Effect.all({ eventId: nextEventId, createdAt: nowIso })
 
-  const offerRuntimeEvent = (event: ProviderRuntimeEvent): Effect.Effect<void> =>
-    Queue.offer(runtimeEventQueue, event).pipe(Effect.asVoid)
+  const offerRuntimeEvent = (
+    context: ClaudeSessionContext,
+    event: ProviderRuntimeEvent,
+  ): Effect.Effect<void> =>
+    Queue.offer(runtimeEventQueue, {
+      binding: context.runtimeSessionBinding,
+      event,
+    }).pipe(Effect.asVoid)
 
   const logNativeSdkMessage = Effect.fn('logNativeSdkMessage')(function* (
     context: ClaudeSessionContext,
@@ -988,7 +1152,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     if (!block.emittedTextDelta && block.fallbackText.length > 0)
     {
       const deltaStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'content.delta',
         eventId: deltaStamp.eventId,
         provider: PROVIDER,
@@ -1020,7 +1184,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     }
 
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'item.completed',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -1159,7 +1323,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     {
       context.lastThreadStartedId = nextThreadId
       const stamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'thread.started',
         eventId: stamp.eventId,
         provider: PROVIDER,
@@ -1192,7 +1356,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     }
     const turnState = context.turnState
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'runtime.error',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -1216,7 +1380,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
   {
     const turnState = context.turnState
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'runtime.warning',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -1251,7 +1415,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     const turnState = context.turnState
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'thread.token-usage.updated',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -1333,7 +1497,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     turnState.capturedProposedPlanKeys.add(captureKey)
 
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'turn.proposed.completed',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -1370,7 +1534,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     }
 
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'turn.plan.updated',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -1397,6 +1561,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     status: ProviderRuntimeTurnStatus,
     errorMessage?: string,
     result?: SDKResultMessage,
+    options?: { readonly suppressLifecycle?: boolean },
   )
   {
     const resultContextWindow = maxClaudeContextWindowFromModelUsage(result?.modelUsage)
@@ -1472,31 +1637,19 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         : undefined)
 
     const turnState = context.turnState
-    if (!turnState)
+    if (!turnState || options?.suppressLifecycle === true)
     {
       yield* emitThreadTokenUsage(context, usageSnapshot, {
         rawMethod: 'claude/result',
         rawPayload: result ?? { status },
       })
 
-      const stamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
-        type: 'turn.completed',
-        eventId: stamp.eventId,
-        provider: PROVIDER,
-        createdAt: stamp.createdAt,
+      // resume handshakes and late results do not represent the active local turn
+      yield* Effect.logInfo('claude.turn.result-without-matching-turn', {
         threadId: context.session.threadId,
-        payload: {
-          state: status,
-          ...(result?.stop_reason !== undefined ? { stopReason: result.stop_reason } : {}),
-          ...(result?.usage ? { usage: result.usage } : {}),
-          ...(result?.modelUsage ? { modelUsage: result.modelUsage } : {}),
-          ...(typeof result?.total_cost_usd === 'number'
-            ? { totalCostUsd: result.total_cost_usd }
-            : {}),
-          ...(errorMessage ? { errorMessage } : {}),
-        },
-        providerRefs: {},
+        status,
+        numTurns: result?.num_turns,
+        hasUsage: result?.usage !== undefined,
       })
       return
     }
@@ -1504,7 +1657,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     for (const [index, tool] of context.inFlightTools.entries())
     {
       const toolStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'item.completed',
         eventId: toolStamp.eventId,
         provider: PROVIDER,
@@ -1556,7 +1709,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     })
 
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'turn.completed',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -1678,7 +1831,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           assistantBlockEntry.block.emittedTextDelta = true
         }
         const stamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           type: 'content.delta',
           eventId: stamp.eventId,
           provider: PROVIDER,
@@ -1752,7 +1905,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         context.inFlightTools.set(event.index, nextTool)
 
         const stamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           type: 'item.updated',
           eventId: stamp.eventId,
           provider: PROVIDER,
@@ -1791,7 +1944,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           if (planSteps && planSteps.length > 0)
           {
             const planStamp = yield* makeEventStamp()
-            yield* offerRuntimeEvent({
+            yield* offerRuntimeEvent(context, {
               type: 'turn.plan.updated',
               eventId: planStamp.eventId,
               provider: PROVIDER,
@@ -1866,7 +2019,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       }
 
       const stamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'item.started',
         eventId: stamp.eventId,
         provider: PROVIDER,
@@ -1940,7 +2093,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
     const agentCompletion = taskTool?.agentCompletion
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'task.completed',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -2030,7 +2183,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       }
 
       const updatedStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'item.updated',
         eventId: updatedStamp.eventId,
         provider: PROVIDER,
@@ -2059,7 +2212,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       if (streamKind && toolResult.text.length > 0 && context.turnState)
       {
         const deltaStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           type: 'content.delta',
           eventId: deltaStamp.eventId,
           provider: PROVIDER,
@@ -2083,7 +2236,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       }
 
       const completedStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'item.completed',
         eventId: completedStamp.eventId,
         provider: PROVIDER,
@@ -2166,6 +2319,17 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       return
     }
 
+    // the SDK reports why an assistant frame failed, and nothing read it. surfacing it here shows
+    // the cause at the moment it happens instead of waiting for the terminal frame -- which, for a
+    // usage limit, used to claim the turn had completed cleanly. this only holds because
+    // turnStatusFromResult now marks that frame failed: a runtime.error raised here is wiped
+    // ~0.5 s later by any turn.completed that is not itself 'failed', since
+    // ProviderRuntimeIngestion nulls lastError whenever the session goes ready
+    if (message.error !== undefined)
+    {
+      yield* emitRuntimeError(context, assistantErrorMessage(message.error), message.error)
+    }
+
     // auto-start a synthetic turn for assistant messages that arrive without
     // an active turn (e.g., background agent/subagent responses between user prompts).
     if (!context.turnState)
@@ -2189,7 +2353,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         updatedAt: startedAt,
       }
       const turnStartedStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'turn.started',
         eventId: turnStartedStamp.eventId,
         provider: PROVIDER,
@@ -2263,15 +2427,46 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       return
     }
 
-    const status = turnStatusFromResult(message)
-    const errorMessage = message.subtype === 'success' ? undefined : message.errors[0]
+    // a terminal refusal already raised its own error row, and the frame it precedes looks like
+    // a clean success. consume the flag here so the classification stays in one place
+    const refusal = context.terminalRefusal
+    context.terminalRefusal = undefined
 
-    if (status === 'failed')
+    const status = refusal === undefined ? turnStatusFromResult(message) : 'failed'
+    const rawError = message.subtype === 'success' ? undefined : message.errors[0]
+    const errorMessage =
+      (message.subtype === 'success'
+        ? successResultErrorMessage(message)
+        : presentableResultError(rawError)) ?? refusal
+
+    const resumeAttempt = context.resumeAttempt
+    const isResumeHandshake =
+      resumeAttempt?.handshakePending === true &&
+      message.subtype === 'success' &&
+      message.num_turns === 0 &&
+      message.session_id === resumeAttempt.sessionId
+    if (isResumeHandshake)
     {
-      yield* emitRuntimeError(context, errorMessage ?? 'Claude turn failed.')
+      resumeAttempt.handshakePending = false
     }
 
-    yield* completeTurn(context, status, errorMessage, message)
+    if (status === 'failed' && refusal === undefined)
+    {
+      // a suppressed internal diagnostic still travels, as structured detail rather than as prose
+      yield* emitRuntimeError(
+        context,
+        errorMessage ?? 'Claude turn failed.',
+        errorMessage === undefined ? rawError : undefined,
+      )
+    }
+
+    yield* completeTurn(
+      context,
+      status,
+      errorMessage,
+      message,
+      isResumeHandshake ? { suppressLifecycle: true } : undefined,
+    )
   })
 
   const handleSystemMessage = Effect.fn('handleSystemMessage')(function* (
@@ -2281,6 +2476,13 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
   {
     if (message.type !== 'system')
     {
+      return
+    }
+
+    const wireSubtype = message.subtype as string
+    if (wireSubtype === 'vcs_state_changed' || wireSubtype === 'code_change_published')
+    {
+      // informational git notices duplicate the underlying tool calls in the work log
       return
     }
 
@@ -2303,7 +2505,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     switch (message.subtype)
     {
       case 'init':
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'session.configured',
           payload: {
@@ -2312,21 +2514,26 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         })
         return
       case 'status':
-        yield* offerRuntimeEvent({
+        // a compaction used to report itself as 'waiting', indistinguishable from any other
+        // pause, so two multi-minute freezes showed nothing at all. the typed state lets the
+        // mapper open a row for the wait instead of guessing from the reason string
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'session.state.changed',
           payload: {
-            state: message.status === 'compacting' ? 'waiting' : 'running',
+            state: message.status === 'compacting' ? 'compacting' : 'running',
             reason: `status:${message.status ?? 'active'}`,
             detail: message,
           },
         })
         return
       case 'compact_boundary':
+      {
+        const rawCompactBoundary = message as unknown as Record<string, unknown>
         yield* emitThreadTokenUsage(
           context,
           compactBoundaryTokenUsageSnapshot(
-            message as unknown as Record<string, unknown>,
+            rawCompactBoundary,
             context.lastKnownContextWindow,
             context.lastKnownTotalProcessedTokens,
           ),
@@ -2335,17 +2542,27 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
             rawPayload: message,
           },
         )
-        yield* offerRuntimeEvent({
+        const compaction = compactBoundaryMetadata(rawCompactBoundary)
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'thread.state.changed',
           payload: {
             state: 'compacted',
-            detail: message,
+            // the raw `detail` blob is deliberately dropped here: the numbers worth showing
+            // are now typed, & the blob carries preserved-message uuid arrays that have no
+            // business growing an activity row
+            ...(compaction !== undefined ? { compaction } : {}),
           },
         })
+        // anchor the durable cursor on the boundary itself. between the boundary and the next
+        // assistant message the persisted cursor otherwise names a message the compaction just
+        // summarized away
+        context.lastAssistantUuid = message.uuid
+        yield* updateResumeCursor(context)
         return
+      }
       case 'hook_started':
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'hook.started',
           payload: {
@@ -2356,7 +2573,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         })
         return
       case 'hook_progress':
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'hook.progress',
           payload: {
@@ -2368,7 +2585,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         })
         return
       case 'hook_response':
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'hook.completed',
           payload: {
@@ -2391,7 +2608,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
           ...(message.workflow_name ? { workflowName: message.workflow_name } : {}),
         })
         const taskTool = state.toolUseId ? context.nativeTaskTools.get(state.toolUseId) : undefined
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'task.started',
           payload: {
@@ -2423,7 +2640,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
             rawPayload: message,
           },
         )
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'task.progress',
           payload: {
@@ -2473,7 +2690,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         return
       }
       case 'files_persisted':
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'files.persisted',
           payload: {
@@ -2501,7 +2718,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         // warning row spammed the work log (10 rows during a 502 storm);
         // the terminal result/error path reports the actual failure. Keep
         // the session visibly alive instead.
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'session.state.changed',
           payload: {
@@ -2512,7 +2729,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         return
       case 'session_state_changed':
         // authoritative turn-over signal from the CLI.
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'session.state.changed',
           payload: {
@@ -2537,6 +2754,11 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       case 'model_refusal_no_fallback':
         // terminal refusal: unlike model_refusal_fallback there is no retry on
         // another model, so the turn dies here & the user needs to see why.
+        // the result frame that follows carries no failing terminal_reason, so
+        // record the refusal for handleResultMessage -- without it the turn
+        // completes clean and ingestion nulls the error the moment the session
+        // goes ready, the same erasure the usage-limit path used to suffer
+        context.terminalRefusal = message.content
         yield* emitRuntimeError(context, message.content, message)
         return
       case 'worker_shutting_down':
@@ -2566,7 +2788,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       case 'informational':
         return
       case 'permission_denied':
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           ...base,
           type: 'tool.denied',
           payload: {
@@ -2622,7 +2844,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (message.type === 'tool_progress')
     {
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         ...base,
         type: 'tool.progress',
         payload: {
@@ -2637,7 +2859,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (message.type === 'tool_use_summary')
     {
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         ...base,
         type: 'tool.summary',
         payload: {
@@ -2654,7 +2876,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (message.type === 'auth_status')
     {
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         ...base,
         type: 'auth.status',
         payload: {
@@ -2668,11 +2890,29 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (message.type === 'rate_limit_event')
     {
-      yield* offerRuntimeEvent({
+      const info = message.rate_limit_info
+      // the SDK re-streams this frame on every tick. keying on the transition, not the
+      // percentage, keeps a slowly-climbing window from writing a row per tick
+      const key = `${info.status}:${info.rateLimitType ?? ''}`
+      if (context.lastRateLimitKey === key)
+      {
+        return
+      }
+      context.lastRateLimitKey = key
+      const resetsAt = info.resetsAt === undefined ? undefined : claudeResetsAtToIso(info.resetsAt)
+      yield* offerRuntimeEvent(context, {
         ...base,
         type: 'account.rate-limits.updated',
         payload: {
-          rateLimits: message,
+          snapshot: {
+            status: info.status,
+            ...(info.rateLimitType ? { windowId: info.rateLimitType } : {}),
+            ...(info.utilization !== undefined ? { utilization: info.utilization } : {}),
+            ...(resetsAt !== undefined ? { resetsAt } : {}),
+          },
+          // the snapshot, not the envelope. the envelope is already carried verbatim by
+          // base.raw.payload, so wrapping it again lost the shape a consumer could read
+          rateLimits: info,
         },
       })
       return
@@ -2698,7 +2938,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     }
     context.lastThreadStartedId = nextThreadId
     const stamp = yield* makeEventStamp()
-    yield* offerRuntimeEvent({
+    yield* offerRuntimeEvent(context, {
       type: 'thread.started',
       eventId: stamp.eventId,
       provider: PROVIDER,
@@ -2954,6 +3194,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         context.resumeAttempt = {
           sessionId: queryOptions.resume,
           usable: false,
+          handshakePending: true,
         }
       }
       else
@@ -2982,7 +3223,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     {
       yield* Deferred.succeed(pending.decision, 'cancel')
       const stamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'request.resolved',
         eventId: stamp.eventId,
         provider: PROVIDER,
@@ -3034,7 +3275,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     if (options?.emitExitEvent !== false)
     {
       const stamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'session.exited',
         eventId: stamp.eventId,
         provider: PROVIDER,
@@ -3186,7 +3427,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
         // emit user-input.requested so the UI can present the questions.
         const requestedStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           type: 'user-input.requested',
           eventId: requestedStamp.eventId,
           provider: PROVIDER,
@@ -3235,7 +3476,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
         // emit user-input.resolved so the UI knows the interaction completed.
         const resolvedStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           type: 'user-input.resolved',
           eventId: resolvedStamp.eventId,
           provider: PROVIDER,
@@ -3345,7 +3586,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         }
 
         const requestedStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           type: 'request.opened',
           eventId: requestedStamp.eventId,
           provider: PROVIDER,
@@ -3395,7 +3636,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         pendingApprovals.delete(requestId)
 
         const resolvedStamp = yield* makeEventStamp()
-        yield* offerRuntimeEvent({
+        yield* offerRuntimeEvent(context, {
           type: 'request.resolved',
           eventId: resolvedStamp.eventId,
           provider: PROVIDER,
@@ -3479,7 +3720,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         ...(fastMode ? { fastMode: true } : {}),
         ...(ultracode ? { ultracode: true } : {}),
       }
-      const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId)
+      const mcpSession = input.mcp
       const baseQueryOptions: ClaudeQueryOptions = {
         ...(input.cwd ? { cwd: input.cwd } : {}),
         ...(apiModelId ? { model: apiModelId } : {}),
@@ -3519,6 +3760,12 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
             }
           : {}),
       }
+      // resumeState.resumeSessionAt is deliberately NOT spread in here. the SDK reads that
+      // option as 'resume only messages up to and including this uuid', so passing the durable
+      // cursor would TRUNCATE the resumed history at whatever the cursor last named, silently
+      // discarding everything that landed after it -- including the tail of an interrupted
+      // turn. it would only be correct on an explicit post-failure re-anchor path, and no such
+      // path exists. the cursor stays durable so one can be built without a schema change
       const queryOptions: ClaudeQueryOptions = {
         ...baseQueryOptions,
         ...(existingResumeSessionId ? { resume: existingResumeSessionId } : {}),
@@ -3581,6 +3828,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
       const context: ClaudeSessionContext = {
         session,
+        runtimeSessionBinding: input.runtimeSessionBinding,
         promptQueue,
         query: queryRuntime,
         baseQueryOptions,
@@ -3595,6 +3843,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
             ? {
                 sessionId: existingResumeSessionId,
                 usable: false,
+                handshakePending: true,
               }
             : undefined,
         hasResumableHistory: existingResumeSessionId !== undefined,
@@ -3610,6 +3859,8 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
         lastKnownContextWindow: initialContextWindow,
         lastKnownTokenUsage: undefined,
         lastKnownTotalProcessedTokens: undefined,
+        lastRateLimitKey: undefined,
+        terminalRefusal: undefined,
         lastAssistantUuid: resumeState?.resumeSessionAt,
         lastThreadStartedId: undefined,
         stopped: false,
@@ -3618,7 +3869,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       sessions.set(threadId, context)
 
       const sessionStartedStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'session.started',
         eventId: sessionStartedStamp.eventId,
         provider: PROVIDER,
@@ -3629,7 +3880,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       })
 
       const configuredStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'session.configured',
         eventId: configuredStamp.eventId,
         provider: PROVIDER,
@@ -3648,7 +3899,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       })
 
       const readyStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'session.state.changed',
         eventId: readyStamp.eventId,
         provider: PROVIDER,
@@ -3671,6 +3922,10 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
   const sendTurn: ClaudeAdapterShape['sendTurn'] = Effect.fn('sendTurn')(function* (input)
   {
     const context = yield* requireSession(input.threadId)
+    const collaborationMode = normalizeCollaborationMode(
+      input.interactionMode ?? 'default',
+      input.orchestrate,
+    )
     const modelSelection =
       input.modelSelection !== undefined && input.modelSelection.instanceId === boundInstanceId
         ? input.modelSelection
@@ -3690,7 +3945,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
     if (steeringTurnState === null)
     {
-      yield* replaceQueryForOrchestrateMode(context, input.interactionMode === 'orchestrate')
+      yield* replaceQueryForOrchestrateMode(context, collaborationMode.orchestrate)
     }
 
     if (modelSelection?.model)
@@ -3713,18 +3968,16 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     // apply interaction mode by switching the SDK's permission mode.
     // "plan" maps directly to the SDK's "plan" permission mode;
     // non-plan modes restore the session's original permission mode.
-    // when interactionMode is absent we leave the current mode unchanged.
-    if (input.interactionMode === 'plan')
+    // when both collaboration fields are absent we leave the current mode unchanged.
+    if (input.interactionMode !== undefined || input.orchestrate !== undefined)
     {
       yield* Effect.tryPromise({
-        try: () => context.query.setPermissionMode('plan'),
-        catch: (cause) => toRequestError(input.threadId, 'turn/setPermissionMode', cause),
-      })
-    }
-    else if (input.interactionMode === 'default' || input.interactionMode === 'orchestrate')
-    {
-      yield* Effect.tryPromise({
-        try: () => context.query.setPermissionMode(context.basePermissionMode ?? 'default'),
+        try: () =>
+          context.query.setPermissionMode(
+            collaborationMode.baseMode === 'plan'
+              ? 'plan'
+              : (context.basePermissionMode ?? 'default'),
+          ),
         catch: (cause) => toRequestError(input.threadId, 'turn/setPermissionMode', cause),
       })
     }
@@ -3752,7 +4005,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       }
 
       const turnStartedStamp = yield* makeEventStamp()
-      yield* offerRuntimeEvent({
+      yield* offerRuntimeEvent(context, {
         type: 'turn.started',
         eventId: turnStartedStamp.eventId,
         provider: PROVIDER,
@@ -3873,6 +4126,9 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
       return context !== undefined && !context.stopped
     })
 
+  const getSessionRuntimeBinding: ClaudeAdapterShape['getSessionRuntimeBinding'] = (threadId) =>
+    Effect.sync(() => sessions.get(threadId)?.runtimeSessionBinding)
+
   const stopAll: ClaudeAdapterShape['stopAll'] = () =>
     Effect.forEach(
       sessions,
@@ -3914,6 +4170,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
     stopSession,
     listSessions,
     hasSession,
+    getSessionRuntimeBinding,
     stopAll,
     get streamEvents()
     {

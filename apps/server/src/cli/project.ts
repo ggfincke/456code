@@ -2,12 +2,12 @@
 // executes project mutations against live or exclusively offline state
 import {
   CommandId,
-  AuthAdministrativeScopes,
   EnvironmentHttpApi,
   EnvironmentHttpCommonError,
+  type EnvironmentProjectCommandV1,
+  EnvironmentStorageOwnerTokenHeaderName,
   type OrchestrationShellSnapshot,
   ProjectId,
-  type ClientOrchestrationCommand,
 } from '@t3tools/contracts'
 import * as Console from 'effect/Console'
 import * as Crypto from 'effect/Crypto'
@@ -24,21 +24,26 @@ import { Argument, Command, Flag, GlobalFlag } from 'effect/unstable/cli'
 import { FetchHttpClient, HttpClient, HttpClientError } from 'effect/unstable/http'
 import * as HttpApiClient from 'effect/unstable/httpapi/HttpApiClient'
 
-import * as EnvironmentAuth from '../auth/EnvironmentAuth.ts'
-
 import * as ServerConfig from '../config.ts'
 import * as OrchestrationEngine from '../orchestration/Services/OrchestrationEngine.ts'
 import * as ProjectionSnapshotQuery from '../orchestration/Services/ProjectionSnapshotQuery.ts'
 import { OrchestrationLayerLive } from '../orchestration/runtimeLayer.ts'
 import { layerConfig as SqlitePersistenceLayerLive } from '../persistence/Layers/Sqlite.ts'
 import * as RepositoryIdentityResolver from '../project/RepositoryIdentityResolver.ts'
+import * as ServerStorageLease from '../serverStorageLease.ts'
 import * as ServerRuntimeStartup from '../serverRuntimeStartup.ts'
 import {
   clearPersistedServerRuntimeStateIfStale,
+  type PersistedServerRuntimeState,
   readPersistedServerRuntimeState,
 } from '../serverRuntimeState.ts'
 import * as WorkspacePaths from '../workspace/WorkspacePaths.ts'
-import { type CliAuthLocationFlags, projectLocationFlags, resolveCliAuthConfig } from './config.ts'
+import {
+  type CliAuthLocationFlags,
+  projectLocationFlags,
+  resolveCliAuthConfig,
+  resolveProjectCliProbeConfig,
+} from './config.ts'
 
 type ProjectMutationTarget = {
   readonly id: ProjectId
@@ -47,10 +52,17 @@ type ProjectMutationTarget = {
 }
 
 type ProjectCommandExecutionMode = 'live' | 'offline'
-type ProjectCliDispatchCommand = Extract<
-  ClientOrchestrationCommand,
-  { type: 'project.create' | 'project.meta.update' | 'project.delete' }
->
+type ProjectCliDispatchCommand = EnvironmentProjectCommandV1
+type ProjectLiveProbeResult =
+  | {
+      readonly _tag: 'Live'
+      readonly origin: string
+      readonly storageOwnerToken: string
+    }
+  | {
+      readonly _tag: 'Offline'
+      readonly staleRuntimeState?: PersistedServerRuntimeState
+    }
 
 const isEnvironmentHttpCommonError = Schema.is(EnvironmentHttpCommonError)
 
@@ -96,6 +108,30 @@ export class ProjectLiveServerUndeclaredStatusError extends Schema.TaggedErrorCl
   override get message(): string
   {
     return `Server request failed with undeclared status ${this.status}.`
+  }
+}
+
+export const ProjectLiveServerIncompatibilityReason = Schema.Literals([
+  'storage_owner_capability_unavailable',
+  'project_command_api_unavailable',
+])
+export type ProjectLiveServerIncompatibilityReason =
+  typeof ProjectLiveServerIncompatibilityReason.Type
+
+export class ProjectLiveServerIncompatibleError extends Schema.TaggedErrorClass<ProjectLiveServerIncompatibleError>()(
+  'ProjectLiveServerIncompatibleError',
+  {
+    operation: Schema.Literal('callLiveServer'),
+    reason: ProjectLiveServerIncompatibilityReason,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return this.reason === 'storage_owner_capability_unavailable'
+      ? 'The running server does not support safe project CLI authentication.'
+      : 'The running server does not support the versioned project command API.'
   }
 }
 
@@ -177,6 +213,7 @@ export const ProjectCommandError = Schema.Union([
   ProjectCommandIdGenerationError,
   ProjectLiveServerDeclaredResponseError,
   ProjectLiveServerUndeclaredStatusError,
+  ProjectLiveServerIncompatibleError,
   ProjectLiveServerRequestError,
   ProjectTitleEmptyError,
   ProjectIdentifierEmptyError,
@@ -228,19 +265,6 @@ const ProjectCliRuntimeLive = Layer.mergeAll(
 )
 
 const PROJECT_CLI_LIVE_SERVER_TIMEOUT = Duration.seconds(1)
-const withProjectCliSessionToken = <A, E, R>(
-  environmentAuth: EnvironmentAuth.EnvironmentAuth['Service'],
-  run: (token: string) => Effect.Effect<A, E, R>,
-) =>
-  Effect.acquireUseRelease(
-    environmentAuth.issueSession({
-      scopes: AuthAdministrativeScopes,
-      label: 't3 project cli',
-    }),
-    (issued) => run(issued.token),
-    (issued) => environmentAuth.revokeSession(issued.sessionId).pipe(Effect.ignore({ log: true })),
-  )
-
 const withProjectCliLiveServerTimeout = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
   effect.pipe(Effect.timeout(PROJECT_CLI_LIVE_SERVER_TIMEOUT))
 
@@ -337,12 +361,12 @@ const findActiveProjectTarget = Effect.fn('findActiveProjectTarget')(function* (
   } satisfies ProjectMutationTarget
 })
 
-const fetchLiveOrchestrationSnapshot = (origin: string, bearerToken: string) =>
+const fetchLiveOrchestrationSnapshot = (origin: string, storageOwnerToken: string) =>
   Effect.gen(function* ()
   {
     const client = yield* makeLiveServerClient(origin)
     return yield* client.orchestration.shellSnapshot({
-      headers: { authorization: `Bearer ${bearerToken}` },
+      headers: { [EnvironmentStorageOwnerTokenHeaderName]: storageOwnerToken },
     })
   }).pipe(
     withProjectCliLiveServerTimeout,
@@ -351,19 +375,36 @@ const fetchLiveOrchestrationSnapshot = (origin: string, bearerToken: string) =>
 
 const dispatchLiveOrchestrationCommand = (
   origin: string,
-  bearerToken: string,
+  storageOwnerToken: string,
   command: ProjectCliDispatchCommand,
 ) =>
   Effect.gen(function* ()
   {
     const client = yield* makeLiveServerClient(origin)
-    yield* client.orchestration.dispatch({
-      headers: { authorization: `Bearer ${bearerToken}` },
-      payload: command,
-    } as Parameters<typeof client.orchestration.dispatch>[0])
+    const headers = { [EnvironmentStorageOwnerTokenHeaderName]: storageOwnerToken }
+    switch (command.type)
+    {
+      case 'project.create':
+        yield* client.orchestration.dispatchProjectV1({ headers, payload: command })
+        break
+      case 'project.meta.update':
+        yield* client.orchestration.dispatchProjectV1({ headers, payload: command })
+        break
+      case 'project.delete':
+        yield* client.orchestration.dispatchProjectV1({ headers, payload: command })
+        break
+    }
   }).pipe(
     withProjectCliLiveServerTimeout,
-    Effect.mapError(projectCommandErrorFromLiveServerRequest),
+    Effect.mapError((cause) =>
+      HttpClientError.isHttpClientError(cause) && cause.response?.status === 404
+        ? new ProjectLiveServerIncompatibleError({
+            operation: 'callLiveServer',
+            reason: 'project_command_api_unavailable',
+            cause,
+          })
+        : projectCommandErrorFromLiveServerRequest(cause),
+    ),
   )
 
 const getOfflineSnapshot = Effect.fn('getOfflineSnapshot')(function* ()
@@ -373,48 +414,54 @@ const getOfflineSnapshot = Effect.fn('getOfflineSnapshot')(function* ()
 })
 
 const tryResolveLiveProjectExecutionMode = Effect.fn('tryResolveLiveProjectExecutionMode')(
-  function* (
-    environmentAuth: EnvironmentAuth.EnvironmentAuth['Service'],
-    config: ServerConfig.ServerConfig['Service'],
-  )
+  function* (config: ServerConfig.ServerConfig['Service'])
   {
     const runtimeState = yield* readPersistedServerRuntimeState(config.serverRuntimeStatePath)
     if (Option.isNone(runtimeState))
     {
-      return Option.none<{ readonly origin: string }>()
+      return { _tag: 'Offline' } satisfies ProjectLiveProbeResult
     }
 
-    const attempt = withProjectCliSessionToken(environmentAuth, (token) =>
-      fetchLiveOrchestrationSnapshot(runtimeState.value.origin, token).pipe(
-        Effect.as({
-          origin: runtimeState.value.origin,
-        }),
-      ),
+    const storageOwnerToken = runtimeState.value.storageLeaseToken
+    if (storageOwnerToken === undefined || storageOwnerToken.trim().length === 0)
+    {
+      return yield* new ProjectLiveServerIncompatibleError({
+        operation: 'callLiveServer',
+        reason: 'storage_owner_capability_unavailable',
+      })
+    }
+
+    const attempt = fetchLiveOrchestrationSnapshot(
+      runtimeState.value.origin,
+      storageOwnerToken,
+    ).pipe(
+      Effect.as({
+        origin: runtimeState.value.origin,
+        storageOwnerToken,
+      }),
     )
 
     const attempted = yield* Effect.result(attempt)
     if (attempted._tag === 'Success')
     {
-      return Option.some(attempted.success)
+      return {
+        _tag: 'Live',
+        ...attempted.success,
+      } satisfies ProjectLiveProbeResult
     }
 
     yield* Effect.logDebug('Failed to connect to the persisted project CLI server.', {
       origin: runtimeState.value.origin,
       cause: attempted.failure,
     })
-    const cleared = yield* clearPersistedServerRuntimeStateIfStale({
-      path: config.serverRuntimeStatePath,
-      expectedState: runtimeState.value,
-    })
-    if (!cleared)
-    {
-      return yield* attempted.failure
-    }
-    return Option.none<{ readonly origin: string }>()
+    return {
+      _tag: 'Offline',
+      staleRuntimeState: runtimeState.value,
+    } satisfies ProjectLiveProbeResult
   },
 )
 
-const runProjectMutation = Effect.fn('runProjectMutation')(function* (
+const runProjectMutationUnscoped = Effect.fn('runProjectMutation')(function* (
   flags: CliAuthLocationFlags,
   run: (input: {
     readonly snapshot: OrchestrationShellSnapshot
@@ -434,57 +481,67 @@ const runProjectMutation = Effect.fn('runProjectMutation')(function* (
 )
 {
   const logLevel = yield* GlobalFlag.LogLevel
-  const config = yield* resolveCliAuthConfig(flags, logLevel)
+  const probeConfig = yield* resolveProjectCliProbeConfig(flags, logLevel)
+  const executionMode = yield* tryResolveLiveProjectExecutionMode(probeConfig).pipe(
+    Effect.provide(FetchHttpClient.layer),
+  )
+
+  if (executionMode._tag === 'Live')
+  {
+    return yield* Effect.gen(function* ()
+    {
+      const snapshot = yield* fetchLiveOrchestrationSnapshot(
+        executionMode.origin,
+        executionMode.storageOwnerToken,
+      )
+      const output = yield* run({
+        snapshot,
+        dispatch: (command) =>
+          dispatchLiveOrchestrationCommand(
+            executionMode.origin,
+            executionMode.storageOwnerToken,
+            command,
+          ),
+        mode: 'live',
+      })
+      yield* Console.log(output)
+    }).pipe(Effect.provide(Layer.mergeAll(FetchHttpClient.layer, WorkspacePaths.layer)))
+  }
+
+  const { config, storageLease } = yield* resolveCliAuthConfig(flags, logLevel)
+  if (executionMode.staleRuntimeState !== undefined)
+  {
+    yield* clearPersistedServerRuntimeStateIfStale({
+      path: config.serverRuntimeStatePath,
+      expectedState: executionMode.staleRuntimeState,
+    })
+  }
   const minimumLogLevel = config.logLevel
+  const offlineRuntimeLayer = ProjectCliRuntimeLive.pipe(
+    Layer.provide(ServerConfig.layer(config)),
+    Layer.provide(ServerStorageLease.layer(storageLease)),
+    Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
+  )
 
   return yield* Effect.gen(function* ()
   {
-    const environmentAuth = yield* EnvironmentAuth.EnvironmentAuth
-    const liveMode = yield* tryResolveLiveProjectExecutionMode(environmentAuth, config)
-
-    if (Option.isSome(liveMode))
-    {
-      return yield* withProjectCliSessionToken(environmentAuth, (token) =>
-        Effect.gen(function* ()
-        {
-          const snapshot = yield* fetchLiveOrchestrationSnapshot(liveMode.value.origin, token)
-          const output = yield* run({
-            snapshot,
-            dispatch: (command) =>
-              dispatchLiveOrchestrationCommand(liveMode.value.origin, token, command),
-            mode: 'live',
-          })
-          yield* Console.log(output)
-        }),
-      )
-    }
-
-    const offlineRuntimeLayer = ProjectCliRuntimeLive.pipe(
-      Layer.provide(ServerConfig.layer(config)),
-      Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
-    )
-
-    return yield* Effect.gen(function* ()
-    {
-      const snapshot = yield* getOfflineSnapshot()
-      const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService
-      const output = yield* run({
-        snapshot,
-        dispatch: (command) => orchestrationEngine.dispatch(command),
-        mode: 'offline',
-      })
-      yield* Console.log(output)
-    }).pipe(Effect.provide(offlineRuntimeLayer))
-  }).pipe(
-    Effect.provide(
-      Layer.mergeAll(EnvironmentAuth.runtimeLayer, WorkspacePaths.layer).pipe(
-        Layer.provideMerge(FetchHttpClient.layer),
-        Layer.provide(ServerConfig.layer(config)),
-        Layer.provide(Layer.succeed(References.MinimumLogLevel, minimumLogLevel)),
-      ),
-    ),
-  )
+    const snapshot = yield* getOfflineSnapshot()
+    const orchestrationEngine = yield* OrchestrationEngine.OrchestrationEngineService
+    const output = yield* run({
+      snapshot,
+      dispatch: (command) => orchestrationEngine.dispatch(command),
+      mode: 'offline',
+    })
+    yield* Console.log(output)
+  }).pipe(Effect.provide(offlineRuntimeLayer))
 })
+
+const runProjectMutation = (
+  ...args: Parameters<typeof runProjectMutationUnscoped>
+): ReturnType<typeof runProjectMutationUnscoped> =>
+  Effect.scoped(runProjectMutationUnscoped(...args)) as ReturnType<
+    typeof runProjectMutationUnscoped
+  >
 
 const projectAddCommand = Command.make('add', {
   ...projectLocationFlags,

@@ -3,7 +3,10 @@
 import {
   AuthOrchestrationOperateScope,
   AuthOrchestrationReadScope,
+  type ClientOrchestrationCommand,
   EnvironmentHttpApi,
+  EnvironmentOrchestrationCommandUnsupportedError,
+  type EnvironmentProjectCommandV1,
 } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
@@ -14,6 +17,7 @@ import { normalizeDispatchCommand } from './Normalizer.ts'
 import { dispatchWithAttachmentLifecycle } from './dispatchWithAttachmentLifecycle.ts'
 import {
   annotateEnvironmentRequest,
+  currentEnvironmentTraceId,
   failEnvironmentInternal,
   failEnvironmentInvalidRequest,
   failEnvironmentNotFound,
@@ -22,6 +26,26 @@ import {
 import { OrchestrationEngineService } from './Services/OrchestrationEngine.ts'
 import { ProjectionSnapshotQuery } from './Services/ProjectionSnapshotQuery.ts'
 
+const isEnvironmentProjectCommand = (
+  command: ClientOrchestrationCommand,
+): command is EnvironmentProjectCommandV1 =>
+  command.type === 'project.create' ||
+  command.type === 'project.meta.update' ||
+  command.type === 'project.delete'
+
+const failEnvironmentUnsupportedCommand = (commandType: string) =>
+  currentEnvironmentTraceId.pipe(
+    Effect.flatMap((traceId) =>
+      Effect.fail(
+        new EnvironmentOrchestrationCommandUnsupportedError({
+          code: 'unsupported_command',
+          commandType,
+          traceId,
+        }),
+      ),
+    ),
+  )
+
 export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   EnvironmentHttpApi,
   'orchestration',
@@ -29,6 +53,21 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
   {
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
     const orchestrationEngine = yield* OrchestrationEngineService
+
+    const dispatchProjectCommand = Effect.fn('environment.orchestration.dispatchProject')(
+      function* (command: EnvironmentProjectCommandV1)
+      {
+        const normalizedCommand = yield* normalizeDispatchCommand(command).pipe(
+          Effect.catch(() => failEnvironmentInvalidRequest('invalid_command')),
+        )
+        return yield* dispatchWithAttachmentLifecycle(
+          normalizedCommand,
+          orchestrationEngine.dispatch(normalizedCommand),
+        ).pipe(
+          Effect.catch((cause) => failEnvironmentInternal('orchestration_dispatch_failed', cause)),
+        )
+      },
+    )
 
     return handlers
       .handle(
@@ -82,22 +121,25 @@ export const orchestrationHttpApiLayer = HttpApiBuilder.group(
         }),
       )
       .handle(
+        'dispatchProjectV1',
+        Effect.fn('environment.orchestration.dispatchProjectV1')(function* (args)
+        {
+          yield* annotateEnvironmentRequest(args.endpoint.name)
+          yield* requireEnvironmentScope(AuthOrchestrationOperateScope)
+          return yield* dispatchProjectCommand(args.payload)
+        }),
+      )
+      .handle(
         'dispatch',
         Effect.fn('environment.orchestration.dispatch')(function* (args)
         {
           yield* annotateEnvironmentRequest(args.endpoint.name)
           yield* requireEnvironmentScope(AuthOrchestrationOperateScope)
-          const normalizedCommand = yield* normalizeDispatchCommand(args.payload).pipe(
-            Effect.catch(() => failEnvironmentInvalidRequest('invalid_command')),
-          )
-          return yield* dispatchWithAttachmentLifecycle(
-            normalizedCommand,
-            orchestrationEngine.dispatch(normalizedCommand),
-          ).pipe(
-            Effect.catch((cause) =>
-              failEnvironmentInternal('orchestration_dispatch_failed', cause),
-            ),
-          )
+          if (!isEnvironmentProjectCommand(args.payload))
+          {
+            return yield* failEnvironmentUnsupportedCommand(args.payload.type)
+          }
+          return yield* dispatchProjectCommand(args.payload)
         }),
       )
   }),

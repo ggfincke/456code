@@ -7,6 +7,21 @@ import * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 
 import { ExternalLauncherError, LaunchEditorInput } from './editor.ts'
 import {
+  ArchitectureImpactResult,
+  ArchitectureStandingSource,
+  CartographerEnsureProjectArchitectureInput,
+  CartographerGetArchitectureNeighborhoodInput,
+  CartographerGetArchitectureNeighborhoodResult,
+  CartographerGetArchitectureScopeInput,
+  CartographerGetArchitectureScopeResult,
+  CartographerGetArchitectureSourceInput,
+  CartographerGetArchitectureSourceResult,
+  CartographerGetRepositoryMapInput,
+  CartographerGetRepositoryMapResult,
+  CartographerSubscribeProjectAtlasStatusInput,
+  ProjectAtlasStatus,
+} from './architectureProjections.ts'
+import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
   EnvironmentAuthorizationError,
@@ -54,6 +69,10 @@ import {
   OrchestrationDispatchCommandError,
   OrchestrationGetFullThreadDiffError,
   OrchestrationGetFullThreadDiffInput,
+  OrchestrationGetRunDiffError,
+  OrchestrationGetRunDiffInput,
+  OrchestrationGetRunExecutionDiffV1Error,
+  OrchestrationGetRunExecutionDiffV1Input,
   OrchestrationGetSnapshotError,
   OrchestrationGetTurnDiffError,
   OrchestrationGetTurnDiffInput,
@@ -174,15 +193,20 @@ import {
   ProposalListInput,
   ProposalListResult,
   ProposalNarrativeDocumentResult,
+  ProposalOrchestratePlanLookupInput,
+  ProposalOrchestratePlanLookupResult,
   ProposalPlanLookupInput,
   ProposalPlanLookupResult,
   ProposalRevisionSelector,
 } from './proposal.ts'
 import {
-  CartographerCloseEmbedInput,
-  CartographerEmbedError,
-  CartographerIssueEmbedInput,
-  CartographerIssueEmbedResult,
+  CartographerError,
+  CartographerGetDiffAnalysisInput,
+  CartographerPrepareCurrentWorktreeArchitectureInput,
+  CartographerRequestDiffAnalysisInput,
+  CartographerRebuildProjectAtlasInput,
+  DiffAnalysisError,
+  DiffAnalysisGeneration,
   ImplementationAttempt,
   ImplementationAttemptLatestInput,
   ProposalGeneration,
@@ -191,6 +215,7 @@ import {
   ProposalGenerationLatestInput,
   ProposalGenerationStartInput,
 } from './cartographer.ts'
+import { ArchitectureImpactInput, ArchitectureToolError } from './architectureTools.ts'
 
 export const WS_METHODS = {
   // project registry methods
@@ -209,12 +234,21 @@ export const WS_METHODS = {
   proposalsDiff: 'proposals.diff',
   proposalsNarrative: 'proposals.narrative',
   proposalsFindByPlan: 'proposals.findByPlan',
+  proposalsFindByOrchestrateRevision: 'proposals.findByOrchestrateRevision',
   proposalsStartGeneration: 'proposals.startGeneration',
   proposalsGetGeneration: 'proposals.getGeneration',
   proposalsLatestGeneration: 'proposals.latestGeneration',
   proposalsLatestImplementationAttempt: 'proposals.latestImplementationAttempt',
-  cartographerIssueEmbed: 'cartographer.issueEmbed',
-  cartographerCloseEmbed: 'cartographer.closeEmbed',
+  cartographerEnsureProjectArchitecture: 'cartographer.ensureProjectArchitecture',
+  cartographerRebuildProjectAtlas: 'cartographer.rebuildProjectAtlas',
+  cartographerPrepareCurrentWorktreeArchitecture: 'cartographer.prepareCurrentWorktreeArchitecture',
+  cartographerRequestDiffAnalysis: 'cartographer.requestDiffAnalysis',
+  cartographerGetDiffAnalysis: 'cartographer.getDiffAnalysis',
+  cartographerGetArchitectureImpact: 'cartographer.getArchitectureImpact',
+  cartographerGetRepositoryMap: 'cartographer.getRepositoryMap',
+  cartographerGetArchitectureScope: 'cartographer.getArchitectureScope',
+  cartographerGetArchitectureNeighborhood: 'cartographer.getArchitectureNeighborhood',
+  cartographerGetArchitectureSource: 'cartographer.getArchitectureSource',
 
   // shell methods
   shellOpenInEditor: 'shell.openInEditor',
@@ -298,6 +332,7 @@ export const WS_METHODS = {
 
   // streaming subscriptions
   subscribeVcsStatus: 'subscribeVcsStatus',
+  subscribeProjectAtlasStatus: 'cartographer.subscribeProjectAtlasStatus',
   subscribeTerminalEvents: 'subscribeTerminalEvents',
   subscribeTerminalMetadata: 'subscribeTerminalMetadata',
   subscribePreviewEvents: 'subscribePreviewEvents',
@@ -501,6 +536,15 @@ export const WsProposalsFindByPlanRpc = Rpc.make(WS_METHODS.proposalsFindByPlan,
   error: Schema.Union([ProposalError, EnvironmentAuthorizationError]),
 })
 
+export const WsProposalsFindByOrchestrateRevisionRpc = Rpc.make(
+  WS_METHODS.proposalsFindByOrchestrateRevision,
+  {
+    payload: ProposalOrchestratePlanLookupInput,
+    success: Schema.NullOr(ProposalOrchestratePlanLookupResult),
+    error: Schema.Union([ProposalError, EnvironmentAuthorizationError]),
+  },
+)
+
 export const WsProposalsStartGenerationRpc = Rpc.make(WS_METHODS.proposalsStartGeneration, {
   payload: ProposalGenerationStartInput,
   success: ProposalGeneration,
@@ -528,15 +572,93 @@ export const WsProposalsLatestImplementationAttemptRpc = Rpc.make(
   },
 )
 
-export const WsCartographerIssueEmbedRpc = Rpc.make(WS_METHODS.cartographerIssueEmbed, {
-  payload: CartographerIssueEmbedInput,
-  success: CartographerIssueEmbedResult,
-  error: Schema.Union([CartographerEmbedError, EnvironmentAuthorizationError]),
+export const WsCartographerEnsureProjectArchitectureRpc = Rpc.make(
+  WS_METHODS.cartographerEnsureProjectArchitecture,
+  {
+    payload: CartographerEnsureProjectArchitectureInput,
+    success: ArchitectureStandingSource,
+    error: Schema.Union([CartographerError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsCartographerPrepareCurrentWorktreeArchitectureRpc = Rpc.make(
+  WS_METHODS.cartographerPrepareCurrentWorktreeArchitecture,
+  {
+    payload: CartographerPrepareCurrentWorktreeArchitectureInput,
+    error: Schema.Union([CartographerError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsCartographerRebuildProjectAtlasRpc = Rpc.make(
+  WS_METHODS.cartographerRebuildProjectAtlas,
+  {
+    payload: CartographerRebuildProjectAtlasInput,
+    error: Schema.Union([CartographerError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsCartographerRequestDiffAnalysisRpc = Rpc.make(
+  WS_METHODS.cartographerRequestDiffAnalysis,
+  {
+    payload: CartographerRequestDiffAnalysisInput,
+    success: DiffAnalysisGeneration,
+    error: Schema.Union([DiffAnalysisError, CartographerError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsCartographerGetDiffAnalysisRpc = Rpc.make(WS_METHODS.cartographerGetDiffAnalysis, {
+  payload: CartographerGetDiffAnalysisInput,
+  success: DiffAnalysisGeneration,
+  error: Schema.Union([DiffAnalysisError, CartographerError, EnvironmentAuthorizationError]),
 })
 
-export const WsCartographerCloseEmbedRpc = Rpc.make(WS_METHODS.cartographerCloseEmbed, {
-  payload: CartographerCloseEmbedInput,
-  error: Schema.Union([CartographerEmbedError, EnvironmentAuthorizationError]),
+export const WsCartographerGetArchitectureImpactRpc = Rpc.make(
+  WS_METHODS.cartographerGetArchitectureImpact,
+  {
+    payload: ArchitectureImpactInput,
+    success: ArchitectureImpactResult,
+    error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsCartographerGetRepositoryMapRpc = Rpc.make(WS_METHODS.cartographerGetRepositoryMap, {
+  payload: CartographerGetRepositoryMapInput,
+  success: CartographerGetRepositoryMapResult,
+  error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
+})
+
+export const WsCartographerGetArchitectureScopeRpc = Rpc.make(
+  WS_METHODS.cartographerGetArchitectureScope,
+  {
+    payload: CartographerGetArchitectureScopeInput,
+    success: CartographerGetArchitectureScopeResult,
+    error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsCartographerGetArchitectureNeighborhoodRpc = Rpc.make(
+  WS_METHODS.cartographerGetArchitectureNeighborhood,
+  {
+    payload: CartographerGetArchitectureNeighborhoodInput,
+    success: CartographerGetArchitectureNeighborhoodResult,
+    error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsCartographerGetArchitectureSourceRpc = Rpc.make(
+  WS_METHODS.cartographerGetArchitectureSource,
+  {
+    payload: CartographerGetArchitectureSourceInput,
+    success: CartographerGetArchitectureSourceResult,
+    error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsSubscribeProjectAtlasStatusRpc = Rpc.make(WS_METHODS.subscribeProjectAtlasStatus, {
+  payload: CartographerSubscribeProjectAtlasStatusInput,
+  success: ProjectAtlasStatus,
+  error: Schema.Union([CartographerError, EnvironmentAuthorizationError]),
+  stream: true,
 })
 
 export const WsShellOpenInEditorRpc = Rpc.make(WS_METHODS.shellOpenInEditor, {
@@ -785,6 +907,21 @@ export const WsOrchestrationGetFullThreadDiffRpc = Rpc.make(
   },
 )
 
+export const WsOrchestrationGetRunDiffRpc = Rpc.make(ORCHESTRATION_WS_METHODS.getRunDiff, {
+  payload: OrchestrationGetRunDiffInput,
+  success: OrchestrationRpcSchemas.getRunDiff.output,
+  error: Schema.Union([OrchestrationGetRunDiffError, EnvironmentAuthorizationError]),
+})
+
+export const WsOrchestrationGetRunExecutionDiffV1Rpc = Rpc.make(
+  ORCHESTRATION_WS_METHODS.getRunExecutionDiffV1,
+  {
+    payload: OrchestrationGetRunExecutionDiffV1Input,
+    success: OrchestrationRpcSchemas.getRunExecutionDiffV1.output,
+    error: Schema.Union([OrchestrationGetRunExecutionDiffV1Error, EnvironmentAuthorizationError]),
+  },
+)
+
 export const WsOrchestrationGetArchivedShellSnapshotRpc = Rpc.make(
   ORCHESTRATION_WS_METHODS.getArchivedShellSnapshot,
   {
@@ -929,16 +1066,26 @@ export const WsRpcGroup = RpcGroup.make(
   WsProposalsDiffRpc,
   WsProposalsNarrativeRpc,
   WsProposalsFindByPlanRpc,
+  WsProposalsFindByOrchestrateRevisionRpc,
   WsProposalsStartGenerationRpc,
   WsProposalsGetGenerationRpc,
   WsProposalsLatestGenerationRpc,
   WsProposalsLatestImplementationAttemptRpc,
-  WsCartographerIssueEmbedRpc,
-  WsCartographerCloseEmbedRpc,
+  WsCartographerEnsureProjectArchitectureRpc,
+  WsCartographerPrepareCurrentWorktreeArchitectureRpc,
+  WsCartographerRebuildProjectAtlasRpc,
+  WsCartographerRequestDiffAnalysisRpc,
+  WsCartographerGetDiffAnalysisRpc,
+  WsCartographerGetArchitectureImpactRpc,
+  WsCartographerGetRepositoryMapRpc,
+  WsCartographerGetArchitectureScopeRpc,
+  WsCartographerGetArchitectureNeighborhoodRpc,
+  WsCartographerGetArchitectureSourceRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,
   WsAssetsCreateUrlRpc,
   WsSubscribeVcsStatusRpc,
+  WsSubscribeProjectAtlasStatusRpc,
   WsVcsPullRpc,
   WsVcsRefreshStatusRpc,
   WsGitRunStackedActionRpc,
@@ -980,6 +1127,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsOrchestrationImportSessionsRpc,
   WsOrchestrationGetTurnDiffRpc,
   WsOrchestrationGetFullThreadDiffRpc,
+  WsOrchestrationGetRunDiffRpc,
+  WsOrchestrationGetRunExecutionDiffV1Rpc,
   WsOrchestrationGetArchivedShellSnapshotRpc,
   WsOrchestrationSubscribeShellRpc,
   WsOrchestrationSubscribeThreadRpc,

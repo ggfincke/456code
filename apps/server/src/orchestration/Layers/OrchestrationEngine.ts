@@ -34,8 +34,13 @@ import {
 import { toPersistenceSqlError } from '../../persistence/Errors.ts'
 import { AttachmentLifecycleRepository } from '../../persistence/Services/AttachmentLifecycle.ts'
 import { CheckpointRevertOperations } from '../../persistence/Services/CheckpointRevertOperations.ts'
+import { ProjectionTurnRepositoryLive } from '../../persistence/Layers/ProjectionTurns.ts'
+import { ProviderRuntimeInboxLive } from '../../persistence/Layers/ProviderRuntimeInbox.ts'
 import { OrchestrationEventStore } from '../../persistence/Services/OrchestrationEventStore.ts'
 import { OrchestrationCommandReceiptRepository } from '../../persistence/Services/OrchestrationCommandReceipts.ts'
+import { ProjectionTurnRepository } from '../../persistence/Services/ProjectionTurns.ts'
+import { ProviderRuntimeInbox } from '../../persistence/Services/ProviderRuntimeInbox.ts'
+import { checkpointRefForThreadTurn } from '../../checkpointing/Utils.ts'
 import {
   OrchestrationCommandInvariantError,
   OrchestrationCommandPreviouslyRejectedError,
@@ -43,36 +48,51 @@ import {
   type OrchestrationProjectorDecodeError,
 } from '../Errors.ts'
 import { decideOrchestrationCommand } from '../decider.ts'
+import { checkpointRevertOperationId } from './CheckpointRollbackJournal.ts'
 import { createEmptyReadModel, projectEvent } from '../projector.ts'
 import { OrchestrationProjectionPipeline } from '../Services/ProjectionPipeline.ts'
 import { ProjectionSnapshotQuery } from '../Services/ProjectionSnapshotQuery.ts'
 import {
   OrchestrationEngineService,
+  type OrchestrationCausalSettlementAuthority,
   type OrchestrationEngineShape,
 } from '../Services/OrchestrationEngine.ts'
+import { ThreadArchiveLifecyclePermit } from '../Services/ThreadArchiveLifecyclePermit.ts'
+import { ThreadArchiveLifecyclePermitLive } from './ThreadArchiveLifecyclePermit.ts'
 const isOrchestrationCommandPreviouslyRejectedError = Schema.is(
   OrchestrationCommandPreviouslyRejectedError,
 )
 const isOrchestrationCommandInvariantError = Schema.is(OrchestrationCommandInvariantError)
-// every phase that still owns checkpoint refs or the stage directory: a turn
-// started here would capture against refs the revert is about to delete, so
-// post-restore bookkeeping phases stay closed until cleanup is verified
-const checkpointRevertGateClosedPhases = new Set([
-  'admitted',
-  'target-staged',
-  'restore-ready',
-  'restore-started',
-  'filesystem-restored',
-  'provider-pending',
-  'provider-outcome-recorded',
-  'projection-finalized',
-  'cleanup-pending',
-  'manual-required',
+// external commands that can change the selected tree or provider lifecycle
+// stay fenced from request acceptance through cleanup/manual resolution.
+// internal projection and provider-settling commands remain allowed so the
+// request's persisted source/inbox barriers can actually drain.
+const checkpointRevertBlockedCommandTypes: ReadonlySet<OrchestrationCommand['type']> = new Set([
+  'project.delete',
+  'thread.delete',
+  'thread.archive',
+  'thread.unarchive',
+  'thread.meta.update',
+  'thread.runtime-mode.set',
+  'thread.interaction-mode.set',
+  'thread.worker-verdict.set',
+  'thread.provider.switch',
+  'thread.turn.start',
+  'thread.turn.interrupt',
+  'thread.approval.respond',
+  'thread.user-input.respond',
+  'thread.orchestrate-plan.respond',
+  'thread.checkpoint.revert',
+  'thread.session.stop',
+  'thread.orchestrate-run-execution.admit',
+  'thread.orchestrate-run-execution.update',
+  'thread.messages.import',
 ])
 
 interface CommandEnvelope
 {
   command: OrchestrationCommand
+  causalSettlementAuthority: OrchestrationCausalSettlementAuthority | null
   result: Deferred.Deferred<{ sequence: number }, OrchestrationDispatchError>
   startedAtMs: number
 }
@@ -114,8 +134,11 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   const commandReceiptRepository = yield* OrchestrationCommandReceiptRepository
   const attachmentLifecycle = yield* AttachmentLifecycleRepository
   const checkpointRevertOperations = yield* CheckpointRevertOperations
+  const projectionTurns = yield* ProjectionTurnRepository
+  const providerRuntimeInbox = yield* ProviderRuntimeInbox
   const projectionPipeline = yield* OrchestrationProjectionPipeline
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
+  const threadArchiveLifecyclePermit = yield* ThreadArchiveLifecyclePermit
   const crypto = yield* Crypto.Crypto
 
   const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
@@ -218,24 +241,41 @@ const makeOrchestrationEngine = Effect.gen(function* ()
           .withTransaction(
             Effect.gen(function* ()
             {
-              if (envelope.command.type === 'thread.turn.start')
+              if (checkpointRevertBlockedCommandTypes.has(envelope.command.type))
               {
-                const activeRevert = yield* checkpointRevertOperations.getActiveByThread(
-                  envelope.command.threadId,
-                )
-                if (
-                  Option.isSome(activeRevert) &&
-                  checkpointRevertGateClosedPhases.has(activeRevert.value.phase)
-                )
+                let affectedThreadIds: ReadonlyArray<ThreadId> = []
+                if (envelope.command.type === 'project.delete')
                 {
-                  return yield* new OrchestrationCommandInvariantError({
-                    commandType: envelope.command.type,
-                    code: 'checkpoint-revert-in-progress',
-                    detail:
-                      `Checkpoint revert '${activeRevert.value.operationId}' is in progress ` +
-                      `for thread '${envelope.command.threadId}' ` +
-                      `(phase '${activeRevert.value.phase}').`,
-                  })
+                  const projectId = envelope.command.projectId
+                  affectedThreadIds = commandReadModel.threads
+                    .filter((thread) => thread.projectId === projectId)
+                    .map((thread) => thread.id)
+                }
+                else if ('threadId' in envelope.command)
+                {
+                  affectedThreadIds = [envelope.command.threadId]
+                }
+                for (const threadId of affectedThreadIds)
+                {
+                  const activeRevert = yield* checkpointRevertOperations.getActiveByThread(threadId)
+                  const authority = envelope.causalSettlementAuthority
+                  const isCausallyPriorInternalSettlement =
+                    envelope.command.type === 'thread.meta.update' &&
+                    authority !== null &&
+                    Option.isSome(activeRevert) &&
+                    (authority.sourceKind === 'domain-event'
+                      ? authority.sourceSequence < activeRevert.value.requestSourceSequence
+                      : authority.sourceSequence <= activeRevert.value.providerInboxHighWater)
+                  if (Option.isSome(activeRevert) && !isCausallyPriorInternalSettlement)
+                  {
+                    return yield* new OrchestrationCommandInvariantError({
+                      commandType: envelope.command.type,
+                      code: 'checkpoint-revert-in-progress',
+                      detail:
+                        `Checkpoint revert '${activeRevert.value.operationId}' is in progress ` +
+                        `for thread '${threadId}' (phase '${activeRevert.value.phase}').`,
+                    })
+                  }
                 }
               }
 
@@ -255,7 +295,61 @@ const makeOrchestrationEngine = Effect.gen(function* ()
                 ),
               )
               const eventBases = Array.isArray(eventBase) ? eventBase : [eventBase]
+              if (envelope.command.type === 'thread.checkpoint.revert')
+              {
+                const pendingTurn = yield* projectionTurns.getPendingTurnStartByThreadId({
+                  threadId: envelope.command.threadId,
+                })
+                if (Option.isSome(pendingTurn))
+                {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: envelope.command.type,
+                    code: 'checkpoint-revert-turn-in-progress',
+                    detail:
+                      `Thread '${envelope.command.threadId}' has a queued turn start ` +
+                      `for message '${pendingTurn.value.messageId}'.`,
+                  })
+                }
+              }
               const savedEvents = yield* eventStore.appendAll(eventBases)
+              if (envelope.command.type === 'thread.checkpoint.revert')
+              {
+                const requestEvent = savedEvents.find(
+                  (event) => event.type === 'thread.checkpoint-revert-requested',
+                )
+                if (requestEvent === undefined)
+                {
+                  return yield* new OrchestrationCommandInvariantError({
+                    commandType: envelope.command.type,
+                    detail: 'Checkpoint revert command produced no request event.',
+                  })
+                }
+                const admissionState = yield* providerRuntimeInbox.getAdmissionState
+                yield* checkpointRevertOperations
+                  .reserve({
+                    operationId: checkpointRevertOperationId(envelope.command.commandId),
+                    threadId: envelope.command.threadId,
+                    targetRef: checkpointRefForThreadTurn(
+                      envelope.command.threadId,
+                      envelope.command.turnCount,
+                    ),
+                    targetTurnCount: envelope.command.turnCount,
+                    requestSourceSequence: requestEvent.sequence,
+                    providerInboxHighWater: Math.max(0, admissionState.nextSequence - 1),
+                    now: requestEvent.occurredAt,
+                  })
+                  .pipe(
+                    Effect.catchTag('CheckpointRevertOperationConflictError', (cause) =>
+                      Effect.fail(
+                        new OrchestrationCommandInvariantError({
+                          commandType: envelope.command.type,
+                          code: 'checkpoint-revert-in-progress',
+                          detail: cause.message,
+                        }),
+                      ),
+                    ),
+                  )
+              }
               const committedEvents: OrchestrationEvent[] = []
               let nextCommandReadModel = commandReadModel
 
@@ -415,17 +509,29 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   const readEvents: OrchestrationEngineShape['readEvents'] = (fromSequenceExclusive, limit) =>
     eventStore.readFromSequence(fromSequenceExclusive, limit)
 
-  const dispatch: OrchestrationEngineShape['dispatch'] = (command) =>
+  const dispatchCommand = (
+    command: OrchestrationCommand,
+    causalSettlementAuthority: OrchestrationCausalSettlementAuthority | null,
+  ) =>
     Effect.gen(function* ()
     {
       const result = yield* Deferred.make<{ sequence: number }, OrchestrationDispatchError>()
       yield* Queue.offer(commandQueue, {
         command,
+        causalSettlementAuthority,
         result,
         startedAtMs: yield* Clock.currentTimeMillis,
       })
       return yield* Deferred.await(result)
     })
+
+  const dispatch: OrchestrationEngineShape['dispatch'] = (command) =>
+    command.type === 'thread.archive' || command.type === 'thread.unarchive'
+      ? threadArchiveLifecyclePermit.withPermit(command.threadId, dispatchCommand(command, null))
+      : dispatchCommand(command, null)
+
+  const dispatchInternal: OrchestrationEngineShape['dispatchInternal'] = (command, authority) =>
+    dispatchCommand(command, authority)
 
   const streamDomainEventsForAggregate: OrchestrationEngineShape['streamDomainEventsForAggregate'] =
     (aggregateKind, aggregateId) =>
@@ -458,6 +564,7 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   return {
     readEvents,
     dispatch,
+    dispatchInternal,
     // each access creates a fresh PubSub subscription so that multiple
     // consumers (wsServer, ProviderRuntimeIngestion, CheckpointReactor, etc.)
     // each independently receive all domain events.
@@ -474,7 +581,13 @@ const makeOrchestrationEngine = Effect.gen(function* ()
   } satisfies OrchestrationEngineShape
 })
 
-export const OrchestrationEngineLive = Layer.effect(
+export const OrchestrationEngineWithArchivePermitLive = Layer.effect(
   OrchestrationEngineService,
   makeOrchestrationEngine,
+)
+
+export const OrchestrationEngineLive = OrchestrationEngineWithArchivePermitLive.pipe(
+  Layer.provide(ThreadArchiveLifecyclePermitLive),
+  Layer.provide(ProjectionTurnRepositoryLive),
+  Layer.provide(ProviderRuntimeInboxLive),
 )

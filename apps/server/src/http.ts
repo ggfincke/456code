@@ -38,11 +38,26 @@ import {
   failEnvironmentInternal,
 } from './auth/http.ts'
 import * as ServerEnvironment from './environment/ServerEnvironment.ts'
-import { browserApiCorsAllowedHeaders, browserApiCorsAllowedMethods } from './httpCors.ts'
+import {
+  browserApiCorsAllowedHeaders,
+  browserApiCorsAllowedMethods,
+  browserApiDesktopRendererOrigins,
+} from './httpCors.ts'
 
 const OTLP_TRACES_PROXY_PATH = '/api/observability/v1/traces'
 const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', '::1', 'localhost'])
-const DESKTOP_RENDERER_ORIGINS = ['code456://app', 'code456-dev://app']
+const SVG_CONTENT_SECURITY_POLICY = `default-src 'none'; style-src 'unsafe-inline'; sandbox`
+
+export function assetResponseHeaders(filePath: string): Record<string, string>
+{
+  return {
+    'Cache-Control': 'private, max-age=3600',
+    'X-Content-Type-Options': 'nosniff',
+    ...(filePath.toLowerCase().endsWith('.svg')
+      ? { 'Content-Security-Policy': SVG_CONTENT_SECURITY_POLICY }
+      : {}),
+  }
+}
 
 export const browserApiCorsLayer = Layer.unwrap(
   Effect.gen(function* ()
@@ -53,7 +68,7 @@ export const browserApiCorsLayer = Layer.unwrap(
     // explicit. Packaged desktop omits credentials and uses Effect's default wildcard origin.
     return HttpRouter.cors({
       ...(devOrigin
-        ? { allowedOrigins: [devOrigin, ...DESKTOP_RENDERER_ORIGINS], credentials: true }
+        ? { allowedOrigins: [devOrigin, ...browserApiDesktopRendererOrigins], credentials: true }
         : {}),
       allowedMethods: browserApiCorsAllowedMethods,
       allowedHeaders: browserApiCorsAllowedHeaders,
@@ -210,10 +225,7 @@ export const assetRouteLayer = HttpRouter.add(
     }
     return yield* HttpServerResponse.file(asset.path, {
       status: 200,
-      headers: {
-        'Cache-Control': 'private, max-age=3600',
-        'X-Content-Type-Options': 'nosniff',
-      },
+      headers: assetResponseHeaders(asset.path),
     }).pipe(
       Effect.orElseSucceed(() => HttpServerResponse.text('Internal Server Error', { status: 500 })),
     )

@@ -61,6 +61,38 @@ export const providerRuntimeEventsTotal = Metric.counter('t3_provider_runtime_ev
   description: 'Total canonical provider runtime events processed.',
 })
 
+export const providerRuntimeInboxRetainedRecords = Metric.gauge(
+  't3_provider_runtime_inbox_retained_records',
+  {
+    description: 'Canonical provider runtime events retained for replay or bounded history.',
+  },
+)
+
+export const providerRuntimeInboxBacklog = Metric.gauge('t3_provider_runtime_inbox_backlog', {
+  description: 'Retained provider runtime events still owed to at least one durable consumer.',
+})
+
+export const providerRuntimeInboxOldestPendingAgeSeconds = Metric.gauge(
+  't3_provider_runtime_inbox_oldest_pending_age_seconds',
+  {
+    description: 'Age in seconds of the oldest provider runtime event owed to a consumer.',
+  },
+)
+
+export const providerRuntimeInboxConsumerLag = Metric.gauge(
+  't3_provider_runtime_inbox_consumer_lag',
+  {
+    description: 'Canonical provider runtime sequence lag by durable consumer.',
+  },
+)
+
+export const providerRuntimeInboxAdmissionRequired = Metric.gauge(
+  't3_provider_runtime_inbox_admission_required',
+  {
+    description: 'Whether provider runtime admission is active (1) or fenced (0).',
+  },
+)
+
 export const gitCommandsTotal = Metric.counter('t3_git_commands_total', {
   description: 'Total git commands executed by the server runtime.',
 })
@@ -68,6 +100,59 @@ export const gitCommandsTotal = Metric.counter('t3_git_commands_total', {
 export const gitCommandDuration = Metric.timer('t3_git_command_duration', {
   description: 'Git command execution duration.',
 })
+
+export const architecturePatchEvaluationDuration = Metric.timer(
+  't3_architecture_patch_evaluation_duration',
+  {
+    description: 'Ephemeral architecture patch evaluation duration.',
+  },
+)
+
+export const architectureImpactReadDuration = Metric.timer('t3_architecture_impact_read_duration', {
+  description: 'Authorized sealed architecture impact read duration.',
+})
+
+export const architectureComparisonGenerationDuration = Metric.timer(
+  't3_architecture_comparison_generation_duration',
+  {
+    description: 'Cartographer proposal or diff comparison generation duration.',
+  },
+)
+
+export const architectureProjectionReadDuration = Metric.timer(
+  't3_architecture_projection_read_duration',
+  {
+    description: 'Authorized bounded native architecture projection duration.',
+  },
+)
+
+export const architectureAtlasIndexReadDuration = Metric.timer(
+  't3_architecture_atlas_index_read_duration',
+  {
+    description: 'Sealed standing-project Atlas index verification and read duration.',
+  },
+)
+
+export const architectureAtlasPublicationDuration = Metric.timer(
+  't3_architecture_atlas_publication_duration',
+  {
+    description: 'Standing-project Atlas generation and atomic publication duration.',
+  },
+)
+
+export const architectureAutoAnalysisActionsTotal = Metric.counter(
+  't3_architecture_auto_analysis_actions_total',
+  {
+    description: 'Total durable automatic architecture analysis actions handled.',
+  },
+)
+
+export const architectureAutoAnalysisActionDuration = Metric.timer(
+  't3_architecture_auto_analysis_action_duration',
+  {
+    description: 'Automatic architecture analysis admission duration.',
+  },
+)
 
 export const terminalSessionsTotal = Metric.counter('t3_terminal_sessions_total', {
   description: 'Total terminal sessions started.',

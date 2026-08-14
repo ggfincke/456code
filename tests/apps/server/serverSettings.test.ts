@@ -13,9 +13,12 @@ import { assert, it } from '@effect/vitest'
 import * as Effect from 'effect/Effect'
 import * as Duration from 'effect/Duration'
 import * as FileSystem from 'effect/FileSystem'
+import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as PlatformError from 'effect/PlatformError'
 import * as Schema from 'effect/Schema'
+import * as Stream from 'effect/Stream'
 import * as ServerSecretStore from '../../../apps/server/src/auth/ServerSecretStore.ts'
 import * as ServerConfig from '../../../apps/server/src/config.ts'
 import * as ServerSettingsModule from '../../../apps/server/src/serverSettings.ts'
@@ -478,12 +481,13 @@ it.layer(NodeServices.layer)('server settings', (it) =>
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   )
 
-  it.effect('trims provider path settings when updates are applied', () =>
+  it.effect('trims provider path and observability settings when updates are applied', () =>
     Effect.gen(function* ()
     {
       const serverSettings = yield* ServerSettingsModule.ServerSettingsService
 
       const next = yield* serverSettings.updateSettings({
+        addProjectBaseDirectory: '  ~/Development  ',
         providers: {
           codex: {
             binaryPath: '  /opt/homebrew/bin/codex  ',
@@ -498,8 +502,13 @@ it.layer(NodeServices.layer)('server settings', (it) =>
             serverPassword: '  secret-password  ',
           },
         },
+        observability: {
+          otlpTracesUrl: '  http://localhost:4318/v1/traces  ',
+          otlpMetricsUrl: '  http://localhost:4318/v1/metrics  ',
+        },
       })
 
+      assert.equal(next.addProjectBaseDirectory, '~/Development')
       assert.deepEqual(next.providers.codex, {
         enabled: true,
         binaryPath: '/opt/homebrew/bin/codex',
@@ -522,27 +531,24 @@ it.layer(NodeServices.layer)('server settings', (it) =>
         serverPassword: 'secret-password',
         customModels: [],
       })
-    }).pipe(Effect.provide(makeServerSettingsLayer())),
-  )
-
-  it.effect('trims observability settings when updates are applied', () =>
-    Effect.gen(function* ()
-    {
-      const serverSettings = yield* ServerSettingsModule.ServerSettingsService
-
-      const next = yield* serverSettings.updateSettings({
-        addProjectBaseDirectory: '  ~/Development  ',
-        observability: {
-          otlpTracesUrl: '  http://localhost:4318/v1/traces  ',
-          otlpMetricsUrl: '  http://localhost:4318/v1/metrics  ',
-        },
-      })
-
-      assert.equal(next.addProjectBaseDirectory, '~/Development')
       assert.deepEqual(next.observability, {
         otlpTracesUrl: 'http://localhost:4318/v1/traces',
         otlpMetricsUrl: 'http://localhost:4318/v1/metrics',
       })
+    }).pipe(Effect.provide(makeServerSettingsLayer())),
+  )
+
+  it.effect('publishes architecture auto-analysis updates', () =>
+    Effect.gen(function* ()
+    {
+      const serverSettings = yield* ServerSettingsModule.ServerSettingsService
+      const updateFiber = yield* Stream.runHead(serverSettings.streamChanges).pipe(Effect.forkChild)
+
+      const next = yield* serverSettings.updateSettings({ architectureAutoAnalysis: 'auto' })
+      const published = Option.getOrThrow(yield* Fiber.join(updateFiber))
+
+      assert.equal(next.architectureAutoAnalysis, 'auto')
+      assert.equal(published.architectureAutoAnalysis, 'auto')
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   )
 
@@ -589,9 +595,11 @@ it.layer(NodeServices.layer)('server settings', (it) =>
           },
         },
         automaticGitFetchInterval: Duration.seconds(10),
+        architectureAutoAnalysis: 'auto',
       })
 
       assert.equal(next.providers.codex.binaryPath, '/opt/homebrew/bin/codex')
+      assert.equal(next.architectureAutoAnalysis, 'auto')
 
       const raw = yield* fileSystem.readFileString(serverConfig.settingsPath)
       // @effect-diagnostics-next-line preferSchemaOverJson:off
@@ -611,7 +619,13 @@ it.layer(NodeServices.layer)('server settings', (it) =>
           },
         },
         automaticGitFetchInterval: 10_000,
+        architectureAutoAnalysis: 'auto',
       })
+
+      yield* serverSettings.updateSettings({ architectureAutoAnalysis: 'on-demand' })
+      const restoredRaw = yield* fileSystem.readFileString(serverConfig.settingsPath)
+      // @effect-diagnostics-next-line preferSchemaOverJson:off
+      assert.notProperty(JSON.parse(restoredRaw), 'architectureAutoAnalysis')
     }).pipe(Effect.provide(makeServerSettingsLayer())),
   )
 

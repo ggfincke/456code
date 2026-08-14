@@ -145,8 +145,17 @@ const COMMIT_TIMEOUT_MS = 10 * 60_000
 const STATUS_RESULT_CACHE_TTL = Duration.seconds(1)
 const STATUS_RESULT_CACHE_CAPACITY = 2_048
 const PR_LOOKUP_CACHE_TTL = Duration.minutes(2)
-const PR_LOOKUP_FAILURE_TTL = Duration.seconds(20)
+const PR_LOOKUP_FAILURE_BASE_TTL = Duration.seconds(20)
+const PR_LOOKUP_FAILURE_MAX_TTL = Duration.minutes(15)
 const PR_LOOKUP_CACHE_CAPACITY = 2_048
+
+export function prLookupFailureTtl(consecutiveFailures: number): Duration.Duration
+{
+  const exponent = Math.max(0, consecutiveFailures - 1)
+  const backoffMs = Duration.toMillis(PR_LOOKUP_FAILURE_BASE_TTL) * Math.pow(2, exponent)
+  return Duration.min(Duration.millis(backoffMs), PR_LOOKUP_FAILURE_MAX_TTL)
+}
+
 type StripProgressContext<T> = T extends any ? Omit<T, 'actionId' | 'cwd' | 'action'> : never
 type GitActionProgressPayload = StripProgressContext<GitActionProgressEvent>
 type GitActionProgressEmitter = (event: GitActionProgressPayload) => Effect.Effect<void, never>
@@ -517,6 +526,25 @@ export const make = Effect.gen(function* ()
   // back to a null upstreamRef.
   const prLookupCacheKey = (cwd: string, details: { branch: string; upstreamRef: string | null }) =>
     [cwd, details.branch, details.upstreamRef ?? '', String(prLookupEpoch(cwd))].join('\u0000')
+  // track failures per branch cache key so a throttled provider is retried progressively slower
+  const prLookupFailureStreakByKey = new Map<string, number>()
+  const nextPrLookupFailureTtl = (key: string) =>
+  {
+    if (
+      !prLookupFailureStreakByKey.has(key) &&
+      prLookupFailureStreakByKey.size >= PR_LOOKUP_CACHE_CAPACITY
+    )
+    {
+      const oldestKey = prLookupFailureStreakByKey.keys().next().value
+      if (oldestKey !== undefined)
+      {
+        prLookupFailureStreakByKey.delete(oldestKey)
+      }
+    }
+    const streak = (prLookupFailureStreakByKey.get(key) ?? 0) + 1
+    prLookupFailureStreakByKey.set(key, streak)
+    return prLookupFailureTtl(streak)
+  }
   const prLookupCache = yield* Cache.makeWith(
     (key: string) =>
     {
@@ -525,17 +553,24 @@ export const make = Effect.gen(function* ()
         branch,
         upstreamRef: upstreamRef.length > 0 ? upstreamRef : null,
       }
-      return resolveBranchHeadContext(cwd, details).pipe(
-        Effect.flatMap((headContext) =>
-          findLatestPrForHeadContext(cwd, headContext).pipe(
-            Effect.map((latest) => ({ latest, headContext })),
-          ),
-        ),
-      )
+      return Effect.gen(function* ()
+      {
+        const headContext = yield* resolveBranchHeadContext(cwd, details)
+        const latest = yield* findLatestPrForHeadContext(cwd, headContext)
+        return { latest, headContext }
+      })
     },
     {
       capacity: PR_LOOKUP_CACHE_CAPACITY,
-      timeToLive: (exit) => (Exit.isSuccess(exit) ? PR_LOOKUP_CACHE_TTL : PR_LOOKUP_FAILURE_TTL),
+      timeToLive: (exit, key) =>
+      {
+        if (Exit.isSuccess(exit))
+        {
+          prLookupFailureStreakByKey.delete(key)
+          return PR_LOOKUP_CACHE_TTL
+        }
+        return nextPrLookupFailureTtl(key)
+      },
     },
   )
   // a transient lookup failure (rate limit, network blip) must not clear an

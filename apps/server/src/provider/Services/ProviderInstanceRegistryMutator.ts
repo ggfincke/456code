@@ -27,21 +27,52 @@
 // no-op (no scope churn, no pubsub emission).
 //
 // @module provider/Services/ProviderInstanceRegistryMutator
-import type { ProviderInstanceConfigMap } from '@t3tools/contracts'
+import type { ProviderInstanceConfigMap, ProviderInstanceId } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
+import * as Schema from 'effect/Schema'
+
+export class ProviderInstanceLifecycleReconcileError extends Schema.TaggedErrorClass<ProviderInstanceLifecycleReconcileError>()(
+  'ProviderInstanceLifecycleReconcileError',
+  {
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return `Provider instance lifecycle reconciliation failed: ${this.detail}`
+  }
+}
+
+export interface ProviderInstanceRegistryLifecycleOwner
+{
+  // serialize every settings mutation with provider command admission and
+  // shutdown. The id list is empty for addition-only and no-op snapshots.
+  readonly aroundMutation: <A, E, R>(
+    retiringInstanceIds: ReadonlyArray<ProviderInstanceId>,
+    mutation: Effect.Effect<A, E, R>,
+  ) => Effect.Effect<A, E | ProviderInstanceLifecycleReconcileError, R>
+}
 
 export interface ProviderInstanceRegistryMutatorShape
 {
   // bring the live registry in line with the supplied config map. See
   // module docs for the add / remove / replace semantics.
   //
-  // the effect never fails: individual driver `create` failures are
-  // captured as "unavailable" shadow snapshots inside the registry, the
-  // same way boot-time failures are handled by
-  // `makeProviderInstanceRegistry`. This keeps settings-watcher loops from
-  // erroring out on a single bad entry.
-  readonly reconcile: (configMap: ProviderInstanceConfigMap) => Effect.Effect<void>
+  // driver `create` failures are captured as "unavailable" shadow
+  // snapshots. Retiring a live route can still fail closed when its
+  // lifecycle owner cannot durably close every exact provider generation.
+  readonly reconcile: (
+    configMap: ProviderInstanceConfigMap,
+  ) => Effect.Effect<void, ProviderInstanceLifecycleReconcileError>
+  readonly registerLifecycleOwner: (
+    owner: ProviderInstanceRegistryLifecycleOwner,
+  ) => Effect.Effect<void>
+  readonly unregisterLifecycleOwner: (
+    owner: ProviderInstanceRegistryLifecycleOwner,
+  ) => Effect.Effect<void>
 }
 
 export class ProviderInstanceRegistryMutator extends Context.Service<

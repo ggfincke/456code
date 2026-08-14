@@ -21,13 +21,18 @@ import {
   ProviderInstanceId,
   ThreadId,
 } from '@t3tools/contracts'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
+import * as Scope from 'effect/Scope'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
+import * as TestClock from 'effect/testing/TestClock'
 import { describe, expect } from 'vite-plus/test'
 
 import * as ServerConfig from '../../../../apps/server/src/config.ts'
+import * as CartographerAnalyzer from '../../../../apps/server/src/cartographer/CartographerAnalyzer.ts'
 import { SqlitePersistenceMemory } from '../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
 import * as ProposalGenerationService from '../../../../apps/server/src/proposal/ProposalGenerationService.ts'
@@ -118,7 +123,7 @@ async function pathExists(path: string): Promise<boolean>
   )
 }
 
-async function fingerprintDist(distRoot: string): Promise<string>
+async function fingerprintDist(distRoot: string, version: string): Promise<string>
 {
   const entries = (await NodeFSP.readdir(distRoot, { recursive: true })).sort()
   const parts: Buffer[] = []
@@ -130,7 +135,7 @@ async function fingerprintDist(distRoot: string): Promise<string>
     const normalizedPath = entry.split(NodePath.sep).join('/')
     parts.push(Buffer.from(`${normalizedPath}\0${bytes.byteLength}\0`, 'utf8'), bytes)
   }
-  return `sha256:${sha256(Buffer.concat(parts))}`
+  return `@t3tools/cartographer-core@${version}:dist-sha256:${sha256(Buffer.concat(parts))}`
 }
 
 describe('ProposalGenerationService', () =>
@@ -152,6 +157,7 @@ describe('ProposalGenerationService', () =>
       )
 
       const analyzerDistRoot = NodePath.join(baseDir, 'cartographer', 'dist')
+      const analyzerPackageJsonPath = NodePath.join(baseDir, 'cartographer', 'package.json')
       const analyzerPath = NodePath.join(analyzerDistRoot, 'cli', 'index.js')
       const analyzerDependencyPath = NodePath.join(analyzerDistRoot, 'runtime.js')
       const badIdentityMarker = NodePath.join(baseDir, 'report-bad-analyzer-identity')
@@ -174,7 +180,23 @@ describe('ProposalGenerationService', () =>
         "const proposedContent = await readFile(`${proposedRoot}/target.txt`, 'utf8')",
         "await writeFile(`${out}/base.graph.json`, JSON.stringify({ content: baseContent, gitRef: flag('--base-ref') }))",
         "await writeFile(`${out}/proposed.graph.json`, JSON.stringify({ content: proposedContent, gitRef: flag('--proposed-ref') }))",
-        "await writeFile(`${out}/impact.json`, JSON.stringify({ baseGitRef: flag('--base-ref'), headGitRef: flag('--proposed-ref'), changed: baseContent !== proposedContent }))",
+        'await writeFile(`${out}/impact.json`, JSON.stringify({',
+        "  baseGeneratedAt: '2026-08-07T12:00:00.000Z',",
+        "  headGeneratedAt: '2026-08-07T12:00:00.000Z',",
+        "  baseGitRef: flag('--base-ref'),",
+        "  headGitRef: flag('--proposed-ref'),",
+        "  addedNodes: baseContent === proposedContent ? [] : ['target.txt'],",
+        '  removedNodes: [],',
+        '  addedEdges: [],',
+        '  removedEdges: [],',
+        '  movedNodes: [],',
+        '  moveFlows: [],',
+        '  movedEdges: 0,',
+        '  apiChanges: [],',
+        '  newViolations: [],',
+        '  resolvedViolations: [],',
+        '  changed: baseContent !== proposedContent',
+        '}))',
         "await appendFile(lifecycleLog, `${JSON.stringify({ event: 'end', out })}\\n`)",
         'console.log(JSON.stringify({',
         "  type: 'cartographer.analysis-ready',",
@@ -192,18 +214,30 @@ describe('ProposalGenerationService', () =>
         await Promise.all([
           NodeFSP.writeFile(analyzerPath, analyzerSource),
           NodeFSP.writeFile(analyzerDependencyPath, 'runtime-v1\n'),
+          NodeFSP.writeFile(
+            analyzerPackageJsonPath,
+            JSON.stringify({
+              name: '@t3tools/cartographer-core',
+              version: '0.1.0-test',
+              bin: { cartographer: './dist/cli/index.js' },
+            }),
+          ),
         ])
       })
       yield* useEnvironment({
-        T3CODE_CARTOGRAPHER_CLI: analyzerPath,
         T3_TEST_CARTOGRAPHER_ANALYZER_LOG: analyzerLifecycleLog,
         T3_TEST_CARTOGRAPHER_BAD_IDENTITY_FILE: badIdentityMarker,
         T3_TEST_CARTOGRAPHER_ANALYZER_DELAY_MS: '350',
       })
 
+      const AnalyzerLayer = Layer.effect(
+        CartographerAnalyzer.CartographerAnalyzer,
+        CartographerAnalyzer.make({ resolvePackageJson: () => analyzerPackageJsonPath }),
+      ).pipe(Layer.provide(ProcessRunner.layer))
       const TestLayer = ProposalGenerationService.layer.pipe(
         Layer.provideMerge(ProposalService.layer),
         Layer.provideMerge(ProcessRunner.layer),
+        Layer.provideMerge(AnalyzerLayer),
         Layer.provideMerge(SqlitePersistenceMemory),
         Layer.provideMerge(ServerConfig.layerTest(workspaceRoot, baseDir)),
         Layer.provideMerge(NodeServices.layer),
@@ -275,7 +309,7 @@ describe('ProposalGenerationService', () =>
         expect(ready.freshness).toBe('fresh')
         expect(ready.workspaceSnapshotTreeOid).toBe(revision.baseSnapshot.workingTreeOid)
         expect(ready.analyzerVersion).toBe(
-          yield* Effect.promise(() => fingerprintDist(analyzerDistRoot)),
+          yield* Effect.promise(() => fingerprintDist(analyzerDistRoot, '0.1.0-test')),
         )
         expect(ready.baseGraphArtifact).toBeTruthy()
         expect(ready.proposedGraphArtifact).toBeTruthy()
@@ -301,20 +335,32 @@ describe('ProposalGenerationService', () =>
           'generations',
           second.generationId,
         )
-        const embedTarget = yield* generations.resolveEmbedTarget(threadId, second.generationId)
-        expect(embedTarget.proposedRoot).toBe(NodePath.join(artifactRoot, 'proposed'))
-        expect(NodePath.basename(embedTarget.baseGraphPath)).toMatch(
+        const architectureTarget = yield* generations.resolveArchitectureTarget(
+          threadId,
+          second.generationId,
+        )
+        expect(architectureTarget.proposedRoot).toBe(NodePath.join(artifactRoot, 'proposed'))
+        expect(NodePath.basename(architectureTarget.baseGraphPath)).toMatch(
           /^base\.graph\.[0-9a-f]{64}\.json$/u,
         )
-        expect(NodePath.basename(embedTarget.proposedGraphPath)).toMatch(
+        expect(NodePath.basename(architectureTarget.proposedGraphPath)).toMatch(
           /^proposed\.graph\.[0-9a-f]{64}\.[0-9a-f]{64}\.json$/u,
         )
-        expect(NodePath.basename(embedTarget.impactPath)).toMatch(/^impact\.[0-9a-f]{64}\.json$/u)
+        expect(NodePath.basename(architectureTarget.impactPath)).toMatch(
+          /^impact\.graph-diff-v1\.[0-9a-f]{64}\.json$/u,
+        )
+        const nativeImpact = yield* generations.resolveImpactTarget(threadId, second.generationId)
+        expect(nativeImpact).toMatchObject({
+          legacy: false,
+          diff: { changed: true, addedNodes: ['target.txt'] },
+        })
         const baseGraph = JSON.parse(
-          yield* Effect.promise(() => NodeFSP.readFile(embedTarget.baseGraphPath, 'utf8')),
+          yield* Effect.promise(() => NodeFSP.readFile(architectureTarget.baseGraphPath, 'utf8')),
         ) as { readonly content: string; readonly gitRef: string }
         const proposedGraph = JSON.parse(
-          yield* Effect.promise(() => NodeFSP.readFile(embedTarget.proposedGraphPath, 'utf8')),
+          yield* Effect.promise(() =>
+            NodeFSP.readFile(architectureTarget.proposedGraphPath, 'utf8'),
+          ),
         ) as { readonly content: string; readonly gitRef: string }
         expect(baseGraph).toEqual({
           content: 'working-base\r\n',
@@ -330,30 +376,48 @@ describe('ProposalGenerationService', () =>
           ),
         ).toBe('proposed-exact\r\n')
         const originalBaseGraphBytes = yield* Effect.promise(() =>
-          NodeFSP.readFile(embedTarget.baseGraphPath),
+          NodeFSP.readFile(architectureTarget.baseGraphPath),
         )
         yield* Effect.promise(() =>
-          NodeFSP.writeFile(embedTarget.baseGraphPath, '{"gitRef":"tampered"}'),
+          NodeFSP.writeFile(architectureTarget.baseGraphPath, '{"gitRef":"tampered"}'),
         )
         expect(
-          (yield* generations.resolveEmbedTarget(threadId, second.generationId).pipe(Effect.flip))
+          (yield* generations.resolveImpactTarget(threadId, second.generationId)).diff?.changed,
+        ).toBe(true)
+        expect(
+          (yield* generations
+            .resolveArchitectureTarget(threadId, second.generationId)
+            .pipe(Effect.flip)).failure,
+        ).toBe('generation_not_found')
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(architectureTarget.baseGraphPath, originalBaseGraphBytes),
+        )
+        const originalImpactBytes = yield* Effect.promise(() =>
+          NodeFSP.readFile(architectureTarget.impactPath),
+        )
+        yield* Effect.promise(() =>
+          NodeFSP.writeFile(architectureTarget.impactPath, '{"changed":true}'),
+        )
+        expect(
+          (yield* generations.resolveImpactTarget(threadId, second.generationId).pipe(Effect.flip))
             .failure,
         ).toBe('generation_not_found')
         yield* Effect.promise(() =>
-          NodeFSP.writeFile(embedTarget.baseGraphPath, originalBaseGraphBytes),
+          NodeFSP.writeFile(architectureTarget.impactPath, originalImpactBytes),
         )
 
         const proposedTargetPath = NodePath.join(artifactRoot, 'proposed', 'target.txt')
         yield* Effect.promise(() => NodeFSP.writeFile(proposedTargetPath, 'tampered-root\n'))
         expect(
-          (yield* generations.resolveEmbedTarget(threadId, second.generationId).pipe(Effect.flip))
-            .failure,
+          (yield* generations
+            .resolveArchitectureTarget(threadId, second.generationId)
+            .pipe(Effect.flip)).failure,
         ).toBe('generation_not_found')
         yield* Effect.promise(() =>
           NodeFSP.writeFile(proposedTargetPath, Buffer.from('proposed-exact\r\n')),
         )
         expect(
-          (yield* generations.resolveEmbedTarget(threadId, second.generationId)).generation
+          (yield* generations.resolveArchitectureTarget(threadId, second.generationId)).generation
             .generationId,
         ).toBe(second.generationId)
 
@@ -367,8 +431,9 @@ describe('ProposalGenerationService', () =>
           git(workspaceRoot, ['update-ref', revision.proposedRetainedRef, baseRetainedCommitOid]),
         )
         expect(
-          (yield* generations.resolveEmbedTarget(threadId, second.generationId).pipe(Effect.flip))
-            .failure,
+          (yield* generations
+            .resolveArchitectureTarget(threadId, second.generationId)
+            .pipe(Effect.flip)).failure,
         ).toBe('generation_not_found')
         const movedRefGeneration = yield* generations.start({
           threadId,
@@ -397,49 +462,6 @@ describe('ProposalGenerationService', () =>
             ),
           ),
         ).toBe(false)
-
-        const relativeCliFailure = yield* Effect.scoped(
-          Effect.gen(function* ()
-          {
-            yield* useEnvironment({
-              T3CODE_CARTOGRAPHER_CLI: 'relative/cartographer/dist/cli/index.js',
-            })
-            return yield* generations
-              .start({
-                threadId,
-                proposalId,
-                revision: 1,
-              })
-              .pipe(Effect.flip)
-          }),
-        )
-        expect(relativeCliFailure._tag).toBe('ProposalGenerationError')
-        if (relativeCliFailure._tag === 'ProposalGenerationError')
-        {
-          expect(relativeCliFailure.failure).toBe('unsupported')
-        }
-
-        const relativeNodeFailure = yield* Effect.scoped(
-          Effect.gen(function* ()
-          {
-            yield* useEnvironment({
-              T3CODE_CARTOGRAPHER_CLI: analyzerPath,
-              T3CODE_CARTOGRAPHER_NODE: './node',
-            })
-            return yield* generations
-              .start({
-                threadId,
-                proposalId,
-                revision: 1,
-              })
-              .pipe(Effect.flip)
-          }),
-        )
-        expect(relativeNodeFailure._tag).toBe('ProposalGenerationError')
-        if (relativeNodeFailure._tag === 'ProposalGenerationError')
-        {
-          expect(relativeNodeFailure.failure).toBe('unsupported')
-        }
 
         yield* Effect.promise(() => NodeFSP.writeFile(badIdentityMarker, ''))
         const failedGeneration = yield* generations.start({
@@ -694,22 +716,35 @@ describe('ProposalGenerationService', () =>
           maximumAnalyzerCount = Math.max(maximumAnalyzerCount, activeAnalyzerCount)
           expect(activeAnalyzerCount).toBeGreaterThanOrEqual(0)
         }
-        expect(maximumAnalyzerCount).toBe(2)
+        expect(maximumAnalyzerCount).toBe(1)
         expect(activeAnalyzerCount).toBe(0)
 
         const abandonedId = ProposalGenerationId.make('generation-startup-abandoned')
+        const olderAbandonedId = ProposalGenerationId.make('generation-startup-abandoned-older')
         const abandonedArtifactRoot = NodePath.join(
           config.stateDir,
           'cartographer',
           'generations',
           abandonedId,
         )
+        const olderAbandonedArtifactRoot = NodePath.join(
+          config.stateDir,
+          'cartographer',
+          'generations',
+          olderAbandonedId,
+        )
         yield* Effect.promise(async () =>
         {
-          await NodeFSP.mkdir(abandonedArtifactRoot, { recursive: true })
-          await NodeFSP.writeFile(NodePath.join(abandonedArtifactRoot, 'partial.json'), '{}')
+          await Promise.all([
+            NodeFSP.mkdir(abandonedArtifactRoot, { recursive: true }),
+            NodeFSP.mkdir(olderAbandonedArtifactRoot, { recursive: true }),
+          ])
+          await Promise.all([
+            NodeFSP.writeFile(NodePath.join(abandonedArtifactRoot, 'partial.json'), '{}'),
+            NodeFSP.writeFile(NodePath.join(olderAbandonedArtifactRoot, 'partial.json'), '{}'),
+          ])
         })
-        const createdAt = '2026-07-27T20:00:00.000Z'
+        const createdAt = '2026-01-01T00:00:00.000Z'
         yield* sql`
           INSERT INTO proposal_generations (
             generation_id,
@@ -748,13 +783,297 @@ describe('ProposalGenerationService', () =>
             ${createdAt}
           )
         `
+        const expiredId = ProposalGenerationId.make('generation-retention-expired')
+        const expiredArtifactRoot = NodePath.join(
+          config.stateDir,
+          'cartographer',
+          'generations',
+          expiredId,
+        )
+        const orphanArtifactRoot = NodePath.join(
+          config.stateDir,
+          'cartographer',
+          'generations',
+          'generation-retention-orphan',
+        )
+        const retentionOld = '2020-01-01T00:00:00.000Z'
+        yield* Effect.promise(async () =>
+        {
+          await Promise.all([
+            NodeFSP.mkdir(expiredArtifactRoot, { recursive: true }),
+            NodeFSP.mkdir(orphanArtifactRoot, { recursive: true }),
+          ])
+          await Promise.all([
+            NodeFSP.utimes(expiredArtifactRoot, 1_600_000_000, 1_600_000_000),
+            NodeFSP.utimes(orphanArtifactRoot, 1_600_000_000, 1_600_000_000),
+          ])
+        })
+        yield* sql`
+          INSERT INTO proposal_generations (
+            generation_id,
+            proposal_id,
+            revision_id,
+            revision,
+            thread_id,
+            state,
+            authority,
+            workspace_snapshot_tree_oid,
+            analyzer_version,
+            artifact_root,
+            base_graph_path,
+            proposed_graph_path,
+            impact_path,
+            error_code,
+            created_at,
+            updated_at
+          )
+          SELECT
+            ${olderAbandonedId},
+            proposal_id,
+            revision_id,
+            revision,
+            thread_id,
+            'abandoned',
+            authority,
+            workspace_snapshot_tree_oid,
+            analyzer_version,
+            ${olderAbandonedArtifactRoot},
+            NULL,
+            NULL,
+            NULL,
+            'server-restarted',
+            ${retentionOld},
+            ${retentionOld}
+          FROM proposal_generations
+          WHERE generation_id = ${abandonedId}
+        `
+        yield* sql`
+          UPDATE proposal_generations
+          SET created_at = ${retentionOld}, updated_at = ${retentionOld}
+          WHERE generation_id = ${second.generationId}
+        `
+        yield* sql`
+          INSERT INTO proposal_generations (
+            generation_id,
+            proposal_id,
+            revision_id,
+            revision,
+            thread_id,
+            state,
+            authority,
+            workspace_snapshot_tree_oid,
+            analyzer_version,
+            artifact_root,
+            base_graph_path,
+            proposed_graph_path,
+            impact_path,
+            error_code,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${expiredId},
+            ${proposalId},
+            ${revision.revisionId},
+            ${revision.revision},
+            ${threadId},
+            'failed',
+            'authoritative',
+            ${revision.baseSnapshot.workingTreeOid},
+            ${ready.analyzerVersion},
+            ${expiredArtifactRoot},
+            NULL,
+            NULL,
+            NULL,
+            'analysis-failed',
+            ${retentionOld},
+            ${retentionOld}
+          )
+        `
+        // it.effect's TestClock starts at epoch 0; pin a fixed present so the
+        // 24h retention cutoff lands after the 2020 seeded timestamps
+        yield* TestClock.setTime(Date.UTC(2026, 0, 1))
         const recovered = yield* ProposalGenerationService.make
         const abandoned = yield* recovered.get({ threadId, generationId: abandonedId })
         expect(abandoned.state).toBe('abandoned')
         expect(abandoned.errorCode).toBe('server-restarted')
         expect(yield* Effect.promise(() => pathExists(abandonedArtifactRoot))).toBe(false)
+        expect(yield* Effect.promise(() => pathExists(olderAbandonedArtifactRoot))).toBe(false)
         expect(yield* Effect.promise(() => pathExists(artifactRoot))).toBe(true)
+        expect(yield* Effect.promise(() => pathExists(expiredArtifactRoot))).toBe(false)
+        expect(yield* Effect.promise(() => pathExists(orphanArtifactRoot))).toBe(false)
+        expect(
+          yield* sql<{ readonly count: number }>`
+            SELECT COUNT(*) AS count
+            FROM proposal_generations
+            WHERE generation_id IN (${expiredId}, ${olderAbandonedId})
+          `,
+        ).toEqual([{ count: 0 }])
+        expect((yield* recovered.get({ threadId, generationId: second.generationId })).state).toBe(
+          'ready',
+        )
+
+        yield* Effect.promise(async () =>
+        {
+          await NodeFSP.mkdir(abandonedArtifactRoot, { recursive: true })
+          await NodeFSP.writeFile(NodePath.join(abandonedArtifactRoot, 'stale-partial.json'), '{}')
+        })
+        yield* TestClock.setTime(Date.UTC(2026, 0, 3))
+        const beyondGrace = yield* ProposalGenerationService.make
+        const retainedRestart = yield* beyondGrace.get({ threadId, generationId: abandonedId })
+        expect(retainedRestart.state).toBe('abandoned')
+        expect(retainedRestart.errorCode).toBe('server-restarted')
+        expect(
+          (yield* beyondGrace.latest({ threadId, proposalId, revision: revision.revision }))
+            ?.generationId,
+        ).toBe(abandonedId)
+        expect(yield* Effect.promise(() => pathExists(abandonedArtifactRoot))).toBe(false)
       }).pipe(Effect.provide(TestLayer))
     }),
+  )
+
+  it.effect('abandons an in-flight generation when its service scope closes', () =>
+    Effect.scoped(
+      Effect.gen(function* ()
+      {
+        const workspaceRoot = yield* Effect.promise(initializeRepository)
+        const baseDir = yield* Effect.promise(() =>
+          NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), '456code-proposal-generation-state-')),
+        )
+        yield* Effect.addFinalizer(() =>
+          Effect.promise(() =>
+            Promise.all([
+              NodeFSP.rm(workspaceRoot, { recursive: true, force: true }),
+              NodeFSP.rm(baseDir, { recursive: true, force: true }),
+            ]),
+          ).pipe(Effect.ignore),
+        )
+        const firstAnalyzerStarted = yield* Deferred.make<void>()
+        const releaseFirstAnalyzer = yield* Deferred.make<void>()
+        let analysisCallCount = 0
+        const analyzer = CartographerAnalyzer.CartographerAnalyzer.of({
+          identify: Effect.succeed({
+            cliPath: '/test/cartographer',
+            fingerprint: 'analyzer-restart-test-v1',
+          }),
+          prepareCurrentWorktree: () => Effect.die('unexpected prepareCurrentWorktree'),
+          buildProjectAtlas: () => Effect.die('unexpected buildProjectAtlas'),
+          analyzeTrees: () =>
+            Effect.gen(function* ()
+            {
+              analysisCallCount += 1
+              if (analysisCallCount === 1)
+              {
+                yield* Deferred.succeed(firstAnalyzerStarted, undefined)
+                yield* Deferred.await(releaseFirstAnalyzer).pipe(Effect.uninterruptible)
+              }
+              return yield* Effect.never
+            }),
+        })
+        const TestLayer = ProposalGenerationService.layer.pipe(
+          Layer.provideMerge(ProposalService.layer),
+          Layer.provideMerge(ProcessRunner.layer),
+          Layer.provideMerge(Layer.succeed(CartographerAnalyzer.CartographerAnalyzer, analyzer)),
+          Layer.provideMerge(SqlitePersistenceMemory),
+          Layer.provideMerge(ServerConfig.layerTest(workspaceRoot, baseDir)),
+          Layer.provideMerge(NodeServices.layer),
+        )
+
+        yield* Effect.gen(function* ()
+        {
+          const proposals = yield* ProposalService.ProposalService
+          const threadId = ThreadId.make('thread-generation-server-restart')
+          const proposalId = ProposalId.make('proposal-generation-server-restart')
+          yield* proposals.upsert({
+            proposalId,
+            environmentId: EnvironmentId.make('environment-generation-server-restart'),
+            projectId: ProjectId.make('project-generation-server-restart'),
+            sourceThreadId: threadId,
+            producer: {
+              providerSessionId: 'provider-session-generation-server-restart',
+              providerInstanceId: ProviderInstanceId.make('codex-generation'),
+            },
+            cwd: workspaceRoot,
+            changes: {
+              _tag: 'typed',
+              operations: [
+                {
+                  _tag: 'modify',
+                  path: 'target.txt',
+                  beforeSha256: sha256('working-base\r\n') as never,
+                  content: { encoding: 'utf8', data: 'proposed-server-restart\r\n' },
+                },
+              ],
+            },
+          })
+
+          const serviceScope = yield* Scope.make('sequential')
+          yield* Effect.addFinalizer(() => Scope.close(serviceScope, Exit.void))
+          const generations = yield* ProposalGenerationService.make.pipe(
+            Effect.provideService(Scope.Scope, serviceScope),
+          )
+          const first = yield* generations.start({ threadId, proposalId, revision: 1 })
+          yield* Deferred.await(firstAnalyzerStarted)
+          const secondStart = yield* generations
+            .start({ threadId, proposalId, revision: 1 })
+            .pipe(Effect.forkScoped)
+          let admittedGenerationId: ProposalGenerationId | null = null
+          for (let attempt = 0; attempt < 200; attempt += 1)
+          {
+            const latest = yield* generations.latest({ threadId, proposalId, revision: 1 })
+            if (latest !== null && latest.generationId !== first.generationId)
+            {
+              admittedGenerationId = latest.generationId
+              break
+            }
+            yield* Effect.promise(() => NodeTimersPromises.setTimeout(5))
+          }
+          if (admittedGenerationId === null)
+          {
+            return yield* Effect.die('concurrent generation was not admitted')
+          }
+          const closeService = yield* Scope.close(serviceScope, Exit.void).pipe(
+            Effect.forkScoped({ startImmediately: true }),
+          )
+          yield* Deferred.succeed(releaseFirstAnalyzer, undefined)
+          const second = yield* Fiber.join(secondStart)
+          yield* Fiber.join(closeService)
+
+          expect(second.generationId).toBe(admittedGenerationId)
+          const superseded = yield* generations.get({
+            threadId,
+            generationId: first.generationId,
+          })
+          expect(superseded.state).toBe('cancelled')
+          expect(superseded.errorCode).toBe('superseded')
+
+          const abandoned = yield* generations.get({
+            threadId,
+            generationId: second.generationId,
+          })
+          expect(abandoned.state).toBe('abandoned')
+          expect(abandoned.errorCode).toBe('server-restarted')
+          expect(
+            yield* Effect.promise(() =>
+              pathExists(
+                NodePath.join(baseDir, 'cartographer', 'generations', second.generationId),
+              ),
+            ),
+          ).toBe(false)
+          const rejected = yield* generations
+            .start({ threadId, proposalId, revision: 1 })
+            .pipe(Effect.flip)
+          expect(rejected._tag).toBe('ProposalGenerationError')
+          if (rejected._tag !== 'ProposalGenerationError')
+          {
+            throw new Error('expected proposal generation failure')
+          }
+          expect(rejected.failure).toBe('analysis-failed')
+          expect(
+            (yield* generations.latest({ threadId, proposalId, revision: 1 }))?.generationId,
+          ).toBe(second.generationId)
+        }).pipe(Effect.provide(TestLayer))
+      }),
+    ),
   )
 })

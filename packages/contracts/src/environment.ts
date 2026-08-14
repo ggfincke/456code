@@ -58,8 +58,10 @@ export const ExecutionEnvironmentCapabilities = Schema.Struct({
   safeMdxDocument: Schema.optionalKey(Schema.Boolean),
   // server supports immutable proposal revisions and exact proposed diffs.
   proposalPreview: Schema.optionalKey(Schema.Boolean),
-  // server can supervise and authenticate an embedded Cartographer atlas.
-  cartographerEmbed: Schema.optionalKey(Schema.Boolean),
+  // server exposes immutable run-execution identity and the versioned exact diff RPC.
+  orchestrateRunExecutionV1: Schema.optionalKey(Schema.Boolean),
+  // server can project native architecture impact for an authorized comparison.
+  architectureImpact: Schema.optionalKey(Schema.Boolean),
 })
 export type ExecutionEnvironmentCapabilities = typeof ExecutionEnvironmentCapabilities.Type
 

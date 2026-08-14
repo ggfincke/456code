@@ -9,6 +9,8 @@ import * as Context from 'effect/Context'
 import type * as Effect from 'effect/Effect'
 import type * as Scope from 'effect/Scope'
 
+import type { ReactorDeliveryError } from '../../persistence/Errors.ts'
+
 /**
  * ProviderRuntimeIngestionShape - Service API for runtime ingestion lifecycle.
  */
@@ -19,13 +21,12 @@ export interface ProviderRuntimeIngestionShape
   // the returned effect must be run in a scope so all worker fibers can be
   // finalized on shutdown.
   //
-  // uses an internal queue and continues after non-interrupt failures by
-  // logging warnings.
-  readonly start: () => Effect.Effect<void, never, Scope.Scope>
+  // every admitted event is claimed through the durable inbox before this
+  // consumer may advance its cursor.
+  readonly start: () => Effect.Effect<void, ReactorDeliveryError, Scope.Scope>
 
   // resolves when the internal processing queue is empty and idle.
-  // intended for test use to replace timing-sensitive sleeps.
-  readonly drain: Effect.Effect<void>
+  readonly drain: Effect.Effect<void, ReactorDeliveryError>
 }
 
 /**

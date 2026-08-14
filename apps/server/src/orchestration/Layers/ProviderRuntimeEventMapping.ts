@@ -46,6 +46,33 @@ function truncateDetail(value: string, limit = 180): string
   return value.length > limit ? `${value.slice(0, limit - 3)}...` : value
 }
 
+// mirrors the compact token convention the web timeline already uses so a server-authored
+// summary and a client-formatted one do not read as two different units
+function formatCompactTokens(totalTokens: number): string
+{
+  if (totalTokens < 1_000)
+  {
+    return `${totalTokens}`
+  }
+  if (totalTokens < 1_000_000)
+  {
+    return `${(totalTokens / 1_000).toFixed(totalTokens < 100_000 ? 1 : 0).replace(/\.0$/, '')}k`
+  }
+  return `${(totalTokens / 1_000_000).toFixed(1).replace(/\.0$/, '')}m`
+}
+
+function formatCompactDuration(durationMs: number): string
+{
+  return durationMs < 1_000 ? `${durationMs}ms` : `${Math.round(durationMs / 1_000)}s`
+}
+
+// absolute instant, trimmed to the minute. never a relative phrase: the limit this row exists
+// for was a seven-day window, and 'try again shortly' would have been wrong by six days
+function formatResetInstant(resetsAt: string): string
+{
+  return `${resetsAt.slice(0, 16).replace('T', ' ')} UTC`
+}
+
 function buildContextWindowActivityPayload(
   event: ProviderRuntimeEvent,
 ): ContextWindowUpdatedActivityPayload | undefined
@@ -93,6 +120,34 @@ export function taskIdFromToolProgressSummary(summary: string | undefined): stri
   }
   const taskId = summary.slice('task:'.length).trim()
   return taskId.length > 0 ? taskId : undefined
+}
+
+// * the runtime item id IS the provider's tool call id for a tool item: claude uses the
+// tool_use block id, acp uses the acp toolCallId, opencode uses part.callID. projecting it
+// into data.toolCallId is what lets a client pair an open frame with its close frame by
+// identity rather than by label, so two concurrent calls to the same tool stop closing each
+// other's rows. an adapter that already wrote data.toolCallId keeps its own value
+function withToolCallId(data: unknown, itemId: string | undefined): unknown
+{
+  if (itemId === undefined)
+  {
+    return data
+  }
+  if (data === undefined)
+  {
+    return { toolCallId: itemId }
+  }
+  if (data === null || typeof data !== 'object' || Array.isArray(data))
+  {
+    return data
+  }
+  const record = data as Record<string, unknown>
+  const existing = record.toolCallId
+  if (typeof existing === 'string' && existing.trim().length > 0)
+  {
+    return data
+  }
+  return { ...record, toolCallId: itemId }
 }
 
 export function runtimeEventToActivities(
@@ -402,6 +457,10 @@ export function runtimeEventToActivities(
       ]
     }
 
+    // a heartbeat's toolUseId is already the provider's tool call id -- the same namespace the
+    // item lifecycle cases now project into data.toolCallId -- so it is forwarded as-is. the
+    // base event.itemId is deliberately NOT projected here: codex heartbeats carry no tool id
+    // and whether their base item id names the same item as their lifecycle frames is unverified
     case 'tool.progress':
     {
       const taskId = taskIdFromToolProgressSummary(event.payload.summary)
@@ -448,9 +507,13 @@ export function runtimeEventToActivities(
       ]
     }
 
-    case 'thread.state.changed':
+    // the session is still working, but it is working on the context rather than the task.
+    // without this row a compaction is a multi-minute freeze with nothing on screen at all
+    case 'session.state.changed':
     {
-      if (event.payload.state !== 'compacted')
+      // the guard is load-bearing: every adapter emits this event for ordinary lifecycle
+      // transitions, and only a Claude compaction can carry the 'compacting' state
+      if (event.payload.state !== 'compacting')
       {
         return []
       }
@@ -460,11 +523,96 @@ export function runtimeEventToActivities(
           id: event.eventId,
           createdAt: event.createdAt,
           tone: 'info',
-          kind: 'context-compaction',
-          summary: 'Context compacted',
+          kind: 'context-compaction.started',
+          summary: 'Compacting context',
           payload: {
             state: event.payload.state,
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ]
+    }
+
+    case 'thread.state.changed':
+    {
+      if (event.payload.state !== 'compacted')
+      {
+        return []
+      }
+
+      const compaction = event.payload.compaction
+      // the bare-string fallback is required: providers other than Claude reach this arm with
+      // no compaction metadata at all, and they still deserve the row
+      const summary = (() =>
+      {
+        if (compaction === undefined)
+        {
+          return 'Context compacted'
+        }
+        const sizes =
+          compaction.preTokens !== undefined && compaction.postTokens !== undefined
+            ? ` ${formatCompactTokens(compaction.preTokens)} -> ${formatCompactTokens(compaction.postTokens)} tokens`
+            : ''
+        const took =
+          compaction.durationMs !== undefined
+            ? ` in ${formatCompactDuration(compaction.durationMs)}`
+            : ''
+        return `Context compacted:${sizes}${took} (${compaction.trigger})`
+      })()
+
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: 'info',
+          kind: 'context-compaction',
+          summary,
+          payload: {
+            state: event.payload.state,
+            ...(compaction !== undefined ? { compaction } : {}),
             ...(event.payload.detail !== undefined ? { detail: event.payload.detail } : {}),
+          },
+          turnId: toTurnId(event.turnId) ?? null,
+          ...maybeSequence,
+        },
+      ]
+    }
+
+    // the pre-failure warning a provider streams before it starts rejecting turns. it used to
+    // land in an untyped payload with no case here at all, so the one signal that could have
+    // stopped a 29-hour run was received and dropped on the floor
+    case 'account.rate-limits.updated':
+    {
+      const snapshot = event.payload.snapshot
+      // 'allowed' is the steady state and would write a row on every window tick
+      if (snapshot === undefined || snapshot.status === 'allowed')
+      {
+        return []
+      }
+
+      const scope = snapshot.windowId ? ` (${snapshot.windowId})` : ''
+      const used =
+        snapshot.utilization !== undefined ? `, ${Math.round(snapshot.utilization)}% used` : ''
+      // say what resets and when, or say nothing about timing. a relative phrase here would
+      // reintroduce exactly the false reassurance this row exists to prevent
+      const resets = snapshot.resetsAt ? `, resets ${formatResetInstant(snapshot.resetsAt)}` : ''
+
+      return [
+        {
+          id: event.eventId,
+          createdAt: event.createdAt,
+          tone: 'error',
+          kind: 'account.rate-limit.warning',
+          summary:
+            snapshot.status === 'rejected'
+              ? `Plan limit reached${scope}${resets}`
+              : `Approaching plan limit${scope}${used}${resets}`,
+          payload: {
+            status: snapshot.status,
+            ...(snapshot.windowId ? { windowId: snapshot.windowId } : {}),
+            ...(snapshot.utilization !== undefined ? { utilization: snapshot.utilization } : {}),
+            ...(snapshot.resetsAt ? { resetsAt: snapshot.resetsAt } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -500,6 +648,7 @@ export function runtimeEventToActivities(
       {
         return []
       }
+      const data = withToolCallId(event.payload.data, event.itemId)
       return [
         {
           id: event.eventId,
@@ -511,7 +660,7 @@ export function runtimeEventToActivities(
             itemType: event.payload.itemType,
             ...(event.payload.status ? { status: event.payload.status } : {}),
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(data !== undefined ? { data } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,
@@ -525,6 +674,7 @@ export function runtimeEventToActivities(
       {
         return []
       }
+      const data = withToolCallId(event.payload.data, event.itemId)
       return [
         {
           id: event.eventId,
@@ -535,7 +685,7 @@ export function runtimeEventToActivities(
           payload: {
             itemType: event.payload.itemType,
             ...(event.payload.detail ? { detail: truncateDetail(event.payload.detail) } : {}),
-            ...(event.payload.data !== undefined ? { data: event.payload.data } : {}),
+            ...(data !== undefined ? { data } : {}),
           },
           turnId: toTurnId(event.turnId) ?? null,
           ...maybeSequence,

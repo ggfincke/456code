@@ -1,7 +1,7 @@
 // apps/server/src/mcp/toolkits/proposal/handlers.ts
 // derives proposal authority from MCP context and persists exact revisions
 
-import { ProposalError, type ProposalId } from '@t3tools/contracts'
+import { normalizeCollaborationMode, ProposalError, type ProposalId } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 
@@ -27,7 +27,7 @@ function proposalError(
   })
 }
 
-const handlers = {
+export const proposalToolkitHandlers = {
   proposal_preview_upsert: (input) =>
     Effect.gen(function* ()
     {
@@ -81,16 +81,76 @@ const handlers = {
           input.proposalId,
         )
       }
-      if (thread.interactionMode !== 'plan')
+      const collaborationMode = normalizeCollaborationMode(
+        thread.interactionMode,
+        thread.orchestrate,
+      )
+      const planId =
+        collaborationMode.baseMode === 'plan'
+          ? proposedPlanIdForTurn(scope.threadId, scope.activeTurnId)
+          : undefined
+      const isOrchestrateMode =
+        collaborationMode.baseMode === 'default' && collaborationMode.orchestrate
+      if (collaborationMode.baseMode === 'plan' && input.orchestratePlan !== undefined)
       {
         return yield* proposalError(
           'proposal_preview_upsert.resolve_plan',
           'identity-mismatch',
-          'The authenticated MCP turn is not running in plan mode.',
+          'Plan-mode proposal previews cannot target an orchestrate-plan revision.',
           input.proposalId,
         )
       }
-      const planId = proposedPlanIdForTurn(scope.threadId, scope.activeTurnId)
+      if (isOrchestrateMode && input.orchestratePlan === undefined)
+      {
+        return yield* proposalError(
+          'proposal_preview_upsert.resolve_plan',
+          'identity-mismatch',
+          'Orchestrate-mode proposal previews require an exact orchestrate-plan revision.',
+          input.proposalId,
+        )
+      }
+      const orchestratePlan =
+        isOrchestrateMode && input.orchestratePlan !== undefined
+          ? thread.orchestratePlans.find(
+              (candidate) =>
+                candidate.runId === input.orchestratePlan?.runId &&
+                candidate.revision === input.orchestratePlan.revision,
+            )
+          : undefined
+      if (
+        isOrchestrateMode &&
+        input.orchestratePlan !== undefined &&
+        orchestratePlan === undefined
+      )
+      {
+        return yield* proposalError(
+          'proposal_preview_upsert.resolve_plan',
+          'not-found',
+          'The exact projected orchestrate-plan revision does not exist.',
+          input.proposalId,
+        )
+      }
+      if (
+        orchestratePlan !== undefined &&
+        (orchestratePlan.turnId !== scope.activeTurnId || orchestratePlan.source !== 'tool')
+      )
+      {
+        return yield* proposalError(
+          'proposal_preview_upsert.resolve_plan',
+          'identity-mismatch',
+          'The orchestrate-plan revision must be tool-sourced from the active turn.',
+          input.proposalId,
+        )
+      }
+      if (collaborationMode.baseMode !== 'plan' && !collaborationMode.orchestrate)
+      {
+        return yield* proposalError(
+          'proposal_preview_upsert.resolve_plan',
+          'identity-mismatch',
+          'Proposal previews require an authenticated plan or orchestrate turn.',
+          input.proposalId,
+        )
+      }
 
       const projectOption = yield* snapshots
         .getProjectShellById(thread.projectId)
@@ -135,9 +195,17 @@ const handlers = {
         cwd: thread.worktreePath ?? projectOption.value.workspaceRoot,
         changes: input.changes,
         ...(input.narrativeMdx === undefined ? {} : { narrativeMdx: input.narrativeMdx }),
-        planId,
+        ...(planId === undefined ? {} : { planId }),
+        ...(input.orchestratePlan === undefined
+          ? {}
+          : {
+              orchestratePlan: {
+                ...input.orchestratePlan,
+                turnId: scope.activeTurnId,
+              },
+            }),
       })
     }),
 } satisfies Parameters<typeof ProposalToolkit.toLayer>[0]
 
-export const ProposalToolkitHandlersLive = ProposalToolkit.toLayer(handlers)
+export const ProposalToolkitHandlersLive = ProposalToolkit.toLayer(proposalToolkitHandlers)

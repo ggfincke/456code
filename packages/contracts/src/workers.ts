@@ -16,6 +16,21 @@ export const WorkersJobStatus = Schema.Literals([
 ])
 export type WorkersJobStatus = typeof WorkersJobStatus.Type
 
+export const WorkersJobOutcome = Schema.Literals([
+  'succeeded',
+  'worker-failed',
+  'environment-blocked',
+  'baseline-broken',
+  'rejected-scope',
+  'superseded',
+  'cancelled',
+  'broker-fault',
+])
+export type WorkersJobOutcome = typeof WorkersJobOutcome.Type
+
+export const WorkersCancelReason = Schema.Literals(['requested', 'superseded', 'shutdown'])
+export type WorkersCancelReason = typeof WorkersCancelReason.Type
+
 // why a terminal job failed, mirrored from the broker's failure_class;
 // "unknown" covers legacy records and jobs the broker could not classify
 export const WorkersFailureClass = Schema.Literals([
@@ -24,6 +39,9 @@ export const WorkersFailureClass = Schema.Literals([
   'broker_fault',
   'scope',
   'verification',
+  'baseline-broken',
+  'verification-failed',
+  'verification-unusable',
   'unknown',
 ])
 export type WorkersFailureClass = typeof WorkersFailureClass.Type
@@ -44,6 +62,20 @@ export const WorkersVerificationRun = Schema.Struct({
 })
 export type WorkersVerificationRun = typeof WorkersVerificationRun.Type
 
+export const WorkersScopeViolationDetail = Schema.Struct({
+  path: TrimmedNonEmptyString,
+  phase: Schema.Literals(['provider', 'final']),
+  nearestAllowed: Schema.Option(TrimmedNonEmptyString),
+  root: TrimmedNonEmptyString,
+})
+export type WorkersScopeViolationDetail = typeof WorkersScopeViolationDetail.Type
+
+export const WorkersScopeViolationGroupCount = Schema.Struct({
+  root: TrimmedNonEmptyString,
+  count: NonNegativeInt,
+})
+export type WorkersScopeViolationGroupCount = typeof WorkersScopeViolationGroupCount.Type
+
 export const WorkersJobSummary = Schema.Struct({
   jobId: TrimmedNonEmptyString,
   status: WorkersJobStatus,
@@ -56,6 +88,10 @@ export const WorkersJobSummary = Schema.Struct({
   run: Schema.Option(TrimmedNonEmptyString),
   model: Schema.Option(TrimmedNonEmptyString),
   effort: Schema.Option(TrimmedNonEmptyString),
+  outcome: Schema.Option(WorkersJobOutcome),
+  cancelReason: Schema.Option(WorkersCancelReason),
+  supersededBy: Schema.Option(TrimmedNonEmptyString),
+  relaunchOf: Schema.Option(TrimmedNonEmptyString),
   error: Schema.Option(Schema.String),
   createdAt: Schema.Option(IsoDateTime),
   startedAt: Schema.Option(IsoDateTime),
@@ -64,6 +100,7 @@ export const WorkersJobSummary = Schema.Struct({
   changedFileCount: Schema.Option(NonNegativeInt),
   verification: Schema.Option(WorkersVerificationSummary),
   scopeViolationCount: NonNegativeInt,
+  scopeViolationGroups: Schema.Option(Schema.Array(WorkersScopeViolationGroupCount)),
   // present only for failed/rejected jobs; Option-al evidence so missing data
   // is never rendered as "no patch" or "exit 0"
   failureClass: Schema.Option(WorkersFailureClass),
@@ -94,7 +131,9 @@ export const WorkersJobDetail = Schema.Struct({
   changedFiles: Schema.Array(TrimmedNonEmptyString),
   changes: Schema.Array(WorkersJobChange),
   verificationRuns: Schema.Array(WorkersVerificationRun),
+  baselineVerification: Schema.Option(Schema.Array(WorkersVerificationRun)),
   scopeViolations: Schema.Array(TrimmedNonEmptyString),
+  scopeViolationDetails: Schema.Option(Schema.Array(WorkersScopeViolationDetail)),
   processExitCode: Schema.Option(Schema.Int),
 })
 export type WorkersJobDetail = typeof WorkersJobDetail.Type
@@ -148,6 +187,12 @@ export const WorkersRunStageRollup = Schema.Struct({
 })
 export type WorkersRunStageRollup = typeof WorkersRunStageRollup.Type
 
+export const WorkersOutcomeCounts = Schema.Record(
+  WorkersJobOutcome,
+  Schema.optionalKey(NonNegativeInt),
+)
+export type WorkersOutcomeCounts = typeof WorkersOutcomeCounts.Type
+
 export const WorkersRunSummary = Schema.Struct({
   run: TrimmedNonEmptyString,
   workflows: Schema.Array(TrimmedNonEmptyString),
@@ -161,8 +206,10 @@ export const WorkersRunSummary = Schema.Struct({
   rejected: NonNegativeInt,
   cancelled: NonNegativeInt,
   unknown: NonNegativeInt,
+  outcomeCounts: WorkersOutcomeCounts,
   stages: Schema.Array(WorkersRunStageRollup),
   scopeViolationCount: NonNegativeInt,
+  scopeViolationGroups: Schema.Option(Schema.Array(WorkersScopeViolationGroupCount)),
 })
 export type WorkersRunSummary = typeof WorkersRunSummary.Type
 

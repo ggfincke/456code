@@ -4,6 +4,9 @@
 import {
   CommandId,
   DEFAULT_PROVIDER_INTERACTION_MODE,
+  IsoDateTime,
+  NonNegativeInt,
+  OrchestrationEvent,
   ProjectId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -13,22 +16,25 @@ import { it } from '@effect/vitest'
 import * as NodeServices from '@effect/platform-node/NodeServices'
 import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
+import * as Option from 'effect/Option'
 import * as Schema from 'effect/Schema'
 import * as Stream from 'effect/Stream'
 import * as TestClock from 'effect/testing/TestClock'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { describe, expect } from 'vite-plus/test'
 
-import { CartographerEmbedBroker } from '../../../../../apps/server/src/cartographer/CartographerEmbedBroker.ts'
+import { CurrentWorktreeArchitectureService } from '../../../../../apps/server/src/cartographer/CurrentWorktreeArchitectureService.ts'
 import { ThreadDeletionReactorLive } from '../../../../../apps/server/src/orchestration/Layers/ThreadDeletionReactor.ts'
-import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
+import { OrchestrationEngineWithArchivePermitLive } from '../../../../../apps/server/src/orchestration/Layers/OrchestrationEngine.ts'
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
+import { ThreadArchiveLifecyclePermitLive } from '../../../../../apps/server/src/orchestration/Layers/ThreadArchiveLifecyclePermit.ts'
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { OrchestrationEngineService } from '../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
 import { ThreadDeletionReactor } from '../../../../../apps/server/src/orchestration/Services/ThreadDeletionReactor.ts'
 import { OrchestrationCommandReceiptRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts'
 import { OrchestrationEventStoreLive } from '../../../../../apps/server/src/persistence/Layers/OrchestrationEventStore.ts'
+import { ProviderRuntimeInboxLive } from '../../../../../apps/server/src/persistence/Layers/ProviderRuntimeInbox.ts'
 import { SqlitePersistenceMemory } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import { OrchestrationReactorDelivery } from '../../../../../apps/server/src/persistence/Services/OrchestrationReactorDelivery.ts'
 import { AttachmentLifecycleRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/AttachmentLifecycle.ts'
@@ -36,14 +42,33 @@ import { CheckpointRevertOperationsLive } from '../../../../../apps/server/src/p
 import { ProposalGenerationService } from '../../../../../apps/server/src/proposal/ProposalGenerationService.ts'
 import {
   ProviderService,
+  type ProviderSessionIdentityCapture,
   type ProviderServiceShape,
 } from '../../../../../apps/server/src/provider/Services/ProviderService.ts'
 import * as RepositoryIdentityResolver from '../../../../../apps/server/src/project/RepositoryIdentityResolver.ts'
 import * as TerminalManager from '../../../../../apps/server/src/terminal/Manager.ts'
+import { expectedProviderGenerationStopKeys } from '../../support/threadLifecycleGenerationClose.ts'
 
 const FIXTURE_TIME = '2026-01-01T00:00:00.000Z'
 const FIXTURE_TIME_MS = Date.parse(FIXTURE_TIME)
 const threadId = ThreadId.make('thread-deletion-reactor-test')
+const providerKind = ProviderDriverKind.make('codex')
+const providerInstanceId = ProviderInstanceId.make('codex')
+const ProviderDeletionIdentity = Schema.Struct({
+  provider: ProviderDriverKind,
+  providerInstanceId: ProviderInstanceId,
+  threadId: ThreadId,
+  sessionGeneration: NonNegativeInt,
+  createdAt: IsoDateTime,
+})
+const StoredProviderDeletionPayload = Schema.fromJsonString(
+  Schema.Struct({
+    event: OrchestrationEvent,
+    providerIdentities: Schema.Array(ProviderDeletionIdentity),
+  }),
+)
+const decodeProviderDeletionPayload = Schema.decodeUnknownSync(StoredProviderDeletionPayload)
+const encodeProviderDeletionPayload = Schema.encodeSync(StoredProviderDeletionPayload)
 
 class CleanupFailure extends Schema.TaggedErrorClass<CleanupFailure>()('CleanupFailure', {
   operation: Schema.String,
@@ -53,15 +78,52 @@ class CleanupFailure extends Schema.TaggedErrorClass<CleanupFailure>()('CleanupF
 interface HarnessState
 {
   readonly calls: Array<string>
+  readonly providerStops: string[]
+  providerIdentities: ProviderSessionIdentityCapture[]
+  providerIdentitiesAddedAfterPlan: ProviderSessionIdentityCapture[]
   cancellationFails: boolean
 }
 
 const unsupported = <A>() =>
   Effect.die(new Error('Unsupported provider call in test')) as Effect.Effect<A, never>
 
+function sameProviderIdentity(
+  left: ProviderSessionIdentityCapture,
+  right: Parameters<ProviderServiceShape['stopSessionIfExact']>[0],
+): boolean
+{
+  return (
+    left.provider === right.provider &&
+    left.providerInstanceId === right.providerInstanceId &&
+    left.threadId === right.threadId &&
+    left.sessionGeneration === right.sessionGeneration
+  )
+}
+
+function makeState(cancellationFails: boolean): HarnessState
+{
+  return {
+    calls: [],
+    providerStops: [],
+    providerIdentities: [
+      {
+        provider: providerKind,
+        providerInstanceId,
+        threadId,
+        sessionGeneration: 1,
+        createdAt: FIXTURE_TIME,
+      },
+    ],
+    providerIdentitiesAddedAfterPlan: [],
+    cancellationFails,
+  }
+}
+
 function makeLayer(state: HarnessState)
 {
-  const orchestrationLayer = OrchestrationEngineLive.pipe(
+  const persistence = Layer.fresh(SqlitePersistenceMemory)
+  const archiveLifecyclePermit = Layer.fresh(ThreadArchiveLifecyclePermitLive)
+  const orchestrationLayer = OrchestrationEngineWithArchivePermitLive.pipe(
     // provideMerge so the reactor can also read the snapshot sequence when it
     // seeds its durable cursor
     Layer.provideMerge(OrchestrationProjectionSnapshotQueryLive),
@@ -71,7 +133,9 @@ function makeLayer(state: HarnessState)
     Layer.provide(RepositoryIdentityResolver.layer),
     Layer.provideMerge(AttachmentLifecycleRepositoryLive),
     Layer.provideMerge(CheckpointRevertOperationsLive),
-    Layer.provide(SqlitePersistenceMemory),
+    Layer.provideMerge(ProviderRuntimeInboxLive),
+    Layer.provide(persistence),
+    Layer.provide(archiveLifecyclePermit),
     Layer.provide(ServerConfig.layerTest(process.cwd(), { prefix: 't3-thread-deletion-test-' })),
   )
   const providerService: ProviderServiceShape = {
@@ -80,11 +144,56 @@ function makeLayer(state: HarnessState)
     interruptTurn: () => unsupported(),
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
-    stopSession: () =>
+    stopSession: () => unsupported(),
+    captureSessionIdentity: (input) =>
+      Effect.succeed(
+        Option.fromNullishOr(
+          state.providerIdentities.find(
+            (identity) =>
+              identity.threadId === input.threadId &&
+              (input.expectedProviderInstanceId === undefined ||
+                identity.providerInstanceId === input.expectedProviderInstanceId),
+          ),
+        ),
+      ),
+    captureSessionIdentities: (input) =>
       Effect.sync(() =>
       {
-        state.calls.push('provider-session')
+        const captured = state.providerIdentities.filter(
+          (identity) => input?.threadId === undefined || identity.threadId === input.threadId,
+        )
+        if (state.providerIdentitiesAddedAfterPlan.length > 0)
+        {
+          state.providerIdentities.push(...state.providerIdentitiesAddedAfterPlan)
+          state.providerIdentitiesAddedAfterPlan = []
+        }
+        return captured
       }),
+    getSessionIdentityState: () => Effect.succeed(Option.none()),
+    matchesSessionIdentity: (identity) =>
+      Effect.succeed(
+        state.providerIdentities.some((current) => sameProviderIdentity(current, identity)),
+      ),
+    stopSessionIfExact: (identity) =>
+      Effect.sync(() =>
+      {
+        state.providerStops.push(
+          `${identity.providerInstanceId}:${identity.threadId}:${identity.sessionGeneration}`,
+        )
+        const identityIndex = state.providerIdentities.findIndex((current) =>
+          sameProviderIdentity(current, identity),
+        )
+        if (identityIndex === -1)
+        {
+          return false
+        }
+        state.providerIdentities.splice(identityIndex, 1)
+        state.calls.push('provider-session')
+        return true
+      }),
+    getAdmissionHandoffHighWater: Effect.succeed(null),
+    resumeAdmissionAfterHandoff: Effect.void,
+    shutdown: Effect.succeed(0),
     listSessions: () => Effect.succeed([]),
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: 'in-session' }),
     getInstanceInfo: (instanceId) =>
@@ -102,6 +211,8 @@ function makeLayer(state: HarnessState)
       })
     },
     rollbackConversation: () => unsupported(),
+    rollbackConversationIfExact: () => Effect.succeed(false),
+    getConversationTurnCountIfExact: () => Effect.succeed(Option.none()),
     get streamEvents()
     {
       return Stream.empty
@@ -110,7 +221,8 @@ function makeLayer(state: HarnessState)
 
   return ThreadDeletionReactorLive.pipe(
     Layer.provideMerge(orchestrationLayer),
-    Layer.provideMerge(SqlitePersistenceMemory),
+    Layer.provideMerge(archiveLifecyclePermit),
+    Layer.provideMerge(persistence),
     Layer.provideMerge(NodeServices.layer),
     Layer.provideMerge(Layer.succeed(ProviderService, providerService)),
     Layer.provideMerge(
@@ -128,11 +240,11 @@ function makeLayer(state: HarnessState)
       }),
     ),
     Layer.provideMerge(
-      Layer.mock(CartographerEmbedBroker)({
+      Layer.mock(CurrentWorktreeArchitectureService)({
         closeThread: () =>
           Effect.sync(() =>
           {
-            state.calls.push('cartographer-embed')
+            state.calls.push('current-worktree-architecture')
           }),
       }),
     ),
@@ -193,11 +305,13 @@ const readActionRows = Effect.fn('readActionRows')(function* ()
 {
   const sql = yield* SqlClient.SqlClient
   return yield* sql<{
+    readonly effectKind: string
     readonly outputIndex: number
     readonly status: string
     readonly attemptCount: number
   }>`
     SELECT
+      effect_kind AS "effectKind",
       output_index AS "outputIndex",
       status,
       attempt_count AS "attemptCount"
@@ -206,6 +320,51 @@ const readActionRows = Effect.fn('readActionRows')(function* ()
     ORDER BY output_index ASC
   `
 })
+
+const seedLegacyEmbedAction = Effect.gen(function* ()
+{
+  const sql = yield* SqlClient.SqlClient
+  yield* sql`
+    UPDATE orchestration_reactor_actions
+    SET effect_kind = 'cartographer-embed.close'
+    WHERE reactor_id = 'thread-deletion'
+      AND output_index = 1
+  `
+})
+
+function rewriteProviderActionIdentities(
+  rewrite: (
+    identities: ReadonlyArray<ProviderSessionIdentityCapture>,
+  ) => ReadonlyArray<ProviderSessionIdentityCapture>,
+)
+{
+  return Effect.gen(function* ()
+  {
+    const sql = yield* SqlClient.SqlClient
+    const rows = yield* sql<{ readonly payloadJson: string }>`
+      SELECT payload_json AS "payloadJson"
+      FROM orchestration_reactor_actions
+      WHERE reactor_id = 'thread-deletion'
+        AND effect_kind = 'provider-session.stop'
+    `
+    const row = rows[0]
+    if (row === undefined)
+    {
+      return yield* Effect.die(new Error('Provider deletion action was not materialized.'))
+    }
+    const payload = decodeProviderDeletionPayload(row.payloadJson)
+    const payloadJson = encodeProviderDeletionPayload({
+      ...payload,
+      providerIdentities: [...rewrite(payload.providerIdentities)],
+    })
+    yield* sql`
+      UPDATE orchestration_reactor_actions
+      SET payload_json = ${payloadJson}
+      WHERE reactor_id = 'thread-deletion'
+        AND effect_kind = 'provider-session.stop'
+    `
+  })
+}
 
 const readCursor = Effect.fn('readCursor')(function* ()
 {
@@ -220,9 +379,9 @@ const readCursor = Effect.fn('readCursor')(function* ()
 
 describe('ThreadDeletionReactor', () =>
 {
-  it.effect('persists cancellation failure as retryable and resumes in order', () =>
+  it.effect('persists cancellation failure and replays a legacy embed cleanup in order', () =>
   {
-    const state: HarnessState = { calls: [], cancellationFails: true }
+    const state = makeState(true)
     return Effect.scoped(
       Effect.gen(function* ()
       {
@@ -235,13 +394,34 @@ describe('ThreadDeletionReactor', () =>
         yield* reactor.drain
 
         expect(yield* readActionRows()).toEqual([
-          { outputIndex: 0, status: 'retryable', attemptCount: 1 },
-          { outputIndex: 1, status: 'pending', attemptCount: 0 },
-          { outputIndex: 2, status: 'pending', attemptCount: 0 },
-          { outputIndex: 3, status: 'pending', attemptCount: 0 },
+          {
+            effectKind: 'proposal-generation.cancel',
+            outputIndex: 0,
+            status: 'retryable',
+            attemptCount: 1,
+          },
+          {
+            effectKind: 'current-worktree-architecture.close',
+            outputIndex: 1,
+            status: 'pending',
+            attemptCount: 0,
+          },
+          {
+            effectKind: 'provider-session.stop',
+            outputIndex: 2,
+            status: 'pending',
+            attemptCount: 0,
+          },
+          {
+            effectKind: 'terminal.close-and-delete-history',
+            outputIndex: 3,
+            status: 'pending',
+            attemptCount: 0,
+          },
         ])
         expect(yield* readCursor()).toBe(2)
 
+        yield* seedLegacyEmbedAction
         state.cancellationFails = false
         yield* TestClock.adjust('1 second')
         yield* reactor.drain
@@ -255,7 +435,7 @@ describe('ThreadDeletionReactor', () =>
         expect(state.calls).toEqual([
           'proposal-generation',
           'proposal-generation',
-          'cartographer-embed',
+          'current-worktree-architecture',
           'provider-session',
           'terminals',
         ])
@@ -266,7 +446,7 @@ describe('ThreadDeletionReactor', () =>
 
   it.effect('replays a deletion appended before start', () =>
   {
-    const state: HarnessState = { calls: [], cancellationFails: false }
+    const state = makeState(false)
     return Effect.scoped(
       Effect.gen(function* ()
       {
@@ -292,7 +472,7 @@ describe('ThreadDeletionReactor', () =>
 
         expect(state.calls).toEqual([
           'proposal-generation',
-          'cartographer-embed',
+          'current-worktree-architecture',
           'provider-session',
           'terminals',
         ])
@@ -301,9 +481,104 @@ describe('ThreadDeletionReactor', () =>
     )
   })
 
+  it.effect('stops every planned and newly-open provider generation exactly', () =>
+  {
+    const state = makeState(false)
+    const plannedClaude = {
+      provider: ProviderDriverKind.make('claudeAgent'),
+      providerInstanceId: ProviderInstanceId.make('claude'),
+      threadId,
+      sessionGeneration: 3,
+      createdAt: FIXTURE_TIME,
+    }
+    const lateCursor = {
+      provider: ProviderDriverKind.make('cursor'),
+      providerInstanceId: ProviderInstanceId.make('cursor'),
+      threadId,
+      sessionGeneration: 8,
+      createdAt: FIXTURE_TIME,
+    }
+    state.providerIdentities.push(plannedClaude)
+    state.providerIdentitiesAddedAfterPlan = [lateCursor]
+    return Effect.scoped(
+      Effect.gen(function* ()
+      {
+        yield* TestClock.setTime(FIXTURE_TIME_MS)
+        const engine = yield* OrchestrationEngineService
+        const reactor = yield* ThreadDeletionReactor
+        yield* reactor.start()
+        yield* seedThread(engine)
+        yield* deleteThread(engine)
+        yield* reactor.drain
+
+        expect((yield* readActionRows()).every((row) => row.status === 'succeeded')).toBe(true)
+        expect(state.providerStops).toEqual(
+          expectedProviderGenerationStopKeys([
+            { providerInstanceId, threadId, sessionGeneration: 1 },
+            plannedClaude,
+            lateCursor,
+          ]),
+        )
+        expect(state.providerIdentities).toEqual([])
+      }).pipe(Effect.provide(makeLayer(state))),
+    )
+  })
+
+  it.effect('poisons mismatched and duplicate provider cleanup identities', () =>
+    Effect.forEach(
+      [
+        {
+          label: 'mismatched',
+          rewrite: (identities: ReadonlyArray<ProviderSessionIdentityCapture>) => [
+            {
+              ...identities[0]!,
+              threadId: ThreadId.make('thread-deletion-payload-mismatch'),
+            },
+          ],
+        },
+        {
+          label: 'duplicate',
+          rewrite: (identities: ReadonlyArray<ProviderSessionIdentityCapture>) => [
+            identities[0]!,
+            identities[0]!,
+          ],
+        },
+      ],
+      (scenario) =>
+      {
+        const state = makeState(true)
+        return Effect.scoped(
+          Effect.gen(function* ()
+          {
+            yield* TestClock.setTime(FIXTURE_TIME_MS)
+            const engine = yield* OrchestrationEngineService
+            const reactor = yield* ThreadDeletionReactor
+            yield* reactor.start()
+            yield* seedThread(engine)
+            yield* deleteThread(engine)
+            yield* reactor.drain
+
+            yield* rewriteProviderActionIdentities(scenario.rewrite)
+            state.cancellationFails = false
+            yield* TestClock.adjust('1 second')
+            yield* reactor.drain
+
+            expect(
+              (yield* readActionRows()).find((row) => row.effectKind === 'provider-session.stop'),
+              scenario.label,
+            ).toMatchObject({ status: 'poison', attemptCount: 1 })
+            expect(state.providerStops, scenario.label).toEqual([])
+            expect(state.providerIdentities, scenario.label).toHaveLength(1)
+          }).pipe(Effect.provide(makeLayer(state))),
+        )
+      },
+      { discard: true },
+    ),
+  )
+
   it.effect('does not repeat completed cleanup on duplicate delivery', () =>
   {
-    const state: HarnessState = { calls: [], cancellationFails: false }
+    const state = makeState(false)
     return Effect.scoped(
       Effect.gen(function* ()
       {
@@ -319,7 +594,7 @@ describe('ThreadDeletionReactor', () =>
 
         expect(state.calls).toEqual([
           'proposal-generation',
-          'cartographer-embed',
+          'current-worktree-architecture',
           'provider-session',
           'terminals',
         ])

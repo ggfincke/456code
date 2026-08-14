@@ -21,6 +21,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   ServerSettings,
+  type ProviderInstanceConfigMap,
   type ServerProvider,
   type ServerProviderSlashCommand,
   type ServerSettings as ContractServerSettings,
@@ -39,7 +40,8 @@ import {
 import { checkClaudeProviderStatus } from '../../../../../apps/server/src/provider/Layers/ClaudeProvider.ts'
 import * as OpenCodeRuntime from '../../../../../apps/server/src/provider/opencodeRuntime.ts'
 import * as ProviderEventLoggers from '../../../../../apps/server/src/provider/Layers/ProviderEventLoggers.ts'
-import { ProviderInstanceRegistryHydrationLive } from '../../../../../apps/server/src/provider/Layers/ProviderInstanceRegistryHydration.ts'
+import { makeProviderInstanceRegistryHydrationLayer } from '../../../../../apps/server/src/provider/Layers/ProviderInstanceRegistryHydration.ts'
+import { makeProviderInstanceRegistry } from '../../../../../apps/server/src/provider/Layers/ProviderInstanceRegistryLive.ts'
 import {
   haveProvidersChanged,
   mergeProviderSnapshot,
@@ -53,13 +55,20 @@ import {
   readProviderStatusCache,
   resolveProviderStatusCachePath,
 } from '../../../../../apps/server/src/provider/maintenance/providerStatusCache.ts'
-import type { ProviderInstance } from '../../../../../apps/server/src/provider/catalog/ProviderDriver.ts'
+import type {
+  ProviderDriver,
+  ProviderInstance,
+} from '../../../../../apps/server/src/provider/catalog/ProviderDriver.ts'
 import * as ProviderInstanceRegistry from '../../../../../apps/server/src/provider/Services/ProviderInstanceRegistry.ts'
+import type { ProviderInstanceRegistryLifecycleOwner } from '../../../../../apps/server/src/provider/Services/ProviderInstanceRegistryMutator.ts'
 import * as ProviderRegistry from '../../../../../apps/server/src/provider/Services/ProviderRegistry.ts'
 import { makeManualOnlyProviderMaintenanceCapabilities } from '../../../../../apps/server/src/provider/maintenance/providerMaintenance.ts'
 const decodeServerSettings = Schema.decodeSync(ServerSettings)
 const encodeServerSettings = Schema.encodeSync(ServerSettings)
 const encodedDefaultServerSettings = encodeServerSettings(DEFAULT_SERVER_SETTINGS)
+const ProviderInstanceRegistryHydrationUnownedTest = makeProviderInstanceRegistryHydrationLayer({
+  requireLifecycleOwnerForRetirement: false,
+})
 
 const defaultClaudeSettings: ClaudeSettings = Schema.decodeSync(ClaudeSettings)({})
 const defaultCodexSettings: CodexSettings = Schema.decodeSync(CodexSettings)({})
@@ -327,6 +336,134 @@ function makeMutableServerSettingsService(
   })
 }
 
+it.effect('holds a required route retirement until its lifecycle owner registers', () =>
+  Effect.gen(function* ()
+  {
+    type TestConfig = {
+      readonly revision: string
+    }
+
+    const driverKind = ProviderDriverKind.make('lifecycle-owner-test')
+    const instanceId = ProviderInstanceId.make('lifecycle-owner-test')
+    const createCount = yield* Ref.make(0)
+    const closeCount = yield* Ref.make(0)
+    const driver: ProviderDriver<TestConfig> = {
+      driverKind,
+      metadata: {
+        displayName: 'Lifecycle owner test',
+      },
+      configSchema: Schema.Struct({
+        revision: Schema.String,
+      }),
+      defaultConfig: () => ({ revision: 'default' }),
+      create: (input) =>
+        Effect.gen(function* ()
+        {
+          yield* Ref.update(createCount, (count) => count + 1)
+          yield* Effect.addFinalizer(() => Ref.update(closeCount, (count) => count + 1))
+          const continuationIdentity = {
+            driverKind,
+            continuationKey: `${driverKind}:instance:${input.instanceId}:${input.config.revision}`,
+          }
+          return {
+            instanceId: input.instanceId,
+            driverKind,
+            continuationIdentity,
+            resolveContinuationIdentity: Effect.succeed(continuationIdentity),
+            displayName: input.displayName,
+            enabled: input.enabled,
+            snapshot: {} as ProviderInstance['snapshot'],
+            adapter: {} as ProviderInstance['adapter'],
+            textGeneration: {} as ProviderInstance['textGeneration'],
+          }
+        }),
+    }
+    const configMap = (revision: string): ProviderInstanceConfigMap => ({
+      [instanceId]: {
+        driver: driverKind,
+        enabled: true,
+        config: { revision },
+      },
+    })
+    const { registry, mutator } = yield* makeProviderInstanceRegistry({
+      drivers: [driver],
+      configMap: configMap('initial'),
+      requireLifecycleOwnerForRetirement: true,
+    })
+    const initialInstance = yield* registry.getInstance(instanceId)
+    assert.notEqual(initialInstance, undefined)
+    assert.equal(yield* Ref.get(createCount), 1)
+    assert.equal(yield* Ref.get(closeCount), 0)
+
+    const pendingReconcile = yield* Effect.forkChild(mutator.reconcile(configMap('replacement')))
+    for (let index = 0; index < 5; index += 1)
+    {
+      yield* Effect.yieldNow
+    }
+
+    assert.equal(pendingReconcile.pollUnsafe(), undefined)
+    assert.strictEqual(yield* registry.getInstance(instanceId), initialInstance)
+    assert.equal(yield* Ref.get(createCount), 1)
+    assert.equal(yield* Ref.get(closeCount), 0)
+
+    const retiredIds: ProviderInstanceId[][] = []
+    let ownerCallCount = 0
+    const owner: ProviderInstanceRegistryLifecycleOwner = {
+      aroundMutation: (instanceIds, mutation) =>
+        Effect.sync(() =>
+        {
+          ownerCallCount += 1
+          retiredIds.push([...instanceIds])
+        }).pipe(Effect.andThen(mutation)),
+    }
+    yield* mutator.registerLifecycleOwner(owner)
+    yield* Fiber.join(pendingReconcile)
+
+    assert.equal(ownerCallCount, 1)
+    assert.deepStrictEqual(retiredIds, [[instanceId]])
+    assert.equal(yield* Ref.get(createCount), 2)
+    assert.equal(yield* Ref.get(closeCount), 1)
+    assert.notStrictEqual(yield* registry.getInstance(instanceId), initialInstance)
+
+    const addedInstanceId = ProviderInstanceId.make('lifecycle-owner-test-added')
+    const additionMap: ProviderInstanceConfigMap = {
+      ...configMap('replacement'),
+      [addedInstanceId]: {
+        driver: driverKind,
+        enabled: true,
+        config: { revision: 'added' },
+      },
+    }
+    yield* mutator.reconcile(additionMap)
+
+    assert.equal(ownerCallCount, 2)
+    assert.deepStrictEqual(retiredIds, [[instanceId], []])
+    assert.notEqual(yield* registry.getInstance(addedInstanceId), undefined)
+
+    yield* mutator.unregisterLifecycleOwner(owner)
+    const pendingAddition = yield* Effect.forkChild(
+      mutator.reconcile({
+        ...additionMap,
+        [ProviderInstanceId.make('lifecycle-owner-test-added-after-unregister')]: {
+          driver: driverKind,
+          enabled: true,
+          config: { revision: 'added-after-unregister' },
+        },
+      }),
+    )
+    for (let index = 0; index < 5; index += 1)
+    {
+      yield* Effect.yieldNow
+    }
+    assert.equal(pendingAddition.pollUnsafe(), undefined)
+
+    yield* mutator.registerLifecycleOwner(owner)
+    yield* Fiber.join(pendingAddition)
+    assert.equal(ownerCallCount, 3)
+    assert.deepStrictEqual(retiredIds, [[instanceId], [], []])
+  }),
+)
+
 it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), TestHttpClientLive))(
   'ProviderRegistry',
   (it) =>
@@ -439,14 +576,25 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           }),
       )
 
-      it.effect('returns an api key label for codex api key auth', () =>
+      it.effect.each([
+        {
+          name: 'api key',
+          accountType: 'apiKey' as const,
+          expectedLabel: 'OpenAI API Key',
+        },
+        {
+          name: 'Amazon Bedrock',
+          accountType: 'amazonBedrock' as const,
+          expectedLabel: 'Amazon Bedrock',
+        },
+      ])('returns a $name label for codex auth', ({ accountType, expectedLabel }) =>
         Effect.gen(function* ()
         {
           const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
             Effect.succeed(
               makeCodexProbeSnapshot({
                 account: {
-                  account: { type: 'apiKey' },
+                  account: { type: accountType },
                   requiresOpenaiAuth: false,
                 },
               }),
@@ -455,29 +603,8 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
 
           assert.strictEqual(status.status, 'ready')
           assert.strictEqual(status.auth.status, 'authenticated')
-          assert.strictEqual(status.auth.type, 'apiKey')
-          assert.strictEqual(status.auth.label, 'OpenAI API Key')
-        }),
-      )
-
-      it.effect('returns an Amazon Bedrock label for codex Bedrock auth', () =>
-        Effect.gen(function* ()
-        {
-          const status = yield* checkCodexProviderStatus(defaultCodexSettings, () =>
-            Effect.succeed(
-              makeCodexProbeSnapshot({
-                account: {
-                  account: { type: 'amazonBedrock' },
-                  requiresOpenaiAuth: false,
-                },
-              }),
-            ),
-          )
-
-          assert.strictEqual(status.status, 'ready')
-          assert.strictEqual(status.auth.status, 'authenticated')
-          assert.strictEqual(status.auth.type, 'amazonBedrock')
-          assert.strictEqual(status.auth.label, 'Amazon Bedrock')
+          assert.strictEqual(status.auth.type, accountType)
+          assert.strictEqual(status.auth.label, expectedLabel)
         }),
       )
 
@@ -1603,7 +1730,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           const scope = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
           const providerRegistryLayer = ProviderRegistryLive.pipe(
-            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(ProviderInstanceRegistryHydrationUnownedTest),
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
@@ -1698,7 +1825,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           const scope = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
           const providerRegistryLayer = ProviderRegistryLive.pipe(
-            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(ProviderInstanceRegistryHydrationUnownedTest),
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
@@ -1826,7 +1953,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
           const scope = yield* Scope.make()
           yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
           const providerRegistryLayer = ProviderRegistryLive.pipe(
-            Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+            Layer.provideMerge(ProviderInstanceRegistryHydrationUnownedTest),
             Layer.provideMerge(
               Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
             ),
@@ -1889,7 +2016,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             const scope = yield* Scope.make()
             yield* Effect.addFinalizer(() => Scope.close(scope, Exit.void))
             const providerRegistryLayer = ProviderRegistryLive.pipe(
-              Layer.provideMerge(ProviderInstanceRegistryHydrationLive),
+              Layer.provideMerge(ProviderInstanceRegistryHydrationUnownedTest),
               Layer.provideMerge(
                 Layer.succeed(ServerSettingsModule.ServerSettingsService, serverSettings),
               ),
@@ -2162,17 +2289,36 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
         ),
       )
 
-      it.effect('returns a display label for claude subscription types', () =>
+      it.effect.each([
+        {
+          name: 'maxplan subscription types',
+          subscriptionType: 'maxplan',
+          expectedType: 'maxplan',
+          expectedLabel: 'Claude Max Subscription',
+        },
+        {
+          name: 'full subscription labels',
+          subscriptionType: 'Claude Max Subscription',
+          expectedType: 'Claude Max Subscription',
+          expectedLabel: 'Claude Max Subscription',
+        },
+        {
+          name: 'provider-prefixed subscription names',
+          subscriptionType: 'Claude Max',
+          expectedType: 'Claude Max',
+          expectedLabel: 'Claude Max Subscription',
+        },
+      ])('returns a display label for $name', ({ subscriptionType, expectedType, expectedLabel }) =>
         Effect.gen(function* ()
         {
           const status = yield* checkClaudeProviderStatus(
             defaultClaudeSettings,
-            claudeCapabilities({ subscriptionType: 'maxplan' }),
+            claudeCapabilities({ subscriptionType }),
           )
           assert.strictEqual(status.status, 'ready')
           assert.strictEqual(status.auth.status, 'authenticated')
-          assert.strictEqual(status.auth.type, 'maxplan')
-          assert.strictEqual(status.auth.label, 'Claude Max Subscription')
+          assert.strictEqual(status.auth.type, expectedType)
+          assert.strictEqual(status.auth.label, expectedLabel)
         }).pipe(
           Effect.provide(
             mockSpawnerLayer((args) =>
@@ -2189,43 +2335,6 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsModule.layerTest(), Te
             }),
           ),
         ),
-      )
-
-      it.effect.each([
-        {
-          name: 'full subscription labels',
-          subscriptionType: 'Claude Max Subscription',
-          expectedType: 'Claude Max Subscription',
-          expectedLabel: 'Claude Max Subscription',
-        },
-        {
-          name: 'provider-prefixed subscription names',
-          subscriptionType: 'Claude Max',
-          expectedType: 'Claude Max',
-          expectedLabel: 'Claude Max Subscription',
-        },
-      ])(
-        'does not duplicate Claude in $name',
-        ({ subscriptionType, expectedType, expectedLabel }) =>
-          Effect.gen(function* ()
-          {
-            const status = yield* checkClaudeProviderStatus(
-              defaultClaudeSettings,
-              claudeCapabilities({ subscriptionType }),
-            )
-            assert.strictEqual(status.auth.status, 'authenticated')
-            assert.strictEqual(status.auth.type, expectedType)
-            assert.strictEqual(status.auth.label, expectedLabel)
-          }).pipe(
-            Effect.provide(
-              mockSpawnerLayer((args) =>
-              {
-                const joined = args.join(' ')
-                if (joined === '--version') return { stdout: '1.0.0\n', stderr: '', code: 0 }
-                throw new Error(`Unexpected args: ${joined}`)
-              }),
-            ),
-          ),
       )
 
       it.effect('returns claude auth email from initialization result', () =>

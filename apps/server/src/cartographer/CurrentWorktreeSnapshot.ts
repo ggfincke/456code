@@ -7,7 +7,7 @@ import * as NodeCrypto from 'node:crypto'
 import * as NodeFSP from 'node:fs/promises'
 import * as NodePath from 'node:path'
 
-import { CartographerEmbedError } from '@t3tools/contracts'
+import { CartographerError } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
 import * as Schema from 'effect/Schema'
 
@@ -36,12 +36,12 @@ export interface CurrentWorktreeSnapshot
   readonly byteCount: number
 }
 
-const isCartographerEmbedError = Schema.is(CartographerEmbedError)
+const isCartographerError = Schema.is(CartographerError)
 
-function publicError(message: string): CartographerEmbedError
+function publicError(message: string): CartographerError
 {
-  return new CartographerEmbedError({
-    failure: 'start_failed',
+  return new CartographerError({
+    failure: 'snapshot_failed',
     message,
   })
 }
@@ -166,7 +166,7 @@ async function captureCurrentWorktreePromise(
         throw publicError('Cartographer could not remove temporary current-worktree capture state.')
       }
     }
-    if (isCartographerEmbedError(cause))
+    if (isCartographerError(cause))
     {
       throw cause
     }
@@ -190,7 +190,7 @@ export const captureCurrentWorktree = Effect.fn('CurrentWorktreeSnapshot.capture
   return yield* Effect.tryPromise({
     try: (signal) => captureCurrentWorktreePromise(input, signal),
     catch: (cause) =>
-      isCartographerEmbedError(cause)
+      isCartographerError(cause)
         ? cause
         : publicError('Cartographer could not capture the current worktree.'),
   })

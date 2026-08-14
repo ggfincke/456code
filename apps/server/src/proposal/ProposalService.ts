@@ -20,11 +20,15 @@ import {
   type ProposalListInput,
   type ProposalListResult,
   type ProposalNarrativeResult,
+  type ProposalOrchestratePlanLookupInput,
+  type ProposalOrchestratePlanLookupResult,
+  type ProposalOrchestratePlanTarget,
   type ProposalProducerIdentity,
   type ProposalRevision,
   type ProposalRevisionSelector,
   type ProposalSha256,
   type ThreadId,
+  type TurnId,
 } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import * as DateTime from 'effect/DateTime'
@@ -48,6 +52,9 @@ export interface ProposalUpsertRequest
   readonly narrativeMdx?: string
   readonly planId?: OrchestrationProposedPlanId
   readonly planMarkdownSha256?: ProposalSha256
+  readonly orchestratePlan?: ProposalOrchestratePlanTarget & {
+    readonly turnId: TurnId
+  }
 }
 
 function proposalError(
@@ -107,6 +114,9 @@ export class ProposalService extends Context.Service<
       { readonly proposal: Proposal; readonly revision: ProposalRevision } | null,
       ProposalError
     >
+    readonly findByOrchestrateRevision: (
+      input: ProposalOrchestratePlanLookupInput,
+    ) => Effect.Effect<ProposalOrchestratePlanLookupResult | null, ProposalError>
   }
 >()('456code/proposal/ProposalService')
 {}
@@ -199,6 +209,9 @@ export const make = Effect.gen(function* ()
           ...(input.planMarkdownSha256 === undefined
             ? {}
             : { planMarkdownSha256: input.planMarkdownSha256 }),
+          ...(input.orchestratePlan === undefined
+            ? {}
+            : { orchestratePlan: input.orchestratePlan }),
           createdAt,
         })
         .pipe(
@@ -312,7 +325,19 @@ export const make = Effect.gen(function* ()
   const findLatestByPlan: ProposalService['Service']['findLatestByPlan'] = (input) =>
     repository.findLatestByPlan(input)
 
-  return ProposalService.of({ upsert, list, get, diff, narrative, findLatestByPlan })
+  const findByOrchestrateRevision: ProposalService['Service']['findByOrchestrateRevision'] = (
+    input,
+  ) => repository.findByOrchestrateRevision(input)
+
+  return ProposalService.of({
+    upsert,
+    list,
+    get,
+    diff,
+    narrative,
+    findLatestByPlan,
+    findByOrchestrateRevision,
+  })
 })
 
 export const layer = Layer.effect(ProposalService, make).pipe(

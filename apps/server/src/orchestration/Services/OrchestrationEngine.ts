@@ -17,6 +17,17 @@ import type * as Stream from 'effect/Stream'
 import type { OrchestrationDispatchError } from '../Errors.ts'
 import type { OrchestrationEventStoreError } from '../../persistence/Errors.ts'
 
+export type OrchestrationCausalSettlementCommand = Extract<
+  OrchestrationCommand,
+  { readonly type: 'thread.meta.update' }
+>
+
+export interface OrchestrationCausalSettlementAuthority
+{
+  readonly sourceKind: 'domain-event' | 'provider-runtime'
+  readonly sourceSequence: number
+}
+
 /**
  * OrchestrationEngineShape - Service API for orchestration command and event flow.
  */
@@ -44,6 +55,13 @@ export interface OrchestrationEngineShape
   // command receipts.
   readonly dispatch: (
     command: OrchestrationCommand,
+  ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>
+
+  // dispatch owner-internal metadata settlement that is causally older than a
+  // checkpoint revert fence. This is not part of any transport contract.
+  readonly dispatchInternal: (
+    command: OrchestrationCausalSettlementCommand,
+    authority: OrchestrationCausalSettlementAuthority,
   ) => Effect.Effect<{ sequence: number }, OrchestrationDispatchError, never>
 
   // stream persisted domain events in dispatch order.

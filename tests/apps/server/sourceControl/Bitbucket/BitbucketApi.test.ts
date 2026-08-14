@@ -202,70 +202,35 @@ it.effect('parses pull request responses from the Bitbucket REST API', () =>
   }).pipe(Effect.provide(layer))
 })
 
-it.effect('lists pull requests with Bitbucket state and source branch query params', () =>
-{
-  const { execute, layer } = makeLayer({
-    response: () =>
-      Response.json({
-        values: [
-          {
-            ...bitbucketPullRequest,
-            id: 7,
-            state: 'MERGED',
-            source: {
-              branch: { name: 'feature/merged' },
-              repository: { full_name: 'pingdotgg/t3code' },
-            },
-          },
-        ],
-      }),
-  })
-
-  return Effect.gen(function* ()
+it.effect.each([
   {
-    const bitbucket = yield* BitbucketApi.BitbucketApi
-    const result = yield* bitbucket.listPullRequests({
-      cwd: '/repo',
-      headSelector: 'origin:feature/merged',
-      state: 'merged',
-      limit: 10,
-    })
-
-    assert.strictEqual(result[0]?.state, 'merged')
-    const request = execute.mock.calls[0]?.[0]
-    assert.strictEqual(
-      request?.url,
-      'https://api.test.local/2.0/repositories/pingdotgg/t3code/pullrequests',
-    )
-    assert.deepStrictEqual(request?.urlParams.params, [
+    name: 'merged',
+    headSelector: 'origin:feature/merged',
+    state: 'merged' as const,
+    expectedParams: [
       ['pagelen', '10'],
       ['sort', '-updated_on'],
       ['q', 'source.branch.name = "feature/merged" AND state = "MERGED"'],
       ['state', 'MERGED'],
-    ])
-  }).pipe(Effect.provide(layer))
-})
-
-it.effect('lists closed pull requests with both closed Bitbucket states', () =>
-{
-  const { execute, layer } = makeLayer({
-    response: () =>
-      Response.json({
-        values: [],
-      }),
-  })
-
-  return Effect.gen(function* ()
+    ] as const,
+    responseValues: [
+      {
+        ...bitbucketPullRequest,
+        id: 7,
+        state: 'MERGED',
+        source: {
+          branch: { name: 'feature/merged' },
+          repository: { full_name: 'pingdotgg/t3code' },
+        },
+      },
+    ],
+    assertResultState: 'merged' as const,
+  },
   {
-    const bitbucket = yield* BitbucketApi.BitbucketApi
-    yield* bitbucket.listPullRequests({
-      cwd: '/repo',
-      headSelector: 'feature/closed',
-      state: 'closed',
-      limit: 10,
-    })
-
-    assert.deepStrictEqual(execute.mock.calls[0]?.[0].urlParams.params, [
+    name: 'closed',
+    headSelector: 'feature/closed',
+    state: 'closed' as const,
+    expectedParams: [
       ['pagelen', '10'],
       ['sort', '-updated_on'],
       [
@@ -274,30 +239,15 @@ it.effect('lists closed pull requests with both closed Bitbucket states', () =>
       ],
       ['state', 'DECLINED'],
       ['state', 'SUPERSEDED'],
-    ])
-  }).pipe(Effect.provide(layer))
-})
-
-it.effect('expands all-state pull request listing instead of relying on Bitbucket defaults', () =>
-{
-  const { execute, layer } = makeLayer({
-    response: () =>
-      Response.json({
-        values: [],
-      }),
-  })
-
-  return Effect.gen(function* ()
+    ] as const,
+    responseValues: [],
+    assertResultState: undefined,
+  },
   {
-    const bitbucket = yield* BitbucketApi.BitbucketApi
-    yield* bitbucket.listPullRequests({
-      cwd: '/repo',
-      headSelector: 'feature/all',
-      state: 'all',
-      limit: 10,
-    })
-
-    assert.deepStrictEqual(execute.mock.calls[0]?.[0].urlParams.params, [
+    name: 'all',
+    headSelector: 'feature/all',
+    state: 'all' as const,
+    expectedParams: [
       ['pagelen', '10'],
       ['sort', '-updated_on'],
       [
@@ -308,9 +258,41 @@ it.effect('expands all-state pull request listing instead of relying on Bitbucke
       ['state', 'MERGED'],
       ['state', 'DECLINED'],
       ['state', 'SUPERSEDED'],
-    ])
-  }).pipe(Effect.provide(layer))
-})
+    ] as const,
+    responseValues: [],
+    assertResultState: undefined,
+  },
+])(
+  'lists pull requests with Bitbucket state query params ($name)',
+  ({ headSelector, state, expectedParams, responseValues, assertResultState }) =>
+  {
+    const { execute, layer } = makeLayer({
+      response: () => Response.json({ values: responseValues }),
+    })
+
+    return Effect.gen(function* ()
+    {
+      const bitbucket = yield* BitbucketApi.BitbucketApi
+      const result = yield* bitbucket.listPullRequests({
+        cwd: '/repo',
+        headSelector,
+        state,
+        limit: 10,
+      })
+
+      if (assertResultState !== undefined)
+      {
+        assert.strictEqual(result[0]?.state, assertResultState)
+      }
+      const request = execute.mock.calls[0]?.[0]
+      assert.strictEqual(
+        request?.url,
+        'https://api.test.local/2.0/repositories/pingdotgg/t3code/pullrequests',
+      )
+      assert.deepStrictEqual(request?.urlParams.params, [...expectedParams])
+    }).pipe(Effect.provide(layer))
+  },
+)
 
 it.effect('reads repository clone URLs and default branch', () =>
 {

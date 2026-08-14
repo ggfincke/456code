@@ -5,25 +5,20 @@ import {
   type AssistantDeliveryMode,
   CommandId,
   MessageId,
-  type OrchestrationMessage,
   type OrchestrationProposedPlanId,
   CheckpointRef,
   ThreadId,
   TurnId,
-  type OrchestrationCheckpointSummary,
-  type OrchestrationProposedPlan,
   type OrchestrationThread,
-  type OrchestrationThreadActivity,
   type ProviderRuntimeEvent,
 } from '@t3tools/contracts'
 import * as Cache from 'effect/Cache'
 import * as Cause from 'effect/Cause'
-import * as Crypto from 'effect/Crypto'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
-import * as Stream from 'effect/Stream'
-import { makeDrainableWorker } from '@t3tools/shared/DrainableWorker'
+import * as Schema from 'effect/Schema'
 
 import { ProviderService } from '../../provider/Services/ProviderService.ts'
 import { ProjectionTurnRepository } from '../../persistence/Services/ProjectionTurns.ts'
@@ -35,6 +30,15 @@ import {
   ProviderRuntimeIngestionService,
   type ProviderRuntimeIngestionShape,
 } from '../Services/ProviderRuntimeIngestion.ts'
+import {
+  PROVIDER_RUNTIME_INGESTION_REACTOR_ID,
+  PROVIDER_RUNTIME_INBOX_OPERATION_VERSION,
+  ProviderRuntimeInboxRunner,
+} from '../Services/ProviderRuntimeInboxRunner.ts'
+import type {
+  ProviderRuntimeInboxBuffer,
+  ProviderRuntimeInboxRecord,
+} from '../../persistence/Services/ProviderRuntimeInbox.ts'
 import { ServerSettingsService } from '../../serverSettings.ts'
 import { proposedPlanIdForTurn } from '../proposedPlanIdentity.ts'
 import { isHiddenTurnRuntimeEvent } from '../../provider/HiddenTurnRegistry.ts'
@@ -82,20 +86,81 @@ import {
 export { runtimeEventToActivities }
 
 const STRICT_PROVIDER_LIFECYCLE_GUARD = process.env.T3CODE_STRICT_PROVIDER_LIFECYCLE_GUARD !== '0'
+const PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION = 1
+
+const ProviderRuntimeIngestionBufferV1 = Schema.Struct({
+  version: Schema.Literal(PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION),
+  turnMessageIds: Schema.Array(
+    Schema.Struct({ key: Schema.String, messageIds: Schema.Array(MessageId) }),
+  ),
+  assistantText: Schema.Array(Schema.Struct({ messageId: MessageId, text: Schema.String })),
+  assistantSegments: Schema.Array(
+    Schema.Struct({
+      key: Schema.String,
+      baseKey: Schema.String,
+      nextSegmentIndex: Schema.Number,
+      activeMessageId: Schema.NullOr(MessageId),
+    }),
+  ),
+  proposedPlans: Schema.Array(
+    Schema.Struct({
+      key: Schema.String,
+      text: Schema.String,
+      createdAt: Schema.String,
+    }),
+  ),
+  taskDescriptions: Schema.Array(Schema.Struct({ key: Schema.String, description: Schema.String })),
+  taskToolUseIds: Schema.Array(Schema.Struct({ key: Schema.String, toolUseId: Schema.String })),
+})
+type ProviderRuntimeIngestionBufferV1 = typeof ProviderRuntimeIngestionBufferV1.Type
+const encodeProviderRuntimeIngestionBuffer = Schema.encodeSync(
+  Schema.fromJsonString(ProviderRuntimeIngestionBufferV1),
+)
+const decodeProviderRuntimeIngestionBuffer = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(ProviderRuntimeIngestionBufferV1),
+)
+
+class ProviderRuntimeIngestionReplayError extends Schema.TaggedErrorClass<ProviderRuntimeIngestionReplayError>()(
+  'ProviderRuntimeIngestionReplayError',
+  {
+    detail: Schema.String,
+    cause: Schema.optional(Schema.Defect()),
+  },
+)
+{
+  override get message(): string
+  {
+    return this.detail
+  }
+}
 
 const make = Effect.gen(function* ()
 {
-  const crypto = yield* Crypto.Crypto
   const orchestrationEngine = yield* OrchestrationEngineService
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
   const checkpointStore = yield* CheckpointStore.CheckpointStore
   const providerService = yield* ProviderService
   const projectionTurnRepository = yield* ProjectionTurnRepository
   const serverSettingsService = yield* ServerSettingsService
-  const providerCommandId = (event: ProviderRuntimeEvent, tag: string) =>
-    crypto.randomUUIDv4.pipe(
-      Effect.map((uuid) => CommandId.make(`provider:${event.eventId}:${tag}:${uuid}`)),
-    )
+  const inboxRunner = yield* ProviderRuntimeInboxRunner
+  let activeRecord: ProviderRuntimeInboxRecord | undefined
+  const activeStageOrdinals = new Map<string, number>()
+  const derivedProviderCommandId = (sourceEventId: string, stage: string) =>
+    Effect.sync(() =>
+    {
+      const record = activeRecord
+      if (record === undefined)
+      {
+        throw new Error('provider runtime ingestion command identity requires an admitted record')
+      }
+      const outputOrdinal = activeStageOrdinals.get(stage) ?? 0
+      activeStageOrdinals.set(stage, outputOrdinal + 1)
+      return CommandId.make(
+        `provider-inbox:v${PROVIDER_RUNTIME_INBOX_OPERATION_VERSION}:${record.sequence}:${record.sessionGeneration}:${sourceEventId}:${stage}:${outputOrdinal}`,
+      )
+    })
+  const providerCommandId = (event: ProviderRuntimeEvent, stage: string) =>
+    derivedProviderCommandId(event.eventId, stage)
 
   const turnMessageIdsByTurnKey = yield* Cache.make<string, Set<MessageId>>({
     capacity: TURN_MESSAGE_IDS_BY_TURN_CACHE_CAPACITY,
@@ -160,6 +225,158 @@ const make = Effect.gen(function* ()
         Option.filter(toolUseId, (value) => value.length > 0).pipe(Option.getOrUndefined),
       ),
     )
+
+  const snapshotBuffer = Effect.fn('ProviderRuntimeIngestion.snapshotBuffer')(function* ()
+  {
+    const turnMessageIds: ProviderRuntimeIngestionBufferV1['turnMessageIds'][number][] = []
+    for (const key of Array.from(yield* Cache.keys(turnMessageIdsByTurnKey)).sort())
+    {
+      const value = yield* Cache.getOption(turnMessageIdsByTurnKey, key)
+      if (Option.isSome(value))
+      {
+        turnMessageIds.push({ key, messageIds: Array.from(value.value).sort() })
+      }
+    }
+
+    const assistantText: ProviderRuntimeIngestionBufferV1['assistantText'][number][] = []
+    for (const messageId of Array.from(
+      yield* Cache.keys(bufferedAssistantTextByMessageId),
+    ).sort())
+    {
+      const value = yield* Cache.getOption(bufferedAssistantTextByMessageId, messageId)
+      if (Option.isSome(value))
+      {
+        assistantText.push({ messageId, text: value.value })
+      }
+    }
+
+    const assistantSegments: ProviderRuntimeIngestionBufferV1['assistantSegments'][number][] = []
+    for (const key of Array.from(yield* Cache.keys(assistantSegmentStateByTurnKey)).sort())
+    {
+      const value = yield* Cache.getOption(assistantSegmentStateByTurnKey, key)
+      if (Option.isSome(value))
+      {
+        assistantSegments.push({ key, ...value.value })
+      }
+    }
+
+    const proposedPlans: ProviderRuntimeIngestionBufferV1['proposedPlans'][number][] = []
+    for (const key of Array.from(yield* Cache.keys(bufferedProposedPlanById)).sort())
+    {
+      const value = yield* Cache.getOption(bufferedProposedPlanById, key)
+      if (Option.isSome(value))
+      {
+        proposedPlans.push({ key, ...value.value })
+      }
+    }
+
+    const taskDescriptions: ProviderRuntimeIngestionBufferV1['taskDescriptions'][number][] = []
+    for (const key of Array.from(yield* Cache.keys(taskDescriptionByTaskKey)).sort())
+    {
+      const value = yield* Cache.getOption(taskDescriptionByTaskKey, key)
+      if (Option.isSome(value))
+      {
+        taskDescriptions.push({ key, description: value.value })
+      }
+    }
+
+    const taskToolUseIds: ProviderRuntimeIngestionBufferV1['taskToolUseIds'][number][] = []
+    for (const key of Array.from(yield* Cache.keys(taskToolUseIdByTaskKey)).sort())
+    {
+      const value = yield* Cache.getOption(taskToolUseIdByTaskKey, key)
+      if (Option.isSome(value))
+      {
+        taskToolUseIds.push({ key, toolUseId: value.value })
+      }
+    }
+
+    const state: ProviderRuntimeIngestionBufferV1 = {
+      version: PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION,
+      turnMessageIds,
+      assistantText,
+      assistantSegments,
+      proposedPlans,
+      taskDescriptions,
+      taskToolUseIds,
+    }
+    return encodeProviderRuntimeIngestionBuffer(state)
+  })
+
+  const clearBuffer = Effect.all(
+    [
+      Cache.invalidateAll(turnMessageIdsByTurnKey),
+      Cache.invalidateAll(bufferedAssistantTextByMessageId),
+      Cache.invalidateAll(assistantSegmentStateByTurnKey),
+      Cache.invalidateAll(bufferedProposedPlanById),
+      Cache.invalidateAll(taskDescriptionByTaskKey),
+      Cache.invalidateAll(taskToolUseIdByTaskKey),
+    ],
+    { discard: true },
+  )
+
+  const restoreBuffer = (checkpoint: Option.Option<ProviderRuntimeInboxBuffer>) =>
+    Effect.gen(function* ()
+    {
+      yield* clearBuffer
+      if (Option.isNone(checkpoint))
+      {
+        return
+      }
+      if (checkpoint.value.stateVersion !== PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION)
+      {
+        return yield* new ProviderRuntimeIngestionReplayError({
+          detail: `unsupported provider runtime ingestion buffer version ${checkpoint.value.stateVersion}`,
+        })
+      }
+      const state = yield* decodeProviderRuntimeIngestionBuffer(checkpoint.value.stateJson).pipe(
+        Effect.mapError(
+          (cause) =>
+            new ProviderRuntimeIngestionReplayError({
+              detail: 'provider runtime ingestion buffer is invalid',
+              cause,
+            }),
+        ),
+      )
+      yield* Effect.forEach(
+        state.turnMessageIds,
+        (entry) => Cache.set(turnMessageIdsByTurnKey, entry.key, new Set(entry.messageIds)),
+        { discard: true },
+      )
+      yield* Effect.forEach(
+        state.assistantText,
+        (entry) => Cache.set(bufferedAssistantTextByMessageId, entry.messageId, entry.text),
+        { discard: true },
+      )
+      yield* Effect.forEach(
+        state.assistantSegments,
+        (entry) =>
+          Cache.set(assistantSegmentStateByTurnKey, entry.key, {
+            baseKey: entry.baseKey,
+            nextSegmentIndex: entry.nextSegmentIndex,
+            activeMessageId: entry.activeMessageId,
+          }),
+        { discard: true },
+      )
+      yield* Effect.forEach(
+        state.proposedPlans,
+        (entry) =>
+          Cache.set(bufferedProposedPlanById, entry.key, {
+            text: entry.text,
+            createdAt: entry.createdAt,
+          }),
+        { discard: true },
+      )
+      yield* Effect.forEach(
+        state.taskDescriptions,
+        (entry) => Cache.set(taskDescriptionByTaskKey, entry.key, entry.description),
+        { discard: true },
+      )
+      yield* Effect.forEach(
+        state.taskToolUseIds,
+        (entry) => Cache.set(taskToolUseIdByTaskKey, entry.key, entry.toolUseId),
+        { discard: true },
+      )
+    })
 
   const resolveThreadDetail = Effect.fn('resolveThreadDetail')(function* (threadId: ThreadId)
   {
@@ -729,11 +946,11 @@ const make = Effect.gen(function* ()
         return
       }
 
-      const commandUuid = yield* crypto.randomUUIDv4
       yield* orchestrationEngine.dispatch({
         type: 'thread.proposed-plan.upsert',
-        commandId: CommandId.make(
-          `provider:source-proposed-plan-implemented:${implementationThreadId}:${commandUuid}`,
+        commandId: yield* derivedProviderCommandId(
+          activeRecord?.sourceEventId ?? '',
+          `source-proposed-plan-implemented:${implementationThreadId}`,
         ),
         threadId: sourceThread.id,
         proposedPlan: {
@@ -821,8 +1038,8 @@ const make = Effect.gen(function* ()
             {
               return sameId(activeTurnId, eventTurnId)
             }
-            // if no active turn is tracked, accept completion scoped to this thread.
-            return true
+            // an untargeted completion cannot prove it belongs to a turn this thread ran
+            return eventTurnId !== undefined
           default:
             return true
         }
@@ -907,17 +1124,6 @@ const make = Effect.gen(function* ()
               acceptedTurnStartedSourcePlan.sourcePlanId,
               thread.id,
               now,
-            ).pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning(
-                  'provider runtime ingestion failed to mark source proposed plan',
-                  {
-                    eventId: event.eventId,
-                    eventType: event.type,
-                    cause: Cause.pretty(cause),
-                  },
-                ),
-              ),
             )
           }
 
@@ -1238,12 +1444,25 @@ const make = Effect.gen(function* ()
 
       if (event.type === 'thread.metadata.updated' && event.payload.name)
       {
-        yield* orchestrationEngine.dispatch({
-          type: 'thread.meta.update',
-          commandId: yield* providerCommandId(event, 'thread-meta-update'),
-          threadId: thread.id,
-          title: event.payload.name,
-        })
+        const sourceSequence = activeRecord?.sequence
+        if (sourceSequence === undefined)
+        {
+          return yield* new ProviderRuntimeIngestionReplayError({
+            detail: 'provider metadata settlement requires an admitted inbox record',
+          })
+        }
+        yield* orchestrationEngine.dispatchInternal(
+          {
+            type: 'thread.meta.update',
+            commandId: yield* providerCommandId(event, 'thread-meta-update'),
+            threadId: thread.id,
+            title: event.payload.name,
+          },
+          {
+            sourceKind: 'provider-runtime',
+            sourceSequence,
+          },
+        )
       }
 
       if (event.type === 'turn.diff.updated')
@@ -1358,36 +1577,54 @@ const make = Effect.gen(function* ()
       ).pipe(Effect.asVoid)
     })
 
-  const processRuntimeEventSafely = (event: ProviderRuntimeEvent) =>
-    processRuntimeEvent(event).pipe(
-      Effect.catchCause((cause) =>
-      {
-        if (Cause.hasInterruptsOnly(cause))
-        {
-          return Effect.failCause(cause)
-        }
-        return Effect.logWarning('provider runtime ingestion failed to process event', {
-          source: 'runtime',
-          eventId: event.eventId,
-          eventType: event.type,
-          cause: Cause.pretty(cause),
-        })
-      }),
-    )
-
-  const worker = yield* makeDrainableWorker(processRuntimeEventSafely)
-
-  const start: ProviderRuntimeIngestionShape['start'] = () =>
+  const processAdmittedRuntimeEvent = (
+    record: ProviderRuntimeInboxRecord,
+    event: ProviderRuntimeEvent,
+  ) =>
     Effect.gen(function* ()
     {
-      yield* Effect.forkScoped(
-        Stream.runForEach(providerService.streamEvents, (event) => worker.enqueue(event)),
-      )
+      activeRecord = record
+      activeStageOrdinals.clear()
+      const processing = yield* Effect.exit(processRuntimeEvent(event))
+      if (Exit.isFailure(processing))
+      {
+        if (Cause.hasInterruptsOnly(processing.cause))
+        {
+          return yield* Effect.interrupt
+        }
+        return yield* new ProviderRuntimeIngestionReplayError({
+          detail: `provider runtime ingestion failed for ${record.sequence}/${event.type}`,
+          cause: Cause.squash(processing.cause),
+        })
+      }
+      const stateJson = yield* snapshotBuffer()
+      return {
+        stateVersion: PROVIDER_RUNTIME_INGESTION_BUFFER_VERSION,
+        stateJson,
+        sessionBufferTerminal: event.type === 'session.exited',
+      }
+    }).pipe(
+      Effect.ensuring(
+        Effect.sync(() =>
+        {
+          activeRecord = undefined
+          activeStageOrdinals.clear()
+        }),
+      ),
+    )
+
+  const start: ProviderRuntimeIngestionShape['start'] = () =>
+    inboxRunner.start({
+      consumerId: PROVIDER_RUNTIME_INGESTION_REACTOR_ID,
+      operationVersion: PROVIDER_RUNTIME_INBOX_OPERATION_VERSION,
+      process: processAdmittedRuntimeEvent,
+      restore: restoreBuffer,
+      classify: () => 'retryable',
     })
 
   return {
     start,
-    drain: worker.drain,
+    drain: inboxRunner.drain(PROVIDER_RUNTIME_INGESTION_REACTOR_ID),
   } satisfies ProviderRuntimeIngestionShape
 })
 

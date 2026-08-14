@@ -82,6 +82,8 @@ const TestEngineLive = Layer.effect(
           ),
         ),
       dispatch: () => Effect.die(new Error('dispatch is not used by runner tests')),
+      dispatchInternal: () =>
+        Effect.die(new Error('internal dispatch is not used by runner tests')),
       get streamDomainEvents()
       {
         return feed.stream
@@ -328,11 +330,12 @@ describe('DurableReactorRunner', () =>
         const feed = yield* TestEventFeed
         const sql = yield* SqlClient.SqlClient
         const repaired = yield* Ref.make(false)
+        const blockedHooks = yield* Ref.make<ReadonlyArray<string>>([])
         yield* prepareProgress('thread-deletion', 'durable')
         yield* feed.append(event(1), false)
 
-        yield* runner.start(
-          definition(
+        yield* runner.start({
+          ...definition(
             'thread-deletion',
             () =>
               Ref.get(repaired).pipe(
@@ -344,7 +347,9 @@ describe('DurableReactorRunner', () =>
               ),
             (_cause, action) => (action.sourceSequence === 1 ? 'poison' : 'retryable'),
           ),
-        )
+          onBlocked: ({ action, status }) =>
+            Ref.update(blockedHooks, (values) => [...values, `${action.sourceSequence}:${status}`]),
+        })
         const blocked = Option.getOrThrow(yield* delivery.getProgress('thread-deletion'))
         assert.equal(blocked.cursorSequence, 0)
         assert.equal(blocked.blockedSequence, 1)
@@ -355,6 +360,7 @@ describe('DurableReactorRunner', () =>
           WHERE reactor_id = 'thread-deletion'
         `
         assert.equal(rows[0]?.status, 'poison')
+        assert.deepStrictEqual(yield* Ref.get(blockedHooks), ['1:poison'])
         yield* Ref.set(repaired, true)
         yield* delivery.resolve({
           actionId: rows[0]!.actionId,
@@ -399,6 +405,7 @@ describe('DurableReactorRunner', () =>
           WHERE reactor_id = 'thread-deletion' AND source_sequence = 2
         `
         assert.equal(manualRows[0]?.status, 'manual')
+        assert.deepStrictEqual(yield* Ref.get(blockedHooks), ['1:poison', '2:manual'])
         assert.equal(
           Option.getOrThrow(yield* delivery.getProgress('thread-deletion')).blockedSequence,
           2,

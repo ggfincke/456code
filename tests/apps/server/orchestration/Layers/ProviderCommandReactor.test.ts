@@ -31,6 +31,7 @@ import * as Deferred from 'effect/Deferred'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as ManagedRuntime from 'effect/ManagedRuntime'
+import * as Option from 'effect/Option'
 import * as PubSub from 'effect/PubSub'
 import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
@@ -41,6 +42,7 @@ import { afterEach, describe, expect, it, vi } from 'vite-plus/test'
 import { deriveServerPaths, ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { TextGenerationError } from '@t3tools/contracts'
 import * as CheckpointStore from '../../../../../apps/server/src/checkpointing/CheckpointStore.ts'
+import * as CheckpointIdentity from '../../../../../apps/server/src/checkpointing/CheckpointIdentity.ts'
 import { checkpointRefForThreadTurn } from '../../../../../apps/server/src/checkpointing/Utils.ts'
 import { ProviderAdapterRequestError } from '../../../../../apps/server/src/provider/Errors.ts'
 import {
@@ -85,6 +87,12 @@ import { VcsStatusBroadcaster } from '../../../../../apps/server/src/vcs/VcsStat
 import * as VcsDriverRegistry from '../../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
 import * as VcsProcess from '../../../../../apps/server/src/vcs/VcsProcess.ts'
 import * as GitWorkflowService from '../../../../../apps/server/src/git/GitWorkflowService.ts'
+import * as GitVcsDriver from '../../../../../apps/server/src/vcs/GitVcsDriver.ts'
+import {
+  makeProviderRuntimeInboxTestAdmission,
+  ProviderRuntimeInboxTestInfrastructureLive,
+} from '../../support/providerRuntimeInbox.ts'
+import { ProviderRuntimeInbox } from '../../../../../apps/server/src/persistence/Services/ProviderRuntimeInbox.ts'
 
 // the harness factory runs before the harness object exists, so its own
 // setup routes through this single runner
@@ -142,7 +150,8 @@ describe('ProviderCommandReactor', () =>
     | ProviderRuntimeIngestionService
     | ProjectionSnapshotQuery
     | OrchestrationReactorDelivery
-    | SqlClient.SqlClient,
+    | SqlClient.SqlClient
+    | ProviderRuntimeInbox,
     unknown
   > | null = null
   let scope: Scope.Closeable | null = null
@@ -414,6 +423,14 @@ describe('ProviderCommandReactor', () =>
       respondToRequest: respondToRequest as ProviderServiceShape['respondToRequest'],
       respondToUserInput: respondToUserInput as ProviderServiceShape['respondToUserInput'],
       stopSession: stopSession as ProviderServiceShape['stopSession'],
+      captureSessionIdentity: () => unsupported(),
+      captureSessionIdentities: () => Effect.succeed([]),
+      getSessionIdentityState: () => Effect.succeed(Option.none()),
+      matchesSessionIdentity: () => unsupported(),
+      stopSessionIfExact: () => unsupported(),
+      getAdmissionHandoffHighWater: Effect.succeed(null),
+      resumeAdmissionAfterHandoff: Effect.void,
+      shutdown: Effect.succeed(0),
       listSessions: () => Effect.succeed(runtimeSessions),
       ...(input?.hasRecoverableSessionEffect === undefined
         ? {}
@@ -445,14 +462,19 @@ describe('ProviderCommandReactor', () =>
         })
       },
       rollbackConversation: () => unsupported(),
+      rollbackConversationIfExact: () => Effect.succeed(false),
+      getConversationTurnCountIfExact: () => Effect.succeed(Option.none()),
       get streamEvents()
       {
         return Stream.fromPubSub(runtimeEventPubSub)
       },
     }
+    let appendRuntimeEvent = (_event: ProviderRuntimeEvent): Effect.Effect<unknown, Error> =>
+      Effect.die(new Error('provider runtime inbox admission is not initialized'))
     const emitRuntimeEvent = (event: ProviderRuntimeEvent) =>
       Effect.runPromise(
-        observeHiddenTurnRuntimeEvent(event).pipe(
+        appendRuntimeEvent(event).pipe(
+          Effect.andThen(observeHiddenTurnRuntimeEvent(event)),
           Effect.andThen(PubSub.publish(runtimeEventPubSub, event)),
           Effect.asVoid,
         ),
@@ -506,7 +528,9 @@ describe('ProviderCommandReactor', () =>
       Layer.provideMerge(orchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provideMerge(ProviderRuntimeInboxTestInfrastructureLive),
       Layer.provideMerge(checkpointStoreLayer),
+      Layer.provideMerge(CheckpointIdentity.layer.pipe(Layer.provide(GitVcsDriver.layer))),
       Layer.provideMerge(Layer.succeed(ProviderService, service)),
       Layer.provideMerge(makeProviderRegistryLayer(providerSnapshots as never)),
       Layer.provideMerge(
@@ -534,6 +558,8 @@ describe('ProviderCommandReactor', () =>
       Layer.provideMerge(NodeServices.layer),
     )
     runtime = ManagedRuntime.make(layer)
+    const admission = await runtime.runPromise(makeProviderRuntimeInboxTestAdmission)
+    appendRuntimeEvent = admission.append
 
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService))
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery))
@@ -724,6 +750,85 @@ describe('ProviderCommandReactor', () =>
     const checkpointRef = checkpointRefForThreadTurn(ThreadId.make('thread-1'), 0)
     expect(runGit(cwd, ['show', `${checkpointRef}:README.md`])).toBe('pre-turn')
     expect(NodeFS.readFileSync(NodePath.join(cwd, 'README.md'), 'utf8')).toBe('post-start\n')
+  })
+
+  it('replays the deterministic baseline record after publication succeeds and dispatch fails', async () =>
+  {
+    const cwd = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 't3-provider-baseline-retry-'))
+    createdBaseDirs.add(cwd)
+    runGit(cwd, ['init', '--initial-branch=main'])
+    runGit(cwd, ['config', 'user.email', 'test@example.com'])
+    runGit(cwd, ['config', 'user.name', 'Test User'])
+    NodeFS.writeFileSync(NodePath.join(cwd, 'README.md'), 'pre-turn\n', 'utf8')
+    runGit(cwd, ['add', 'README.md'])
+    runGit(cwd, ['commit', '-m', 'Initial'])
+
+    let captureCount = 0
+    const harness = await createHarness({
+      workspaceRoot: cwd,
+      beforeCheckpointCapture: () =>
+        Effect.sync(() =>
+        {
+          captureCount += 1
+        }),
+    })
+    const originalDispatch = harness.engine.dispatch
+    const baselineCommands: Array<
+      Extract<Parameters<typeof originalDispatch>[0], { type: 'thread.checkpoint.baseline.record' }>
+    > = []
+    let failBaselineRecord = true
+    const dispatchSpy = vi.spyOn(harness.engine, 'dispatch').mockImplementation((command) =>
+    {
+      if (command.type === 'thread.checkpoint.baseline.record')
+      {
+        baselineCommands.push(command)
+        if (failBaselineRecord)
+        {
+          failBaselineRecord = false
+          return Effect.die(new Error('Simulated baseline record dispatch failure.'))
+        }
+      }
+      return originalDispatch(command)
+    })
+    const createdAt = '2026-01-01T00:00:00.000Z'
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-baseline-retry'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('user-message-baseline-retry'),
+          role: 'user',
+          text: 'retry the durable baseline record',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt,
+      }),
+    )
+    await harness.drain()
+
+    expect(captureCount).toBe(1)
+    expect(harness.startSession).not.toHaveBeenCalled()
+    expect(harness.sendTurn).not.toHaveBeenCalled()
+
+    await harness.run(harness.sql`
+      UPDATE orchestration_reactor_actions
+      SET available_at = '1970-01-01T00:00:00.000Z'
+      WHERE reactor_id = 'provider-command'
+        AND effect_kind = 'thread.turn-start-requested'
+    `)
+    await harness.drain()
+
+    expect(captureCount).toBe(1)
+    expect(harness.startSession).toHaveBeenCalledTimes(1)
+    expect(harness.sendTurn).toHaveBeenCalledTimes(1)
+    expect(baselineCommands).toHaveLength(2)
+    expect(baselineCommands[1]).toEqual(baselineCommands[0])
+    expect(baselineCommands[1]?.createdAt).toBe(createdAt)
+    dispatchSpy.mockRestore()
   })
 
   it('materializes a duplicate source command only once', async () =>
@@ -2137,58 +2242,6 @@ describe('ProviderCommandReactor', () =>
     }),
   )
 
-  it('generates a thread title on the first turn', async () =>
-  {
-    const harness = await createHarness()
-    const now = '2026-01-01T00:00:00.000Z'
-    const seededTitle = 'Please investigate reconnect failures after restar...'
-    harness.generateThreadTitle.mockReturnValue(Effect.succeed({ title: 'Generated title' }))
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.meta.update',
-        commandId: CommandId.make('cmd-thread-title-seed'),
-        threadId: ThreadId.make('thread-1'),
-        title: seededTitle,
-      }),
-    )
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-title'),
-        threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-title'),
-          role: 'user',
-          text: 'Please investigate reconnect failures after restarting the session.',
-          attachments: [],
-        },
-        titleSeed: seededTitle,
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        createdAt: now,
-      }),
-    )
-
-    await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1)
-    expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
-      message: 'Please investigate reconnect failures after restarting the session.',
-    })
-
-    await waitFor(async () =>
-    {
-      const readModel = await harness.readModel()
-      return (
-        readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))?.title ===
-        'Generated title'
-      )
-    })
-    const readModel = await harness.readModel()
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
-    expect(thread?.title).toBe('Generated title')
-  })
-
   it('does not overwrite an existing custom thread title on the first turn', async () =>
   {
     const harness = await createHarness()
@@ -2235,6 +2288,7 @@ describe('ProviderCommandReactor', () =>
     const harness = await createHarness()
     const now = '2026-01-01T00:00:00.000Z'
     const seededTitle = 'Fix reconnect spinner on resume'
+    const outgoingPrompt = '[effort:high]\\n\\nFix reconnect spinner on resume'
     harness.generateThreadTitle.mockReturnValue(
       Effect.succeed({
         title: 'Reconnect spinner resume bug',
@@ -2258,7 +2312,7 @@ describe('ProviderCommandReactor', () =>
         message: {
           messageId: asMessageId('user-message-title-formatted'),
           role: 'user',
-          text: '[effort:high]\\n\\nFix reconnect spinner on resume',
+          text: outgoingPrompt,
           attachments: [],
         },
         titleSeed: seededTitle,
@@ -2269,6 +2323,9 @@ describe('ProviderCommandReactor', () =>
     )
 
     await waitFor(() => harness.generateThreadTitle.mock.calls.length === 1)
+    expect(harness.generateThreadTitle.mock.calls[0]?.[0]).toMatchObject({
+      message: outgoingPrompt,
+    })
     await waitFor(async () =>
     {
       const readModel = await harness.readModel()
@@ -2336,6 +2393,144 @@ describe('ProviderCommandReactor', () =>
       message: 'Add a safer reconnect backoff.',
     })
     expect(harness.refreshStatus.mock.calls[0]?.[0]).toBe('/tmp/provider-project-worktree')
+  })
+
+  it('settles a paused first-turn branch owner through an active later revert fence', async () =>
+  {
+    const cwd = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 't3-causal-branch-owner-'))
+    createdBaseDirs.add(cwd)
+    runGit(cwd, ['init', '--initial-branch=main'])
+    runGit(cwd, ['config', 'user.email', 'test@example.com'])
+    runGit(cwd, ['config', 'user.name', 'Test User'])
+    NodeFS.writeFileSync(NodePath.join(cwd, 'README.md'), 'causal branch owner\n', 'utf8')
+    runGit(cwd, ['add', 'README.md'])
+    runGit(cwd, ['commit', '-m', 'Initial'])
+    runGit(cwd, ['branch', '-m', '456code/1234abcd'])
+
+    const generationStarted = Effect.runSync(Deferred.make<void>())
+    const releaseGeneration = Effect.runSync(Deferred.make<void>())
+    const harness = await createHarness({
+      workspaceRoot: cwd,
+      withRuntimeIngestion: true,
+    })
+    harness.generateBranchName.mockImplementation(() =>
+      Deferred.succeed(generationStarted, undefined).pipe(
+        Effect.andThen(Deferred.await(releaseGeneration)),
+        Effect.as({ branch: 'causal branch settlement' }),
+      ),
+    )
+    let renamedBranch: string | undefined
+    harness.renameBranch.mockImplementation((renameInput: unknown) =>
+      Effect.sync(() =>
+      {
+        if (
+          typeof renameInput !== 'object' ||
+          renameInput === null ||
+          !('oldBranch' in renameInput) ||
+          typeof renameInput.oldBranch !== 'string' ||
+          !('newBranch' in renameInput) ||
+          typeof renameInput.newBranch !== 'string'
+        )
+        {
+          throw new Error('Expected an exact branch rename request.')
+        }
+        runGit(cwd, ['branch', '-m', renameInput.oldBranch, renameInput.newBranch])
+        renamedBranch = renameInput.newBranch
+        return { branch: renameInput.newBranch }
+      }),
+    )
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.meta.update',
+        commandId: CommandId.make('cmd-seed-causal-owner-branch'),
+        threadId: ThreadId.make('thread-1'),
+        branch: '456code/1234abcd',
+        worktreePath: cwd,
+      }),
+    )
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-start-causal-owner-branch'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('message-start-causal-owner-branch'),
+          role: 'user',
+          text: 'Generate a causally settled branch.',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'approval-required',
+        createdAt: '2026-01-01T00:00:01.000Z',
+      }),
+    )
+    await harness.run(Deferred.await(generationStarted))
+
+    await harness.emitRuntimeEvent({
+      type: 'turn.started',
+      eventId: EventId.make('evt-causal-owner-turn-started'),
+      provider: ProviderDriverKind.make('codex'),
+      providerInstanceId: ProviderInstanceId.make('codex'),
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-1'),
+      createdAt: '2026-01-01T00:00:02.000Z',
+      payload: {},
+    })
+    await harness.emitRuntimeEvent({
+      type: 'turn.completed',
+      eventId: EventId.make('evt-causal-owner-turn-completed'),
+      provider: ProviderDriverKind.make('codex'),
+      providerInstanceId: ProviderInstanceId.make('codex'),
+      threadId: ThreadId.make('thread-1'),
+      turnId: asTurnId('turn-1'),
+      createdAt: '2026-01-01T00:00:03.000Z',
+      payload: { state: 'completed' },
+    })
+    await harness.drainIngestion()
+    await waitFor(async () =>
+    {
+      const model = await harness.readModel()
+      return model.threads[0]?.session?.status === 'ready'
+    })
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.checkpoint.revert',
+        commandId: CommandId.make('cmd-revert-after-causal-owner-branch'),
+        threadId: ThreadId.make('thread-1'),
+        turnCount: 0,
+        createdAt: '2026-01-01T00:00:04.000Z',
+      }),
+    )
+    const causalSequences = await harness.run(
+      harness.sql<{
+        readonly sourceSequence: number
+        readonly requestSourceSequence: number
+      }>`
+        SELECT
+          action.source_sequence AS "sourceSequence",
+          operation.request_source_sequence AS "requestSourceSequence"
+        FROM orchestration_reactor_actions AS action
+        CROSS JOIN checkpoint_revert_operations AS operation
+        WHERE action.effect_kind = 'first-turn.worktree-branch.generate'
+          AND operation.thread_id = 'thread-1'
+      `,
+    )
+    expect(causalSequences).toHaveLength(1)
+    expect(causalSequences[0]!.sourceSequence).toBeLessThan(
+      causalSequences[0]!.requestSourceSequence,
+    )
+
+    await harness.run(Deferred.succeed(releaseGeneration, undefined))
+    await harness.drain()
+
+    const readModel = await harness.readModel()
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+    expect(renamedBranch).toBe('456code/causal-branch-settlement')
+    expect(runGit(cwd, ['branch', '--show-current'])).toBe(renamedBranch)
+    expect(thread?.branch).toBe(renamedBranch)
+    expect(thread?.worktreePath).toBe(cwd)
   })
 
   it.each([
@@ -2678,298 +2873,294 @@ describe('ProviderCommandReactor', () =>
     expect(harness.stopSession.mock.calls.length).toBe(0)
   })
 
-  it('restarts an existing Codex thread on a compatible requested instance', async () =>
-  {
-    const harness = await createHarness()
-    const now = '2026-01-01T00:00:00.000Z'
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-compatible-codex-1'),
-        threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-compatible-codex-1'),
-          role: 'user',
-          text: 'first',
-          attachments: [],
-        },
+  it.each([
+    {
+      trigger: 'compatible Codex instance',
+      harness: undefined as undefined | { threadModelSelection: ModelSelection },
+      first: {
+        commandSuffix: 'compatible-codex',
+        text: 'first',
         modelSelection: {
           instanceId: ProviderInstanceId.make('codex'),
           model: 'gpt-5-codex',
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        createdAt: now,
-      }),
-    )
-
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-compatible-codex-2'),
-        threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-compatible-codex-2'),
-          role: 'user',
-          text: 'second',
-          attachments: [],
-        },
+        } satisfies ModelSelection,
+        runtimeMode: 'approval-required' as const,
+      },
+      prepareFirst: undefined as
+        | ((harness: Awaited<ReturnType<typeof createHarness>>, now: string) => Promise<void>)
+        | undefined,
+      between: undefined as
+        | ((harness: Awaited<ReturnType<typeof createHarness>>, now: string) => Promise<void>)
+        | undefined,
+      second: {
+        commandSuffix: 'compatible-codex',
+        text: 'second',
         modelSelection: {
           instanceId: ProviderInstanceId.make('codex_work'),
           model: 'gpt-5-codex',
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        createdAt: '2026-01-01T00:00:00.000Z',
-      }),
-    )
-
-    await waitFor(() => harness.sendTurn.mock.calls.length === 2)
-
-    expect(harness.startSession).toHaveBeenCalledTimes(2)
-    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
-      provider: ProviderDriverKind.make('codex'),
-      providerInstanceId: ProviderInstanceId.make('codex_work'),
-      resumeCursor: { opaque: 'resume-1' },
-    })
-
-    const readModel = await harness.readModel()
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
-    expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make('codex_work'))
-  })
-
-  it('restarts the provider session when the thread workspace changes', async () =>
-  {
-    const harness = await createHarness({
-      threadModelSelection: {
-        instanceId: ProviderInstanceId.make('claudeAgent'),
-        model: 'claude-sonnet-4-6',
+        } satisfies ModelSelection,
+        runtimeMode: 'approval-required' as const,
       },
-    })
-    const now = '2026-01-01T00:00:00.000Z'
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-workspace-1'),
-        threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-workspace-1'),
-          role: 'user',
-          text: 'first in project root',
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        createdAt: now,
-      }),
-    )
-
-    await waitFor(() => harness.startSession.mock.calls.length === 1)
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
-    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
-      cwd: '/tmp/provider-project',
-    })
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.meta.update',
-        commandId: CommandId.make('cmd-thread-worktree-change'),
-        threadId: ThreadId.make('thread-1'),
-        worktreePath: '/tmp/provider-project-worktree',
-      }),
-    )
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-workspace-2'),
-        threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-workspace-2'),
-          role: 'user',
-          text: 'second in worktree',
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        createdAt: now,
-      }),
-    )
-
-    await waitFor(() => harness.startSession.mock.calls.length === 2)
-    await waitFor(() => harness.sendTurn.mock.calls.length === 2)
-    expect(harness.stopSession.mock.calls.length).toBe(0)
-    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
-      threadId: ThreadId.make('thread-1'),
-      cwd: '/tmp/provider-project-worktree',
-      resumeCursor: { opaque: 'resume-1' },
-      modelSelection: {
-        instanceId: ProviderInstanceId.make('claudeAgent'),
-        model: 'claude-sonnet-4-6',
+      // runtime-mode restarts before the second turn; others restart on it
+      restartBeforeSecondTurn: false,
+      expectFirstStart: undefined as Record<string, unknown> | undefined,
+      expectSecondStart: {
+        provider: ProviderDriverKind.make('codex'),
+        providerInstanceId: ProviderInstanceId.make('codex_work'),
+        resumeCursor: { opaque: 'resume-1' },
       },
-      runtimeMode: 'approval-required',
-    })
-  })
-
-  it('restarts claude sessions when claude effort changes', async () =>
-  {
-    const harness = await createHarness({
-      threadModelSelection: {
-        instanceId: ProviderInstanceId.make('claudeAgent'),
-        model: 'claude-sonnet-4-6',
+      expectStopSessionCalls: undefined as number | undefined,
+      assertThread: async (harness: Awaited<ReturnType<typeof createHarness>>) =>
+      {
+        const readModel = await harness.readModel()
+        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+        expect(thread?.session?.providerInstanceId).toBe(ProviderInstanceId.make('codex_work'))
       },
-    })
-    const now = '2026-01-01T00:00:00.000Z'
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-claude-effort-1'),
+    },
+    {
+      trigger: 'thread workspace',
+      harness: {
+        threadModelSelection: {
+          instanceId: ProviderInstanceId.make('claudeAgent'),
+          model: 'claude-sonnet-4-6',
+        } satisfies ModelSelection,
+      },
+      first: {
+        commandSuffix: 'workspace',
+        text: 'first in project root',
+        modelSelection: undefined,
+        runtimeMode: 'approval-required' as const,
+      },
+      prepareFirst: undefined,
+      between: async (harness: Awaited<ReturnType<typeof createHarness>>) =>
+      {
+        await harness.run(
+          harness.engine.dispatch({
+            type: 'thread.meta.update',
+            commandId: CommandId.make('cmd-thread-worktree-change'),
+            threadId: ThreadId.make('thread-1'),
+            worktreePath: '/tmp/provider-project-worktree',
+          }),
+        )
+      },
+      second: {
+        commandSuffix: 'workspace',
+        text: 'second in worktree',
+        modelSelection: undefined,
+        runtimeMode: 'approval-required' as const,
+      },
+      restartBeforeSecondTurn: false,
+      expectFirstStart: { cwd: '/tmp/provider-project' },
+      expectSecondStart: {
         threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-claude-effort-1'),
-          role: 'user',
-          text: 'first claude turn',
-          attachments: [],
+        cwd: '/tmp/provider-project-worktree',
+        resumeCursor: { opaque: 'resume-1' },
+        modelSelection: {
+          instanceId: ProviderInstanceId.make('claudeAgent'),
+          model: 'claude-sonnet-4-6',
         },
+        runtimeMode: 'approval-required',
+      },
+      expectStopSessionCalls: 0,
+      assertThread: undefined,
+    },
+    {
+      trigger: 'claude effort',
+      harness: {
+        threadModelSelection: {
+          instanceId: ProviderInstanceId.make('claudeAgent'),
+          model: 'claude-sonnet-4-6',
+        } satisfies ModelSelection,
+      },
+      first: {
+        commandSuffix: 'claude-effort',
+        text: 'first claude turn',
         modelSelection: createModelSelection(
           ProviderInstanceId.make('claudeAgent'),
           'claude-sonnet-4-6',
           [{ id: 'effort', value: 'medium' }],
         ),
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        createdAt: now,
-      }),
-    )
-
-    await waitFor(() => harness.startSession.mock.calls.length === 1)
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-claude-effort-2'),
-        threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-claude-effort-2'),
-          role: 'user',
-          text: 'second claude turn',
-          attachments: [],
-        },
+        runtimeMode: 'approval-required' as const,
+      },
+      prepareFirst: undefined,
+      between: undefined,
+      second: {
+        commandSuffix: 'claude-effort',
+        text: 'second claude turn',
         modelSelection: createModelSelection(
           ProviderInstanceId.make('claudeAgent'),
           'claude-sonnet-4-6',
           [{ id: 'effort', value: 'max' }],
         ),
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        createdAt: now,
-      }),
-    )
-
-    await waitFor(() => harness.startSession.mock.calls.length === 2)
-    await waitFor(() => harness.sendTurn.mock.calls.length === 2)
-    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
-      resumeCursor: { opaque: 'resume-1' },
-      modelSelection: createModelSelection(
-        ProviderInstanceId.make('claudeAgent'),
-        'claude-sonnet-4-6',
-        [{ id: 'effort', value: 'max' }],
-      ),
-    })
-  })
-
-  it('restarts the provider session when runtime mode is updated on the thread', async () =>
-  {
-    const harness = await createHarness()
-    const now = '2026-01-01T00:00:00.000Z'
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.runtime-mode.set',
-        commandId: CommandId.make('cmd-runtime-mode-set-initial-full-access'),
-        threadId: ThreadId.make('thread-1'),
-        runtimeMode: 'full-access',
-        createdAt: now,
-      }),
-    )
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-runtime-mode-1'),
-        threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-runtime-mode-1'),
-          role: 'user',
-          text: 'first',
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'full-access',
-        createdAt: now,
-      }),
-    )
-
-    await waitFor(() => harness.startSession.mock.calls.length === 1)
-    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
-
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.runtime-mode.set',
-        commandId: CommandId.make('cmd-runtime-mode-set-1'),
-        threadId: ThreadId.make('thread-1'),
-        runtimeMode: 'approval-required',
-        createdAt: now,
-      }),
-    )
-
-    await waitFor(async () =>
+        runtimeMode: 'approval-required' as const,
+      },
+      restartBeforeSecondTurn: false,
+      expectFirstStart: undefined,
+      expectSecondStart: {
+        resumeCursor: { opaque: 'resume-1' },
+        modelSelection: createModelSelection(
+          ProviderInstanceId.make('claudeAgent'),
+          'claude-sonnet-4-6',
+          [{ id: 'effort', value: 'max' }],
+        ),
+      },
+      expectStopSessionCalls: undefined,
+      assertThread: undefined,
+    },
     {
-      const readModel = await harness.readModel()
-      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
-      return thread?.runtimeMode === 'approval-required'
-    })
-    await waitFor(() => harness.startSession.mock.calls.length === 2)
-    await harness.run(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-runtime-mode-2'),
+      trigger: 'runtime mode',
+      harness: undefined,
+      first: {
+        commandSuffix: 'runtime-mode',
+        text: 'first',
+        modelSelection: undefined,
+        runtimeMode: 'full-access' as const,
+      },
+      prepareFirst: async (harness: Awaited<ReturnType<typeof createHarness>>, now: string) =>
+      {
+        await harness.run(
+          harness.engine.dispatch({
+            type: 'thread.runtime-mode.set',
+            commandId: CommandId.make('cmd-runtime-mode-set-initial-full-access'),
+            threadId: ThreadId.make('thread-1'),
+            runtimeMode: 'full-access',
+            createdAt: now,
+          }),
+        )
+      },
+      between: async (harness: Awaited<ReturnType<typeof createHarness>>, now: string) =>
+      {
+        await harness.run(
+          harness.engine.dispatch({
+            type: 'thread.runtime-mode.set',
+            commandId: CommandId.make('cmd-runtime-mode-set-1'),
+            threadId: ThreadId.make('thread-1'),
+            runtimeMode: 'approval-required',
+            createdAt: now,
+          }),
+        )
+        await waitFor(async () =>
+        {
+          const readModel = await harness.readModel()
+          const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+          return thread?.runtimeMode === 'approval-required'
+        })
+        await waitFor(() => harness.startSession.mock.calls.length === 2)
+      },
+      second: {
+        commandSuffix: 'runtime-mode',
+        text: 'second',
+        modelSelection: undefined,
+        runtimeMode: 'full-access' as const,
+      },
+      restartBeforeSecondTurn: true,
+      expectFirstStart: undefined,
+      expectSecondStart: {
         threadId: ThreadId.make('thread-1'),
-        message: {
-          messageId: asMessageId('user-message-runtime-mode-2'),
-          role: 'user',
-          text: 'second',
-          attachments: [],
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'full-access',
-        createdAt: now,
-      }),
-    )
+        resumeCursor: { opaque: 'resume-1' },
+        runtimeMode: 'approval-required',
+      },
+      expectStopSessionCalls: 0,
+      assertThread: async (harness: Awaited<ReturnType<typeof createHarness>>) =>
+      {
+        expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
+          threadId: ThreadId.make('thread-1'),
+        })
+        const readModel = await harness.readModel()
+        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+        expect(thread?.session?.threadId).toBe('thread-1')
+        expect(thread?.session?.runtimeMode).toBe('approval-required')
+      },
+    },
+  ])(
+    'restarts the provider session when $trigger changes',
+    async ({
+      harness: harnessOptions,
+      first,
+      prepareFirst,
+      between,
+      second,
+      restartBeforeSecondTurn,
+      expectFirstStart,
+      expectSecondStart,
+      expectStopSessionCalls,
+      assertThread,
+    }) =>
+    {
+      const harness = await createHarness(harnessOptions)
+      const now = '2026-01-01T00:00:00.000Z'
 
-    await waitFor(() => harness.sendTurn.mock.calls.length === 2)
+      if (prepareFirst)
+      {
+        await prepareFirst(harness, now)
+      }
 
-    expect(harness.stopSession.mock.calls.length).toBe(0)
-    expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject({
-      threadId: ThreadId.make('thread-1'),
-      resumeCursor: { opaque: 'resume-1' },
-      runtimeMode: 'approval-required',
-    })
-    expect(harness.sendTurn.mock.calls[1]?.[0]).toMatchObject({
-      threadId: ThreadId.make('thread-1'),
-    })
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.turn.start',
+          commandId: CommandId.make(`cmd-turn-start-${first.commandSuffix}-1`),
+          threadId: ThreadId.make('thread-1'),
+          message: {
+            messageId: asMessageId(`user-message-${first.commandSuffix}-1`),
+            role: 'user',
+            text: first.text,
+            attachments: [],
+          },
+          ...(first.modelSelection ? { modelSelection: first.modelSelection } : {}),
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: first.runtimeMode,
+          createdAt: now,
+        }),
+      )
 
-    const readModel = await harness.readModel()
-    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
-    expect(thread?.session?.threadId).toBe('thread-1')
-    expect(thread?.session?.runtimeMode).toBe('approval-required')
-  })
+      await waitFor(() => harness.startSession.mock.calls.length === 1)
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+      if (expectFirstStart)
+      {
+        expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject(expectFirstStart)
+      }
+
+      if (between)
+      {
+        await between(harness, now)
+      }
+
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.turn.start',
+          commandId: CommandId.make(`cmd-turn-start-${second.commandSuffix}-2`),
+          threadId: ThreadId.make('thread-1'),
+          message: {
+            messageId: asMessageId(`user-message-${second.commandSuffix}-2`),
+            role: 'user',
+            text: second.text,
+            attachments: [],
+          },
+          ...(second.modelSelection ? { modelSelection: second.modelSelection } : {}),
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: second.runtimeMode,
+          createdAt: now,
+        }),
+      )
+
+      if (!restartBeforeSecondTurn)
+      {
+        await waitFor(() => harness.startSession.mock.calls.length === 2)
+      }
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2)
+
+      expect(harness.startSession).toHaveBeenCalledTimes(2)
+      expect(harness.startSession.mock.calls[1]?.[1]).toMatchObject(expectSecondStart)
+      if (expectStopSessionCalls !== undefined)
+      {
+        expect(harness.stopSession.mock.calls.length).toBe(expectStopSessionCalls)
+      }
+      if (assertThread)
+      {
+        await assertThread(harness)
+      }
+    },
+  )
 
   it('does not inject derived model options when restarting claude on runtime mode changes', async () =>
   {

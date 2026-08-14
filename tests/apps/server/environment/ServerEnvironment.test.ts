@@ -77,6 +77,8 @@ it.layer(NodeServices.layer)('ServerEnvironmentLive', (it) =>
       expect(second.capabilities.repositoryIdentity).toBe(true)
       expect(second.capabilities.connectionProbe).toBe(true)
       expect(second.capabilities.safeMdxDocument).toBe(true)
+      expect(second.capabilities.orchestrateRunExecutionV1).toBe(true)
+      expect(typeof second.capabilities.architectureImpact).toBe('boolean')
     }),
   )
 

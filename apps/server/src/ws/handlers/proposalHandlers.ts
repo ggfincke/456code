@@ -21,6 +21,7 @@ type ProposalRpcMethod =
   | typeof WS_METHODS.proposalsDiff
   | typeof WS_METHODS.proposalsNarrative
   | typeof WS_METHODS.proposalsFindByPlan
+  | typeof WS_METHODS.proposalsFindByOrchestrateRevision
   | typeof WS_METHODS.proposalsStartGeneration
   | typeof WS_METHODS.proposalsGetGeneration
   | typeof WS_METHODS.proposalsLatestGeneration
@@ -218,6 +219,64 @@ export function makeProposalRpcHandlers({
               operation: 'WsProposals.findByPlan',
               code: 'identity-mismatch',
               detail: 'The linked proposal is outside the authenticated thread scope.',
+              proposalId: linked.proposal.proposalId,
+            })
+          }
+          return linked
+        }),
+        { 'rpc.aggregate': 'proposal' },
+      ),
+    [WS_METHODS.proposalsFindByOrchestrateRevision]: (input) =>
+      observeRpcEffect(
+        WS_METHODS.proposalsFindByOrchestrateRevision,
+        Effect.gen(function* ()
+        {
+          const thread = yield* projectionSnapshotQuery
+            .getThreadDetailById(input.sourceThreadId)
+            .pipe(
+              Effect.mapError(
+                () =>
+                  new ProposalError({
+                    operation: 'WsProposals.findByOrchestrateRevision',
+                    code: 'identity-mismatch',
+                    detail: 'The proposal source thread could not be verified.',
+                  }),
+              ),
+            )
+          if (Option.isNone(thread))
+          {
+            return yield* new ProposalError({
+              operation: 'WsProposals.findByOrchestrateRevision',
+              code: 'identity-mismatch',
+              detail: 'The proposal source thread was not found.',
+            })
+          }
+          const exactPlan = thread.value.orchestratePlans.find(
+            (candidate) => candidate.runId === input.runId && candidate.revision === input.revision,
+          )
+          if (exactPlan === undefined) return null
+          const linked = yield* proposalService.findByOrchestrateRevision(input)
+          if (linked === null) return null
+          const environmentId = yield* serverEnvironment.getEnvironmentId
+          if (
+            linked.proposal.environmentId !== environmentId ||
+            linked.proposal.projectId !== thread.value.projectId ||
+            linked.proposal.sourceThreadId !== input.sourceThreadId ||
+            linked.link.proposalId !== linked.proposal.proposalId ||
+            linked.link.proposalRevision !== linked.revision.revision ||
+            linked.link.sourceThreadId !== input.sourceThreadId ||
+            linked.link.runId !== input.runId ||
+            linked.link.revision !== input.revision ||
+            linked.orchestratePlan.runId !== input.runId ||
+            linked.orchestratePlan.revision !== input.revision ||
+            linked.orchestratePlan.runId !== exactPlan.runId ||
+            linked.orchestratePlan.revision !== exactPlan.revision
+          )
+          {
+            return yield* new ProposalError({
+              operation: 'WsProposals.findByOrchestrateRevision',
+              code: 'identity-mismatch',
+              detail: 'The linked proposal is outside the authenticated orchestrate revision.',
               proposalId: linked.proposal.proposalId,
             })
           }

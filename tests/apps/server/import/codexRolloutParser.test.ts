@@ -1108,13 +1108,6 @@ describe('parseCodexRollout', () =>
               query: 'site:example.com Codex',
               queries: ['site:example.com Codex', 'Codex documentation'],
             },
-            item: {
-              input: {
-                type: 'search',
-                query: 'site:example.com Codex',
-                queries: ['site:example.com Codex', 'Codex documentation'],
-              },
-            },
           },
         },
       },

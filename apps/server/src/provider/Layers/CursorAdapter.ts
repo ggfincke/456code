@@ -8,6 +8,7 @@ import {
   EventId,
   type ProviderApprovalDecision,
   type ProviderInteractionMode,
+  normalizeCollaborationMode,
   type ProviderRuntimeEvent,
   type ProviderSession,
   type ProviderUserInputAnswers,
@@ -37,7 +38,6 @@ import type * as EffectAcpSchema from 'effect-acp/schema'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
-import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -73,6 +73,10 @@ import {
   extractTodosAsPlan,
 } from '../acp/CursorAcpExtension.ts'
 import { type CursorAdapterShape } from '../Services/CursorAdapter.ts'
+import type {
+  ProviderAdapterRuntimeEvent,
+  ProviderAdapterRuntimeSessionBinding,
+} from '../Services/ProviderAdapter.ts'
 import { makeAcpAdapterSessionLifecycle } from './AcpAdapterSessionLifecycle.ts'
 import { resolveCursorAcpBaseModelId } from './CursorProvider.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
@@ -125,6 +129,7 @@ interface PendingUserInput
 interface CursorSessionContext
 {
   readonly threadId: ThreadId
+  readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
   readonly acpSessionId: string
   readonly generationId: string
   session: ProviderSession
@@ -238,6 +243,7 @@ function isPlanMode(mode: AcpSessionMode): boolean
 
 function resolveRequestedModeId(input: {
   readonly interactionMode: ProviderInteractionMode | undefined
+  readonly orchestrate: boolean | undefined
   readonly runtimeMode: RuntimeMode
   readonly modeState: AcpSessionModeState | undefined
 }): string | undefined
@@ -248,7 +254,10 @@ function resolveRequestedModeId(input: {
     return undefined
   }
 
-  if (input.interactionMode === 'plan')
+  if (
+    normalizeCollaborationMode(input.interactionMode ?? 'default', input.orchestrate).baseMode ===
+    'plan'
+  )
   {
     return findModeByAliases(modeState.availableModes, ACP_PLAN_MODE_ALIASES)?.id
   }
@@ -275,6 +284,7 @@ function applyRequestedSessionConfiguration<E>(input: {
   readonly runtime: AcpSessionRuntime.AcpSessionRuntime['Service']
   readonly runtimeMode: RuntimeMode
   readonly interactionMode: ProviderInteractionMode | undefined
+  readonly orchestrate: boolean | undefined
   readonly modelSelection:
     | {
         readonly model: string
@@ -305,6 +315,7 @@ function applyRequestedSessionConfiguration<E>(input: {
 
     const requestedModeId = resolveRequestedModeId({
       interactionMode: input.interactionMode,
+      orchestrate: input.orchestrate,
       runtimeMode: input.runtimeMode,
       modeState: yield* input.runtime.getModeState,
     })
@@ -367,7 +378,7 @@ export function makeCursorAdapter(
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined
     const makeAcpNativeLoggers = yield* makeAcpNativeLoggerFactory()
 
-    const runtimeEventPubSub = yield* PubSub.unbounded<ProviderRuntimeEvent>()
+    const runtimeEventPubSub = yield* PubSub.unbounded<ProviderAdapterRuntimeEvent>()
 
     const nowIso = Effect.map(DateTime.now, DateTime.formatIso)
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
@@ -394,8 +405,10 @@ export function makeCursorAdapter(
         ),
       )
 
-    const offerRuntimeEvent = (event: ProviderRuntimeEvent) =>
-      PubSub.publish(runtimeEventPubSub, event).pipe(Effect.asVoid)
+    const offerRuntimeEvent = (
+      binding: ProviderAdapterRuntimeSessionBinding,
+      event: ProviderRuntimeEvent,
+    ) => PubSub.publish(runtimeEventPubSub, { binding, event }).pipe(Effect.asVoid)
 
     const sessionLifecycle = yield* makeAcpAdapterSessionLifecycle<
       CursorSessionContext,
@@ -411,7 +424,7 @@ export function makeCursorAdapter(
       emitSessionExited: (context, classification) =>
         Effect.gen(function* ()
         {
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(context.runtimeSessionBinding, {
             type: 'session.exited',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
@@ -483,6 +496,7 @@ export function makeCursorAdapter(
         }
         ctx.lastPlanFingerprint = fingerprint
         yield* offerRuntimeEvent(
+          ctx.runtimeSessionBinding,
           makeAcpPlanUpdatedEvent({
             stamp: yield* makeEventStamp(),
             provider: PROVIDER,
@@ -584,7 +598,7 @@ export function makeCursorAdapter(
             ? yield* options.resolveSettings
             : cursorSettings
 
-          const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId)
+          const mcpSession = input.mcp
           const acp = yield* makeCursorAcpRuntime({
             cursorSettings: effectiveCursorSettings,
             ...(options?.environment ? { environment: options.environment } : {}),
@@ -640,7 +654,7 @@ export function makeCursorAdapter(
                   const runtimeRequestId = RuntimeRequestId.make(requestId)
                   const answers = yield* Deferred.make<ProviderUserInputAnswers>()
                   pendingUserInputs.set(requestId, { answers })
-                  yield* offerRuntimeEvent({
+                  yield* offerRuntimeEvent(input.runtimeSessionBinding, {
                     type: 'user-input.requested',
                     ...(yield* makeEventStamp()),
                     provider: PROVIDER,
@@ -656,7 +670,7 @@ export function makeCursorAdapter(
                   })
                   const resolved = yield* Deferred.await(answers)
                   pendingUserInputs.delete(requestId)
-                  yield* offerRuntimeEvent({
+                  yield* offerRuntimeEvent(input.runtimeSessionBinding, {
                     type: 'user-input.resolved',
                     ...(yield* makeEventStamp()),
                     provider: PROVIDER,
@@ -679,7 +693,7 @@ export function makeCursorAdapter(
                     params,
                     'acp.cursor.extension',
                   )
-                  yield* offerRuntimeEvent({
+                  yield* offerRuntimeEvent(input.runtimeSessionBinding, {
                     type: 'turn.proposed.completed',
                     ...(yield* makeEventStamp()),
                     provider: PROVIDER,
@@ -754,6 +768,7 @@ export function makeCursorAdapter(
                     kind: permissionRequest.kind,
                   })
                   yield* offerRuntimeEvent(
+                    input.runtimeSessionBinding,
                     makeAcpRequestOpenedEvent({
                       stamp: yield* makeEventStamp(),
                       provider: PROVIDER,
@@ -774,6 +789,7 @@ export function makeCursorAdapter(
                   const resolved = yield* Deferred.await(decision)
                   pendingApprovals.delete(requestId)
                   yield* offerRuntimeEvent(
+                    input.runtimeSessionBinding,
                     makeAcpRequestResolvedEvent({
                       stamp: yield* makeEventStamp(),
                       provider: PROVIDER,
@@ -807,6 +823,7 @@ export function makeCursorAdapter(
             runtime: acp,
             runtimeMode: input.runtimeMode,
             interactionMode: undefined,
+            orchestrate: undefined,
             modelSelection: cursorModelSelection,
             mapError: ({ cause, method }) =>
               mapAcpToAdapterError(PROVIDER, input.threadId, method, cause),
@@ -833,6 +850,7 @@ export function makeCursorAdapter(
 
           ctx = {
             threadId: input.threadId,
+            runtimeSessionBinding: input.runtimeSessionBinding,
             acpSessionId: started.sessionId,
             generationId,
             session,
@@ -862,6 +880,7 @@ export function makeCursorAdapter(
                     return
                   case 'AssistantItemStarted':
                     yield* offerRuntimeEvent(
+                      ctx.runtimeSessionBinding,
                       makeAcpAssistantItemEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -874,6 +893,7 @@ export function makeCursorAdapter(
                     return
                   case 'AssistantItemCompleted':
                     yield* offerRuntimeEvent(
+                      ctx.runtimeSessionBinding,
                       makeAcpAssistantItemEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -907,6 +927,7 @@ export function makeCursorAdapter(
                       'acp.jsonrpc',
                     )
                     yield* offerRuntimeEvent(
+                      ctx.runtimeSessionBinding,
                       makeAcpToolCallEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -925,6 +946,7 @@ export function makeCursorAdapter(
                       'acp.jsonrpc',
                     )
                     yield* offerRuntimeEvent(
+                      ctx.runtimeSessionBinding,
                       makeAcpContentDeltaEvent({
                         stamp: yield* makeEventStamp(),
                         provider: PROVIDER,
@@ -954,21 +976,21 @@ export function makeCursorAdapter(
             finalizeSession(ctx, classifyAcpTermination(cause)),
           ).pipe(Effect.forkChild)
 
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(input.runtimeSessionBinding, {
             type: 'session.started',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: input.threadId,
             payload: { resume: started.initializeResult },
           })
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(input.runtimeSessionBinding, {
             type: 'session.state.changed',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
             threadId: input.threadId,
             payload: { state: 'ready', reason: 'Cursor ACP session ready' },
           })
-          yield* offerRuntimeEvent({
+          yield* offerRuntimeEvent(input.runtimeSessionBinding, {
             type: 'thread.started',
             ...(yield* makeEventStamp()),
             provider: PROVIDER,
@@ -1004,6 +1026,7 @@ export function makeCursorAdapter(
             runtime: ctx.acp,
             runtimeMode: ctx.session.runtimeMode,
             interactionMode: input.interactionMode,
+            orchestrate: input.orchestrate,
             modelSelection:
               model === undefined
                 ? undefined
@@ -1027,7 +1050,7 @@ export function makeCursorAdapter(
 
           if (steeringTurnId === undefined)
           {
-            yield* offerRuntimeEvent({
+            yield* offerRuntimeEvent(ctx.runtimeSessionBinding, {
               type: 'turn.started',
               ...(yield* makeEventStamp()),
               provider: PROVIDER,
@@ -1131,7 +1154,7 @@ export function makeCursorAdapter(
               // pending must leave the merged turn running.
               if (ctx.promptsInFlight === 1)
               {
-                yield* offerRuntimeEvent({
+                yield* offerRuntimeEvent(ctx.runtimeSessionBinding, {
                   type: 'turn.completed',
                   ...(yield* makeEventStamp()),
                   provider: PROVIDER,
@@ -1245,6 +1268,9 @@ export function makeCursorAdapter(
 
     const stopAll: CursorAdapterShape['stopAll'] = () => sessionLifecycle.stopAll(gracefulStop)
 
+    const getSessionRuntimeBinding: CursorAdapterShape['getSessionRuntimeBinding'] = (threadId) =>
+      Effect.sync(() => sessions.get(threadId)?.runtimeSessionBinding)
+
     yield* Effect.addFinalizer(() =>
       stopAll().pipe(
         Effect.catch((cause) =>
@@ -1270,6 +1296,7 @@ export function makeCursorAdapter(
       stopSession,
       listSessions,
       hasSession,
+      getSessionRuntimeBinding,
       stopAll,
       streamEvents,
     } satisfies CursorAdapterShape

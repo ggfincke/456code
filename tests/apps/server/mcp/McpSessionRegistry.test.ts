@@ -4,6 +4,9 @@ import * as NodeServices from '@effect/platform-node/NodeServices'
 import { expect, it } from '@effect/vitest'
 import { EnvironmentId, ProviderInstanceId, ThreadId, TurnId } from '@t3tools/contracts'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import * as Layer from 'effect/Layer'
+import * as Scope from 'effect/Scope'
 import { HttpServer } from 'effect/unstable/http'
 
 import * as ServerEnvironment from '../../../../apps/server/src/environment/ServerEnvironment.ts'
@@ -42,6 +45,7 @@ it.effect('stores only a token hash, resolves the bearer token, and revokes by t
     const issued = yield* registry.issue({
       threadId,
       providerInstanceId: ProviderInstanceId.make('codex'),
+      providerSessionGeneration: 1,
     })
     expect(issued.config.endpoint).toBe('http://127.0.0.1:43123/mcp')
     const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, '')
@@ -49,7 +53,9 @@ it.effect('stores only a token hash, resolves the bearer token, and revokes by t
 
     const resolved = yield* registry.resolve(token)
     expect(resolved?.threadId).toBe(threadId)
-    expect(resolved?.capabilities).toEqual(new Set(['preview', 'proposal', 'orchestrate']))
+    expect(resolved?.capabilities).toEqual(
+      new Set(['preview', 'proposal', 'orchestrate', 'architecture']),
+    )
     expect(resolved?.activeTurnId).toBeUndefined()
 
     const turnId = TurnId.make('turn-1')
@@ -82,6 +88,7 @@ it.effect('builds MCP endpoints from the bound server host', () =>
       const issued = yield* registry.issue({
         threadId: ThreadId.make(`thread-${hostname}`),
         providerInstanceId: ProviderInstanceId.make('codex'),
+        providerSessionGeneration: 1,
       })
       expect(issued.config.endpoint).toBe(expectedEndpoint)
     }
@@ -96,6 +103,7 @@ it.effect('expires credentials once their session stops showing signs of life', 
     const issued = yield* registry.issue({
       threadId: ThreadId.make('thread-2'),
       providerInstanceId: ProviderInstanceId.make('claude'),
+      providerSessionGeneration: 1,
     })
     const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, '')
     timestamp += 101
@@ -112,6 +120,7 @@ it.effect('keeps a credential alive across turns that never touch an MCP tool', 
     const issued = yield* registry.issue({
       threadId,
       providerInstanceId: ProviderInstanceId.make('claude'),
+      providerSessionGeneration: 1,
     })
     const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, '')
 
@@ -134,6 +143,7 @@ it.effect('does not keep credentials of other threads alive', () =>
     const issued = yield* registry.issue({
       threadId: ThreadId.make('thread-4'),
       providerInstanceId: ProviderInstanceId.make('codex'),
+      providerSessionGeneration: 1,
     })
     const token = issued.config.authorizationHeader.replace(/^Bearer\s+/, '')
 
@@ -142,5 +152,106 @@ it.effect('does not keep credentials of other threads alive', () =>
     timestamp += 2
 
     expect(yield* registry.resolve(token)).toBeUndefined()
+  }),
+)
+
+it.effect('replaces the credential owned by an existing provider thread', () =>
+  Effect.gen(function* ()
+  {
+    const registry = yield* makeRegistry(() => 1_000)
+    const threadId = ThreadId.make('thread-replaced')
+    const first = yield* registry.issue({
+      threadId,
+      providerInstanceId: ProviderInstanceId.make('codex'),
+      providerSessionGeneration: 1,
+    })
+    const second = yield* registry.issue({
+      threadId,
+      providerInstanceId: ProviderInstanceId.make('claude'),
+      providerSessionGeneration: 2,
+    })
+    const firstToken = first.config.authorizationHeader.replace(/^Bearer\s+/, '')
+    const secondToken = second.config.authorizationHeader.replace(/^Bearer\s+/, '')
+
+    expect(yield* registry.resolve(firstToken)).toBeUndefined()
+    expect((yield* registry.resolve(secondToken))?.providerInstanceId).toBe(
+      ProviderInstanceId.make('claude'),
+    )
+    yield* registry.revokeExact({
+      threadId,
+      providerInstanceId: ProviderInstanceId.make('codex'),
+      providerSessionGeneration: 1,
+    })
+    expect((yield* registry.resolve(secondToken))?.providerSessionGeneration).toBe(2)
+  }),
+)
+
+it.effect('keeps disabled provider composition explicit and inert', () =>
+  Effect.gen(function* ()
+  {
+    const registry = McpSessionRegistry.__testing.disabled
+    const threadId = ThreadId.make('thread-disabled')
+
+    expect(registry.enabled).toBe(false)
+    expect(
+      yield* registry.issue({
+        threadId,
+        providerInstanceId: ProviderInstanceId.make('codex'),
+        providerSessionGeneration: 1,
+      }),
+    ).toBeUndefined()
+    yield* registry.touch(threadId)
+    yield* registry.bindActiveTurn(threadId, TurnId.make('turn-disabled'))
+    yield* registry.revokeThread(threadId)
+    yield* registry.revokeAll
+    expect(yield* registry.resolve('unissued-token')).toBeUndefined()
+  }),
+)
+
+it.effect('isolates concurrent registry scopes and revokes only the scope that closes', () =>
+  Effect.gen(function* ()
+  {
+    const registryLayer = Layer.fresh(
+      McpSessionRegistry.enabledLayer.pipe(
+        Layer.provide(Layer.succeed(HttpServer.HttpServer, fakeHttpServer)),
+        Layer.provide(Layer.succeed(ServerEnvironment.ServerEnvironment, fakeEnvironment)),
+        Layer.provide(NodeServices.layer),
+      ),
+    )
+    const firstScope = yield* Scope.make()
+    const secondScope = yield* Scope.make()
+    const firstContext = yield* Layer.build(registryLayer).pipe(Scope.provide(firstScope))
+    const secondContext = yield* Layer.build(registryLayer).pipe(Scope.provide(secondScope))
+    const firstRegistry = yield* McpSessionRegistry.McpSessionRegistry.pipe(
+      Effect.provide(firstContext),
+    )
+    const secondRegistry = yield* McpSessionRegistry.McpSessionRegistry.pipe(
+      Effect.provide(secondContext),
+    )
+    const firstIssued = yield* firstRegistry.issue({
+      threadId: ThreadId.make('thread-shared-name'),
+      providerInstanceId: ProviderInstanceId.make('codex'),
+      providerSessionGeneration: 1,
+    })
+    const secondIssued = yield* secondRegistry.issue({
+      threadId: ThreadId.make('thread-shared-name'),
+      providerInstanceId: ProviderInstanceId.make('claude'),
+      providerSessionGeneration: 1,
+    })
+    if (!firstIssued || !secondIssued)
+    {
+      throw new Error('enabled registry did not issue credentials')
+    }
+    const firstToken = firstIssued.config.authorizationHeader.replace(/^Bearer\s+/, '')
+    const secondToken = secondIssued.config.authorizationHeader.replace(/^Bearer\s+/, '')
+
+    expect(yield* firstRegistry.resolve(secondToken)).toBeUndefined()
+    expect(yield* secondRegistry.resolve(firstToken)).toBeUndefined()
+    yield* Scope.close(firstScope, Exit.void)
+    expect(yield* firstRegistry.resolve(firstToken)).toBeUndefined()
+    expect((yield* secondRegistry.resolve(secondToken))?.providerInstanceId).toBe(
+      ProviderInstanceId.make('claude'),
+    )
+    yield* Scope.close(secondScope, Exit.void)
   }),
 )

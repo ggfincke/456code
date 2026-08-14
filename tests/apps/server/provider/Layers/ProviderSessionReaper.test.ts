@@ -28,6 +28,7 @@ import { ProviderValidationError } from '../../../../../apps/server/src/provider
 import { ProviderSessionReaper } from '../../../../../apps/server/src/provider/Services/ProviderSessionReaper.ts'
 import {
   ProviderService,
+  type ProviderSessionIdentityCapture,
   type ProviderServiceShape,
 } from '../../../../../apps/server/src/provider/Services/ProviderService.ts'
 import { ProviderSessionDirectoryLive } from '../../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts'
@@ -156,12 +157,14 @@ describe('ProviderSessionReaper', () =>
 
   async function createHarness(input: {
     readonly readModel: ReturnType<typeof makeReadModel>
+    readonly providerIdentities?: ReadonlyArray<ProviderSessionIdentityCapture>
     readonly stopSessionImplementation?: (input: {
       readonly threadId: ThreadId
     }) => ReturnType<ProviderServiceShape['stopSession']>
   })
   {
     const stoppedThreadIds = new Set<ThreadId>()
+    const providerIdentities = [...(input.providerIdentities ?? [])]
     const stopSession = vi.fn<ProviderServiceShape['stopSession']>(
       (request) =>
         (input.stopSessionImplementation
@@ -179,6 +182,55 @@ describe('ProviderSessionReaper', () =>
       respondToRequest: () => unsupported(),
       respondToUserInput: () => unsupported(),
       stopSession,
+      captureSessionIdentity: (request) =>
+        Effect.succeed(
+          Option.fromNullishOr(
+            providerIdentities.find(
+              (identity) =>
+                identity.threadId === request.threadId &&
+                (request.expectedProviderInstanceId === undefined ||
+                  identity.providerInstanceId === request.expectedProviderInstanceId),
+            ),
+          ),
+        ),
+      captureSessionIdentities: (request) =>
+        Effect.succeed(
+          providerIdentities.filter(
+            (identity) => request?.threadId === undefined || identity.threadId === request.threadId,
+          ),
+        ),
+      getSessionIdentityState: () => Effect.succeed(Option.none()),
+      matchesSessionIdentity: (identity) =>
+        Effect.succeed(
+          providerIdentities.some(
+            (current) =>
+              current.provider === identity.provider &&
+              current.providerInstanceId === identity.providerInstanceId &&
+              current.threadId === identity.threadId &&
+              current.sessionGeneration === identity.sessionGeneration,
+          ),
+        ),
+      stopSessionIfExact: vi.fn((identity) =>
+        Effect.sync(() =>
+        {
+          const identityIndex = providerIdentities.findIndex(
+            (current) =>
+              current.provider === identity.provider &&
+              current.providerInstanceId === identity.providerInstanceId &&
+              current.threadId === identity.threadId &&
+              current.sessionGeneration === identity.sessionGeneration,
+          )
+          if (identityIndex === -1)
+          {
+            return false
+          }
+          providerIdentities.splice(identityIndex, 1)
+          return true
+        }),
+      ),
+      getAdmissionHandoffHighWater: Effect.succeed(null),
+      resumeAdmissionAfterHandoff: Effect.void,
+      shutdown: Effect.succeed(0),
       listSessions: () => Effect.succeed([]),
       getCapabilities: () => Effect.succeed({ sessionModelSwitch: 'in-session' }),
       getInstanceInfo: (instanceId) =>
@@ -196,6 +248,8 @@ describe('ProviderSessionReaper', () =>
         })
       },
       rollbackConversation: () => unsupported(),
+      rollbackConversationIfExact: () => Effect.succeed(false),
+      getConversationTurnCountIfExact: () => Effect.succeed(Option.none()),
       streamEvents: Stream.empty,
     }
 
@@ -229,8 +283,55 @@ describe('ProviderSessionReaper', () =>
     )
 
     runtime = ManagedRuntime.make(layer)
-    return { stopSession, stoppedThreadIds }
+    return {
+      stopSession,
+      stopSessionIfExact: providerService.stopSessionIfExact,
+      stoppedThreadIds,
+      providerIdentities,
+    }
   }
+
+  it('reconciles every durable open generation without a live directory binding', async () =>
+  {
+    const firstThreadId = ThreadId.make('thread-reaper-orphan-first')
+    const secondThreadId = ThreadId.make('thread-reaper-orphan-second')
+    const harness = await createHarness({
+      readModel: makeReadModel([]),
+      providerIdentities: [
+        {
+          provider: ProviderDriverKind.make('codex'),
+          providerInstanceId: ProviderInstanceId.make('codex'),
+          threadId: firstThreadId,
+          sessionGeneration: 2,
+          createdAt: '2026-01-01T00:00:00.000Z',
+        },
+        {
+          provider: ProviderDriverKind.make('claudeAgent'),
+          providerInstanceId: ProviderInstanceId.make('claude'),
+          threadId: secondThreadId,
+          sessionGeneration: 5,
+          createdAt: '2026-01-01T00:00:01.000Z',
+        },
+      ],
+    })
+
+    const reaper = await runtime!.runPromise(Effect.service(ProviderSessionReaper))
+    scope = await Effect.runPromise(Scope.make('sequential'))
+    await Effect.runPromise(reaper.start().pipe(Scope.provide(scope)))
+
+    await waitFor(() => vi.mocked(harness.stopSessionIfExact).mock.calls.length === 2)
+
+    expect(
+      vi
+        .mocked(harness.stopSessionIfExact)
+        .mock.calls.map(
+          ([identity]) =>
+            `${identity.providerInstanceId}:${identity.threadId}:${identity.sessionGeneration}`,
+        ),
+    ).toEqual(['codex:thread-reaper-orphan-first:2', 'claude:thread-reaper-orphan-second:5'])
+    expect(harness.providerIdentities).toEqual([])
+    expect(harness.stopSession).not.toHaveBeenCalled()
+  })
 
   it('reaps stale persisted sessions without active turns', async () =>
   {

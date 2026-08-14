@@ -32,7 +32,7 @@ import { dedupeRemoteBranchesWithLocalMatches, normalizeGitRemoteUrl } from '@t3
 import { compactTraceAttributes } from '@t3tools/shared/observability'
 import { decodeJsonResult } from '@t3tools/shared/schemaJson'
 import { gitCommandDuration, gitCommandsTotal, withMetrics } from '../observability/Metrics.ts'
-import * as GitVcsDriver from './GitVcsDriver.ts'
+import type * as GitVcsDriver from './GitVcsDriver.ts'
 import {
   parseRemoteNames,
   parseRemoteNamesInGitOrder,
@@ -1026,10 +1026,13 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
       },
     ).pipe(Effect.map((result) => result.exitCode === 0))
 
-  const originRemoteExists = (cwd: string): Effect.Effect<boolean, GitCommandError> =>
-    executeGit('GitVcsDriver.originRemoteExists', cwd, ['remote', 'get-url', 'origin'], {
+  const remoteExists: GitVcsDriver.GitVcsDriver['Service']['remoteExists'] = (input) =>
+    executeGit('GitVcsDriver.remoteExists', input.cwd, ['remote', 'get-url', input.remoteName], {
       allowNonZeroExit: true,
     }).pipe(Effect.map((result) => result.exitCode === 0))
+
+  const originRemoteExists = (cwd: string): Effect.Effect<boolean, GitCommandError> =>
+    remoteExists({ cwd, remoteName: 'origin' })
 
   const listRemoteNames = (cwd: string): Effect.Effect<ReadonlyArray<string>, GitCommandError> =>
     runGitStdout('GitVcsDriver.listRemoteNames', cwd, ['remote']).pipe(
@@ -1220,6 +1223,70 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
     return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
   })
 
+  const resolveBranchRange: GitVcsDriver.GitVcsDriver['Service']['resolveBranchRange'] = Effect.fn(
+    'GitVcsDriver.resolveBranchRange',
+  )(function* (input)
+  {
+    const branch = yield* runGitStdout(
+      'GitVcsDriver.resolveBranchRange.currentBranch',
+      input.cwd,
+      ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+      true,
+    ).pipe(Effect.map((stdout) => stdout.trim()))
+    const baseRef =
+      input.baseRef ??
+      (branch.length === 0 ? null : yield* resolveBaseBranchForNoUpstream(input.cwd, branch))
+    if (baseRef === null || baseRef.length === 0)
+    {
+      return yield* new GitCommandError({
+        ...gitCommandContext({
+          operation: 'GitVcsDriver.resolveBranchRange.baseRef',
+          cwd: input.cwd,
+          args: ['merge-base', '<base>', 'HEAD'],
+        }),
+        detail: 'No branch-range base ref could be resolved.',
+      })
+    }
+
+    const [mergeBaseCommitOid, headCommitOid] = yield* Effect.all(
+      [
+        runGitStdout('GitVcsDriver.resolveBranchRange.mergeBase', input.cwd, [
+          'merge-base',
+          baseRef,
+          'HEAD',
+        ]).pipe(Effect.map((stdout) => stdout.trim())),
+        runGitStdout('GitVcsDriver.resolveBranchRange.headCommit', input.cwd, [
+          'rev-parse',
+          '--verify',
+          'HEAD^{commit}',
+        ]).pipe(Effect.map((stdout) => stdout.trim())),
+      ],
+      { concurrency: 2 },
+    )
+    const [baseTreeOid, headTreeOid] = yield* Effect.all(
+      [
+        runGitStdout('GitVcsDriver.resolveBranchRange.baseTree', input.cwd, [
+          'rev-parse',
+          '--verify',
+          `${mergeBaseCommitOid}^{tree}`,
+        ]).pipe(Effect.map((stdout) => stdout.trim())),
+        runGitStdout('GitVcsDriver.resolveBranchRange.headTree', input.cwd, [
+          'rev-parse',
+          '--verify',
+          `${headCommitOid}^{tree}`,
+        ]).pipe(Effect.map((stdout) => stdout.trim())),
+      ],
+      { concurrency: 2 },
+    )
+    return {
+      baseRef,
+      mergeBaseCommitOid,
+      headCommitOid,
+      baseTreeOid,
+      headTreeOid,
+    }
+  })
+
   const readStatusDetailsRemote = Effect.fn('readStatusDetailsRemote')(function* (cwd: string)
   {
     const branchResult = yield* executeGitWithStableDiagnostics(
@@ -1238,27 +1305,40 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
     {
       return NON_REPOSITORY_REMOTE_STATUS_DETAILS
     }
+    let branch: string | null
     if (branchResult.exitCode !== 0)
     {
       if (isNonRepositoryGitStderr(branchResult.stderr))
       {
         return NON_REPOSITORY_REMOTE_STATUS_DETAILS
       }
-      return yield* new GitCommandError({
-        ...gitCommandContext({
-          operation: 'GitVcsDriver.statusDetailsRemote.branch',
-          cwd,
-          args: ['rev-parse', '--abbrev-ref', 'HEAD'],
-        }),
-        detail: 'Git branch lookup failed.',
-        exitCode: branchResult.exitCode,
-        stdoutLength: branchResult.stdout.length,
-        stderrLength: branchResult.stderr.length,
-      })
-    }
+      if (!isUnbornHeadStderr(branchResult.stderr))
+      {
+        return yield* new GitCommandError({
+          ...gitCommandContext({
+            operation: 'GitVcsDriver.statusDetailsRemote.branch',
+            cwd,
+            args: ['rev-parse', '--abbrev-ref', 'HEAD'],
+          }),
+          detail: 'Git branch lookup failed.',
+          exitCode: branchResult.exitCode,
+          stdoutLength: branchResult.stdout.length,
+          stderrLength: branchResult.stderr.length,
+        })
+      }
 
-    const branchValue = branchResult.stdout.trim()
-    const branch = branchValue.length > 0 && branchValue !== 'HEAD' ? branchValue : null
+      const branchValue = yield* runGitStdout(
+        'GitVcsDriver.statusDetailsRemote.unbornBranch',
+        cwd,
+        ['symbolic-ref', '--quiet', '--short', 'HEAD'],
+      )
+      branch = branchValue.trim() || null
+    }
+    else
+    {
+      const branchValue = branchResult.stdout.trim()
+      branch = branchValue.length > 0 && branchValue !== 'HEAD' ? branchValue : null
+    }
     const upstream = yield* resolveCurrentUpstream(cwd)
     const upstreamRef = upstream?.upstreamRef ?? null
     let aheadCount = 0
@@ -2768,7 +2848,7 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
       ),
     )
 
-  return GitVcsDriver.GitVcsDriver.of({
+  return {
     execute,
     status,
     statusDetails,
@@ -2782,7 +2862,9 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
     pullCurrentBranch: (cwd) => withListRefsInvalidation(cwd, pullCurrentBranch(cwd)),
     readRangeContext,
     getReviewDiffPreview,
+    resolveBranchRange,
     readConfigValue,
+    resolveBaseBranch: resolveBaseBranchForNoUpstream,
     listRefs,
     createWorktree: (input) => withListRefsInvalidation(input.cwd, createWorktree(input)),
     fetchPullRequestBranch: (input) =>
@@ -2790,6 +2872,7 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
     ensureRemote: (input) => withListRefsInvalidation(input.cwd, ensureRemote(input)),
     resolvePrimaryRemoteName,
     fetchRemote: (input) => withListRefsInvalidation(input.cwd, fetchRemote(input)),
+    remoteExists,
     resolveRemoteTrackingCommit,
     fetchRemoteBranch: (input) => withListRefsInvalidation(input.cwd, fetchRemoteBranch(input)),
     fetchRemoteTrackingBranch: (input) =>
@@ -2801,5 +2884,5 @@ export const makeGitVcsDriverCore = Effect.fn('makeGitVcsDriverCore')(function* 
     switchRef: (input) => withListRefsInvalidation(input.cwd, switchRef(input)),
     initRepo: initRepoWithListRefsInvalidation,
     listLocalBranchNames,
-  })
+  } satisfies GitVcsDriver.GitVcsDriver['Service']
 })

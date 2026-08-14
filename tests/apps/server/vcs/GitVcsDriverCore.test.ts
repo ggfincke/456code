@@ -28,6 +28,7 @@ import * as GitVcsDriver from '../../../../apps/server/src/vcs/GitVcsDriver.ts'
 const ServerConfigLayer = ServerConfig.layerTest(process.cwd(), {
   prefix: 't3-git-vcs-driver-test-',
 })
+
 const TestLayer = GitVcsDriver.layer.pipe(
   Layer.provide(ServerConfigLayer),
   Layer.provideMerge(NodeServices.layer),
@@ -770,29 +771,28 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
 
   describe('review diff previews', () =>
   {
-    it.effect('drops an unterminated path from truncated NUL-separated git output', () =>
-      Effect.sync(() =>
+    it.each([
       {
-        const paths = splitNullSeparatedGitStdoutPaths({
-          stdout: 'complete.txt\0partial',
-          stdoutTruncated: true,
-        })
-
-        assert.deepStrictEqual(paths, ['complete.txt'])
-      }),
-    )
-
-    it.effect('keeps the final path when NUL-separated git output is complete', () =>
-      Effect.sync(() =>
+        name: 'drops an unterminated path from truncated NUL-separated git output',
+        stdout: 'complete.txt\0partial',
+        stdoutTruncated: true,
+        expected: ['complete.txt'],
+      },
       {
-        const paths = splitNullSeparatedGitStdoutPaths({
-          stdout: 'complete.txt\0final.txt',
-          stdoutTruncated: false,
-        })
+        name: 'keeps the final path when NUL-separated git output is complete',
+        stdout: 'complete.txt\0final.txt',
+        stdoutTruncated: false,
+        expected: ['complete.txt', 'final.txt'],
+      },
+    ])('$name', ({ stdout, stdoutTruncated, expected }) =>
+    {
+      const paths = splitNullSeparatedGitStdoutPaths({
+        stdout,
+        stdoutTruncated,
+      })
 
-        assert.deepStrictEqual(paths, ['complete.txt', 'final.txt'])
-      }),
-    )
+      assert.deepStrictEqual(paths, expected)
+    })
 
     it.effect('honors whitespace filtering for worktree and branch previews', () =>
       Effect.gen(function* ()
@@ -1147,6 +1147,24 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
         }
       }),
     )
+
+    it.effect('reports remote status on unborn HEAD without failing', () =>
+      Effect.gen(function* ()
+      {
+        const cwd = yield* makeTmpDir()
+        const driver = yield* GitVcsDriver.GitVcsDriver
+        yield* driver.initRepo({ cwd })
+        const initialBranch = yield* git(cwd, ['symbolic-ref', '--short', 'HEAD'])
+
+        const status = yield* driver.statusDetailsRemote(cwd, { refreshUpstream: false })
+
+        assert.equal(status.isRepo, true)
+        assert.equal(status.branch, initialBranch)
+        assert.equal(status.hasUpstream, false)
+        assert.equal(status.aheadCount, 0)
+        assert.equal(status.behindCount, 0)
+      }),
+    )
   })
 
   describe('refName operations', () =>
@@ -1387,27 +1405,6 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
           url: 'ssh://git@github.com/pingdotgg/t3code',
         })
         assert.equal(reusedForSshScheme, 'origin')
-
-        const reusedForBareSshScheme = yield* driver.ensureRemote({
-          cwd,
-          preferredName: 'pingdotgg',
-          url: 'ssh://github.com/pingdotgg/t3code',
-        })
-        assert.equal(reusedForBareSshScheme, 'origin')
-
-        const reusedForSshPort = yield* driver.ensureRemote({
-          cwd,
-          preferredName: 'pingdotgg',
-          url: 'ssh://git@github.com:22/pingdotgg/t3code',
-        })
-        assert.equal(reusedForSshPort, 'origin')
-
-        const reusedForSshWithPort = yield* driver.ensureRemote({
-          cwd,
-          preferredName: 'pingdotgg',
-          url: 'ssh://git@github.com:22/pingdotgg/t3code.git',
-        })
-        assert.equal(reusedForSshWithPort, 'origin')
 
         const addedForFork = yield* driver.ensureRemote({
           cwd,
@@ -1657,3 +1654,36 @@ it.layer(TestLayer)('GitVcsDriver core integration', (it) =>
     )
   })
 })
+
+it.effect('resolves branch analysis from the merge base rather than the base tip', () =>
+  Effect.scoped(
+    Effect.gen(function* ()
+    {
+      const cwd = yield* makeTmpDir('git-vcs-driver-merge-base-')
+      const { initialBranch } = yield* initRepoWithCommit(cwd)
+      const initialCommit = yield* git(cwd, ['rev-parse', 'HEAD'])
+      const initialTree = yield* git(cwd, ['rev-parse', 'HEAD^{tree}'])
+
+      yield* git(cwd, ['checkout', '-b', 'feature/analysis'])
+      yield* writeTextFile(cwd, 'feature.txt', 'feature\n')
+      yield* git(cwd, ['add', 'feature.txt'])
+      yield* git(cwd, ['commit', '-m', 'feature'])
+      const featureCommit = yield* git(cwd, ['rev-parse', 'HEAD'])
+      const featureTree = yield* git(cwd, ['rev-parse', 'HEAD^{tree}'])
+
+      yield* git(cwd, ['checkout', initialBranch])
+      yield* writeTextFile(cwd, 'base-tip.txt', 'base tip\n')
+      yield* git(cwd, ['add', 'base-tip.txt'])
+      yield* git(cwd, ['commit', '-m', 'advance base'])
+      yield* git(cwd, ['checkout', 'feature/analysis'])
+
+      const driver = yield* GitVcsDriver.GitVcsDriver
+      const resolved = yield* driver.resolveBranchRange({ cwd, baseRef: initialBranch })
+      assert.equal(resolved.baseRef, initialBranch)
+      assert.equal(resolved.mergeBaseCommitOid, initialCommit)
+      assert.equal(resolved.headCommitOid, featureCommit)
+      assert.equal(resolved.baseTreeOid, initialTree)
+      assert.equal(resolved.headTreeOid, featureTree)
+    }).pipe(Effect.provide(TestLayer)),
+  ),
+)

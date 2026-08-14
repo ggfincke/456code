@@ -10,6 +10,7 @@ import type { SqlError } from 'effect/unstable/sql/SqlError'
 
 import { runMigrations } from '../Migrations.ts'
 import { ServerConfig } from '../../config.ts'
+import * as ServerStorageLease from '../../serverStorageLease.ts'
 
 type RuntimeSqliteLayerConfig = {
   readonly filename: string
@@ -50,6 +51,7 @@ export const makeSqlitePersistenceLive = Effect.fn('makeSqlitePersistenceLive')(
 {
   const fs = yield* FileSystem.FileSystem
   const path = yield* Path.Path
+  yield* ServerStorageLease.assertLeasedStoragePath(dbPath)
   yield* fs.makeDirectory(path.dirname(dbPath), { recursive: true })
 
   return Layer.provideMerge(

@@ -17,6 +17,7 @@ export interface McpCredentialRequest
 {
   readonly threadId: ThreadId
   readonly providerInstanceId: ProviderInstanceId
+  readonly providerSessionGeneration: number
 }
 
 export interface McpIssuedCredential
@@ -26,7 +27,8 @@ export interface McpIssuedCredential
 
 export interface McpSessionRegistryShape
 {
-  readonly issue: (request: McpCredentialRequest) => Effect.Effect<McpIssuedCredential>
+  readonly enabled: boolean
+  readonly issue: (request: McpCredentialRequest) => Effect.Effect<McpIssuedCredential | undefined>
   readonly resolve: (
     rawToken: string,
   ) => Effect.Effect<McpInvocationContext.McpInvocationScope | undefined>
@@ -34,8 +36,18 @@ export interface McpSessionRegistryShape
   readonly touch: (threadId: ThreadId) => Effect.Effect<void>
   readonly bindActiveTurn: (threadId: ThreadId, turnId?: TurnId) => Effect.Effect<void>
   readonly revokeProviderSession: (providerSessionId: string) => Effect.Effect<void>
+  readonly revokeExact: (request: McpCredentialRequest) => Effect.Effect<void>
   readonly revokeThread: (threadId: ThreadId) => Effect.Effect<void>
   readonly revokeAll: Effect.Effect<void>
+}
+
+interface McpEnabledSessionRegistryShape extends Omit<
+  McpSessionRegistryShape,
+  'enabled' | 'issue'
+>
+{
+  readonly enabled: true
+  readonly issue: (request: McpCredentialRequest) => Effect.Effect<McpIssuedCredential>
 }
 
 export class McpSessionRegistry extends Context.Service<
@@ -114,7 +126,7 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
     return next.size === records.size ? records : next
   }
 
-  const issue: McpSessionRegistryShape['issue'] = Effect.fn('McpSessionRegistry.issue')(
+  const issue: McpEnabledSessionRegistryShape['issue'] = Effect.fn('McpSessionRegistry.issue')(
     function* (request)
     {
       const issuedAt = yield* currentTimeMillis
@@ -126,7 +138,8 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
         threadId: ThreadId.make(request.threadId),
         providerSessionId,
         providerInstanceId: ProviderInstanceId.make(request.providerInstanceId),
-        capabilities: new Set(['preview', 'proposal', 'orchestrate']),
+        providerSessionGeneration: request.providerSessionGeneration,
+        capabilities: new Set(['preview', 'proposal', 'orchestrate', 'architecture']),
         issuedAt,
       }
       yield* SynchronizedRef.update(state, ({ records }) =>
@@ -144,6 +157,7 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
           threadId: scope.threadId,
           providerSessionId,
           providerInstanceId: scope.providerInstanceId,
+          providerSessionGeneration: request.providerSessionGeneration,
           endpoint,
           authorizationHeader: `Bearer ${rawToken}`,
         },
@@ -217,7 +231,8 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
       records: new Map(Array.from(records).filter(([, record]) => !predicate(record))),
     }))
 
-  return McpSessionRegistry.of({
+  return {
+    enabled: true,
     issue,
     resolve,
     touch,
@@ -228,58 +243,50 @@ const makeWithOptions = Effect.fn('McpSessionRegistry.make')(function* (
         yield* revokeWhere((record) => record.scope.providerSessionId === providerSessionId)
       },
     ),
+    revokeExact: Effect.fn('McpSessionRegistry.revokeExact')(function* (request)
+    {
+      yield* revokeWhere(
+        (record) =>
+          record.scope.threadId === request.threadId &&
+          record.scope.providerInstanceId === request.providerInstanceId &&
+          record.scope.providerSessionGeneration === request.providerSessionGeneration,
+      )
+    }),
     revokeThread: Effect.fn('McpSessionRegistry.revokeThread')(function* (threadId)
     {
       yield* revokeWhere((record) => record.scope.threadId === threadId)
     }),
     revokeAll: SynchronizedRef.set(state, { records: new Map() }),
-  })
+  } satisfies McpEnabledSessionRegistryShape
 })
 
-let activeMcpSessionRegistry: McpSessionRegistryShape | undefined
+const make = Effect.acquireRelease(makeWithOptions(), (registry) => registry.revokeAll)
 
-const make = Effect.acquireRelease(
-  makeWithOptions().pipe(
-    Effect.tap((registry) =>
-      Effect.sync(() =>
-      {
-        activeMcpSessionRegistry = registry
-      }),
-    ),
-  ),
-  (registry) =>
-    Effect.sync(() =>
-    {
-      if (activeMcpSessionRegistry === registry)
-      {
-        activeMcpSessionRegistry = undefined
-      }
-    }),
-)
+const makeEnabledLayer = (): Layer.Layer<
+  McpSessionRegistry,
+  never,
+  Crypto.Crypto | HttpServer.HttpServer | ServerEnvironment.ServerEnvironment
+> => Layer.effect(McpSessionRegistry, make)
 
-export const layer = Layer.effect(McpSessionRegistry, make)
+export const enabledLayer = makeEnabledLayer()
 
-export const issueActiveMcpCredential = (
-  request: McpCredentialRequest,
-): Effect.Effect<McpIssuedCredential | undefined> =>
-  activeMcpSessionRegistry
-    ? activeMcpSessionRegistry.issue(request)
-    : Effect.succeed<McpIssuedCredential | undefined>(undefined)
+const disabled = McpSessionRegistry.of({
+  enabled: false,
+  issue: () => Effect.succeed(undefined),
+  resolve: () => Effect.succeed(undefined),
+  touch: () => Effect.void,
+  bindActiveTurn: () => Effect.void,
+  revokeProviderSession: () => Effect.void,
+  revokeExact: () => Effect.void,
+  revokeThread: () => Effect.void,
+  revokeAll: Effect.void,
+})
 
-// refreshes the thread credential from provider activity
-export const touchActiveMcpThread = (threadId: ThreadId): Effect.Effect<void> =>
-  activeMcpSessionRegistry ? activeMcpSessionRegistry.touch(threadId) : Effect.void
-
-export const bindActiveMcpTurn = (threadId: ThreadId, turnId?: TurnId): Effect.Effect<void> =>
-  activeMcpSessionRegistry ? activeMcpSessionRegistry.bindActiveTurn(threadId, turnId) : Effect.void
-
-export const revokeActiveMcpThread = (threadId: ThreadId): Effect.Effect<void> =>
-  activeMcpSessionRegistry ? activeMcpSessionRegistry.revokeThread(threadId) : Effect.void
-
-export const revokeAllActiveMcpCredentials = (): Effect.Effect<void> =>
-  activeMcpSessionRegistry ? activeMcpSessionRegistry.revokeAll : Effect.void
+// explicitly preserves provider operation when the mcp capability is not mounted
+export const disabledLayer = Layer.succeed(McpSessionRegistry, disabled)
 
 // exposed for tests.
 export const __testing = {
   make: makeWithOptions,
+  disabled,
 }

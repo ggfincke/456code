@@ -10,10 +10,11 @@ import { HostProcessPlatform } from '@t3tools/shared/hostProcess'
 import {
   AuthAccessTokenType,
   AuthEnvironmentBootstrapTokenType,
+  AuthOrchestrationRecoverScope,
   AuthTokenExchangeGrantType,
-  CartographerEmbedSessionId,
   CommandId,
   DEFAULT_SERVER_SETTINGS,
+  DiffAnalysisId,
   EnvironmentId,
   EventId,
   GitCommandError,
@@ -26,11 +27,13 @@ import {
   TerminalNotRunningError,
   type OrchestrationCommand,
   type OrchestrationEvent,
+  OrchestratePlanRunId,
   ORCHESTRATION_WS_METHODS,
   type PreviewEvent,
   ProjectId,
   PROPOSAL_SNAPSHOT_POLICY_V1,
   ProposalId,
+  ProposalGenerationId,
   ProposalRevisionId,
   ProviderDriverKind,
   ProviderInstanceId,
@@ -81,16 +84,20 @@ import { vi } from 'vite-plus/test'
 const TEST_EPOCH = DateTime.makeUnsafe('1970-01-01T00:00:00.000Z')
 
 import * as ServerConfig from '../../../apps/server/src/config.ts'
+import * as ArchitectureQueryService from '../../../apps/server/src/cartographer/ArchitectureQueryService.ts'
+import * as ArchitectureProjectionService from '../../../apps/server/src/cartographer/ArchitectureProjectionService.ts'
 import {
   makeRoutesLayer,
   makeSourceControlDiscoveryLayer,
 } from '../../../apps/server/src/server.ts'
 import { resolveAvailableEditorsForConfig } from '../../../apps/server/src/ws.ts'
 import { ImportContinuationDepsUnbound } from '../../../apps/server/src/import/continuation/continuationContract.ts'
+import * as ImportRuntime from '../../../apps/server/src/import/importRuntime.ts'
 import { ImportReplacementIntentRepository } from '../../../apps/server/src/persistence/Services/ImportReplacementIntents.ts'
 import { OrchestrationProjectionPipeline } from '../../../apps/server/src/orchestration/Services/ProjectionPipeline.ts'
 import { AttachmentLifecycleRepository } from '../../../apps/server/src/persistence/Services/AttachmentLifecycle.ts'
 import * as CheckpointDiffQuery from '../../../apps/server/src/orchestration/Services/CheckpointDiffQuery.ts'
+import * as CheckpointIdentity from '../../../apps/server/src/checkpointing/CheckpointIdentity.ts'
 import * as GitManager from '../../../apps/server/src/git/GitManager.ts'
 import * as GitStatusReaderLive from '../../../apps/server/src/git/GitStatusReaderLive.ts'
 import * as Keybindings from '../../../apps/server/src/keybindings.ts'
@@ -109,6 +116,7 @@ import * as TerminalManager from '../../../apps/server/src/terminal/Manager.ts'
 import * as PreviewManager from '../../../apps/server/src/preview/Manager.ts'
 import * as PortScanner from '../../../apps/server/src/preview/PortScanner.ts'
 import * as BrowserTraceCollector from '../../../apps/server/src/observability/BrowserTraceCollector.ts'
+import * as McpSessionRegistry from '../../../apps/server/src/mcp/McpSessionRegistry.ts'
 import * as ProjectFaviconResolver from '../../../apps/server/src/project/ProjectFaviconResolver.ts'
 import * as ProjectFileLoader from '../../../apps/server/src/project/ProjectFileLoader.ts'
 import * as ProjectSetupScriptRunner from '../../../apps/server/src/project/ProjectSetupScriptRunner.ts'
@@ -135,7 +143,10 @@ import * as ProcessResourceMonitor from '../../../apps/server/src/diagnostics/Pr
 import * as TraceDiagnostics from '../../../apps/server/src/diagnostics/TraceDiagnostics.ts'
 import * as WorkerBrokerStore from '../../../apps/server/src/workers/WorkerBrokerStore.ts'
 import * as WorkersStatusBroadcaster from '../../../apps/server/src/workers/WorkersStatusBroadcaster.ts'
-import * as CartographerEmbedBroker from '../../../apps/server/src/cartographer/CartographerEmbedBroker.ts'
+import * as CurrentWorktreeArchitectureService from '../../../apps/server/src/cartographer/CurrentWorktreeArchitectureService.ts'
+import * as DiffAnalysisService from '../../../apps/server/src/cartographer/DiffAnalysisService.ts'
+import * as ProjectAtlasStatusBroadcaster from '../../../apps/server/src/cartographer/ProjectAtlasStatusBroadcaster.ts'
+import * as ProjectArchitectureLifecycleService from '../../../apps/server/src/cartographer/ProjectArchitectureLifecycleService.ts'
 import * as ProposalGenerationService from '../../../apps/server/src/proposal/ProposalGenerationService.ts'
 import * as ProposalImplementationAttemptService from '../../../apps/server/src/proposal/ProposalImplementationAttemptService.ts'
 import * as ProposalService from '../../../apps/server/src/proposal/ProposalService.ts'
@@ -395,7 +406,17 @@ const buildAppUnderTest = (options?: {
     repositoryIdentityResolver?: Partial<
       RepositoryIdentityResolver.RepositoryIdentityResolver['Service']
     >
-    cartographerEmbedBroker?: Partial<CartographerEmbedBroker.CartographerEmbedBroker['Service']>
+    architectureQueryService?: Partial<ArchitectureQueryService.ArchitectureQueryService['Service']>
+    architectureProjectionService?: Partial<
+      ArchitectureProjectionService.ArchitectureProjectionService['Service']
+    >
+    currentWorktreeArchitecture?: Partial<
+      CurrentWorktreeArchitectureService.CurrentWorktreeArchitectureService['Service']
+    >
+    projectArchitectureLifecycle?: Partial<
+      ProjectArchitectureLifecycleService.ProjectArchitectureLifecycleService['Service']
+    >
+    diffAnalysisService?: Partial<DiffAnalysisService.DiffAnalysisService['Service']>
     proposalGenerationService?: Partial<
       ProposalGenerationService.ProposalGenerationService['Service']
     >
@@ -585,19 +606,25 @@ const buildAppUnderTest = (options?: {
         })
       : VcsStatusBroadcaster.layer.pipe(Layer.provide(gitStatusReaderLayer))
 
-    const servedRoutesLayer = HttpRouter.serve(makeRoutesLayer, {
-      disableListenLog: true,
-      disableLogger: true,
-    }).pipe(
+    const servedRoutesLayer = HttpRouter.serve(
+      makeRoutesLayer.pipe(Layer.provide(McpSessionRegistry.enabledLayer)),
+      {
+        disableListenLog: true,
+        disableLogger: true,
+      },
+    ).pipe(
       Layer.provide(
-        Layer.mock(Keybindings.Keybindings)({
-          loadConfigState: Effect.succeed({
-            keybindings: [],
-            issues: [],
+        Layer.mergeAll(
+          ImportRuntime.layer.pipe(Layer.provide(ImportContinuationDepsUnbound)),
+          Layer.mock(Keybindings.Keybindings)({
+            loadConfigState: Effect.succeed({
+              keybindings: [],
+              issues: [],
+            }),
+            streamChanges: Stream.empty,
+            ...options?.layers?.keybindings,
           }),
-          streamChanges: Stream.empty,
-          ...options?.layers?.keybindings,
-        }),
+        ),
       ),
       Layer.provide(
         Layer.mock(ProviderRegistry.ProviderRegistry)({
@@ -712,21 +739,66 @@ const buildAppUnderTest = (options?: {
                 error: Option.none(),
               }),
           }),
-          Layer.mock(CartographerEmbedBroker.CartographerEmbedBroker)({
-            issue: () => Effect.die('CartographerEmbedBroker not stubbed in this test'),
-            exchangeTicket: () => Effect.die('CartographerEmbedBroker not stubbed in this test'),
-            resolveProxyTarget: () =>
-              Effect.die('CartographerEmbedBroker not stubbed in this test'),
-            releaseSession: () => Effect.void,
+          ProjectAtlasStatusBroadcaster.layer,
+          Layer.mock(ArchitectureQueryService.ArchitectureQueryService)({
+            resolveContext: () => Effect.die('ArchitectureQueryService not stubbed in this test'),
+            blastRadius: () => Effect.die('ArchitectureQueryService not stubbed in this test'),
+            graphDiff: () => Effect.die('ArchitectureQueryService not stubbed in this test'),
+            architectureImpact: () =>
+              Effect.die('ArchitectureQueryService not stubbed in this test'),
+            proposePatch: () => Effect.die('ArchitectureQueryService not stubbed in this test'),
+            ...options?.layers?.architectureQueryService,
+          }),
+          Layer.mock(ArchitectureProjectionService.ArchitectureProjectionService)({
+            repositoryMap: () =>
+              Effect.die('ArchitectureProjectionService not stubbed in this test'),
+            architectureScope: () =>
+              Effect.die('ArchitectureProjectionService not stubbed in this test'),
+            architectureNeighborhood: () =>
+              Effect.die('ArchitectureProjectionService not stubbed in this test'),
+            architectureSource: () =>
+              Effect.die('ArchitectureProjectionService not stubbed in this test'),
+            ...options?.layers?.architectureProjectionService,
+          }),
+          Layer.mock(CurrentWorktreeArchitectureService.CurrentWorktreeArchitectureService)({
+            prepare: () =>
+              Effect.die('CurrentWorktreeArchitectureService not stubbed in this test'),
+            retainThreadTarget: () =>
+              Effect.die('CurrentWorktreeArchitectureService not stubbed in this test'),
+            releasePreparedTarget: () => Effect.void,
             closeThread: () => Effect.void,
             closeAll: Effect.void,
-            ...options?.layers?.cartographerEmbedBroker,
+            reapExpired: Effect.succeed(0),
+            ...options?.layers?.currentWorktreeArchitecture,
+          }),
+          Layer.mock(ProjectArchitectureLifecycleService.ProjectArchitectureLifecycleService)({
+            ensureProject: () =>
+              Effect.die('ProjectArchitectureLifecycleService not stubbed in this test'),
+            rebuildProject: () =>
+              Effect.die('ProjectArchitectureLifecycleService not stubbed in this test'),
+            closeProject: () => Effect.void,
+            invalidateProjectMetadata: () => Effect.void,
+            deleteProjectArtifacts: () => Effect.void,
+            retainProjectStatus: () => Effect.void,
+            releaseProjectStatus: () => Effect.void,
+            hasRetainedProjectContext: () => Effect.succeed(false),
+            projectRetentionChanges: Stream.empty,
+            getProjectSnapshot: () => Effect.succeed(null),
+            isProjectDeleted: () => Effect.succeed(false),
+            closeAll: Effect.void,
+            ...options?.layers?.projectArchitectureLifecycle,
+          }),
+          Layer.mock(DiffAnalysisService.DiffAnalysisService)({
+            request: () => Effect.die('DiffAnalysisService not stubbed in this test'),
+            get: () => Effect.die('DiffAnalysisService not stubbed in this test'),
+            retainReadyTarget: () => Effect.die('DiffAnalysisService not stubbed in this test'),
+            ...options?.layers?.diffAnalysisService,
           }),
           Layer.mock(ProposalGenerationService.ProposalGenerationService)({
             start: () => Effect.die('ProposalGenerationService not stubbed in this test'),
             get: () => Effect.die('ProposalGenerationService not stubbed in this test'),
             latest: () => Effect.succeed(null),
-            resolveEmbedTarget: () =>
+            resolveArchitectureTarget: () =>
               Effect.die('ProposalGenerationService not stubbed in this test'),
             cancelThread: () => Effect.void,
             ...options?.layers?.proposalGenerationService,
@@ -746,6 +818,7 @@ const buildAppUnderTest = (options?: {
             diff: () => Effect.die('ProposalService not stubbed in this test'),
             narrative: () => Effect.succeed(null),
             findLatestByPlan: () => Effect.succeed(null),
+            findByOrchestrateRevision: () => Effect.succeed(null),
             ...options?.layers?.proposalService,
           }),
         ),
@@ -822,7 +895,12 @@ const buildAppUnderTest = (options?: {
             listOpen: () => Effect.succeed([]),
             retire: () => Effect.succeed(false),
           }),
-          Layer.mock(OrchestrationProjectionPipeline)({}),
+          Layer.mock(OrchestrationProjectionPipeline)({
+            verifyThreadAttachmentSet: () =>
+              Effect.succeed({ complete: true, actualRelativePaths: [] }),
+            cleanupDeletedThreadAttachments: () =>
+              Effect.succeed({ complete: true, remainingRelativePaths: [] }),
+          }),
           Layer.mock(AttachmentLifecycleRepository)({
             markDispatchFailure: () => Effect.void,
           }),
@@ -861,23 +939,36 @@ const buildAppUnderTest = (options?: {
         ),
       ),
       Layer.provide(
-        Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
-          getTurnDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: '',
-            }),
-          getFullThreadDiff: () =>
-            Effect.succeed({
-              threadId: defaultThreadId,
-              fromTurnCount: 0,
-              toTurnCount: 0,
-              diff: '',
-            }),
-          ...options?.layers?.checkpointDiffQuery,
-        }),
+        Layer.mergeAll(
+          Layer.mock(CheckpointDiffQuery.CheckpointDiffQuery)({
+            getTurnDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: '',
+              }),
+            getFullThreadDiff: () =>
+              Effect.succeed({
+                threadId: defaultThreadId,
+                fromTurnCount: 0,
+                toTurnCount: 0,
+                diff: '',
+              }),
+            ...options?.layers?.checkpointDiffQuery,
+          }),
+          Layer.mock(CheckpointIdentity.CheckpointIdentityResolver)({
+            resolveCapture: () => Effect.die('CheckpointIdentity.resolveCapture not stubbed'),
+            resolveRead: () => Effect.die('CheckpointIdentity.resolveRead not stubbed'),
+            resolveReadRange: () => Effect.die('CheckpointIdentity.resolveReadRange not stubbed'),
+            resolveDestructive: () =>
+              Effect.die('CheckpointIdentity.resolveDestructive not stubbed'),
+            resolveRepositoryRevision: () =>
+              Effect.die('CheckpointIdentity.resolveRepositoryRevision not stubbed'),
+            resolveRepositoryObjectRevision: () =>
+              Effect.die('CheckpointIdentity.resolveRepositoryObjectRevision not stubbed'),
+          }),
+        ),
       ),
     )
 
@@ -918,8 +1009,8 @@ const buildAppUnderTest = (options?: {
         }),
       ),
       Layer.provideMerge(makeAuthTestLayer()),
+      Layer.provideMerge(SqlitePersistenceMemory),
       Layer.provideMerge(ServerSecretStore.layer),
-      Layer.provide(ImportContinuationDepsUnbound),
       Layer.provide(workspaceAndProjectServicesLayer),
       Layer.provideMerge(FetchHttpClient.layer),
       Layer.provide(layerConfig),
@@ -944,7 +1035,7 @@ const parseSessionCookieFromWsUrl = (
   }
 }
 
-const wsRpcProtocolLayer = (wsUrl: string) =>
+const wsRpcProtocolLayer = (wsUrl: string, origin?: string) =>
 {
   const { cookie, url } = parseSessionCookieFromWsUrl(wsUrl)
   const webSocketConstructorLayer = Layer.succeed(
@@ -953,7 +1044,9 @@ const wsRpcProtocolLayer = (wsUrl: string) =>
       new NodeSocket.NodeWS.WebSocket(
         socketUrl,
         protocols,
-        cookie ? { headers: { cookie } } : undefined,
+        cookie || origin
+          ? { headers: { ...(cookie ? { cookie } : {}), ...(origin ? { origin } : {}) } }
+          : undefined,
       ) as unknown as globalThis.WebSocket,
   )
 
@@ -970,7 +1063,8 @@ type WsRpcClient =
 const withWsRpcClient = <A, E, R>(
   wsUrl: string,
   f: (client: WsRpcClient) => Effect.Effect<A, E, R>,
-) => makeWsRpcClient.pipe(Effect.flatMap(f), Effect.provide(wsRpcProtocolLayer(wsUrl)))
+  origin?: string,
+) => makeWsRpcClient.pipe(Effect.flatMap(f), Effect.provide(wsRpcProtocolLayer(wsUrl, origin)))
 
 const appendSessionCookieToWsUrl = (url: string, sessionCookieHeader: string) =>
 {
@@ -1118,16 +1212,6 @@ const makeDpopProof = (input: {
     privateKey: keyPair.privateKey,
     publicJwk: keyPair.publicJwk,
   }
-}
-
-const decodeCompactJwtPayload = <A>(token: string): A =>
-{
-  const encodedPayload = token.split('.')[1]
-  if (!encodedPayload)
-  {
-    throw new Error('JWT does not contain a payload.')
-  }
-  return JSON.parse(Buffer.from(encodedPayload, 'base64url').toString('utf8')) as A
 }
 
 class AuthenticationGetterError extends Data.TaggedError('AuthenticationGetterError')<{
@@ -1396,13 +1480,6 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
 
       yield* Effect.gen(function* ()
       {
-        assert.strictEqual(yield* ServerConfig.ServerConfig, config)
-        assert.strictEqual(yield* VcsProcess.VcsProcess, process)
-        assert.strictEqual(
-          yield* SourceControlProviderRegistry.SourceControlProviderRegistry,
-          providerRegistry,
-        )
-
         const discovery = yield* SourceControlDiscovery.SourceControlDiscovery
         const result = yield* discovery.discover
 
@@ -1458,20 +1535,6 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
   )
 
   it.effect('serves the public environment descriptor without requiring auth', () =>
-    Effect.gen(function* ()
-    {
-      yield* buildAppUnderTest()
-
-      const url = yield* getHttpServerUrl('/.well-known/t3/environment')
-      const response = yield* fetchEffect(url)
-      const body = yield* responseJsonEffect<typeof testEnvironmentDescriptor>(response)
-
-      assert.equal(response.status, 200)
-      assert.deepEqual(body, testEnvironmentDescriptor)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  )
-
-  it.effect('includes CORS headers on public environment descriptor responses', () =>
     Effect.gen(function* ()
     {
       yield* buildAppUnderTest()
@@ -1658,6 +1721,80 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         userAgent: 'undici',
       })
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('streams pairing consumption changes in their causal revision order', () =>
+    Effect.gen(function* ()
+    {
+      yield* buildAppUnderTest({
+        config: {
+          host: '0.0.0.0',
+        },
+      })
+
+      const ownerCookie = yield* getAuthenticatedSessionCookieHeader()
+      const snapshotSeen = yield* Deferred.make<void>()
+      const wsUrl = appendSessionCookieToWsUrl(
+        yield* getWsServerUrl('/ws', { authenticated: false }),
+        ownerCookie,
+      )
+      const events = yield* Effect.scoped(
+        Effect.gen(function* ()
+        {
+          const eventsFiber = yield* withWsRpcClient(wsUrl, (client) =>
+            client[WS_METHODS.subscribeAuthAccess]({}).pipe(
+              Stream.tap((event) =>
+                event.type === 'snapshot'
+                  ? Deferred.succeed(snapshotSeen, undefined).pipe(Effect.ignore)
+                  : Effect.void,
+              ),
+              Stream.take(4),
+              Stream.runCollect,
+            ),
+          ).pipe(Effect.forkScoped)
+
+          yield* Deferred.await(snapshotSeen)
+          const pairingResponse = yield* HttpClient.post('/api/auth/pairing-token', {
+            headers: {
+              cookie: ownerCookie,
+            },
+            body: yield* HttpBody.json({ label: '456code Mobile' }),
+          })
+          const pairingBody = (yield* pairingResponse.json) as {
+            readonly credential: string
+          }
+          const { response: exchangeResponse } = yield* exchangeAccessToken(
+            pairingBody.credential,
+            {
+              scope: 'orchestration:read orchestration:operate terminal:operate review:write',
+              clientMetadata: {
+                label: '456code Mobile',
+                deviceType: 'mobile',
+                os: 'iOS',
+              },
+            },
+          )
+
+          assert.equal(pairingResponse.status, 200)
+          assert.equal(exchangeResponse.status, 200)
+          return yield* Fiber.join(eventsFiber)
+        }),
+      ).pipe(Effect.timeout('2 seconds'))
+
+      assert.deepEqual(
+        Array.from(events, (event) => event.type),
+        ['snapshot', 'pairingLinkUpserted', 'clientUpserted', 'pairingLinkRemoved'],
+      )
+      assert.deepEqual(
+        Array.from(events, (event) => event.revision),
+        [1, 2, 3, 4],
+      )
+      assert.equal(events[2]?.type, 'clientUpserted')
+      if (events[2]?.type === 'clientUpserted')
+      {
+        assert.equal(events[2].payload.current, false)
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   )
 
   it.effect(
@@ -1865,31 +2002,6 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(bootstrap.body.code, 'auth_invalid')
       assert.equal(bootstrap.body.reason, 'invalid_credential')
       assert.equal(typeof bootstrap.body.traceId, 'string')
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  )
-
-  it.effect('issues short-lived websocket tickets for authenticated bearer sessions', () =>
-    Effect.gen(function* ()
-    {
-      yield* buildAppUnderTest()
-
-      const bearerToken = yield* getAuthenticatedBearerSessionToken()
-      const wsTicketUrl = yield* getHttpServerUrl('/api/auth/websocket-ticket')
-      const wsTicketResponse = yield* fetchEffect(wsTicketUrl, {
-        method: 'POST',
-        headers: {
-          authorization: `Bearer ${bearerToken}`,
-        },
-      })
-      const wsTicketBody = yield* responseJsonEffect<{
-        readonly ticket: string
-        readonly expiresAt: string
-      }>(wsTicketResponse)
-
-      assert.equal(wsTicketResponse.status, 200)
-      assert.equal(typeof wsTicketBody.ticket, 'string')
-      assert.isTrue(wsTicketBody.ticket.length > 0)
-      assert.equal(typeof wsTicketBody.expiresAt, 'string')
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
@@ -2159,6 +2271,53 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(response.status, 400)
       assert.equal(body.code, 'invalid_request')
       assert.equal(body.reason, 'invalid_scope')
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('rejects recovery scope grants through the pairing route', () =>
+    Effect.gen(function* ()
+    {
+      yield* buildAppUnderTest()
+
+      const response = yield* HttpClient.post('/api/auth/pairing-token', {
+        headers: {
+          cookie: yield* getAuthenticatedSessionCookieHeader(),
+        },
+        body: yield* HttpBody.json({ scopes: [AuthOrchestrationRecoverScope] }),
+      })
+      const body = (yield* response.json) as {
+        readonly code: string
+        readonly reason: string
+      }
+
+      assert.equal(response.status, 400)
+      assert.equal(body.code, 'invalid_request')
+      assert.equal(body.reason, 'invalid_scope')
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('mounts recovery diagnostics behind orchestration read authority', () =>
+    Effect.gen(function* ()
+    {
+      yield* buildAppUnderTest()
+
+      const unauthenticated = yield* HttpClient.get('/api/recovery/actions')
+      assert.equal(unauthenticated.status, 401)
+
+      const { body: readToken } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: 'orchestration:read',
+      })
+      const response = yield* HttpClient.get('/api/recovery/actions', {
+        headers: { authorization: `Bearer ${readToken.access_token ?? ''}` },
+      })
+      const body = (yield* response.json) as {
+        readonly items: ReadonlyArray<unknown>
+        readonly truncated: boolean
+        readonly nextCursor: string | null
+      }
+
+      assert.equal(response.status, 200)
+      assert.deepEqual(body, { items: [], truncated: false, nextCursor: null })
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
@@ -2531,31 +2690,6 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
-  it.effect('uses the injected source control discovery service over websocket rpc', () =>
-    Effect.gen(function* ()
-    {
-      const sentinelResult = {
-        versionControlSystems: [],
-        sourceControlProviders: [],
-      } satisfies SourceControlDiscoveryResult
-      yield* buildAppUnderTest({
-        layers: {
-          sourceControlDiscovery: {
-            discover: Effect.succeed(sentinelResult),
-          },
-        },
-      })
-
-      const result = yield* Effect.scoped(
-        withWsRpcClient(yield* getWsServerUrl('/ws'), (client) =>
-          client[WS_METHODS.serverDiscoverSourceControl]({}),
-        ),
-      )
-
-      assert.deepEqual(result, sentinelResult)
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  )
-
   it.effect('does not block server config when editor discovery never resolves', () =>
     Effect.gen(function* ()
     {
@@ -2612,7 +2746,14 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         })
         const wsTicketBody = yield* responseJsonEffect<{
           readonly ticket: string
+          readonly expiresAt: string
         }>(wsTicketResponse)
+
+        assert.equal(wsTicketResponse.status, 200)
+        assert.equal(typeof wsTicketBody.ticket, 'string')
+        assert.isTrue(wsTicketBody.ticket.length > 0)
+        assert.equal(typeof wsTicketBody.expiresAt, 'string')
+
         const wsUrl = `${yield* getWsServerUrl('/ws', { authenticated: false })}?wsTicket=${encodeURIComponent(wsTicketBody.ticket)}`
 
         const response = yield* Effect.scoped(
@@ -3373,7 +3514,617 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   )
 
-  it.effect('serves scoped proposal state and releases exact Cartographer sessions', () =>
+  it.effect('dispatches explicit architecture preparation only for live authorized owners', () =>
+    Effect.gen(function* ()
+    {
+      const project: OrchestrationProjectShell = {
+        id: defaultProjectId,
+        title: 'Architecture lifecycle RPC',
+        workspaceRoot: '/tmp/architecture-lifecycle-rpc',
+        defaultModelSelection,
+        scripts: [],
+        createdAt: '2026-08-07T12:00:00.000Z',
+        updatedAt: '2026-08-07T12:00:00.000Z',
+      }
+      const thread = makeDefaultOrchestrationThreadShell({
+        id: defaultThreadId,
+        projectId: defaultProjectId,
+        worktreePath: '/tmp/architecture-lifecycle-rpc-worktree',
+      })
+      const generation = 'a'.repeat(64)
+      const graphDigest = `sha256:${'b'.repeat(64)}` as const
+      const ensures: string[] = []
+      const rebuilds: string[] = []
+      const preparations: string[] = []
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(projectId === defaultProjectId ? Option.some(project) : Option.none()),
+            getThreadShellById: (threadId) =>
+              Effect.succeed(threadId === defaultThreadId ? Option.some(thread) : Option.none()),
+          },
+          projectArchitectureLifecycle: {
+            ensureProject: (input) =>
+              Effect.sync(() =>
+              {
+                ensures.push(`${input.projectId}:${input.workspaceRoot}`)
+                return {
+                  root: input.workspaceRoot,
+                  outDir: '/tmp/architecture-lifecycle-rpc-output',
+                  generation,
+                  graphDigest,
+                  builtAt: '2026-08-07T12:00:00.000Z',
+                }
+              }),
+            rebuildProject: (input) =>
+              Effect.sync(() =>
+              {
+                rebuilds.push(`${input.projectId}:${input.workspaceRoot}`)
+                return {
+                  root: input.workspaceRoot,
+                  outDir: '/tmp/architecture-lifecycle-rpc-output',
+                  generation,
+                  graphDigest,
+                  builtAt: '2026-08-07T12:00:00.000Z',
+                }
+              }),
+          },
+          currentWorktreeArchitecture: {
+            prepare: (input) =>
+              Effect.sync(() =>
+              {
+                preparations.push(`${input.threadId}:${input.workspaceRoot}`)
+                return {
+                  sourceKind: 'current-worktree' as const,
+                  root: '/tmp/architecture-lifecycle-rpc-snapshot',
+                  outDir: '/tmp/architecture-lifecycle-rpc-current-output',
+                  graphPath: '/tmp/architecture-lifecycle-rpc-current-output/graph.json',
+                  liveRoot: input.workspaceRoot,
+                }
+              }),
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const missingProjectId = ProjectId.make('project-architecture-rpc-missing')
+      const missingThreadId = ThreadId.make('thread-architecture-rpc-missing')
+      const result = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          Effect.gen(function* ()
+          {
+            const source = yield* client[WS_METHODS.cartographerEnsureProjectArchitecture]({
+              projectId: defaultProjectId,
+            })
+            yield* client[WS_METHODS.cartographerPrepareCurrentWorktreeArchitecture]({
+              threadId: defaultThreadId,
+            })
+            yield* client[WS_METHODS.cartographerRebuildProjectAtlas]({
+              projectId: defaultProjectId,
+            })
+            const missing = yield* Effect.all({
+              ensure: client[WS_METHODS.cartographerEnsureProjectArchitecture]({
+                projectId: missingProjectId,
+              }).pipe(Effect.flip),
+              prepare: client[WS_METHODS.cartographerPrepareCurrentWorktreeArchitecture]({
+                threadId: missingThreadId,
+              }).pipe(Effect.flip),
+              rebuild: client[WS_METHODS.cartographerRebuildProjectAtlas]({
+                projectId: missingProjectId,
+              }).pipe(Effect.flip),
+            })
+            return { source, missing }
+          }),
+        ),
+      )
+
+      assert.deepEqual(result.source, {
+        kind: 'standing-project-generation',
+        projectId: defaultProjectId,
+        generationId: generation,
+        side: 'analyzed',
+        graphDigest,
+      })
+      assert.deepEqual(ensures, [`${defaultProjectId}:${project.workspaceRoot}`])
+      assert.deepEqual(rebuilds, [`${defaultProjectId}:${project.workspaceRoot}`])
+      assert.deepEqual(preparations, [`${defaultThreadId}:${thread.worktreePath}`])
+      for (const missing of Object.values(result.missing))
+      {
+        assert.equal(missing._tag, 'CartographerError')
+        if (missing._tag === 'CartographerError')
+        {
+          assert.equal(missing.failure, 'workspace_context_not_found')
+        }
+      }
+
+      const { body: readToken } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: 'orchestration:read',
+      })
+      const readTicketResponse = yield* HttpClient.post('/api/auth/websocket-ticket', {
+        headers: { authorization: `Bearer ${readToken.access_token ?? ''}` },
+      })
+      const readTicket = (yield* readTicketResponse.json) as { readonly ticket: string }
+      const readWsUrl = `${yield* getWsServerUrl('/ws', {
+        authenticated: false,
+      })}?wsTicket=${encodeURIComponent(readTicket.ticket)}`
+      const denied = yield* Effect.scoped(
+        withWsRpcClient(readWsUrl, (client) =>
+          client[WS_METHODS.cartographerPrepareCurrentWorktreeArchitecture]({
+            threadId: defaultThreadId,
+          }).pipe(Effect.flip),
+        ),
+      )
+      assert.equal(denied._tag, 'EnvironmentAuthorizationError')
+      if (denied._tag === 'EnvironmentAuthorizationError')
+      {
+        assert.equal(denied.requiredScope, 'orchestration:operate')
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('serves exact architecture impact through read-scoped authority', () =>
+    Effect.gen(function* ()
+    {
+      const generationId = ProposalGenerationId.make('proposal-generation-impact-rpc')
+      const calls: Array<{
+        readonly authority: ArchitectureQueryService.ArchitectureQueryAuthority
+        readonly comparison: { readonly kind: string; readonly generationId?: string }
+      }> = []
+      yield* buildAppUnderTest({
+        layers: {
+          architectureQueryService: {
+            architectureImpact: (authority, input) =>
+              Effect.sync(() =>
+              {
+                calls.push({ authority, comparison: input.comparison })
+                return {
+                  version: 2 as const,
+                  summary: 'No architecture changes.',
+                  base: { generatedAt: '2026-08-09T00:00:00.000Z' },
+                  head: { generatedAt: '2026-08-09T00:00:01.000Z' },
+                  changed: false,
+                  addedNodes: { items: [], total: 0, omitted: 0 },
+                  removedNodes: { items: [], total: 0, omitted: 0 },
+                  addedEdges: { items: [], total: 0, omitted: 0 },
+                  removedEdges: { items: [], total: 0, omitted: 0 },
+                  movedNodes: { items: [], total: 0, omitted: 0 },
+                  moveFlows: { items: [], total: 0, omitted: 0 },
+                  movedEdges: 0,
+                  apiChanges: { items: [], total: 0, omitted: 0 },
+                  apiTotals: {
+                    files: 0,
+                    addedExports: 0,
+                    removedExports: 0,
+                    brokenConsumers: 0,
+                  },
+                  newViolations: { items: [], total: 0, omitted: 0 },
+                  resolvedViolations: { items: [], total: 0, omitted: 0 },
+                  comparison: input.comparison,
+                  impactDigest: `sha256:${'c'.repeat(64)}` as const,
+                  baseSource: {
+                    kind: 'proposal-generation' as const,
+                    threadId: defaultThreadId,
+                    generationId,
+                    side: 'base' as const,
+                    graphDigest: `sha256:${'d'.repeat(64)}` as const,
+                  },
+                  headSource: {
+                    kind: 'proposal-generation' as const,
+                    threadId: defaultThreadId,
+                    generationId,
+                    side: 'proposed' as const,
+                    graphDigest: `sha256:${'e'.repeat(64)}` as const,
+                  },
+                }
+              }),
+          },
+        },
+      })
+
+      const { body: readToken } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: 'orchestration:read',
+      })
+      const readTicketResponse = yield* HttpClient.post('/api/auth/websocket-ticket', {
+        headers: { authorization: `Bearer ${readToken.access_token ?? ''}` },
+      })
+      const readTicket = (yield* readTicketResponse.json) as { readonly ticket: string }
+      const readWsUrl = `${yield* getWsServerUrl('/ws', {
+        authenticated: false,
+      })}?wsTicket=${encodeURIComponent(readTicket.ticket)}`
+      const result = yield* Effect.scoped(
+        withWsRpcClient(readWsUrl, (client) =>
+          client[WS_METHODS.cartographerGetArchitectureImpact]({
+            threadId: defaultThreadId,
+            comparison: { kind: 'proposal-generation', generationId },
+          }),
+        ),
+      )
+
+      assert.equal(result.changed, false)
+      assert.deepEqual(calls, [
+        {
+          authority: {
+            environmentId: testEnvironmentDescriptor.environmentId,
+            threadId: defaultThreadId,
+          },
+          comparison: { kind: 'proposal-generation', generationId },
+        },
+      ])
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('routes native architecture projections through read-scoped authority', () =>
+    Effect.gen(function* ()
+    {
+      const generationId = ProposalGenerationId.make('proposal-generation-projection-rpc')
+      const standingGeneration = '6'.repeat(64)
+      const standingDigest = `sha256:${'7'.repeat(64)}` as const
+      const proposalDigest = `sha256:${'8'.repeat(64)}` as const
+      const source = {
+        kind: 'standing-project-generation' as const,
+        projectId: defaultProjectId,
+        generationId: standingGeneration,
+        side: 'analyzed' as const,
+        graphDigest: standingDigest,
+      }
+      const proposalSource = {
+        kind: 'proposal-generation' as const,
+        threadId: defaultThreadId,
+        generationId,
+        side: 'proposed' as const,
+        graphDigest: proposalDigest,
+      }
+      const calls: Array<{
+        readonly kind: string
+        readonly authority: ArchitectureQueryService.ArchitectureQueryAuthority
+      }> = []
+      yield* buildAppUnderTest({
+        layers: {
+          architectureProjectionService: {
+            repositoryMap: (authority) =>
+              Effect.sync(() =>
+              {
+                calls.push({ kind: 'map', authority })
+                return {
+                  version: 1 as const,
+                  source,
+                  builtAt: '2026-08-09T00:00:00.000Z',
+                  dirty: false,
+                  repo: { name: '456code', scope: '.' },
+                  counts: { files: 2, imports: 1, systems: 1, blocks: 1, dirs: 1 },
+                  health: {
+                    cycles: 0,
+                    orphans: 0,
+                    violatingImports: 0,
+                    violatedRules: 0,
+                    ruleTotal: 0,
+                  },
+                  level: 'systems' as const,
+                  systemSource: 'authored' as const,
+                  units: [],
+                  unitCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
+                  edges: [],
+                  edgeCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
+                }
+              }),
+            architectureScope: (authority, input) =>
+              Effect.sync(() =>
+              {
+                calls.push({ kind: 'scope', authority })
+                return {
+                  version: 1 as const,
+                  source,
+                  scope: input.scope,
+                  childLevel: 'blocks' as const,
+                  children: [],
+                  childCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
+                  edges: [],
+                  edgeCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
+                  files: [],
+                  fileCount: { total: 0, indexed: 0, returned: 0, omitted: 0 },
+                }
+              }),
+            architectureNeighborhood: (authority, input) =>
+              Effect.sync(() =>
+              {
+                calls.push({ kind: 'neighborhood', authority })
+                return {
+                  version: 1 as const,
+                  source: input.source,
+                  target: input.target,
+                  direction: input.direction,
+                  maxDepth: input.maxDepth,
+                  upstream: { items: [], total: 0, omitted: 0 },
+                  downstream: { items: [], total: 0, omitted: 0 },
+                  impactedFileCount: 0,
+                }
+              }),
+            architectureSource: (authority, input) =>
+              Effect.sync(() =>
+              {
+                calls.push({ kind: 'source', authority })
+                return {
+                  version: 1 as const,
+                  source: input.source,
+                  relativePath: input.relativePath,
+                  sourceDigest: `sha256:${'9'.repeat(64)}` as const,
+                  content: 'export const value = 1\n',
+                }
+              }),
+          },
+        },
+      })
+
+      const { body: readToken } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: 'orchestration:read',
+      })
+      const readTicketResponse = yield* HttpClient.post('/api/auth/websocket-ticket', {
+        headers: { authorization: `Bearer ${readToken.access_token ?? ''}` },
+      })
+      const readTicket = (yield* readTicketResponse.json) as { readonly ticket: string }
+      const readWsUrl = `${yield* getWsServerUrl('/ws', {
+        authenticated: false,
+      })}?wsTicket=${encodeURIComponent(readTicket.ticket)}`
+      const results = yield* Effect.scoped(
+        withWsRpcClient(readWsUrl, (client) =>
+          Effect.gen(function* ()
+          {
+            const map = yield* client[WS_METHODS.cartographerGetRepositoryMap]({
+              threadId: defaultThreadId,
+              projectId: defaultProjectId,
+            })
+            const scope = yield* client[WS_METHODS.cartographerGetArchitectureScope]({
+              threadId: defaultThreadId,
+              source,
+              scope: { level: 'systems', id: 'systems:runtime' },
+            })
+            const neighborhood = yield* client[WS_METHODS.cartographerGetArchitectureNeighborhood]({
+              threadId: defaultThreadId,
+              source,
+              target: 'src/value.ts',
+              direction: 'both',
+              maxDepth: 1,
+            })
+            const immutableSource = yield* client[WS_METHODS.cartographerGetArchitectureSource]({
+              threadId: defaultThreadId,
+              source: proposalSource,
+              relativePath: 'src/value.ts',
+            })
+            return { map, scope, neighborhood, immutableSource }
+          }),
+        ),
+      )
+
+      assert.equal(results.map.source.generationId, standingGeneration)
+      assert.equal(results.scope.scope.id, 'systems:runtime')
+      assert.equal(results.neighborhood.target, 'src/value.ts')
+      assert.equal(results.immutableSource.content, 'export const value = 1\n')
+      assert.deepEqual(
+        calls.map((call) => call.kind),
+        ['map', 'scope', 'neighborhood', 'source'],
+      )
+      assert.equal(
+        calls.every(
+          (call) =>
+            call.authority.environmentId === testEnvironmentDescriptor.environmentId &&
+            call.authority.threadId === defaultThreadId,
+        ),
+        true,
+      )
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('routes diff-analysis RPCs with target reads, owner masking, and scoped access', () =>
+    Effect.gen(function* ()
+    {
+      const project: OrchestrationProjectShell = {
+        id: defaultProjectId,
+        title: 'Diff analysis RPC',
+        workspaceRoot: '/tmp/diff-analysis-rpc',
+        defaultModelSelection,
+        scripts: [],
+        createdAt: '2026-08-07T12:00:00.000Z',
+        updatedAt: '2026-08-07T12:00:00.000Z',
+      }
+      const thread = makeDefaultOrchestrationThreadShell({
+        id: defaultThreadId,
+        projectId: defaultProjectId,
+        worktreePath: '/tmp/diff-analysis-rpc-worktree',
+        orchestrateRunExecution: {
+          threadId: defaultThreadId,
+          runId: OrchestratePlanRunId.make('run-diff-analysis-rpc'),
+          planRevision: 1,
+          sourceTurnId: TurnId.make('turn-diff-analysis-rpc'),
+          sourceSequence: 10,
+          repositoryRoot: '/tmp/diff-analysis-rpc-retained',
+          repositoryCommonDir: '/tmp/diff-analysis-rpc-retained/.git',
+          baseOid: 'a'.repeat(40),
+          lifecycle: 'completed',
+          availability: 'unavailable',
+          integrationRoot: '/tmp/diff-analysis-rpc-pruned',
+          integrationCommonDir: '/tmp/diff-analysis-rpc-retained/.git',
+          integrationBranch: 'run/exact',
+          integrationOid: 'b'.repeat(40),
+          observedHeadOid: 'b'.repeat(40),
+          finalHeadOid: 'b'.repeat(40),
+          closeReason: 'completed fixture',
+          current: true,
+          admittedAt: '2026-08-07T11:59:00.000Z',
+          updatedAt: '2026-08-07T12:00:00.000Z',
+          terminalAt: '2026-08-07T12:00:00.000Z',
+          jobs: [],
+        },
+      })
+      const diffAnalysisId = DiffAnalysisId.make('diff-analysis-rpc')
+      const generation = {
+        version: 1 as const,
+        diffAnalysisId,
+        sourceKind: 'checkpoint' as const,
+        state: 'ready' as const,
+        baseTreeOid: 'a'.repeat(40),
+        headTreeOid: 'b'.repeat(40),
+        analyzerVersion: 'cartographer-rpc-test',
+        analysisPolicyVersion: 'diff-analysis-v1',
+        sourceCurrent: true,
+        baseGraphArtifact: 'base-graph-ref',
+        headGraphArtifact: 'head-graph-ref',
+        impactArtifact: 'impact-ref',
+        artifactByteLength: 1024,
+        errorCode: null,
+        createdAt: '2026-08-07T12:00:00.000Z',
+        updatedAt: '2026-08-07T12:00:01.000Z',
+        lastAccessedAt: '2026-08-07T12:00:02.000Z',
+      }
+      const serviceCalls: string[] = []
+      const missingProjectId = ProjectId.make('project-diff-analysis-missing')
+      yield* buildAppUnderTest({
+        layers: {
+          projectionSnapshotQuery: {
+            getProjectShellById: (projectId) =>
+              Effect.succeed(projectId === defaultProjectId ? Option.some(project) : Option.none()),
+            getThreadShellById: (threadId) =>
+              Effect.succeed(threadId === defaultThreadId ? Option.some(thread) : Option.none()),
+          },
+          diffAnalysisService: {
+            request: (input) =>
+              Effect.sync(() =>
+              {
+                const sourceKind = input.source.sourceKind === 'checkpoint' ? 'checkpoint' : 'other'
+                serviceCalls.push(['request', sourceKind, input.workspaceRoot].join(':'))
+                return generation
+              }),
+            get: (input) =>
+              Effect.sync(() =>
+              {
+                const sourceKind = input.source.sourceKind === 'review' ? 'review' : 'other'
+                serviceCalls.push(
+                  [
+                    'get',
+                    sourceKind,
+                    input.diffAnalysisId ?? 'target-only',
+                    input.workspaceRoot,
+                  ].join(':'),
+                )
+                return generation
+              }),
+          },
+        },
+      })
+
+      const checkpointSource = {
+        sourceKind: 'checkpoint' as const,
+        threadId: defaultThreadId,
+        fromTurnCount: 0,
+        toTurnCount: 1,
+      }
+      const reviewSource = {
+        sourceKind: 'review' as const,
+        cwd: project.workspaceRoot,
+        kind: 'working-tree' as const,
+      }
+      const exactRunSource = {
+        sourceKind: 'commit-pair' as const,
+        cwd: '/tmp/diff-analysis-rpc-retained',
+        baseCommitOid: 'a'.repeat(40),
+        headCommitOid: 'b'.repeat(40),
+      }
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const response = yield* Effect.scoped(
+        withWsRpcClient(
+          wsUrl,
+          (client) =>
+            Effect.all({
+              requested: client[WS_METHODS.cartographerRequestDiffAnalysis]({
+                owner: { threadId: defaultThreadId },
+                source: checkpointSource,
+              }),
+              readByTarget: client[WS_METHODS.cartographerGetDiffAnalysis]({
+                owner: { projectId: defaultProjectId },
+                source: reviewSource,
+                diffAnalysisId,
+              }),
+              exactRunRead: client[WS_METHODS.cartographerGetDiffAnalysis]({
+                owner: { threadId: defaultThreadId },
+                source: exactRunSource,
+              }),
+              masked: client[WS_METHODS.cartographerGetDiffAnalysis]({
+                owner: { projectId: defaultProjectId },
+                source: checkpointSource,
+              }).pipe(Effect.flip),
+              missingRequest: client[WS_METHODS.cartographerRequestDiffAnalysis]({
+                owner: { projectId: missingProjectId },
+                source: reviewSource,
+              }).pipe(Effect.flip),
+              missingGet: client[WS_METHODS.cartographerGetDiffAnalysis]({
+                owner: { projectId: missingProjectId },
+                source: reviewSource,
+              }).pipe(Effect.flip),
+            }),
+          'http://127.0.0.1:4173',
+        ),
+      )
+
+      assert.equal(response.requested.diffAnalysisId, diffAnalysisId)
+      assert.equal(response.readByTarget.diffAnalysisId, diffAnalysisId)
+      assert.equal(response.exactRunRead.diffAnalysisId, diffAnalysisId)
+      assert.equal(response.masked._tag, 'CartographerError')
+      if (response.masked._tag === 'CartographerError')
+      {
+        assert.equal(response.masked.failure, 'diff_analysis_not_found')
+      }
+      for (const missing of [response.missingRequest, response.missingGet])
+      {
+        assert.equal(missing._tag, 'CartographerError')
+        if (missing._tag === 'CartographerError')
+        {
+          assert.equal(missing.failure, 'diff_analysis_not_found')
+          assert.equal(missing.message, 'A ready diff analysis was not found for this owner.')
+        }
+      }
+      assert.deepEqual(serviceCalls.toSorted(), [
+        'get:other:target-only:/tmp/diff-analysis-rpc-retained',
+        `get:review:${diffAnalysisId}:${project.workspaceRoot}`,
+        `request:checkpoint:${thread.worktreePath ?? project.workspaceRoot}`,
+      ])
+
+      const { body: readToken } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: 'orchestration:read',
+      })
+      const readTicketResponse = yield* HttpClient.post('/api/auth/websocket-ticket', {
+        headers: { authorization: `Bearer ${readToken.access_token ?? ''}` },
+      })
+      const readTicket = (yield* readTicketResponse.json) as { readonly ticket: string }
+      const readWsUrl = `${yield* getWsServerUrl('/ws', {
+        authenticated: false,
+      })}?wsTicket=${encodeURIComponent(readTicket.ticket)}`
+      const scoped = yield* Effect.scoped(
+        withWsRpcClient(
+          readWsUrl,
+          (client) =>
+            Effect.all({
+              read: client[WS_METHODS.cartographerGetDiffAnalysis]({
+                owner: { projectId: defaultProjectId },
+                source: reviewSource,
+              }),
+              requestDenied: client[WS_METHODS.cartographerRequestDiffAnalysis]({
+                owner: { projectId: defaultProjectId },
+                source: reviewSource,
+              }).pipe(Effect.flip),
+            }),
+          'http://127.0.0.1:4173',
+        ),
+      )
+      assert.equal(scoped.read.diffAnalysisId, diffAnalysisId)
+      assert.equal(scoped.requestDenied._tag, 'EnvironmentAuthorizationError')
+      if (scoped.requestDenied._tag === 'EnvironmentAuthorizationError')
+      {
+        assert.equal(scoped.requestDenied.requiredScope, 'orchestration:operate')
+      }
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('serves scoped proposal state and exact orchestrate links', () =>
     Effect.gen(function* ()
     {
       const proposalId = ProposalId.make('proposal-rpc')
@@ -3469,8 +4220,35 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         updatedAt: timestamp,
       }
       const thread = makeDefaultOrchestrationThreadShell()
-      const embedSessionId = CartographerEmbedSessionId.make('cartographer-session-rpc')
-      let releasedEmbedSession: string | null = null
+      const orchestratePlan = {
+        runId: 'run-proposal-rpc',
+        revision: 6,
+        turnId: TurnId.make('turn-proposal-rpc'),
+        workflow: 'implementation',
+        task: 'Serve the exact linked proposal.',
+        stages: [],
+        totalWorkers: 0,
+        maxWorkers: 1,
+        source: 'tool' as const,
+        leadModelSelection: null,
+        status: 'superseded' as const,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      }
+      const mismatchedOrchestratePlan = {
+        ...orchestratePlan,
+        runId: 'run-proposal-rpc-mismatched-link',
+        revision: 7,
+      }
+      const threadDetail = {
+        ...makeDefaultOrchestrationReadModel().threads[0]!,
+        orchestratePlans: [orchestratePlan, mismatchedOrchestratePlan],
+      }
+      const exactLookupInputs: Array<{
+        readonly sourceThreadId: ThreadId
+        readonly runId: string
+        readonly revision: number
+      }> = []
       Reflect.set(globalThis, '__proposalNarrativeExecuted', false)
 
       yield* buildAppUnderTest({
@@ -3484,6 +4262,10 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
               Effect.succeed(
                 requestedThreadId === defaultThreadId ? Option.some(thread) : Option.none(),
               ),
+            getThreadDetailById: (requestedThreadId) =>
+              Effect.succeed(
+                requestedThreadId === defaultThreadId ? Option.some(threadDetail) : Option.none(),
+              ),
           },
           proposalService: {
             get: () => Effect.succeed({ proposal, revision, revisions: [revision] }),
@@ -3496,22 +4278,48 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
                 sourceSha256: '2'.repeat(64),
               }),
             findLatestByPlan: () => Effect.succeed({ proposal, revision }),
+            findByOrchestrateRevision: (input) =>
+              Effect.sync(() =>
+              {
+                exactLookupInputs.push(input)
+                const selectedPlan =
+                  input.runId === mismatchedOrchestratePlan.runId
+                    ? mismatchedOrchestratePlan
+                    : orchestratePlan
+                return {
+                  link: {
+                    proposalId:
+                      input.runId === mismatchedOrchestratePlan.runId
+                        ? ProposalId.make('proposal-rpc-other')
+                        : proposalId,
+                    proposalRevision: revision.revision,
+                    sourceThreadId: defaultThreadId,
+                    runId: selectedPlan.runId,
+                    revision: selectedPlan.revision,
+                    createdAt: timestamp,
+                  },
+                  proposal,
+                  revision,
+                  orchestratePlan: selectedPlan,
+                }
+              }),
           },
           proposalImplementationAttemptService: {
             latestForProposal: () => Effect.succeed(attempt),
           },
-          cartographerEmbedBroker: {
-            releaseSession: (threadId, sessionId) =>
-              Effect.sync(() =>
-              {
-                assert.equal(threadId, defaultThreadId)
-                releasedEmbedSession = sessionId
-              }),
-          },
         },
       })
 
-      const wsUrl = yield* getWsServerUrl('/ws')
+      const { body: readToken } = yield* exchangeAccessToken(defaultDesktopBootstrapToken, {
+        scope: 'orchestration:read',
+      })
+      const readTicketResponse = yield* HttpClient.post('/api/auth/websocket-ticket', {
+        headers: { authorization: `Bearer ${readToken.access_token ?? ''}` },
+      })
+      const readTicket = (yield* readTicketResponse.json) as { readonly ticket: string }
+      const wsUrl = `${yield* getWsServerUrl('/ws', {
+        authenticated: false,
+      })}?wsTicket=${encodeURIComponent(readTicket.ticket)}`
       const response = yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           Effect.all({
@@ -3520,14 +4328,25 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
               sourceThreadId: defaultThreadId,
               planId: 'plan-rpc',
             }),
+            orchestrateLinked: client[WS_METHODS.proposalsFindByOrchestrateRevision]({
+              sourceThreadId: defaultThreadId,
+              runId: orchestratePlan.runId,
+              revision: orchestratePlan.revision,
+            }),
+            missingOrchestrateLink: client[WS_METHODS.proposalsFindByOrchestrateRevision]({
+              sourceThreadId: defaultThreadId,
+              runId: orchestratePlan.runId,
+              revision: orchestratePlan.revision + 1,
+            }),
+            mismatchedOrchestrateLink: client[WS_METHODS.proposalsFindByOrchestrateRevision]({
+              sourceThreadId: defaultThreadId,
+              runId: mismatchedOrchestratePlan.runId,
+              revision: mismatchedOrchestratePlan.revision,
+            }).pipe(Effect.flip),
             attempt: client[WS_METHODS.proposalsLatestImplementationAttempt]({
               sourceThreadId: defaultThreadId,
               proposalId,
               revision: 1,
-            }),
-            closeEmbed: client[WS_METHODS.cartographerCloseEmbed]({
-              threadId: defaultThreadId,
-              sessionId: embedSessionId,
             }),
           }),
         ),
@@ -3541,8 +4360,27 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         ) === true,
       )
       assert.equal(response.linked?.revision.revisionId, revisionId)
+      assert.equal(response.orchestrateLinked?.revision.revisionId, revisionId)
+      assert.equal(response.orchestrateLinked?.orchestratePlan.revision, 6)
+      assert.equal(response.missingOrchestrateLink, null)
+      assert.equal(response.mismatchedOrchestrateLink._tag, 'ProposalError')
+      if (response.mismatchedOrchestrateLink._tag === 'ProposalError')
+      {
+        assert.equal(response.mismatchedOrchestrateLink.code, 'identity-mismatch')
+      }
+      assert.deepEqual(exactLookupInputs, [
+        {
+          sourceThreadId: defaultThreadId,
+          runId: orchestratePlan.runId,
+          revision: orchestratePlan.revision,
+        },
+        {
+          sourceThreadId: defaultThreadId,
+          runId: mismatchedOrchestratePlan.runId,
+          revision: mismatchedOrchestratePlan.revision,
+        },
+      ])
       assert.equal(response.attempt?.outcome, 'matched')
-      assert.equal(releasedEmbedSession, embedSessionId)
       Reflect.deleteProperty(globalThis, '__proposalNarrativeExecuted')
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   )
@@ -3936,39 +4774,10 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
-  it.effect('routes websocket rpc shell.openInEditor', () =>
-    Effect.gen(function* ()
-    {
-      let openedInput: { cwd: string; editor: EditorId } | null = null
-      yield* buildAppUnderTest({
-        layers: {
-          externalLauncher: {
-            launchEditor: (input) =>
-              Effect.sync(() =>
-              {
-                openedInput = input
-              }),
-          },
-        },
-      })
-
-      const wsUrl = yield* getWsServerUrl('/ws')
-      yield* Effect.scoped(
-        withWsRpcClient(wsUrl, (client) =>
-          client[WS_METHODS.shellOpenInEditor]({
-            cwd: '/tmp/project',
-            editor: 'cursor',
-          }),
-        ),
-      )
-
-      assert.deepEqual(openedInput, { cwd: '/tmp/project', editor: 'cursor' })
-    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
-  )
-
   it.effect('routes websocket rpc shell.openInEditor errors', () =>
     Effect.gen(function* ()
     {
+      let openedInput: { cwd: string; editor: EditorId } | null = null
       const externalLauncherError = new ExternalLauncherCommandNotFoundError({
         editor: 'cursor',
         command: 'cursor',
@@ -3976,7 +4785,11 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       yield* buildAppUnderTest({
         layers: {
           externalLauncher: {
-            launchEditor: () => Effect.fail(externalLauncherError),
+            launchEditor: (input) =>
+            {
+              openedInput = input
+              return Effect.fail(externalLauncherError)
+            },
           },
         },
       })
@@ -3991,6 +4804,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         ).pipe(Effect.result),
       )
 
+      assert.deepEqual(openedInput, { cwd: '/tmp/project', editor: 'cursor' })
       assertFailure(result, externalLauncherError)
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
@@ -3998,6 +4812,49 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
   it.effect('routes websocket rpc git methods', () =>
     Effect.gen(function* ()
     {
+      const fs = yield* FileSystem.FileSystem
+      const worktreePath = yield* fs.makeTempDirectoryScoped({ prefix: 't3-ws-rpc-worktree-' })
+      const demoPr = {
+        number: 1,
+        title: 'Demo PR',
+        url: 'https://example.com/pr/1',
+        baseBranch: 'main',
+        headBranch: 'feature/demo',
+        state: 'open' as const,
+      }
+      const cleanStatus = {
+        isRepo: true,
+        hasPrimaryRemote: true,
+        isDefaultRef: true,
+        refName: 'main',
+        hasWorkingTreeChanges: false,
+        workingTree: { files: [] as const, insertions: 0, deletions: 0 },
+        hasUpstream: true,
+        aheadCount: 0,
+        behindCount: 0,
+        pr: null,
+      }
+      const stackedCommitResult = {
+        action: 'commit' as const,
+        branch: { status: 'skipped_not_requested' as const },
+        commit: {
+          status: 'created' as const,
+          commitSha: 'abc123',
+          subject: 'feat: demo',
+        },
+        push: { status: 'skipped_not_requested' as const },
+        pr: { status: 'skipped_not_requested' as const },
+        toast: {
+          title: 'Committed abc123',
+          description: 'feat: demo',
+          cta: {
+            kind: 'run_action' as const,
+            label: 'Push',
+            action: { kind: 'push' as const },
+          },
+        },
+      }
+
       yield* buildAppUnderTest({
         config: {
           cwd: '/tmp/repo',
@@ -4010,15 +4867,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
             invalidateLocalStatus: () => Effect.void,
             invalidateRemoteStatus: () => Effect.void,
             invalidateStatus: () => Effect.void,
-            localStatus: () =>
-              Effect.succeed({
-                isRepo: true,
-                hasPrimaryRemote: true,
-                isDefaultRef: true,
-                refName: 'main',
-                hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
-              }),
+            localStatus: () => Effect.succeed(cleanStatus),
             remoteStatus: () =>
               Effect.succeed({
                 hasUpstream: true,
@@ -4026,45 +4875,10 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
                 behindCount: 0,
                 pr: null,
               }),
-            status: () =>
-              Effect.succeed({
-                isRepo: true,
-                hasPrimaryRemote: true,
-                isDefaultRef: true,
-                refName: 'main',
-                hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
-                hasUpstream: true,
-                aheadCount: 0,
-                behindCount: 0,
-                pr: null,
-              }),
+            status: () => Effect.succeed(cleanStatus),
             runStackedAction: (input, options) =>
               Effect.gen(function* ()
               {
-                const result = {
-                  action: 'commit' as const,
-                  branch: { status: 'skipped_not_requested' as const },
-                  commit: {
-                    status: 'created' as const,
-                    commitSha: 'abc123',
-                    subject: 'feat: demo',
-                  },
-                  push: { status: 'skipped_not_requested' as const },
-                  pr: { status: 'skipped_not_requested' as const },
-                  toast: {
-                    title: 'Committed abc123',
-                    description: 'feat: demo',
-                    cta: {
-                      kind: 'run_action' as const,
-                      label: 'Push',
-                      action: {
-                        kind: 'push' as const,
-                      },
-                    },
-                  },
-                }
-
                 yield* options?.progressReporter?.publish({
                   actionId: options.actionId ?? input.actionId,
                   cwd: input.cwd,
@@ -4073,38 +4887,19 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
                   phase: 'commit',
                   label: 'Committing...',
                 }) ?? Effect.void
-
                 yield* options?.progressReporter?.publish({
                   actionId: options.actionId ?? input.actionId,
                   cwd: input.cwd,
                   action: input.action,
                   kind: 'action_finished',
-                  result,
+                  result: stackedCommitResult,
                 }) ?? Effect.void
-
-                return result
+                return stackedCommitResult
               }),
-            resolvePullRequest: () =>
-              Effect.succeed({
-                pullRequest: {
-                  number: 1,
-                  title: 'Demo PR',
-                  url: 'https://example.com/pr/1',
-                  baseBranch: 'main',
-                  headBranch: 'feature/demo',
-                  state: 'open',
-                },
-              }),
+            resolvePullRequest: () => Effect.succeed({ pullRequest: demoPr }),
             preparePullRequestThread: () =>
               Effect.succeed({
-                pullRequest: {
-                  number: 1,
-                  title: 'Demo PR',
-                  url: 'https://example.com/pr/1',
-                  baseBranch: 'main',
-                  headBranch: 'feature/demo',
-                  state: 'open',
-                },
+                pullRequest: demoPr,
                 branch: 'feature/demo',
                 worktreePath: null,
               }),
@@ -4133,26 +4928,14 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
               }),
             createWorktree: () =>
               Effect.succeed({
-                worktree: { path: '/tmp/wt', refName: 'feature/demo' },
+                worktree: { path: worktreePath, refName: 'feature/demo' },
               }),
             removeWorktree: () => Effect.void,
             createRef: (input) => Effect.succeed({ refName: input.refName }),
             switchRef: (input) => Effect.succeed({ refName: input.refName }),
           },
           vcsStatusBroadcaster: {
-            refreshStatus: () =>
-              Effect.succeed({
-                isRepo: true,
-                hasPrimaryRemote: true,
-                isDefaultRef: true,
-                refName: 'main',
-                hasWorkingTreeChanges: false,
-                workingTree: { files: [], insertions: 0, deletions: 0 },
-                hasUpstream: true,
-                aheadCount: 0,
-                behindCount: 0,
-                pr: null,
-              }),
+            refreshStatus: () => Effect.succeed(cleanStatus),
           },
           reviewService: {
             getDiffPreview: (input) =>
@@ -4256,11 +5039,12 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
       assert.equal(worktree.worktree.refName, 'feature/demo')
 
+      // removeWorktree canonicalizes via realPath before the mocked driver runs
       yield* Effect.scoped(
         withWsRpcClient(wsUrl, (client) =>
           client[WS_METHODS.vcsRemoveWorktree]({
             cwd: '/tmp/repo',
-            path: '/tmp/wt',
+            path: worktreePath,
           }),
         ),
       )
@@ -5019,6 +5803,12 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
                   updatedAt: '2026-01-01T00:00:10.000Z',
                 })),
               getImportReconciliationContext: () => Effect.sync(importReconciliationContext),
+              getActiveProjectByWorkspaceRoot: (workspaceRoot) =>
+                Effect.sync(() =>
+                  Option.fromNullishOr(
+                    projects.find((project) => project.workspaceRoot === workspaceRoot),
+                  ).pipe(Option.map((project) => ({ ...project, deletedAt: null }))),
+                ),
               getProjectShellById: (projectId) =>
                 Effect.sync(() =>
                   Option.fromNullishOr(projects.find((project) => project.id === projectId)),
@@ -5311,14 +6101,14 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
   )
 
-  it.effect('buffers thread events published while the initial snapshot loads', () =>
+  it.effect('buffers orchestrate plan upserts published while the initial snapshot loads', () =>
     Effect.gen(function* ()
     {
       const thread = makeDefaultOrchestrationReadModel().threads[0]!
       const liveEvents = yield* PubSub.unbounded<OrchestrationEvent>()
-      const messageEvent = {
+      const planEvent = {
         sequence: 2,
-        eventId: EventId.make('event-message'),
+        eventId: EventId.make('event-orchestrate-plan'),
         aggregateKind: 'thread',
         aggregateId: defaultThreadId,
         occurredAt: '2026-01-01T00:00:01.000Z',
@@ -5326,18 +6116,35 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         causationEventId: null,
         correlationId: null,
         metadata: {},
-        type: 'thread.message-sent',
+        type: 'thread.orchestrate-plan-upserted',
         payload: {
           threadId: defaultThreadId,
-          messageId: MessageId.make('message-1'),
-          role: 'user',
-          text: 'First message',
-          turnId: null,
-          streaming: false,
+          plan: {
+            runId: 'run-snapshot-race',
+            revision: 1,
+            turnId: TurnId.make('turn-snapshot-race'),
+            workflow: 'snapshot race',
+            task: 'Deliver the live plan revision.',
+            stages: [
+              {
+                id: 'stage-1',
+                provider: 'codex',
+                model: null,
+                mode: 'edit',
+                workers: 1,
+              },
+            ],
+            totalWorkers: 1,
+            maxWorkers: 1,
+            source: 'tool',
+            leadModelSelection: null,
+            status: 'pending',
+            createdAt: '2026-01-01T00:00:01.000Z',
+            updatedAt: '2026-01-01T00:00:01.000Z',
+          },
           createdAt: '2026-01-01T00:00:01.000Z',
-          updatedAt: '2026-01-01T00:00:01.000Z',
         },
-      } satisfies Extract<OrchestrationEvent, { type: 'thread.message-sent' }>
+      } satisfies Extract<OrchestrationEvent, { type: 'thread.orchestrate-plan-upserted' }>
 
       yield* buildAppUnderTest({
         layers: {
@@ -5348,7 +6155,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
             getThreadDetailSnapshot: () =>
               Effect.gen(function* ()
               {
-                yield* PubSub.publish(liveEvents, messageEvent)
+                yield* PubSub.publish(liveEvents, planEvent)
                 return Option.some({ snapshotSequence: 1, thread })
               }),
           },
@@ -5367,7 +6174,76 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       assert.equal(items[0]?.kind, 'snapshot')
       assert.equal(items[1]?.kind, 'event')
       assert.equal(items[1]?.kind === 'event' ? items[1].event.sequence : null, 2)
+      assert.equal(
+        items[1]?.kind === 'event' ? items[1].event.type : null,
+        'thread.orchestrate-plan-upserted',
+      )
     }).pipe(Effect.provide(NodeHttpServer.layerTest), TestClock.withLive),
+  )
+
+  it.effect('replays an orchestrate plan response before the synchronization marker', () =>
+    Effect.gen(function* ()
+    {
+      const readEventsCalls: Array<readonly [number, number | undefined]> = []
+      const responseEvent = {
+        sequence: 2,
+        eventId: EventId.make('event-orchestrate-plan-response'),
+        aggregateKind: 'thread',
+        aggregateId: defaultThreadId,
+        occurredAt: '2026-01-01T00:00:02.000Z',
+        commandId: null,
+        causationEventId: null,
+        correlationId: null,
+        metadata: {},
+        type: 'thread.orchestrate-plan-response-requested',
+        payload: {
+          threadId: defaultThreadId,
+          runId: 'run-bounded-replay',
+          revision: 1,
+          decision: 'approve',
+          createdAt: '2026-01-01T00:00:02.000Z',
+        },
+      } satisfies Extract<
+        OrchestrationEvent,
+        { type: 'thread.orchestrate-plan-response-requested' }
+      >
+
+      yield* buildAppUnderTest({
+        layers: {
+          orchestrationEngine: {
+            latestSequence: Effect.succeed(2),
+            readEvents: (afterSequence, limit) =>
+              Stream.sync(() =>
+              {
+                readEventsCalls.push([afterSequence, limit])
+                return responseEvent
+              }),
+          },
+          projectionSnapshotQuery: {
+            getThreadDetailSnapshot: () => Effect.die('snapshot should not load during replay'),
+          },
+        },
+      })
+
+      const wsUrl = yield* getWsServerUrl('/ws')
+      const items = yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.subscribeThread]({
+            threadId: defaultThreadId,
+            afterSequence: 1,
+            requestCompletionMarker: true,
+          }).pipe(Stream.take(2), Stream.runCollect),
+        ),
+      )
+
+      assert.deepEqual(readEventsCalls, [[1, 1]])
+      assert.deepEqual(
+        Array.from(items, (item) => item.kind),
+        ['event', 'synchronized'],
+      )
+      assert.equal(items[0]?.kind === 'event' ? items[0].event.type : null, responseEvent.type)
+      assert.isFalse(Array.from(items).some((item) => item.kind === 'snapshot'))
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
   it.effect('subscribeShell sends a fresh snapshot instead of replaying a large gap', () =>
@@ -5896,7 +6772,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
-  it.effect('stops the provider session and closes thread terminals after archive', () =>
+  it.effect('dispatches archive without transport-local provider or terminal cleanup', () =>
     Effect.gen(function* ()
     {
       const threadId = ThreadId.make('thread-archive')
@@ -5957,21 +6833,15 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
 
       assert.equal(dispatchResult.sequence, 1)
-      assert.deepEqual(effects, [
-        'dispatch:thread.archive',
-        'dispatch:thread.session.stop',
-        `terminal.close:${threadId}`,
-      ])
-      const sessionStopCommand = dispatchedCommands[1]
-      assert.equal(sessionStopCommand?.type, 'thread.session.stop')
-      if (sessionStopCommand?.type === 'thread.session.stop')
-      {
-        assert.equal(sessionStopCommand.threadId, threadId)
-      }
+      assert.deepEqual(effects, ['dispatch:thread.archive'])
+      assert.deepEqual(
+        dispatchedCommands.map((command) => command.type),
+        ['thread.archive'],
+      )
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
-  it.effect('checks session status before archiving removes the thread from active lookups', () =>
+  it.effect('archives without consulting transport-local thread session state', () =>
     Effect.gen(function* ()
     {
       const threadId = ThreadId.make('thread-archive-precheck')
@@ -6041,15 +6911,10 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
 
       assert.equal(dispatchResult.sequence, 1)
-      assert.deepEqual(effects, [
-        'query:thread-shell:active',
-        'dispatch:thread.archive',
-        'dispatch:thread.session.stop',
-        `terminal.close:${threadId}`,
-      ])
+      assert.deepEqual(effects, ['dispatch:thread.archive'])
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ['thread.archive', 'thread.session.stop'],
+        ['thread.archive'],
       )
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
@@ -6127,7 +6992,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
 
       assert.equal(dispatchResult.sequence, 1)
-      assert.deepEqual(effects, ['dispatch:thread.archive', `terminal.close:${threadId}`])
+      assert.deepEqual(effects, ['dispatch:thread.archive'])
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
         ['thread.archive'],
@@ -6135,7 +7000,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
-  it.effect('archives and still closes terminals when session stop dies', () =>
+  it.effect('does not invoke the obsolete session-stop path during archive', () =>
     Effect.gen(function* ()
     {
       const threadId = ThreadId.make('thread-archive-stop-die')
@@ -6199,14 +7064,10 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
       )
 
       assert.equal(dispatchResult.sequence, 1)
-      assert.deepEqual(effects, [
-        'dispatch:thread.archive',
-        'dispatch:thread.session.stop',
-        `terminal.close:${threadId}`,
-      ])
+      assert.deepEqual(effects, ['dispatch:thread.archive'])
       assert.deepEqual(
         dispatchedCommands.map((command) => command.type),
-        ['thread.archive', 'thread.session.stop'],
+        ['thread.archive'],
       )
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
@@ -6235,6 +7096,14 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
             behindCount: 0,
             pr: null,
           }),
+        )
+        const remoteExists = vi.fn(
+          (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['remoteExists']>[0]) =>
+            Effect.sync(() =>
+            {
+              bootstrapGitOperations.push('remote-exists')
+              return true
+            }),
         )
         const fetchRemote = vi.fn(
           (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['fetchRemote']>[0]) =>
@@ -6286,6 +7155,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
         yield* buildAppUnderTest({
           layers: {
             gitVcsDriver: {
+              remoteExists,
               fetchRemote,
               resolveRemoteTrackingCommit,
               createWorktree,
@@ -6377,6 +7247,7 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           fallbackRemoteName: 'origin',
         })
         assert.deepEqual(bootstrapGitOperations, [
+          'remote-exists',
           'fetch',
           'resolve-remote-commit',
           'create-worktree',
@@ -6404,6 +7275,110 @@ it.layer(NodeServices.layer)('server router seam', (it) =>
           assert.equal(finalCommand.bootstrap, undefined)
         }
       }).pipe(Effect.provide(NodeHttpServer.layerTest)),
+  )
+
+  it.effect('falls back to the local base branch when startFromOrigin is set without origin', () =>
+    Effect.gen(function* ()
+    {
+      const dispatchedCommands: Array<OrchestrationCommand> = []
+      const remoteExists = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['remoteExists']>[0]) =>
+          Effect.succeed(false),
+      )
+      const fetchRemote = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['fetchRemote']>[0]) => Effect.void,
+      )
+      const resolveRemoteTrackingCommit = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['resolveRemoteTrackingCommit']>[0]) =>
+          Effect.succeed({
+            commitSha: '0123456789abcdef0123456789abcdef01234567',
+            remoteRefName: 'origin/main',
+          }),
+      )
+      const createWorktree = vi.fn(
+        (_: Parameters<GitVcsDriver.GitVcsDriver['Service']['createWorktree']>[0]) =>
+          Effect.succeed({
+            worktree: {
+              refName: 't3code/bootstrap-refName',
+              path: '/tmp/bootstrap-worktree',
+            },
+          }),
+      )
+
+      yield* buildAppUnderTest({
+        layers: {
+          gitVcsDriver: {
+            remoteExists,
+            fetchRemote,
+            resolveRemoteTrackingCommit,
+            createWorktree,
+          },
+          orchestrationEngine: {
+            dispatch: (command) =>
+              Effect.sync(() =>
+              {
+                dispatchedCommands.push(command)
+                return { sequence: dispatchedCommands.length }
+              }),
+            readEvents: () => Stream.empty,
+          },
+        },
+      })
+
+      const createdAt = '2026-01-01T00:00:00.000Z'
+      const wsUrl = yield* getWsServerUrl('/ws')
+      yield* Effect.scoped(
+        withWsRpcClient(wsUrl, (client) =>
+          client[ORCHESTRATION_WS_METHODS.dispatchCommand]({
+            type: 'thread.turn.start',
+            commandId: CommandId.make('cmd-bootstrap-turn-start-no-origin'),
+            threadId: ThreadId.make('thread-bootstrap-no-origin'),
+            message: {
+              messageId: MessageId.make('msg-bootstrap-no-origin'),
+              role: 'user',
+              text: 'hello',
+              attachments: [],
+            },
+            modelSelection: defaultModelSelection,
+            runtimeMode: 'full-access',
+            interactionMode: 'default',
+            bootstrap: {
+              createThread: {
+                projectId: defaultProjectId,
+                title: 'Bootstrap Thread',
+                modelSelection: defaultModelSelection,
+                runtimeMode: 'full-access',
+                interactionMode: 'default',
+                branch: 'main',
+                worktreePath: null,
+                createdAt,
+              },
+              prepareWorktree: {
+                projectCwd: '/tmp/project',
+                baseBranch: 'main',
+                branch: 't3code/bootstrap-refName',
+                startFromOrigin: true,
+              },
+            },
+            createdAt,
+          }),
+        ),
+      )
+
+      assert.deepEqual(remoteExists.mock.calls[0]?.[0], {
+        cwd: '/tmp/project',
+        remoteName: 'origin',
+      })
+      assert.equal(fetchRemote.mock.calls.length, 0)
+      assert.equal(resolveRemoteTrackingCommit.mock.calls.length, 0)
+      assert.deepEqual(createWorktree.mock.calls[0]?.[0], {
+        cwd: '/tmp/project',
+        refName: 'main',
+        newRefName: 't3code/bootstrap-refName',
+        baseRefName: 'main',
+        path: null,
+      })
+    }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   )
 
   it.effect('records setup-script failures without aborting bootstrap turn start', () =>

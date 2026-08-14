@@ -28,14 +28,17 @@ import {
   TurnId,
 } from '@t3tools/contracts'
 import * as Clock from 'effect/Clock'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
 import * as Exit from 'effect/Exit'
 import * as Layer from 'effect/Layer'
 import * as ManagedRuntime from 'effect/ManagedRuntime'
+import * as Option from 'effect/Option'
 import * as PubSub from 'effect/PubSub'
 import * as Schema from 'effect/Schema'
 import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
+import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import { it as effectIt } from '@effect/vitest'
 import { afterEach, describe, expect, it } from 'vite-plus/test'
 
@@ -53,7 +56,10 @@ import { OrchestrationEngineLive } from '../../../../../apps/server/src/orchestr
 import { OrchestrationProjectionPipelineLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionPipeline.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../../../../../apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts'
 import { ProviderRuntimeIngestionLive } from '../../../../../apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts'
-import { OrchestrationEngineService } from '../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
+import {
+  OrchestrationEngineService,
+  type OrchestrationEngineShape,
+} from '../../../../../apps/server/src/orchestration/Services/OrchestrationEngine.ts'
 import { ProviderRuntimeIngestionService } from '../../../../../apps/server/src/orchestration/Services/ProviderRuntimeIngestion.ts'
 import * as VcsProcess from '../../../../../apps/server/src/vcs/VcsProcess.ts'
 import * as VcsDriverRegistry from '../../../../../apps/server/src/vcs/VcsDriverRegistry.ts'
@@ -62,6 +68,12 @@ import { ProjectionSnapshotQuery } from '../../../../../apps/server/src/orchestr
 import { ServerConfig } from '../../../../../apps/server/src/config.ts'
 import { ServerSettingsService } from '../../../../../apps/server/src/serverSettings.ts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
+import { ProviderRuntimeInbox } from '../../../../../apps/server/src/persistence/Services/ProviderRuntimeInbox.ts'
+import { OrchestrationReactorDelivery } from '../../../../../apps/server/src/persistence/Services/OrchestrationReactorDelivery.ts'
+import {
+  makeProviderRuntimeInboxTestAdmission,
+  ProviderRuntimeInboxTestInfrastructureLive,
+} from '../../support/providerRuntimeInbox.ts'
 
 function makeTestServerSettingsLayer(overrides: Partial<ServerSettings> = {})
 {
@@ -110,6 +122,9 @@ function createProviderServiceHarness()
 {
   const runtimeEventPubSub = Effect.runSync(PubSub.unbounded<ProviderRuntimeEvent>())
   const runtimeSessions: ProviderSession[] = []
+  let appendRuntimeEvent:
+    ((event: ProviderRuntimeEvent) => Effect.Effect<unknown, Error>) | undefined
+  let admissionTail = Promise.resolve()
 
   const unsupported = () => Effect.die(new Error('Unsupported provider call in test')) as never
   const service: ProviderServiceShape = {
@@ -119,6 +134,14 @@ function createProviderServiceHarness()
     respondToRequest: () => unsupported(),
     respondToUserInput: () => unsupported(),
     stopSession: () => unsupported(),
+    captureSessionIdentity: () => unsupported(),
+    captureSessionIdentities: () => Effect.succeed([]),
+    getSessionIdentityState: () => Effect.succeed(Option.none()),
+    matchesSessionIdentity: () => unsupported(),
+    stopSessionIfExact: () => unsupported(),
+    getAdmissionHandoffHighWater: Effect.succeed(null),
+    resumeAdmissionAfterHandoff: Effect.void,
+    shutdown: Effect.succeed(0),
     listSessions: () => Effect.succeed([...runtimeSessions]),
     getCapabilities: () => Effect.succeed({ sessionModelSwitch: 'in-session' }),
     getInstanceInfo: (instanceId) =>
@@ -136,6 +159,8 @@ function createProviderServiceHarness()
       })
     },
     rollbackConversation: () => unsupported(),
+    rollbackConversationIfExact: () => Effect.succeed(false),
+    getConversationTurnCountIfExact: () => Effect.succeed(Option.none()),
     get streamEvents()
     {
       return Stream.fromPubSub(runtimeEventPubSub)
@@ -167,7 +192,41 @@ function createProviderServiceHarness()
       return normalized
     }
 
-    return event as ProviderRuntimeEvent
+    let payload = event.payload
+    if (
+      (event.type === 'item.started' || event.type === 'item.completed') &&
+      payload !== null &&
+      typeof payload === 'object' &&
+      !Array.isArray(payload) &&
+      (payload as { readonly status?: string }).status === 'in_progress'
+    )
+    {
+      payload = { ...payload, status: 'inProgress' }
+    }
+    if (
+      event.type === 'turn.plan.updated' &&
+      payload !== null &&
+      typeof payload === 'object' &&
+      !Array.isArray(payload) &&
+      Array.isArray((payload as { readonly plan?: unknown }).plan)
+    )
+    {
+      payload = {
+        ...payload,
+        plan: (payload as { readonly plan: ReadonlyArray<Record<string, unknown>> }).plan.map(
+          (step) => (step.status === 'in_progress' ? { ...step, status: 'inProgress' } : step),
+        ),
+      }
+    }
+    if (payload === undefined)
+    {
+      payload =
+        event.type === 'session.started' && typeof event.message === 'string'
+          ? { message: event.message }
+          : {}
+    }
+
+    return { ...event, payload } as ProviderRuntimeEvent
   }
 
   const emit = (event: LegacyProviderRuntimeEvent): void =>
@@ -181,13 +240,32 @@ function createProviderServiceHarness()
       providerInstanceId:
         normalized.providerInstanceId ?? ProviderInstanceId.make(String(normalized.provider)),
     }
-    Effect.runSync(PubSub.publish(runtimeEventPubSub, stamped))
+    if (appendRuntimeEvent === undefined)
+    {
+      Effect.runSync(PubSub.publish(runtimeEventPubSub, stamped))
+      return
+    }
+    admissionTail = admissionTail.then(() =>
+      Effect.runPromise(
+        appendRuntimeEvent!(stamped).pipe(
+          Effect.andThen(PubSub.publish(runtimeEventPubSub, stamped)),
+          Effect.asVoid,
+        ),
+      ),
+    )
   }
 
   return {
     service,
     emit,
     setSession,
+    setAdmission: (
+      append: (event: ProviderRuntimeEvent) => Effect.Effect<unknown, Error>,
+    ): void =>
+    {
+      appendRuntimeEvent = append
+    },
+    flushAdmissions: (): Promise<void> => admissionTail,
   }
 }
 
@@ -227,7 +305,12 @@ async function waitForThread(
 describe('ProviderRuntimeIngestion', () =>
 {
   let runtime: ManagedRuntime.ManagedRuntime<
-    OrchestrationEngineService | ProviderRuntimeIngestionService | ProjectionSnapshotQuery,
+    | OrchestrationEngineService
+    | ProviderRuntimeIngestionService
+    | ProjectionSnapshotQuery
+    | ProviderRuntimeInbox
+    | OrchestrationReactorDelivery
+    | SqlClient.SqlClient,
     unknown
   > | null = null
   let scope: Scope.Closeable | null = null
@@ -258,7 +341,13 @@ describe('ProviderRuntimeIngestion', () =>
     }
   })
 
-  async function createHarness(options?: { serverSettings?: Partial<ServerSettings> })
+  async function createHarness(options?: {
+    serverSettings?: Partial<ServerSettings>
+    beforeDispatchInternal?: (
+      command: Parameters<OrchestrationEngineShape['dispatchInternal']>[0],
+      authority: Parameters<OrchestrationEngineShape['dispatchInternal']>[1],
+    ) => Effect.Effect<void>
+  })
   {
     const workspaceRoot = makeTempDir('t3-provider-project-')
     // repository detection now goes through the vcs registry (megacore XC2-1),
@@ -284,6 +373,10 @@ describe('ProviderRuntimeIngestion', () =>
         return OrchestrationEngineService.of({
           readEvents: engine.readEvents,
           dispatch: engine.dispatch,
+          dispatchInternal: (command, authority) =>
+            (options?.beforeDispatchInternal?.(command, authority) ?? Effect.void).pipe(
+              Effect.andThen(engine.dispatchInternal(command, authority)),
+            ),
           get streamDomainEvents()
           {
             domainSubscriptionCount += 1
@@ -308,6 +401,7 @@ describe('ProviderRuntimeIngestion', () =>
       Layer.provideMerge(observedOrchestrationLayer),
       Layer.provideMerge(projectionSnapshotLayer),
       Layer.provideMerge(SqlitePersistenceMemory),
+      Layer.provideMerge(ProviderRuntimeInboxTestInfrastructureLive),
       Layer.provideMerge(Layer.succeed(ProviderService, provider.service)),
       Layer.provideMerge(makeTestServerSettingsLayer(options?.serverSettings)),
       Layer.provideMerge(ServerConfig.layerTest(process.cwd(), process.cwd())),
@@ -317,9 +411,17 @@ describe('ProviderRuntimeIngestion', () =>
     const engine = await runtime.runPromise(Effect.service(OrchestrationEngineService))
     const snapshotQuery = await runtime.runPromise(Effect.service(ProjectionSnapshotQuery))
     const ingestion = await runtime.runPromise(Effect.service(ProviderRuntimeIngestionService))
+    const delivery = await runtime.runPromise(Effect.service(OrchestrationReactorDelivery))
+    const sql = await runtime.runPromise(Effect.service(SqlClient.SqlClient))
+    const admission = await runtime.runPromise(makeProviderRuntimeInboxTestAdmission)
+    provider.setAdmission(admission.append)
     scope = await Effect.runPromise(Scope.make('sequential'))
     await Effect.runPromise(ingestion.start().pipe(Scope.provide(scope)))
-    const drain = () => Effect.runPromise(ingestion.drain)
+    const drain = async () =>
+    {
+      await provider.flushAdmissions()
+      await Effect.runPromise(ingestion.drain)
+    }
 
     const createdAt = '2026-01-01T00:00:00.000Z'
     await Effect.runPromise(
@@ -385,9 +487,63 @@ describe('ProviderRuntimeIngestion', () =>
       readModel: () => Effect.runPromise(snapshotQuery.getSnapshot()),
       emit: provider.emit,
       setProviderSession: provider.setSession,
+      readRuntimeIngestionProgress: () =>
+        runtime!.runPromise(delivery.getProgress('provider-runtime-ingestion')),
+      sql,
       drain,
       domainSubscriptionCount: () => domainSubscriptionCount,
     }
+  }
+
+  // ingestion fence (megacore U-072) drops events whose provider instance does
+  // not match the bound session — bind before emitting provider-scoped events
+  const bindSessionFence = (
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    input: {
+      readonly providerName: string
+      readonly providerInstanceId: ProviderInstanceId
+      readonly commandSuffix?: string
+    },
+  ) =>
+    Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make(
+          `cmd-session-seed-${input.commandSuffix ?? String(input.providerInstanceId)}-fence`,
+        ),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'ready',
+          providerName: input.providerName,
+          providerInstanceId: input.providerInstanceId,
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: '2026-01-01T00:00:00.000Z',
+          lastError: null,
+        },
+        createdAt: '2026-01-01T00:00:00.000Z',
+      }),
+    )
+
+  const startBufferedTurn = async (
+    harness: Awaited<ReturnType<typeof createHarness>>,
+    turnId: string,
+    now = '2026-01-01T00:00:00.000Z',
+  ) =>
+  {
+    harness.emit({
+      type: 'turn.started',
+      eventId: asEventId(`evt-turn-started-${turnId}`),
+      provider: ProviderDriverKind.make('codex'),
+      createdAt: now,
+      threadId: asThreadId('thread-1'),
+      turnId: asTurnId(turnId),
+    })
+    await waitForThread(
+      harness.readModel,
+      (thread) => thread.session?.status === 'running' && thread.session?.activeTurnId === turnId,
+    )
   }
 
   it('does not subscribe to thread.turn-start-requested domain events', async () =>
@@ -763,10 +919,15 @@ describe('ProviderRuntimeIngestion', () =>
       })
       harness.emit({
         type: 'session.exited',
-        eventId: asEventId('evt-duplicate-session-exited-after-stop'),
+        eventId: asEventId('evt-session-exited-after-stop'),
         provider: ProviderDriverKind.make('codex'),
         threadId,
-        createdAt: '2026-01-01T00:00:04.000Z',
+        createdAt: '2026-01-01T00:00:03.000Z',
+        payload: {
+          exitKind: 'error',
+          reason: 'ACP process exited with code 9',
+          recoverable: false,
+        },
       })
 
       yield* Effect.promise(() => harness.drain())
@@ -893,6 +1054,47 @@ describe('ProviderRuntimeIngestion', () =>
       harness.readModel,
       (thread) => thread.session?.status === 'ready' && thread.session?.activeTurnId === null,
     )
+  })
+
+  it('rejects an untargeted turn completion when no turn is active', async () =>
+  {
+    const harness = await createHarness()
+    const seededAt = '2026-01-01T00:00:00.000Z'
+
+    await Effect.runPromise(
+      harness.engine.dispatch({
+        type: 'thread.session.set',
+        commandId: CommandId.make('cmd-session-seed-untargeted-completion'),
+        threadId: ThreadId.make('thread-1'),
+        session: {
+          threadId: ThreadId.make('thread-1'),
+          status: 'starting',
+          providerName: 'claudeAgent',
+          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+          runtimeMode: 'approval-required',
+          activeTurnId: null,
+          updatedAt: seededAt,
+          lastError: null,
+        },
+        createdAt: seededAt,
+      }),
+    )
+
+    harness.emit({
+      type: 'turn.completed',
+      eventId: asEventId('evt-turn-completed-untargeted'),
+      provider: ProviderDriverKind.make('claudeAgent'),
+      createdAt: seededAt,
+      threadId: asThreadId('thread-1'),
+      status: 'completed',
+    })
+
+    await harness.drain()
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === ThreadId.make('thread-1'),
+    )
+    expect(thread?.session?.status).toBe('starting')
+    expect(thread?.session?.activeTurnId).toBeNull()
   })
 
   it('ignores auxiliary turn completions from a different provider thread', async () =>
@@ -1511,21 +1713,47 @@ describe('ProviderRuntimeIngestion', () =>
     })
   })
 
-  it('does not mark the source proposed plan implemented for a rejected turn.started event', async () =>
-  {
-    const harness = await createHarness()
-    const sourceThreadId = asThreadId('thread-plan')
-    const targetThreadId = asThreadId('thread-1')
-    const sourceTurnId = asTurnId('turn-plan-source')
-    const activeTurnId = asTurnId('turn-already-running')
-    const staleTurnId = asTurnId('turn-stale-start')
-    const createdAt = '2026-01-01T00:00:00.000Z'
+  it.each([
+    {
+      label: 'rejected stale turn.started',
+      targetThreadId: 'thread-1',
+      createTargetThread: false,
+      prebindActiveTurnId: 'turn-already-running',
+      providerActiveTurnIdBeforeEmit: null,
+      emittedTurnId: 'turn-stale-start',
+      assertTargetKeepsActiveTurn: 'turn-already-running',
+    },
+    {
+      label: 'unrelated turn.started with no tracked active turn',
+      targetThreadId: 'thread-implement',
+      createTargetThread: true,
+      prebindActiveTurnId: null,
+      providerActiveTurnIdBeforeEmit: 'turn-plan-implement',
+      emittedTurnId: 'turn-replayed',
+      assertTargetKeepsActiveTurn: null,
+    },
+  ])(
+    'does not mark the source proposed plan implemented for a $label',
+    async ({
+      targetThreadId: targetThreadIdValue,
+      createTargetThread,
+      prebindActiveTurnId,
+      providerActiveTurnIdBeforeEmit,
+      emittedTurnId,
+      assertTargetKeepsActiveTurn,
+    }) =>
+    {
+      const harness = await createHarness()
+      const sourceThreadId = asThreadId('thread-plan')
+      const targetThreadId = asThreadId(targetThreadIdValue)
+      const sourceTurnId = asTurnId('turn-plan-source')
+      const createdAt = '2026-01-01T00:00:00.000Z'
+      const suffix = createTargetThread ? 'unrelated' : 'guarded'
 
-    await Effect.runPromise(
-      Effect.andThen(
+      await Effect.runPromise(
         harness.engine.dispatch({
           type: 'thread.create',
-          commandId: CommandId.make('cmd-thread-create-plan-source-guarded'),
+          commandId: CommandId.make(`cmd-thread-create-plan-source-${suffix}`),
           threadId: sourceThreadId,
           projectId: asProjectId('project-1'),
           title: 'Plan Source',
@@ -1539,9 +1767,11 @@ describe('ProviderRuntimeIngestion', () =>
           worktreePath: null,
           createdAt,
         }),
+      )
+      await Effect.runPromise(
         harness.engine.dispatch({
           type: 'thread.session.set',
-          commandId: CommandId.make('cmd-session-set-plan-source-guarded'),
+          commandId: CommandId.make(`cmd-session-set-plan-source-${suffix}`),
           threadId: sourceThreadId,
           session: {
             threadId: sourceThreadId,
@@ -1554,117 +1784,177 @@ describe('ProviderRuntimeIngestion', () =>
           },
           createdAt,
         }),
-      ),
-    )
-    harness.setProviderSession({
-      provider: ProviderDriverKind.make('codex'),
-      status: 'running',
-      runtimeMode: 'approval-required',
-      threadId: targetThreadId,
-      createdAt,
-      updatedAt: createdAt,
-      activeTurnId,
-    })
+      )
 
-    harness.emit({
-      type: 'turn.started',
-      eventId: asEventId('evt-turn-started-already-running'),
-      provider: ProviderDriverKind.make('codex'),
-      createdAt,
-      threadId: targetThreadId,
-      turnId: activeTurnId,
-    })
+      if (createTargetThread)
+      {
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: 'thread.create',
+            commandId: CommandId.make(`cmd-thread-create-plan-target-${suffix}`),
+            threadId: targetThreadId,
+            projectId: asProjectId('project-1'),
+            title: 'Plan Target',
+            modelSelection: {
+              instanceId: ProviderInstanceId.make('codex'),
+              model: 'gpt-5-codex',
+            },
+            interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+            runtimeMode: 'approval-required',
+            branch: null,
+            worktreePath: null,
+            createdAt,
+          }),
+        )
+        await Effect.runPromise(
+          harness.engine.dispatch({
+            type: 'thread.session.set',
+            commandId: CommandId.make(`cmd-session-set-plan-target-${suffix}`),
+            threadId: targetThreadId,
+            session: {
+              threadId: targetThreadId,
+              status: 'ready',
+              providerName: 'codex',
+              runtimeMode: 'approval-required',
+              activeTurnId: null,
+              updatedAt: createdAt,
+              lastError: null,
+            },
+            createdAt,
+          }),
+        )
+      }
 
-    await waitForThread(
-      harness.readModel,
-      (thread) =>
-        thread.session?.status === 'running' && thread.session?.activeTurnId === activeTurnId,
-      2_000,
-      targetThreadId,
-    )
+      if (prebindActiveTurnId !== null)
+      {
+        const activeTurnId = asTurnId(prebindActiveTurnId)
+        harness.setProviderSession({
+          provider: ProviderDriverKind.make('codex'),
+          status: 'running',
+          runtimeMode: 'approval-required',
+          threadId: targetThreadId,
+          createdAt,
+          updatedAt: createdAt,
+          activeTurnId,
+        })
+        harness.emit({
+          type: 'turn.started',
+          eventId: asEventId('evt-turn-started-already-running'),
+          provider: ProviderDriverKind.make('codex'),
+          createdAt,
+          threadId: targetThreadId,
+          turnId: activeTurnId,
+        })
+        await waitForThread(
+          harness.readModel,
+          (thread) =>
+            thread.session?.status === 'running' && thread.session?.activeTurnId === activeTurnId,
+          2_000,
+          targetThreadId,
+        )
+      }
 
-    harness.emit({
-      type: 'turn.proposed.completed',
-      eventId: asEventId('evt-plan-source-completed-guarded'),
-      provider: ProviderDriverKind.make('codex'),
-      createdAt,
-      threadId: sourceThreadId,
-      turnId: sourceTurnId,
-      payload: {
-        planMarkdown: '# Source plan',
-      },
-    })
-
-    const sourceThreadWithPlan = await waitForThread(
-      harness.readModel,
-      (thread) =>
-        thread.proposedPlans.some(
-          (proposedPlan: ProviderRuntimeTestProposedPlan) =>
-            proposedPlan.id === 'plan:thread-plan:turn:turn-plan-source' &&
-            proposedPlan.implementedAt === null,
-        ),
-      2_000,
-      sourceThreadId,
-    )
-    const sourcePlan = sourceThreadWithPlan.proposedPlans.find(
-      (entry: ProviderRuntimeTestProposedPlan) =>
-        entry.id === 'plan:thread-plan:turn:turn-plan-source',
-    )
-    expect(sourcePlan).toBeDefined()
-    if (!sourcePlan)
-    {
-      throw new Error('Expected source plan to exist.')
-    }
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-plan-target-guarded'),
-        threadId: targetThreadId,
-        message: {
-          messageId: asMessageId('msg-plan-target-guarded'),
-          role: 'user',
-          text: 'PLEASE IMPLEMENT THIS PLAN:\n# Source plan',
-          attachments: [],
+      harness.emit({
+        type: 'turn.proposed.completed',
+        eventId: asEventId(`evt-plan-source-completed-${suffix}`),
+        provider: ProviderDriverKind.make('codex'),
+        createdAt,
+        threadId: sourceThreadId,
+        turnId: sourceTurnId,
+        payload: {
+          planMarkdown: '# Source plan',
         },
-        sourceProposedPlan: {
-          threadId: sourceThreadId,
-          planId: sourcePlan.id,
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
+      })
+
+      const sourceThreadWithPlan = await waitForThread(
+        harness.readModel,
+        (thread) =>
+          thread.proposedPlans.some(
+            (proposedPlan: ProviderRuntimeTestProposedPlan) =>
+              proposedPlan.id === 'plan:thread-plan:turn:turn-plan-source' &&
+              proposedPlan.implementedAt === null,
+          ),
+        2_000,
+        sourceThreadId,
+      )
+      const sourcePlan = sourceThreadWithPlan.proposedPlans.find(
+        (entry: ProviderRuntimeTestProposedPlan) =>
+          entry.id === 'plan:thread-plan:turn:turn-plan-source',
+      )
+      expect(sourcePlan).toBeDefined()
+      if (!sourcePlan)
+      {
+        throw new Error('Expected source plan to exist.')
+      }
+
+      await Effect.runPromise(
+        harness.engine.dispatch({
+          type: 'thread.turn.start',
+          commandId: CommandId.make(`cmd-turn-start-plan-target-${suffix}`),
+          threadId: targetThreadId,
+          message: {
+            messageId: asMessageId(`msg-plan-target-${suffix}`),
+            role: 'user',
+            text: 'PLEASE IMPLEMENT THIS PLAN:\n# Source plan',
+            attachments: [],
+          },
+          sourceProposedPlan: {
+            threadId: sourceThreadId,
+            planId: sourcePlan.id,
+          },
+          interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+          runtimeMode: 'approval-required',
+          createdAt: '2026-01-01T00:00:00.000Z',
+        }),
+      )
+
+      if (providerActiveTurnIdBeforeEmit !== null)
+      {
+        harness.setProviderSession({
+          provider: ProviderDriverKind.make('codex'),
+          status: 'running',
+          runtimeMode: 'approval-required',
+          threadId: targetThreadId,
+          createdAt,
+          updatedAt: createdAt,
+          activeTurnId: asTurnId(providerActiveTurnIdBeforeEmit),
+        })
+      }
+
+      harness.emit({
+        type: 'turn.started',
+        eventId: asEventId(`evt-turn-started-${suffix}-plan-implementation`),
+        provider: ProviderDriverKind.make('codex'),
         createdAt: '2026-01-01T00:00:00.000Z',
-      }),
-    )
+        threadId: targetThreadId,
+        turnId: asTurnId(emittedTurnId),
+      })
 
-    harness.emit({
-      type: 'turn.started',
-      eventId: asEventId('evt-turn-started-stale-plan-implementation'),
-      provider: ProviderDriverKind.make('codex'),
-      createdAt: '2026-01-01T00:00:00.000Z',
-      threadId: targetThreadId,
-      turnId: staleTurnId,
-    })
+      await harness.drain()
 
-    await harness.drain()
+      const readModel = await harness.readModel()
+      const sourceThreadAfterNegativeStart = readModel.threads.find(
+        (entry) => entry.id === sourceThreadId,
+      )
+      expect(
+        sourceThreadAfterNegativeStart?.proposedPlans.find((entry) => entry.id === sourcePlan.id),
+      ).toMatchObject({
+        implementedAt: null,
+        implementationThreadId: null,
+      })
 
-    const readModel = await harness.readModel()
-    const sourceThreadAfterRejectedStart = readModel.threads.find(
-      (entry) => entry.id === sourceThreadId,
-    )
-    expect(
-      sourceThreadAfterRejectedStart?.proposedPlans.find((entry) => entry.id === sourcePlan.id),
-    ).toMatchObject({
-      implementedAt: null,
-      implementationThreadId: null,
-    })
-
-    const targetThreadAfterRejectedStart = readModel.threads.find(
-      (entry) => entry.id === targetThreadId,
-    )
-    expect(targetThreadAfterRejectedStart?.session?.status).toBe('running')
-    expect(targetThreadAfterRejectedStart?.session?.activeTurnId).toBe(activeTurnId)
-  })
+      if (assertTargetKeepsActiveTurn !== null)
+      {
+        const targetThreadAfterNegativeStart = readModel.threads.find(
+          (entry) => entry.id === targetThreadId,
+        )
+        expect(targetThreadAfterNegativeStart?.session?.status).toBe('running')
+        expect(targetThreadAfterNegativeStart?.session?.activeTurnId).toBe(
+          assertTargetKeepsActiveTurn,
+        )
+      }
+    },
+  )
 
   it('accepts a conflicting turn.started for a pending turn start when the provider expects that turn', async () =>
   {
@@ -1751,174 +2041,6 @@ describe('ProviderRuntimeIngestion', () =>
     expect(threadAfterSteer.session?.activeTurnId).toBe(newTurnId)
     expect(threadAfterSteer.latestTurn?.turnId).toBe(newTurnId)
     expect(threadAfterSteer.latestTurn?.state).toBe('running')
-  })
-
-  it('does not mark the source proposed plan implemented for an unrelated turn.started when no thread active turn is tracked', async () =>
-  {
-    const harness = await createHarness()
-    const sourceThreadId = asThreadId('thread-plan')
-    const targetThreadId = asThreadId('thread-implement')
-    const sourceTurnId = asTurnId('turn-plan-source')
-    const expectedTurnId = asTurnId('turn-plan-implement')
-    const replayedTurnId = asTurnId('turn-replayed')
-    const createdAt = '2026-01-01T00:00:00.000Z'
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.create',
-        commandId: CommandId.make('cmd-thread-create-plan-source-unrelated'),
-        threadId: sourceThreadId,
-        projectId: asProjectId('project-1'),
-        title: 'Plan Source',
-        modelSelection: {
-          instanceId: ProviderInstanceId.make('codex'),
-          model: 'gpt-5-codex',
-        },
-        interactionMode: 'plan',
-        runtimeMode: 'approval-required',
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      }),
-    )
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.session.set',
-        commandId: CommandId.make('cmd-session-set-plan-source-unrelated'),
-        threadId: sourceThreadId,
-        session: {
-          threadId: sourceThreadId,
-          status: 'ready',
-          providerName: 'codex',
-          runtimeMode: 'approval-required',
-          activeTurnId: null,
-          updatedAt: createdAt,
-          lastError: null,
-        },
-        createdAt,
-      }),
-    )
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.create',
-        commandId: CommandId.make('cmd-thread-create-plan-target-unrelated'),
-        threadId: targetThreadId,
-        projectId: asProjectId('project-1'),
-        title: 'Plan Target',
-        modelSelection: {
-          instanceId: ProviderInstanceId.make('codex'),
-          model: 'gpt-5-codex',
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        branch: null,
-        worktreePath: null,
-        createdAt,
-      }),
-    )
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.session.set',
-        commandId: CommandId.make('cmd-session-set-plan-target-unrelated'),
-        threadId: targetThreadId,
-        session: {
-          threadId: targetThreadId,
-          status: 'ready',
-          providerName: 'codex',
-          runtimeMode: 'approval-required',
-          activeTurnId: null,
-          updatedAt: createdAt,
-          lastError: null,
-        },
-        createdAt,
-      }),
-    )
-
-    harness.emit({
-      type: 'turn.proposed.completed',
-      eventId: asEventId('evt-plan-source-completed-unrelated'),
-      provider: ProviderDriverKind.make('codex'),
-      createdAt,
-      threadId: sourceThreadId,
-      turnId: sourceTurnId,
-      payload: {
-        planMarkdown: '# Source plan',
-      },
-    })
-
-    const sourceThreadWithPlan = await waitForThread(
-      harness.readModel,
-      (thread) =>
-        thread.proposedPlans.some(
-          (proposedPlan: ProviderRuntimeTestProposedPlan) =>
-            proposedPlan.id === 'plan:thread-plan:turn:turn-plan-source' &&
-            proposedPlan.implementedAt === null,
-        ),
-      2_000,
-      sourceThreadId,
-    )
-    const sourcePlan = sourceThreadWithPlan.proposedPlans.find(
-      (entry: ProviderRuntimeTestProposedPlan) =>
-        entry.id === 'plan:thread-plan:turn:turn-plan-source',
-    )
-    expect(sourcePlan).toBeDefined()
-    if (!sourcePlan)
-    {
-      throw new Error('Expected source plan to exist.')
-    }
-
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.turn.start',
-        commandId: CommandId.make('cmd-turn-start-plan-target-unrelated'),
-        threadId: targetThreadId,
-        message: {
-          messageId: asMessageId('msg-plan-target-unrelated'),
-          role: 'user',
-          text: 'PLEASE IMPLEMENT THIS PLAN:\n# Source plan',
-          attachments: [],
-        },
-        sourceProposedPlan: {
-          threadId: sourceThreadId,
-          planId: sourcePlan.id,
-        },
-        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-        runtimeMode: 'approval-required',
-        createdAt: '2026-01-01T00:00:00.000Z',
-      }),
-    )
-
-    harness.setProviderSession({
-      provider: ProviderDriverKind.make('codex'),
-      status: 'running',
-      runtimeMode: 'approval-required',
-      threadId: targetThreadId,
-      createdAt,
-      updatedAt: createdAt,
-      activeTurnId: expectedTurnId,
-    })
-
-    harness.emit({
-      type: 'turn.started',
-      eventId: asEventId('evt-turn-started-unrelated-plan-implementation'),
-      provider: ProviderDriverKind.make('codex'),
-      createdAt: '2026-01-01T00:00:00.000Z',
-      threadId: targetThreadId,
-      turnId: replayedTurnId,
-    })
-
-    await harness.drain()
-
-    const readModel = await harness.readModel()
-    const sourceThreadAfterUnrelatedStart = readModel.threads.find(
-      (entry) => entry.id === sourceThreadId,
-    )
-    expect(
-      sourceThreadAfterUnrelatedStart?.proposedPlans.find((entry) => entry.id === sourcePlan.id),
-    ).toMatchObject({
-      implementedAt: null,
-      implementationThreadId: null,
-    })
   })
 
   it('finalizes buffered proposed-plan deltas into a first-class proposed plan on turn completion', async () =>
@@ -2100,19 +2222,7 @@ describe('ProviderRuntimeIngestion', () =>
     {
       const harness = await createHarness()
       const now = '2026-01-01T00:00:00.000Z'
-
-      harness.emit({
-        type: 'turn.started',
-        eventId: asEventId(`evt-turn-started-${turnId}`),
-        provider: ProviderDriverKind.make('codex'),
-        createdAt: now,
-        threadId: asThreadId('thread-1'),
-        turnId: asTurnId(turnId),
-      })
-      await waitForThread(
-        harness.readModel,
-        (thread) => thread.session?.status === 'running' && thread.session?.activeTurnId === turnId,
-      )
+      await startBufferedTurn(harness, turnId, now)
 
       harness.emit({
         type: 'content.delta',
@@ -2842,7 +2952,7 @@ describe('ProviderRuntimeIngestion', () =>
       itemId: asItemId('item-p1-tool'),
       payload: {
         itemType: 'command_execution',
-        status: 'in_progress',
+        status: 'inProgress',
         title: 'Run tests',
         detail: 'bun test',
         data: { pid: 123 },
@@ -2875,6 +2985,7 @@ describe('ProviderRuntimeIngestion', () =>
       },
     })
 
+    await harness.drain()
     const thread = await waitForThread(
       harness.readModel,
       (entry) =>
@@ -2914,7 +3025,7 @@ describe('ProviderRuntimeIngestion', () =>
         : undefined
     expect(toolUpdate?.kind).toBe('tool.updated')
     expect(toolUpdatePayload?.itemType).toBe('command_execution')
-    expect(toolUpdatePayload?.status).toBe('in_progress')
+    expect(toolUpdatePayload?.status).toBe('inProgress')
 
     const warning = thread.activities.find(
       (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-runtime-warning',
@@ -2934,150 +3045,196 @@ describe('ProviderRuntimeIngestion', () =>
     expect(checkpoint?.checkpointRef).toBe('provider-diff:evt-turn-diff-updated')
   })
 
-  it('projects context window updates into normalized thread activities', async () =>
+  it('settles lagged provider metadata at the revert inbox high-water without self-blocking', async () =>
   {
-    const harness = await createHarness()
-    // the ingestion fence (megacore U-072) drops events whose provider
-    // instance does not match the bound session; bind a claude session first
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.session.set',
-        commandId: CommandId.make('cmd-session-seed-claude-fence'),
-        threadId: ThreadId.make('thread-1'),
-        session: {
-          threadId: ThreadId.make('thread-1'),
-          status: 'ready',
-          providerName: 'codex',
-          providerInstanceId: ProviderInstanceId.make('codex-work'),
-          runtimeMode: 'approval-required',
-          activeTurnId: null,
-          updatedAt: '2026-01-01T00:00:00.000Z',
-          lastError: null,
-        },
-        createdAt: '2026-01-01T00:00:00.000Z',
-      }),
-    )
-    const now = '2026-01-01T00:00:00.000Z'
+    const dispatchStarted = Effect.runSync(Deferred.make<void>())
+    const releaseDispatch = Effect.runSync(Deferred.make<void>())
+    const harness = await createHarness({
+      beforeDispatchInternal: (command, authority) =>
+        command.type === 'thread.meta.update' && command.title === 'Causally prior provider title'
+          ? Deferred.succeed(dispatchStarted, undefined).pipe(
+              Effect.andThen(Deferred.await(releaseDispatch)),
+            )
+          : Effect.void,
+    })
+    const createdAt = '2026-01-01T00:00:01.000Z'
 
     harness.emit({
-      type: 'thread.token-usage.updated',
-      eventId: asEventId('evt-thread-token-usage-updated'),
+      type: 'thread.metadata.updated',
+      eventId: asEventId('evt-metadata-before-active-revert'),
       provider: ProviderDriverKind.make('codex'),
-      providerInstanceId: ProviderInstanceId.make('codex-work'),
-      createdAt: now,
+      createdAt,
       threadId: asThreadId('thread-1'),
       payload: {
-        usage: {
-          usedTokens: 1075,
-          totalProcessedTokens: 10_200,
-          maxTokens: 128_000,
-          inputTokens: 1000,
-          cachedInputTokens: 500,
-          outputTokens: 50,
-          reasoningOutputTokens: 25,
-          lastUsedTokens: 1075,
-          lastInputTokens: 1000,
-          lastCachedInputTokens: 500,
-          lastOutputTokens: 50,
-          lastReasoningOutputTokens: 25,
-          compactsAutomatically: true,
-        },
+        name: 'Causally prior provider title',
+        metadata: { source: 'provider' },
       },
     })
+    await Effect.runPromise(Deferred.await(dispatchStarted))
 
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.activities.some(
-        (activity: ProviderRuntimeTestActivity) => activity.kind === 'context-window.updated',
-      ),
-    )
-
-    const usageActivity = thread.activities.find(
-      (activity: ProviderRuntimeTestActivity) => activity.kind === 'context-window.updated',
-    )
-    expect(usageActivity).toBeDefined()
-    expect(usageActivity?.payload).toMatchObject({
-      usedTokens: 1075,
-      totalProcessedTokens: 10_200,
-      maxTokens: 128_000,
-      inputTokens: 1000,
-      cachedInputTokens: 500,
-      outputTokens: 50,
-      reasoningOutputTokens: 25,
-      lastUsedTokens: 1075,
-      compactsAutomatically: true,
-      provider: 'codex',
-      providerInstanceId: 'codex-work',
-    })
-    // legacy payloads without provider identity must still decode
-    expect(
-      Schema.decodeUnknownSync(ContextWindowUpdatedActivityPayload)({ usedTokens: 1 }),
-    ).toEqual({ usedTokens: 1 })
-  })
-
-  it('projects Claude usage snapshots with context window into normalized thread activities', async () =>
-  {
-    const harness = await createHarness()
-    // the ingestion fence (megacore U-072) drops events whose provider
-    // instance does not match the bound session; bind a claude session first
     await Effect.runPromise(
       harness.engine.dispatch({
-        type: 'thread.session.set',
-        commandId: CommandId.make('cmd-session-seed-claude-fence'),
-        threadId: ThreadId.make('thread-1'),
-        session: {
-          threadId: ThreadId.make('thread-1'),
-          status: 'ready',
-          providerName: 'claudeAgent',
-          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
-          runtimeMode: 'approval-required',
-          activeTurnId: null,
-          updatedAt: '2026-01-01T00:00:00.000Z',
-          lastError: null,
-        },
-        createdAt: '2026-01-01T00:00:00.000Z',
+        type: 'thread.checkpoint.revert',
+        commandId: CommandId.make('cmd-revert-fences-lagged-provider-metadata'),
+        threadId: asThreadId('thread-1'),
+        turnCount: 0,
+        createdAt: '2026-01-01T00:00:02.000Z',
       }),
     )
-    const now = '2026-01-01T00:00:00.000Z'
 
-    harness.emit({
-      type: 'thread.token-usage.updated',
-      eventId: asEventId('evt-thread-token-usage-updated-claude-window'),
+    const operations = await Effect.runPromise(
+      harness.sql<{
+        readonly phase: string
+        readonly providerInboxHighWater: number
+      }>`
+        SELECT
+          phase,
+          provider_inbox_high_water AS "providerInboxHighWater"
+        FROM checkpoint_revert_operations
+        WHERE thread_id = 'thread-1'
+      `,
+    )
+    expect(operations).toEqual([
+      {
+        phase: 'requested',
+        providerInboxHighWater: 1,
+      },
+    ])
+
+    await Effect.runPromise(Deferred.succeed(releaseDispatch, undefined))
+    await harness.drain()
+
+    const thread = await waitForThread(
+      harness.readModel,
+      (entry) => entry.title === 'Causally prior provider title',
+    )
+    const progress = await harness.readRuntimeIngestionProgress()
+    expect(thread.title).toBe('Causally prior provider title')
+    expect(progress._tag).toBe('Some')
+    if (progress._tag !== 'Some')
+    {
+      throw new Error('Expected provider runtime ingestion progress.')
+    }
+    expect(progress.value.blockedSequence).toBeNull()
+    expect(progress.value.cursorSequence).toBe(1)
+  })
+
+  it.each([
+    {
+      label: 'Codex context window',
+      providerName: 'codex',
+      providerInstanceId: ProviderInstanceId.make('codex-work'),
+      eventId: 'evt-thread-token-usage-updated',
+      provider: ProviderDriverKind.make('codex'),
+      emitProviderInstanceId: ProviderInstanceId.make('codex-work'),
+      usage: {
+        usedTokens: 1075,
+        totalProcessedTokens: 10_200,
+        maxTokens: 128_000,
+        inputTokens: 1000,
+        cachedInputTokens: 500,
+        outputTokens: 50,
+        reasoningOutputTokens: 25,
+        lastUsedTokens: 1075,
+        lastInputTokens: 1000,
+        lastCachedInputTokens: 500,
+        lastOutputTokens: 50,
+        lastReasoningOutputTokens: 25,
+        compactsAutomatically: true,
+      },
+      raw: undefined as
+        { readonly source: string; readonly method: string; readonly payload: object } | undefined,
+      expectPayload: {
+        usedTokens: 1075,
+        totalProcessedTokens: 10_200,
+        maxTokens: 128_000,
+        inputTokens: 1000,
+        cachedInputTokens: 500,
+        outputTokens: 50,
+        reasoningOutputTokens: 25,
+        lastUsedTokens: 1075,
+        compactsAutomatically: true,
+        provider: 'codex',
+        providerInstanceId: 'codex-work',
+      },
+      assertLegacyDecode: true,
+    },
+    {
+      label: 'Claude usage snapshot',
+      providerName: 'claudeAgent',
+      providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+      eventId: 'evt-thread-token-usage-updated-claude-window',
       provider: ProviderDriverKind.make('claudeAgent'),
-      createdAt: now,
-      threadId: asThreadId('thread-1'),
-      payload: {
-        usage: {
-          usedTokens: 31_251,
-          lastUsedTokens: 31_251,
-          maxTokens: 200_000,
-          toolUses: 25,
-          durationMs: 43_567,
-        },
+      emitProviderInstanceId: undefined,
+      usage: {
+        usedTokens: 31_251,
+        lastUsedTokens: 31_251,
+        maxTokens: 200_000,
+        toolUses: 25,
+        durationMs: 43_567,
       },
       raw: {
         source: 'claude.sdk.message',
         method: 'claude/result/success',
         payload: {},
       },
-    })
+      expectPayload: {
+        usedTokens: 31_251,
+        lastUsedTokens: 31_251,
+        maxTokens: 200_000,
+        toolUses: 25,
+        durationMs: 43_567,
+      },
+      assertLegacyDecode: false,
+    },
+  ])(
+    'projects $label into normalized thread activities',
+    async ({
+      providerName,
+      providerInstanceId,
+      eventId,
+      provider,
+      emitProviderInstanceId,
+      usage,
+      raw,
+      expectPayload,
+      assertLegacyDecode,
+    }) =>
+    {
+      const harness = await createHarness()
+      await bindSessionFence(harness, { providerName, providerInstanceId })
+      const now = '2026-01-01T00:00:00.000Z'
 
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.activities.some(
+      harness.emit({
+        type: 'thread.token-usage.updated',
+        eventId: asEventId(eventId),
+        provider,
+        ...(emitProviderInstanceId ? { providerInstanceId: emitProviderInstanceId } : {}),
+        createdAt: now,
+        threadId: asThreadId('thread-1'),
+        payload: { usage },
+        ...(raw ? { raw } : {}),
+      })
+
+      const thread = await waitForThread(harness.readModel, (entry) =>
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.kind === 'context-window.updated',
+        ),
+      )
+      const usageActivity = thread.activities.find(
         (activity: ProviderRuntimeTestActivity) => activity.kind === 'context-window.updated',
-      ),
-    )
-
-    const usageActivity = thread.activities.find(
-      (activity: ProviderRuntimeTestActivity) => activity.kind === 'context-window.updated',
-    )
-    expect(usageActivity?.payload).toMatchObject({
-      usedTokens: 31_251,
-      lastUsedTokens: 31_251,
-      maxTokens: 200_000,
-      toolUses: 25,
-      durationMs: 43_567,
-    })
-  })
+      )
+      expect(usageActivity).toBeDefined()
+      expect(usageActivity?.payload).toMatchObject(expectPayload)
+      if (assertLegacyDecode)
+      {
+        // legacy payloads without provider identity must still decode
+        expect(
+          Schema.decodeUnknownSync(ContextWindowUpdatedActivityPayload)({ usedTokens: 1 }),
+        ).toEqual({ usedTokens: 1 })
+      }
+    },
+  )
 
   it('projects compacted thread state into context compaction activities', async () =>
   {
@@ -3212,195 +3369,144 @@ describe('ProviderRuntimeIngestion', () =>
     ).toBe('# Plan title')
   })
 
-  it('titles task activities with the task description, including on completion', async () =>
-  {
-    const harness = await createHarness()
-    // the ingestion fence (megacore U-072) drops events whose provider
-    // instance does not match the bound session; bind a claude session first
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.session.set',
-        commandId: CommandId.make('cmd-session-seed-claude-fence'),
-        threadId: ThreadId.make('thread-1'),
-        session: {
-          threadId: ThreadId.make('thread-1'),
-          status: 'ready',
-          providerName: 'claudeAgent',
-          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
-          runtimeMode: 'approval-required',
-          activeTurnId: null,
-          updatedAt: '2026-01-01T00:00:00.000Z',
-          lastError: null,
+  it.each([
+    {
+      label: 'progress present',
+      taskId: 'named-task-1',
+      turnId: 'turn-named-task',
+      description: 'Typecheck mobile app',
+      emitProgress: true,
+      progressSummary: 'Running tsc across the mobile workspace.',
+      completedSummary: 'Typecheck finished without errors.',
+      expectProgressTitle: true,
+      expectCompletedDetail: true,
+    },
+    {
+      label: 'progress absent',
+      taskId: 'fast-task-1',
+      turnId: 'turn-fast-task',
+      description: 'wait for codex review to finish',
+      emitProgress: false,
+      progressSummary: undefined,
+      completedSummary: undefined,
+      expectProgressTitle: false,
+      expectCompletedDetail: false,
+    },
+  ])(
+    'titles task activities from the task description when $label',
+    async ({
+      taskId,
+      turnId,
+      description,
+      emitProgress,
+      progressSummary,
+      completedSummary,
+      expectProgressTitle,
+      expectCompletedDetail,
+    }) =>
+    {
+      const harness = await createHarness()
+      await bindSessionFence(harness, {
+        providerName: 'claudeAgent',
+        providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+        commandSuffix: 'claude',
+      })
+      const now = '2026-01-01T00:00:00.000Z'
+      const startedEventId = `evt-${taskId}-started`
+      const progressEventId = `evt-${taskId}-progress`
+      const completedEventId = `evt-${taskId}-completed`
+
+      harness.emit({
+        type: 'task.started',
+        eventId: asEventId(startedEventId),
+        provider: ProviderDriverKind.make('claudeAgent'),
+        createdAt: now,
+        threadId: asThreadId('thread-1'),
+        turnId: asTurnId(turnId),
+        payload: {
+          taskId,
+          description,
+          taskType: 'local_bash',
         },
-        createdAt: '2026-01-01T00:00:00.000Z',
-      }),
-    )
-    const now = '2026-01-01T00:00:00.000Z'
+      })
 
-    harness.emit({
-      type: 'task.started',
-      eventId: asEventId('evt-named-task-started'),
-      provider: ProviderDriverKind.make('claudeAgent'),
-      createdAt: now,
-      threadId: asThreadId('thread-1'),
-      turnId: asTurnId('turn-named-task'),
-      payload: {
-        taskId: 'named-task-1',
-        description: 'Typecheck mobile app',
-        taskType: 'local_bash',
-      },
-    })
+      if (emitProgress)
+      {
+        harness.emit({
+          type: 'task.progress',
+          eventId: asEventId(progressEventId),
+          provider: ProviderDriverKind.make('claudeAgent'),
+          createdAt: now,
+          threadId: asThreadId('thread-1'),
+          turnId: asTurnId(turnId),
+          payload: {
+            taskId,
+            description,
+            summary: progressSummary,
+          },
+        })
+      }
 
-    harness.emit({
-      type: 'task.progress',
-      eventId: asEventId('evt-named-task-progress'),
-      provider: ProviderDriverKind.make('claudeAgent'),
-      createdAt: now,
-      threadId: asThreadId('thread-1'),
-      turnId: asTurnId('turn-named-task'),
-      payload: {
-        taskId: 'named-task-1',
-        description: 'Typecheck mobile app',
-        summary: 'Running tsc across the mobile workspace.',
-      },
-    })
-
-    harness.emit({
-      type: 'task.completed',
-      eventId: asEventId('evt-named-task-completed'),
-      provider: ProviderDriverKind.make('claudeAgent'),
-      createdAt: now,
-      threadId: asThreadId('thread-1'),
-      turnId: asTurnId('turn-named-task'),
-      payload: {
-        taskId: 'named-task-1',
-        status: 'completed',
-        summary: 'Typecheck finished without errors.',
-      },
-    })
-
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.activities.some(
-        (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-named-task-completed',
-      ),
-    )
-
-    const progress = thread.activities.find(
-      (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-named-task-progress',
-    )
-    const completed = thread.activities.find(
-      (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-named-task-completed',
-    )
-
-    const progressPayload =
-      progress?.payload && typeof progress.payload === 'object'
-        ? (progress.payload as Record<string, unknown>)
-        : undefined
-    const completedPayload =
-      completed?.payload && typeof completed.payload === 'object'
-        ? (completed.payload as Record<string, unknown>)
-        : undefined
-
-    expect(progress?.summary).toBe('Typecheck mobile app')
-    expect(progressPayload?.title).toBe('Typecheck mobile app')
-    expect(completed?.summary).toBe('Task completed')
-    expect(completedPayload?.title).toBe('Typecheck mobile app')
-    expect(completedPayload?.summary).toBe('Typecheck finished without errors.')
-    expect(completedPayload?.detail).toBe('Typecheck finished without errors.')
-  })
-
-  it('titles task completion from task.started when no progress event carried the name', async () =>
-  {
-    const harness = await createHarness()
-    // the ingestion fence (megacore U-072) drops events whose provider
-    // instance does not match the bound session; bind a claude session first
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.session.set',
-        commandId: CommandId.make('cmd-session-seed-claude-fence'),
-        threadId: ThreadId.make('thread-1'),
-        session: {
-          threadId: ThreadId.make('thread-1'),
-          status: 'ready',
-          providerName: 'claudeAgent',
-          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
-          runtimeMode: 'approval-required',
-          activeTurnId: null,
-          updatedAt: '2026-01-01T00:00:00.000Z',
-          lastError: null,
+      harness.emit({
+        type: 'task.completed',
+        eventId: asEventId(completedEventId),
+        provider: ProviderDriverKind.make('claudeAgent'),
+        createdAt: now,
+        threadId: asThreadId('thread-1'),
+        turnId: asTurnId(turnId),
+        payload: {
+          taskId,
+          status: 'completed',
+          ...(completedSummary === undefined ? {} : { summary: completedSummary }),
         },
-        createdAt: '2026-01-01T00:00:00.000Z',
-      }),
-    )
-    const now = '2026-01-01T00:00:00.000Z'
+      })
 
-    harness.emit({
-      type: 'task.started',
-      eventId: asEventId('evt-fast-task-started'),
-      provider: ProviderDriverKind.make('claudeAgent'),
-      createdAt: now,
-      threadId: asThreadId('thread-1'),
-      turnId: asTurnId('turn-fast-task'),
-      payload: {
-        taskId: 'fast-task-1',
-        description: 'wait for codex review to finish',
-        taskType: 'local_bash',
-      },
-    })
+      const thread = await waitForThread(harness.readModel, (entry) =>
+        entry.activities.some(
+          (activity: ProviderRuntimeTestActivity) => activity.id === completedEventId,
+        ),
+      )
 
-    harness.emit({
-      type: 'task.completed',
-      eventId: asEventId('evt-fast-task-completed'),
-      provider: ProviderDriverKind.make('claudeAgent'),
-      createdAt: now,
-      threadId: asThreadId('thread-1'),
-      turnId: asTurnId('turn-fast-task'),
-      payload: {
-        taskId: 'fast-task-1',
-        status: 'completed',
-      },
-    })
+      const completed = thread.activities.find(
+        (activity: ProviderRuntimeTestActivity) => activity.id === completedEventId,
+      )
+      const completedPayload =
+        completed?.payload && typeof completed.payload === 'object'
+          ? (completed.payload as Record<string, unknown>)
+          : undefined
 
-    const thread = await waitForThread(harness.readModel, (entry) =>
-      entry.activities.some(
-        (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-fast-task-completed',
-      ),
-    )
+      expect(completedPayload?.title).toBe(description)
 
-    const completed = thread.activities.find(
-      (activity: ProviderRuntimeTestActivity) => activity.id === 'evt-fast-task-completed',
-    )
-    const completedPayload =
-      completed?.payload && typeof completed.payload === 'object'
-        ? (completed.payload as Record<string, unknown>)
-        : undefined
+      if (expectProgressTitle)
+      {
+        const progress = thread.activities.find(
+          (activity: ProviderRuntimeTestActivity) => activity.id === progressEventId,
+        )
+        const progressPayload =
+          progress?.payload && typeof progress.payload === 'object'
+            ? (progress.payload as Record<string, unknown>)
+            : undefined
+        expect(progress?.summary).toBe(description)
+        expect(progressPayload?.title).toBe(description)
+        expect(completed?.summary).toBe('Task completed')
+      }
 
-    expect(completedPayload?.title).toBe('wait for codex review to finish')
-  })
+      if (expectCompletedDetail)
+      {
+        expect(completedPayload?.summary).toBe(completedSummary)
+        expect(completedPayload?.detail).toBe(completedSummary)
+      }
+    },
+  )
 
   it('titles task completion from persisted activities after the description cache is swept', async () =>
   {
     const harness = await createHarness()
-    // the ingestion fence (megacore U-072) drops events whose provider
-    // instance does not match the bound session; bind a claude session first
-    await Effect.runPromise(
-      harness.engine.dispatch({
-        type: 'thread.session.set',
-        commandId: CommandId.make('cmd-session-seed-claude-fence'),
-        threadId: ThreadId.make('thread-1'),
-        session: {
-          threadId: ThreadId.make('thread-1'),
-          status: 'ready',
-          providerName: 'claudeAgent',
-          providerInstanceId: ProviderInstanceId.make('claudeAgent'),
-          runtimeMode: 'approval-required',
-          activeTurnId: null,
-          updatedAt: '2026-01-01T00:00:00.000Z',
-          lastError: null,
-        },
-        createdAt: '2026-01-01T00:00:00.000Z',
-      }),
-    )
+    await bindSessionFence(harness, {
+      providerName: 'claudeAgent',
+      providerInstanceId: ProviderInstanceId.make('claudeAgent'),
+      commandSuffix: 'claude',
+    })
     const now = '2026-01-01T00:00:00.000Z'
 
     harness.emit({
@@ -3430,6 +3536,15 @@ describe('ProviderRuntimeIngestion', () =>
       eventId: asEventId('evt-swept-task-session-exited'),
       provider: ProviderDriverKind.make('claudeAgent'),
       createdAt: now,
+      threadId: asThreadId('thread-1'),
+      payload: {},
+    })
+
+    harness.emit({
+      type: 'session.started',
+      eventId: asEventId('evt-swept-task-session-restarted'),
+      provider: ProviderDriverKind.make('claudeAgent'),
+      createdAt: '2026-01-01T00:00:01.000Z',
       threadId: asThreadId('thread-1'),
       payload: {},
     })
@@ -3539,7 +3654,7 @@ describe('ProviderRuntimeIngestion', () =>
     })
   })
 
-  it('continues processing runtime events after a single event handler failure', async () =>
+  it('blocks later runtime events behind an invalid canonical event for operator recovery', async () =>
   {
     const harness = await createHarness()
     const now = '2026-01-01T00:00:00.000Z'
@@ -3570,14 +3685,24 @@ describe('ProviderRuntimeIngestion', () =>
       },
     })
 
-    const thread = await waitForThread(
-      harness.readModel,
-      (entry) =>
-        entry.session?.status === 'error' &&
-        entry.session?.activeTurnId === 'turn-after-failure' &&
-        entry.session?.lastError === 'runtime still processed',
+    await harness.drain()
+
+    const progress = await harness.readRuntimeIngestionProgress()
+    expect(progress._tag).toBe('Some')
+    if (progress._tag !== 'Some')
+    {
+      throw new Error('Expected provider runtime ingestion progress.')
+    }
+    expect(progress.value.cursorSequence).toBe(0)
+    expect(progress.value.blockedSequence).toBe(1)
+    expect(progress.value.lastError).toContain('cannot decode admitted provider event 1')
+
+    // the later valid event remains pending until an operator resolves the poison barrier
+    const thread = (await harness.readModel()).threads.find(
+      (entry) => entry.id === asThreadId('thread-1'),
     )
-    expect(thread.session?.status).toBe('error')
-    expect(thread.session?.lastError).toBe('runtime still processed')
+    expect(thread?.session?.status).toBe('ready')
+    expect(thread?.session?.activeTurnId).toBeNull()
+    expect(thread?.session?.lastError).toBeNull()
   })
 })

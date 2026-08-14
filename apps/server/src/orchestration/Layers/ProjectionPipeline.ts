@@ -6,10 +6,11 @@ import {
   type ChatAttachment,
   type ApprovalOutcomeStatus,
   type ProviderApprovalDecision,
-  type ModelSelection,
+  ModelSelection,
+  NonNegativeInt,
   OrchestratePlanRevision,
+  type OrchestrateRunExecution,
   type OrchestrationEvent,
-  type OrchestrationSessionStatus,
   ThreadId,
   ThreadOrigin,
 } from '@t3tools/contracts'
@@ -25,7 +26,11 @@ import * as Stream from 'effect/Stream'
 import * as SqlClient from 'effect/unstable/sql/SqlClient'
 import * as SqlSchema from 'effect/unstable/sql/SqlSchema'
 
-import { toPersistenceSqlError, type ProjectionRepositoryError } from '../../persistence/Errors.ts'
+import {
+  PersistenceSqlError,
+  toPersistenceSqlError,
+  type ProjectionRepositoryError,
+} from '../../persistence/Errors.ts'
 import { AttachmentLifecycleRepositoryLive } from '../../persistence/Layers/AttachmentLifecycle.ts'
 import { AttachmentLifecycleRepository } from '../../persistence/Services/AttachmentLifecycle.ts'
 import { OrchestrationEventStore } from '../../persistence/Services/OrchestrationEventStore.ts'
@@ -38,10 +43,7 @@ import {
   type ProjectionThreadMessage,
   ProjectionThreadMessageRepository,
 } from '../../persistence/Services/ProjectionThreadMessages.ts'
-import {
-  type ProjectionThreadProposedPlan,
-  ProjectionThreadProposedPlanRepository,
-} from '../../persistence/Services/ProjectionThreadProposedPlans.ts'
+import { ProjectionThreadProposedPlanRepository } from '../../persistence/Services/ProjectionThreadProposedPlans.ts'
 import { ProjectionThreadSessionRepository } from '../../persistence/Services/ProjectionThreadSessions.ts'
 import {
   type ProjectionTurn,
@@ -87,6 +89,7 @@ export const ORCHESTRATION_PROJECTOR_NAMES = {
   threadMessages: 'projection.thread-messages',
   threadProposedPlans: 'projection.thread-proposed-plans',
   threadOrchestratePlans: 'projection.thread-orchestrate-plans',
+  orchestrateRunExecutions: 'projection.orchestrate-run-executions',
   threadActivities: 'projection.thread-activities',
   threadSessions: 'projection.thread-sessions',
   threadTurns: 'projection.thread-turns',
@@ -99,6 +102,9 @@ const encodeUnknownJsonString = Schema.encodeUnknownSync(Schema.UnknownFromJsonS
 const encodeOrchestratePlanStagesJson = Schema.encodeSync(
   Schema.fromJsonString(OrchestratePlanRevision.fields.stages),
 )
+const encodeOrchestratePlanLeadModelJson = Schema.encodeSync(
+  Schema.NullOr(Schema.fromJsonString(ModelSelection)),
+)
 const ProjectionThreadOrchestratePlanDbRow = Schema.Struct({
   threadId: ThreadId,
   runId: OrchestratePlanRevision.fields.runId,
@@ -110,7 +116,11 @@ const ProjectionThreadOrchestratePlanDbRow = Schema.Struct({
   totalWorkers: OrchestratePlanRevision.fields.totalWorkers,
   maxWorkers: OrchestratePlanRevision.fields.maxWorkers,
   source: OrchestratePlanRevision.fields.source,
+  // NULL on every revision persisted before migration 054; nothing can
+  // backfill it, so the column stays nullable rather than defaulted
+  leadModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
   status: OrchestratePlanRevision.fields.status,
+  sourceSequence: Schema.NullOr(NonNegativeInt),
   createdAt: OrchestratePlanRevision.fields.createdAt,
   updatedAt: OrchestratePlanRevision.fields.updatedAt,
 })
@@ -120,6 +130,7 @@ const ProjectionThreadOrchestratePlanKey = Schema.Struct({
   runId: OrchestratePlanRevision.fields.runId,
   revision: OrchestratePlanRevision.fields.revision,
 })
+type ProjectionThreadOrchestratePlanKey = typeof ProjectionThreadOrchestratePlanKey.Type
 const ProjectionThreadOrchestratePlansByThread = Schema.Struct({
   threadId: ThreadId,
 })
@@ -511,7 +522,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           total_workers AS "totalWorkers",
           max_workers AS "maxWorkers",
           source,
+          lead_model_selection_json AS "leadModelSelection",
           status,
+          source_sequence AS "sourceSequence",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_orchestrate_plans
@@ -537,7 +550,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           total_workers AS "totalWorkers",
           max_workers AS "maxWorkers",
           source,
+          lead_model_selection_json AS "leadModelSelection",
           status,
+          source_sequence AS "sourceSequence",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_orchestrate_plans
@@ -551,6 +566,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     )
     {
       const stagesJson = encodeOrchestratePlanStagesJson(row.stages)
+      const leadModelSelectionJson = encodeOrchestratePlanLeadModelJson(row.leadModelSelection)
       yield* sql`
           INSERT INTO projection_thread_orchestrate_plans (
             thread_id,
@@ -563,7 +579,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             total_workers,
             max_workers,
             source,
+            lead_model_selection_json,
             status,
+            source_sequence,
             created_at,
             updated_at
           )
@@ -578,7 +596,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             ${row.totalWorkers},
             ${row.maxWorkers},
             ${row.source},
+            ${leadModelSelectionJson},
             ${row.status},
+            ${row.sourceSequence},
             ${row.createdAt},
             ${row.updatedAt}
           )
@@ -591,7 +611,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             total_workers = excluded.total_workers,
             max_workers = excluded.max_workers,
             source = excluded.source,
+            lead_model_selection_json = excluded.lead_model_selection_json,
             status = excluded.status,
+            source_sequence = excluded.source_sequence,
             created_at = excluded.created_at,
             updated_at = excluded.updated_at
         `.pipe(
@@ -601,16 +623,251 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       )
     })
 
-    const deleteThreadOrchestratePlanRows = Effect.fn('deleteThreadOrchestratePlanRows')(function* (
-      threadId: ThreadId,
+    const insertOrchestrateExecutionJobs = Effect.fn('insertOrchestrateExecutionJobs')(function* (
+      execution: OrchestrateRunExecution,
+    )
+    {
+      yield* Effect.forEach(
+        execution.jobs,
+        (job) =>
+          Effect.gen(function* ()
+          {
+            yield* sql`
+              INSERT INTO projection_orchestrate_execution_jobs (
+                job_id,
+                thread_id,
+                run_id,
+                plan_revision,
+                status,
+                request_run_id,
+                request_repository_root,
+                result_repository_root,
+                repository_common_dir,
+                base_oid,
+                head_oid,
+                worktree_root,
+                branch,
+                bound_at
+              )
+              VALUES (
+                ${job.jobId},
+                ${execution.threadId},
+                ${execution.runId},
+                ${execution.planRevision},
+                ${job.status},
+                ${job.requestRunId},
+                ${job.requestRepositoryRoot},
+                ${job.resultRepositoryRoot},
+                ${job.repositoryCommonDir},
+                ${job.baseOid},
+                ${job.headOid},
+                ${job.worktreeRoot},
+                ${job.branch},
+                ${job.boundAt}
+              )
+              ON CONFLICT (job_id) DO NOTHING
+              `
+            const rows = yield* sql<{
+              readonly jobId: string
+              readonly threadId: string
+              readonly runId: string
+              readonly planRevision: number
+              readonly status: string
+              readonly requestRunId: string
+              readonly requestRepositoryRoot: string
+              readonly resultRepositoryRoot: string | null
+              readonly repositoryCommonDir: string
+              readonly baseOid: string
+              readonly headOid: string | null
+              readonly worktreeRoot: string | null
+              readonly branch: string | null
+              readonly boundAt: string
+            }>`
+                SELECT
+                  job_id AS "jobId",
+                  thread_id AS "threadId",
+                  run_id AS "runId",
+                  plan_revision AS "planRevision",
+                  status,
+                  request_run_id AS "requestRunId",
+                  request_repository_root AS "requestRepositoryRoot",
+                  result_repository_root AS "resultRepositoryRoot",
+                  repository_common_dir AS "repositoryCommonDir",
+                  base_oid AS "baseOid",
+                  head_oid AS "headOid",
+                  worktree_root AS "worktreeRoot",
+                  branch,
+                  bound_at AS "boundAt"
+                FROM projection_orchestrate_execution_jobs
+                WHERE job_id = ${job.jobId}
+              `
+            const row = rows[0]
+            if (
+              row === undefined ||
+              rows.length !== 1 ||
+              row.jobId !== job.jobId ||
+              row.threadId !== execution.threadId ||
+              row.runId !== execution.runId ||
+              row.planRevision !== execution.planRevision ||
+              row.status !== job.status ||
+              row.requestRunId !== job.requestRunId ||
+              row.requestRepositoryRoot !== job.requestRepositoryRoot ||
+              row.resultRepositoryRoot !== job.resultRepositoryRoot ||
+              row.repositoryCommonDir !== job.repositoryCommonDir ||
+              row.baseOid !== job.baseOid ||
+              row.headOid !== job.headOid ||
+              row.worktreeRoot !== job.worktreeRoot ||
+              row.branch !== job.branch ||
+              row.boundAt !== job.boundAt
+            )
+            {
+              return yield* new PersistenceSqlError({
+                operation: 'ProjectionOrchestrateRunExecutions.bindJob',
+                detail:
+                  `Broker job '${job.jobId}' is already bound with different immutable ` +
+                  'execution identity or evidence.',
+              })
+            }
+          }),
+        { concurrency: 1, discard: true },
+      )
+    })
+
+    const insertOrchestrateRunExecution = Effect.fn('insertOrchestrateRunExecution')(function* (
+      execution: OrchestrateRunExecution,
     )
     {
       yield* sql`
-          DELETE FROM projection_thread_orchestrate_plans
-          WHERE thread_id = ${threadId}
+          INSERT INTO projection_orchestrate_runs (
+            thread_id,
+            run_id,
+            current_plan_revision,
+            created_at,
+            updated_at
+          )
+          VALUES (
+            ${execution.threadId},
+            ${execution.runId},
+            ${execution.planRevision},
+            ${execution.admittedAt},
+            ${execution.updatedAt}
+          )
+          ON CONFLICT (thread_id, run_id)
+          DO UPDATE SET
+            current_plan_revision = excluded.current_plan_revision,
+            updated_at = excluded.updated_at
+        `
+      yield* sql`
+          UPDATE projection_orchestrate_run_executions
+          SET is_current = 0
+          WHERE thread_id = ${execution.threadId}
+            AND is_current = 1
+        `
+      yield* sql`
+          INSERT INTO projection_orchestrate_run_executions (
+            thread_id,
+            run_id,
+            plan_revision,
+            source_turn_id,
+            source_sequence,
+            repository_root,
+            repository_common_dir,
+            base_oid,
+            lifecycle,
+            availability,
+            integration_root,
+            integration_common_dir,
+            integration_branch,
+            integration_oid,
+            observed_head_oid,
+            final_head_oid,
+            close_reason,
+            is_current,
+            admitted_at,
+            updated_at,
+            terminal_at
+          )
+          VALUES (
+            ${execution.threadId},
+            ${execution.runId},
+            ${execution.planRevision},
+            ${execution.sourceTurnId},
+            ${execution.sourceSequence},
+            ${execution.repositoryRoot},
+            ${execution.repositoryCommonDir},
+            ${execution.baseOid},
+            ${execution.lifecycle},
+            ${execution.availability},
+            ${execution.integrationRoot},
+            ${execution.integrationCommonDir},
+            ${execution.integrationBranch},
+            ${execution.integrationOid},
+            ${execution.observedHeadOid},
+            ${execution.finalHeadOid},
+            ${execution.closeReason},
+            ${execution.current ? 1 : 0},
+            ${execution.admittedAt},
+            ${execution.updatedAt},
+            ${execution.terminalAt}
+          )
+        `
+      yield* insertOrchestrateExecutionJobs(execution)
+    })
+
+    const updateOrchestrateRunExecution = Effect.fn('updateOrchestrateRunExecution')(function* (
+      execution: OrchestrateRunExecution,
+    )
+    {
+      yield* sql`
+          UPDATE projection_orchestrate_run_executions
+          SET
+            lifecycle = ${execution.lifecycle},
+            availability = ${execution.availability},
+            integration_root = ${execution.integrationRoot},
+            integration_common_dir = ${execution.integrationCommonDir},
+            integration_branch = ${execution.integrationBranch},
+            integration_oid = ${execution.integrationOid},
+            observed_head_oid = ${execution.observedHeadOid},
+            final_head_oid = ${execution.finalHeadOid},
+            close_reason = ${execution.closeReason},
+            is_current = ${execution.current ? 1 : 0},
+            updated_at = ${execution.updatedAt},
+            terminal_at = ${execution.terminalAt}
+          WHERE thread_id = ${execution.threadId}
+            AND run_id = ${execution.runId}
+            AND plan_revision = ${execution.planRevision}
+        `
+      yield* sql`
+          UPDATE projection_orchestrate_runs
+          SET updated_at = ${execution.updatedAt}
+          WHERE thread_id = ${execution.threadId}
+            AND run_id = ${execution.runId}
+        `
+      yield* insertOrchestrateExecutionJobs(execution)
+    })
+
+    const deleteThreadOrchestratePlanRow = Effect.fn('deleteThreadOrchestratePlanRow')(function* (
+      key: ProjectionThreadOrchestratePlanKey,
+    )
+    {
+      yield* sql`
+          DELETE FROM proposal_orchestrate_plan_links
+          WHERE source_thread_id = ${key.threadId}
+            AND run_id = ${key.runId}
+            AND orchestrate_revision = ${key.revision}
         `.pipe(
         Effect.mapError(
-          toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.delete:query'),
+          toPersistenceSqlError('ProposalOrchestratePlanLinkRepository.deleteExact:query'),
+        ),
+      )
+      yield* sql`
+          DELETE FROM projection_thread_orchestrate_plans
+          WHERE thread_id = ${key.threadId}
+            AND run_id = ${key.runId}
+            AND revision = ${key.revision}
+        `.pipe(
+        Effect.mapError(
+          toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.deleteExact:query'),
         ),
       )
     })
@@ -749,14 +1006,20 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             providerSwitch: null,
             runtimeMode: event.payload.runtimeMode,
             interactionMode: event.payload.interactionMode,
+            interactionOrchestrate: event.payload.orchestrate === true ? 1 : 0,
             branch: event.payload.branch,
             worktreePath: event.payload.worktreePath,
+            // a thread is never born inside a run; the integration target is
+            // declared later and reaches this row through the shell refresh
+            orchestrateRunWorktreePath: null,
+            orchestrateRunBranch: null,
             originJson:
               event.payload.origin === null ? null : encodeThreadOriginJson(event.payload.origin),
             latestTurnId: null,
             createdAt: event.payload.createdAt,
             updatedAt: event.payload.updatedAt,
             archivedAt: null,
+            archiveGeneration: 0,
             settledOverride: null,
             settledAt: null,
             snoozedUntil: null,
@@ -781,6 +1044,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             archivedAt: event.payload.archivedAt,
+            archiveGeneration: event.payload.archiveGeneration ?? 0,
             updatedAt: event.payload.updatedAt,
           })
           return
@@ -899,6 +1163,66 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           return
         }
 
+        // updatedAt is deliberately untouched: adoption is a server observation,
+        // and bumping it would reorder the user's thread list for a change the
+        // user never made
+        case 'thread.orchestrate-run-integration-set':
+        {
+          const authoritative = yield* sql<{ readonly present: number }>`
+            SELECT EXISTS (
+              SELECT 1
+              FROM projection_orchestrate_run_executions
+              WHERE thread_id = ${event.payload.threadId}
+                AND is_current = 1
+            ) AS present
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionThreads.authoritativeRunExists:query'),
+            ),
+          )
+          if (authoritative[0]?.present === 1)
+          {
+            return
+          }
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: event.payload.threadId,
+          })
+          if (Option.isNone(existingRow))
+          {
+            return
+          }
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            orchestrateRunWorktreePath: event.payload.worktreePath,
+            orchestrateRunBranch: event.payload.branch,
+          })
+          return
+        }
+
+        case 'thread.orchestrate-run-execution-admitted':
+        case 'thread.orchestrate-run-execution-updated':
+        {
+          const execution = event.payload.execution
+          if (!execution.current)
+          {
+            return
+          }
+          const existingRow = yield* projectionThreadRepository.getById({
+            threadId: execution.threadId,
+          })
+          if (Option.isNone(existingRow))
+          {
+            return
+          }
+          const available = execution.availability === 'available'
+          yield* projectionThreadRepository.upsert({
+            ...existingRow.value,
+            orchestrateRunWorktreePath: available ? execution.integrationRoot : null,
+            orchestrateRunBranch: available ? execution.integrationBranch : null,
+          })
+          return
+        }
+
         case 'thread.runtime-mode-set':
         {
           const existingRow = yield* projectionThreadRepository.getById({
@@ -928,6 +1252,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           yield* projectionThreadRepository.upsert({
             ...existingRow.value,
             interactionMode: event.payload.interactionMode,
+            interactionOrchestrate: event.payload.orchestrate === true ? 1 : 0,
             updatedAt: event.payload.updatedAt,
           })
           return
@@ -1464,6 +1789,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           yield* upsertThreadOrchestratePlanRow({
             threadId: event.payload.threadId,
             ...event.payload.plan,
+            sourceSequence: event.sequence,
           })
           return
 
@@ -1536,12 +1862,47 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             return
           }
 
-          yield* deleteThreadOrchestratePlanRows(event.payload.threadId)
-          yield* Effect.forEach(keptRows, upsertThreadOrchestratePlanRow, {
+          const prunedRows = existingRows.filter(
+            (row) =>
+              !keptRows.some(
+                (kept) =>
+                  kept.threadId === row.threadId &&
+                  kept.runId === row.runId &&
+                  kept.revision === row.revision,
+              ),
+          )
+          yield* Effect.forEach(prunedRows, deleteThreadOrchestratePlanRow, {
             concurrency: 1,
           }).pipe(Effect.asVoid)
           return
         }
+
+        default:
+          return
+      }
+    })
+
+    const applyOrchestrateRunExecutionsProjection: ProjectorDefinition['apply'] = Effect.fn(
+      'applyOrchestrateRunExecutionsProjection',
+    )(function* (event, _attachmentSideEffects)
+    {
+      switch (event.type)
+      {
+        case 'thread.orchestrate-run-execution-admitted':
+          yield* insertOrchestrateRunExecution(event.payload.execution).pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionOrchestrateRunExecutions.admit:query'),
+            ),
+          )
+          return
+
+        case 'thread.orchestrate-run-execution-updated':
+          yield* updateOrchestrateRunExecution(event.payload.execution).pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionOrchestrateRunExecutions.update:query'),
+            ),
+          )
+          return
 
         default:
           return
@@ -1917,6 +2278,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               checkpointRef: null,
               checkpointStatus: null,
               checkpointFiles: [],
+              checkpointCaptureRoot: null,
+              checkpointRepositoryCommonDir: null,
+              checkpointCommitOid: null,
             })
           }
 
@@ -1984,6 +2348,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             checkpointRef: null,
             checkpointStatus: null,
             checkpointFiles: [],
+            checkpointCaptureRoot: null,
+            checkpointRepositoryCommonDir: null,
+            checkpointCommitOid: null,
           })
           return
         }
@@ -2024,6 +2391,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             checkpointRef: null,
             checkpointStatus: null,
             checkpointFiles: [],
+            checkpointCaptureRoot: null,
+            checkpointRepositoryCommonDir: null,
+            checkpointCommitOid: null,
           })
           return
         }
@@ -2060,6 +2430,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
               checkpointRef: event.payload.checkpointRef,
               checkpointStatus: event.payload.status,
               checkpointFiles: event.payload.files,
+              checkpointCaptureRoot: event.payload.checkpointCaptureRoot ?? null,
+              checkpointRepositoryCommonDir: event.payload.checkpointRepositoryCommonDir ?? null,
+              checkpointCommitOid: event.payload.checkpointCommitOid ?? null,
               startedAt: existingTurn.value.startedAt ?? event.payload.completedAt,
               requestedAt: existingTurn.value.requestedAt ?? event.payload.completedAt,
               completedAt: event.payload.completedAt,
@@ -2081,6 +2454,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             checkpointRef: event.payload.checkpointRef,
             checkpointStatus: event.payload.status,
             checkpointFiles: event.payload.files,
+            checkpointCaptureRoot: event.payload.checkpointCaptureRoot ?? null,
+            checkpointRepositoryCommonDir: event.payload.checkpointRepositoryCommonDir ?? null,
+            checkpointCommitOid: event.payload.checkpointCommitOid ?? null,
           })
           return
         }
@@ -2118,7 +2494,105 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
       }
     })
 
-    const applyCheckpointsProjection: ProjectorDefinition['apply'] = () => Effect.void
+    const upsertCheckpointIdentity = Effect.fn('upsertCheckpointIdentity')(function* (input: {
+      readonly threadId: ThreadId
+      readonly checkpointTurnCount: number
+      readonly checkpointRef: string
+      readonly checkpointCaptureRoot: string | null
+      readonly checkpointRepositoryCommonDir: string | null
+      readonly checkpointCommitOid: string | null
+      readonly capturedAt: string
+    })
+    {
+      yield* sql`
+        INSERT INTO projection_checkpoint_identities (
+          thread_id,
+          checkpoint_turn_count,
+          checkpoint_ref,
+          checkpoint_capture_root,
+          checkpoint_repository_common_dir,
+          checkpoint_commit_oid,
+          captured_at
+        )
+        VALUES (
+          ${input.threadId},
+          ${input.checkpointTurnCount},
+          ${input.checkpointRef},
+          ${input.checkpointCaptureRoot},
+          ${input.checkpointRepositoryCommonDir},
+          ${input.checkpointCommitOid},
+          ${input.capturedAt}
+        )
+        ON CONFLICT (thread_id, checkpoint_turn_count)
+        DO UPDATE SET
+          checkpoint_ref = excluded.checkpoint_ref,
+          checkpoint_capture_root = COALESCE(
+            excluded.checkpoint_capture_root,
+            projection_checkpoint_identities.checkpoint_capture_root
+          ),
+          checkpoint_repository_common_dir = COALESCE(
+            excluded.checkpoint_repository_common_dir,
+            projection_checkpoint_identities.checkpoint_repository_common_dir
+          ),
+          checkpoint_commit_oid = COALESCE(
+            excluded.checkpoint_commit_oid,
+            projection_checkpoint_identities.checkpoint_commit_oid
+          ),
+          captured_at = excluded.captured_at
+      `.pipe(
+        Effect.mapError(toPersistenceSqlError('ProjectionPipeline.upsertCheckpointIdentity:query')),
+      )
+    })
+
+    const applyCheckpointsProjection: ProjectorDefinition['apply'] = Effect.fn(
+      'applyCheckpointsProjection',
+    )(function* (event, _attachmentSideEffects)
+    {
+      switch (event.type)
+      {
+        case 'thread.checkpoint-baseline-recorded':
+          yield* upsertCheckpointIdentity(event.payload)
+          return
+
+        case 'thread.turn-diff-completed':
+          yield* upsertCheckpointIdentity({
+            threadId: event.payload.threadId,
+            checkpointTurnCount: event.payload.checkpointTurnCount,
+            checkpointRef: event.payload.checkpointRef,
+            checkpointCaptureRoot: event.payload.checkpointCaptureRoot ?? null,
+            checkpointRepositoryCommonDir: event.payload.checkpointRepositoryCommonDir ?? null,
+            checkpointCommitOid: event.payload.checkpointCommitOid ?? null,
+            capturedAt: event.payload.completedAt,
+          })
+          return
+
+        case 'thread.reverted':
+          yield* sql`
+            DELETE FROM projection_checkpoint_identities
+            WHERE thread_id = ${event.payload.threadId}
+              AND checkpoint_turn_count > ${event.payload.turnCount}
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionPipeline.deleteStaleCheckpointIdentities:query'),
+            ),
+          )
+          return
+
+        case 'thread.deleted':
+          yield* sql`
+            DELETE FROM projection_checkpoint_identities
+            WHERE thread_id = ${event.payload.threadId}
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError('ProjectionPipeline.deleteCheckpointIdentities:query'),
+            ),
+          )
+          return
+
+        default:
+          return
+      }
+    })
 
     const applyPendingApprovalsProjection: ProjectorDefinition['apply'] = Effect.fn(
       'applyPendingApprovalsProjection',
@@ -2335,15 +2809,6 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
         apply: applyThreadProposedPlansProjection,
       },
       {
-        name: ORCHESTRATION_PROJECTOR_NAMES.threadOrchestratePlans,
-        eventTypes: new Set([
-          'thread.orchestrate-plan-upserted',
-          'thread.orchestrate-plan-response-requested',
-          'thread.reverted',
-        ]),
-        apply: applyThreadOrchestratePlansProjection,
-      },
-      {
         name: ORCHESTRATION_PROJECTOR_NAMES.threadActivities,
         eventTypes: new Set([
           'thread.provider-switch-failed',
@@ -2371,8 +2836,30 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
         apply: applyThreadTurnsProjection,
       },
       {
+        name: ORCHESTRATION_PROJECTOR_NAMES.threadOrchestratePlans,
+        eventTypes: new Set([
+          'thread.orchestrate-plan-upserted',
+          'thread.orchestrate-plan-response-requested',
+          'thread.reverted',
+        ]),
+        apply: applyThreadOrchestratePlansProjection,
+      },
+      {
+        name: ORCHESTRATION_PROJECTOR_NAMES.orchestrateRunExecutions,
+        eventTypes: new Set([
+          'thread.orchestrate-run-execution-admitted',
+          'thread.orchestrate-run-execution-updated',
+        ]),
+        apply: applyOrchestrateRunExecutionsProjection,
+      },
+      {
         name: ORCHESTRATION_PROJECTOR_NAMES.checkpoints,
-        eventTypes: new Set(),
+        eventTypes: new Set([
+          'thread.checkpoint-baseline-recorded',
+          'thread.turn-diff-completed',
+          'thread.reverted',
+          'thread.deleted',
+        ]),
         apply: applyCheckpointsProjection,
       },
       {
@@ -2391,6 +2878,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           'thread.snoozed',
           'thread.unsnoozed',
           'thread.meta-updated',
+          'thread.orchestrate-run-integration-set',
+          'thread.orchestrate-run-execution-admitted',
+          'thread.orchestrate-run-execution-updated',
           'thread.runtime-mode-set',
           'thread.interaction-mode-set',
           'thread.provider-switch-requested',

@@ -3,12 +3,20 @@
 
 import {
   type GitActionProgressEvent,
+  type GitCommandError,
   type GitManagerServiceError,
+  type OrchestrateRunExecution,
+  type VcsRemoveWorktreeInput,
   WS_METHODS,
   type WsRpcGroup,
 } from '@t3tools/contracts'
+import * as Cause from 'effect/Cause'
 import type * as Duration from 'effect/Duration'
 import * as Effect from 'effect/Effect'
+import * as Exit from 'effect/Exit'
+import type * as FileSystem from 'effect/FileSystem'
+import type * as Path from 'effect/Path'
+import type * as PlatformError from 'effect/PlatformError'
 import * as Queue from 'effect/Queue'
 import * as Stream from 'effect/Stream'
 import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
@@ -16,6 +24,7 @@ import type * as RpcGroup from 'effect/unstable/rpc/RpcGroup'
 import type * as GitWorkflowService from '../../git/GitWorkflowService.ts'
 import type * as VcsProvisioningService from '../../vcs/VcsProvisioningService.ts'
 import type * as VcsStatusBroadcaster from '../../vcs/VcsStatusBroadcaster.ts'
+import { withOrchestrateRunWorktreePermit } from '../../orchestration/runExecutionAvailability.ts'
 import type { makeRpcAuthorization } from '../rpcAuthorization.ts'
 
 type WsRpcHandlers = RpcGroup.HandlersFrom<RpcGroup.Rpcs<typeof WsRpcGroup>>
@@ -41,8 +50,68 @@ interface VcsRpcHandlerDependencies
   readonly vcsStatusBroadcaster: VcsStatusBroadcaster.VcsStatusBroadcaster['Service']
   readonly automaticGitFetchInterval: Effect.Effect<Duration.Duration, never>
   readonly refreshGitStatus: (cwd: string) => Effect.Effect<void>
+  readonly retireRunExecutionWorktreeAvailability: (
+    input: VcsRemoveWorktreeInput,
+  ) => Effect.Effect<ReadonlyArray<OrchestrateRunExecution>, GitCommandError>
+  readonly restoreRunExecutionWorktreeAvailability: (
+    executions: ReadonlyArray<OrchestrateRunExecution>,
+  ) => Effect.Effect<void, GitCommandError>
+  readonly verifyRunExecutionWorktreePresent: (
+    input: VcsRemoveWorktreeInput,
+    executions: ReadonlyArray<OrchestrateRunExecution>,
+  ) => Effect.Effect<boolean>
+  readonly resolveRunExecutionWorktreePermitPath: (
+    input: VcsRemoveWorktreeInput,
+  ) => Effect.Effect<string, GitCommandError>
   readonly observeRpcEffect: ReturnType<typeof makeRpcAuthorization>['observeRpcEffect']
   readonly observeRpcStream: ReturnType<typeof makeRpcAuthorization>['observeRpcStream']
+}
+
+function canonicalizeMissingWorktreeTail(
+  value: string,
+  dependencies: {
+    readonly fileSystem: FileSystem.FileSystem
+    readonly path: Path.Path
+  },
+): Effect.Effect<string, PlatformError.PlatformError>
+{
+  return dependencies.fileSystem.realPath(value).pipe(
+    Effect.catchTag('PlatformError', (error) =>
+    {
+      if (error.reason._tag !== 'NotFound')
+      {
+        return Effect.fail(error)
+      }
+      const parent = dependencies.path.dirname(value)
+      if (parent === value)
+      {
+        return Effect.fail(error)
+      }
+      return canonicalizeMissingWorktreeTail(parent, dependencies).pipe(
+        Effect.map((canonicalParent) =>
+          dependencies.path.join(canonicalParent, dependencies.path.basename(value)),
+        ),
+      )
+    }),
+  )
+}
+
+export function resolveCanonicalRunExecutionWorktreePermitPath(
+  input: VcsRemoveWorktreeInput,
+  dependencies: {
+    readonly fileSystem: FileSystem.FileSystem
+    readonly path: Path.Path
+  },
+): Effect.Effect<string, PlatformError.PlatformError>
+{
+  const worktreePath = dependencies.path.normalize(
+    dependencies.path.isAbsolute(input.path)
+      ? input.path
+      : dependencies.path.resolve(input.cwd, input.path),
+  )
+  return input.force
+    ? canonicalizeMissingWorktreeTail(worktreePath, dependencies)
+    : dependencies.fileSystem.realPath(worktreePath)
 }
 
 export function makeVcsRpcHandlers({
@@ -51,6 +120,10 @@ export function makeVcsRpcHandlers({
   vcsStatusBroadcaster,
   automaticGitFetchInterval,
   refreshGitStatus,
+  retireRunExecutionWorktreeAvailability,
+  restoreRunExecutionWorktreeAvailability,
+  verifyRunExecutionWorktreePresent,
+  resolveRunExecutionWorktreePermitPath,
   observeRpcEffect,
   observeRpcStream,
 }: VcsRpcHandlerDependencies)
@@ -130,7 +203,13 @@ export function makeVcsRpcHandlers({
     [WS_METHODS.vcsRemoveWorktree]: (input) =>
       observeRpcEffect(
         WS_METHODS.vcsRemoveWorktree,
-        gitWorkflow.removeWorktree(input).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
+        removeWorktreeWithRunExecutionAvailability(input, {
+          removeWorktree: gitWorkflow.removeWorktree,
+          retireRunExecutionWorktreeAvailability,
+          restoreRunExecutionWorktreeAvailability,
+          verifyRunExecutionWorktreePresent,
+          resolveRunExecutionWorktreePermitPath,
+        }).pipe(Effect.tap(() => refreshGitStatus(input.cwd))),
         { 'rpc.aggregate': 'vcs' },
       ),
     [WS_METHODS.vcsCreateRef]: (input) =>
@@ -152,4 +231,68 @@ export function makeVcsRpcHandlers({
         { 'rpc.aggregate': 'vcs' },
       ),
   } satisfies VcsRpcHandlers
+}
+
+export function removeWorktreeWithRunExecutionAvailability(
+  input: VcsRemoveWorktreeInput,
+  dependencies: {
+    readonly removeWorktree: (input: VcsRemoveWorktreeInput) => Effect.Effect<void, GitCommandError>
+    readonly retireRunExecutionWorktreeAvailability: (
+      input: VcsRemoveWorktreeInput,
+    ) => Effect.Effect<ReadonlyArray<OrchestrateRunExecution>, GitCommandError>
+    readonly restoreRunExecutionWorktreeAvailability: (
+      executions: ReadonlyArray<OrchestrateRunExecution>,
+    ) => Effect.Effect<void, GitCommandError>
+    readonly verifyRunExecutionWorktreePresent: (
+      input: VcsRemoveWorktreeInput,
+      executions: ReadonlyArray<OrchestrateRunExecution>,
+    ) => Effect.Effect<boolean>
+    readonly resolveRunExecutionWorktreePermitPath: (
+      input: VcsRemoveWorktreeInput,
+    ) => Effect.Effect<string, GitCommandError>
+  },
+): Effect.Effect<void, GitCommandError>
+{
+  return Effect.gen(function* ()
+  {
+    const worktreePath = yield* dependencies.resolveRunExecutionWorktreePermitPath(input)
+    const canonicalInput = { ...input, path: worktreePath }
+    return yield* withOrchestrateRunWorktreePermit(
+      worktreePath,
+      Effect.uninterruptibleMask((restore) =>
+        Effect.gen(function* ()
+        {
+          const retired = yield* dependencies.retireRunExecutionWorktreeAvailability(canonicalInput)
+          const removalExit = yield* restore(dependencies.removeWorktree(canonicalInput)).pipe(
+            Effect.exit,
+          )
+          if (Exit.isSuccess(removalExit))
+          {
+            return
+          }
+
+          const presenceExit = yield* dependencies
+            .verifyRunExecutionWorktreePresent(canonicalInput, retired)
+            .pipe(Effect.exit)
+          if (Exit.isFailure(presenceExit))
+          {
+            return yield* Effect.failCause(Cause.combine(removalExit.cause, presenceExit.cause))
+          }
+          if (!presenceExit.value)
+          {
+            return yield* Effect.failCause(removalExit.cause)
+          }
+
+          const restorationExit = yield* dependencies
+            .restoreRunExecutionWorktreeAvailability(retired)
+            .pipe(Effect.exit)
+          if (Exit.isFailure(restorationExit))
+          {
+            return yield* Effect.failCause(Cause.combine(removalExit.cause, restorationExit.cause))
+          }
+          return yield* Effect.failCause(removalExit.cause)
+        }),
+      ),
+    )
+  })
 }

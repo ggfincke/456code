@@ -205,10 +205,9 @@ describe('buildTurnStartParams', () =>
       NodeAssert.equal(params.collaborationMode?.mode, 'default')
       NodeAssert.equal(params.collaborationMode?.settings.model, 'gpt-5.3-codex')
       NodeAssert.equal(params.collaborationMode?.settings.reasoning_effort, 'high')
-      NodeAssert.ok(
-        params.collaborationMode?.settings.developer_instructions?.startsWith(
-          CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS,
-        ),
+      NodeAssert.match(
+        params.collaborationMode?.settings.developer_instructions ?? '',
+        /# Collaboration Mode: Orchestrate/,
       )
     }),
   )
@@ -296,6 +295,11 @@ describe('buildCodexDeveloperInstructions', () =>
     NodeAssert.match(instructions, /456code/)
     NodeAssert.match(instructions, /Codex harness/)
     NodeAssert.match(instructions, /as gpt-5\.3-codex with high reasoning effort/)
+    NodeAssert.match(instructions, /code456/)
+    NodeAssert.match(instructions, /preview_status/)
+    NodeAssert.match(instructions, /preview_open/)
+    NodeAssert.match(instructions, /Do not switch to global browser skills/)
+    NodeAssert.doesNotMatch(instructions, /architecture_/)
   })
 
   it('includes runtime info alongside plan mode instructions', () =>
@@ -307,9 +311,22 @@ describe('buildCodexDeveloperInstructions', () =>
 
     NodeAssert.ok(instructions.startsWith(CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS))
     NodeAssert.match(instructions, /proposal_preview_upsert/)
-    NodeAssert.match(instructions, /MUST call it.*before emitting the final/)
-    NodeAssert.match(instructions, /Do not finalize the plan until the call succeeds/)
+    NodeAssert.match(instructions, /In Plan mode, call .* before emitting the final/)
+    NodeAssert.match(
+      instructions,
+      /Do not finalize the plan until the required proposal call succeeds/,
+    )
     NodeAssert.match(instructions, /does not edit the user's worktree or index/)
+    NodeAssert.match(instructions, /code456/)
+    NodeAssert.match(instructions, /preview_status/)
+    NodeAssert.match(instructions, /preview_open/)
+    NodeAssert.match(instructions, /Do not switch to global browser skills/)
+    NodeAssert.match(instructions, /architecture_blast_radius/)
+    NodeAssert.match(instructions, /architecture_graph_diff/)
+    NodeAssert.match(instructions, /architecture_propose_patch/)
+    NodeAssert.match(instructions, /never invent or pass authority values/)
+    NodeAssert.equal(instructions.match(/## 456code proposal previews/g)?.length, 1)
+    NodeAssert.equal(instructions.match(/## 456code architecture tools/g)?.length, 1)
     NodeAssert.match(instructions, /as gpt-5\.3-codex with medium reasoning effort/)
   })
 
@@ -320,12 +337,69 @@ describe('buildCodexDeveloperInstructions', () =>
       reasoningEffort: 'high',
     })
 
-    NodeAssert.ok(instructions.startsWith(CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS))
+    NodeAssert.ok(instructions.startsWith(CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS))
     NodeAssert.match(instructions, /core collaboration mode, not a user-level skill/)
     NodeAssert.match(instructions, /Before any .*start_worker.* call/)
     NodeAssert.match(instructions, /orchestrate-plan/)
+    NodeAssert.match(instructions, /capture its committed .*runId, revision/)
+    NodeAssert.match(
+      instructions,
+      /proposal_preview_upsert.*orchestratePlan: \{ runId, revision \}/,
+    )
+    NodeAssert.match(instructions, /same committed .*runId.* and .*revision/)
+    NodeAssert.match(instructions, /fence, not a .*proposed_plan.* block, is the timeline anchor/)
+    NodeAssert.match(instructions, /code456/)
+    NodeAssert.match(instructions, /preview_status/)
+    NodeAssert.match(instructions, /preview_open/)
+    NodeAssert.match(instructions, /Do not switch to global browser skills/)
+    NodeAssert.match(instructions, /architecture_blast_radius/)
+    NodeAssert.match(instructions, /architecture_graph_diff/)
+    NodeAssert.match(instructions, /architecture_propose_patch/)
+    NodeAssert.match(instructions, /never invent or pass authority values/)
+    NodeAssert.equal(instructions.match(/## 456code proposal previews/g)?.length, 1)
+    NodeAssert.equal(instructions.match(/## 456code architecture tools/g)?.length, 1)
     NodeAssert.match(instructions, /Wait for explicit approval before launching/)
     NodeAssert.match(instructions, /wait_for_workers/)
+  })
+
+  it('composes plan and orchestrate instructions without allowing worker mutations', () =>
+  {
+    const instructions = buildCodexDeveloperInstructions(
+      'plan',
+      {
+        model: 'gpt-5.3-codex',
+        reasoningEffort: 'high',
+      },
+      true,
+    )
+
+    NodeAssert.ok(instructions.startsWith(CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS))
+    NodeAssert.match(instructions, /# Collaboration Mode: Orchestrate/)
+    NodeAssert.match(instructions, /workers must be read-only scouts/)
+    NodeAssert.match(instructions, /no-mutation invariant applies to the lead and every worker/)
+  })
+
+  it('orders browser, architecture, and proposal guidance consistently', () =>
+  {
+    for (const instructions of [
+      CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
+      CODEX_ORCHESTRATE_MODE_DEVELOPER_INSTRUCTIONS,
+    ])
+    {
+      const browser = instructions.indexOf('## 456code collaborative browser')
+      const architecture = instructions.indexOf('## 456code architecture tools')
+      const proposal = instructions.indexOf('## 456code proposal previews')
+      NodeAssert.ok(browser >= 0 && browser < architecture)
+      NodeAssert.ok(architecture < proposal)
+      NodeAssert.ok(
+        instructions.indexOf('architecture_blast_radius') <
+          instructions.indexOf('architecture_graph_diff'),
+      )
+      NodeAssert.ok(
+        instructions.indexOf('architecture_graph_diff') <
+          instructions.indexOf('architecture_propose_patch'),
+      )
+    }
   })
 
   it('flattens multiline metadata into single-line runtime info', () =>
@@ -337,23 +411,6 @@ describe('buildCodexDeveloperInstructions', () =>
 
     NodeAssert.match(instructions, /as gpt 5\.3 codex with high effort reasoning effort/)
     NodeAssert.doesNotMatch(instructions, /<runtime_info>[^<]*\n/)
-  })
-})
-
-describe('T3 browser developer instructions', () =>
-{
-  it('prefers the product-native preview tools in both collaboration modes', () =>
-  {
-    for (const instructions of [
-      CODEX_DEFAULT_MODE_DEVELOPER_INSTRUCTIONS,
-      CODEX_PLAN_MODE_DEVELOPER_INSTRUCTIONS,
-    ])
-    {
-      NodeAssert.match(instructions, /code456/)
-      NodeAssert.match(instructions, /preview_status/)
-      NodeAssert.match(instructions, /preview_open/)
-      NodeAssert.match(instructions, /Do not switch to global browser skills/)
-    }
   })
 })
 

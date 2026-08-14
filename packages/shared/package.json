@@ -179,6 +179,10 @@
       "types": "./src/terminalLabels.ts",
       "import": "./src/terminalLabels.ts"
     },
+    "./threadChangeRoot": {
+      "types": "./src/threadChangeRoot.ts",
+      "import": "./src/threadChangeRoot.ts"
+    },
     "./relayClient": {
       "types": "./src/relayClient.ts",
       "import": "./src/relayClient.ts"
@@ -210,6 +214,10 @@
     "./httpReadiness": {
       "types": "./src/httpReadiness.ts",
       "import": "./src/httpReadiness.ts"
+    },
+    "./toolMutationTargets": {
+      "types": "./src/toolMutationTargets.ts",
+      "import": "./src/toolMutationTargets.ts"
     }
   },
   "scripts": {

@@ -14,7 +14,7 @@ export interface ProviderRollbackJournalDetail
 {
   readonly version: 1
   readonly capability: ProviderRollbackCapability
-  readonly state: 'pending' | 'attempt-started' | 'recorded'
+  readonly state: 'pending' | 'identity-unavailable' | 'attempt-started' | 'recorded'
   readonly rolledBackTurns: number
   readonly staleRefs: ReadonlyArray<string>
   readonly detail: string | null
@@ -80,6 +80,7 @@ export function decodeProviderRollbackJournalDetail(
       candidate.capability !== 'known-unsupported' &&
       candidate.capability !== 'legacy-unreported') ||
     (candidate.state !== 'pending' &&
+      candidate.state !== 'identity-unavailable' &&
       candidate.state !== 'attempt-started' &&
       candidate.state !== 'recorded') ||
     typeof candidate.rolledBackTurns !== 'number' ||

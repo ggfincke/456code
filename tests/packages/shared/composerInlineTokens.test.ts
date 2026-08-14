@@ -139,4 +139,22 @@ describe('collectComposerInlineTokens', () =>
       },
     ])
   })
+
+  it('bounds file link labels without dropping a label at the cap', () =>
+  {
+    const labelAtCap = `${'a'.repeat(508)}.tsx`
+    const labelPastCap = `${'a'.repeat(509)}.tsx`
+
+    expect(collectComposerInlineTokens(`see [${labelAtCap}](src/${labelAtCap}) ok`)).toHaveLength(1)
+    expect(collectComposerInlineTokens(`see [${labelPastCap}](src/${labelPastCap}) ok`)).toEqual([])
+  })
+
+  it('stays responsive on unterminated bracket runs', () =>
+  {
+    // every whitespace used to rescan the remaining source
+    const startedAt = performance.now()
+
+    expect(collectComposerInlineTokens(' [['.repeat(40_000))).toEqual([])
+    expect(performance.now() - startedAt).toBeLessThan(1_000)
+  })
 })

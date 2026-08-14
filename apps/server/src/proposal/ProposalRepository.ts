@@ -7,14 +7,19 @@ import * as NodeCrypto from 'node:crypto'
 
 import {
   PROPOSAL_SNAPSHOT_POLICY_V1,
+  OrchestratePlanRevision,
   Proposal,
   ProposalError,
+  ProposalOrchestratePlanLink,
   ProposalRepositoryIdentity,
   ProposalRevision,
   ProposalRevisionManifest,
   ProposalSnapshotPolicy,
   type EnvironmentId,
   type OrchestrationProposedPlanId,
+  type ProposalOrchestratePlanLookupInput,
+  type ProposalOrchestratePlanLookupResult,
+  type ProposalOrchestratePlanTarget,
   type ProjectId,
   type ProposalId,
   type ProposalListInput,
@@ -22,6 +27,7 @@ import {
   type ProposalRevisionId,
   type ProposalSha256,
   type ThreadId,
+  type TurnId,
 } from '@t3tools/contracts'
 import * as Context from 'effect/Context'
 import * as Effect from 'effect/Effect'
@@ -72,6 +78,26 @@ interface ProposalRevisionRow
   readonly createdAt: string
 }
 
+interface ProposalOrchestratePlanLookupRow
+{
+  readonly proposalId: string
+  readonly proposalRevision: number
+  readonly sourceThreadId: string
+  readonly runId: string
+  readonly orchestrateRevision: number
+  readonly linkCreatedAt: string
+  readonly turnId: string | null
+  readonly workflow: string
+  readonly task: string
+  readonly stagesJson: string
+  readonly totalWorkers: number
+  readonly maxWorkers: number
+  readonly source: string
+  readonly status: string
+  readonly planCreatedAt: string
+  readonly planUpdatedAt: string
+}
+
 export interface AppendProposalRevisionInput
 {
   readonly proposalId: ProposalId
@@ -84,6 +110,9 @@ export interface AppendProposalRevisionInput
   readonly narrative?: ProposalContentBlob
   readonly planId?: OrchestrationProposedPlanId
   readonly planMarkdownSha256?: ProposalSha256
+  readonly orchestratePlan?: ProposalOrchestratePlanTarget & {
+    readonly turnId: TurnId
+  }
   readonly createdAt: string
 }
 
@@ -147,6 +176,8 @@ const decodeProposal = Schema.decodeUnknownEffect(Proposal)
 const decodeSnapshotPolicy = Schema.decodeUnknownEffect(ProposalSnapshotPolicy)
 const decodeRevisionManifest = Schema.decodeUnknownEffect(ProposalRevisionManifest)
 const decodeRevision = Schema.decodeUnknownEffect(ProposalRevision)
+const decodeOrchestratePlanLink = Schema.decodeUnknownEffect(ProposalOrchestratePlanLink)
+const decodeOrchestratePlanRevision = Schema.decodeUnknownEffect(OrchestratePlanRevision)
 
 function decodeProposalRow(row: ProposalRow)
 {
@@ -350,6 +381,9 @@ export class ProposalRepository extends Context.Service<
       { readonly proposal: Proposal; readonly revision: ProposalRevision } | null,
       ProposalError
     >
+    readonly findByOrchestrateRevision: (
+      input: ProposalOrchestratePlanLookupInput,
+    ) => Effect.Effect<ProposalOrchestratePlanLookupResult | null, ProposalError>
     readonly readBlob: (
       sha256: ProposalSha256,
       proposalId: ProposalId,
@@ -449,6 +483,67 @@ export const make = Effect.gen(function* ()
               )
             }
 
+            if (input.orchestratePlan !== undefined)
+            {
+              const targetRows = yield* sql<{
+                readonly turnId: string | null
+                readonly source: string
+                readonly interactionMode: string | null
+                readonly sessionStatus: string | null
+                readonly activeTurnId: string | null
+                readonly latestTurnId: string | null
+                readonly latestTurnState: string | null
+              }>`
+                SELECT
+                  plan.turn_id AS "turnId",
+                  plan.source,
+                  thread.interaction_mode AS "interactionMode",
+                  session.status AS "sessionStatus",
+                  session.active_turn_id AS "activeTurnId",
+                  thread.latest_turn_id AS "latestTurnId",
+                  latest_turn.state AS "latestTurnState"
+                FROM projection_thread_orchestrate_plans plan
+                LEFT JOIN projection_threads thread
+                  ON thread.thread_id = plan.thread_id
+                LEFT JOIN projection_thread_sessions session
+                  ON session.thread_id = plan.thread_id
+                LEFT JOIN projection_turns latest_turn
+                  ON latest_turn.thread_id = thread.thread_id
+                  AND latest_turn.turn_id = thread.latest_turn_id
+                WHERE plan.thread_id = ${input.sourceThreadId}
+                  AND plan.run_id = ${input.orchestratePlan.runId}
+                  AND plan.revision = ${input.orchestratePlan.revision}
+                LIMIT 1
+              `
+              const target = targetRows[0]
+              if (!target)
+              {
+                return yield* proposalError(
+                  'ProposalRepository.append',
+                  'not-found',
+                  'The exact projected orchestrate-plan revision does not exist.',
+                  input.proposalId,
+                )
+              }
+              if (
+                target.turnId !== input.orchestratePlan.turnId ||
+                target.source !== 'tool' ||
+                target.interactionMode !== 'orchestrate' ||
+                target.sessionStatus !== 'running' ||
+                target.activeTurnId !== input.orchestratePlan.turnId ||
+                target.latestTurnId !== input.orchestratePlan.turnId ||
+                target.latestTurnState !== 'running'
+              )
+              {
+                return yield* proposalError(
+                  'ProposalRepository.append',
+                  'identity-mismatch',
+                  'The orchestrate-plan revision must be tool-sourced from the active turn.',
+                  input.proposalId,
+                )
+              }
+            }
+
             for (const blob of input.prepared.blobs)
             {
               yield* sql`
@@ -533,6 +628,27 @@ export const make = Effect.gen(function* ()
               ${input.createdAt}
             )
           `
+            if (input.orchestratePlan !== undefined)
+            {
+              yield* sql`
+                INSERT INTO proposal_orchestrate_plan_links (
+                  proposal_id,
+                  proposal_revision,
+                  source_thread_id,
+                  run_id,
+                  orchestrate_revision,
+                  created_at
+                )
+                VALUES (
+                  ${input.proposalId},
+                  ${revision},
+                  ${input.sourceThreadId},
+                  ${input.orchestratePlan.runId},
+                  ${input.orchestratePlan.revision},
+                  ${input.createdAt}
+                )
+              `
+            }
             yield* sql`
             UPDATE proposals
             SET updated_at = ${input.createdAt}
@@ -694,7 +810,113 @@ export const make = Effect.gen(function* ()
     return { proposal: stored.proposal, revision }
   })
 
-  return ProposalRepository.of({ append, list, get, findLatestByPlan, readBlob })
+  const findByOrchestrateRevision: ProposalRepository['Service']['findByOrchestrateRevision'] =
+    Effect.fn('ProposalRepository.findByOrchestrateRevision')(function* (input)
+    {
+      const rows = yield* sql<ProposalOrchestratePlanLookupRow>`
+        SELECT
+          link.proposal_id AS "proposalId",
+          link.proposal_revision AS "proposalRevision",
+          link.source_thread_id AS "sourceThreadId",
+          link.run_id AS "runId",
+          link.orchestrate_revision AS "orchestrateRevision",
+          link.created_at AS "linkCreatedAt",
+          plan.turn_id AS "turnId",
+          plan.workflow,
+          plan.task,
+          plan.stages_json AS "stagesJson",
+          plan.total_workers AS "totalWorkers",
+          plan.max_workers AS "maxWorkers",
+          plan.source,
+          plan.status,
+          plan.created_at AS "planCreatedAt",
+          plan.updated_at AS "planUpdatedAt"
+        FROM proposal_orchestrate_plan_links link
+        JOIN projection_thread_orchestrate_plans plan
+          ON plan.thread_id = link.source_thread_id
+          AND plan.run_id = link.run_id
+          AND plan.revision = link.orchestrate_revision
+        WHERE link.source_thread_id = ${input.sourceThreadId}
+          AND link.run_id = ${input.runId}
+          AND link.orchestrate_revision = ${input.revision}
+        LIMIT 1
+      `.pipe(
+        Effect.mapError((cause) =>
+          persistenceError('ProposalRepository.findByOrchestrateRevision', cause),
+        ),
+      )
+      const row = rows[0]
+      if (!row) return null
+
+      const stored = yield* get(row.proposalId as ProposalId)
+      const revision = stored.revisions.find(
+        (candidate) => candidate.revision === row.proposalRevision,
+      )
+      if (!revision)
+      {
+        return yield* proposalError(
+          'ProposalRepository.findByOrchestrateRevision',
+          'persistence-failed',
+          'The linked proposal revision could not be read back.',
+          row.proposalId as ProposalId,
+        )
+      }
+      const stages = yield* parseStoredJson(
+        row.stagesJson,
+        'ProposalRepository.findByOrchestrateRevision',
+        row.proposalId as ProposalId,
+      )
+      const link = yield* decodeOrchestratePlanLink({
+        proposalId: row.proposalId,
+        proposalRevision: row.proposalRevision,
+        sourceThreadId: row.sourceThreadId,
+        runId: row.runId,
+        revision: row.orchestrateRevision,
+        createdAt: row.linkCreatedAt,
+      }).pipe(
+        Effect.mapError((cause) =>
+          proposalError(
+            'ProposalRepository.findByOrchestrateRevision',
+            'persistence-failed',
+            cause.message,
+            row.proposalId as ProposalId,
+          ),
+        ),
+      )
+      const orchestratePlan = yield* decodeOrchestratePlanRevision({
+        runId: row.runId,
+        revision: row.orchestrateRevision,
+        turnId: row.turnId,
+        workflow: row.workflow,
+        task: row.task,
+        stages,
+        totalWorkers: row.totalWorkers,
+        maxWorkers: row.maxWorkers,
+        source: row.source,
+        status: row.status,
+        createdAt: row.planCreatedAt,
+        updatedAt: row.planUpdatedAt,
+      }).pipe(
+        Effect.mapError((cause) =>
+          proposalError(
+            'ProposalRepository.findByOrchestrateRevision',
+            'persistence-failed',
+            cause.message,
+            row.proposalId as ProposalId,
+          ),
+        ),
+      )
+      return { link, proposal: stored.proposal, revision, orchestratePlan }
+    })
+
+  return ProposalRepository.of({
+    append,
+    list,
+    get,
+    findLatestByPlan,
+    findByOrchestrateRevision,
+    readBlob,
+  })
 })
 
 export const layer = Layer.effect(ProposalRepository, make)

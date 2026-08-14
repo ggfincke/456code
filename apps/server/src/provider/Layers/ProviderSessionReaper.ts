@@ -44,6 +44,44 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
       const now = yield* Clock.currentTimeMillis
       let reapedCount = 0
 
+      const bindingByThread = new Map(bindings.map((binding) => [binding.threadId, binding]))
+      const durableSessions = yield* providerService.captureSessionIdentities()
+      for (const identity of durableSessions)
+      {
+        const binding = bindingByThread.get(identity.threadId)
+        if (
+          binding !== undefined &&
+          binding.status !== 'stopped' &&
+          binding.providerInstanceId === identity.providerInstanceId
+        )
+        {
+          continue
+        }
+        const reaped = yield* providerService.stopSessionIfExact(identity).pipe(
+          Effect.tap((stopped) =>
+            stopped
+              ? Effect.logInfo('provider.session.reaper.reconciled-orphan', {
+                  threadId: identity.threadId,
+                  providerInstanceId: identity.providerInstanceId,
+                  sessionGeneration: identity.sessionGeneration,
+                })
+              : Effect.void,
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning('provider.session.reaper.orphan-stop-failed', {
+              threadId: identity.threadId,
+              providerInstanceId: identity.providerInstanceId,
+              sessionGeneration: identity.sessionGeneration,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
+        )
+        if (reaped)
+        {
+          reapedCount += 1
+        }
+      }
+
       for (const binding of bindings)
       {
         if (binding.status === 'stopped')

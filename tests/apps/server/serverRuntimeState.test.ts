@@ -23,7 +23,7 @@ interface CapturedLog
 
 describe('serverRuntimeState', () =>
 {
-  it.effect('persists and reads the runtime state', () =>
+  it.effect('persists and reads owner-bound runtime state with private permissions', () =>
     Effect.gen(function* ()
     {
       const fileSystem = yield* FileSystem.FileSystem
@@ -39,12 +39,14 @@ describe('serverRuntimeState', () =>
         port: 4_971,
         origin: 'http://127.0.0.1:4971',
         startedAt: '2026-06-20T00:00:00.000Z',
+        storageLeaseToken: 'test-owner-token',
       }
 
       yield* ServerRuntimeState.persistServerRuntimeState({ path: statePath, state })
       const restored = yield* ServerRuntimeState.readPersistedServerRuntimeState(statePath)
 
       assert.deepEqual(Option.getOrThrow(restored), state)
+      assert.equal((yield* fileSystem.stat(statePath)).mode & 0o777, 0o600)
     }).pipe(Effect.provide(NodeServices.layer)),
   )
 

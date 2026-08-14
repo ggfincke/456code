@@ -11,6 +11,8 @@ import type {
   OrchestrationProject,
   OrchestrationProjectShell,
   OrchestrationReadModel,
+  OrchestrateRunExecution,
+  OrchestrateRunExecutionIdentity,
   OrchestrationShellSnapshot,
   OrchestrationThread,
   OrchestrationThreadDetailSnapshot,
@@ -44,6 +46,16 @@ export interface ProjectionThreadCheckpointContext
   readonly workspaceRoot: string
   readonly worktreePath: string | null
   readonly checkpoints: ReadonlyArray<OrchestrationCheckpointSummary>
+  readonly baselineCheckpointIdentity?: ProjectionCheckpointIdentity | null
+}
+
+export interface ProjectionCheckpointIdentity
+{
+  readonly checkpointTurnCount: number
+  readonly checkpointRef: CheckpointRef
+  readonly checkpointCaptureRoot: string | null
+  readonly checkpointRepositoryCommonDir: string | null
+  readonly checkpointCommitOid: string | null
 }
 
 export interface ProjectionFullThreadDiffContext
@@ -53,7 +65,9 @@ export interface ProjectionFullThreadDiffContext
   readonly workspaceRoot: string
   readonly worktreePath: string | null
   readonly latestCheckpointTurnCount: number
-  readonly toCheckpointRef: CheckpointRef | null
+  readonly fromCheckpointIdentity?: ProjectionCheckpointIdentity | null
+  readonly toCheckpointIdentity?: ProjectionCheckpointIdentity | null
+  readonly toCheckpointRef?: CheckpointRef | null
 }
 
 export interface ProjectionImportReconciliationContext
@@ -150,6 +164,23 @@ export interface ProjectionSnapshotQueryShape
     threadId: ThreadId,
     toTurnCount: number,
   ) => Effect.Effect<Option.Option<ProjectionFullThreadDiffContext>, ProjectionRepositoryError>
+
+  // read one checkpoint's durable capture identity, including turn zero.
+  readonly getCheckpointIdentity: (
+    threadId: ThreadId,
+    checkpointTurnCount: number,
+  ) => Effect.Effect<Option.Option<ProjectionCheckpointIdentity>, ProjectionRepositoryError>
+
+  // exact historical execution lookup; paths may be unavailable while captured
+  // repository/base/final provenance remains readable
+  readonly getOrchestrateRunExecution: (
+    identity: OrchestrateRunExecutionIdentity,
+  ) => Effect.Effect<Option.Option<OrchestrateRunExecution>, ProjectionRepositoryError>
+
+  // compatibility owner for web/mobile current-run surfaces.
+  readonly getCurrentOrchestrateRunExecution: (
+    threadId: ThreadId,
+  ) => Effect.Effect<Option.Option<OrchestrateRunExecution>, ProjectionRepositoryError>
 
   // read a single active thread shell row by id.
   readonly getThreadShellById: (

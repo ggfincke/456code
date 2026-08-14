@@ -4,6 +4,7 @@
 import {
   EventId,
   type OpenCodeSettings,
+  normalizeCollaborationMode,
   ProviderDriverKind,
   ProviderInstanceId,
   type ProviderRuntimeEvent,
@@ -31,7 +32,6 @@ import { getModelSelectionStringOptionValue } from '@t3tools/shared/model'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
-import * as McpProviderSession from '../../mcp/McpProviderSession.ts'
 import { type EventNdjsonLogger, makeEventNdjsonLogger } from './EventNdjsonLogger.ts'
 import { makeKeyedSemaphore } from './KeyedSemaphore.ts'
 import {
@@ -42,6 +42,10 @@ import {
   ProviderAdapterValidationError,
 } from '../Errors.ts'
 import { type OpenCodeAdapterShape } from '../Services/OpenCodeAdapter.ts'
+import type {
+  ProviderAdapterRuntimeEvent,
+  ProviderAdapterRuntimeSessionBinding,
+} from '../Services/ProviderAdapter.ts'
 import {
   buildOpenCodePermissionRules,
   OpenCodeRuntime,
@@ -235,6 +239,7 @@ function openCodeEventSessionTitle(event: OpenCodeSubscribedEvent): string | und
 interface OpenCodeSessionContext
 {
   session: ProviderSession
+  readonly runtimeSessionBinding: ProviderAdapterRuntimeSessionBinding
   readonly client: OpencodeClient
   readonly server: OpenCodeServerConnection
   readonly directory: string
@@ -305,9 +310,14 @@ type EventBaseInput = {
   readonly raw?: unknown
 }
 
-function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType
+export function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType
 {
   const normalized = toolName.toLowerCase()
+  // opencode prefixes remote MCP tools with the configured server name
+  if (normalized.includes('mcp') || normalized.startsWith('code456_'))
+  {
+    return 'mcp_tool_call'
+  }
   if (normalized.includes('bash') || normalized.includes('command'))
   {
     return 'command_execution'
@@ -324,10 +334,6 @@ function toToolLifecycleItemType(toolName: string): ToolLifecycleItemType
   if (normalized.includes('web'))
   {
     return 'web_search'
-  }
-  if (normalized.includes('mcp'))
-  {
-    return 'mcp_tool_call'
   }
   if (normalized.includes('image'))
   {
@@ -600,16 +606,10 @@ function updateProviderSession(
   })
 }
 
-const stopOpenCodeContext = Effect.fn('stopOpenCodeContext')(function* (
+const teardownOpenCodeContext = Effect.fn('teardownOpenCodeContext')(function* (
   context: OpenCodeSessionContext,
 )
 {
-  // race-safe one-shot: first caller flips the flag, everyone else no-ops.
-  if (yield* Ref.getAndSet(context.stopped, true))
-  {
-    return false
-  }
-
   // best-effort remote abort. The scope close below tears down the local
   // handles (event-pump fiber, server-exit fiber, event-subscribe fetch),
   // but we still want to tell OpenCode that this session is done.
@@ -621,6 +621,18 @@ const stopOpenCodeContext = Effect.fn('stopOpenCodeContext')(function* (
   // runs each finalizer we registered — the `AbortController.abort()` call,
   // the child-process termination, etc.
   yield* Scope.close(context.sessionScope, Exit.void)
+})
+
+const stopOpenCodeContext = Effect.fn('stopOpenCodeContext')(function* (
+  context: OpenCodeSessionContext,
+)
+{
+  // race-safe one-shot: first caller flips the flag, everyone else no-ops.
+  if (yield* Ref.getAndSet(context.stopped, true))
+  {
+    return false
+  }
+  yield* teardownOpenCodeContext(context)
   return true
 })
 
@@ -650,7 +662,7 @@ export function makeOpenCodeAdapter(
     // `options.nativeEventLogger`, they own its lifecycle.
     const managedNativeEventLogger =
       options?.nativeEventLogger === undefined ? nativeEventLogger : undefined
-    const runtimeEvents = yield* Queue.unbounded<ProviderRuntimeEvent>()
+    const runtimeEvents = yield* Queue.unbounded<ProviderAdapterRuntimeEvent>()
     const sessions = new Map<ThreadId, OpenCodeSessionContext>()
     const threadLocks = yield* makeKeyedSemaphore<ThreadId>()
     const randomUUIDv4 = crypto.randomUUIDv4.pipe(
@@ -721,8 +733,11 @@ export function makeOpenCodeAdapter(
       }).pipe(Effect.ensuring(Queue.shutdown(runtimeEvents))),
     )
 
-    const emit = (event: ProviderRuntimeEvent) =>
-      Queue.offer(runtimeEvents, event).pipe(Effect.asVoid)
+    const emit = (context: OpenCodeSessionContext, event: ProviderRuntimeEvent) =>
+      Queue.offer(runtimeEvents, {
+        binding: context.runtimeSessionBinding,
+        event,
+      }).pipe(Effect.asVoid)
     const writeNativeEvent = (
       threadId: ThreadId,
       event: {
@@ -757,7 +772,7 @@ export function makeOpenCodeAdapter(
       // run this inside a fiber forked via `Effect.forkIn(context.sessionScope)`;
       // closing that scope triggers the fiber-interrupt finalizer, so any
       // subsequent yield point would unwind and silently drop these emits.
-      yield* emit({
+      yield* emit(context, {
         ...(yield* buildEventBase({
           threadId: context.session.threadId,
           turnId,
@@ -768,7 +783,7 @@ export function makeOpenCodeAdapter(
           class: 'transport_error',
         },
       }).pipe(Effect.ignore)
-      yield* emit({
+      yield* emit(context, {
         ...(yield* buildEventBase({
           threadId: context.session.threadId,
           turnId,
@@ -816,7 +831,7 @@ export function makeOpenCodeAdapter(
       }
       if (deltaToEmit.length > 0)
       {
-        yield* emit({
+        yield* emit(context, {
           ...(yield* buildEventBase({
             threadId: context.session.threadId,
             turnId,
@@ -842,7 +857,7 @@ export function makeOpenCodeAdapter(
       )
       {
         context.completedAssistantPartIds.add(part.id)
-        yield* emit({
+        yield* emit(context, {
           ...(yield* buildEventBase({
             threadId: context.session.threadId,
             turnId,
@@ -892,7 +907,7 @@ export function makeOpenCodeAdapter(
           const title = openCodeEventSessionTitle(event)
           if (title)
           {
-            yield* emit({
+            yield* emit(context, {
               ...(yield* buildEventBase({
                 threadId: context.session.threadId,
                 raw: event,
@@ -967,7 +982,7 @@ export function makeOpenCodeAdapter(
               text: nextText,
             })
           }
-          yield* emit({
+          yield* emit(context, {
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
               turnId,
@@ -1031,7 +1046,7 @@ export function makeOpenCodeAdapter(
               payload,
             }
             appendTurnItem(context, turnId, part)
-            yield* emit(runtimeEvent)
+            yield* emit(context, runtimeEvent)
           }
           break
         }
@@ -1039,7 +1054,7 @@ export function makeOpenCodeAdapter(
         case 'permission.asked':
         {
           context.pendingPermissions.set(event.properties.id, event.properties)
-          yield* emit({
+          yield* emit(context, {
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
               turnId,
@@ -1062,7 +1077,7 @@ export function makeOpenCodeAdapter(
         case 'permission.replied':
         {
           context.pendingPermissions.delete(event.properties.requestID)
-          yield* emit({
+          yield* emit(context, {
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
               turnId,
@@ -1081,7 +1096,7 @@ export function makeOpenCodeAdapter(
         case 'question.asked':
         {
           context.pendingQuestions.set(event.properties.id, event.properties)
-          yield* emit({
+          yield* emit(context, {
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
               turnId,
@@ -1106,7 +1121,7 @@ export function makeOpenCodeAdapter(
               event.properties.answers[index]?.join(', ') ?? '',
             ]),
           )
-          yield* emit({
+          yield* emit(context, {
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
               turnId,
@@ -1122,7 +1137,7 @@ export function makeOpenCodeAdapter(
         case 'question.rejected':
         {
           context.pendingQuestions.delete(event.properties.requestID)
-          yield* emit({
+          yield* emit(context, {
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
               turnId,
@@ -1147,7 +1162,7 @@ export function makeOpenCodeAdapter(
 
           if (event.properties.status.type === 'retry')
           {
-            yield* emit({
+            yield* emit(context, {
               ...(yield* buildEventBase({
                 threadId: context.session.threadId,
                 turnId,
@@ -1166,7 +1181,7 @@ export function makeOpenCodeAdapter(
           {
             context.activeTurnId = undefined
             yield* updateProviderSession(context, { status: 'ready' }, { clearActiveTurnId: true })
-            yield* emit({
+            yield* emit(context, {
               ...(yield* buildEventBase({
                 threadId: context.session.threadId,
                 turnId,
@@ -1196,7 +1211,7 @@ export function makeOpenCodeAdapter(
           )
           if (activeTurnId)
           {
-            yield* emit({
+            yield* emit(context, {
               ...(yield* buildEventBase({
                 threadId: context.session.threadId,
                 turnId: activeTurnId,
@@ -1209,7 +1224,7 @@ export function makeOpenCodeAdapter(
               },
             })
           }
-          yield* emit({
+          yield* emit(context, {
             ...(yield* buildEventBase({
               threadId: context.session.threadId,
               raw: event,
@@ -1363,7 +1378,7 @@ export function makeOpenCodeAdapter(
                 directory,
                 ...(server.external && serverPassword ? { serverPassword } : {}),
               })
-              const mcpSession = McpProviderSession.readMcpProviderSession(input.threadId)
+              const mcpSession = input.mcp
               if (mcpSession && !server.external)
               {
                 yield* runOpenCodeSdk('mcp.add', () =>
@@ -1541,6 +1556,7 @@ export function makeOpenCodeAdapter(
 
         const context: OpenCodeSessionContext = {
           session,
+          runtimeSessionBinding: input.runtimeSessionBinding,
           client: started.client,
           server: started.server,
           directory,
@@ -1561,14 +1577,14 @@ export function makeOpenCodeAdapter(
         sessions.set(input.threadId, context)
         yield* startEventPump(context)
 
-        yield* emit({
+        yield* emit(context, {
           ...(yield* buildEventBase({ threadId: input.threadId })),
           type: 'session.started',
           payload: {
             message: 'OpenCode session started',
           },
         })
-        yield* emit({
+        yield* emit(context, {
           ...(yield* buildEventBase({ threadId: input.threadId })),
           type: 'thread.started',
           payload: {
@@ -1635,7 +1651,12 @@ export function makeOpenCodeAdapter(
       const variant = getModelSelectionStringOptionValue(modelSelection, 'variant')
 
       context.activeTurnId = turnId
-      context.activeAgent = agent ?? (input.interactionMode === 'plan' ? 'plan' : undefined)
+      context.activeAgent =
+        agent ??
+        (normalizeCollaborationMode(input.interactionMode ?? 'default', input.orchestrate)
+          .baseMode === 'plan'
+          ? 'plan'
+          : undefined)
       context.activeVariant = variant
       yield* updateProviderSession(
         context,
@@ -1649,7 +1670,7 @@ export function makeOpenCodeAdapter(
 
       if (steeringTurnId === undefined)
       {
-        yield* emit({
+        yield* emit(context, {
           ...(yield* buildEventBase({ threadId: input.threadId, turnId })),
           type: 'turn.started',
           payload: {
@@ -1691,7 +1712,7 @@ export function makeOpenCodeAdapter(
                   },
                   { clearActiveTurnId: true },
                 )
-                yield* emit({
+                yield* emit(context, {
                   ...(yield* buildEventBase({
                     threadId: input.threadId,
                     turnId,
@@ -1725,7 +1746,7 @@ export function makeOpenCodeAdapter(
         ).pipe(Effect.mapError(toRequestError))
         if (turnId ?? context.activeTurnId)
         {
-          yield* emit({
+          yield* emit(context, {
             ...(yield* buildEventBase({
               threadId,
               turnId: turnId ?? context.activeTurnId,
@@ -1784,6 +1805,31 @@ export function makeOpenCodeAdapter(
       ).pipe(Effect.mapError(toRequestError))
     })
 
+    const stopContextGracefully = Effect.fn('stopContextGracefully')(function* (
+      context: OpenCodeSessionContext,
+    )
+    {
+      if (yield* Ref.getAndSet(context.stopped, true))
+      {
+        return false
+      }
+      sessions.delete(context.session.threadId)
+      yield* teardownOpenCodeContext(context).pipe(
+        Effect.ensuring(
+          emit(context, {
+            ...(yield* buildEventBase({ threadId: context.session.threadId })),
+            type: 'session.exited',
+            payload: {
+              reason: 'Session stopped.',
+              recoverable: false,
+              exitKind: 'graceful',
+            },
+          }),
+        ),
+      )
+      return true
+    })
+
     const stopSessionUnlocked: OpenCodeAdapterShape['stopSession'] = Effect.fn('stopSession')(
       function* (threadId)
       {
@@ -1795,21 +1841,7 @@ export function makeOpenCodeAdapter(
             threadId,
           })
         }
-        const stopped = yield* stopOpenCodeContext(context)
-        sessions.delete(threadId)
-        if (!stopped)
-        {
-          return
-        }
-        yield* emit({
-          ...(yield* buildEventBase({ threadId })),
-          type: 'session.exited',
-          payload: {
-            reason: 'Session stopped.',
-            recoverable: false,
-            exitKind: 'graceful',
-          },
-        })
+        yield* stopContextGracefully(context)
       },
     )
     const stopSession: OpenCodeAdapterShape['stopSession'] = (threadId) =>
@@ -1820,6 +1852,9 @@ export function makeOpenCodeAdapter(
 
     const hasSession: OpenCodeAdapterShape['hasSession'] = (threadId) =>
       Effect.sync(() => sessions.has(threadId))
+
+    const getSessionRuntimeBinding: OpenCodeAdapterShape['getSessionRuntimeBinding'] = (threadId) =>
+      Effect.sync(() => sessions.get(threadId)?.runtimeSessionBinding)
 
     const readThread: OpenCodeAdapterShape['readThread'] = Effect.fn('readThread')(
       function* (threadId)
@@ -1880,16 +1915,16 @@ export function makeOpenCodeAdapter(
       Effect.gen(function* ()
       {
         const contexts = [...sessions.values()]
-        sessions.clear()
-        // `stopOpenCodeContext` is typed as never-failing — SDK aborts are
-        // already `Effect.ignore`'d inside it. `ignoreCause` here also
-        // swallows defects from throwing finalizers so one bad close can't
-        // interrupt the sibling fibers. Same pattern as the layer finalizer.
-        yield* Effect.forEach(
+        const exits = yield* Effect.forEach(
           contexts,
-          (context) => Effect.ignoreCause(stopOpenCodeContext(context)),
-          { concurrency: 'unbounded', discard: true },
+          (context) => Effect.exit(stopContextGracefully(context)),
+          { concurrency: 'unbounded' },
         )
+        const failed = exits.find(Exit.isFailure)
+        if (failed !== undefined)
+        {
+          return yield* Effect.failCause(failed.cause)
+        }
       })
 
     return {
@@ -1905,6 +1940,7 @@ export function makeOpenCodeAdapter(
       stopSession,
       listSessions,
       hasSession,
+      getSessionRuntimeBinding,
       readThread,
       rollbackThread,
       stopAll,

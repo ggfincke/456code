@@ -21,6 +21,12 @@ export interface OrchestrationReactorShape
   // the returned effect must be run in a scope so all worker fibers can be
   // finalized on shutdown.
   readonly start: () => Effect.Effect<void, ReactorDeliveryError, Scope.Scope>
+
+  // drain every state-changing reactor in dependency order.
+  readonly drain: Effect.Effect<void, ReactorDeliveryError>
+
+  // stop provider sources and drain all admitted rows through their high-water.
+  readonly shutdown: Effect.Effect<void, ReactorDeliveryError>
 }
 
 /**

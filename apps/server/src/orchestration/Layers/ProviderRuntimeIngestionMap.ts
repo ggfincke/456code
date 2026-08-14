@@ -175,7 +175,15 @@ export function normalizeRuntimeTurnState(
 }
 
 export function orchestrationSessionStatusFromRuntimeState(
-  state: 'starting' | 'running' | 'waiting' | 'ready' | 'interrupted' | 'stopped' | 'error',
+  state:
+    | 'starting'
+    | 'running'
+    | 'waiting'
+    | 'compacting'
+    | 'ready'
+    | 'interrupted'
+    | 'stopped'
+    | 'error',
 ): 'starting' | 'running' | 'ready' | 'interrupted' | 'stopped' | 'error'
 {
   switch (state)
@@ -184,6 +192,9 @@ export function orchestrationSessionStatusFromRuntimeState(
       return 'starting'
     case 'running':
     case 'waiting':
+    // a compaction is the session still working, not a pause. collapsing it to 'running' keeps
+    // the active turn alive so the compaction row is additive instead of tearing the turn down
+    case 'compacting':
       return 'running'
     case 'ready':
       return 'ready'

@@ -19,6 +19,7 @@ import { Argument, Flag } from 'effect/unstable/cli'
 import { readBootstrapEnvelope } from '../bootstrap.ts'
 import * as ServerConfig from '../config.ts'
 import { expandHomePath, resolveBaseDir } from '../os-jank.ts'
+import * as ServerStorageLease from '../serverStorageLease.ts'
 
 export const modeFlag = Flag.choice('mode', ServerConfig.RuntimeMode.literals).pipe(
   Flag.withDescription('Runtime mode. `desktop` keeps loopback defaults unless overridden.'),
@@ -133,16 +134,6 @@ const EnvServerConfig = Config.all({
     Config.option,
     Config.map(Option.getOrUndefined),
   ),
-  cartographerReconciliationMode: Config.schema(
-    ServerConfig.CartographerReconciliationMode,
-    'T3CODE_CARTOGRAPHER_RECONCILIATION_MODE',
-  ).pipe(Config.withDefault('report')),
-  cartographerReconciliationDeleteEnabled: Config.int(
-    'T3CODE_CARTOGRAPHER_RECONCILIATION_DELETE',
-  ).pipe(
-    Config.withDefault(0),
-    Config.map((value) => value === 1),
-  ),
   proposalReconciliationMode: Config.schema(
     ServerConfig.ProposalReconciliationMode,
     'T3CODE_PROPOSAL_RECONCILIATION_MODE',
@@ -172,6 +163,12 @@ export interface CliAuthLocationFlags
 {
   readonly baseDir: Option.Option<string>
   readonly devUrl?: Option.Option<URL>
+}
+
+export interface ResolvedServerConfig
+{
+  readonly config: ServerConfig.ServerConfig['Service']
+  readonly storageLease: ServerStorageLease.ServerStorageLease['Service']
 }
 
 export const sharedServerLocationFlags = {
@@ -222,12 +219,13 @@ const loadPersistedObservabilitySettings = Effect.fn(function* (settingsPath: st
   return parsePersistedServerObservabilitySettings(raw)
 })
 
-export const resolveServerConfig = (
+const resolveServerConfigInternal = (
   flags: CliServerFlags,
   cliLogLevel: Option.Option<LogLevel.LogLevel>,
   options?: {
     readonly startupPresentation?: ServerConfig.StartupPresentation
     readonly forceAutoBootstrapProjectFromCwd?: boolean
+    readonly storageOwnership?: 'exclusive' | 'deferred'
   },
 ) =>
   Effect.gen(function* ()
@@ -292,23 +290,32 @@ export const resolveServerConfig = (
       normalizedFlags.baseDir,
       Option.fromUndefinedOr(env.t3Home),
     ).pipe(Option.filter((value) => value.trim().length > 0))
-    const baseDir = yield* resolveBaseDir(
+    const requestedBaseDir = yield* resolveBaseDir(
       Option.getOrUndefined(
         resolveOptionPrecedence(explicitBaseDir, Option.fromUndefinedOr(bootstrap?.t3Home)),
       ),
     )
     const rawCwd = Option.getOrElse(normalizedFlags.cwd, () => process.cwd())
     const cwd = path.resolve(yield* expandHomePath(rawCwd.trim()))
-    yield* fs.makeDirectory(cwd, { recursive: true })
+    const storageLease =
+      options?.storageOwnership === 'deferred'
+        ? undefined
+        : yield* ServerStorageLease.acquireServerStorageLease(requestedBaseDir)
+    if (storageLease !== undefined) yield* fs.makeDirectory(cwd, { recursive: true })
+    const baseDir = requestedBaseDir
     const derivedPaths = yield* ServerConfig.deriveServerPaths(baseDir, devUrl, {
       baseDirIsExplicit: Option.isSome(explicitBaseDir),
     })
-    yield* ServerConfig.ensureServerDirectories(derivedPaths)
-    const persistedObservabilitySettings = yield* loadPersistedObservabilitySettings(
-      derivedPaths.settingsPath,
-    )
+    if (storageLease !== undefined) yield* ServerConfig.ensureServerDirectories(derivedPaths)
+    const persistedObservabilitySettings =
+      storageLease === undefined
+        ? { otlpTracesUrl: undefined, otlpMetricsUrl: undefined }
+        : yield* loadPersistedObservabilitySettings(derivedPaths.settingsPath)
     const serverTracePath = env.traceFile ?? derivedPaths.serverTracePath
-    yield* fs.makeDirectory(path.dirname(serverTracePath), { recursive: true })
+    if (storageLease !== undefined)
+    {
+      yield* fs.makeDirectory(path.dirname(serverTracePath), { recursive: true })
+    }
     const startupPresentation = options?.startupPresentation ?? 'browser'
     const isHeadlessStartup = startupPresentation === 'headless'
     const noBrowser = Option.getOrElse(
@@ -397,36 +404,58 @@ export const resolveServerConfig = (
       logWebSocketEvents,
       tailscaleServeEnabled,
       tailscaleServePort,
-      cartographerReconciliationMode: env.cartographerReconciliationMode,
-      cartographerReconciliationDeleteEnabled: env.cartographerReconciliationDeleteEnabled,
       proposalReconciliationMode: env.proposalReconciliationMode,
       proposalReconciliationDeleteEnabled: env.proposalReconciliationDeleteEnabled,
     }
 
-    return config
+    return { config, storageLease }
   })
+
+export const resolveServerConfig = (
+  flags: CliServerFlags,
+  cliLogLevel: Option.Option<LogLevel.LogLevel>,
+  options?: {
+    readonly startupPresentation?: ServerConfig.StartupPresentation
+    readonly forceAutoBootstrapProjectFromCwd?: boolean
+  },
+) =>
+  resolveServerConfigInternal(flags, cliLogLevel, {
+    ...options,
+    storageOwnership: 'exclusive',
+  }).pipe(
+    Effect.map(({ config, storageLease }) => ({
+      config,
+      storageLease: storageLease!,
+    })),
+  )
+
+const cliAuthServerFlags = (flags: CliAuthLocationFlags): CliServerFlags => ({
+  mode: Option.none(),
+  port: Option.none(),
+  host: Option.none(),
+  baseDir: flags.baseDir,
+  cwd: Option.none(),
+  devUrl: flags.devUrl ?? Option.none(),
+  noBrowser: Option.none(),
+  bootstrapFd: Option.none(),
+  autoBootstrapProjectFromCwd: Option.none(),
+  logWebSocketEvents: Option.none(),
+  tailscaleServeEnabled: Option.none(),
+  tailscaleServePort: Option.none(),
+})
+
+export const resolveProjectCliProbeConfig = (
+  flags: CliAuthLocationFlags,
+  cliLogLevel: Option.Option<LogLevel.LogLevel>,
+) =>
+  resolveServerConfigInternal(cliAuthServerFlags(flags), cliLogLevel, {
+    storageOwnership: 'deferred',
+  }).pipe(Effect.map(({ config }) => config))
 
 export const resolveCliAuthConfig = (
   flags: CliAuthLocationFlags,
   cliLogLevel: Option.Option<LogLevel.LogLevel>,
-) =>
-  resolveServerConfig(
-    {
-      mode: Option.none(),
-      port: Option.none(),
-      host: Option.none(),
-      baseDir: flags.baseDir,
-      cwd: Option.none(),
-      devUrl: flags.devUrl ?? Option.none(),
-      noBrowser: Option.none(),
-      bootstrapFd: Option.none(),
-      autoBootstrapProjectFromCwd: Option.none(),
-      logWebSocketEvents: Option.none(),
-      tailscaleServeEnabled: Option.none(),
-      tailscaleServePort: Option.none(),
-    },
-    cliLogLevel,
-  )
+) => resolveServerConfig(cliAuthServerFlags(flags), cliLogLevel)
 
 const DurationShorthandPattern = /^(?<value>\d+)(?<unit>ms|s|m|h|d|w)$/i
 

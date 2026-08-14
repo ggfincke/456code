@@ -17,12 +17,20 @@ import {
   HostProcessPlatform,
 } from '@t3tools/shared/hostProcess'
 
-import { reconcileService } from '../../../../apps/server/src/cli/service.ts'
+import {
+  prepareServiceStorageMutation,
+  reconcileService,
+} from '../../../../apps/server/src/cli/service.ts'
 import * as ProcessRunner from '../../../../apps/server/src/process/processRunner.ts'
+import {
+  SERVER_STORAGE_LEASE_FILE,
+  ServerStorageLeaseOwner,
+} from '../../../../apps/server/src/serverStorageLease.ts'
 import * as BootService from '../../../../apps/server/src/service/bootService.ts'
 
 const isUnsupportedError = Schema.is(BootService.BootServiceUnsupportedError)
 const isCommandError = Schema.is(BootService.BootServiceCommandError)
+const encodeStorageOwner = Schema.encodeSync(Schema.fromJsonString(ServerStorageLeaseOwner))
 
 interface RecordedCommand
 {
@@ -35,19 +43,27 @@ const makeRecordingRunnerLayer = (
   options?: {
     readonly failCommand?: string
     readonly failWhen?: (command: string, args: ReadonlyArray<string>) => boolean
+    readonly afterSuccess?: (
+      command: string,
+      args: ReadonlyArray<string>,
+    ) => Effect.Effect<void, never>
   },
 ) =>
   Layer.succeed(
     ProcessRunner.ProcessRunner,
     ProcessRunner.ProcessRunner.of({
       run: (input) =>
-        Effect.sync(() =>
+        Effect.gen(function* ()
         {
           assert.isUndefined(input.env)
           commands.push({ command: input.command, args: input.args })
           const failed =
             input.command === options?.failCommand ||
             options?.failWhen?.(input.command, input.args) === true
+          if (!failed && options?.afterSuccess !== undefined)
+          {
+            yield* options.afterSuccess(input.command, input.args)
+          }
           return {
             stdout: '',
             stderr: failed ? `${input.command} exploded` : '',
@@ -60,9 +76,10 @@ const makeRecordingRunnerLayer = (
     }),
   )
 
-const makeHost = (entry: string): BootService.BootServiceHost => ({
+const makeHost = (entry: string, awaitStorageOwner = false): BootService.BootServiceHost => ({
   execPath: '/usr/local/bin/node',
   cliEntryPath: entry,
+  awaitStorageOwner,
 })
 
 const provideHostRefs = (home: string, platform: NodeJS.Platform = 'linux') =>
@@ -206,11 +223,16 @@ it.layer(NodeServices.layer)('BootService', (it) =>
         Effect.provideService(BootService.BootService, service),
       )
       assert.isFalse(second.changed)
-      assert.lengthOf(commands, commandCount)
+      assert.deepEqual(commands.slice(commandCount), [
+        {
+          command: 'systemctl',
+          args: ['--user', 'is-active', '--quiet', BootService.BOOT_SERVICE_UNIT_FILE],
+        },
+      ])
     }),
   )
 
-  it.effect('installs the unit, enables the service, and enables linger', () =>
+  it.effect('stops a stale installed service before storage mutation begins', () =>
     Effect.gen(function* ()
     {
       const { dirs, fs, path } = yield* makeTestContext()
@@ -222,7 +244,84 @@ it.layer(NodeServices.layer)('BootService', (it) =>
         host: makeHost(dirs.stableEntry),
       }).pipe(Effect.provide(makeRecordingRunnerLayer(commands)), provideHostRefs(dirs.home))
 
-      const plan = yield* service.install
+      yield* service.install
+      const unitPath = path.join(dirs.home, '.config', 'systemd', 'user', '456code.service')
+      yield* fs.writeFileString(unitPath, 'stale unit\n')
+      commands.length = 0
+
+      const status = yield* prepareServiceStorageMutation().pipe(
+        Effect.provideService(BootService.BootService, service),
+      )
+
+      assert.isTrue(status.installed)
+      assert.isFalse(status.current)
+      assert.deepEqual(commands, [
+        {
+          command: 'systemctl',
+          args: ['--user', 'is-active', '--quiet', BootService.BOOT_SERVICE_UNIT_FILE],
+        },
+        {
+          command: 'systemctl',
+          args: ['--user', 'stop', BootService.BOOT_SERVICE_UNIT_FILE],
+        },
+      ])
+    }),
+  )
+
+  it.effect('retries an interrupted preparation without stopping an inactive unit', () =>
+    Effect.gen(function* ()
+    {
+      const { dirs } = yield* makeTestContext()
+      const commands: Array<RecordedCommand> = []
+      const service = yield* BootService.make({
+        baseDir: dirs.baseDir,
+        logsDir: dirs.logsDir,
+        cliVersion: '0.0.27',
+        host: makeHost(dirs.stableEntry),
+      }).pipe(
+        Effect.provide(
+          makeRecordingRunnerLayer(commands, {
+            failWhen: (command, args) => command === 'systemctl' && args.includes('is-active'),
+          }),
+        ),
+        provideHostRefs(dirs.home),
+      )
+
+      yield* service.prepareInstall
+      const status = yield* prepareServiceStorageMutation().pipe(
+        Effect.provideService(BootService.BootService, service),
+      )
+
+      assert.isTrue(status.installed)
+      assert.isFalse(status.active)
+      assert.isFalse(status.current)
+      assert.deepEqual(commands, [
+        {
+          command: 'systemctl',
+          args: ['--user', 'is-active', '--quiet', BootService.BOOT_SERVICE_UNIT_FILE],
+        },
+      ])
+    }),
+  )
+
+  it.effect('prepares the unit without activation and activates it explicitly', () =>
+    Effect.gen(function* ()
+    {
+      const { dirs, fs, path } = yield* makeTestContext()
+      const commands: Array<RecordedCommand> = []
+      const service = yield* BootService.make({
+        baseDir: dirs.baseDir,
+        logsDir: dirs.logsDir,
+        cliVersion: '0.0.27',
+        host: makeHost(dirs.stableEntry),
+      }).pipe(Effect.provide(makeRecordingRunnerLayer(commands)), provideHostRefs(dirs.home))
+
+      const prepared = yield* service.prepareInstall
+
+      assert.deepEqual(commands, [])
+      assert.isTrue(yield* fs.exists(prepared.plan.unitPath))
+
+      const plan = yield* service.activatePrepared(prepared)
 
       // a stable entry point is reused directly — no npm install.
       assert.equal(plan.t3EntryPath, dirs.stableEntry)
@@ -255,6 +354,70 @@ it.layer(NodeServices.layer)('BootService', (it) =>
       assert.isFalse(statusAfter.installed)
       const removedAgain = yield* service.uninstall
       assert.isFalse(removedAgain)
+    }),
+  )
+
+  it.effect('reports activation only after a new durable storage owner is visible', () =>
+    Effect.gen(function* ()
+    {
+      const { dirs, fs, path } = yield* makeTestContext()
+      yield* fs.makeDirectory(dirs.baseDir, { recursive: true })
+      const canonicalBaseDir = yield* fs.realPath(dirs.baseDir)
+      const ownerPath = path.join(canonicalBaseDir, SERVER_STORAGE_LEASE_FILE)
+      yield* fs.writeFileString(
+        ownerPath,
+        `${encodeStorageOwner({
+          version: 1,
+          token: 'cli-storage-owner',
+          pid: process.pid,
+          hostname: 'test-host',
+          acquiredAt: '2026-08-09T11:59:00.000Z',
+          processStartedAt: '2026-08-09T11:59:00.000Z',
+          canonicalBaseDir,
+        })}\n`,
+      )
+      const commands: Array<RecordedCommand> = []
+      const service = yield* BootService.make({
+        baseDir: dirs.baseDir,
+        logsDir: dirs.logsDir,
+        cliVersion: '0.0.27',
+        host: makeHost(dirs.stableEntry, true),
+      }).pipe(
+        Effect.provide(
+          makeRecordingRunnerLayer(commands, {
+            afterSuccess: (command, args) =>
+              command === 'systemctl' && args.includes('restart')
+                ? fs
+                    .writeFileString(
+                      ownerPath,
+                      `${encodeStorageOwner({
+                        version: 1,
+                        token: 'started-server-owner',
+                        pid: process.pid + 1,
+                        hostname: 'test-host',
+                        acquiredAt: '2026-08-09T12:00:00.000Z',
+                        processStartedAt: '2026-08-09T12:00:00.000Z',
+                        canonicalBaseDir,
+                      })}\n`,
+                    )
+                    .pipe(Effect.orDie)
+                : Effect.void,
+          }),
+        ),
+        provideHostRefs(dirs.home),
+      )
+
+      const prepared = yield* service.prepareInstall
+      assert.equal(prepared.previousStorageOwnerToken, 'cli-storage-owner')
+      assert.isFalse((yield* service.status).current)
+      const plan = yield* service.activatePrepared(prepared)
+
+      assert.equal(plan.baseDir, dirs.baseDir)
+      assert.deepEqual(commands.at(-1), {
+        command: 'systemctl',
+        args: ['--user', 'is-active', '--quiet', BootService.BOOT_SERVICE_UNIT_FILE],
+      })
+      assert.isTrue((yield* service.status).current)
     }),
   )
 
@@ -319,6 +482,7 @@ it.layer(NodeServices.layer)('BootService', (it) =>
         baseDir: dirs.baseDir,
         logsDir: dirs.logsDir,
         cliVersion: '0.0.27',
+        awaitStorageOwner: false,
       }).pipe(
         Effect.provide(makeRecordingRunnerLayer(commands)),
         provideHostRefs(dirs.home),

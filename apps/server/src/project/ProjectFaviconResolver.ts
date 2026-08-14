@@ -53,11 +53,11 @@ const ICON_SOURCE_FILES = [
   'src/index.html',
 ] as const
 
-// matches <link ...> tags or object-like icon metadata where rel/href can appear in any order.
+// anchor html scans on link tags & inspect object metadata in brace-free runs
 const LINK_ICON_HTML_RE =
   /<link\b(?=[^>]*\brel=["'](?:icon|shortcut icon)["'])(?=[^>]*\bhref=["']([^"'?]+))[^>]*>/i
-const LINK_ICON_OBJ_RE =
-  /(?=[^}]*\brel\s*:\s*["'](?:icon|shortcut icon)["'])(?=[^}]*\bhref\s*:\s*["']([^"'?]+))[^}]*/i
+const ICON_REL_RE = /\brel\s*:\s*["'](?:icon|shortcut icon)["']/i
+const ICON_HREF_RE = /\bhref\s*:\s*["']([^"'?]+)/i
 
 export class ProjectFaviconResolutionError extends Schema.TaggedErrorClass<ProjectFaviconResolutionError>()(
   'ProjectFaviconResolutionError',
@@ -99,8 +99,12 @@ function extractIconHref(source: string): string | null
 {
   const htmlMatch = source.match(LINK_ICON_HTML_RE)
   if (htmlMatch?.[1]) return htmlMatch[1]
-  const objMatch = source.match(LINK_ICON_OBJ_RE)
-  if (objMatch?.[1]) return objMatch[1]
+  for (const run of source.split('}'))
+  {
+    if (!ICON_REL_RE.test(run)) continue
+    const hrefMatch = run.match(ICON_HREF_RE)
+    if (hrefMatch?.[1]) return hrefMatch[1]
+  }
   return null
 }
 

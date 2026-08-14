@@ -464,18 +464,28 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
   it.effect('redacts and bounds agent list and load failures at scan and batch boundaries', () =>
     Effect.gen(function* ()
     {
+      const pad = '界'.repeat(1_000)
+      const listSecrets = {
+        token: 'private-list-json-token',
+        xai: 'private-list-xai-api-key',
+        access: 'private-list-access-token',
+        password: 'private-list-password',
+        aws: 'private-list-aws-secret-access-key',
+        secret: 'private-list-secret-access-key',
+        privateKey: 'private-list-private-key',
+        cookie: 'private-list-cookie',
+        setCookie: 'private-list-set-cookie',
+        credential: 'private-list-credential',
+      } as const
+      const loadSecrets = {
+        authorization: 'private-load-authorization',
+        openai: 'private-load-openai-api-key',
+        access: 'private-load-access-token',
+        password: 'private-load-password',
+      } as const
+
       // list path: scan + scanAndLoad + batch, with wire-byte growth.
       {
-        const privateJsonToken = 'private-list-json-token'
-        const privateXaiApiKey = 'private-list-xai-api-key'
-        const privateAccessToken = 'private-list-access-token'
-        const privatePassword = 'private-list-password'
-        const privateAwsSecretAccessKey = 'private-list-aws-secret-access-key'
-        const privateSecretAccessKey = 'private-list-secret-access-key'
-        const privatePrivateKey = 'private-list-private-key'
-        const privateCookie = 'private-list-cookie'
-        const privateSetCookie = 'private-list-set-cookie'
-        const privateCredential = 'private-list-credential'
         const nativeSessionId = 'acp-session-list-error'
         const binaryPath = yield* Effect.promise(() =>
           makeProtocolAgentWrapper({
@@ -484,7 +494,7 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
             title: null,
             model: 'test-model',
             failOperation: 'session/list',
-            failureMessage: `{"token":"${privateJsonToken}","AWS_SECRET_ACCESS_KEY":"${privateAwsSecretAccessKey}","private_key":"${privatePrivateKey}","Cookie":"${privateCookie}","safe_token_count":3,"safe_status":"visible"}; secret_access_key=${privateSecretAccessKey}; Set-Cookie=${privateSetCookie}; credential=${privateCredential}; XAI_API_KEY=${privateXaiApiKey}; access_token='${privateAccessToken}'; password=${privatePassword}; ${'界'.repeat(1_000)}`,
+            failureMessage: `{"token":"${listSecrets.token}","AWS_SECRET_ACCESS_KEY":"${listSecrets.aws}","private_key":"${listSecrets.privateKey}","Cookie":"${listSecrets.cookie}","safe_token_count":3,"safe_status":"visible"}; secret_access_key=${listSecrets.secret}; Set-Cookie=${listSecrets.setCookie}; credential=${listSecrets.credential}; XAI_API_KEY=${listSecrets.xai}; access_token='${listSecrets.access}'; password=${listSecrets.password}; ${pad}`,
           }),
         )
         const wireUsage = { consumedBytes: 0 }
@@ -500,18 +510,7 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
           cursorProviderInstanceId,
           nativeSessionId,
         )
-        const secrets = [
-          privateJsonToken,
-          privateXaiApiKey,
-          privateAccessToken,
-          privatePassword,
-          privateAwsSecretAccessKey,
-          privateSecretAccessKey,
-          privatePrivateKey,
-          privateCookie,
-          privateSetCookie,
-          privateCredential,
-        ]
+        const secrets = Object.values(listSecrets)
 
         const scanError = yield* Effect.flip(scanAcpImportCatalog(options))
         const scanWireBytes = wireUsage.consumedBytes
@@ -532,10 +531,6 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
 
       // load path: scanAndLoad + batch (catalog succeeds; load fails).
       {
-        const privateAuthorization = 'private-load-authorization'
-        const privateOpenAiApiKey = 'private-load-openai-api-key'
-        const privateAccessToken = 'private-load-access-token'
-        const privatePassword = 'private-load-password'
         const nativeSessionId = 'acp-session-load-error'
         const binaryPath = yield* Effect.promise(() =>
           makeProtocolAgentWrapper({
@@ -544,7 +539,7 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
             title: 'Load error',
             model: 'test-model',
             failOperation: 'session/load',
-            failureMessage: `Authorization: Bearer ${privateAuthorization}; {"OPENAI_API_KEY":"${privateOpenAiApiKey}","safe_status":"visible"}; access_token=${privateAccessToken}; password=${privatePassword}; ${'界'.repeat(1_000)}`,
+            failureMessage: `Authorization: Bearer ${loadSecrets.authorization}; {"OPENAI_API_KEY":"${loadSecrets.openai}","safe_status":"visible"}; access_token=${loadSecrets.access}; password=${loadSecrets.password}; ${pad}`,
           }),
         )
         const options = {
@@ -558,12 +553,7 @@ it.layer(acpImportLayer)('ACP session import', (it) =>
           cursorProviderInstanceId,
           nativeSessionId,
         )
-        const secrets = [
-          privateAuthorization,
-          privateOpenAiApiKey,
-          privateAccessToken,
-          privatePassword,
-        ]
+        const secrets = Object.values(loadSecrets)
 
         const [scanResult] = yield* scanAndLoadAcpImportCatalog(options)
         const [batchResult] = yield* loadAcpImportSessionsBatch(options, [sourcePath])

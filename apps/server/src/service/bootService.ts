@@ -1,7 +1,8 @@
 // apps/server/src/service/bootService.ts
-// determine whether ephemeral cache entry
+// installs and manages the per-user 456code background service
 
 import * as Context from 'effect/Context'
+import * as Clock from 'effect/Clock'
 import * as Config from 'effect/Config'
 import * as DateTime from 'effect/DateTime'
 import * as Duration from 'effect/Duration'
@@ -19,6 +20,7 @@ import {
 } from '@t3tools/shared/hostProcess'
 
 import * as ProcessRunner from '../process/processRunner.ts'
+import { SERVER_STORAGE_LEASE_FILE, ServerStorageLeaseOwner } from '../serverStorageLease.ts'
 import { ensurePinnedRuntimeInstalled, pinnedRuntimePaths } from './pinnedRuntime.ts'
 
 // installs 456code as a per-user boot service. Linux-only for now: systemd
@@ -30,6 +32,10 @@ const BOOT_SERVICE_NAME = '456code'
 
 export const BOOT_SERVICE_UNIT_FILE = `${BOOT_SERVICE_NAME}.service`
 export const BOOT_SERVICE_UNIT_ENV = 'CODE456_BOOT_SERVICE_UNIT'
+
+const decodeStorageOwner = Schema.decodeUnknownOption(
+  Schema.fromJsonString(ServerStorageLeaseOwner),
+)
 
 const EPHEMERAL_CACHE_SEGMENTS = [
   // npx
@@ -78,6 +84,14 @@ export interface BootServicePlan
   readonly baseDir: string
   readonly logPath: string
   readonly unitPath: string
+}
+
+export interface BootServicePreparedInstall
+{
+  readonly plan: BootServicePlan
+  readonly canonicalBaseDir: string
+  readonly previousStorageOwnerToken: string | null
+  readonly previousUnit: string | null
 }
 
 // pure so it is testable byte-for-byte. systemd user units run with a
@@ -163,6 +177,7 @@ export interface BootServiceStatus
 {
   readonly supported: boolean
   readonly installed: boolean
+  readonly active: boolean
   // false when the installed unit no longer matches what install would write.
   readonly current: boolean
   readonly unitPath: string
@@ -172,8 +187,19 @@ export interface BootServiceStatus
 export class BootService extends Context.Service<
   BootService,
   {
+    // materializes baseDir-owned runtime state and the unit without starting it.
+    readonly prepareInstall: Effect.Effect<BootServicePreparedInstall, BootServiceError>
+    // activates a prepared unit after the caller releases storage ownership.
+    readonly activatePrepared: (
+      prepared: BootServicePreparedInstall,
+    ) => Effect.Effect<BootServicePlan, BootServiceError>
     // installs the pinned runtime + unit, enables linger, starts the service.
     readonly install: Effect.Effect<BootServicePlan, BootServiceError>
+    // restores a previously installed unit after lease-scoped preparation fails.
+    readonly restart: Effect.Effect<void, BootServiceError>
+    // stops the installed unit without removing it so a storage-owning server
+    // releases its lease before an update replaces the runtime or unit.
+    readonly stop: Effect.Effect<boolean, BootServiceError>
     // stops and removes the unit; leaves the pinned runtime for reuse.
     // returns whether a unit was actually removed.
     readonly uninstall: Effect.Effect<boolean, BootServiceError>
@@ -186,6 +212,8 @@ export interface BootServiceHost
 {
   readonly execPath: string
   readonly cliEntryPath: string
+  // embeddings that own an equivalent readiness signal may disable this check.
+  readonly awaitStorageOwner?: boolean
 }
 
 export const make = Effect.fn('service.boot_service.make')(function* (input: {
@@ -193,6 +221,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
   readonly logsDir: string
   readonly cliVersion: string
   readonly host?: BootServiceHost
+  readonly awaitStorageOwner?: boolean
 })
 {
   const hostExecPath = yield* HostProcessExecutablePath
@@ -203,6 +232,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     // install, repo checkout) the boot service runs this same artifact.
     cliEntryPath: hostArguments[1] ?? '',
   }
+  const awaitStorageOwnerReadiness = input.awaitStorageOwner ?? host.awaitStorageOwner ?? true
   const platform = yield* HostProcessPlatform
   const homeDir = yield* Config.string('HOME').pipe(Config.withDefault(''))
   const fs = yield* FileSystem.FileSystem
@@ -297,7 +327,7 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
   })
 
   // where the unit will point: derivable without touching the network, so
-  // status can compare units purely; install materializes it first.
+  // status can compare its definition purely before checking runtime readiness.
   const plannedEntryPath = isEphemeralCacheEntry(host.cliEntryPath)
     ? runtimePaths.entryPath
     : host.cliEntryPath
@@ -309,7 +339,29 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     unitPath,
   }
 
-  const install: BootService['Service']['install'] = Effect.gen(function* ()
+  const readStorageOwner = Effect.fn('service.boot_service.read_storage_owner')(function* (
+    canonicalBaseDir: string,
+  )
+  {
+    return yield* fs.readFileString(path.join(canonicalBaseDir, SERVER_STORAGE_LEASE_FILE)).pipe(
+      Effect.map(decodeStorageOwner),
+      Effect.orElseSucceed(() => Option.none()),
+    )
+  })
+
+  const restoreUnitFile = Effect.fn('service.boot_service.restore_unit_file')(function* (
+    previousUnit: string | null,
+  )
+  {
+    if (previousUnit === null)
+    {
+      yield* fs.remove(unitPath).pipe(Effect.ignore)
+      return
+    }
+    yield* fs.writeFileString(unitPath, previousUnit).pipe(Effect.ignore)
+  })
+
+  const prepareInstall: BootService['Service']['prepareInstall'] = Effect.gen(function* ()
   {
     yield* requireSystemdLinux
     yield* fs
@@ -318,11 +370,15 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
 
     yield* ensurePinnedRuntime
 
+    const canonicalBaseDir = yield* fs
+      .realPath(input.baseDir)
+      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
+    const previousStorageOwner = yield* readStorageOwner(canonicalBaseDir)
     const previousUnit = yield* fs.exists(unitPath).pipe(
       Effect.flatMap((exists) =>
         exists
-          ? fs.readFileString(unitPath).pipe(Effect.map(Option.some))
-          : Effect.succeed(Option.none<string>()),
+          ? fs.readFileString(unitPath).pipe(Effect.map((unit) => unit as string | null))
+          : Effect.succeed(null),
       ),
       Effect.mapError((cause) => new BootServiceInstallError({ cause })),
     )
@@ -330,11 +386,107 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     yield* fs.makeDirectory(unitDir, { recursive: true }).pipe(
       Effect.andThen(fs.writeFileString(unitPath, renderBootServiceUnit(plan))),
       Effect.mapError((cause) => new BootServiceInstallError({ cause })),
+      Effect.tapError(() => restoreUnitFile(previousUnit)),
     )
 
-    // if any activation step fails, remove the unit again: a leftover file
-    // would make service status report it as installed even though it was
-    // never enabled or lingered.
+    return {
+      plan,
+      canonicalBaseDir,
+      previousStorageOwnerToken: Option.isSome(previousStorageOwner)
+        ? previousStorageOwner.value.token
+        : null,
+      previousUnit,
+    }
+  }).pipe(Effect.withSpan('service.boot_service.prepare_install'))
+
+  const awaitStorageOwner = Effect.fn('service.boot_service.await_storage_owner')(function* (
+    prepared: BootServicePreparedInstall,
+  )
+  {
+    if (!awaitStorageOwnerReadiness) return
+
+    const deadline = (yield* Clock.currentTimeMillis) + 10_000
+    while (true)
+    {
+      const owner = yield* readStorageOwner(prepared.canonicalBaseDir)
+      if (
+        Option.isSome(owner) &&
+        owner.value.canonicalBaseDir === prepared.canonicalBaseDir &&
+        owner.value.pid !== process.pid &&
+        owner.value.token !== prepared.previousStorageOwnerToken
+      )
+      {
+        break
+      }
+      if ((yield* Clock.currentTimeMillis) >= deadline)
+      {
+        return yield* new BootServiceCommandError({
+          step: 'waiting for the service to acquire storage ownership',
+        })
+      }
+      yield* Effect.sleep('100 millis')
+    }
+
+    yield* runStep('verifying the service is active', 'systemctl', [
+      '--user',
+      'is-active',
+      '--quiet',
+      BOOT_SERVICE_UNIT_FILE,
+    ])
+  })
+
+  // if activation fails partway (e.g. enable succeeds but restart/linger
+  // fails), leave nothing behind: disable removes the enable symlink, remove
+  // deletes the file, daemon-reload clears the stale definition — otherwise a
+  // dangling wants/ symlink logs "Failed to load unit" at every boot and the
+  // next lifecycle command misreports the state.
+  const rollbackFailedInstall = Effect.fn('service.boot_service.rollback_failed_install')(
+    function* (previousUnit: string | null)
+    {
+      if (previousUnit !== null)
+      {
+        yield* fs.writeFileString(unitPath, previousUnit).pipe(Effect.ignore)
+      }
+      else
+      {
+        yield* runStep('cleaning up the service', 'systemctl', [
+          '--user',
+          'disable',
+          '--now',
+          BOOT_SERVICE_UNIT_FILE,
+        ]).pipe(Effect.ignore)
+        yield* fs.remove(unitPath).pipe(Effect.ignore)
+      }
+      yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload']).pipe(
+        Effect.ignore,
+      )
+      if (previousUnit !== null)
+      {
+        yield* runStep('restoring the previous service', 'systemctl', [
+          '--user',
+          'restart',
+          BOOT_SERVICE_UNIT_FILE,
+        ]).pipe(Effect.ignore)
+      }
+    },
+  )
+
+  const activatePrepared: BootService['Service']['activatePrepared'] = Effect.fn(
+    'service.boot_service.activate_prepared',
+  )(function* (prepared)
+  {
+    yield* requireSystemdLinux
+    if (
+      prepared.plan.unitPath !== unitPath ||
+      prepared.plan.baseDir !== plan.baseDir ||
+      prepared.plan.t3EntryPath !== plan.t3EntryPath
+    )
+    {
+      return yield* new BootServiceInstallError({
+        cause: new Error('Prepared boot service belongs to a different service configuration.'),
+      })
+    }
+
     yield* Effect.gen(function* ()
     {
       yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload'])
@@ -356,46 +508,38 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
       // username argument: loginctl defaults to the calling user, which is
       // always right, while $USER can be stale (su without -l) or unset.
       yield* runStep('enabling lingering for this user', 'loginctl', ['enable-linger'])
-    }).pipe(Effect.tapError(() => rollbackFailedInstall(previousUnit)))
+      yield* awaitStorageOwner(prepared)
+    }).pipe(Effect.tapError(() => rollbackFailedInstall(prepared.previousUnit)))
 
-    return plan
-  }).pipe(Effect.withSpan('service.boot_service.install'))
+    return prepared.plan
+  })
 
-  // if activation fails partway (e.g. enable succeeds but restart/linger
-  // fails), leave nothing behind: disable removes the enable symlink, remove
-  // deletes the file, daemon-reload clears the stale definition — otherwise a
-  // dangling wants/ symlink logs "Failed to load unit" at every boot and the
-  // next lifecycle command misreports the state.
-  const rollbackFailedInstall = Effect.fn('service.boot_service.rollback_failed_install')(
-    function* (previousUnit: Option.Option<string>)
-    {
-      if (Option.isSome(previousUnit))
-      {
-        yield* fs.writeFileString(unitPath, previousUnit.value).pipe(Effect.ignore)
-      }
-      else
-      {
-        yield* runStep('cleaning up the service', 'systemctl', [
-          '--user',
-          'disable',
-          '--now',
-          BOOT_SERVICE_UNIT_FILE,
-        ]).pipe(Effect.ignore)
-        yield* fs.remove(unitPath).pipe(Effect.ignore)
-      }
-      yield* runStep('reloading systemd user units', 'systemctl', ['--user', 'daemon-reload']).pipe(
-        Effect.ignore,
-      )
-      if (Option.isSome(previousUnit))
-      {
-        yield* runStep('restoring the previous service', 'systemctl', [
-          '--user',
-          'restart',
-          BOOT_SERVICE_UNIT_FILE,
-        ]).pipe(Effect.ignore)
-      }
-    },
+  const install: BootService['Service']['install'] = prepareInstall.pipe(
+    Effect.flatMap(activatePrepared),
+    Effect.withSpan('service.boot_service.install'),
   )
+
+  const restart: BootService['Service']['restart'] = Effect.gen(function* ()
+  {
+    yield* requireSystemdLinux
+    const canonicalBaseDir = yield* fs
+      .realPath(input.baseDir)
+      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
+    const previousStorageOwner = yield* readStorageOwner(canonicalBaseDir)
+    yield* runStep('restoring the previous service', 'systemctl', [
+      '--user',
+      'restart',
+      BOOT_SERVICE_UNIT_FILE,
+    ])
+    yield* awaitStorageOwner({
+      plan,
+      canonicalBaseDir,
+      previousStorageOwnerToken: Option.isSome(previousStorageOwner)
+        ? previousStorageOwner.value.token
+        : null,
+      previousUnit: null,
+    })
+  }).pipe(Effect.withSpan('service.boot_service.restart'))
 
   const uninstall: BootService['Service']['uninstall'] = Effect.gen(function* ()
   {
@@ -420,16 +564,37 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
     return true
   }).pipe(Effect.withSpan('service.boot_service.uninstall'))
 
+  const stop: BootService['Service']['stop'] = Effect.gen(function* ()
+  {
+    yield* requireSystemdLinux
+    const exists = yield* fs
+      .exists(unitPath)
+      .pipe(Effect.mapError((cause) => new BootServiceInstallError({ cause })))
+    if (!exists)
+    {
+      return false
+    }
+    yield* runStep('stopping the service', 'systemctl', ['--user', 'stop', BOOT_SERVICE_UNIT_FILE])
+    return true
+  }).pipe(Effect.withSpan('service.boot_service.stop'))
+
   const status: BootService['Service']['status'] = Effect.gen(function* ()
   {
     if (platform !== 'linux' || homeDir === '')
     {
-      return { supported: false, installed: false, current: false, unitPath, logPath }
+      return {
+        supported: false,
+        installed: false,
+        active: false,
+        current: false,
+        unitPath,
+        logPath,
+      }
     }
     const unitExists = yield* fs.exists(unitPath)
     if (!unitExists)
     {
-      return { supported: true, installed: false, current: false, unitPath, logPath }
+      return { supported: true, installed: false, active: false, current: false, unitPath, logPath }
     }
     const unit = yield* fs.readFileString(unitPath)
     // a unit is current only if it matches what install would write now (an
@@ -442,14 +607,49 @@ export const make = Effect.fn('service.boot_service.make')(function* (input: {
         ? fs.exists(runtimePaths.sentinelPath)
         : Effect.succeed(true),
     ])
-    const current = unit === renderBootServiceUnit(plan) && entryExists && sentinelExists
-    return { supported: true, installed: true, current, unitPath, logPath }
+    const definitionCurrent = unit === renderBootServiceUnit(plan) && entryExists && sentinelExists
+    const active = yield* runner
+      .run({
+        command: 'systemctl',
+        args: ['--user', 'is-active', '--quiet', BOOT_SERVICE_UNIT_FILE],
+      })
+      .pipe(
+        Effect.map((result) => result.code === 0),
+        Effect.orElseSucceed(() => false),
+      )
+    const ownerReady =
+      definitionCurrent && active && awaitStorageOwnerReadiness
+        ? yield* fs.realPath(input.baseDir).pipe(
+            Effect.flatMap((canonicalBaseDir) =>
+              readStorageOwner(canonicalBaseDir).pipe(
+                Effect.map(
+                  (owner) =>
+                    Option.isSome(owner) &&
+                    owner.value.canonicalBaseDir === canonicalBaseDir &&
+                    owner.value.pid !== process.pid,
+                ),
+              ),
+            ),
+            Effect.orElseSucceed(() => false),
+          )
+        : definitionCurrent && active
+    // a materialized unit that never reached post-lease activation is repairable.
+    const current = definitionCurrent && active && ownerReady
+    return { supported: true, installed: true, active, current, unitPath, logPath }
   }).pipe(
     Effect.mapError((cause) => new BootServiceInstallError({ cause })),
     Effect.withSpan('service.boot_service.status'),
   )
 
-  return BootService.of({ install, uninstall, status })
+  return BootService.of({
+    prepareInstall,
+    activatePrepared,
+    install,
+    restart,
+    stop,
+    uninstall,
+    status,
+  })
 })
 
 export const layer = (input: {
@@ -457,4 +657,5 @@ export const layer = (input: {
   readonly logsDir: string
   readonly cliVersion: string
   readonly host?: BootServiceHost
+  readonly awaitStorageOwner?: boolean
 }) => Layer.effect(BootService, make(input))

@@ -8,6 +8,7 @@ import {
   PROPOSAL_SNAPSHOT_POLICY_V1,
   ProposalId,
   ProposalRevisionId,
+  type OrchestratePlanRevision,
   type ProviderInteractionMode,
   ProviderInstanceId,
   ThreadId,
@@ -20,6 +21,7 @@ import { McpSchema, McpServer } from 'effect/unstable/ai'
 
 import * as McpHttpServer from '../../../../apps/server/src/mcp/McpHttpServer.ts'
 import * as McpInvocationContext from '../../../../apps/server/src/mcp/McpInvocationContext.ts'
+import { proposalToolkitHandlers } from '../../../../apps/server/src/mcp/toolkits/proposal/handlers.ts'
 import * as ProjectionSnapshotQuery from '../../../../apps/server/src/orchestration/Services/ProjectionSnapshotQuery.ts'
 import * as ProposalService from '../../../../apps/server/src/proposal/ProposalService.ts'
 
@@ -87,8 +89,14 @@ function makeLayer(
   options: {
     readonly proposedPlanTurnId?: TurnId | null
     readonly interactionMode?: ProviderInteractionMode
+    readonly orchestrate?: boolean
+    readonly orchestratePlans?: ReadonlyArray<OrchestratePlanRevision>
   } = {},
-): Layer.Layer<McpServer.McpServer>
+): Layer.Layer<
+  | McpServer.McpServer
+  | ProposalService.ProposalService
+  | ProjectionSnapshotQuery.ProjectionSnapshotQuery
+>
 {
   const proposals = ProposalService.ProposalService.of({
     upsert: (input) =>
@@ -102,6 +110,7 @@ function makeLayer(
     diff: () => Effect.die('unused'),
     narrative: () => Effect.succeed(null),
     findLatestByPlan: () => Effect.succeed(null),
+    findByOrchestrateRevision: () => Effect.succeed(null),
   })
   const proposedPlanTurnId =
     options.proposedPlanTurnId === undefined ? turnId : options.proposedPlanTurnId
@@ -114,6 +123,7 @@ function makeLayer(
               projectId,
               worktreePath: '/derived/worktree',
               interactionMode: options.interactionMode ?? 'plan',
+              ...(options.orchestrate !== undefined ? { orchestrate: options.orchestrate } : {}),
               session: {
                 status: 'running',
                 activeTurnId: turnId,
@@ -140,6 +150,7 @@ function makeLayer(
                         updatedAt: createdAt,
                       },
                     ],
+              orchestratePlans: options.orchestratePlans ?? [],
             })
           : Option.none(),
       ),
@@ -156,8 +167,8 @@ function makeLayer(
 
   return McpHttpServer.ProposalToolkitRegistrationLive.pipe(
     Layer.provideMerge(McpServer.McpServer.layer),
-    Layer.provide(Layer.succeed(ProposalService.ProposalService, proposals)),
-    Layer.provide(Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, snapshots)),
+    Layer.provideMerge(Layer.succeed(ProposalService.ProposalService, proposals)),
+    Layer.provideMerge(Layer.succeed(ProjectionSnapshotQuery.ProjectionSnapshotQuery, snapshots)),
   )
 }
 
@@ -343,19 +354,98 @@ it.effect('accepts an active plan-mode turn before its proposed plan row is pers
     expect(result.isError).toBe(false)
     expect(captured).toHaveLength(1)
     expect(captured[0]?.planId).toBe(`plan:${threadId}:turn:${turnId}`)
-  }).pipe(Effect.provide(makeLayer(captured, { proposedPlanTurnId: null })))
+  }).pipe(Effect.provide(makeLayer(captured, { proposedPlanTurnId: null, orchestrate: true })))
 })
 
-it.effect('rejects proposal persistence from an active default-mode turn', () =>
+it.effect('rejects an orchestrate target supplied from a plan-mode turn', () =>
 {
   const captured: Array<ProposalService.ProposalUpsertRequest> = []
   return Effect.gen(function* ()
   {
-    const server = yield* McpServer.McpServer
-    const result = yield* server
-      .callTool({
-        name: 'proposal_preview_upsert',
-        arguments: {
+    const failure = yield* proposalToolkitHandlers
+      .proposal_preview_upsert({
+        changes: {
+          _tag: 'typed',
+          operations: [
+            {
+              _tag: 'add',
+              path: 'src/proposed.ts',
+              content: { encoding: 'utf8', data: 'x' },
+            },
+          ],
+        },
+        orchestratePlan: { runId: 'run-plan-mode', revision: 1 },
+      })
+      .pipe(
+        Effect.provideService(
+          McpInvocationContext.McpInvocationContext,
+          invocation(new Set(['proposal'])),
+        ),
+        Effect.flip,
+        Effect.orDie,
+      )
+
+    expect(failure).toMatchObject({ _tag: 'ProposalError', code: 'identity-mismatch' })
+    expect(captured).toHaveLength(0)
+  }).pipe(Effect.provide(makeLayer(captured)))
+})
+
+it.effect('binds only an exact tool-sourced orchestrate revision from the active turn', () =>
+{
+  const captured: Array<ProposalService.ProposalUpsertRequest> = []
+  const orchestratePlans = [
+    {
+      runId: 'run-wrong-turn',
+      revision: 2,
+      turnId: TurnId.make('turn-other'),
+      workflow: 'implementation',
+      task: 'wrong turn',
+      stages: [],
+      totalWorkers: 0,
+      maxWorkers: 1,
+      leadModelSelection: null,
+      source: 'tool',
+      status: 'pending',
+      createdAt,
+      updatedAt: createdAt,
+    },
+    {
+      runId: 'run-fence',
+      revision: 3,
+      turnId,
+      workflow: 'implementation',
+      task: 'fence sourced',
+      stages: [],
+      totalWorkers: 0,
+      maxWorkers: 1,
+      leadModelSelection: null,
+      source: 'fence',
+      status: 'pending',
+      createdAt,
+      updatedAt: createdAt,
+    },
+    {
+      runId: 'run-exact',
+      revision: 4,
+      turnId,
+      workflow: 'implementation',
+      task: 'exact target',
+      stages: [],
+      totalWorkers: 0,
+      maxWorkers: 1,
+      leadModelSelection: null,
+      source: 'tool',
+      status: 'superseded',
+      createdAt,
+      updatedAt: createdAt,
+    },
+  ] as const satisfies ReadonlyArray<OrchestratePlanRevision>
+
+  return Effect.gen(function* ()
+  {
+    const call = (orchestratePlan?: { readonly runId: string; readonly revision: number }) =>
+      proposalToolkitHandlers
+        .proposal_preview_upsert({
           changes: {
             _tag: 'typed',
             operations: [
@@ -366,6 +456,65 @@ it.effect('rejects proposal persistence from an active default-mode turn', () =>
               },
             ],
           },
+          ...(orchestratePlan === undefined ? {} : { orchestratePlan }),
+        })
+        .pipe(
+          Effect.provideService(
+            McpInvocationContext.McpInvocationContext,
+            invocation(new Set(['proposal'])),
+          ),
+        )
+
+    expect(yield* call().pipe(Effect.flip, Effect.orDie)).toMatchObject({
+      _tag: 'ProposalError',
+      code: 'identity-mismatch',
+    })
+    expect(
+      yield* call({ runId: 'run-missing', revision: 1 }).pipe(Effect.flip, Effect.orDie),
+    ).toMatchObject({ _tag: 'ProposalError', code: 'not-found' })
+    expect(
+      yield* call({ runId: 'run-wrong-turn', revision: 2 }).pipe(Effect.flip, Effect.orDie),
+    ).toMatchObject({ _tag: 'ProposalError', code: 'identity-mismatch' })
+    expect(
+      yield* call({ runId: 'run-fence', revision: 3 }).pipe(Effect.flip, Effect.orDie),
+    ).toMatchObject({ _tag: 'ProposalError', code: 'identity-mismatch' })
+    expect(yield* call({ runId: 'run-exact', revision: 4 })).toEqual(revision)
+    expect(captured).toHaveLength(1)
+    expect(captured[0]).toMatchObject({
+      orchestratePlan: {
+        runId: 'run-exact',
+        revision: 4,
+        turnId,
+      },
+    })
+    expect(captured[0]).not.toHaveProperty('planId')
+  }).pipe(
+    Effect.provide(
+      makeLayer(captured, {
+        proposedPlanTurnId: null,
+        interactionMode: 'orchestrate',
+        orchestratePlans,
+      }),
+    ),
+  )
+})
+
+it.effect('rejects proposal persistence from an active default-mode turn', () =>
+{
+  const captured: Array<ProposalService.ProposalUpsertRequest> = []
+  return Effect.gen(function* ()
+  {
+    const failure = yield* proposalToolkitHandlers
+      .proposal_preview_upsert({
+        changes: {
+          _tag: 'typed',
+          operations: [
+            {
+              _tag: 'add',
+              path: 'src/proposed.ts',
+              content: { encoding: 'utf8', data: 'x' },
+            },
+          ],
         },
       })
       .pipe(
@@ -373,10 +522,11 @@ it.effect('rejects proposal persistence from an active default-mode turn', () =>
           McpInvocationContext.McpInvocationContext,
           invocation(new Set(['proposal'])),
         ),
-        Effect.provideService(McpSchema.McpServerClient, client),
+        Effect.flip,
+        Effect.orDie,
       )
 
-    expect(result.isError).toBe(true)
+    expect(failure).toMatchObject({ _tag: 'ProposalError', code: 'identity-mismatch' })
     expect(captured).toHaveLength(0)
   }).pipe(
     Effect.provide(

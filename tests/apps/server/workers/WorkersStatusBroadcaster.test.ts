@@ -25,6 +25,7 @@ describe('WorkersStatusBroadcaster activity', () =>
       listRuns: () => Effect.die('unused'),
       getJob: () => Effect.die('unused'),
       getRun: () => Effect.die('unused'),
+      getExecutionEvidence: () => Effect.die('unused'),
       readActivity: ({ jobId }) =>
         Effect.sync(() => ({
           jobId,

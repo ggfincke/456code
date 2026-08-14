@@ -1385,6 +1385,7 @@ it.live('reverts claudeAgent turns and rolls back provider conversation state', 
             instanceId: ProviderInstanceId.make('claudeAgent'),
             model: 'claude-sonnet-4-6',
           },
+          createdAt: '2026-02-24T10:13:59.900Z',
         })
 
         yield* harness.waitForThread(
@@ -1440,6 +1441,7 @@ it.live('reverts claudeAgent turns and rolls back provider conversation state', 
           commandId: 'cmd-turn-start-claude-revert-2',
           messageId: 'msg-user-claude-revert-2',
           text: 'Second Claude edit',
+          createdAt: '2026-02-24T10:14:00.900Z',
         })
 
         yield* harness.waitForThread(
@@ -1468,9 +1470,10 @@ it.live('reverts claudeAgent turns and rolls back provider conversation state', 
           gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 1)),
           true,
         )
-        assert.equal(
-          gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 2)),
-          false,
+        yield* waitForSync(
+          () => gitRefExists(harness.workspaceDir, checkpointRefForThreadTurn(THREAD_ID, 2)),
+          (exists) => !exists,
+          'stale Claude checkpoint ref deleted by revert cleanup',
         )
         assert.deepEqual(harness.adapterHarness!.getRollbackCalls(THREAD_ID), [1])
       }),

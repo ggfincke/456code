@@ -226,6 +226,7 @@ const proposalServiceLayer = Layer.succeed(
         findLatestByPlanInputs.push(input)
         return input.planId === planId ? { proposal, revision } : null
       }),
+    findByOrchestrateRevision: () => Effect.succeed(null),
   }),
 )
 

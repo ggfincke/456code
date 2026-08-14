@@ -7,8 +7,8 @@ import * as Effect from 'effect/Effect'
 import * as Layer from 'effect/Layer'
 
 import * as ServerConfig from '../config.ts'
+import { isLoopbackHost, isWildcardHost } from '../environment/accessHost.ts'
 import { resolveSessionCookieName } from './utils.ts'
-import { isLoopbackHost, isWildcardHost } from '../startupAccess.ts'
 
 export class EnvironmentAuthPolicy extends Context.Service<
   EnvironmentAuthPolicy,

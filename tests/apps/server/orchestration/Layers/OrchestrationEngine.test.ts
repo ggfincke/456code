@@ -35,6 +35,8 @@ import {
 } from '../../../../../apps/server/src/persistence/Services/CheckpointRevertOperations.ts'
 import { OrchestrationCommandReceiptRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/OrchestrationCommandReceipts.ts'
 import { OrchestrationEventStoreLive } from '../../../../../apps/server/src/persistence/Layers/OrchestrationEventStore.ts'
+import { ProjectionTurnRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/ProjectionTurns.ts'
+import { ProviderRuntimeInboxLive } from '../../../../../apps/server/src/persistence/Layers/ProviderRuntimeInbox.ts'
 import { SqlitePersistenceMemory } from '../../../../../apps/server/src/persistence/Layers/Sqlite.ts'
 import { AttachmentLifecycleRepositoryLive } from '../../../../../apps/server/src/persistence/Layers/AttachmentLifecycle.ts'
 import {
@@ -93,6 +95,8 @@ function makeEngineAuxiliaryLayer(
   return Layer.mergeAll(
     attachmentLayer,
     Layer.succeed(CheckpointRevertOperations, checkpointReverts),
+    ProjectionTurnRepositoryLive,
+    ProviderRuntimeInboxLive,
   )
 }
 
@@ -156,10 +160,12 @@ const hasMetricSnapshot = (
 
 describe('OrchestrationEngine', () =>
 {
-  it('gates turn starts until a checkpoint revert finishes cleanup', async () =>
+  it('gates provider and target lifecycle mutations until a checkpoint revert finishes cleanup', async () =>
   {
     const phases = new Map<string, CheckpointRevertOperation['phase']>([
+      ['thread-gate-requested', 'requested'],
       ['thread-gate-admitted', 'admitted'],
+      ['thread-gate-provider', 'provider-pending'],
       ['thread-gate-started', 'restore-started'],
       ['thread-gate-manual', 'manual-required'],
       ['thread-gate-projected', 'projection-finalized'],
@@ -171,23 +177,29 @@ describe('OrchestrationEngine', () =>
       getActiveRevert: (threadId) =>
       {
         const phase = phases.get(threadId)
-        return phase === undefined
+        return phase === undefined || phase === 'completed' || phase === 'aborted'
           ? Option.none()
           : Option.some({
               operationId: `operation-${threadId}`,
               threadId,
               targetRef: `refs/t3/checkpoints/${threadId}/1`,
               targetTurnCount: 1,
+              requestSourceSequence: 100,
+              providerInboxHighWater: 50,
               targetTree: null,
               cwd: '/tmp/worktree',
+              checkpointCaptureRoot: null,
               repositoryCommonDir: null,
+              checkpointCommitOid: null,
               stagePath: null,
               phase,
               attemptCount: 0,
               lastError: null,
+              provider: null,
               providerInstanceId: null,
               providerSessionId: null,
               providerThreadId: null,
+              providerSessionGeneration: null,
               providerOutcome: null,
               providerOutcomeJson: null,
               projectionStatus: null,
@@ -244,7 +256,9 @@ describe('OrchestrationEngine', () =>
     }
 
     const blockedPhases = [
+      ['requested', 'requested'],
       ['admitted', 'admitted'],
+      ['provider-pending', 'provider'],
       ['restore-started', 'started'],
       ['manual-required', 'manual'],
       ['projection-finalized', 'projected'],
@@ -291,14 +305,72 @@ describe('OrchestrationEngine', () =>
       }
     }
 
-    await system.run(
-      engine.dispatch({
-        type: 'thread.meta.update',
-        commandId: CommandId.make('cmd-meta-while-revert-active'),
-        threadId: ThreadId.make('thread-gate-admitted'),
-        title: 'Non-turn command allowed',
-      }),
+    const metadataMutation = await system.run(
+      Effect.result(
+        engine.dispatch({
+          type: 'thread.meta.update',
+          commandId: CommandId.make('cmd-meta-while-revert-active'),
+          threadId: ThreadId.make('thread-gate-admitted'),
+          title: 'Mutation must remain fenced',
+        }),
+      ),
     )
+    expect(metadataMutation._tag).toBe('Failure')
+    if (metadataMutation._tag === 'Failure')
+    {
+      expect(metadataMutation.failure).toMatchObject({
+        code: 'checkpoint-revert-in-progress',
+      })
+    }
+
+    await system.run(
+      engine.dispatchInternal(
+        {
+          type: 'thread.meta.update',
+          commandId: CommandId.make('cmd-meta-causal-domain-settlement'),
+          threadId: ThreadId.make('thread-gate-admitted'),
+          title: 'Causally prior domain settlement',
+        },
+        { sourceKind: 'domain-event', sourceSequence: 99 },
+      ),
+    )
+    await system.run(
+      engine.dispatchInternal(
+        {
+          type: 'thread.meta.update',
+          commandId: CommandId.make('cmd-meta-causal-runtime-settlement'),
+          threadId: ThreadId.make('thread-gate-admitted'),
+          title: 'Causally prior runtime settlement',
+        },
+        { sourceKind: 'provider-runtime', sourceSequence: 50 },
+      ),
+    )
+    for (const [commandId, authority] of [
+      ['cmd-meta-stale-domain-settlement', { sourceKind: 'domain-event', sourceSequence: 100 }],
+      ['cmd-meta-stale-runtime-settlement', { sourceKind: 'provider-runtime', sourceSequence: 51 }],
+    ] as const)
+    {
+      const staleSettlement = await system.run(
+        Effect.result(
+          engine.dispatchInternal(
+            {
+              type: 'thread.meta.update',
+              commandId: CommandId.make(commandId),
+              threadId: ThreadId.make('thread-gate-admitted'),
+              title: 'Causally newer mutation stays fenced',
+            },
+            authority,
+          ),
+        ),
+      )
+      expect(staleSettlement._tag).toBe('Failure')
+      if (staleSettlement._tag === 'Failure')
+      {
+        expect(staleSettlement.failure).toMatchObject({
+          code: 'checkpoint-revert-in-progress',
+        })
+      }
+    }
     for (const suffix of ['completed'] as const)
     {
       await system.run(
@@ -679,6 +751,10 @@ describe('OrchestrationEngine', () =>
       (await system.readModel()).threads.find((thread) => thread.id === 'thread-archive')
         ?.archivedAt,
     ).not.toBeNull()
+    expect(
+      (await system.readModel()).threads.find((thread) => thread.id === 'thread-archive')
+        ?.archiveGeneration,
+    ).toBe(1)
 
     await system.run(
       engine.dispatch({
@@ -691,6 +767,26 @@ describe('OrchestrationEngine', () =>
       (await system.readModel()).threads.find((thread) => thread.id === 'thread-archive')
         ?.archivedAt,
     ).toBeNull()
+    expect(
+      (await system.readModel()).threads.find((thread) => thread.id === 'thread-archive')
+        ?.archiveGeneration,
+    ).toBe(1)
+
+    await system.run(
+      engine.dispatch({
+        type: 'thread.archive',
+        commandId: CommandId.make('cmd-thread-rearchive'),
+        threadId: ThreadId.make('thread-archive'),
+      }),
+    )
+    expect(
+      (await system.readModel()).threads.find((thread) => thread.id === 'thread-archive')
+        ?.archiveGeneration,
+    ).toBe(2)
+    const archiveEvents = Array.from(
+      await system.run(Stream.runCollect(engine.readEvents(0))),
+    ).filter((event) => event.type === 'thread.archived')
+    expect(archiveEvents.map((event) => event.payload.archiveGeneration)).toEqual([1, 2])
 
     await system.dispose()
   })

@@ -19,13 +19,10 @@ const encodeServerSettings = Schema.encodeSync(ServerSettings)
 
 describe('ClientSettings word wrap', () =>
 {
-  it('defaults word wrap on', () =>
+  it('defaults word wrap on and ignores obsolete wrapping preferences', () =>
   {
     expect(decodeClientSettings({}).wordWrap).toBe(true)
-  })
 
-  it('ignores obsolete wrapping preferences', () =>
-  {
     const decoded = decodeClientSettings({
       chatWordWrap: false,
       diffWordWrap: false,
@@ -119,16 +116,39 @@ describe('ServerSettings.providerInstances (slice-2 invariant)', () =>
 
 describe('ServerSettings worktree defaults', () =>
 {
-  it('defaults start-from-origin on for legacy configs', () =>
+  it('defaults start-from-origin on and accepts updates', () =>
   {
     expect(decodeServerSettings({}).newWorktreesStartFromOrigin).toBe(true)
-  })
-
-  it('accepts start-from-origin updates', () =>
-  {
     expect(
       decodeServerSettingsPatch({ newWorktreesStartFromOrigin: false }).newWorktreesStartFromOrigin,
     ).toBe(false)
+  })
+})
+
+describe('ServerSettings architecture analysis', () =>
+{
+  it('defaults legacy configs to on-demand analysis', () =>
+  {
+    expect(decodeServerSettings({}).architectureAutoAnalysis).toBe('on-demand')
+  })
+
+  it.each(['off', 'on-demand', 'auto'] as const)(
+    'accepts the %s mode in settings and patches',
+    (mode) =>
+    {
+      expect(
+        decodeServerSettings({ architectureAutoAnalysis: mode }).architectureAutoAnalysis,
+      ).toBe(mode)
+      expect(
+        decodeServerSettingsPatch({ architectureAutoAnalysis: mode }).architectureAutoAnalysis,
+      ).toBe(mode)
+    },
+  )
+
+  it('rejects architecture analysis modes outside the frozen contract', () =>
+  {
+    expect(() => decodeServerSettings({ architectureAutoAnalysis: 'manual' })).toThrow()
+    expect(() => decodeServerSettingsPatch({ architectureAutoAnalysis: 'manual' })).toThrow()
   })
 })
 

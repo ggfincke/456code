@@ -55,6 +55,7 @@ describe('projectThreadAwareness', () =>
     expect(
       projectThreadAwareness({
         environmentId: 'env-1' as EnvironmentId,
+        now: Date.parse(NOW),
         project,
         thread: thread(),
       }),
@@ -65,6 +66,7 @@ describe('projectThreadAwareness', () =>
   {
     const state = projectThreadAwareness({
       environmentId: 'env-1' as EnvironmentId,
+      now: Date.parse(NOW),
       project,
       thread: thread({
         hasPendingApprovals: true,
@@ -88,6 +90,7 @@ describe('projectThreadAwareness', () =>
   {
     const state = projectThreadAwareness({
       environmentId: 'env-1' as EnvironmentId,
+      now: Date.parse(NOW),
       project,
       thread: thread({
         session: {
@@ -115,6 +118,7 @@ describe('projectThreadAwareness', () =>
   {
     const state = projectThreadAwareness({
       environmentId: 'env-1' as EnvironmentId,
+      now: Date.parse(NOW),
       project,
       thread: thread({
         approvalOutcomes: [
@@ -148,6 +152,7 @@ describe('projectThreadAwareness', () =>
   {
     const state = projectThreadAwareness({
       environmentId: 'env-1' as EnvironmentId,
+      now: Date.parse(NOW),
       project,
       thread: thread({
         approvalOutcomes: [
@@ -192,6 +197,7 @@ describe('projectThreadAwareness', () =>
     }
     const state = projectThreadAwareness({
       environmentId: 'env-1' as EnvironmentId,
+      now: Date.parse(NOW),
       project,
       thread: thread({ latestTurn: finishedTurn }),
     })
@@ -204,6 +210,7 @@ describe('projectThreadAwareness', () =>
 
     const trulyInterrupted = projectThreadAwareness({
       environmentId: 'env-1' as EnvironmentId,
+      now: Date.parse(NOW),
       project,
       thread: thread({ latestTurn: { ...finishedTurn, completedAt: null } }),
     })
@@ -216,6 +223,7 @@ describe('projectThreadAwareness', () =>
     // the ready session remains a sufficient completion signal
     const state = projectThreadAwareness({
       environmentId: 'env-1' as EnvironmentId,
+      now: Date.parse(NOW),
       project,
       thread: thread({
         session: {
@@ -237,6 +245,7 @@ describe('projectThreadAwareness', () =>
   {
     const state = projectThreadAwareness({
       environmentId: 'env-1' as EnvironmentId,
+      now: Date.parse(NOW),
       project,
       thread: thread({
         session: {

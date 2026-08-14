@@ -93,6 +93,8 @@ import type {
   ClientOrchestrationCommand,
   OrchestrationGetFullThreadDiffInput,
   OrchestrationGetFullThreadDiffResult,
+  OrchestrationGetRunDiffInput,
+  OrchestrationGetRunDiffResult,
   OrchestrationGetTurnDiffInput,
   OrchestrationGetTurnDiffResult,
   OrchestrationShellSnapshot,
@@ -100,7 +102,13 @@ import type {
   OrchestrationSubscribeThreadInput,
   OrchestrationThreadStreamItem,
 } from './orchestration.ts'
-import { EnvironmentId } from './baseSchemas.ts'
+import {
+  EnvironmentId,
+  IsoDateTime,
+  NonNegativeInt,
+  ThreadId,
+  TrimmedNonEmptyString,
+} from './baseSchemas.ts'
 import { AuthAccessTokenResult, AuthSessionState, AuthWebSocketTicketResult } from './auth.ts'
 import { AdvertisedEndpoint } from './remoteAccess.ts'
 import { EditorId } from './editor.ts'
@@ -128,6 +136,59 @@ export interface ContextMenuItem<T extends string = string>
   icon?: string
   children?: readonly ContextMenuItem<T>[]
 }
+
+export const DesktopMenuBarThreadSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  title: TrimmedNonEmptyString,
+  projectTitle: TrimmedNonEmptyString,
+  // the renderer-resolved status pill label, so the tray row says what the
+  // thread is waiting on rather than only what it is called. Optional so a
+  // payload from an older renderer still decodes, and absent when the thread
+  // has no status worth showing.
+  status: Schema.optional(TrimmedNonEmptyString),
+})
+export type DesktopMenuBarThread = typeof DesktopMenuBarThreadSchema.Type
+
+export const DesktopMenuBarUsageItemSchema = Schema.Struct({
+  providerLabel: TrimmedNonEmptyString,
+  windowLabel: TrimmedNonEmptyString,
+  usedPercent: Schema.Finite.check(Schema.isBetween({ minimum: 0, maximum: 100 })),
+  resetsAt: Schema.NullOr(IsoDateTime),
+})
+export type DesktopMenuBarUsageItem = typeof DesktopMenuBarUsageItemSchema.Type
+
+export const DesktopThreadAttentionKindSchema = Schema.Literals([
+  'needs-approval',
+  'needs-input',
+  'failed',
+  'completed',
+])
+export type DesktopThreadAttentionKind = typeof DesktopThreadAttentionKindSchema.Type
+
+export const DesktopThreadAttentionSchema = Schema.Struct({
+  environmentId: EnvironmentId,
+  threadId: ThreadId,
+  title: TrimmedNonEmptyString,
+  projectTitle: TrimmedNonEmptyString,
+  kind: DesktopThreadAttentionKindSchema,
+  // the renderer has this thread on screen. Only the main process knows
+  // whether the window is actually focused, so the two halves of "the user is
+  // already looking at this" are combined there: a notification for the thread
+  // in front of the user is noise, one for any other thread is not.
+  isViewedThread: Schema.Boolean,
+})
+export type DesktopThreadAttention = typeof DesktopThreadAttentionSchema.Type
+
+export const DesktopMenuBarStateSchema = Schema.Struct({
+  recentThreads: Schema.Array(DesktopMenuBarThreadSchema).check(Schema.isMaxLength(5)),
+  usageItems: Schema.Array(DesktopMenuBarUsageItemSchema).check(Schema.isMaxLength(2)),
+  // deliberately its own field rather than recentThreads.length: that array is
+  // capped at 5, so a badge derived from it would silently stop counting.
+  // optional so a payload from an older renderer still decodes.
+  attentionCount: Schema.optional(NonNegativeInt),
+})
+export type DesktopMenuBarState = typeof DesktopMenuBarStateSchema.Type
 
 export interface ContextMenuItemSchemaType
 {
@@ -1047,6 +1108,10 @@ export interface DesktopBridge
     position?: { x: number; y: number },
   ) => Promise<T | null>
   openExternal: (url: string) => Promise<boolean>
+  setMenuBarState?: (state: DesktopMenuBarState) => Promise<void>
+  // desktop-only, so optional: web builds have no bridge and the renderer
+  // feature-detects before calling.
+  notifyThreadAttention?: (attention: DesktopThreadAttention) => Promise<void>
   onMenuAction: (listener: (action: string) => void) => () => void
   getWindowFullscreenState: () => boolean
   onWindowFullscreenStateChange: (listener: (fullscreen: boolean) => void) => () => void
@@ -1263,6 +1328,7 @@ export interface EnvironmentApi
     getFullThreadDiff: (
       input: OrchestrationGetFullThreadDiffInput,
     ) => Promise<OrchestrationGetFullThreadDiffResult>
+    getRunDiff: (input: OrchestrationGetRunDiffInput) => Promise<OrchestrationGetRunDiffResult>
     getArchivedShellSnapshot: () => Promise<OrchestrationShellSnapshot>
     subscribeShell: (
       callback: (event: OrchestrationShellStreamItem) => void,

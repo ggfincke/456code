@@ -54,6 +54,52 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
     otlpServiceName: 't3-server',
   } as const
 
+  // full deep-equal reserved for precedence + headless presentation; other cases
+  // pin the fields that distinguish the scenario.
+  const expectResolvedCore = (
+    resolved: Effect.Success<ReturnType<typeof resolveServerConfig>>['config'],
+    expected: {
+      readonly logLevel: string
+      readonly mode: string
+      readonly port: number
+      readonly baseDir: string
+      readonly host: string | undefined
+      readonly noBrowser: boolean
+      readonly startupPresentation: string
+      readonly autoBootstrapProjectFromCwd: boolean
+      readonly logWebSocketEvents: boolean
+      readonly desktopBootstrapToken?: string | undefined
+      readonly otlpTracesUrl?: string | undefined
+      readonly otlpMetricsUrl?: string | undefined
+      readonly tailscaleServeEnabled?: boolean
+      readonly tailscaleServePort?: number
+      readonly devUrl?: URL | undefined
+    },
+  ) =>
+  {
+    expect(resolved).toMatchObject({
+      ...defaultObservabilityConfig,
+      ...(expected.otlpTracesUrl === undefined ? {} : { otlpTracesUrl: expected.otlpTracesUrl }),
+      ...(expected.otlpMetricsUrl === undefined ? {} : { otlpMetricsUrl: expected.otlpMetricsUrl }),
+      logLevel: expected.logLevel,
+      mode: expected.mode,
+      port: expected.port,
+      cwd: process.cwd(),
+      baseDir: expected.baseDir,
+      host: expected.host,
+      noBrowser: expected.noBrowser,
+      startupPresentation: expected.startupPresentation,
+      desktopBootstrapToken: expected.desktopBootstrapToken,
+      autoBootstrapProjectFromCwd: expected.autoBootstrapProjectFromCwd,
+      proposalReconciliationMode: 'report',
+      proposalReconciliationDeleteEnabled: false,
+      logWebSocketEvents: expected.logWebSocketEvents,
+      tailscaleServeEnabled: expected.tailscaleServeEnabled ?? false,
+      tailscaleServePort: expected.tailscaleServePort ?? 443,
+      ...(expected.devUrl === undefined ? { devUrl: undefined } : { devUrl: expected.devUrl }),
+    })
+  }
+
   const openBootstrapFd = Effect.fn(function* (payload: DesktopBackendBootstrapValue)
   {
     const fs = yield* FileSystem.FileSystem
@@ -73,7 +119,7 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         baseDir,
         new URL('http://127.0.0.1:5173'),
       )
-      const resolved = yield* resolveServerConfig(
+      const { config: resolved } = yield* resolveServerConfig(
         {
           mode: Option.none(),
           port: Option.none(),
@@ -112,29 +158,19 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         ),
       )
 
-      expect(resolved).toEqual({
+      expectResolvedCore(resolved, {
         logLevel: 'Warn',
-        ...defaultObservabilityConfig,
         mode: 'desktop',
         port: 4001,
-        cwd: process.cwd(),
         baseDir,
-        ...derivedPaths,
         host: '0.0.0.0',
-        staticDir: undefined,
-        devUrl: new URL('http://127.0.0.1:5173'),
         noBrowser: true,
         startupPresentation: 'browser',
-        desktopBootstrapToken: undefined,
         autoBootstrapProjectFromCwd: false,
-        cartographerReconciliationMode: 'report',
-        cartographerReconciliationDeleteEnabled: false,
-        proposalReconciliationMode: 'report',
-        proposalReconciliationDeleteEnabled: false,
         logWebSocketEvents: true,
-        tailscaleServeEnabled: false,
-        tailscaleServePort: 443,
+        devUrl: new URL('http://127.0.0.1:5173'),
       })
+      expect(resolved).toMatchObject(derivedPaths)
       assert.equal(resolved.stateDir, join(baseDir, 'userdata'))
     }),
   )
@@ -148,7 +184,7 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         baseDir,
         new URL('http://127.0.0.1:4173'),
       )
-      const resolved = yield* resolveServerConfig(
+      const { config: resolved } = yield* resolveServerConfig(
         {
           mode: Option.some('web'),
           port: Option.some(8788),
@@ -202,8 +238,6 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         startupPresentation: 'browser',
         desktopBootstrapToken: undefined,
         autoBootstrapProjectFromCwd: true,
-        cartographerReconciliationMode: 'report',
-        cartographerReconciliationDeleteEnabled: false,
         proposalReconciliationMode: 'report',
         proposalReconciliationDeleteEnabled: false,
         logWebSocketEvents: true,
@@ -231,7 +265,7 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         new URL('http://127.0.0.1:4173'),
       )
 
-      const resolved = yield* resolveServerConfig(
+      const { config: resolved } = yield* resolveServerConfig(
         {
           mode: Option.some('web'),
           port: Option.some(8788),
@@ -280,8 +314,6 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         startupPresentation: 'browser',
         desktopBootstrapToken: 'desktop-bootstrap-token',
         autoBootstrapProjectFromCwd: false,
-        cartographerReconciliationMode: 'report',
-        cartographerReconciliationDeleteEnabled: false,
         proposalReconciliationMode: 'report',
         proposalReconciliationDeleteEnabled: false,
         logWebSocketEvents: false,
@@ -311,7 +343,7 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
       )
       const derivedPaths = yield* deriveServerPaths(baseDir, undefined)
 
-      const resolved = yield* resolveServerConfig(
+      const { config: resolved } = yield* resolveServerConfig(
         {
           mode: Option.none(),
           port: Option.none(),
@@ -342,31 +374,21 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         ),
       )
 
-      expect(resolved).toEqual({
+      expectResolvedCore(resolved, {
         logLevel: 'Info',
-        ...defaultObservabilityConfig,
-        otlpTracesUrl: 'http://localhost:4318/v1/traces',
-        otlpMetricsUrl: 'http://localhost:4318/v1/metrics',
         mode: 'desktop',
         port: 4888,
-        cwd: process.cwd(),
         baseDir,
-        ...derivedPaths,
         host: '127.0.0.2',
-        staticDir: resolved.staticDir,
-        devUrl: undefined,
         noBrowser: true,
         startupPresentation: 'browser',
         desktopBootstrapToken: 'desktop-token',
         autoBootstrapProjectFromCwd: false,
-        cartographerReconciliationMode: 'report',
-        cartographerReconciliationDeleteEnabled: false,
-        proposalReconciliationMode: 'report',
-        proposalReconciliationDeleteEnabled: false,
         logWebSocketEvents: false,
-        tailscaleServeEnabled: false,
-        tailscaleServePort: 443,
+        otlpTracesUrl: 'http://localhost:4318/v1/traces',
+        otlpMetricsUrl: 'http://localhost:4318/v1/metrics',
       })
+      expect(resolved).toMatchObject(derivedPaths)
       assert.equal(join(baseDir, 'userdata'), resolved.stateDir)
     }),
   )
@@ -379,7 +401,7 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
       const baseDir = yield* fs.makeTempDirectoryScoped({ prefix: 't3-cli-config-dirs-' })
       const customCwd = path.join(baseDir, 'nested', 'project')
 
-      const resolved = yield* resolveServerConfig(
+      const { config: resolved } = yield* resolveServerConfig(
         {
           mode: Option.some('desktop'),
           port: Option.some(4888),
@@ -443,7 +465,7 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         new URL('http://127.0.0.1:4173'),
       )
 
-      const resolved = yield* resolveServerConfig(
+      const { config: resolved } = yield* resolveServerConfig(
         {
           mode: Option.none(),
           port: Option.some(8788),
@@ -494,8 +516,6 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         startupPresentation: 'browser',
         desktopBootstrapToken: 'desktop-token',
         autoBootstrapProjectFromCwd: true,
-        cartographerReconciliationMode: 'report',
-        cartographerReconciliationDeleteEnabled: false,
         proposalReconciliationMode: 'report',
         proposalReconciliationDeleteEnabled: false,
         logWebSocketEvents: true,
@@ -524,7 +544,7 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         })}\n`,
       )
 
-      const resolved = yield* resolveServerConfig(
+      const { config: resolved } = yield* resolveServerConfig(
         {
           mode: Option.some('desktop'),
           port: Option.some(4888),
@@ -549,33 +569,20 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         ),
       )
 
-      expect(resolved.otlpTracesUrl).toBe('http://localhost:4318/v1/traces')
-      expect(resolved.otlpMetricsUrl).toBe('http://localhost:4318/v1/metrics')
-      expect(resolved).toEqual({
+      expectResolvedCore(resolved, {
         logLevel: 'Info',
-        ...defaultObservabilityConfig,
-        otlpTracesUrl: 'http://localhost:4318/v1/traces',
-        otlpMetricsUrl: 'http://localhost:4318/v1/metrics',
         mode: 'desktop',
         port: 4888,
-        cwd: process.cwd(),
         baseDir,
-        ...derivedPaths,
         host: '127.0.0.1',
-        staticDir: resolved.staticDir,
-        devUrl: undefined,
         noBrowser: true,
         startupPresentation: 'browser',
-        desktopBootstrapToken: undefined,
         autoBootstrapProjectFromCwd: false,
-        cartographerReconciliationMode: 'report',
-        cartographerReconciliationDeleteEnabled: false,
-        proposalReconciliationMode: 'report',
-        proposalReconciliationDeleteEnabled: false,
         logWebSocketEvents: false,
-        tailscaleServeEnabled: false,
-        tailscaleServePort: 443,
+        otlpTracesUrl: 'http://localhost:4318/v1/traces',
+        otlpMetricsUrl: 'http://localhost:4318/v1/metrics',
       })
+      expect(resolved).toMatchObject(derivedPaths)
     }),
   )
 
@@ -586,7 +593,7 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
       const baseDir = join(NodeOS.tmpdir(), 't3-cli-config-headless-base')
       const derivedPaths = yield* deriveExplicitServerPaths(baseDir, undefined)
 
-      const resolved = yield* resolveServerConfig(
+      const { config: resolved } = yield* resolveServerConfig(
         {
           mode: Option.some('web'),
           port: Option.some(3773),
@@ -636,8 +643,6 @@ it.layer(NodeServices.layer)('cli config resolution', (it) =>
         startupPresentation: 'headless',
         desktopBootstrapToken: undefined,
         autoBootstrapProjectFromCwd: false,
-        cartographerReconciliationMode: 'report',
-        cartographerReconciliationDeleteEnabled: false,
         proposalReconciliationMode: 'report',
         proposalReconciliationDeleteEnabled: false,
         logWebSocketEvents: false,

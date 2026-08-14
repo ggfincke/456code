@@ -71,6 +71,7 @@ export const ProviderSendTurnInput = Schema.Struct({
   ),
   modelSelection: Schema.optional(ModelSelection),
   interactionMode: Schema.optional(ProviderInteractionMode),
+  orchestrate: Schema.optional(Schema.Boolean),
 })
 export type ProviderSendTurnInput = typeof ProviderSendTurnInput.Type
 

@@ -26,6 +26,7 @@ import * as Scope from 'effect/Scope'
 import * as Stream from 'effect/Stream'
 
 import * as CheckpointStore from '../src/checkpointing/CheckpointStore.ts'
+import * as CheckpointIdentity from '../src/checkpointing/CheckpointIdentity.ts'
 import { TextGeneration, type TextGenerationShape } from '../src/textGeneration/TextGeneration.ts'
 import { OrchestrationCommandReceiptRepositoryLive } from '../src/persistence/Layers/OrchestrationCommandReceipts.ts'
 import { ImportReplacementIntentRepositoryLive } from '../src/persistence/Layers/ImportReplacementIntents.ts'
@@ -43,6 +44,7 @@ import { makeProviderRegistryLayer } from '../src/provider/testUtils/providerReg
 import { ProviderSessionDirectoryLive } from '../src/provider/Layers/ProviderSessionDirectory.ts'
 import { ServerSettingsService } from '../src/serverSettings.ts'
 import { makeProviderServiceLive } from '../src/provider/Layers/ProviderService.ts'
+import * as McpSessionRegistry from '../src/mcp/McpSessionRegistry.ts'
 import { makeCodexAdapter } from '../src/provider/Layers/CodexAdapter.ts'
 import {
   NoOpProviderEventLoggers,
@@ -52,18 +54,24 @@ import { ProviderService } from '../src/provider/Services/ProviderService.ts'
 import { AnalyticsService } from '../src/telemetry/Services/AnalyticsService.ts'
 import { CheckpointReactorLive } from '../src/orchestration/Layers/CheckpointReactor.ts'
 import * as RepositoryIdentityResolver from '../src/project/RepositoryIdentityResolver.ts'
-import { OrchestrationEngineLive } from '../src/orchestration/Layers/OrchestrationEngine.ts'
+import { OrchestrationEngineWithArchivePermitLive } from '../src/orchestration/Layers/OrchestrationEngine.ts'
 import { CheckpointRevertOperationsLive } from '../src/persistence/Layers/CheckpointRevertOperations.ts'
 import { OrchestrationProjectionPipelineLive } from '../src/orchestration/Layers/ProjectionPipeline.ts'
 import { OrchestrationProjectionSnapshotQueryLive } from '../src/orchestration/Layers/ProjectionSnapshotQuery.ts'
+import { ThreadArchiveLifecyclePermitLive } from '../src/orchestration/Layers/ThreadArchiveLifecyclePermit.ts'
 import { RuntimeReceiptBusTest } from '../src/orchestration/Layers/RuntimeReceiptBus.ts'
 import { OrchestrationReactorLive } from '../src/orchestration/Layers/OrchestrationReactor.ts'
 import { ProviderCommandReactorLive } from '../src/orchestration/Layers/ProviderCommandReactor.ts'
 import { ProviderRuntimeIngestionLive } from '../src/orchestration/Layers/ProviderRuntimeIngestion.ts'
+import { ProviderRuntimeInboxLive } from '../src/persistence/Layers/ProviderRuntimeInbox.ts'
+import { OrchestrationReactorDeliveryLive } from '../src/persistence/Layers/OrchestrationReactorDelivery.ts'
+import { ProviderRuntimeInboxRunnerLive } from '../src/orchestration/Layers/ProviderRuntimeInboxRunner.ts'
 import {
   OrchestrationEngineService,
   type OrchestrationEngineShape,
 } from '../src/orchestration/Services/OrchestrationEngine.ts'
+import { ArchitectureAutoAnalysisReactor } from '../src/orchestration/Services/ArchitectureAutoAnalysisReactor.ts'
+import { ThreadArchiveReactor } from '../src/orchestration/Services/ThreadArchiveReactor.ts'
 import { ThreadDeletionReactor } from '../src/orchestration/Services/ThreadDeletionReactor.ts'
 import { OrchestrationReactor } from '../src/orchestration/Services/OrchestrationReactor.ts'
 import { ProjectionSnapshotQuery } from '../src/orchestration/Services/ProjectionSnapshotQuery.ts'
@@ -83,6 +91,8 @@ import * as VcsDriverRegistry from '../src/vcs/VcsDriverRegistry.ts'
 import { VcsStatusBroadcaster } from '../src/vcs/VcsStatusBroadcaster.ts'
 import { GitWorkflowService } from '../src/git/GitWorkflowService.ts'
 import * as VcsProcess from '../src/vcs/VcsProcess.ts'
+import * as GitVcsDriver from '../src/vcs/GitVcsDriver.ts'
+import * as ServerStorageLease from '../src/serverStorageLease.ts'
 
 const decodeCodexSettings = Schema.decodeEffect(CodexSettings)
 
@@ -282,8 +292,14 @@ export const makeOrchestrationIntegrationHarness = (
       yield* initializeGitWorkspace(workspaceDir)
     }
 
-    const persistenceLayer = makeSqlitePersistenceLive(dbPath)
-    const orchestrationLayer = OrchestrationEngineLive.pipe(
+    const storageLeaseLayer = Layer.effect(
+      ServerStorageLease.ServerStorageLease,
+      ServerStorageLease.acquireServerStorageLease(rootDir),
+    )
+    const persistenceLayer = makeSqlitePersistenceLive(dbPath).pipe(
+      Layer.provideMerge(storageLeaseLayer),
+    )
+    const orchestrationLayer = OrchestrationEngineWithArchivePermitLive.pipe(
       Layer.provide(CheckpointRevertOperationsLive),
       Layer.provide(OrchestrationProjectionPipelineLive),
       Layer.provide(OrchestrationEventStoreLive),
@@ -308,14 +324,20 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(providerSessionDirectoryLayer),
     )
     const providerEventLoggersLayer = Layer.succeed(ProviderEventLoggers, NoOpProviderEventLoggers)
+    const providerRuntimeInboxPersistenceLayer = Layer.merge(
+      ProviderRuntimeInboxLive,
+      OrchestrationReactorDeliveryLive,
+    )
     const providerLayer = useRealCodex
       ? makeProviderServiceLive().pipe(
+          Layer.provide(McpSessionRegistry.disabledLayer),
           Layer.provide(providerSessionDirectoryLayer),
           Layer.provide(realCodexRegistry),
           Layer.provide(AnalyticsService.layerTest),
           Layer.provide(providerEventLoggersLayer),
         )
       : makeProviderServiceLive().pipe(
+          Layer.provide(McpSessionRegistry.disabledLayer),
           Layer.provide(providerSessionDirectoryLayer),
           Layer.provide(fakeRegistry!),
           Layer.provide(AnalyticsService.layerTest),
@@ -324,16 +346,24 @@ export const makeOrchestrationIntegrationHarness = (
     const providerRegistryLayer = makeProviderRegistryLayer()
 
     const checkpointStoreLayer = CheckpointStore.layer.pipe(Layer.provide(VcsDriverRegistry.layer))
-    const projectionSnapshotQueryLayer = OrchestrationProjectionSnapshotQueryLive
+    const checkpointIdentityLayer = CheckpointIdentity.layer.pipe(Layer.provide(GitVcsDriver.layer))
+    const sharedOrchestrationServicesLayer = Layer.merge(
+      OrchestrationProjectionSnapshotQueryLive,
+      ThreadArchiveLifecyclePermitLive,
+    )
     const runtimeServicesLayer = Layer.mergeAll(
-      projectionSnapshotQueryLayer,
-      orchestrationLayer.pipe(Layer.provide(projectionSnapshotQueryLayer)),
+      orchestrationLayer,
       ProjectionCheckpointRepositoryLive,
       ProjectionPendingApprovalRepositoryLive,
       checkpointStoreLayer,
+      checkpointIdentityLayer,
       providerLayer,
+      ProviderRuntimeInboxRunnerLive,
       RuntimeReceiptBusTest,
       ImportReplacementIntentRepositoryLive,
+    ).pipe(
+      Layer.provideMerge(providerRuntimeInboxPersistenceLayer),
+      Layer.provideMerge(sharedOrchestrationServicesLayer),
     )
     const serverSettingsLayer = ServerSettingsService.layerTest()
     const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(
@@ -390,6 +420,18 @@ export const makeOrchestrationIntegrationHarness = (
       Layer.provideMerge(runtimeIngestionLayer),
       Layer.provideMerge(providerCommandReactorLayer),
       Layer.provideMerge(checkpointReactorLayer),
+      Layer.provideMerge(
+        Layer.succeed(ArchitectureAutoAnalysisReactor, {
+          start: () => Effect.void,
+          drain: Effect.void,
+        }),
+      ),
+      Layer.provideMerge(
+        Layer.succeed(ThreadArchiveReactor, {
+          start: () => Effect.void,
+          drain: Effect.void,
+        }),
+      ),
       Layer.provideMerge(
         Layer.succeed(ThreadDeletionReactor, {
           start: () => Effect.void,

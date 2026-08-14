@@ -75,6 +75,28 @@ function settingsWith(input: {
   }
 }
 
+// densify TOCTOU fixture scaffolding; keep each distinct authorization failure
+const seedAuthorizedCodexRollout = (root: string) =>
+  Effect.gen(function* ()
+  {
+    const codexHome = NodePath.join(root, 'codex')
+    const sessionsRoot = NodePath.join(codexHome, 'sessions')
+    const dayRoot = NodePath.join(sessionsRoot, '2026', '01', '01')
+    const sourcePath = NodePath.join(dayRoot, 'rollout-session.jsonl')
+    yield* Effect.promise(async () =>
+    {
+      await NodeFSP.mkdir(dayRoot, { recursive: true })
+      await NodeFSP.writeFile(sourcePath, '{"authorized":true}')
+    })
+    const catalog = yield* resolveSourceCatalog(settingsWith({ codex: { homePath: codexHome } }), {
+      environment: {},
+      homePath: root,
+      cwd: root,
+    })
+    const trusted = yield* resolveImportSourcePath(catalog.descriptors, 'codex-cli', sourcePath)
+    return { codexHome, sessionsRoot, sourcePath, trusted }
+  })
+
 afterEach(async () =>
 {
   await Promise.all(
@@ -941,20 +963,7 @@ describe('resolveImportSourcePath', () =>
     Effect.gen(function* ()
     {
       const root = yield* Effect.promise(() => temporaryDirectory())
-      const codexHome = NodePath.join(root, 'codex')
-      const sessionsRoot = NodePath.join(codexHome, 'sessions')
-      const dayRoot = NodePath.join(sessionsRoot, '2026', '01', '01')
-      const sourcePath = NodePath.join(dayRoot, 'rollout-session.jsonl')
-      yield* Effect.promise(async () =>
-      {
-        await NodeFSP.mkdir(dayRoot, { recursive: true })
-        await NodeFSP.writeFile(sourcePath, '{"authorized":true}')
-      })
-      const catalog = yield* resolveSourceCatalog(
-        settingsWith({ codex: { homePath: codexHome } }),
-        { environment: {}, homePath: root, cwd: root },
-      )
-      const trusted = yield* resolveImportSourcePath(catalog.descriptors, 'codex-cli', sourcePath)
+      const { sourcePath, trusted } = yield* seedAuthorizedCodexRollout(root)
 
       yield* Effect.promise(async () =>
       {
@@ -977,21 +986,8 @@ describe('resolveImportSourcePath', () =>
     Effect.gen(function* ()
     {
       const root = yield* Effect.promise(() => temporaryDirectory())
-      const codexHome = NodePath.join(root, 'codex')
-      const sessionsRoot = NodePath.join(codexHome, 'sessions')
+      const { codexHome, sessionsRoot, trusted } = yield* seedAuthorizedCodexRollout(root)
       const relocatedSessionsRoot = NodePath.join(codexHome, 'sessions-relocated')
-      const dayRoot = NodePath.join(sessionsRoot, '2026', '01', '01')
-      const sourcePath = NodePath.join(dayRoot, 'rollout-session.jsonl')
-      yield* Effect.promise(async () =>
-      {
-        await NodeFSP.mkdir(dayRoot, { recursive: true })
-        await NodeFSP.writeFile(sourcePath, '{"authorized":true}')
-      })
-      const catalog = yield* resolveSourceCatalog(
-        settingsWith({ codex: { homePath: codexHome } }),
-        { environment: {}, homePath: root, cwd: root },
-      )
-      const trusted = yield* resolveImportSourcePath(catalog.descriptors, 'codex-cli', sourcePath)
 
       yield* Effect.promise(async () =>
       {

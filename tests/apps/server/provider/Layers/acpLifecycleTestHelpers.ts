@@ -2,11 +2,11 @@
 // shared ACP child-process lifecycle assertions for Cursor and Grok adapters
 
 import { assert } from '@effect/vitest'
-import type {
-  ProviderDriverKind,
+import {
   ProviderInstanceId,
-  ProviderRuntimeEvent,
-  ThreadId,
+  type ProviderDriverKind,
+  type ProviderRuntimeEvent,
+  type ThreadId,
 } from '@t3tools/contracts'
 import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
@@ -14,11 +14,53 @@ import * as Fiber from 'effect/Fiber'
 import * as Stream from 'effect/Stream'
 
 import type { ProviderAdapterError } from '../../../../../apps/server/src/provider/Errors.ts'
-import type { ProviderAdapterShape } from '../../../../../apps/server/src/provider/Services/ProviderAdapter.ts'
+import type {
+  ProviderAdapterRuntimeSessionBinding,
+  ProviderAdapterSessionStartInput,
+  ProviderAdapterShape,
+} from '../../../../../apps/server/src/provider/Services/ProviderAdapter.ts'
+
+type TestProviderAdapterSessionStartInput = Omit<
+  ProviderAdapterSessionStartInput,
+  'runtimeSessionBinding'
+> & {
+  readonly runtimeSessionBinding?: ProviderAdapterRuntimeSessionBinding
+}
+
+export function startAcpTestSession<TError>(
+  adapter: Pick<ProviderAdapterShape<TError>, 'provider' | 'startSession'>,
+  input: TestProviderAdapterSessionStartInput,
+)
+{
+  return adapter.startSession({
+    ...input,
+    runtimeSessionBinding: input.runtimeSessionBinding ?? {
+      providerInstanceId:
+        input.providerInstanceId ??
+        input.modelSelection?.instanceId ??
+        ProviderInstanceId.make(String(adapter.provider)),
+      threadId: input.threadId,
+      sessionGeneration: 1,
+    },
+  })
+}
+
+export function unwrapAcpRuntimeEvents<TError>(
+  adapter: Pick<ProviderAdapterShape<TError>, 'streamEvents'>,
+)
+{
+  return adapter.streamEvents.pipe(Stream.map(({ event }) => event))
+}
 
 type AcpLifecycleAdapter = Pick<
   ProviderAdapterShape<ProviderAdapterError>,
-  'startSession' | 'sendTurn' | 'stopSession' | 'hasSession' | 'listSessions' | 'streamEvents'
+  | 'provider'
+  | 'startSession'
+  | 'sendTurn'
+  | 'stopSession'
+  | 'hasSession'
+  | 'listSessions'
+  | 'streamEvents'
 >
 
 export function waitForAcpSessionDrop(
@@ -51,7 +93,7 @@ function forkEventCollector(adapter: AcpLifecycleAdapter)
   {
     const events: Array<ProviderRuntimeEvent> = []
     const requestOpened = yield* Deferred.make<void>()
-    yield* Stream.runForEach(adapter.streamEvents, (event) =>
+    yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
       Effect.sync(() => events.push(event)).pipe(
         Effect.andThen(
           event.type === 'request.opened'
@@ -79,7 +121,7 @@ export function assertStopClosesAcpChild(
 {
   return Effect.gen(function* ()
   {
-    yield* adapter.startSession({
+    yield* startAcpTestSession(adapter, {
       threadId: input.threadId,
       provider: input.provider,
       cwd: process.cwd(),
@@ -110,7 +152,7 @@ export function assertAbnormalChildExitFinalizesOnce(
   {
     const { events, requestOpened } = yield* forkEventCollector(adapter)
 
-    yield* adapter.startSession({
+    yield* startAcpTestSession(adapter, {
       threadId: input.threadId,
       provider: input.provider,
       cwd: process.cwd(),
@@ -160,11 +202,11 @@ export function assertAbnormalExitDisabledByDefault(
   return Effect.gen(function* ()
   {
     const events: Array<ProviderRuntimeEvent> = []
-    yield* Stream.runForEach(adapter.streamEvents, (event) =>
+    yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
       Effect.sync(() => events.push(event)),
     ).pipe(Effect.forkChild)
 
-    yield* adapter.startSession({
+    yield* startAcpTestSession(adapter, {
       threadId: input.threadId,
       provider: input.provider,
       cwd: process.cwd(),
@@ -193,10 +235,10 @@ export function assertOneExitWhenStopRacesTermination(
   return Effect.gen(function* ()
   {
     const events: Array<ProviderRuntimeEvent> = []
-    yield* Stream.runForEach(adapter.streamEvents, (event) =>
+    yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
       Effect.sync(() => events.push(event)),
     ).pipe(Effect.forkChild)
-    yield* adapter.startSession({
+    yield* startAcpTestSession(adapter, {
       threadId: input.threadId,
       provider: input.provider,
       cwd: process.cwd(),
@@ -213,5 +255,54 @@ export function assertOneExitWhenStopRacesTermination(
     yield* Effect.yieldNow
 
     assert.equal(events.filter((event) => event.type === 'session.exited').length, 1)
+  })
+}
+
+export function assertConcurrentStartSerializesSameThread(
+  adapter: AcpLifecycleAdapter,
+  input: {
+    readonly threadId: ThreadId
+    readonly provider: ProviderDriverKind
+    readonly modelSelection: {
+      readonly instanceId: ProviderInstanceId
+      readonly model: string
+    }
+    readonly readExitLog: Effect.Effect<string>
+  },
+)
+{
+  return Effect.gen(function* ()
+  {
+    const events: Array<ProviderRuntimeEvent> = []
+    yield* Stream.runForEach(unwrapAcpRuntimeEvents(adapter), (event) =>
+      Effect.sync(() => events.push(event)),
+    ).pipe(Effect.forkChild)
+
+    const startInput = {
+      threadId: input.threadId,
+      provider: input.provider,
+      cwd: process.cwd(),
+      runtimeMode: 'full-access' as const,
+      modelSelection: input.modelSelection,
+    }
+
+    const [firstSession, secondSession] = yield* Effect.all(
+      [startAcpTestSession(adapter, startInput), startAcpTestSession(adapter, startInput)],
+      { concurrency: 'unbounded' },
+    )
+
+    assert.equal(firstSession.threadId, input.threadId)
+    assert.equal(secondSession.threadId, input.threadId)
+    yield* Effect.yieldNow
+    assert.isTrue(yield* adapter.hasSession(input.threadId))
+    assert.equal((yield* adapter.listSessions()).length, 1)
+    assert.equal(events.filter((event) => event.type === 'session.exited').length, 1)
+
+    yield* adapter.stopSession(input.threadId)
+    yield* Effect.yieldNow
+    assert.equal(events.filter((event) => event.type === 'session.exited').length, 2)
+
+    const exitLog = yield* input.readExitLog
+    assert.equal(exitLog.match(/SIGTERM/g)?.length ?? 0, 2)
   })
 }

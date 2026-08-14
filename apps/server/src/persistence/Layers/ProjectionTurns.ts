@@ -58,7 +58,10 @@ const makeProjectionTurnRepository = Effect.gen(function* ()
           checkpoint_turn_count,
           checkpoint_ref,
           checkpoint_status,
-          checkpoint_files_json
+          checkpoint_files_json,
+          checkpoint_capture_root,
+          checkpoint_repository_common_dir,
+          checkpoint_commit_oid
         )
         VALUES (
           ${row.threadId},
@@ -74,7 +77,10 @@ const makeProjectionTurnRepository = Effect.gen(function* ()
           ${row.checkpointTurnCount},
           ${row.checkpointRef},
           ${row.checkpointStatus},
-          ${row.checkpointFiles}
+          ${row.checkpointFiles},
+          ${row.checkpointCaptureRoot},
+          ${row.checkpointRepositoryCommonDir},
+          ${row.checkpointCommitOid}
         )
         ON CONFLICT (thread_id, turn_id)
         DO UPDATE SET
@@ -89,7 +95,10 @@ const makeProjectionTurnRepository = Effect.gen(function* ()
           checkpoint_turn_count = excluded.checkpoint_turn_count,
           checkpoint_ref = excluded.checkpoint_ref,
           checkpoint_status = excluded.checkpoint_status,
-          checkpoint_files_json = excluded.checkpoint_files_json
+          checkpoint_files_json = excluded.checkpoint_files_json,
+          checkpoint_capture_root = excluded.checkpoint_capture_root,
+          checkpoint_repository_common_dir = excluded.checkpoint_repository_common_dir,
+          checkpoint_commit_oid = excluded.checkpoint_commit_oid
       `,
   })
 
@@ -123,7 +132,10 @@ const makeProjectionTurnRepository = Effect.gen(function* ()
           checkpoint_turn_count,
           checkpoint_ref,
           checkpoint_status,
-          checkpoint_files_json
+          checkpoint_files_json,
+          checkpoint_capture_root,
+          checkpoint_repository_common_dir,
+          checkpoint_commit_oid
         )
         VALUES (
           ${row.threadId},
@@ -139,7 +151,10 @@ const makeProjectionTurnRepository = Effect.gen(function* ()
           NULL,
           NULL,
           NULL,
-          '[]'
+          '[]',
+          NULL,
+          NULL,
+          NULL
         )
       `,
   })
@@ -185,7 +200,10 @@ const makeProjectionTurnRepository = Effect.gen(function* ()
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "checkpointStatus",
-          checkpoint_files_json AS "checkpointFiles"
+          checkpoint_files_json AS "checkpointFiles",
+          checkpoint_capture_root AS "checkpointCaptureRoot",
+          checkpoint_repository_common_dir AS "checkpointRepositoryCommonDir",
+          checkpoint_commit_oid AS "checkpointCommitOid"
         FROM projection_turns
         WHERE thread_id = ${threadId}
         ORDER BY
@@ -218,7 +236,10 @@ const makeProjectionTurnRepository = Effect.gen(function* ()
           checkpoint_turn_count AS "checkpointTurnCount",
           checkpoint_ref AS "checkpointRef",
           checkpoint_status AS "checkpointStatus",
-          checkpoint_files_json AS "checkpointFiles"
+          checkpoint_files_json AS "checkpointFiles",
+          checkpoint_capture_root AS "checkpointCaptureRoot",
+          checkpoint_repository_common_dir AS "checkpointRepositoryCommonDir",
+          checkpoint_commit_oid AS "checkpointCommitOid"
         FROM projection_turns
         WHERE thread_id = ${threadId}
           AND turn_id = ${turnId}
@@ -235,7 +256,10 @@ const makeProjectionTurnRepository = Effect.gen(function* ()
           checkpoint_turn_count = NULL,
           checkpoint_ref = NULL,
           checkpoint_status = NULL,
-          checkpoint_files_json = '[]'
+          checkpoint_files_json = '[]',
+          checkpoint_capture_root = NULL,
+          checkpoint_repository_common_dir = NULL,
+          checkpoint_commit_oid = NULL
         WHERE thread_id = ${threadId}
           AND checkpoint_turn_count = ${checkpointTurnCount}
           AND (turn_id IS NULL OR turn_id <> ${turnId})

@@ -39,6 +39,10 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
     type:
       | 'thread.message-sent'
       | 'thread.proposed-plan-upserted'
+      | 'thread.orchestrate-plan-upserted'
+      | 'thread.orchestrate-plan-response-requested'
+      | 'thread.orchestrate-run-execution-admitted'
+      | 'thread.orchestrate-run-execution-updated'
       | 'thread.activity-appended'
       | 'thread.turn-diff-completed'
       | 'thread.reverted'
@@ -54,6 +58,10 @@ export function isThreadDetailEvent(event: OrchestrationEvent): event is Extract
   return (
     event.type === 'thread.message-sent' ||
     event.type === 'thread.proposed-plan-upserted' ||
+    event.type === 'thread.orchestrate-plan-upserted' ||
+    event.type === 'thread.orchestrate-plan-response-requested' ||
+    event.type === 'thread.orchestrate-run-execution-admitted' ||
+    event.type === 'thread.orchestrate-run-execution-updated' ||
     event.type === 'thread.activity-appended' ||
     event.type === 'thread.turn-diff-completed' ||
     event.type === 'thread.reverted' ||
@@ -72,7 +80,7 @@ export function makeOrchestrationThreadStreamHandlers({
   orchestrationEngine,
   projectionSnapshotQuery,
   observeRpcStreamEffect,
-}: OrchestrationThreadStreamHandlerDependencies): ThreadStreamRpcHandlers
+}: OrchestrationThreadStreamHandlerDependencies)
 {
   return {
     [ORCHESTRATION_WS_METHODS.subscribeThread]: (input) =>
@@ -191,5 +199,5 @@ export function makeOrchestrationThreadStreamHandlers({
         }),
         { 'rpc.aggregate': 'orchestration' },
       ),
-  }
+  } satisfies ThreadStreamRpcHandlers
 }
