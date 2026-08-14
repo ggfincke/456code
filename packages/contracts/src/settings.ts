@@ -360,6 +360,48 @@ export const GrokSettings = makeProviderSettingsSchema(
 )
 export type GrokSettings = typeof GrokSettings.Type
 
+export const CoralSettings = makeProviderSettingsSchema(
+  {
+    enabled: Schema.Boolean.pipe(
+      Schema.withDecodingDefault(Effect.succeed(false)),
+      Schema.annotateKey({ providerSettingsForm: { hidden: true } }),
+    ),
+    binaryPath: makeBinaryPathSetting('coral').pipe(
+      Schema.annotateKey({
+        title: 'Binary path',
+        description: 'Path to the Coral CLI binary.',
+        providerSettingsForm: { placeholder: 'coral', clearWhenEmpty: 'omit' },
+      }),
+    ),
+    ollamaHost: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed('http://localhost:11434')),
+      Schema.annotateKey({
+        title: 'Ollama host',
+        description: 'HTTP or HTTPS endpoint Coral uses for Ollama inference.',
+        providerSettingsForm: {
+          placeholder: 'http://localhost:11434',
+          clearWhenEmpty: 'omit',
+        },
+      }),
+    ),
+    homePath: TrimmedString.pipe(
+      Schema.withDecodingDefault(Effect.succeed('')),
+      Schema.annotateKey({
+        title: 'CORAL_HOME path',
+        description: 'Custom Coral session, trust, and local telemetry directory.',
+        providerSettingsForm: {
+          placeholder: '~/.coral',
+          clearWhenEmpty: 'omit',
+        },
+      }),
+    ),
+  },
+  {
+    order: ['binaryPath', 'ollamaHost', 'homePath'],
+  },
+)
+export type CoralSettings = typeof CoralSettings.Type
+
 export const OpenCodeSettings = makeProviderSettingsSchema(
   {
     enabled: Schema.Boolean.pipe(
@@ -484,6 +526,7 @@ export const ServerSettings = Schema.Struct({
     claudeAgent: ClaudeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     cursor: CursorSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     grok: GrokSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
+    coral: CoralSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
     opencode: OpenCodeSettings.pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   }).pipe(Schema.withDecodingDefault(Effect.succeed({}))),
   // new driver-agnostic instance map. Keyed by `ProviderInstanceId`; values
@@ -582,6 +625,13 @@ const GrokSettingsPatch = Schema.Struct({
   customModels: Schema.optionalKey(Schema.Array(Schema.String)),
 })
 
+const CoralSettingsPatch = Schema.Struct({
+  enabled: Schema.optionalKey(Schema.Boolean),
+  binaryPath: Schema.optionalKey(TrimmedString),
+  ollamaHost: Schema.optionalKey(TrimmedString),
+  homePath: Schema.optionalKey(TrimmedString),
+})
+
 const OpenCodeSettingsPatch = Schema.Struct({
   enabled: Schema.optionalKey(Schema.Boolean),
   binaryPath: Schema.optionalKey(TrimmedString),
@@ -620,6 +670,7 @@ export const ServerSettingsPatch = Schema.Struct({
       claudeAgent: Schema.optionalKey(ClaudeSettingsPatch),
       cursor: Schema.optionalKey(CursorSettingsPatch),
       grok: Schema.optionalKey(GrokSettingsPatch),
+      coral: Schema.optionalKey(CoralSettingsPatch),
       opencode: Schema.optionalKey(OpenCodeSettingsPatch),
     }),
   ),

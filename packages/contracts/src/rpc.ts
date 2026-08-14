@@ -12,6 +12,8 @@ import {
   CartographerEnsureProjectArchitectureInput,
   CartographerGetArchitectureNeighborhoodInput,
   CartographerGetArchitectureNeighborhoodResult,
+  CartographerGetArchitecturePathScopeInput,
+  CartographerGetArchitecturePathScopeResult,
   CartographerGetArchitectureScopeInput,
   CartographerGetArchitectureScopeResult,
   CartographerGetArchitectureSourceInput,
@@ -248,6 +250,7 @@ export const WS_METHODS = {
   cartographerGetRepositoryMap: 'cartographer.getRepositoryMap',
   cartographerGetArchitectureScope: 'cartographer.getArchitectureScope',
   cartographerGetArchitectureNeighborhood: 'cartographer.getArchitectureNeighborhood',
+  cartographerGetArchitecturePathScope: 'cartographer.getArchitecturePathScope',
   cartographerGetArchitectureSource: 'cartographer.getArchitectureSource',
 
   // shell methods
@@ -641,6 +644,15 @@ export const WsCartographerGetArchitectureNeighborhoodRpc = Rpc.make(
   {
     payload: CartographerGetArchitectureNeighborhoodInput,
     success: CartographerGetArchitectureNeighborhoodResult,
+    error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
+  },
+)
+
+export const WsCartographerGetArchitecturePathScopeRpc = Rpc.make(
+  WS_METHODS.cartographerGetArchitecturePathScope,
+  {
+    payload: CartographerGetArchitecturePathScopeInput,
+    success: CartographerGetArchitecturePathScopeResult,
     error: Schema.Union([ArchitectureToolError, EnvironmentAuthorizationError]),
   },
 )
@@ -1080,6 +1092,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsCartographerGetRepositoryMapRpc,
   WsCartographerGetArchitectureScopeRpc,
   WsCartographerGetArchitectureNeighborhoodRpc,
+  WsCartographerGetArchitecturePathScopeRpc,
   WsCartographerGetArchitectureSourceRpc,
   WsShellOpenInEditorRpc,
   WsFilesystemBrowseRpc,

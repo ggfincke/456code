@@ -12,6 +12,7 @@ import {
   TrimmedNonEmptyString,
 } from './baseSchemas.ts'
 import { DiffAnalysisId, ProposalGenerationId } from './cartographer.ts'
+import { ArchitectureRelativePath } from './architecturePath.ts'
 import {
   ARCHITECTURE_BLAST_PATH_LIMIT,
   ArchitectureComparisonSelector,
@@ -39,26 +40,7 @@ export const ArchitectureSourceDigest = Schema.String.check(
 )
 export type ArchitectureSourceDigest = typeof ArchitectureSourceDigest.Type
 
-export const ArchitectureRelativePath = Schema.String.check(
-  Schema.isNonEmpty(),
-  Schema.makeFilter((value) =>
-  {
-    if (value.startsWith('/') || value.includes('\\'))
-    {
-      return 'Architecture source paths must be repository-relative POSIX paths.'
-    }
-    if (value.includes('\u0000'))
-    {
-      return 'Architecture source paths must not contain NUL bytes.'
-    }
-    return value
-      .split('/')
-      .every((segment) => segment !== '' && segment !== '.' && segment !== '..')
-      ? true
-      : 'Architecture source paths must not contain empty, dot, or parent segments.'
-  }),
-)
-export type ArchitectureRelativePath = typeof ArchitectureRelativePath.Type
+export { ArchitectureRelativePath }
 
 export const ArchitectureProposalSource = Schema.Struct({
   kind: Schema.Literal('proposal-generation'),
@@ -344,3 +326,34 @@ export const CartographerGetArchitectureSourceResult = Schema.Struct({
 })
 export type CartographerGetArchitectureSourceResult =
   typeof CartographerGetArchitectureSourceResult.Type
+
+export const ArchitecturePathScopeChip = Schema.Struct({
+  role: Schema.Literals(['touched', 'context']),
+  level: Schema.Literals(['systems', 'blocks']),
+  id: Schema.String.check(Schema.isNonEmpty()),
+  key: Schema.String.check(Schema.isNonEmpty()),
+  label: Schema.String.check(Schema.isNonEmpty()),
+})
+export type ArchitecturePathScopeChip = typeof ArchitecturePathScopeChip.Type
+
+export const CartographerGetArchitecturePathScopeInput = Schema.Struct({
+  threadId: ThreadId,
+  projectId: ProjectId,
+  paths: Schema.Array(ArchitectureRelativePath).check(
+    Schema.isMinLength(1),
+    Schema.isMaxLength(ARCHITECTURE_BLAST_PATH_LIMIT),
+  ),
+  generationId: Schema.optionalKey(ArchitectureGenerationId),
+})
+export type CartographerGetArchitecturePathScopeInput =
+  typeof CartographerGetArchitecturePathScopeInput.Type
+
+export const CartographerGetArchitecturePathScopeResult = Schema.Struct({
+  version: Schema.Literal(1),
+  source: ArchitectureStandingSource,
+  chips: Schema.Array(ArchitecturePathScopeChip).check(
+    Schema.isMaxLength(ARCHITECTURE_PROJECTION_UNIT_LIMIT),
+  ),
+})
+export type CartographerGetArchitecturePathScopeResult =
+  typeof CartographerGetArchitecturePathScopeResult.Type

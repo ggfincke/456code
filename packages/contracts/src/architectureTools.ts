@@ -11,12 +11,14 @@ import {
   TrimmedNonEmptyString,
 } from './baseSchemas.ts'
 import { DiffAnalysisId, ProposalGenerationId } from './cartographer.ts'
+import { ARCHITECTURE_BLAST_PATH_LIMIT } from './architecturePath.ts'
+
+export { ARCHITECTURE_BLAST_PATH_LIMIT }
 
 export const ARCHITECTURE_RESULT_LIST_LIMIT = 200
 export const ARCHITECTURE_API_FILE_LIMIT = 100
 export const ARCHITECTURE_API_EXPORT_LIMIT = 50
 export const ARCHITECTURE_API_CONSUMER_LIMIT = 25
-export const ARCHITECTURE_BLAST_PATH_LIMIT = 400
 export const ARCHITECTURE_PATCH_ISSUE_LIMIT = 200
 export const ARCHITECTURE_PATCH_CYCLE_LIMIT = 20
 export const ARCHITECTURE_PATCH_BOUNDARY_LIMIT = 50

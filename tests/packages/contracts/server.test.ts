@@ -23,12 +23,13 @@ describe('ServerProvider', () =>
 {
   it.each([
     {
-      label: 'defaults capability arrays',
+      label: 'keeps capabilities absent on older cached snapshots',
       input: { ...baseProvider },
       assert: (parsed: ReturnType<typeof decodeServerProvider>) =>
       {
         expect(parsed.slashCommands).toEqual([])
         expect(parsed.skills).toEqual([])
+        expect(parsed.capabilities).toBeUndefined()
         expect(parsed.versionAdvisory).toBeUndefined()
         expect(parsed.updateState).toBeUndefined()
       },
@@ -49,6 +50,27 @@ describe('ServerProvider', () =>
       assert: (parsed: ReturnType<typeof decodeServerProvider>) =>
       {
         expect(parsed.versionAdvisory?.canUpdate).toBe(false)
+      },
+    },
+    {
+      label: 'defaults capability fields missing from older cached snapshots',
+      input: {
+        ...baseProvider,
+        capabilities: {
+          sessionModelSwitch: 'in-session',
+        },
+      },
+      assert: (parsed: ReturnType<typeof decodeServerProvider>) =>
+      {
+        expect(parsed.capabilities).toEqual({
+          sessionModelSwitch: 'in-session',
+          supportedInteractionModes: ['default'],
+          supportedRuntimeModes: ['approval-required'],
+          activeTurnInput: 'unsupported',
+          conversationRollback: 'unsupported',
+          orchestrateInstructionDelivery: 'unsupported',
+          orchestrateBaseModes: [],
+        })
       },
     },
     {
@@ -93,6 +115,29 @@ describe('ServerProvider', () =>
         accountUsage: { status: 'external', dashboardUrl: 'https://cursor.com/dashboard' },
       }).accountUsage?.status,
     ).toBe('external')
+  })
+
+  it('decodes local providers whose authentication is not applicable', () =>
+  {
+    expect(
+      decodeServerProvider({
+        ...baseProvider,
+        auth: { status: 'not-applicable' },
+      }).auth.status,
+    ).toBe('not-applicable')
+  })
+
+  it('rejects empty or contradictory provider capability mode matrices', () =>
+  {
+    for (const capabilities of [
+      { supportedInteractionModes: [] },
+      { supportedInteractionModes: ['plan'] },
+      { supportedInteractionModes: ['default', 'orchestrate'] },
+      { supportedRuntimeModes: [] },
+    ])
+    {
+      expect(() => decodeServerProvider({ ...baseProvider, capabilities })).toThrow()
+    }
   })
 
   it('rejects empty available usage windows and out-of-range percentages', () =>

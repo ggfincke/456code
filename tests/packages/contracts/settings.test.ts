@@ -111,6 +111,12 @@ describe('ServerSettings.providerInstances (slice-2 invariant)', () =>
     // legacy `providers` struct is still hydrated with its per-driver defaults
     // so existing call sites keep working through the migration.
     expect(decoded.providers.codex.enabled).toBe(true)
+    expect(decoded.providers.coral).toEqual({
+      enabled: false,
+      binaryPath: 'coral',
+      ollamaHost: 'http://localhost:11434',
+      homePath: '',
+    })
   })
 })
 

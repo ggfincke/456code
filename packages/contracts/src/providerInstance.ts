@@ -76,6 +76,26 @@ export const isProviderDriverKind = (value: unknown): value is ProviderDriverKin
 export const ProviderInstanceId = slugSchema.pipe(Schema.brand('ProviderInstanceId'))
 export type ProviderInstanceId = typeof ProviderInstanceId.Type
 
+// explicit target namespaces keep app provider sessions distinct from
+// worker-broker harnesses even when their slugs happen to match
+export const BrokerHarnessId = slugSchema.pipe(Schema.brand('BrokerHarnessId'))
+export type BrokerHarnessId = typeof BrokerHarnessId.Type
+
+export const ProviderInstanceTarget = Schema.Struct({
+  kind: Schema.Literal('provider-instance'),
+  instanceId: ProviderInstanceId,
+})
+export type ProviderInstanceTarget = typeof ProviderInstanceTarget.Type
+
+export const BrokerHarnessTarget = Schema.Struct({
+  kind: Schema.Literal('broker-harness'),
+  harness: BrokerHarnessId,
+})
+export type BrokerHarnessTarget = typeof BrokerHarnessTarget.Type
+
+export const AgentExecutionTarget = Schema.Union([ProviderInstanceTarget, BrokerHarnessTarget])
+export type AgentExecutionTarget = typeof AgentExecutionTarget.Type
+
 // stable identity of the provider-owned storage or connection that can
 // continue native sessions.
 export const ProviderContinuationIdentity = Schema.Struct({
