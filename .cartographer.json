@@ -1,0 +1,326 @@
+{
+  "groupDepth": 2,
+  "layering": "strict",
+  "groups": [
+    {
+      "match": "apps/atlas/**",
+      "name": "Atlas SPA",
+      "description": "Cartographer's browser-based architecture atlas."
+    },
+    {
+      "match": "apps/desktop/**",
+      "name": "Desktop Client",
+      "description": "Electron shell, native integrations, and desktop packaging."
+    },
+    {
+      "match": "apps/mobile/**",
+      "name": "Mobile Client",
+      "description": "The Expo and React Native client surface."
+    },
+    {
+      "match": "apps/server/**",
+      "name": "Server Runtime",
+      "description": "The Node.js WebSocket and provider-session server."
+    },
+    {
+      "match": "apps/web/**",
+      "name": "Web Client",
+      "description": "The React browser client and session experience."
+    },
+    {
+      "match": "packages/cartographer-core/**",
+      "name": "Cartographer Core",
+      "description": "Repository analysis, persistence, reporting, CLI, and MCP surfaces."
+    },
+    {
+      "match": "packages/client-runtime/**",
+      "name": "Client Runtime",
+      "description": "Shared client state, commands, RPC, and environment behavior."
+    },
+    {
+      "match": "packages/contracts/**",
+      "name": "Contracts",
+      "description": "Shared schemas and transport contracts."
+    },
+    {
+      "match": "packages/effect-acp/**",
+      "name": "Provider Adapters",
+      "description": "Effect-native provider protocol adapters."
+    },
+    {
+      "match": "packages/effect-codex-app-server/**",
+      "name": "Provider Adapters",
+      "description": "Effect-native provider protocol adapters."
+    },
+    {
+      "match": "packages/ssh/**",
+      "name": "Platform Integrations",
+      "description": "Reusable network and remote-environment adapters."
+    },
+    {
+      "match": "packages/tailscale/**",
+      "name": "Platform Integrations",
+      "description": "Reusable network and remote-environment adapters."
+    },
+    {
+      "match": "packages/shared/**",
+      "name": "Shared Runtime",
+      "description": "Cross-platform runtime utilities exposed through explicit subpaths."
+    },
+    {
+      "match": "scripts/**",
+      "name": "Repository Tooling",
+      "description": "Build, release, maintenance, and lint tooling."
+    },
+    {
+      "match": "oxlint-plugin-456code/**",
+      "name": "Repository Tooling",
+      "description": "Build, release, maintenance, and lint tooling."
+    },
+    {
+      "match": "vite.config.ts",
+      "name": "Repository Tooling",
+      "description": "Build, release, maintenance, and lint tooling."
+    },
+    {
+      "match": "tests/**",
+      "name": "Test Suites",
+      "description": "Mirrored application, package, plugin, and script tests."
+    }
+  ],
+  "systems": [
+    {
+      "match": "apps/server/**",
+      "name": "Server Runtime",
+      "rank": 1
+    },
+    {
+      "match": "apps/**",
+      "name": "Client Surfaces",
+      "rank": 0
+    },
+    {
+      "match": "packages/cartographer-core/**",
+      "name": "Cartographer Core",
+      "rank": 2
+    },
+    {
+      "match": "packages/client-runtime/**",
+      "name": "Client Runtime",
+      "rank": 1
+    },
+    {
+      "match": "packages/shared/**",
+      "name": "Shared Runtime",
+      "rank": 3
+    },
+    {
+      "match": "packages/contracts/**",
+      "name": "Contracts",
+      "rank": 4
+    },
+    {
+      "match": "packages/**",
+      "name": "Platform Adapters",
+      "rank": 2
+    },
+    {
+      "match": "tests/**",
+      "name": "Test Suites",
+      "rank": 0
+    },
+    {
+      "match": "scripts/**",
+      "name": "Repository Tooling",
+      "rank": 0
+    },
+    {
+      "match": "oxlint-plugin-456code/**",
+      "name": "Repository Tooling",
+      "rank": 0
+    },
+    {
+      "match": "vite.config.ts",
+      "name": "Repository Tooling",
+      "rank": 0
+    }
+  ],
+  "rules": [
+    {
+      "id": "packages-never-import-apps",
+      "from": "packages/*/src/**",
+      "to": "apps/*/src/**",
+      "verdict": "forbid",
+      "why": "Reusable packages must not depend on application implementations.",
+      "enforcedBy": {
+        "mechanism": "none"
+      }
+    },
+    {
+      "id": "clients-never-import-server-source",
+      "from": "apps/*/src/**",
+      "to": "apps/server/src/**",
+      "verdict": "allow-only",
+      "allowVia": ["apps/server/src/**"],
+      "why": "Client surfaces communicate through public contracts instead of server source imports.",
+      "enforcedBy": {
+        "mechanism": "none"
+      }
+    },
+    {
+      "id": "contracts-stay-schema-only",
+      "from": "packages/contracts/src/**",
+      "to": "packages/shared/src/**",
+      "verdict": "forbid",
+      "why": "Contracts stay schema-only and independent of shared runtime implementations.",
+      "enforcedBy": {
+        "mechanism": "none"
+      }
+    },
+    {
+      "id": "client-runtime-subpath-allow-only",
+      "from": "apps/*/src/**",
+      "to": "packages/client-runtime/src/**",
+      "verdict": "allow-only",
+      "allowVia": ["apps/desktop/src/**", "apps/mobile/src/**", "apps/web/src/**"],
+      "why": "Only the desktop, mobile, and web clients consume shared client-runtime subpaths.",
+      "enforcedBy": {
+        "mechanism": "none"
+      }
+    },
+    {
+      "id": "contracts-entrypoints-allow-only",
+      "from": "apps/*/src/**",
+      "to": "packages/contracts/src/**",
+      "verdict": "allow-only",
+      "allowVia": [
+        "apps/desktop/src/**",
+        "apps/mobile/src/**",
+        "apps/server/src/**",
+        "apps/web/src/**"
+      ],
+      "why": "Only application entrypoints that participate in the shared protocol consume contracts directly.",
+      "enforcedBy": {
+        "mechanism": "none"
+      }
+    },
+    {
+      "id": "atlas-core-public-surface",
+      "from": "apps/atlas/src/**",
+      "to": "packages/cartographer-core/src/**",
+      "verdict": "allow-only",
+      "allowVia": [
+        "apps/atlas/src/features/analysis/**",
+        "apps/atlas/src/features/bootstrap/**",
+        "apps/atlas/src/features/changes/**",
+        "apps/atlas/src/shared/**"
+      ],
+      "why": "Only Atlas graph and data adapters consume Cartographer's public browser and contracts surfaces.",
+      "enforcedBy": {
+        "mechanism": "none"
+      }
+    },
+    {
+      "id": "cartographer-core-stays-standalone",
+      "from": "packages/cartographer-core/src/**",
+      "to": "packages/shared/src/**",
+      "verdict": "forbid",
+      "why": "The standalone Cartographer package stays independent of monorepo runtime utilities.",
+      "enforcedBy": {
+        "mechanism": "none"
+      }
+    }
+  ],
+  "runtimes": [
+    {
+      "key": "web-browser",
+      "label": "456code Web Browser",
+      "roots": ["apps/web/src/main.tsx"]
+    },
+    {
+      "key": "server",
+      "label": "456code Server",
+      "roots": ["apps/server/src/bin.ts"]
+    },
+    {
+      "key": "atlas-browser",
+      "label": "Atlas Browser",
+      "roots": ["apps/atlas/src/app/main.tsx"]
+    },
+    {
+      "key": "atlas-worker",
+      "label": "Atlas Worker",
+      "roots": ["apps/atlas/src/workers/atlas.worker.ts"]
+    },
+    {
+      "key": "cartographer-cli",
+      "label": "Cartographer CLI",
+      "roots": ["packages/cartographer-core/src/cli/index.ts"]
+    },
+    {
+      "key": "cartographer-mcp",
+      "label": "Cartographer MCP",
+      "roots": ["packages/cartographer-core/src/mcp/server.ts"]
+    }
+  ],
+  "journeys": [
+    {
+      "id": "agent-turn",
+      "title": "Run an agent turn",
+      "why": "Trace a submitted message through orchestration, provider execution, event ingestion, and client projection.",
+      "stops": [
+        {
+          "at": "apps/web/src/components/chat/useChatDispatchController.ts",
+          "title": "Submit the composer message",
+          "timing": "immediate"
+        },
+        {
+          "at": "packages/client-runtime/src/state/threads/threadCommands.ts",
+          "title": "Dispatch the environment command",
+          "timing": "immediate"
+        },
+        {
+          "at": "apps/server/src/ws/handlers/orchestrationHandlers.ts",
+          "title": "Authorize the orchestration request",
+          "timing": "immediate"
+        },
+        {
+          "at": "apps/server/src/orchestration/Layers/OrchestrationEngine.ts",
+          "title": "Commit the command outcome",
+          "timing": "transaction"
+        },
+        {
+          "at": "apps/server/src/orchestration/decider.ts",
+          "title": "Decide the turn-start events",
+          "timing": "transaction"
+        },
+        {
+          "at": "apps/server/src/orchestration/Layers/ProviderCommandReactor.ts",
+          "title": "Launch the provider turn",
+          "timing": "deferred"
+        },
+        {
+          "at": "apps/server/src/provider/Layers/CodexAdapter.ts",
+          "title": "Exchange provider runtime messages",
+          "timing": "deferred"
+        },
+        {
+          "at": "apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts",
+          "title": "Ingest provider events",
+          "timing": "transaction"
+        },
+        {
+          "at": "apps/server/src/ws/handlers/orchestrationThreadStreamHandlers.ts",
+          "title": "Stream thread events to the client",
+          "timing": "deferred"
+        },
+        {
+          "at": "packages/client-runtime/src/state/threads/threadReducer.ts",
+          "title": "Project the updated thread",
+          "timing": "immediate"
+        }
+      ]
+    }
+  ],
+  "exclude": [".repos"]
+}

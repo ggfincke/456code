@@ -126,6 +126,17 @@ export default defineConfig({
                 'Import from an explicit @t3tools/client-runtime/* subpath. The package has no root export.',
             },
           ],
+          patterns: [
+            {
+              group: [
+                '@t3tools/cartographer-core/*',
+                '!@t3tools/cartographer-core/contracts',
+                '!@t3tools/cartographer-core/browser',
+                '!@t3tools/cartographer-core/server',
+              ],
+              message: 'Use only the contracts, browser, or server Cartographer subpath exports.',
+            },
+          ],
         },
       ],
       '456code/no-global-process-runtime': 'error',
