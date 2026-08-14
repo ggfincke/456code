@@ -13,7 +13,8 @@ import * as NodePath from 'node:path'
 import * as NodeProcess from 'node:process'
 import * as NodeReadline from 'node:readline'
 import * as NodeTimers from 'node:timers'
-import { prepareSpawnCommandForPlatform } from '@t3tools/shared/shell'
+import { prepareSpawnCommandForPlatform, resolveSpawnCommand } from '@t3tools/shared/shell'
+import * as Effect from 'effect/Effect'
 
 const SERVER_PACKAGE_NAME = '456code'
 const CORE_PACKAGE_NAME = '@t3tools/cartographer-core'
@@ -286,7 +287,7 @@ function runChecked(
   options: { readonly env?: NodeJS.ProcessEnv } = {},
 ): string
 {
-  const spawnCommand = prepareSpawnCommandForPlatform(command, args, NodeProcess.platform)
+  const spawnCommand = Effect.runSync(resolveSpawnCommand(command, args, options))
   const result = NodeChildProcess.spawnSync(spawnCommand.command, spawnCommand.args, {
     cwd,
     encoding: 'utf8',
