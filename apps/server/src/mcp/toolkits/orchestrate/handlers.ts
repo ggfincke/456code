@@ -739,6 +739,9 @@ const handlers = {
         maxWorkers: input.maxWorkers ?? totalWorkers,
         source: 'tool',
         status: 'pending',
+        ...(input.architecturePaths === undefined || input.architecturePaths.length === 0
+          ? {}
+          : { architecturePaths: input.architecturePaths }),
         createdAt,
         updatedAt: createdAt,
       }).pipe(

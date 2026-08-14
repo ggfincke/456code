@@ -264,7 +264,7 @@ server.tool(
 
 server.tool(
   'annotate_files',
-  'Write one-line descriptions for files that have no header comment into the <root>/.cartographer.annotations.json sidecar, keyed by content hash so they go stale (& get flagged) when the file changes. Descriptions surface in the atlas, graph.json nodes[].description, & graph_repo output. A file-header comment always wins over an annotation, so prefer fixing headers in repos you control; use this for repos w/o a header convention. Find files needing work via graph_repo (describedFiles vs files) or `cartographer annotate <root>` (pending & stale lists). Rebuild the graph afterward to pick annotations up.',
+  'Write one-line descriptions for files that have no header comment into the <root>/.cartographer.annotations.json sidecar, keyed by content hash so they go stale (& get flagged) when the file changes. Descriptions surface in graph.json nodes[].description & graph_repo output. A file-header comment always wins over an annotation, so prefer fixing headers in repos you control; use this for repos w/o a header convention. Find files needing work via graph_repo (describedFiles vs files) or `cartographer annotate <root>` (pending & stale lists). Rebuild the graph afterward to pick annotations up.',
   {
     root: z.string().describe('Absolute path to the repository root to annotate.'),
     annotations: z

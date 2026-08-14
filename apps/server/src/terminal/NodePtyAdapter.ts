@@ -164,14 +164,18 @@ export const make = Effect.fn('NodePtyAdapter.make')(function* (
     spawn: Effect.fn('NodePtyAdapter.spawn')(function* (input)
     {
       yield* ensureNodePtySpawnHelperExecutableCached
+      // conpty does not derive TERM from node-pty's name option
+      const hasTerm = Object.keys(input.env).some((name) => name.toUpperCase() === 'TERM')
+      const env =
+        platform === 'win32' && !hasTerm ? { ...input.env, TERM: 'xterm-256color' } : input.env
       const ptyProcess = yield* Effect.try({
         try: () =>
           nodePty.spawn(input.shell, input.args ?? [], {
             cwd: input.cwd,
             cols: input.cols,
             rows: input.rows,
-            env: input.env,
-            name: platform === 'win32' ? 'xterm-color' : 'xterm-256color',
+            env,
+            name: 'xterm-256color',
           }),
         catch: (cause) =>
           new PtyAdapter.PtySpawnError({

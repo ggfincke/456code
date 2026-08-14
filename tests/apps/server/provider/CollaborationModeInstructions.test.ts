@@ -24,6 +24,11 @@ describe('applyOrchestrateModeInstructions', () =>
     expect(result.orchestrate).toBe(true)
     expect(result.input).toContain(ORCHESTRATE_MODE_INSTRUCTIONS)
     expect(result.input).toContain('<user_request>\nPlan the change.\n</user_request>')
+    expect(ORCHESTRATE_MODE_INSTRUCTIONS).toContain('non-empty decided edit set')
+    expect(ORCHESTRATE_MODE_INSTRUCTIONS).toContain('standing-project')
+    expect(ORCHESTRATE_MODE_INSTRUCTIONS).not.toContain(
+      'complete the linked proposal-preview sequence',
+    )
   })
 
   it('leaves plain plan input unchanged', () =>

@@ -113,6 +113,7 @@ export const TOOL_LIFECYCLE_ITEM_TYPES = [
   'mcp_tool_call',
   'dynamic_tool_call',
   'collab_agent_tool_call',
+  'repository_search',
   'web_search',
   'image_view',
 ] as const

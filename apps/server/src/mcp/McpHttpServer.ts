@@ -6,11 +6,13 @@ import * as Effect from 'effect/Effect'
 import * as FileSystem from 'effect/FileSystem'
 import * as Layer from 'effect/Layer'
 import * as Option from 'effect/Option'
+import * as Schema from 'effect/Schema'
 import * as Sink from 'effect/Sink'
 import * as Stream from 'effect/Stream'
 import type * as Types from 'effect/Types'
 import { McpSchema, McpServer, Tool } from 'effect/unstable/ai'
 import { HttpRouter, HttpServerRequest, HttpServerResponse } from 'effect/unstable/http'
+import { ArchitectureToolError } from '@t3tools/contracts'
 
 import packageJson from '../../package.json' with { type: 'json' }
 import * as ArchitectureQueryService from '../cartographer/ArchitectureQueryService.ts'
@@ -255,25 +257,77 @@ export const OrchestrateToolkitRegistrationLive = McpServer.toolkit(OrchestrateT
 export const ARCHITECTURE_TOOL_UNEXPECTED_FAILURE_TEXT =
   'Architecture tool failed unexpectedly. Retry, or ask the operator to check the server log.'
 
-// only defects reach this path; typed tool errors keep their structured envelope in
-// architectureToolCallResult. the detailed cause stays server-side so handler internals
-// (stack traces, absolute workspace paths, persistence detail) never reach the model
+const encodeArchitectureToolError = Schema.encodeUnknownSync(ArchitectureToolError)
+
+function toolParameterValidationDescription(error: unknown): string | null
+{
+  if (typeof error !== 'object' || error === null || !('_tag' in error)) return null
+  if (error._tag === 'AiError' && 'reason' in error)
+  {
+    return toolParameterValidationDescription(error.reason)
+  }
+  if (
+    error._tag === 'ToolParameterValidationError' &&
+    'description' in error &&
+    typeof error.description === 'string'
+  )
+  {
+    return error.description
+  }
+  return null
+}
+
+function architectureInvalidPatchResult(
+  toolName: string,
+  cause: Cause.Cause<unknown>,
+): McpSchema.CallToolResult | null
+{
+  for (const reason of cause.reasons)
+  {
+    if (!Cause.isFailReason(reason)) continue
+    const description = toolParameterValidationDescription(reason.error)
+    if (description === null) continue
+    return architectureToolCallResult({
+      isFailure: true,
+      encodedResult: encodeArchitectureToolError(
+        new ArchitectureToolError({
+          operation: toolName,
+          code: 'invalid-patch',
+          detail: description,
+        }),
+      ),
+    })
+  }
+  return null
+}
+
+// only defects reach the unexpected path; toolkit parameter validation maps to
+// structured invalid-patch so the model can retry corrected GraphPatch args
 export const architectureToolCallFailure =
   (toolName: string) =>
   (cause: Cause.Cause<unknown>): Effect.Effect<McpSchema.CallToolResult> =>
-    Cause.hasInterruptsOnly(cause)
-      ? Effect.failCause(cause as Cause.Cause<never>)
-      : Effect.logError('architecture tool call failed', {
-          tool: toolName,
-          cause: Cause.pretty(cause),
-        }).pipe(
-          Effect.as(
-            new McpSchema.CallToolResult({
-              isError: true,
-              content: [{ type: 'text', text: ARCHITECTURE_TOOL_UNEXPECTED_FAILURE_TEXT }],
-            }),
-          ),
-        )
+  {
+    if (Cause.hasInterruptsOnly(cause))
+    {
+      return Effect.failCause(cause as Cause.Cause<never>)
+    }
+    const invalidPatch = architectureInvalidPatchResult(toolName, cause)
+    if (invalidPatch !== null)
+    {
+      return Effect.succeed(invalidPatch)
+    }
+    return Effect.logError('architecture tool call failed', {
+      tool: toolName,
+      cause: Cause.pretty(cause),
+    }).pipe(
+      Effect.as(
+        new McpSchema.CallToolResult({
+          isError: true,
+          content: [{ type: 'text', text: ARCHITECTURE_TOOL_UNEXPECTED_FAILURE_TEXT }],
+        }),
+      ),
+    )
+  }
 
 const architectureToolCallResult = (result: {
   readonly encodedResult: unknown

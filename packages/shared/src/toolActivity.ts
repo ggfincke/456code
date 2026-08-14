@@ -226,7 +226,13 @@ function classifyToolAction(input: {
   {
     return 'file_change'
   }
-  if (itemType === 'web_search' || kind === 'search' || title === 'find' || title === 'grep')
+  if (
+    itemType === 'repository_search' ||
+    itemType === 'web_search' ||
+    kind === 'search' ||
+    title === 'find' ||
+    title === 'grep'
+  )
   {
     return 'search'
   }

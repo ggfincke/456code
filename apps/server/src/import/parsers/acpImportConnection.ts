@@ -26,7 +26,6 @@ import {
   ACP_IMPORT_DEFAULT_REPLAY_CONNECTION_MAX_BYTES,
   ACP_IMPORT_DEFAULT_REPLAY_SESSION_MAX_BYTES,
   IMPORT_NORMALIZED_SESSION_MAX_BYTES,
-  IMPORT_NORMALIZED_SESSION_MAX_RECORDS,
 } from '../discovery/resourceLimits.ts'
 import { boundedToolDisplayText, replayFailureMessageMaxBytes } from './acpImportRedact.ts'
 import {
@@ -533,7 +532,7 @@ export const connectAcpImportClient = (
     yield* client.handleRequestPermission(() =>
       Effect.succeed({ outcome: { outcome: 'cancelled' as const } }),
     )
-    yield* client.handleElicitation(() => Effect.succeed({ action: { action: 'cancel' as const } }))
+    yield* client.handleElicitation(() => Effect.succeed({ action: 'cancel' as const }))
     yield* client.handleSessionUpdate((notification) =>
       Clock.currentTimeMillis.pipe(
         Effect.flatMap((nowMs) =>

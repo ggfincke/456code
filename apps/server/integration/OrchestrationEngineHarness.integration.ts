@@ -41,6 +41,7 @@ import { ImportReplacementIntentRepository } from '../src/persistence/Services/I
 import { makeAdapterRegistryMock } from '../src/provider/testUtils/providerAdapterRegistryMock.ts'
 import { ProviderAdapterRegistry } from '../src/provider/Services/ProviderAdapterRegistry.ts'
 import { makeProviderRegistryLayer } from '../src/provider/testUtils/providerRegistryMock.ts'
+import { ProviderBackgroundTaskRegistryLive } from '../src/provider/Layers/ProviderBackgroundTaskRegistry.ts'
 import { ProviderSessionDirectoryLive } from '../src/provider/Layers/ProviderSessionDirectory.ts'
 import { ServerSettingsService } from '../src/serverSettings.ts'
 import { makeProviderServiceLive } from '../src/provider/Layers/ProviderService.ts'
@@ -364,6 +365,7 @@ export const makeOrchestrationIntegrationHarness = (
     ).pipe(
       Layer.provideMerge(providerRuntimeInboxPersistenceLayer),
       Layer.provideMerge(sharedOrchestrationServicesLayer),
+      Layer.provideMerge(ProviderBackgroundTaskRegistryLive),
     )
     const serverSettingsLayer = ServerSettingsService.layerTest()
     const runtimeIngestionLayer = ProviderRuntimeIngestionLive.pipe(

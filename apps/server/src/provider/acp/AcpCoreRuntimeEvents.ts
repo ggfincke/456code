@@ -11,11 +11,15 @@ import {
   type ProviderRuntimeEvent,
   type RuntimeRequestId,
   type ThreadId,
-  type ToolLifecycleItemType,
   type TurnId,
 } from '@t3tools/contracts'
 
-import type { AcpPermissionRequest, AcpPlanUpdate, AcpToolCallState } from './AcpRuntimeModel.ts'
+import {
+  canonicalItemTypeFromAcpToolCall,
+  type AcpPermissionRequest,
+  type AcpPlanUpdate,
+  type AcpToolCallState,
+} from './AcpRuntimeModel.ts'
 
 type AcpAdapterRawSource = Extract<RuntimeEventRawSource, 'acp.jsonrpc' | `acp.${string}.extension`>
 
@@ -44,24 +48,6 @@ function canonicalRequestTypeFromAcpKind(kind: string | 'unknown'): AcpCanonical
       return 'file_change_approval'
     default:
       return 'unknown'
-  }
-}
-
-function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecycleItemType
-{
-  switch (kind)
-  {
-    case 'execute':
-      return 'command_execution'
-    case 'edit':
-    case 'delete':
-    case 'move':
-      return 'file_change'
-    case 'search':
-    case 'fetch':
-      return 'web_search'
-    default:
-      return 'dynamic_tool_call'
   }
 }
 
@@ -174,7 +160,7 @@ export function makeAcpToolCallEvent(input: {
   readonly turnId: TurnId | undefined
   readonly toolCall: AcpToolCallState
   readonly rawPayload: unknown
-}): ProviderRuntimeEvent
+}): Extract<ProviderRuntimeEvent, { readonly type: 'item.completed' | 'item.updated' }>
 {
   const runtimeStatus = runtimeItemStatusFromAcpToolStatus(input.toolCall.status)
   return {
@@ -188,7 +174,7 @@ export function makeAcpToolCallEvent(input: {
     turnId: input.turnId,
     itemId: RuntimeItemId.make(input.toolCall.toolCallId),
     payload: {
-      itemType: canonicalItemTypeFromAcpToolKind(input.toolCall.kind),
+      itemType: canonicalItemTypeFromAcpToolCall(input.toolCall),
       ...(runtimeStatus ? { status: runtimeStatus } : {}),
       ...(input.toolCall.title ? { title: input.toolCall.title } : {}),
       ...(input.toolCall.detail ? { detail: input.toolCall.detail } : {}),

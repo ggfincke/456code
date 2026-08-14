@@ -88,6 +88,7 @@ const RPC_REQUIRED_SCOPE = new Map<string, AuthEnvironmentScope>([
   [WS_METHODS.cartographerGetRepositoryMap, AuthOrchestrationReadScope],
   [WS_METHODS.cartographerGetArchitectureScope, AuthOrchestrationReadScope],
   [WS_METHODS.cartographerGetArchitectureNeighborhood, AuthOrchestrationReadScope],
+  [WS_METHODS.cartographerGetArchitecturePathScope, AuthOrchestrationReadScope],
   [WS_METHODS.cartographerGetArchitectureSource, AuthOrchestrationReadScope],
   [WS_METHODS.subscribeProjectAtlasStatus, AuthOrchestrationReadScope],
   [WS_METHODS.shellOpenInEditor, AuthOrchestrationOperateScope],

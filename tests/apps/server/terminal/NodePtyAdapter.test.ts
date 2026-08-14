@@ -37,6 +37,7 @@ const testLayer = NodePtyAdapter.layer.pipe(
 it.effect('spawns through the public adapter with the provided host references', () =>
   Effect.gen(function* ()
   {
+    spawn.mockClear()
     const adapter = yield* PtyAdapter.PtyAdapter
     const process = yield* adapter.spawn({
       shell: 'powershell.exe',
@@ -56,8 +57,36 @@ it.effect('spawns through the public adapter with the provided host references',
         cwd: 'C:\\workspace',
         cols: 120,
         rows: 40,
-        env: {},
-        name: 'xterm-color',
+        env: { TERM: 'xterm-256color' },
+        name: 'xterm-256color',
+      },
+    ])
+  }).pipe(Effect.provide(testLayer)),
+)
+
+it.effect('preserves a caller-provided TERM case-insensitively on win32', () =>
+  Effect.gen(function* ()
+  {
+    spawn.mockClear()
+    const adapter = yield* PtyAdapter.PtyAdapter
+    yield* adapter.spawn({
+      shell: 'powershell.exe',
+      cwd: 'C:\\workspace',
+      cols: 80,
+      rows: 24,
+      env: { Term: 'xterm-direct' },
+    })
+
+    assert.equal(spawn.mock.calls.length, 1)
+    assert.deepEqual(spawn.mock.calls[0], [
+      'powershell.exe',
+      [],
+      {
+        cwd: 'C:\\workspace',
+        cols: 80,
+        rows: 24,
+        env: { Term: 'xterm-direct' },
+        name: 'xterm-256color',
       },
     ])
   }).pipe(Effect.provide(testLayer)),

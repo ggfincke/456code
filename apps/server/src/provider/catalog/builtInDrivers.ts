@@ -1,5 +1,5 @@
 // apps/server/src/provider/catalog/builtInDrivers.ts
-// with
+// register the server's built-in provider drivers
 
 //
 // every driver that the server knows how to instantiate from settings is
@@ -21,6 +21,7 @@
 // @module provider/builtInDrivers
 import { ClaudeDriver, type ClaudeDriverEnv } from '../Drivers/ClaudeDriver.ts'
 import { CodexDriver, type CodexDriverEnv } from '../Drivers/CodexDriver.ts'
+import { CoralDriver, type CoralDriverEnv } from '../Drivers/CoralDriver.ts'
 import { CursorDriver, type CursorDriverEnv } from '../Drivers/CursorDriver.ts'
 import { GrokDriver, type GrokDriverEnv } from '../Drivers/GrokDriver.ts'
 import { OpenCodeDriver, type OpenCodeDriverEnv } from '../Drivers/OpenCodeDriver.ts'
@@ -30,7 +31,12 @@ import type { AnyProviderDriver } from './ProviderDriver.ts'
 // driver. The registry layer declares `R = BuiltInDriversEnv`; the runtime
 // layer must provide every service in this union.
 export type BuiltInDriversEnv =
-  ClaudeDriverEnv | CodexDriverEnv | CursorDriverEnv | GrokDriverEnv | OpenCodeDriverEnv
+  | ClaudeDriverEnv
+  | CodexDriverEnv
+  | CoralDriverEnv
+  | CursorDriverEnv
+  | GrokDriverEnv
+  | OpenCodeDriverEnv
 
 // ordered list of built-in drivers. Order matters only for tie-breaking in
 // UI presentation — the registry itself is keyed by `driverKind`, so
@@ -38,6 +44,7 @@ export type BuiltInDriversEnv =
 export const BUILT_IN_DRIVERS: ReadonlyArray<AnyProviderDriver<BuiltInDriversEnv>> = [
   CodexDriver,
   ClaudeDriver,
+  CoralDriver,
   CursorDriver,
   GrokDriver,
   OpenCodeDriver,

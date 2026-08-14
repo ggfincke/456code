@@ -13,6 +13,7 @@ import type {
   ProviderInstanceId,
   ProviderUserInputAnswers,
   ProviderRuntimeEvent,
+  ProviderRuntimeCapabilities,
   ProviderSendTurnInput,
   ProviderSession,
   ProviderSessionStartInput,
@@ -25,8 +26,6 @@ import type * as Stream from 'effect/Stream'
 
 import type { McpProviderSessionConfig } from '../../mcp/McpProviderSession.ts'
 
-export type ProviderSessionModelSwitchMode = 'in-session' | 'unsupported'
-
 export interface ProviderEffectContext
 {
   readonly actionId: string
@@ -35,19 +34,7 @@ export interface ProviderEffectContext
   readonly operationVersion: number
 }
 
-export type ProviderConversationRollbackMode = 'exact' | 'unsupported'
-
-export interface ProviderAdapterCapabilities
-{
-  // declares whether changing the model on an existing session is supported.
-  readonly sessionModelSwitch: ProviderSessionModelSwitchMode
-  // declares whether rolling the conversation back to an earlier turn is
-  // supported. every adapter implements rollbackThread today, so leaving this
-  // undefined means "attempt it and classify the result"; an adapter that
-  // cannot roll back declares 'unsupported' so checkpoint revert records the
-  // divergence instead of silently leaving the conversation ahead of the tree
-  readonly conversationRollback?: ProviderConversationRollbackMode
-}
+export type ProviderAdapterCapabilities = ProviderRuntimeCapabilities
 
 export interface ProviderThreadTurnSnapshot
 {

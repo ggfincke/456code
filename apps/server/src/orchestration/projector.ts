@@ -295,6 +295,125 @@ function retainThreadOrchestratePlansAfterRevert(
   return orchestratePlans.filter((plan) => plan.turnId === null || retainedTurnIds.has(plan.turnId))
 }
 
+// command ACK occupies the revision as approved/rejected before sendTurn;
+// a failed envelope must free it so the user can respond again
+export function readOrchestratePlanRespondFailureTarget(payload: unknown): {
+  readonly runId: string
+  readonly revision: number
+} | null
+{
+  if (typeof payload !== 'object' || payload === null)
+  {
+    return null
+  }
+  const record = payload as Record<string, unknown>
+  const runId = typeof record.runId === 'string' ? record.runId.trim() : ''
+  const revision = record.revision
+  if (
+    runId.length === 0 ||
+    typeof revision !== 'number' ||
+    !Number.isInteger(revision) ||
+    revision < 0
+  )
+  {
+    return null
+  }
+  return { runId, revision }
+}
+
+type OccupiedOrchestratePlanRef = {
+  readonly runId: string
+  readonly revision: number
+  readonly status: string
+  readonly updatedAt: string
+}
+
+// tagged payloads pin the revision; legacy failures (detail-only) take the
+// newest occupied plan whose stamp is not after the failure
+export function pickOccupiedOrchestratePlanForRespondFailure(
+  plans: ReadonlyArray<OccupiedOrchestratePlanRef>,
+  payload: unknown,
+  failureCreatedAt: string,
+): { readonly runId: string; readonly revision: number } | null
+{
+  const occupied = plans.filter(
+    (entry) =>
+      (entry.status === 'approved' || entry.status === 'rejected') &&
+      entry.updatedAt <= failureCreatedAt,
+  )
+  if (occupied.length === 0)
+  {
+    return null
+  }
+  const target = readOrchestratePlanRespondFailureTarget(payload)
+  if (target !== null)
+  {
+    return occupied.some(
+      (entry) => entry.runId === target.runId && entry.revision === target.revision,
+    )
+      ? target
+      : null
+  }
+  return occupied.reduce((best, entry) =>
+  {
+    if (entry.updatedAt > best.updatedAt)
+    {
+      return entry
+    }
+    if (entry.updatedAt === best.updatedAt && entry.revision > best.revision)
+    {
+      return entry
+    }
+    return best
+  })
+}
+
+export function revertOrchestratePlansAfterRespondFailure(
+  plans: OrchestrationThread['orchestratePlans'],
+  payload: unknown,
+  updatedAt: string,
+): OrchestrationThread['orchestratePlans']
+{
+  const picked = pickOccupiedOrchestratePlanForRespondFailure(plans, payload, updatedAt)
+  if (picked === null)
+  {
+    return plans
+  }
+  let changed = false
+  const next = plans.map((entry) =>
+  {
+    if (
+      entry.runId !== picked.runId ||
+      entry.revision !== picked.revision ||
+      (entry.status !== 'approved' && entry.status !== 'rejected')
+    )
+    {
+      return entry
+    }
+    changed = true
+    return { ...entry, status: 'pending' as const, updatedAt }
+  })
+  return changed ? next : plans
+}
+
+export function healOrchestratePlansAfterFailedEnvelope(
+  plans: OrchestrationThread['orchestratePlans'],
+  activities: ReadonlyArray<{
+    readonly kind: string
+    readonly payload: unknown
+    readonly createdAt: string
+  }>,
+): OrchestrationThread['orchestratePlans']
+{
+  return activities.reduce(
+    (next, activity) =>
+      activity.kind === 'provider.orchestrate-plan.respond.failed'
+        ? revertOrchestratePlansAfterRespondFailure(next, activity.payload, activity.createdAt)
+        : next,
+    plans,
+  )
+}
+
 function isImportContinuationActivity(
   activity: OrchestrationThread['activities'][number],
 ): boolean
@@ -1388,6 +1507,14 @@ export function projectEvent(
             thread.latestTurn === null &&
             isImportContinuationActivity(activity)
           const approvalOutcome = approvalOutcomeFromActivity(activity)
+          const orchestratePlans =
+            activity.kind === 'provider.orchestrate-plan.respond.failed'
+              ? revertOrchestratePlansAfterRespondFailure(
+                  thread.orchestratePlans,
+                  activity.payload,
+                  activity.createdAt,
+                )
+              : thread.orchestratePlans
 
           return {
             ...nextBase,
@@ -1395,6 +1522,7 @@ export function projectEvent(
               activities: importFinalized
                 ? compactFinalizedImportActivities(activities)
                 : retainThreadActivities(activities),
+              orchestratePlans,
               pendingHandoff:
                 activity.kind === 'provider.handoff.delivered' ? null : thread.pendingHandoff,
               ...(approvalOutcome === null

@@ -7,6 +7,7 @@ import * as Effect from 'effect/Effect'
 import * as Option from 'effect/Option'
 import * as Ref from 'effect/Ref'
 import type * as EffectAcpSchema from 'effect-acp/schema'
+import type { SessionModelsExtension, SessionModelState } from 'effect-acp/provider-extensions'
 import { deriveToolActivityPresentation } from '@t3tools/shared/toolActivity'
 import type { ToolLifecycleItemType } from '@t3tools/contracts'
 
@@ -15,7 +16,7 @@ function isRecord(value: unknown): value is Record<string, unknown>
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isSessionModelState(value: unknown): value is EffectAcpSchema.SessionModelState
+function isSessionModelState(value: unknown): value is SessionModelState
 {
   if (!isRecord(value) || typeof value.currentModelId !== 'string')
   {
@@ -126,9 +127,9 @@ export type AcpParsedSessionEvent =
     }
 
 type AcpSessionSetupResponse =
-  | EffectAcpSchema.LoadSessionResponse
-  | EffectAcpSchema.NewSessionResponse
-  | EffectAcpSchema.ResumeSessionResponse
+  | (EffectAcpSchema.LoadSessionResponse & SessionModelsExtension)
+  | (EffectAcpSchema.NewSessionResponse & SessionModelsExtension)
+  | (EffectAcpSchema.ResumeSessionResponse & SessionModelsExtension)
 
 type AcpToolCallUpdate = Extract<
   EffectAcpSchema.SessionNotification['update'],
@@ -340,9 +341,14 @@ function normalizeToolKind(kind: unknown): string | undefined
   return typeof kind === 'string' && kind.trim().length > 0 ? kind.trim() : undefined
 }
 
-function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecycleItemType
+const CORAL_REPOSITORY_SEARCH_TOOL_NAMES = new Set(['search_code', 'grep', 'glob'])
+
+export function canonicalItemTypeFromAcpToolCall(input: {
+  readonly kind?: string | undefined
+  readonly data: Readonly<Record<string, unknown>>
+}): ToolLifecycleItemType
 {
-  switch (kind)
+  switch (input.kind)
   {
     case 'execute':
       return 'command_execution'
@@ -351,6 +357,14 @@ function canonicalItemTypeFromAcpToolKind(kind: string | undefined): ToolLifecyc
     case 'move':
       return 'file_change'
     case 'search':
+    {
+      const rawInput = isRecord(input.data.rawInput) ? input.data.rawInput : undefined
+      const rawToolName =
+        typeof rawInput?.toolName === 'string' ? rawInput.toolName.trim() : undefined
+      return rawToolName !== undefined && CORAL_REPOSITORY_SEARCH_TOOL_NAMES.has(rawToolName)
+        ? 'repository_search'
+        : 'web_search'
+    }
     case 'fetch':
       return 'web_search'
     default:
@@ -421,7 +435,7 @@ function makeToolCallState(
     textContent !== undefined
   const presentation = hasPresentationSeed
     ? deriveToolActivityPresentation({
-        itemType: canonicalItemTypeFromAcpToolKind(kind),
+        itemType: canonicalItemTypeFromAcpToolCall({ kind, data }),
         title,
         detail: fallbackDetail,
         data,
@@ -560,7 +574,7 @@ export const waitForSessionLoadReplayIdle = (input: {
 
 export function syntheticLoadSessionResponseFromInitialize(
   initializeResult: EffectAcpSchema.InitializeResponse,
-): EffectAcpSchema.LoadSessionResponse
+): EffectAcpSchema.LoadSessionResponse & SessionModelsExtension
 {
   const meta = initializeResult._meta
   const modelState = isRecord(meta) ? meta.modelState : undefined

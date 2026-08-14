@@ -23,6 +23,7 @@ import { makeManualOnlyProviderMaintenanceCapabilities } from '../../../../../ap
 import type * as TextGeneration from '../../../../../apps/server/src/textGeneration/TextGeneration.ts'
 import * as ProviderAdapterRegistryLayer from '../../../../../apps/server/src/provider/Layers/ProviderAdapterRegistry.ts'
 import * as NodeServices from '@effect/platform-node/NodeServices'
+import { CODEX_PROVIDER_CAPABILITIES } from '../../../../../apps/server/src/provider/providerCapabilities.ts'
 
 const CODEX_DRIVER = ProviderDriverKind.make('codex')
 const CLAUDE_AGENT_DRIVER = ProviderDriverKind.make('claudeAgent')
@@ -32,7 +33,7 @@ let currentClaudeContinuationKey = 'claudeAgent:instance:claudeAgent'
 
 const fakeCodexAdapter: CodexAdapter.CodexAdapterShape = {
   provider: CODEX_DRIVER,
-  capabilities: { sessionModelSwitch: 'in-session' },
+  capabilities: CODEX_PROVIDER_CAPABILITIES,
   startSession: vi.fn(),
   sendTurn: vi.fn(),
   interruptTurn: vi.fn(),
@@ -50,7 +51,7 @@ const fakeCodexAdapter: CodexAdapter.CodexAdapterShape = {
 
 const fakeClaudeAdapter: ClaudeAdapter.ClaudeAdapterShape = {
   provider: CLAUDE_AGENT_DRIVER,
-  capabilities: { sessionModelSwitch: 'in-session' },
+  capabilities: CODEX_PROVIDER_CAPABILITIES,
   startSession: vi.fn(),
   sendTurn: vi.fn(),
   interruptTurn: vi.fn(),
@@ -68,7 +69,7 @@ const fakeClaudeAdapter: ClaudeAdapter.ClaudeAdapterShape = {
 
 const fakeOpenCodeAdapter: OpenCodeAdapter.OpenCodeAdapterShape = {
   provider: OPENCODE_DRIVER,
-  capabilities: { sessionModelSwitch: 'in-session' },
+  capabilities: CODEX_PROVIDER_CAPABILITIES,
   startSession: vi.fn(),
   sendTurn: vi.fn(),
   interruptTurn: vi.fn(),
@@ -86,7 +87,7 @@ const fakeOpenCodeAdapter: OpenCodeAdapter.OpenCodeAdapterShape = {
 
 const fakeCursorAdapter: CursorAdapter.CursorAdapterShape = {
   provider: CURSOR_DRIVER,
-  capabilities: { sessionModelSwitch: 'in-session' },
+  capabilities: CODEX_PROVIDER_CAPABILITIES,
   startSession: vi.fn(),
   sendTurn: vi.fn(),
   interruptTurn: vi.fn(),

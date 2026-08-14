@@ -49,12 +49,14 @@ import {
 } from '../maintenance/providerMaintenance.ts'
 import * as AcpSessionRuntime from '../acp/AcpSessionRuntime.ts'
 import { CursorListAvailableModelsResponse } from '../acp/CursorAcpExtension.ts'
+import { CURSOR_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 
 const decodeCursorListAvailableModelsResponse = Schema.decodeUnknownEffect(
   CursorListAvailableModelsResponse,
 )
 const CURSOR_PRESENTATION = {
   displayName: 'Cursor',
+  capabilities: CURSOR_PROVIDER_CAPABILITIES,
   badgeLabel: 'Early Access',
   showInteractionModeToggle: true,
 } as const

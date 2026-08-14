@@ -34,6 +34,7 @@ import type * as EffectAcpSchema from 'effect-acp/schema'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
+import { GROK_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
@@ -657,7 +658,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
-            ...(parsedResume?.requireExisting === true ? { requireSessionLoadResponse: true } : {}),
+            ...(parsedResume?.requireExisting === true ? { sessionSetup: 'import' as const } : {}),
             clientInfo: { name: 'code456', version: '0.0.0' },
             ...(mcpSession
               ? {
@@ -1580,7 +1581,7 @@ export function makeGrokAdapter(grokSettings: GrokSettings, options?: GrokAdapte
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: 'in-session' },
+      capabilities: GROK_PROVIDER_CAPABILITIES,
       startSession,
       sendTurn,
       interruptTurn,

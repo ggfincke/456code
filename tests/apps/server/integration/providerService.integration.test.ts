@@ -16,6 +16,7 @@ import * as Stream from 'effect/Stream'
 
 import { ProviderAdapterRegistry } from '../../../../apps/server/src/provider/Services/ProviderAdapterRegistry.ts'
 import { makeAdapterRegistryMock } from '../../../../apps/server/src/provider/testUtils/providerAdapterRegistryMock.ts'
+import { ProviderBackgroundTaskRegistryLive } from '../../../../apps/server/src/provider/Layers/ProviderBackgroundTaskRegistry.ts'
 import { ProviderSessionDirectoryLive } from '../../../../apps/server/src/provider/Layers/ProviderSessionDirectory.ts'
 import {
   NoOpProviderEventLoggers,
@@ -97,6 +98,7 @@ const makeIntegrationFixture = Effect.gen(function* ()
     ),
     Layer.provide(ProviderRuntimeInboxLive.pipe(Layer.provide(SqlitePersistenceMemory))),
     Layer.provide(McpSessionRegistry.disabledLayer),
+    Layer.provide(ProviderBackgroundTaskRegistryLive),
     Layer.provide(shared),
     Layer.provide(NodeServices.layer),
   )

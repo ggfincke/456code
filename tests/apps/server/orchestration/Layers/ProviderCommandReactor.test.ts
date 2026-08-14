@@ -13,6 +13,7 @@ import {
   ProviderSession,
   ProviderDriverKind,
   ProviderInstanceId,
+  type RuntimeMode,
   type ThreadOrigin,
 } from '@t3tools/contracts'
 import { createModelSelection } from '@t3tools/shared/model'
@@ -57,6 +58,7 @@ import {
   type ProviderServiceShape,
 } from '../../../../../apps/server/src/provider/Services/ProviderService.ts'
 import { makeProviderRegistryLayer } from '../../../../../apps/server/src/provider/testUtils/providerRegistryMock.ts'
+import { CODEX_PROVIDER_CAPABILITIES } from '../../../../../apps/server/src/provider/providerCapabilities.ts'
 import {
   TextGeneration,
   type TextGenerationShape,
@@ -237,6 +239,7 @@ describe('ProviderCommandReactor', () =>
     readonly threadOrigin?: ThreadOrigin
     readonly instanceDriverKind?: ProviderDriverKind
     readonly sessionModelSwitch?: 'unsupported' | 'in-session'
+    readonly supportedRuntimeModes?: readonly [RuntimeMode, ...RuntimeMode[]]
     readonly requiresNewThreadForModelChange?: boolean
     readonly withRuntimeIngestion?: boolean
     readonly startReactor?: boolean
@@ -338,6 +341,28 @@ describe('ProviderCommandReactor', () =>
     const interruptTurn = vi.fn((_: unknown) => Effect.void)
     const respondToRequest = vi.fn<ProviderServiceShape['respondToRequest']>(() => Effect.void)
     const respondToUserInput = vi.fn<ProviderServiceShape['respondToUserInput']>(() => Effect.void)
+    const getInstanceInfo = vi.fn((instanceId: ProviderInstanceId) =>
+    {
+      const raw = String(instanceId)
+      const driverKind =
+        input?.instanceDriverKind ??
+        ProviderDriverKind.make(
+          raw.startsWith('claude') ? 'claudeAgent' : raw.startsWith('codex') ? 'codex' : raw,
+        )
+      return Effect.succeed({
+        instanceId,
+        driverKind,
+        displayName: undefined,
+        enabled: true,
+        continuationIdentity: {
+          driverKind,
+          continuationKey:
+            driverKind === ProviderDriverKind.make('codex')
+              ? 'codex:home:/shared-codex'
+              : `${driverKind}:instance:${instanceId}`,
+        },
+      })
+    })
     const stopSession = vi.fn((stopInput: unknown, context?: unknown) =>
       (input?.stopSessionEffect?.(stopInput, context) ?? Effect.void).pipe(
         Effect.tap(() =>
@@ -437,30 +462,20 @@ describe('ProviderCommandReactor', () =>
         : { hasRecoverableSession: input.hasRecoverableSessionEffect }),
       getCapabilities: (_provider) =>
         Effect.succeed({
+          ...CODEX_PROVIDER_CAPABILITIES,
           sessionModelSwitch: input?.sessionModelSwitch ?? 'in-session',
+          ...(input?.supportedRuntimeModes === undefined
+            ? {}
+            : {
+                supportedInteractionModes: ['default' as const],
+                supportedRuntimeModes: input.supportedRuntimeModes,
+                activeTurnInput: 'unsupported' as const,
+                conversationRollback: 'unsupported' as const,
+                orchestrateInstructionDelivery: 'unsupported' as const,
+                orchestrateBaseModes: [],
+              }),
         }),
-      getInstanceInfo: (instanceId) =>
-      {
-        const raw = String(instanceId)
-        const driverKind =
-          input?.instanceDriverKind ??
-          ProviderDriverKind.make(
-            raw.startsWith('claude') ? 'claudeAgent' : raw.startsWith('codex') ? 'codex' : raw,
-          )
-        return Effect.succeed({
-          instanceId,
-          driverKind,
-          displayName: undefined,
-          enabled: true,
-          continuationIdentity: {
-            driverKind,
-            continuationKey:
-              driverKind === ProviderDriverKind.make('codex')
-                ? 'codex:home:/shared-codex'
-                : `${driverKind}:instance:${instanceId}`,
-          },
-        })
-      },
+      getInstanceInfo,
       rollbackConversation: () => unsupported(),
       rollbackConversationIfExact: () => Effect.succeed(false),
       getConversationTurnCountIfExact: () => Effect.succeed(Option.none()),
@@ -626,6 +641,7 @@ describe('ProviderCommandReactor', () =>
       interruptTurn,
       respondToRequest,
       respondToUserInput,
+      getInstanceInfo,
       stopSession,
       renameBranch,
       refreshStatus,
@@ -688,6 +704,65 @@ describe('ProviderCommandReactor', () =>
     expect(thread?.session?.threadId).toBe('thread-1')
     expect(thread?.session?.status).toBe('starting')
     expect(thread?.session?.runtimeMode).toBe('approval-required')
+  })
+
+  it('coerces unsupported Coral runtime mode before startSession', async () =>
+  {
+    const harness = await createHarness({
+      threadModelSelection: {
+        instanceId: ProviderInstanceId.make('coral'),
+        model: 'gemma4:31b-mlx',
+      },
+      instanceDriverKind: ProviderDriverKind.make('coral'),
+      supportedRuntimeModes: ['approval-required'],
+    })
+    const now = '2026-01-01T00:00:00.000Z'
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.runtime-mode.set',
+        commandId: CommandId.make('cmd-runtime-mode-set-coral-full-access'),
+        threadId: ThreadId.make('thread-1'),
+        runtimeMode: 'full-access',
+        createdAt: now,
+      }),
+    )
+    await waitFor(async () =>
+    {
+      const readModel = await harness.readModel()
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+      return thread?.runtimeMode === 'full-access'
+    })
+
+    await harness.run(
+      harness.engine.dispatch({
+        type: 'thread.turn.start',
+        commandId: CommandId.make('cmd-turn-start-coral-coerce'),
+        threadId: ThreadId.make('thread-1'),
+        message: {
+          messageId: asMessageId('user-message-coral-coerce'),
+          role: 'user',
+          text: 'hello coral',
+          attachments: [],
+        },
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        runtimeMode: 'full-access',
+        createdAt: now,
+      }),
+    )
+
+    await waitFor(() => harness.startSession.mock.calls.length === 1)
+    await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+    expect(harness.startSession.mock.calls[0]?.[1]).toMatchObject({
+      runtimeMode: 'approval-required',
+    })
+
+    const readModel = await harness.readModel()
+    const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+    expect(thread?.session?.threadId).toBe('thread-1')
+    expect(thread?.session?.status).toBe('starting')
+    expect(thread?.session?.runtimeMode).toBe('approval-required')
+    expect(thread?.session?.lastError).toBeNull()
   })
 
   it('publishes a delayed pre-turn baseline before any provider side effect starts', async () =>
@@ -4104,4 +4179,186 @@ describe('ProviderCommandReactor', () =>
         expect(thread?.session?.activeTurnId).toBeNull()
       }),
   )
+
+  describe('orchestrate plan respond', () =>
+  {
+    const pendingPlan = {
+      runId: 'run-cartographer-scope',
+      revision: 1,
+      turnId: asTurnId('turn-plan'),
+      workflow: 'implementation',
+      task: 'Ship the current scope.',
+      stages: [
+        {
+          id: 'implement',
+          provider: 'codex',
+          model: null,
+          mode: 'edit' as const,
+          workers: 1,
+        },
+      ],
+      totalWorkers: 1,
+      maxWorkers: 1,
+      source: 'tool' as const,
+      leadModelSelection: null,
+      status: 'pending' as const,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      updatedAt: '2026-01-01T00:00:00.000Z',
+    }
+
+    async function seedPendingPlan(
+      harness: Awaited<ReturnType<typeof createHarness>>,
+      createdAt: string,
+    )
+    {
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.orchestrate-plan.upsert',
+          commandId: CommandId.make('cmd-orchestrate-plan-upsert'),
+          threadId: ThreadId.make('thread-1'),
+          plan: pendingPlan,
+          createdAt,
+        }),
+      )
+    }
+
+    it('resumes a stopped session and delivers the persisted approve envelope', async () =>
+    {
+      const harness = await createHarness()
+      const now = '2026-01-01T00:00:00.000Z'
+      await seedPendingPlan(harness, now)
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.session.set',
+          commandId: CommandId.make('cmd-session-stopped-before-approve'),
+          threadId: ThreadId.make('thread-1'),
+          session: {
+            threadId: ThreadId.make('thread-1'),
+            status: 'stopped',
+            providerName: 'codex',
+            providerInstanceId: ProviderInstanceId.make('codex'),
+            runtimeMode: 'approval-required',
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      )
+
+      harness.getInstanceInfo.mockClear()
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.orchestrate-plan.respond',
+          commandId: CommandId.make('cmd-orchestrate-plan-approve'),
+          threadId: ThreadId.make('thread-1'),
+          runId: pendingPlan.runId,
+          revision: pendingPlan.revision,
+          decision: 'approve',
+          createdAt: now,
+        }),
+      )
+      await waitFor(() => harness.sendTurn.mock.calls.length === 1)
+
+      expect(harness.getInstanceInfo).toHaveBeenCalled()
+      expect(harness.startSession).toHaveBeenCalled()
+      expect(harness.sendTurn.mock.calls[0]?.[0]).toMatchObject({
+        threadId: ThreadId.make('thread-1'),
+        input: expect.stringContaining(
+          `<orchestrate_plan_response run="${pendingPlan.runId}" revision="${pendingPlan.revision}" decision="approve">`,
+        ),
+      })
+
+      const readModel = await harness.readModel()
+      const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+      expect(thread?.orchestratePlans[0]?.status).toBe('approved')
+    })
+
+    it('reverts approved when envelope delivery fails so approve can be retried', async () =>
+    {
+      const harness = await createHarness()
+      const now = '2026-01-01T00:00:00.000Z'
+      await seedPendingPlan(harness, now)
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.session.set',
+          commandId: CommandId.make('cmd-session-ready-before-approve'),
+          threadId: ThreadId.make('thread-1'),
+          session: {
+            threadId: ThreadId.make('thread-1'),
+            status: 'ready',
+            providerName: 'codex',
+            providerInstanceId: ProviderInstanceId.make('codex'),
+            runtimeMode: 'approval-required',
+            activeTurnId: null,
+            lastError: null,
+            updatedAt: now,
+          },
+          createdAt: now,
+        }),
+      )
+
+      harness.sendTurn.mockImplementationOnce(
+        () =>
+          Effect.fail(
+            new ProviderAdapterRequestError({
+              provider: ProviderDriverKind.make('codex'),
+              method: 'turn/start',
+              detail: 'simulated envelope delivery failure',
+            }),
+          ) as never,
+      )
+
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.orchestrate-plan.respond',
+          commandId: CommandId.make('cmd-orchestrate-plan-approve-fail'),
+          threadId: ThreadId.make('thread-1'),
+          runId: pendingPlan.runId,
+          revision: pendingPlan.revision,
+          decision: 'approve',
+          createdAt: now,
+        }),
+      )
+      await waitFor(async () =>
+      {
+        const readModel = await harness.readModel()
+        const thread = readModel.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+        return (
+          thread?.activities.some(
+            (activity) => activity.kind === 'provider.orchestrate-plan.respond.failed',
+          ) === true
+        )
+      })
+
+      const failed = await harness.readModel()
+      const failedThread = failed.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+      expect(failedThread?.orchestratePlans[0]?.status).toBe('pending')
+      expect(
+        failedThread?.activities.find(
+          (activity) => activity.kind === 'provider.orchestrate-plan.respond.failed',
+        )?.payload,
+      ).toMatchObject({
+        runId: pendingPlan.runId,
+        revision: pendingPlan.revision,
+      })
+
+      await harness.run(
+        harness.engine.dispatch({
+          type: 'thread.orchestrate-plan.respond',
+          commandId: CommandId.make('cmd-orchestrate-plan-approve-retry'),
+          threadId: ThreadId.make('thread-1'),
+          runId: pendingPlan.runId,
+          revision: pendingPlan.revision,
+          decision: 'approve',
+          createdAt: now,
+        }),
+      )
+      await waitFor(() => harness.sendTurn.mock.calls.length === 2)
+
+      const retried = await harness.readModel()
+      const retriedThread = retried.threads.find((entry) => entry.id === ThreadId.make('thread-1'))
+      expect(retriedThread?.orchestratePlans[0]?.status).toBe('approved')
+    })
+  })
 })

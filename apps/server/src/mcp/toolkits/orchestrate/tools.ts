@@ -29,6 +29,7 @@ export const OrchestratePlanUpsertInput = Schema.Struct({
   stages: Schema.Array(OrchestratePlanStage),
   totalWorkers: Schema.optional(OrchestratePlanRevision.fields.totalWorkers),
   maxWorkers: Schema.optional(OrchestratePlanRevision.fields.maxWorkers),
+  architecturePaths: OrchestratePlanRevision.fields.architecturePaths,
 })
 export type OrchestratePlanUpsertInput = typeof OrchestratePlanUpsertInput.Type
 
@@ -120,7 +121,7 @@ const dependencies = [
 
 export const OrchestratePlanUpsertTool = Tool.make('orchestrate_plan_upsert', {
   description:
-    'Persist an immutable orchestrate plan revision for the authenticated active orchestrate turn. When this toolkit is available, call this tool first, then ALSO emit the fenced orchestrate-plan block with the same runId as the render anchor the client mounts the persisted revision into; without this toolkit the fence alone is the supported form. The authenticated MCP session supplies thread and turn identity, so do not pass them. Reusing a runId appends its next revision and supersedes earlier pending revisions. The response returns the exact committed plan revision chosen by the serialized decider.',
+    'Persist an immutable orchestrate plan revision for the authenticated active orchestrate turn. When this toolkit is available, call this tool first, then ALSO emit the fenced orchestrate-plan block with the same runId as the render anchor the client mounts the persisted revision into; without this toolkit the fence alone is the supported form. Optional architecturePaths are existing repository-relative files or directories for the standing-atlas scope strip; never invent paths. Stage scope stays worker text. The authenticated MCP session supplies thread and turn identity, so do not pass them. Reusing a runId appends its next revision and supersedes earlier pending revisions. The response returns the exact committed plan revision chosen by the serialized decider.',
   parameters: OrchestratePlanUpsertInput,
   success: OrchestratePlanUpsertResult,
   failure: OrchestratePlanUpsertError,

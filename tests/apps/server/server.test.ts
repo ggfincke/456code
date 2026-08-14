@@ -756,6 +756,8 @@ const buildAppUnderTest = (options?: {
               Effect.die('ArchitectureProjectionService not stubbed in this test'),
             architectureNeighborhood: () =>
               Effect.die('ArchitectureProjectionService not stubbed in this test'),
+            architecturePathScope: () =>
+              Effect.die('ArchitectureProjectionService not stubbed in this test'),
             architectureSource: () =>
               Effect.die('ArchitectureProjectionService not stubbed in this test'),
             ...options?.layers?.architectureProjectionService,

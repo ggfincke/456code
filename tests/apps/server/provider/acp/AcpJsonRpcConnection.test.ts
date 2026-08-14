@@ -664,7 +664,7 @@ describe('AcpSessionRuntime', () =>
           },
           cwd: process.cwd(),
           resumeSessionId: 'mock-session-1',
-          requireSessionLoadResponse: true,
+          sessionSetup: 'import',
           sessionLoadReplayIdleGap: '25 millis',
           sessionLoadTimeout: '150 millis',
           clientInfo: { name: 't3-test', version: '0.0.0' },

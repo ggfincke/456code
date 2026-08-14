@@ -9,6 +9,7 @@ import * as Option from 'effect/Option'
 import * as Schedule from 'effect/Schedule'
 
 import { ProjectionSnapshotQuery } from '../../orchestration/Services/ProjectionSnapshotQuery.ts'
+import { ProviderBackgroundTaskRegistry } from '../Services/ProviderBackgroundTaskRegistry.ts'
 import { ProviderSessionDirectory } from '../Services/ProviderSessionDirectory.ts'
 import {
   ProviderSessionReaper,
@@ -29,6 +30,7 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
   Effect.gen(function* ()
   {
     const providerService = yield* ProviderService
+    const backgroundTasks = yield* ProviderBackgroundTaskRegistry
     const directory = yield* ProviderSessionDirectory
     const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
 
@@ -52,9 +54,20 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
         if (
           binding !== undefined &&
           binding.status !== 'stopped' &&
+          binding.provider === identity.provider &&
           binding.providerInstanceId === identity.providerInstanceId
         )
         {
+          continue
+        }
+        if (yield* backgroundTasks.hasLiveTasks(identity))
+        {
+          yield* Effect.logDebug('provider.session.reaper.skipped-background-task', {
+            threadId: identity.threadId,
+            providerInstanceId: identity.providerInstanceId,
+            sessionGeneration: identity.sessionGeneration,
+            reason: 'durable_orphan',
+          })
           continue
         }
         const reaped = yield* providerService.stopSessionIfExact(identity).pipe(
@@ -119,6 +132,19 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue
         }
 
+        // pending orchestrate approve is live work; don't reap before the user responds
+        const threadDetail = yield* projectionSnapshotQuery
+          .getThreadDetailById(binding.threadId)
+          .pipe(Effect.map(Option.getOrUndefined))
+        if (threadDetail?.orchestratePlans.some((plan) => plan.status === 'pending'))
+        {
+          yield* Effect.logDebug('provider.session.reaper.skipped-pending-orchestrate-plan', {
+            threadId: binding.threadId,
+            idleDurationMs,
+          })
+          continue
+        }
+
         const latestBindings = yield* directory.listBindings()
         const latestBinding = latestBindings.find(
           (candidate) => candidate.threadId === binding.threadId,
@@ -143,30 +169,56 @@ const makeProviderSessionReaper = (options?: ProviderSessionReaperLiveOptions) =
           continue
         }
 
-        const reaped = yield* providerService
-          .stopSession({
-            threadId: binding.threadId,
-            expectedProviderInstanceId: binding.providerInstanceId,
+        const providerInstanceId = latestBinding.providerInstanceId
+        if (providerInstanceId === undefined)
+        {
+          continue
+        }
+        const identity = Option.getOrUndefined(
+          yield* providerService.captureSessionIdentity({
+            threadId: latestBinding.threadId,
+            expectedProviderInstanceId: providerInstanceId,
+          }),
+        )
+        if (identity === undefined || identity.provider !== latestBinding.provider)
+        {
+          continue
+        }
+        if (yield* backgroundTasks.hasLiveTasks(identity))
+        {
+          yield* Effect.logDebug('provider.session.reaper.skipped-background-task', {
+            threadId: identity.threadId,
+            providerInstanceId: identity.providerInstanceId,
+            sessionGeneration: identity.sessionGeneration,
+            reason: 'inactivity_threshold',
           })
-          .pipe(
-            Effect.tap(() =>
-              Effect.logInfo('provider.session.reaped', {
-                threadId: binding.threadId,
-                provider: binding.provider,
-                idleDurationMs,
-                reason: 'inactivity_threshold',
-              }),
-            ),
-            Effect.as(true),
-            Effect.catchCause((cause) =>
-              Effect.logWarning('provider.session.reaper.stop-failed', {
-                threadId: binding.threadId,
-                provider: binding.provider,
-                idleDurationMs,
-                cause,
-              }).pipe(Effect.as(false)),
-            ),
-          )
+          continue
+        }
+
+        const reaped = yield* providerService.stopSessionIfExact(identity).pipe(
+          Effect.tap((stopped) =>
+            stopped
+              ? Effect.logInfo('provider.session.reaped', {
+                  threadId: identity.threadId,
+                  provider: identity.provider,
+                  providerInstanceId: identity.providerInstanceId,
+                  sessionGeneration: identity.sessionGeneration,
+                  idleDurationMs,
+                  reason: 'inactivity_threshold',
+                })
+              : Effect.void,
+          ),
+          Effect.catchCause((cause) =>
+            Effect.logWarning('provider.session.reaper.stop-failed', {
+              threadId: identity.threadId,
+              provider: identity.provider,
+              providerInstanceId: identity.providerInstanceId,
+              sessionGeneration: identity.sessionGeneration,
+              idleDurationMs,
+              cause,
+            }).pipe(Effect.as(false)),
+          ),
+        )
 
         if (reaped)
         {

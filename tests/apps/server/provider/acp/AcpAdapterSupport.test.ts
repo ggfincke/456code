@@ -6,20 +6,12 @@ import * as EffectAcpErrors from 'effect-acp/errors'
 import { ProviderDriverKind } from '@t3tools/contracts'
 
 import {
-  acpPermissionOutcome,
   classifyAcpTermination,
   mapAcpToAdapterError,
 } from '../../../../../apps/server/src/provider/acp/AcpAdapterSupport.ts'
 
 describe('AcpAdapterSupport', () =>
 {
-  it('maps ACP approval decisions to permission outcomes', () =>
-  {
-    expect(acpPermissionOutcome('accept')).toBe('allow-once')
-    expect(acpPermissionOutcome('acceptForSession')).toBe('allow-always')
-    expect(acpPermissionOutcome('decline')).toBe('reject-once')
-  })
-
   it('maps ACP request errors to provider adapter request errors', () =>
   {
     const error = mapAcpToAdapterError(

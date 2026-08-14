@@ -61,6 +61,7 @@ import type {
 } from '../Services/ProviderAdapter.ts'
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
+import { CODEX_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 import {
   CodexResumeCursorSchema,
   CodexSessionRuntimeThreadIdMissingError,
@@ -1996,9 +1997,7 @@ export const makeCodexAdapter = Effect.fn('makeCodexAdapter')(function* (
 
   return {
     provider: PROVIDER,
-    capabilities: {
-      sessionModelSwitch: 'in-session',
-    },
+    capabilities: CODEX_PROVIDER_CAPABILITIES,
     startSession,
     sendTurn,
     interruptTurn,

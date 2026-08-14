@@ -3839,3 +3839,167 @@ it.layer(
     }),
   )
 })
+
+it.layer(Layer.fresh(makeProjectionPipelinePrefixedTestLayer('t3-orchestrate-respond-failed-')))(
+  'OrchestrationProjectionPipeline',
+  (it) =>
+  {
+    it.effect('reverts an approved orchestrate plan after respond.failed', () =>
+      Effect.gen(function* ()
+      {
+        const projectionPipeline = yield* OrchestrationProjectionPipeline
+        const eventStore = yield* OrchestrationEventStore
+        const sql = yield* SqlClient.SqlClient
+        const appendAndProject = (event: Parameters<typeof eventStore.append>[0]) =>
+          eventStore
+            .append(event)
+            .pipe(Effect.flatMap((savedEvent) => projectionPipeline.projectEvent(savedEvent)))
+
+        const threadId = ThreadId.make('thread-orchestrate-respond-failed')
+        const projectId = ProjectId.make('project-orchestrate-respond-failed')
+        const upsertedAt = '2026-08-13T18:00:00.000Z'
+        const approvedAt = '2026-08-13T18:00:01.000Z'
+        const failedAt = '2026-08-13T18:00:02.000Z'
+
+        yield* appendAndProject({
+          type: 'project.created',
+          eventId: EventId.make('evt-orchestrate-respond-failed-project'),
+          aggregateKind: 'project',
+          aggregateId: projectId,
+          occurredAt: upsertedAt,
+          commandId: CommandId.make('cmd-orchestrate-respond-failed-project'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-orchestrate-respond-failed-project'),
+          metadata: {},
+          payload: {
+            projectId,
+            title: 'Orchestrate respond failed',
+            workspaceRoot: '/tmp/orchestrate-respond-failed',
+            defaultModelSelection: null,
+            scripts: [],
+            createdAt: upsertedAt,
+            updatedAt: upsertedAt,
+          },
+        })
+        yield* appendAndProject({
+          type: 'thread.created',
+          eventId: EventId.make('evt-orchestrate-respond-failed-thread'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: upsertedAt,
+          commandId: CommandId.make('cmd-orchestrate-respond-failed-thread'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-orchestrate-respond-failed-thread'),
+          metadata: {},
+          payload: {
+            threadId,
+            projectId,
+            title: 'Thread',
+            modelSelection: {
+              instanceId: ProviderInstanceId.make('codex'),
+              model: 'gpt-5-codex',
+            },
+            runtimeMode: 'full-access',
+            branch: null,
+            worktreePath: null,
+            createdAt: upsertedAt,
+            updatedAt: upsertedAt,
+          },
+        })
+        yield* appendAndProject({
+          type: 'thread.orchestrate-plan-upserted',
+          eventId: EventId.make('evt-orchestrate-respond-failed-upsert'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: upsertedAt,
+          commandId: CommandId.make('cmd-orchestrate-respond-failed-upsert'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-orchestrate-respond-failed-upsert'),
+          metadata: {},
+          payload: {
+            threadId,
+            plan: {
+              runId: 'run-pipeline-revert',
+              revision: 1,
+              turnId: null,
+              workflow: 'implementation',
+              task: 'Ship the change',
+              stages: [],
+              totalWorkers: 0,
+              maxWorkers: 1,
+              source: 'tool',
+              status: 'pending',
+              createdAt: upsertedAt,
+              updatedAt: upsertedAt,
+            },
+            createdAt: upsertedAt,
+          },
+        })
+        yield* appendAndProject({
+          type: 'thread.orchestrate-plan-response-requested',
+          eventId: EventId.make('evt-orchestrate-respond-failed-approve'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: approvedAt,
+          commandId: CommandId.make('cmd-orchestrate-respond-failed-approve'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-orchestrate-respond-failed-approve'),
+          metadata: {},
+          payload: {
+            threadId,
+            runId: 'run-pipeline-revert',
+            revision: 1,
+            decision: 'approve',
+            createdAt: approvedAt,
+          },
+        })
+
+        const approved = yield* sql<{ readonly status: string }>`
+          SELECT status
+          FROM projection_thread_orchestrate_plans
+          WHERE thread_id = ${threadId}
+            AND run_id = 'run-pipeline-revert'
+            AND revision = 1
+        `
+        assert.deepEqual(approved, [{ status: 'approved' }])
+
+        yield* appendAndProject({
+          type: 'thread.activity-appended',
+          eventId: EventId.make('evt-orchestrate-respond-failed-activity'),
+          aggregateKind: 'thread',
+          aggregateId: threadId,
+          occurredAt: failedAt,
+          commandId: CommandId.make('cmd-orchestrate-respond-failed-activity'),
+          causationEventId: null,
+          correlationId: CorrelationId.make('cmd-orchestrate-respond-failed-activity'),
+          metadata: {},
+          payload: {
+            threadId,
+            activity: {
+              id: EventId.make('activity-orchestrate-respond-failed'),
+              tone: 'error',
+              kind: 'provider.orchestrate-plan.respond.failed',
+              summary: 'Provider orchestrate plan response failed',
+              payload: {
+                detail: 'simulated envelope delivery failure',
+                runId: 'run-pipeline-revert',
+                revision: 1,
+              },
+              turnId: null,
+              createdAt: failedAt,
+            },
+          },
+        })
+
+        const reverted = yield* sql<{ readonly status: string }>`
+          SELECT status
+          FROM projection_thread_orchestrate_plans
+          WHERE thread_id = ${threadId}
+            AND run_id = 'run-pipeline-revert'
+            AND revision = 1
+        `
+        assert.deepEqual(reverted, [{ status: 'pending' }])
+      }),
+    )
+  },
+)

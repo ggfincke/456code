@@ -38,16 +38,13 @@ import type * as EffectAcpSchema from 'effect-acp/schema'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
+import { CURSOR_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 import {
   ProviderAdapterProcessError,
   ProviderAdapterRequestError,
   ProviderAdapterValidationError,
 } from '../Errors.ts'
-import {
-  acpPermissionOutcome,
-  classifyAcpTermination,
-  mapAcpToAdapterError,
-} from '../acp/AcpAdapterSupport.ts'
+import { classifyAcpTermination, mapAcpToAdapterError } from '../acp/AcpAdapterSupport.ts'
 import type * as AcpSessionRuntime from '../acp/AcpSessionRuntime.ts'
 import {
   makeAcpAssistantItemEvent,
@@ -354,6 +351,20 @@ function selectAutoApprovedPermissionOption(
   return undefined
 }
 
+function selectPermissionOptionId(
+  request: EffectAcpSchema.RequestPermissionRequest,
+  decision: Exclude<ProviderApprovalDecision, 'cancel'>,
+): string | undefined
+{
+  const kind =
+    decision === 'acceptForSession'
+      ? 'allow_always'
+      : decision === 'accept'
+        ? 'allow_once'
+        : 'reject_once'
+  return request.options.find((option) => option.kind === kind)?.optionId.trim() || undefined
+}
+
 export function makeCursorAdapter(
   cursorSettings: CursorSettings,
   options?: CursorAdapterLiveOptions,
@@ -605,7 +616,7 @@ export function makeCursorAdapter(
             childProcessSpawner,
             cwd,
             ...(resumeSessionId ? { resumeSessionId } : {}),
-            ...(parsedResume?.requireExisting === true ? { requireSessionLoadResponse: true } : {}),
+            ...(parsedResume?.requireExisting === true ? { sessionSetup: 'import' as const } : {}),
             clientInfo: { name: 'code456', version: '0.0.0' },
             ...(mcpSession
               ? {
@@ -800,14 +811,15 @@ export function makeCursorAdapter(
                       decision: resolved,
                     }),
                   )
+                  const selectedOptionId =
+                    resolved === 'cancel' ? undefined : selectPermissionOptionId(params, resolved)
                   return {
-                    outcome:
-                      resolved === 'cancel'
-                        ? ({ outcome: 'cancelled' } as const)
-                        : {
-                            outcome: 'selected' as const,
-                            optionId: acpPermissionOutcome(resolved),
-                          },
+                    outcome: selectedOptionId
+                      ? {
+                          outcome: 'selected' as const,
+                          optionId: selectedOptionId,
+                        }
+                      : ({ outcome: 'cancelled' } as const),
                   }
                 }),
               ),
@@ -1285,7 +1297,7 @@ export function makeCursorAdapter(
 
     return {
       provider: PROVIDER,
-      capabilities: { sessionModelSwitch: 'in-session' },
+      capabilities: CURSOR_PROVIDER_CAPABILITIES,
       startSession,
       sendTurn,
       interruptTurn,

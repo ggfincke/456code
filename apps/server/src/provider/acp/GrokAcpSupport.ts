@@ -9,6 +9,7 @@ import * as Scope from 'effect/Scope'
 import * as ChildProcessSpawner from 'effect/unstable/process/ChildProcessSpawner'
 import * as EffectAcpErrors from 'effect-acp/errors'
 import type * as EffectAcpSchema from 'effect-acp/schema'
+import type { SessionModelsExtension } from 'effect-acp/provider-extensions'
 import { normalizeModelSlug } from '@t3tools/shared/model'
 
 import * as AcpSessionRuntime from './AcpSessionRuntime.ts'
@@ -92,9 +93,9 @@ export function resolveGrokAcpBaseModelId(model: string | null | undefined): str
 
 export function currentGrokModelIdFromSessionSetup(
   sessionSetupResult:
-    | EffectAcpSchema.LoadSessionResponse
-    | EffectAcpSchema.NewSessionResponse
-    | EffectAcpSchema.ResumeSessionResponse,
+    | (EffectAcpSchema.LoadSessionResponse & SessionModelsExtension)
+    | (EffectAcpSchema.NewSessionResponse & SessionModelsExtension)
+    | (EffectAcpSchema.ResumeSessionResponse & SessionModelsExtension),
 ): string | undefined
 {
   return sessionSetupResult.models?.currentModelId?.trim() || undefined

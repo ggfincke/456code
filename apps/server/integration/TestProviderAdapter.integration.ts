@@ -30,6 +30,7 @@ import type {
   ProviderThreadSnapshot,
   ProviderThreadTurnSnapshot,
 } from '../src/provider/Services/ProviderAdapter.ts'
+import { providerCapabilitiesForDriver } from '../src/provider/providerCapabilities.ts'
 
 export interface TestTurnResponse
 {
@@ -587,9 +588,7 @@ export const makeTestProviderAdapterHarness = (options?: MakeTestProviderAdapter
 
     const adapter: ProviderAdapterShape<ProviderAdapterError> = {
       provider,
-      capabilities: {
-        sessionModelSwitch: 'in-session',
-      },
+      capabilities: providerCapabilitiesForDriver(provider),
       startSession,
       sendTurn,
       interruptTurn,

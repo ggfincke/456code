@@ -357,10 +357,14 @@ const installWindowsEnvironment = Effect.fn('desktop.shellEnvironment.installWin
     config: ShellEnvironmentConfig,
   ): Effect.fn.Return<void, never, ChildProcessSpawner.ChildProcessSpawner>
   {
-    const noProfile = yield* readWindowsEnvironment(['PATH'], { loadProfile: false })
-    const profile = yield* readWindowsEnvironment(WINDOWS_PROFILE_ENV_NAMES, {
-      loadProfile: true,
-    })
+    // probes are independent and each launches its own PowerShell process
+    const [noProfile, profile] = yield* Effect.all(
+      [
+        readWindowsEnvironment(['PATH'], { loadProfile: false }),
+        readWindowsEnvironment(WINDOWS_PROFILE_ENV_NAMES, { loadProfile: true }),
+      ],
+      { concurrency: 2 },
+    )
     const mergedPath = mergePaths('win32', [
       trimNonEmpty(profile.PATH),
       trimNonEmpty(knownWindowsCliDirs(config.env).join(';')),

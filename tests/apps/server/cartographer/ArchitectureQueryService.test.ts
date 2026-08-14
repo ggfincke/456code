@@ -1065,6 +1065,74 @@ describe('ArchitectureQueryService', () =>
     }),
   )
 
+  it.effect('falls back to paired graph reads only for a legacy sealed diff-analysis impact', () =>
+    Effect.gen(function* ()
+    {
+      const root = yield* Effect.promise(() =>
+        makeTemporaryRoot('456code-legacy-diff-analysis-impact-'),
+      )
+      const diffAnalysisId = DiffAnalysisId.make('diff-analysis-legacy-impact')
+      const baseGraphPath = yield* Effect.promise(() =>
+        writeGraph(root, graph(['src/base.ts']), 'legacy-base.graph.json'),
+      )
+      const headGraphPath = yield* Effect.promise(() =>
+        writeGraph(root, graph(['src/base.ts', 'src/added.ts']), 'legacy-head.graph.json'),
+      )
+      let graphLoads = 0
+      const service = yield* make({
+        loadGraph: (path) =>
+        {
+          graphLoads += 1
+          return loadContextQuery(path)
+        },
+      }).pipe(
+        Effect.provide(
+          dependencyLayer({
+            root,
+            diffs: {
+              getById: () => Effect.succeed(diffGeneration(diffAnalysisId)),
+              retainReadyImpactTarget: () =>
+                Effect.succeed({
+                  generation: diffGeneration(diffAnalysisId),
+                  diff: null,
+                  impactDigest: `sha256:${'3'.repeat(64)}`,
+                  legacy: true,
+                  repositoryRoot: root,
+                  baseTreeOid: 'a'.repeat(40),
+                  headTreeOid: 'b'.repeat(40),
+                  baseGraphDigest: `sha256:${'4'.repeat(64)}`,
+                  headGraphDigest: `sha256:${'5'.repeat(64)}`,
+                  baseRoot: root,
+                  headRoot: root,
+                }),
+              retainReadyTarget: () =>
+                Effect.succeed({
+                  generation: diffGeneration(diffAnalysisId),
+                  repositoryKey: 'repository-test',
+                  headRoot: root,
+                  baseGraphPath,
+                  headGraphPath,
+                  impactPath: headGraphPath,
+                }),
+            },
+          }),
+        ),
+      )
+
+      const result = yield* service.architectureImpact(authority, {
+        comparison: { kind: 'diff-analysis', diffAnalysisId },
+      })
+
+      expect(result).toMatchObject({
+        version: 2,
+        comparison: { kind: 'diff-analysis', diffAnalysisId },
+        changed: true,
+        addedNodes: { items: ['src/added.ts'], total: 1, omitted: 0 },
+      })
+      expect(graphLoads).toBe(2)
+    }),
+  )
+
   it.effect('accepts all-skipped patches and returns exact byte and graph limit details', () =>
     Effect.gen(function* ()
     {

@@ -57,6 +57,7 @@ import * as Path from 'effect/Path'
 import * as Queue from 'effect/Queue'
 import * as Ref from 'effect/Ref'
 import * as Stream from 'effect/Stream'
+import { CLAUDE_PROVIDER_CAPABILITIES } from '../providerCapabilities.ts'
 
 import { resolveAttachmentPath } from '../../attachments/attachmentStore.ts'
 import { ServerConfig } from '../../config.ts'
@@ -4157,9 +4158,7 @@ export const makeClaudeAdapter = Effect.fn('makeClaudeAdapter')(function* (
 
   return {
     provider: PROVIDER,
-    capabilities: {
-      sessionModelSwitch: 'in-session',
-    },
+    capabilities: CLAUDE_PROVIDER_CAPABILITIES,
     startSession,
     sendTurn,
     interruptTurn,

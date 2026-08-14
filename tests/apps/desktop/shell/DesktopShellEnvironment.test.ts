@@ -2,7 +2,9 @@
 // verify desktop shell environment behavior
 
 import { assert, describe, it } from '@effect/vitest'
+import * as Deferred from 'effect/Deferred'
 import * as Effect from 'effect/Effect'
+import * as Fiber from 'effect/Fiber'
 import * as Layer from 'effect/Layer'
 import * as Logger from 'effect/Logger'
 import * as PlatformError from 'effect/PlatformError'
@@ -75,6 +77,7 @@ function runShellEnvironment(input: {
   readonly env: NodeJS.ProcessEnv
   readonly platform: NodeJS.Platform
   readonly handler: (command: ChildProcess.Command) => string
+  readonly beforeSpawn?: (command: ChildProcess.Command) => Effect.Effect<void>
   readonly failure?: PlatformError.PlatformError
 })
 {
@@ -88,7 +91,9 @@ function runShellEnvironment(input: {
     ChildProcessSpawner.ChildProcessSpawner,
     ChildProcessSpawner.make((command) =>
       input.failure === undefined
-        ? Effect.succeed(makeProcess(input.handler(command)))
+        ? (input.beforeSpawn?.(command) ?? Effect.void).pipe(
+            Effect.map(() => makeProcess(input.handler(command))),
+          )
         : Effect.fail(input.failure),
     ),
   )
@@ -259,6 +264,46 @@ describe('DesktopShellEnvironment', () =>
         env.FNM_MULTISHELL_PATH,
         'C:\\Users\\testuser\\AppData\\Local\\fnm_multishells\\123',
       )
+    }),
+  )
+
+  it.effect('starts both Windows environment probes before either completes', () =>
+    Effect.gen(function* ()
+    {
+      const env: NodeJS.ProcessEnv = { PATH: 'C:\\Windows\\System32' }
+      const firstProbeStarted = yield* Deferred.make<void>()
+      const releaseProbes = yield* Deferred.make<void>()
+      const startedProbes: string[] = []
+
+      const installFiber = yield* runShellEnvironment({
+        env,
+        platform: 'win32',
+        handler: (command) =>
+          command._tag === 'StandardCommand' && command.args.includes('-NoProfile')
+            ? envOutput({ PATH: 'C:\\NoProfile' })
+            : envOutput({ PATH: 'C:\\Profile' }),
+        beforeSpawn: (command) =>
+          Effect.gen(function* ()
+          {
+            const probe =
+              command._tag === 'StandardCommand' && command.args.includes('-NoProfile')
+                ? 'no-profile'
+                : 'profile'
+            startedProbes.push(probe)
+            if (startedProbes.length === 1)
+            {
+              yield* Deferred.succeed(firstProbeStarted, undefined)
+            }
+            yield* Deferred.await(releaseProbes)
+          }),
+      }).pipe(Effect.forkChild({ startImmediately: true }))
+
+      yield* Deferred.await(firstProbeStarted)
+      yield* Effect.yieldNow
+      assert.sameMembers(startedProbes, ['no-profile', 'profile'])
+
+      yield* Deferred.succeed(releaseProbes, undefined)
+      yield* Fiber.join(installFiber)
     }),
   )
 

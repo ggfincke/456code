@@ -8,6 +8,7 @@ import {
   type ProviderApprovalDecision,
   ModelSelection,
   NonNegativeInt,
+  OrchestrateArchitecturePaths,
   OrchestratePlanRevision,
   type OrchestrateRunExecution,
   type OrchestrationEvent,
@@ -60,6 +61,7 @@ import { ProjectionThreadSessionRepositoryLive } from '../../persistence/Layers/
 import { ProjectionTurnRepositoryLive } from '../../persistence/Layers/ProjectionTurns.ts'
 import { ProjectionThreadRepositoryLive } from '../../persistence/Layers/ProjectionThreads.ts'
 import { ServerConfig } from '../../config.ts'
+import { pickOccupiedOrchestratePlanForRespondFailure } from '../projector.ts'
 import {
   OrchestrationProjectionPipeline,
   type OrchestrationProjectionPipelineShape,
@@ -105,6 +107,9 @@ const encodeOrchestratePlanStagesJson = Schema.encodeSync(
 const encodeOrchestratePlanLeadModelJson = Schema.encodeSync(
   Schema.NullOr(Schema.fromJsonString(ModelSelection)),
 )
+const encodeOrchestratePlanArchitecturePathsJson = Schema.encodeSync(
+  Schema.NullOr(Schema.fromJsonString(OrchestrateArchitecturePaths)),
+)
 const ProjectionThreadOrchestratePlanDbRow = Schema.Struct({
   threadId: ThreadId,
   runId: OrchestratePlanRevision.fields.runId,
@@ -121,6 +126,8 @@ const ProjectionThreadOrchestratePlanDbRow = Schema.Struct({
   leadModelSelection: Schema.NullOr(Schema.fromJsonString(ModelSelection)),
   status: OrchestratePlanRevision.fields.status,
   sourceSequence: Schema.NullOr(NonNegativeInt),
+  // NULL when the revision omitted paths or was written before migration 068
+  architecturePaths: Schema.NullOr(Schema.fromJsonString(OrchestrateArchitecturePaths)),
   createdAt: OrchestratePlanRevision.fields.createdAt,
   updatedAt: OrchestratePlanRevision.fields.updatedAt,
 })
@@ -525,6 +532,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           lead_model_selection_json AS "leadModelSelection",
           status,
           source_sequence AS "sourceSequence",
+          architecture_paths_json AS "architecturePaths",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_orchestrate_plans
@@ -553,6 +561,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           lead_model_selection_json AS "leadModelSelection",
           status,
           source_sequence AS "sourceSequence",
+          architecture_paths_json AS "architecturePaths",
           created_at AS "createdAt",
           updated_at AS "updatedAt"
         FROM projection_thread_orchestrate_plans
@@ -567,6 +576,9 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
     {
       const stagesJson = encodeOrchestratePlanStagesJson(row.stages)
       const leadModelSelectionJson = encodeOrchestratePlanLeadModelJson(row.leadModelSelection)
+      const architecturePathsJson = encodeOrchestratePlanArchitecturePathsJson(
+        row.architecturePaths,
+      )
       yield* sql`
           INSERT INTO projection_thread_orchestrate_plans (
             thread_id,
@@ -582,6 +594,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             lead_model_selection_json,
             status,
             source_sequence,
+            architecture_paths_json,
             created_at,
             updated_at
           )
@@ -599,6 +612,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             ${leadModelSelectionJson},
             ${row.status},
             ${row.sourceSequence},
+            ${architecturePathsJson},
             ${row.createdAt},
             ${row.updatedAt}
           )
@@ -614,6 +628,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
             lead_model_selection_json = excluded.lead_model_selection_json,
             status = excluded.status,
             source_sequence = excluded.source_sequence,
+            architecture_paths_json = excluded.architecture_paths_json,
             created_at = excluded.created_at,
             updated_at = excluded.updated_at
         `.pipe(
@@ -1789,6 +1804,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           yield* upsertThreadOrchestratePlanRow({
             threadId: event.payload.threadId,
             ...event.payload.plan,
+            architecturePaths: event.payload.plan.architecturePaths ?? null,
             sourceSequence: event.sequence,
           })
           return
@@ -1830,6 +1846,50 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
           `.pipe(
             Effect.mapError(
               toPersistenceSqlError('ProjectionThreadOrchestratePlanRepository.respond:query'),
+            ),
+          )
+          return
+        }
+
+        case 'thread.activity-appended':
+        {
+          if (event.payload.activity.kind !== 'provider.orchestrate-plan.respond.failed')
+          {
+            return
+          }
+          const existingRows = yield* listThreadOrchestratePlanRows({
+            threadId: event.payload.threadId,
+          }).pipe(
+            Effect.mapError(
+              toPersistenceSqlError(
+                'ProjectionThreadOrchestratePlanRepository.revertRespondFailure:list',
+              ),
+            ),
+          )
+          const target = pickOccupiedOrchestratePlanForRespondFailure(
+            existingRows,
+            event.payload.activity.payload,
+            event.payload.activity.createdAt,
+          )
+          if (target === null)
+          {
+            return
+          }
+          yield* sql`
+            UPDATE projection_thread_orchestrate_plans
+            SET
+              status = 'pending',
+              updated_at = ${event.payload.activity.createdAt}
+            WHERE thread_id = ${event.payload.threadId}
+              AND run_id = ${target.runId}
+              AND revision = ${target.revision}
+              AND status IN ('approved', 'rejected')
+              AND updated_at <= ${event.payload.activity.createdAt}
+          `.pipe(
+            Effect.mapError(
+              toPersistenceSqlError(
+                'ProjectionThreadOrchestratePlanRepository.revertRespondFailure:query',
+              ),
             ),
           )
           return
@@ -2840,6 +2900,7 @@ const makeOrchestrationProjectionPipeline = Effect.fn('makeOrchestrationProjecti
         eventTypes: new Set([
           'thread.orchestrate-plan-upserted',
           'thread.orchestrate-plan-response-requested',
+          'thread.activity-appended',
           'thread.reverted',
         ]),
         apply: applyThreadOrchestratePlansProjection,

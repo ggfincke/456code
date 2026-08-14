@@ -484,6 +484,42 @@ it.effect('derives the draft revision and returns the exact committed revision',
   }).pipe(Effect.provide(makeLayer(dispatched, readEventsCalls)))
 })
 
+it.effect('persists optional architecturePaths on the dispatched revision', () =>
+{
+  const dispatched: Array<OrchestrationCommand> = []
+  const readEventsCalls: Array<readonly [number, number | undefined]> = []
+
+  return Effect.gen(function* ()
+  {
+    const server = yield* McpServer.McpServer
+    yield* server
+      .callTool({
+        name: 'orchestrate_plan_upsert',
+        arguments: {
+          runId,
+          workflow: 'implementation',
+          task: 'Ship the orchestrate plan.',
+          stages: projectedPlan.stages,
+          maxWorkers: 2,
+          architecturePaths: ['src/api.ts', 'apps/web'],
+        },
+      })
+      .pipe(
+        Effect.provideService(McpInvocationContext.McpInvocationContext, invocation),
+        Effect.provideService(McpSchema.McpServerClient, client),
+      )
+
+    expect(dispatched[0]).toMatchObject({
+      type: 'thread.orchestrate-plan.upsert',
+      plan: {
+        runId,
+        architecturePaths: ['src/api.ts', 'apps/web'],
+      },
+    })
+    expect(readEventsCalls).toEqual([[41, 1]])
+  }).pipe(Effect.provide(makeLayer(dispatched, readEventsCalls)))
+})
+
 it.effect(
   'admits only the approved source event and captures repository identity server-side',
   () =>

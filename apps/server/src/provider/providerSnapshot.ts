@@ -2,6 +2,7 @@
 // builds normalized provider snapshots from provider-specific probe results
 import type {
   ProviderDriverKind,
+  ProviderRuntimeCapabilities,
   ModelCapabilities,
   ServerProvider,
   ServerProviderAccountUsage,
@@ -62,6 +63,7 @@ export interface ProviderProbeResult
 export interface ServerProviderPresentation
 {
   readonly displayName: string
+  readonly capabilities: ProviderRuntimeCapabilities
   readonly badgeLabel?: string
   readonly showInteractionModeToggle?: boolean
   readonly requiresNewThreadForModelChange?: boolean
@@ -252,6 +254,7 @@ export function buildServerProvider(input: {
     : undefined
   return {
     displayName: input.presentation.displayName,
+    capabilities: input.presentation.capabilities,
     ...(input.presentation.badgeLabel ? { badgeLabel: input.presentation.badgeLabel } : {}),
     ...(typeof input.presentation.showInteractionModeToggle === 'boolean'
       ? { showInteractionModeToggle: input.presentation.showInteractionModeToggle }

@@ -19,13 +19,11 @@ export const T3_CODE_PROPOSAL_TOOL_INSTRUCTIONS = `
 
 ## 456code proposal previews
 
-When the \`code456\` MCP server exposes \`proposal_preview_upsert\`, you MUST create an immutable proposal preview after the proposed edit set is decision-complete. Pass only bounded typed file operations and, when useful, a SafeDocument MDX narrative. The authenticated 456code session derives environment, project, thread, provider, worktree root, and active-turn authority; never invent or pass those values.
+When the \`code456\` MCP server exposes \`proposal_preview_upsert\`, create an immutable proposal preview after the proposed edit set is decision-complete and non-empty. Pass only bounded typed file operations and, when useful, a SafeDocument MDX narrative. The authenticated 456code session derives environment, project, thread, provider, worktree root, and active-turn authority; never invent or pass those values.
 
-In Plan mode, call \`proposal_preview_upsert\` before emitting the final \`<proposed_plan>\` block. The current turn supplies the plan identity; do not pass an orchestrate target.
+In Plan mode, call \`proposal_preview_upsert\` before emitting the final \`<proposed_plan>\` block. The current turn supplies the plan identity; do not pass an orchestrate target. Do not finalize the plan until the required proposal call succeeds. If a tool call fails, inspect the error and retry when it is actionable; if it still cannot succeed, report the failure instead of presenting an official final plan without its immutable proposal revision.
 
-In Orchestrate mode, use this exact sequence: call \`orchestrate_plan_upsert\`; capture its committed \`(runId, revision)\`; call \`proposal_preview_upsert\` with \`orchestratePlan: { runId, revision }\`; after that succeeds, emit the fenced \`orchestrate-plan\` JSON block containing the same committed \`runId\` and \`revision\`. The fence, not a \`<proposed_plan>\` block, is the timeline anchor for an orchestrate proposal preview.
-
-Do not finalize the plan until the required proposal call succeeds. If a tool call fails, inspect the error and retry when it is actionable; if it still cannot succeed, report the failure instead of presenting an official final plan without its immutable proposal revision.
+In Orchestrate mode, \`orchestrate_plan_upsert\` plus the fenced \`orchestrate-plan\` JSON block is enough to render the approval gate. Call \`proposal_preview_upsert\` with \`orchestratePlan: { runId, revision }\` only when there is a non-empty decided edit set. Never invent files, paths, or no-op edits to satisfy a proposal preview. An empty or speculative preview is not the orchestrate gate.
 
 \`proposal_preview_upsert\` is allowed in Plan and Orchestrate modes despite their mutation restrictions because it writes only 456code planning metadata, content-addressed blobs, and isolated retained Git refs. It does not edit the user's worktree or index and does not implement the plan. Never describe the preview as guaranteed future changes; call it a preview of the exact proposal revision against its captured workspace snapshot.
 `
@@ -34,9 +32,9 @@ export const T3_CODE_ARCHITECTURE_TOOL_INSTRUCTIONS = `
 
 ## 456code architecture tools
 
-When the \`code456\` MCP server exposes \`architecture_*\` tools, use them to ground structural decisions. In Plan mode, call \`architecture_blast_radius\` before proposing an invasive or cross-boundary change. In Orchestrate mode, call it before gating a plan that changes shared interfaces or subsystem ownership.
+When the \`code456\` MCP server exposes \`architecture_*\` tools, use them to ground structural decisions. Prefer \`standing-project\` for pre-write blast radius and neighborhood. Do not invent files to query. Do not auto-prepare \`current-thread-worktree\` from architecture read tools. In Plan mode, call \`architecture_blast_radius\` before proposing an invasive or cross-boundary change. In Orchestrate mode, call it before gating a plan that changes shared interfaces or subsystem ownership.
 
-Use \`architecture_graph_diff\` to compare analyzed base/head states for a concrete diff, never to predict unanalyzed changes. Use \`architecture_propose_patch\` after the intended edit set is decision-complete to sanity-check its file/import structure; the result is analysis, not authority to edit.
+Use \`architecture_graph_diff\` to compare analyzed base/head states for a concrete diff, never to predict unanalyzed changes. Use \`architecture_propose_patch\` after the intended edit set is decision-complete to sanity-check its file/import structure; the result is analysis, not authority to edit. GraphPatch operations use repository-relative \`from\`/\`to\` file paths; never treat \`path\` or \`specifier\` as GraphPatch endpoints.
 
 Before the plan/proposal anchor, sequence blast radius first, graph diff when both states exist, then propose patch when structural validation helps. Summarize material findings in prose; rely on tool descriptions for operation details. The authenticated session derives scope; never invent or pass authority values. On failure, inspect and retry corrected arguments when actionable. If tools are absent, unsupported, or still fail, continue from repository evidence, state the limitation, and never fabricate architecture results.
 `
@@ -66,7 +64,7 @@ Before any \`start_worker\` call:
 
 1. Parse any \`workflow=\`, per-stage \`<stage>=provider[:model[:effort]]\` overrides, \`max-workers=\`, and explicit \`--yes\`.
 2. Resolve each stage's provider, model, effort, mode, and worker count from broker defaults, global and repository profile bindings, approved gate edits, and inline arguments in that precedence order.
-3. When the orchestrate MCP toolkit is available, persist the resolved plan with \`orchestrate_plan_upsert\`, capture its committed \`revision\`, complete the linked proposal-preview sequence below, then ALSO emit the fenced \`orchestrate-plan\` JSON block with the same \`runId\` and committed \`revision\` — the fence is the timeline anchor the client renders that exact persisted revision into. Without the toolkit, the fenced block alone is the supported form. Include a stable \`runId\`, revision when committed by the toolkit, workflow, task, unique stage ids, provider/model/effort, read or edit mode, worker counts, scalar scopes, \`totalWorkers\`, and \`maxWorkers\`.
+3. When the orchestrate MCP toolkit is available, persist the resolved plan with \`orchestrate_plan_upsert\`, capture its committed \`revision\`, then ALSO emit the fenced \`orchestrate-plan\` JSON block with the same committed \`runId\` and \`revision\` — the fence is the timeline render anchor; the persisted revision is the durable card. Pass optional \`architecturePaths\` as existing repository-relative files or directories you will touch; never invent paths to satisfy the gate. Stage \`scope\` stays worker text (globs/braces are not graph identity). Without the toolkit, the fenced block alone is the supported form. Include a stable \`runId\`, revision when committed by the toolkit, workflow, task, unique stage ids, provider/model/effort, read or edit mode, worker counts, scalar scopes, \`totalWorkers\`, and \`maxWorkers\`.
 4. Wait for explicit approval before launching. Only an invocation containing \`--yes\` skips the gate.
 
 Treat the approved plan as a budget. Re-gate before changing a stage's provider or model or exceeding \`maxWorkers\`. The session model remains the orchestrator; stage bindings govern workers only.

@@ -69,6 +69,7 @@ import type {
   ProviderEffectContext,
 } from '../Services/ProviderAdapter.ts'
 import * as ProviderAdapterRegistry from '../Services/ProviderAdapterRegistry.ts'
+import { ProviderBackgroundTaskRegistry } from '../Services/ProviderBackgroundTaskRegistry.ts'
 import * as ProviderService from '../Services/ProviderService.ts'
 import * as ProviderSessionDirectory from '../Services/ProviderSessionDirectory.ts'
 import { type EventNdjsonLogger } from './EventNdjsonLogger.ts'
@@ -76,6 +77,11 @@ import * as ProviderEventLoggers from './ProviderEventLoggers.ts'
 import * as AnalyticsService from '../../telemetry/Services/AnalyticsService.ts'
 import * as McpSessionRegistry from '../../mcp/McpSessionRegistry.ts'
 import { applyOrchestrateModeInstructions } from '../CollaborationModeInstructions.ts'
+import {
+  coerceSupportedRuntimeMode,
+  providerBaseInteractionMode,
+  supportsTurnMode,
+} from '../providerCapabilities.ts'
 import { observeHiddenTurnRuntimeEvent } from '../HiddenTurnRegistry.ts'
 import {
   ProviderRuntimeInbox,
@@ -348,6 +354,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       ? contextualRegistryMutator
       : Option.some(options.registryMutator)
   const directory = yield* ProviderSessionDirectory.ProviderSessionDirectory
+  const backgroundTasks = yield* ProviderBackgroundTaskRegistry
   const mcpSessionRegistry = yield* McpSessionRegistry.McpSessionRegistry
   const runtimeInbox = yield* ProviderRuntimeInbox
   const projectionSnapshotQuery = yield* ProjectionSnapshotQuery
@@ -516,6 +523,34 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
     }
   })
 
+  const shouldRefreshLastSeenAt = (event: ProviderRuntimeEvent): boolean =>
+    event.type === 'turn.completed' ||
+    (event.type === 'session.state.changed' && event.payload.state === 'ready')
+
+  const refreshSessionLastSeenAt = (threadId: ThreadId, providerInstanceId: ProviderInstanceId) =>
+    directory.getBinding(threadId).pipe(
+      Effect.flatMap((binding) =>
+      {
+        const current = Option.getOrUndefined(binding)
+        if (current === undefined || current.providerInstanceId !== providerInstanceId)
+        {
+          return Effect.void
+        }
+        return directory.upsert({
+          threadId: current.threadId,
+          provider: current.provider,
+          providerInstanceId,
+        })
+      }),
+      Effect.catchCause((cause) =>
+        Effect.logWarning('provider.session.last-seen.refresh-failed', {
+          threadId,
+          providerInstanceId,
+          cause,
+        }),
+      ),
+    )
+
   const publishRuntimeEvent = (
     binding: ProviderAdapterRuntimeSessionBinding,
     event: ProviderRuntimeEvent,
@@ -524,7 +559,8 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
       Effect.flatMap((result) =>
         result.duplicate
           ? Effect.void
-          : observeHiddenTurnRuntimeEvent(event).pipe(
+          : backgroundTasks.observeAcceptedRuntimeEvent(binding, event).pipe(
+              Effect.andThen(observeHiddenTurnRuntimeEvent(event)),
               Effect.andThen(
                 increment(providerRuntimeEventsTotal, {
                   provider: event.provider,
@@ -537,6 +573,11 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                   : Effect.void,
               ),
               Effect.andThen(PubSub.publish(runtimeEventPubSub, event)),
+              Effect.andThen(
+                shouldRefreshLastSeenAt(event)
+                  ? refreshSessionLastSeenAt(event.threadId, binding.providerInstanceId)
+                  : Effect.void,
+              ),
               Effect.asVoid,
             ),
       ),
@@ -2131,6 +2172,10 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                   resolvedInstanceId,
                   route.adapter,
                 )
+                const runtimeMode = coerceSupportedRuntimeMode(
+                  route.adapter.capabilities,
+                  parsed.runtimeMode,
+                )
                 const resolvedProvider = expectedProvider ?? route.info.driverKind
                 metricProvider = resolvedProvider
                 if (parsed.provider !== undefined && parsed.provider !== resolvedProvider)
@@ -2144,6 +2189,7 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                   ...parsed,
                   threadId,
                   provider: resolvedProvider,
+                  runtimeMode,
                 }
                 const persistedBinding = Option.getOrUndefined(
                   yield* directory.getBinding(threadId),
@@ -2396,6 +2442,55 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           })
           metricProvider = routed.adapter.provider
           metricModel = input.modelSelection?.model
+          const capabilities = routed.adapter.capabilities
+          const requestedBaseMode = providerBaseInteractionMode(input)
+          const requestedOrchestrate =
+            input.orchestrate === true || input.interactionMode === 'orchestrate'
+          if (!supportsTurnMode(capabilities, input))
+          {
+            return yield* toValidationError(
+              'ProviderService.sendTurn',
+              requestedOrchestrate && capabilities.orchestrateInstructionDelivery === 'unsupported'
+                ? `Provider instance '${routed.instanceId}' does not support orchestrate instruction delivery.`
+                : `Provider instance '${routed.instanceId}' does not support interaction mode '${requestedBaseMode}'.`,
+            )
+          }
+          if (
+            input.modelSelection !== undefined &&
+            input.modelSelection.instanceId !== routed.instanceId
+          )
+          {
+            return yield* toValidationError(
+              'ProviderService.sendTurn',
+              `Provider turn model selection targets instance '${input.modelSelection.instanceId}', but thread '${input.threadId}' is bound to '${routed.instanceId}'.`,
+            )
+          }
+          const activeSession = (yield* routed.adapter.listSessions()).find(
+            (session) => session.threadId === input.threadId,
+          )
+          if (
+            capabilities.activeTurnInput === 'unsupported' &&
+            activeSession !== undefined &&
+            (activeSession.status === 'running' || activeSession.activeTurnId !== undefined)
+          )
+          {
+            return yield* toValidationError(
+              'ProviderService.sendTurn',
+              `Provider instance '${routed.instanceId}' does not accept input while a turn is active.`,
+            )
+          }
+          if (
+            capabilities.sessionModelSwitch === 'unsupported' &&
+            input.modelSelection !== undefined &&
+            activeSession?.model !== undefined &&
+            input.modelSelection.model !== activeSession.model
+          )
+          {
+            return yield* toValidationError(
+              'ProviderService.sendTurn',
+              `Provider instance '${routed.instanceId}' cannot switch models within an active session.`,
+            )
+          }
           yield* Effect.annotateCurrentSpan({
             'provider.kind': routed.adapter.provider,
             ...(input.modelSelection?.model
@@ -3031,6 +3126,13 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
           ...(context !== undefined ? { context } : {}),
         })
         metricProvider = routed.adapter.provider
+        if (routed.adapter.capabilities.conversationRollback !== 'exact')
+        {
+          return yield* toValidationError(
+            'ProviderService.rollbackConversation',
+            `Provider instance '${routed.instanceId}' does not support exact conversation rollback.`,
+          )
+        }
         yield* Effect.annotateCurrentSpan({
           'provider.operation': 'rollback-conversation',
           'provider.kind': routed.adapter.provider,
@@ -3090,6 +3192,13 @@ const makeProviderService = Effect.fn('makeProviderService')(function* (
                 input.identity.providerInstanceId,
                 route.adapter,
               )
+              if (route.adapter.capabilities.conversationRollback !== 'exact')
+              {
+                return yield* toValidationError(
+                  'ProviderService.rollbackConversationIfExact',
+                  `Provider instance '${input.identity.providerInstanceId}' does not support exact conversation rollback.`,
+                )
+              }
               if (!(yield* route.adapter.hasSession(input.identity.threadId)))
               {
                 return false

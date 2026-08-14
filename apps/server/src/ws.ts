@@ -1161,6 +1161,15 @@ const makeWsRpcLayer = (
             ),
             { 'rpc.aggregate': 'cartographer' },
           ),
+        [WS_METHODS.cartographerGetArchitecturePathScope]: (input) =>
+          observeRpcEffect(
+            WS_METHODS.cartographerGetArchitecturePathScope,
+            architectureProjectionService.architecturePathScope(
+              { environmentId: serverEnvironmentId, threadId: input.threadId },
+              input,
+            ),
+            { 'rpc.aggregate': 'cartographer' },
+          ),
         [WS_METHODS.cartographerGetArchitectureSource]: (input) =>
           observeRpcEffect(
             WS_METHODS.cartographerGetArchitectureSource,
