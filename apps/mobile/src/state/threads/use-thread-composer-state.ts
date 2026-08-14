@@ -7,12 +7,14 @@ import { Alert } from 'react-native'
 
 import {
   CommandId,
+  CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
   MessageId,
   normalizeCollaborationMode,
   type CollaborationMode,
   type EnvironmentId,
   type ModelSelection,
   type ProviderInteractionMode,
+  type ProviderRuntimeCapabilities,
   type RuntimeMode,
   type ThreadId,
 } from '@t3tools/contracts'
@@ -29,6 +31,7 @@ import type { DraftComposerImageAttachment } from '../../lib/composerImages'
 import { scopedThreadKey } from '../../lib/scopedEntities'
 import { buildThreadFeed } from '../../lib/threadActivity'
 import { appAtomRegistry } from '../atom-registry'
+import { useEnvironmentServerConfig } from '../entities'
 import {
   appendComposerDraftAttachments,
   appendComposerDraftText,
@@ -65,6 +68,58 @@ function resolveComposerCollaborationMode(
     )
   }
   return normalizeCollaborationMode(thread.interactionMode, thread.orchestrate)
+}
+
+export function resolveThreadComposerDispatchSettings(input: {
+  readonly draft: Pick<
+    ComposerDraft,
+    'modelSelection' | 'runtimeMode' | 'interactionMode' | 'orchestrate'
+  >
+  readonly thread: {
+    readonly modelSelection: ModelSelection
+    readonly runtimeMode: RuntimeMode
+    readonly interactionMode: ProviderInteractionMode
+    readonly orchestrate?: boolean
+  }
+  readonly serverConfig: {
+    readonly providers: ReadonlyArray<{
+      readonly instanceId: ModelSelection['instanceId']
+      readonly capabilities?: ProviderRuntimeCapabilities
+    }>
+  } | null
+}): {
+  readonly modelSelection: ModelSelection
+  readonly runtimeMode: RuntimeMode
+  readonly collaborationMode: CollaborationMode
+}
+{
+  const modelSelection = input.draft.modelSelection ?? input.thread.modelSelection
+  const capabilities =
+    input.serverConfig?.providers.find(
+      (provider) => provider.instanceId === modelSelection.instanceId,
+    )?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+  const requestedRuntimeMode = input.draft.runtimeMode ?? input.thread.runtimeMode
+  const requestedCollaborationMode = resolveComposerCollaborationMode(input.draft, input.thread)
+  const fallbackBaseMode = capabilities.supportedInteractionModes.includes('default')
+    ? 'default'
+    : 'plan'
+  const collaborationMode = {
+    baseMode: capabilities.supportedInteractionModes.includes(requestedCollaborationMode.baseMode)
+      ? requestedCollaborationMode.baseMode
+      : fallbackBaseMode,
+    orchestrate:
+      requestedCollaborationMode.orchestrate &&
+      capabilities.orchestrateInstructionDelivery !== 'unsupported' &&
+      capabilities.orchestrateBaseModes.includes(requestedCollaborationMode.baseMode),
+  } satisfies CollaborationMode
+
+  return {
+    modelSelection,
+    runtimeMode: capabilities.supportedRuntimeModes.includes(requestedRuntimeMode)
+      ? requestedRuntimeMode
+      : (capabilities.supportedRuntimeModes[0] ?? 'approval-required'),
+    collaborationMode,
+  }
 }
 
 export function appendReviewCommentToDraft(input: {
@@ -106,6 +161,7 @@ export function useThreadComposerState()
   const { selectedThread: selectedThreadShell } = useThreadSelection()
   const selectedThreadDetailState = useSelectedThreadDetailState()
   const selectedThreadDetail = Option.getOrNull(selectedThreadDetailState.data)
+  const serverConfig = useEnvironmentServerConfig(selectedThreadShell?.environmentId ?? null)
   const composerDrafts = useAtomValue(composerDraftsAtom)
   const queuedMessagesByThreadKey = useThreadOutboxMessages()
   const providerSwitch = useThreadProviderSwitch()
@@ -210,7 +266,11 @@ export function useThreadComposerState()
 
     const metadata = makeQueuedMessageMetadata()
     const messageId = MessageId.make(metadata.messageId)
-    const collaborationMode = resolveComposerCollaborationMode(draft, thread)
+    const dispatchSettings = resolveThreadComposerDispatchSettings({
+      draft,
+      thread,
+      serverConfig,
+    })
     // clear on optimistic enqueue and restore content if storage fails
     const enqueuePromise = enqueueThreadOutboxMessage({
       environmentId: selectedThreadShell.environmentId,
@@ -219,10 +279,10 @@ export function useThreadComposerState()
       commandId: CommandId.make(metadata.commandId),
       text,
       attachments,
-      modelSelection: draft.modelSelection ?? thread.modelSelection,
-      runtimeMode: draft.runtimeMode ?? thread.runtimeMode,
-      interactionMode: collaborationMode.baseMode,
-      orchestrate: collaborationMode.orchestrate,
+      modelSelection: dispatchSettings.modelSelection,
+      runtimeMode: dispatchSettings.runtimeMode,
+      interactionMode: dispatchSettings.collaborationMode.baseMode,
+      orchestrate: dispatchSettings.collaborationMode.orchestrate,
       createdAt: metadata.createdAt,
     })
     clearComposerDraftContent(threadKey)
@@ -236,7 +296,7 @@ export function useThreadComposerState()
       )
     })
     return messageId
-  }, [selectedThreadDetail, selectedThreadShell, sendBlockedReason])
+  }, [selectedThreadDetail, selectedThreadShell, sendBlockedReason, serverConfig])
 
   const onChangeDraftMessage = useCallback(
     (value: string) =>

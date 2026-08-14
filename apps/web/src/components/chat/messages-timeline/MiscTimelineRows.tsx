@@ -1,107 +1,17 @@
 // apps/web/src/components/chat/messages-timeline/MiscTimelineRows.tsx
 // render turn-fold, plan, provider-switch, and worker-verdict timeline rows
 
-import { FileDiff } from '@pierre/diffs/react'
-import {
-  type EnvironmentId,
-  type MessageId,
-  type ScopedThreadRef,
-  type ServerProviderSkill,
-  type TurnId,
-} from '@t3tools/contracts'
-import { type TimestampFormat } from '@t3tools/contracts/settings'
-import {
-  ArrowRightIcon,
-  BotIcon,
-  CheckIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  CircleAlertIcon,
-  EyeIcon,
-  GlobeIcon,
-  HammerIcon,
-  MessageCircleIcon,
-  MinusIcon,
-  MousePointerClickIcon,
-  PaintbrushIcon,
-  SquarePenIcon,
-  TerminalIcon,
-  Undo2Icon,
-  WrenchIcon,
-  XIcon,
-  ZapIcon,
-} from 'lucide-react'
-import {
-  Fragment,
-  memo,
-  use,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type KeyboardEvent,
-  type ReactNode,
-} from 'react'
-import { type ParsedElementContextEntry } from '~/lib/elementContext'
-import {
-  extractTrailingPreviewAnnotation,
-  type ParsedPreviewAnnotation,
-} from '~/lib/previewAnnotation'
-import {
-  deriveDisplayedUserMessageState,
-  type ParsedTerminalContextEntry,
-} from '~/lib/terminalContext'
+import { ArrowRightIcon, ChevronDownIcon, ChevronRightIcon, CircleAlertIcon } from 'lucide-react'
+import { use, useState, type KeyboardEvent } from 'react'
 import { cn } from '~/lib/utils'
-import { useUiStateStore } from '~/uiStateStore'
-import { useSyntaxThemeName } from '../../../hooks/useSyntaxThemeName'
-import { getRenderablePatch, resolveFileDiffPath } from '../../../lib/diffRendering'
 import { type ProviderSwitchTimelineParty } from '../../../providerSwitchPresentation'
-import {
-  deriveTimelineEntries,
-  formatDuration,
-  workEntryIndicatesToolFailure,
-  workEntryIndicatesToolNeutralStatus,
-  workEntryIndicatesToolSuccess,
-  workLogEntryIsToolLike,
-} from '../../../session-logic'
-import { formatChatTimestampTooltip, formatShortTimestamp } from '../../../timestampFormat'
-import { type TurnDiffSummary } from '../../../types'
-import ChatMarkdown from '../../ChatMarkdown'
-import { Button } from '../../ui/button'
-import { Tooltip, TooltipPopup, TooltipTrigger } from '../../ui/tooltip'
-import { shouldAutoExpandChangedFiles } from '../changedFilesPresentation'
-import { ChangedFilesCard } from '../ChangedFilesTree'
-import { buildExpandedImagePreview, ExpandedImagePreview } from '../ExpandedImagePreview'
-import { MessageCopyButton } from '../MessageCopyButton'
-import {
-  normalizeCompactToolLabel,
-  resolveAssistantMessageCopyState,
-  type MessagesTimelineRow,
-} from './MessagesTimeline.logic'
-import type { OrchestratePlanActions } from '../OrchestratePlanCard'
 import { ProposedPlanCard } from '../ProposedPlanCard'
+import {
+  OrchestratePlanCard,
+  persistedRevisionToPlan,
+} from '../orchestrate-plan/OrchestratePlanCard'
 import { ProviderInstanceIcon } from '../ProviderInstanceIcon'
-import { TerminalContextInlineChip } from '../TerminalContextInlineChip'
-import { formatWorkspaceRelativePath } from '../../../lib/filePathDisplay'
-import {
-  buildReviewCommentRenderablePatch,
-  formatReviewCommentFence,
-  formatReviewCommentContext,
-  parseReviewCommentMessageSegments,
-  type ReviewCommentContext,
-} from '../../../reviewCommentContext'
-import { SkillInlineText } from '../SkillInlineText'
-import {
-  buildInlineTerminalContextText,
-  formatInlineTerminalContextLabel,
-  textContainsInlineTerminalContextLabels,
-} from '../userMessageTerminalContexts'
-import {
-  TimelineRowActivityCtx,
-  TimelineRowCtx,
-  type TimelineRow,
-  type TimelineWorkEntry,
-} from './timelineRowContext'
+import { TimelineRowCtx, type TimelineRow } from './timelineRowContext'
 
 export function TurnFoldTimelineRow({ row }: { row: Extract<TimelineRow, { kind: 'turn-fold' }> })
 {
@@ -141,6 +51,25 @@ export function ProposedPlanTimelineRow({
         threadRef={ctx.threadRef ?? undefined}
         cwd={ctx.markdownCwd}
         workspaceRoot={ctx.workspaceRoot}
+      />
+    </div>
+  )
+}
+
+export function OrchestratePlanTimelineRow({
+  row,
+}: {
+  row: Extract<TimelineRow, { kind: 'orchestrate-plan' }>
+})
+{
+  const ctx = use(TimelineRowCtx)
+  if (ctx.orchestratePlanActions === undefined) return null
+
+  return (
+    <div className="min-w-0 px-1 py-0.5">
+      <OrchestratePlanCard
+        plan={persistedRevisionToPlan(row.revision)}
+        actions={ctx.orchestratePlanActions}
       />
     </div>
   )

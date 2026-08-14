@@ -1146,6 +1146,89 @@ describe('applyThreadDetailEvent', () =>
         ])
       }
     })
+
+    it('reverts an approved revision when envelope delivery fails', () =>
+    {
+      const approved = applyThreadDetailEvent(
+        {
+          ...baseThread,
+          orchestratePlans: [makeOrchestratePlan({ status: 'approved' })],
+        },
+        {
+          ...baseEventFields,
+          sequence: 15,
+          occurredAt: '2026-04-01T10:04:00.000Z',
+          aggregateKind: 'thread',
+          aggregateId: baseThread.id,
+          type: 'thread.activity-appended',
+          payload: {
+            threadId: baseThread.id,
+            activity: {
+              id: EventId.make('activity-orchestrate-respond-failed'),
+              tone: 'error',
+              kind: 'provider.orchestrate-plan.respond.failed',
+              summary: 'Provider orchestrate plan response failed',
+              payload: {
+                detail: 'simulated envelope delivery failure',
+                runId: 'run-1',
+                revision: 1,
+              },
+              turnId: null,
+              createdAt: '2026-04-01T10:04:00.000Z',
+            },
+          },
+        },
+      )
+
+      expect(approved.kind).toBe('updated')
+      if (approved.kind === 'updated')
+      {
+        expect(approved.thread.orchestratePlans[0]?.status).toBe('pending')
+      }
+    })
+
+    it('reverts a legacy approved revision when the failure payload has no runId', () =>
+    {
+      const approved = applyThreadDetailEvent(
+        {
+          ...baseThread,
+          orchestratePlans: [
+            makeOrchestratePlan({
+              status: 'approved',
+              updatedAt: '2026-08-13T17:42:59.386Z',
+            }),
+          ],
+        },
+        {
+          ...baseEventFields,
+          sequence: 16,
+          occurredAt: '2026-08-13T17:42:59.386Z',
+          aggregateKind: 'thread',
+          aggregateId: baseThread.id,
+          type: 'thread.activity-appended',
+          payload: {
+            threadId: baseThread.id,
+            activity: {
+              id: EventId.make('activity-orchestrate-respond-failed-legacy'),
+              tone: 'error',
+              kind: 'provider.orchestrate-plan.respond.failed',
+              summary: 'Provider orchestrate plan response failed',
+              payload: {
+                detail: 'No active provider session is bound to this thread.',
+              },
+              turnId: null,
+              createdAt: '2026-08-13T17:42:59.386Z',
+            },
+          },
+        },
+      )
+
+      expect(approved.kind).toBe('updated')
+      if (approved.kind === 'updated')
+      {
+        expect(approved.thread.orchestratePlans[0]?.status).toBe('pending')
+      }
+    })
   })
 
   describe('thread.activity-appended', () =>

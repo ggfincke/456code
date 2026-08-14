@@ -26,6 +26,21 @@ export function ProviderIcon(props: ProviderIconProps)
     )
   }
 
+  if (props.provider === 'coral')
+  {
+    return (
+      <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+        <Path
+          stroke="#ff6f61"
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          d="M12 21V8m0 5-4-4m4 1 4-4m-4 10-5 3m5-2 5 3M8 9V5m8 1V3M7 19l-2-3m12 4 2-4"
+        />
+      </Svg>
+    )
+  }
+
   return (
     <Svg width={size} height={size} viewBox="0 0 256 260" fill="none">
       <Path

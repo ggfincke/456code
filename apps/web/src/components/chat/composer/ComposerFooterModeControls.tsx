@@ -1,7 +1,7 @@
 // apps/web/src/components/chat/composer/ComposerFooterModeControls.tsx
 // renders composer runtime-mode and interaction-mode footer controls
 
-import type { CollaborationMode, RuntimeMode } from '@t3tools/contracts'
+import { coerceRuntimeMode, type CollaborationMode, type RuntimeMode } from '@t3tools/contracts'
 import { memo } from 'react'
 import {
   BotIcon,
@@ -53,6 +53,8 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
   showPlanMode: boolean
   collaborationMode: CollaborationMode
   runtimeMode: RuntimeMode
+  showOrchestrate: boolean
+  supportedRuntimeModes: ReadonlyArray<RuntimeMode>
   showPlanToggle: boolean
   planSidebarLabel: string
   planSidebarOpen: boolean
@@ -62,7 +64,8 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
   onTogglePlanSidebar: () => void
 })
 {
-  const runtimeModeOption = runtimeModeConfig[props.runtimeMode]
+  const effectiveRuntimeMode = coerceRuntimeMode(props.runtimeMode, props.supportedRuntimeModes)
+  const runtimeModeOption = runtimeModeConfig[effectiveRuntimeMode]
   const RuntimeModeIcon = runtimeModeOption.icon
   const effectiveMode = props.collaborationMode.baseMode === 'default' ? 'build' : 'plan'
   const interactionModeTooltip =
@@ -80,73 +83,77 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
   const interactionModeToggle = (
     <>
       <Separator orientation="vertical" className="mx-0.5 hidden h-4 sm:block" />
-      <Tooltip>
-        <Select
-          value={effectiveMode}
-          onValueChange={(value) => props.onInteractionModeChange(value! as 'build' | 'plan')}
-        >
+      {props.showPlanMode ? (
+        <Tooltip>
+          <Select
+            value={effectiveMode}
+            onValueChange={(value) => props.onInteractionModeChange(value! as 'build' | 'plan')}
+          >
+            <TooltipTrigger
+              render={
+                <SelectTrigger
+                  variant="ghost"
+                  size="sm"
+                  className={cn(
+                    'shrink-0 whitespace-nowrap px-2 sm:px-3',
+                    effectiveMode !== 'build'
+                      ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
+                      : 'text-muted-foreground/70 hover:text-foreground/80',
+                  )}
+                  aria-label={interactionModeTooltip}
+                />
+              }
+            >
+              <InteractionModeIcon className="size-4" />
+              <SelectValue>{effectiveMode === 'plan' ? 'Plan' : 'Build'}</SelectValue>
+            </TooltipTrigger>
+            <SelectPopup alignItemWithTrigger={false} popupClassName="min-w-40">
+              {/* item text is one block, and preflight makes svg display:block, so
+                each label needs its own flex row to sit beside its icon */}
+              <SelectItem value="build" hideIndicator>
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <BotIcon className="size-3.5" />
+                  Build
+                </span>
+              </SelectItem>
+              {props.showPlanMode ? (
+                <SelectItem value="plan" hideIndicator>
+                  <span className="flex items-center gap-2 whitespace-nowrap">
+                    <PencilRulerIcon className="size-3.5" />
+                    Plan
+                  </span>
+                </SelectItem>
+              ) : null}
+            </SelectPopup>
+          </Select>
+          <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
+        </Tooltip>
+      ) : null}
+      {props.showOrchestrate ? (
+        <Tooltip>
           <TooltipTrigger
             render={
-              <SelectTrigger
+              <Toggle
                 variant="ghost"
                 size="sm"
                 className={cn(
-                  'shrink-0 whitespace-nowrap px-2 sm:px-3',
-                  effectiveMode !== 'build'
+                  'shrink-0 px-2 sm:px-3',
+                  props.collaborationMode.orchestrate
                     ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
                     : 'text-muted-foreground/70 hover:text-foreground/80',
                 )}
-                aria-label={interactionModeTooltip}
-              />
+                aria-label={orchestrateTooltip}
+                pressed={props.collaborationMode.orchestrate}
+                onPressedChange={props.onOrchestrateChange}
+              >
+                <WorkflowIcon className="size-4" />
+                <span className="sr-only sm:not-sr-only">Orchestrate</span>
+              </Toggle>
             }
-          >
-            <InteractionModeIcon className="size-4" />
-            <SelectValue>{effectiveMode === 'plan' ? 'Plan' : 'Build'}</SelectValue>
-          </TooltipTrigger>
-          <SelectPopup alignItemWithTrigger={false} popupClassName="min-w-40">
-            {/* item text is one block, and preflight makes svg display:block, so
-                each label needs its own flex row to sit beside its icon */}
-            <SelectItem value="build" hideIndicator>
-              <span className="flex items-center gap-2 whitespace-nowrap">
-                <BotIcon className="size-3.5" />
-                Build
-              </span>
-            </SelectItem>
-            {props.showPlanMode ? (
-              <SelectItem value="plan" hideIndicator>
-                <span className="flex items-center gap-2 whitespace-nowrap">
-                  <PencilRulerIcon className="size-3.5" />
-                  Plan
-                </span>
-              </SelectItem>
-            ) : null}
-          </SelectPopup>
-        </Select>
-        <TooltipPopup side="top">{interactionModeTooltip}</TooltipPopup>
-      </Tooltip>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <Toggle
-              variant="ghost"
-              size="sm"
-              className={cn(
-                'shrink-0 px-2 sm:px-3',
-                props.collaborationMode.orchestrate
-                  ? 'bg-blue-500/10 text-blue-400 hover:bg-blue-500/15 hover:text-blue-300'
-                  : 'text-muted-foreground/70 hover:text-foreground/80',
-              )}
-              aria-label={orchestrateTooltip}
-              pressed={props.collaborationMode.orchestrate}
-              onPressedChange={props.onOrchestrateChange}
-            >
-              <WorkflowIcon className="size-4" />
-              <span className="sr-only sm:not-sr-only">Orchestrate</span>
-            </Toggle>
-          }
-        />
-        <TooltipPopup side="top">{orchestrateTooltip}</TooltipPopup>
-      </Tooltip>
+          />
+          <TooltipPopup side="top">{orchestrateTooltip}</TooltipPopup>
+        </Tooltip>
+      ) : null}
     </>
   )
 
@@ -156,7 +163,7 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
 
       <Tooltip>
         <Select
-          value={props.runtimeMode}
+          value={effectiveRuntimeMode}
           onValueChange={(value) => props.onRuntimeModeChange(value!)}
         >
           <TooltipTrigger
@@ -173,32 +180,34 @@ export const ComposerFooterModeControls = memo(function ComposerFooterModeContro
             <SelectValue>{runtimeModeOption.label}</SelectValue>
           </TooltipTrigger>
           <SelectPopup alignItemWithTrigger={false}>
-            {runtimeModeOptions.map((mode) =>
-            {
-              const option = runtimeModeConfig[mode]
-              const OptionIcon = option.icon
-              return (
-                <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
-                  <div className="flex min-w-0 items-center gap-3">
-                    <div className="grid min-w-0 flex-1 gap-0.5">
-                      <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
-                        <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
-                        {option.label}
-                      </span>
-                      <span className="text-muted-foreground text-xs leading-4">
-                        {option.description}
-                      </span>
+            {runtimeModeOptions
+              .filter((mode) => props.supportedRuntimeModes.includes(mode))
+              .map((mode) =>
+              {
+                const option = runtimeModeConfig[mode]
+                const OptionIcon = option.icon
+                return (
+                  <SelectItem key={mode} value={mode} hideIndicator className="min-w-64 py-2">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="grid min-w-0 flex-1 gap-0.5">
+                        <span className="inline-flex items-center gap-1.5 font-medium text-foreground">
+                          <OptionIcon className="size-3.5 shrink-0 text-muted-foreground" />
+                          {option.label}
+                        </span>
+                        <span className="text-muted-foreground text-xs leading-4">
+                          {option.description}
+                        </span>
+                      </div>
                     </div>
-                  </div>
-                </SelectItem>
-              )
-            })}
+                  </SelectItem>
+                )
+              })}
           </SelectPopup>
         </Select>
         <TooltipPopup side="top">{runtimeModeOption.description}</TooltipPopup>
       </Tooltip>
 
-      {interactionModeToggle}
+      {props.showPlanMode || props.showOrchestrate ? interactionModeToggle : null}
 
       {props.showPlanToggle ? (
         <>

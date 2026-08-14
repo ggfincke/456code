@@ -37,6 +37,7 @@ function renderPendingActions(isRunning: boolean): string
       isEnvironmentUnavailable: false,
       isPreparingWorktree: false,
       hasSendableContent: false,
+      showOrchestrate: true,
       orchestrateReadinessMessage: null,
       onPreviousPendingQuestion: () => undefined,
       onInterrupt: () => undefined,

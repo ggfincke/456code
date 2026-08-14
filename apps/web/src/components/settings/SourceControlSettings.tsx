@@ -16,7 +16,7 @@ import { DEFAULT_UNIFIED_SETTINGS } from '@t3tools/contracts/settings'
 
 import { usePrimarySettings, useUpdatePrimarySettings } from '../../hooks/useSettings'
 import { cn } from '../../lib/utils'
-import { usePrimaryEnvironment } from '../../state/environments'
+import { useEnvironments, usePrimaryEnvironment } from '../../state/environments'
 import { useEnvironmentQuery } from '../../state/query'
 import { sourceControlEnvironment } from '../../state/sourceControl'
 import { Badge } from '../ui/badge'
@@ -469,7 +469,16 @@ function EmptySourceControlDiscovery({
 
 export function SourceControlSettingsPanel()
 {
-  const environmentId = usePrimaryEnvironment()?.environmentId ?? null
+  const { environments } = useEnvironments()
+  const primaryEnvironment = usePrimaryEnvironment()
+  const selectedEnvironment =
+    primaryEnvironment ??
+    environments.find((environment) => environment.connection.phase === 'connected') ??
+    environments[0] ??
+    null
+  const environmentId = selectedEnvironment?.environmentId ?? null
+  const isPrimaryEnvironment =
+    primaryEnvironment !== null && environmentId === primaryEnvironment.environmentId
   const discovery = useEnvironmentQuery(
     environmentId === null
       ? null
@@ -519,7 +528,7 @@ export function SourceControlSettingsPanel()
             <SettingsSection title="Version Control" headerAction={scanButton}>
               {result.versionControlSystems.map((item) => (
                 <DiscoveryItemRow key={`vcs:${item.kind}`} item={item}>
-                  {item.kind === 'git' ? (
+                  {item.kind === 'git' && isPrimaryEnvironment ? (
                     <>
                       <GitFetchIntervalSettings />
                       <ArchitectureAutoAnalysisSettings />
@@ -549,7 +558,7 @@ export function SourceControlSettingsPanel()
         />
       )}
 
-      {environmentId !== null ? <SourceControlWritingSettingsSection /> : null}
+      {isPrimaryEnvironment ? <SourceControlWritingSettingsSection /> : null}
     </SettingsPageContainer>
   )
 }

@@ -4,7 +4,11 @@
 import { useAtomValue } from '@effect/atom-react'
 import { type DiffsThemeNames } from '@pierre/diffs'
 import { CircleAlertIcon } from 'lucide-react'
-import type { ScopedThreadRef, ServerProviderSkill } from '@t3tools/contracts'
+import type {
+  OrchestratePlanRevision,
+  ScopedThreadRef,
+  ServerProviderSkill,
+} from '@t3tools/contracts'
 import { isAtomCommandInterrupted } from '@t3tools/client-runtime/state/runtime'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'
@@ -26,8 +30,10 @@ import remarkGfm from 'remark-gfm'
 import { renderSkillInlineMarkdownChildren } from './chat/SkillInlineText'
 import {
   OrchestratePlanCard,
+  type OrchestratePlan,
   type OrchestratePlanActions,
   parseOrchestratePlanResult,
+  resolvePersistedRevision,
 } from './chat/orchestrate-plan/OrchestratePlanCard'
 import {
   resolveExternalWebLinkHost,
@@ -204,6 +210,33 @@ const CHAT_MARKDOWN_REHYPE_PLUGINS = [
   rehypeRaw,
   [rehypeSanitize, CHAT_MARKDOWN_SANITIZE_SCHEMA],
 ] satisfies NonNullable<ReactMarkdownOptions['rehypePlugins']>
+
+export type ChatMarkdownOrchestrateFenceMount =
+  | { kind: 'ignore' }
+  | { kind: 'suppress' }
+  | { kind: 'card'; plan: OrchestratePlan }
+  | { kind: 'error'; diagnostic: string }
+
+export function resolveChatMarkdownOrchestrateFence(input: {
+  readonly language: string | null
+  readonly code: string
+  readonly isComplete: boolean
+  readonly orchestratePlans: ReadonlyArray<OrchestratePlanRevision>
+  readonly hasActions: boolean
+}): ChatMarkdownOrchestrateFenceMount
+{
+  if (input.language !== 'orchestrate-plan') return { kind: 'ignore' }
+  const result = parseOrchestratePlanResult(input.code, input.isComplete)
+  if (result.status === 'incomplete') return { kind: 'ignore' }
+  if (result.status === 'error') return { kind: 'error', diagnostic: result.diagnostic }
+  if (!input.hasActions) return { kind: 'ignore' }
+  const persisted = resolvePersistedRevision(
+    input.orchestratePlans,
+    result.plan.runId ?? null,
+    result.plan.revision,
+  )
+  return persisted !== null ? { kind: 'suppress' } : { kind: 'card', plan: result.plan }
+}
 
 const MarkdownDocument = memo(function MarkdownDocument(props: {
   readonly text: string
@@ -558,14 +591,21 @@ function ChatMarkdown({
         let orchestratePlanDiagnostic: string | null = null
         if (language === 'orchestrate-plan')
         {
-          const result = parseOrchestratePlanResult(codeBlock.code, !segmentIsStreaming)
-          if (result.status === 'success' && orchestratePlanActions)
+          const mount = resolveChatMarkdownOrchestrateFence({
+            language,
+            code: codeBlock.code,
+            isComplete: !segmentIsStreaming,
+            orchestratePlans: orchestratePlanActions?.orchestratePlans ?? [],
+            hasActions: orchestratePlanActions !== undefined,
+          })
+          if (mount.kind === 'suppress') return null
+          if (mount.kind === 'card' && orchestratePlanActions !== undefined)
           {
-            return <OrchestratePlanCard plan={result.plan} actions={orchestratePlanActions} />
+            return <OrchestratePlanCard plan={mount.plan} actions={orchestratePlanActions} />
           }
-          if (result.status === 'error')
+          if (mount.kind === 'error')
           {
-            orchestratePlanDiagnostic = result.diagnostic
+            orchestratePlanDiagnostic = mount.diagnostic
           }
         }
         const fenceTitle = extractFenceTitle(extractPreCodeMeta(node))

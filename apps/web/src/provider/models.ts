@@ -2,6 +2,7 @@
 // format provider driver kind label
 
 import {
+  CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES,
   DEFAULT_MODEL,
   DEFAULT_MODEL_BY_PROVIDER,
   defaultInstanceIdForDriver,
@@ -58,7 +59,13 @@ export function getProviderInteractionModeToggle(
   provider: ProviderDriverKind,
 ): boolean
 {
-  return getProviderSnapshot(providers, provider)?.showInteractionModeToggle ?? true
+  const snapshot = getProviderSnapshot(providers, provider)
+  return (
+    snapshot?.showInteractionModeToggle !== false &&
+    (
+      snapshot?.capabilities ?? CONSERVATIVE_PROVIDER_RUNTIME_CAPABILITIES
+    ).supportedInteractionModes.includes('plan')
+  )
 }
 
 export function isProviderEnabled(

@@ -43,6 +43,7 @@ interface ComposerPrimaryActionsProps
   isEnvironmentUnavailable: boolean
   isPreparingWorktree: boolean
   hasSendableContent: boolean
+  showOrchestrate: boolean
   orchestrateReadinessMessage: string | null
   preserveComposerFocusOnPointerDown?: boolean
   onPreviousPendingQuestion: () => void
@@ -91,6 +92,7 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
   isEnvironmentUnavailable,
   isPreparingWorktree,
   hasSendableContent,
+  showOrchestrate,
   orchestrateReadinessMessage,
   preserveComposerFocusOnPointerDown = false,
   onPreviousPendingQuestion,
@@ -224,44 +226,48 @@ export const ComposerPrimaryActions = memo(function ComposerPrimaryActions({
             <ChevronDownIcon className="size-3.5" />
           </MenuTrigger>
           <MenuPopup align="end" side="top" className="max-w-80">
-            <MenuItem
-              className="items-start"
-              disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
-              title={orchestrateReadinessMessage ?? undefined}
-              onClick={() => void onImplementPlanWithOrchestrate()}
-            >
-              <span className="grid min-w-0 gap-0.5">
-                <span>Implement with Orchestrate</span>
-                {orchestrateReadinessMessage === null ? null : (
-                  <span className="flex items-start gap-1 text-amber-700 text-xs whitespace-normal dark:text-amber-400">
-                    <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
-                    <span>{orchestrateReadinessMessage}</span>
-                  </span>
-                )}
-              </span>
-            </MenuItem>
+            {showOrchestrate ? (
+              <MenuItem
+                className="items-start"
+                disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+                title={orchestrateReadinessMessage ?? undefined}
+                onClick={() => void onImplementPlanWithOrchestrate()}
+              >
+                <span className="grid min-w-0 gap-0.5">
+                  <span>Implement with Orchestrate</span>
+                  {orchestrateReadinessMessage === null ? null : (
+                    <span className="flex items-start gap-1 text-amber-700 text-xs whitespace-normal dark:text-amber-400">
+                      <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+                      <span>{orchestrateReadinessMessage}</span>
+                    </span>
+                  )}
+                </span>
+              </MenuItem>
+            ) : null}
             <MenuItem
               disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
               onClick={() => void onImplementPlanInNewThread()}
             >
               Implement in a new thread
             </MenuItem>
-            <MenuItem
-              className="items-start"
-              disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
-              title={orchestrateReadinessMessage ?? undefined}
-              onClick={() => void onImplementPlanWithOrchestrateInNewThread()}
-            >
-              <span className="grid min-w-0 gap-0.5">
-                <span>Implement with Orchestrate in a new thread</span>
-                {orchestrateReadinessMessage === null ? null : (
-                  <span className="flex items-start gap-1 text-amber-700 text-xs whitespace-normal dark:text-amber-400">
-                    <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
-                    <span>{orchestrateReadinessMessage}</span>
-                  </span>
-                )}
-              </span>
-            </MenuItem>
+            {showOrchestrate ? (
+              <MenuItem
+                className="items-start"
+                disabled={isSendBusy || isSendDisabled || isConnecting || isEnvironmentUnavailable}
+                title={orchestrateReadinessMessage ?? undefined}
+                onClick={() => void onImplementPlanWithOrchestrateInNewThread()}
+              >
+                <span className="grid min-w-0 gap-0.5">
+                  <span>Implement with Orchestrate in a new thread</span>
+                  {orchestrateReadinessMessage === null ? null : (
+                    <span className="flex items-start gap-1 text-amber-700 text-xs whitespace-normal dark:text-amber-400">
+                      <TriangleAlertIcon aria-hidden="true" className="mt-0.5 size-3 shrink-0" />
+                      <span>{orchestrateReadinessMessage}</span>
+                    </span>
+                  )}
+                </span>
+              </MenuItem>
+            ) : null}
           </MenuPopup>
         </Menu>
       </div>

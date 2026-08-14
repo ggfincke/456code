@@ -2,6 +2,7 @@
 // derives plan and timeline presentation state
 
 import {
+  type OrchestratePlanRevision,
   type OrchestrationLatestTurn,
   type OrchestrationProposedPlanId,
   type OrchestrationThreadActivity,
@@ -57,6 +58,12 @@ export type TimelineEntry =
       kind: 'proposed-plan'
       createdAt: string
       proposedPlan: ProposedPlan
+    }
+  | {
+      id: string
+      kind: 'orchestrate-plan'
+      createdAt: string
+      revision: OrchestratePlanRevision
     }
   | {
       id: string
@@ -227,9 +234,10 @@ function toLatestProposedPlanState(proposedPlan: ProposedPlan): LatestProposedPl
 const TIMELINE_ENTRY_KIND_RANK = {
   message: 0,
   'proposed-plan': 1,
-  work: 2,
-  'provider-switch': 3,
-  'worker-verdict': 4,
+  'orchestrate-plan': 2,
+  work: 3,
+  'provider-switch': 4,
+  'worker-verdict': 5,
 } as const satisfies Record<TimelineEntry['kind'], number>
 
 function timelineEntryKindRank(entry: TimelineEntry): number
@@ -243,6 +251,7 @@ export function deriveTimelineEntries(
   workEntries: ReadonlyArray<WorkLogEntry>,
   providerSwitchEvents: ReadonlyArray<ProviderSwitchTimelineEvent> = [],
   activities: ReadonlyArray<OrchestrationThreadActivity> = [],
+  orchestratePlans: ReadonlyArray<OrchestratePlanRevision> = [],
 ): TimelineEntry[]
 {
   const messageRows: TimelineEntry[] = messages.map((message) => ({
@@ -256,6 +265,12 @@ export function deriveTimelineEntries(
     kind: 'proposed-plan',
     createdAt: proposedPlan.createdAt,
     proposedPlan,
+  }))
+  const orchestratePlanRows: TimelineEntry[] = orchestratePlans.map((revision) => ({
+    id: `orchestrate-plan:${revision.runId}:${revision.revision}`,
+    kind: 'orchestrate-plan',
+    createdAt: revision.createdAt,
+    revision,
   }))
   const workRows: TimelineEntry[] = workEntries.map((entry) => ({
     id: entry.id,
@@ -280,6 +295,7 @@ export function deriveTimelineEntries(
   const rows = [
     ...messageRows,
     ...proposedPlanRows,
+    ...orchestratePlanRows,
     ...workRows,
     ...providerSwitchRows,
     ...workerVerdictRows,

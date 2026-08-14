@@ -15,16 +15,16 @@ import { cn } from '../../../lib/utils'
 import { useRightPanelStore } from '../../../rightPanelStore'
 import { projectEnvironment } from '../../../state/projects'
 import { useEnvironmentQuery } from '../../../state/query'
+import { useAtomCommand } from '../../../state/use-atom-command'
 import { workersEnvironment } from '../../../state/workers'
 import { workerRunJobRows, workerRunOutcomeSummaryView } from '../../../workers/workersPanel.logic'
-import {
-  resolveOrchestrateArchitectureState,
-  selectExactOrchestrateProposalLookup,
-} from '../../cartographer/orchestrateArchitecture'
-import { formatProposalGenerationFailure } from '../../cartographer/proposalGenerationFailure'
+import { ArchitectureQueryState } from '../../architecture/ArchitectureQueryState'
+import { createArchitectureScopeSurface } from '../../architecture/architectureResourceIdentity'
+import { selectExactOrchestrateProposalLookup } from '../../cartographer/orchestrateArchitecture'
 import { Badge } from '../../ui/badge'
 import { Button } from '../../ui/button'
 import {
+  clearOrchestratePlanRevisionStarted,
   createOrchestratePlanCardStateKey,
   hashOrchestratePlanText,
   isOrchestratePlanCardSuperseded,
@@ -75,6 +75,8 @@ export {
   buildOrchestrateApprovalReply,
   parseOrchestratePlan,
   parseOrchestratePlanResult,
+  persistedRevisionToPlan,
+  resolvePersistedRevision,
 } from './parse'
 
 // the lead's picker key; stage row keys are always `index:stageId`, so this
@@ -87,18 +89,6 @@ interface OrchestratePlanTimelineIdentity
   readonly order: OrchestratePlanEmissionOrder
 }
 
-const ORCHESTRATE_ARCHITECTURE_REFRESH_MS = 3_000
-
-export function refreshOrchestrateArchitectureQueries(input: {
-  readonly linked: boolean
-  readonly refreshLookup: () => void
-  readonly refreshGeneration: () => void
-}): void
-{
-  input.refreshLookup()
-  if (input.linked) input.refreshGeneration()
-}
-
 export function resolveOrchestrateArchitectureRevision(
   persistedRevision: OrchestratePlanRevision | null,
   committedRevision: number | undefined,
@@ -109,6 +99,19 @@ export function resolveOrchestrateArchitectureRevision(
     : null
 }
 
+function atlasUnreadyMessage(state: 'idle' | 'building' | 'error', lastBuildError: string | null)
+{
+  switch (state)
+  {
+    case 'building':
+      return 'Building the standing Repository Atlas for this project.'
+    case 'error':
+      return lastBuildError ?? 'The standing Repository Atlas could not be built.'
+    case 'idle':
+      return 'The standing Repository Atlas has not been built for this project.'
+  }
+}
+
 function OrchestrateArchitectureStrip(props: {
   readonly actions: OrchestratePlanActions
   readonly revision: OrchestratePlanRevision
@@ -116,7 +119,34 @@ function OrchestrateArchitectureStrip(props: {
 })
 {
   const threadRef = props.actions.threadRef
-  const target = useMemo(
+  const projectId = props.actions.projectId
+  const paths = props.revision.architecturePaths ?? []
+  const atlasQuery = useEnvironmentQuery(
+    threadRef === null || projectId === null || paths.length === 0
+      ? null
+      : projectEnvironment.projectAtlasStatus({
+          environmentId: props.actions.environmentId,
+          input: { projectId },
+        }),
+  )
+  const atlasStatus = atlasQuery.data
+  const atlasReady = atlasStatus?.state === 'ready' && atlasStatus.source !== null
+  const pathScopeQuery = useEnvironmentQuery(
+    threadRef === null || projectId === null || !atlasReady || paths.length === 0
+      ? null
+      : projectEnvironment.getArchitecturePathScope({
+          environmentId: props.actions.environmentId,
+          input: {
+            threadId: threadRef.threadId,
+            projectId,
+            paths,
+            ...(atlasStatus?.source === null || atlasStatus?.source === undefined
+              ? {}
+              : { generationId: atlasStatus.source.generationId }),
+          },
+        }),
+  )
+  const proposalTarget = useMemo(
     () =>
       threadRef === null
         ? null
@@ -129,20 +159,23 @@ function OrchestrateArchitectureStrip(props: {
     [props.revision.revision, props.revision.runId, threadRef],
   )
   const lookupQuery = useEnvironmentQuery(
-    target === null
+    proposalTarget === null
       ? null
       : projectEnvironment.findProposalByOrchestrateRevision({
           environmentId: props.actions.environmentId,
           input: {
-            sourceThreadId: target.threadId,
-            runId: target.runId,
-            revision: target.revision,
+            sourceThreadId: proposalTarget.threadId,
+            runId: proposalTarget.runId,
+            revision: proposalTarget.revision,
           },
         }),
   )
   const lookup = useMemo(
-    () => (target === null ? null : selectExactOrchestrateProposalLookup(lookupQuery.data, target)),
-    [lookupQuery.data, target],
+    () =>
+      proposalTarget === null
+        ? null
+        : selectExactOrchestrateProposalLookup(lookupQuery.data, proposalTarget),
+    [lookupQuery.data, proposalTarget],
   )
   const generationQuery = useEnvironmentQuery(
     lookup === null
@@ -156,72 +189,174 @@ function OrchestrateArchitectureStrip(props: {
           },
         }),
   )
-  useEffect(() =>
-  {
-    if (target === null) return
-    const refresh = () =>
-      refreshOrchestrateArchitectureQueries({
-        linked: lookup !== null,
-        refreshLookup: lookupQuery.refresh,
-        refreshGeneration: generationQuery.refresh,
-      })
-    const intervalId = window.setInterval(refresh, ORCHESTRATE_ARCHITECTURE_REFRESH_MS)
-    return () => window.clearInterval(intervalId)
-  }, [generationQuery.refresh, lookup, lookupQuery.refresh, target])
-
-  if (target === null || threadRef === null) return null
-  const state = resolveOrchestrateArchitectureState({
-    lookup,
-    lookupSettled: lookupQuery.hasSettled,
-    lookupError: lookupQuery.error,
-    generation: generationQuery.data,
-    generationSettled: generationQuery.hasSettled,
-    generationError: generationQuery.error,
+  const ensureProjectArchitecture = useAtomCommand(projectEnvironment.ensureProjectArchitecture, {
+    reportFailure: false,
   })
-  const message = (() =>
+
+  const openReview =
+    lookup !== null && generationQuery.data !== null && generationQuery.data !== undefined
+  const openReviewButton =
+    openReview && threadRef !== null && proposalTarget !== null ? (
+      <Button
+        type="button"
+        variant="outline"
+        size="xs"
+        className="gap-1.5"
+        onClick={() => useRightPanelStore.getState().openExplorer(threadRef, proposalTarget)}
+      >
+        <ExternalLinkIcon aria-hidden="true" className="size-3" />
+        Open review
+      </Button>
+    ) : null
+
+  if (threadRef === null || projectId === null) return null
+
+  const stripClassName = cn(
+    'flex w-full flex-col gap-2 border-border bg-muted/20 px-4 py-2 text-xs',
+    props.compact ? 'border-t' : 'border-b',
+  )
+  if (paths.length === 0)
   {
-    switch (state.kind)
-    {
-      case 'pending':
-        return 'Checking linked architecture analysis.'
-      case 'no-link':
-        return 'No architecture proposal is linked to this exact revision.'
-      case 'linked-no-generation':
-        return 'Architecture proposal linked. Open Proposal Review to start analysis.'
-      case 'active':
-        return `Architecture analysis is ${state.generation.state}.`
-      case 'ready':
-        return 'Architecture analysis is ready.'
-      case 'terminal':
-        return formatProposalGenerationFailure(state.generation)
-      case 'error':
-        return state.message
-    }
-  })()
+    if (openReviewButton === null) return null
+    return (
+      <div data-orchestrate-architecture="review" className={stripClassName}>
+        <div className="flex w-full flex-wrap items-center justify-end gap-2">
+          {openReviewButton}
+        </div>
+      </div>
+    )
+  }
+
+  const retryAtlas = () =>
+  {
+    void ensureProjectArchitecture({
+      environmentId: props.actions.environmentId,
+      input: { projectId },
+    })
+  }
+
+  if (!atlasQuery.hasSettled)
+  {
+    return (
+      <div data-orchestrate-architecture="pending" className={stripClassName}>
+        <span className="text-muted-foreground">Checking standing Repository Atlas.</span>
+      </div>
+    )
+  }
+  if (atlasQuery.error !== null)
+  {
+    return (
+      <div data-orchestrate-architecture="error" className={stripClassName}>
+        {props.compact ? (
+          <span className="text-muted-foreground">Repository Atlas status failed.</span>
+        ) : (
+          <ArchitectureQueryState
+            kind="error"
+            title="Repository Atlas unavailable"
+            message="Standing architecture status could not be loaded."
+            onRetry={retryAtlas}
+          />
+        )}
+      </div>
+    )
+  }
+  if (atlasStatus === null || atlasStatus.state !== 'ready' || atlasStatus.source === null)
+  {
+    const unreadyState =
+      atlasStatus?.state === 'building'
+        ? 'building'
+        : atlasStatus?.state === 'error'
+          ? 'error'
+          : 'idle'
+    return (
+      <div data-orchestrate-architecture="unready" className={stripClassName}>
+        {props.compact ? (
+          <span className="text-muted-foreground">
+            {atlasUnreadyMessage(unreadyState, atlasStatus?.lastBuildError ?? null)}
+          </span>
+        ) : (
+          <ArchitectureQueryState
+            kind={unreadyState === 'building' ? 'loading' : 'error'}
+            title="Standing Repository Atlas"
+            message={atlasUnreadyMessage(unreadyState, atlasStatus?.lastBuildError ?? null)}
+            onRetry={unreadyState === 'building' ? undefined : retryAtlas}
+          />
+        )}
+      </div>
+    )
+  }
+  if (!pathScopeQuery.hasSettled)
+  {
+    return (
+      <div data-orchestrate-architecture="pending" className={stripClassName}>
+        <span className="text-muted-foreground">Resolving standing atlas scope.</span>
+      </div>
+    )
+  }
+  if (pathScopeQuery.error !== null)
+  {
+    return (
+      <div data-orchestrate-architecture="error" className={stripClassName}>
+        {props.compact ? (
+          <span className="text-muted-foreground">Standing atlas scope could not be resolved.</span>
+        ) : (
+          <ArchitectureQueryState
+            kind="error"
+            title="Architecture scope unavailable"
+            message="Touched systems and neighbors could not be resolved from the standing atlas."
+            onRetry={pathScopeQuery.refresh}
+          />
+        )}
+      </div>
+    )
+  }
+
+  const chips = pathScopeQuery.data?.chips ?? []
+  const source = atlasStatus.source
 
   return (
     <div
-      data-orchestrate-architecture={state.kind}
-      className={cn(
-        'flex w-full flex-wrap items-center justify-between gap-2 border-border bg-muted/20 px-4 py-2 text-xs',
-        props.compact ? 'border-t' : 'border-b',
-      )}
+      data-orchestrate-architecture={chips.length === 0 ? 'empty' : 'ready'}
+      className={stripClassName}
     >
-      <span className="min-w-0">
-        <strong className="font-medium">Architecture</strong>
-        <span className="ml-2 text-muted-foreground">{message}</span>
-      </span>
-      {lookup === null ? null : (
-        <Button
-          type="button"
-          variant="outline"
-          size="xs"
-          className="gap-1.5"
-          onClick={() => useRightPanelStore.getState().openExplorer(threadRef, target)}
-        >
-          <ExternalLinkIcon aria-hidden="true" className="size-3" />
-          Open review
-        </Button>
+      <div className="flex w-full flex-wrap items-center justify-between gap-2">
+        <span className="min-w-0">
+          <strong className="font-medium">Architecture</strong>
+          <span className="ml-2 text-muted-foreground">
+            {chips.length === 0
+              ? 'No matching systems or blocks in the standing Repository Atlas.'
+              : 'Standing atlas scope for this plan.'}
+          </span>
+        </span>
+        {openReviewButton}
+      </div>
+      {chips.length === 0 ? null : (
+        <div className="flex flex-wrap gap-1.5">
+          {chips.map((chip) => (
+            <Button
+              key={`${chip.role}:${chip.level}:${chip.id}`}
+              type="button"
+              variant="ghost"
+              size="xs"
+              data-architecture-chip={chip.role}
+              data-architecture-level={chip.level}
+              className="h-auto rounded-md p-0"
+              onClick={() =>
+                useRightPanelStore.getState().openArchitectureSurface(
+                  threadRef,
+                  createArchitectureScopeSurface({
+                    source,
+                    scope: { level: chip.level, id: chip.id },
+                  }),
+                )
+              }
+            >
+              <Badge variant={chip.role === 'touched' ? 'default' : 'outline'} className="gap-1">
+                {chip.label}
+              </Badge>
+            </Button>
+          ))}
+        </div>
       )}
     </div>
   )
@@ -338,6 +473,14 @@ export function OrchestratePlanCard({
   const status = cardState.status
   const serverStatus = persistedRevision?.status ?? null
   const compactSuperseded = persistedRevision !== null && emissionSuperseded
+  // ACK sets local `sent` before delivery; respond.failed reverts the
+  // revision to pending, so a live tab must drop that lock to retry
+  useEffect(() =>
+  {
+    if (serverStatus !== 'pending' || status !== 'sent') return
+    setOrchestratePlanCardStatus(draftKey, 'idle')
+    if (runId !== null) clearOrchestratePlanRevisionStarted(runId, cardRevisionKey)
+  }, [cardRevisionKey, draftKey, runId, serverStatus, status])
   const superseded =
     compactSuperseded ||
     (persistedRevision === null ? emissionSuperseded : serverStatus === 'superseded')
@@ -393,7 +536,9 @@ export function OrchestratePlanCard({
   // read as dead after a refresh. that evidence stays display-only: re-gating a
   // running plan is a designed flow, so a live run reports progress beside the
   // approval row and never replaces or disables it
-  const revisionStarted = runStarted || startedRevision
+  const deliveryFailedBackToPending = status === 'sent' && serverStatus === 'pending'
+  const effectiveStatus = deliveryFailedBackToPending ? 'idle' : status
+  const revisionStarted = runStarted || (startedRevision && !deliveryFailedBackToPending)
   const runActive = currentRunJobs.some((job) => !TERMINAL_STATUSES.has(job.status))
   const finishedCount = currentRunJobs.filter((job) => TERMINAL_STATUSES.has(job.status)).length
   const outcomeSummary = workerRunOutcomeSummaryView(runJobs)
@@ -409,8 +554,8 @@ export function OrchestratePlanCard({
   const disabled =
     superseded ||
     displayPlan.validationError !== null ||
-    status === 'sending' ||
-    status === 'sent' ||
+    effectiveStatus === 'sending' ||
+    effectiveStatus === 'sent' ||
     (serverStatus !== null && serverStatus !== 'pending')
   const minimumMaxWorkers = persistedRevision === null ? 1 : 0
   const maxWorkersValid = Number.isSafeInteger(maxWorkers) && maxWorkers >= minimumMaxWorkers
@@ -859,13 +1004,13 @@ export function OrchestratePlanCard({
                   {displayPlan.validationError ?? cardState.error}
                 </span>
               )}
-              {status === 'editing' ? (
+              {effectiveStatus === 'editing' ? (
                 <span className="text-muted-foreground text-xs">
                   Fallback reply appended to the composer
                 </span>
-              ) : status === 'sending' ? (
+              ) : effectiveStatus === 'sending' ? (
                 <span className="text-muted-foreground text-xs">Sending response…</span>
-              ) : status === 'sent' ? (
+              ) : effectiveStatus === 'sent' ? (
                 <span className="text-muted-foreground text-xs">Response sent</span>
               ) : null}
               <input

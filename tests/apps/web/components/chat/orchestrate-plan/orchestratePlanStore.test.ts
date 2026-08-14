@@ -5,6 +5,7 @@ import { beforeEach, describe, expect, it } from '@effect/vitest'
 import {
   createOrchestratePlanCardStateKey,
   EMPTY_ORCHESTRATE_PLAN_CARD_STATE,
+  clearOrchestratePlanRevisionStarted,
   isOrchestratePlanCardSuperseded,
   isOrchestratePlanRevisionStarted,
   markOrchestratePlanRevisionStarted,
@@ -87,6 +88,18 @@ describe('orchestrate plan revision state', () =>
 
     expect(isOrchestratePlanRevisionStarted('run-1', 'started')).toBe(true)
     expect(isOrchestratePlanRevisionStarted('run-1', 'revised')).toBe(false)
+  })
+
+  it('clears the started revision after a failed envelope so Approve can retry', () =>
+  {
+    registerOrchestratePlanCard('run-1', 'started', { messageIndex: 10, planIndex: 0 })
+    markOrchestratePlanRevisionStarted('run-1', 'started')
+    clearOrchestratePlanRevisionStarted('run-1', 'revised')
+
+    expect(isOrchestratePlanRevisionStarted('run-1', 'started')).toBe(true)
+
+    clearOrchestratePlanRevisionStarted('run-1', 'started')
+    expect(isOrchestratePlanRevisionStarted('run-1', 'started')).toBe(false)
   })
 })
 

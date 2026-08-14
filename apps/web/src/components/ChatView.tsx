@@ -2085,8 +2085,10 @@ function ChatViewContent(props: ChatViewProps)
         workLogEntries,
         providerSwitchTimelineEvents,
         threadActivities,
+        activeThread?.orchestratePlans ?? [],
       ),
     [
+      activeThread?.orchestratePlans,
       activeThread?.proposedPlans,
       providerSwitchTimelineEvents,
       threadActivities,
@@ -4793,6 +4795,7 @@ function ChatViewContent(props: ChatViewProps)
         selectedProviderModels: ctxSelectedProviderModels,
         selectedPromptEffort: ctxSelectedPromptEffort,
         selectedModelSelection: ctxSelectedModelSelection,
+        runtimeMode: dispatchRuntimeMode,
       } = sendCtx
 
       const threadIdForSend = activeThread.id
@@ -4847,7 +4850,7 @@ function ChatViewContent(props: ChatViewProps)
         ...(localCheckoutBranchMismatch
           ? { branch: localCheckoutBranchMismatch.currentBranch }
           : {}),
-        runtimeMode,
+        runtimeMode: dispatchRuntimeMode,
         collaborationMode: nextCollaborationMode,
       })
       let failure: AtomCommandResult<unknown, unknown> | null =
@@ -4874,7 +4877,7 @@ function ChatViewContent(props: ChatViewProps)
             },
             modelSelection: ctxSelectedModelSelection,
             titleSeed: activeThread.title,
-            runtimeMode,
+            runtimeMode: dispatchRuntimeMode,
             interactionMode: wireMode.interactionMode,
             orchestrate: wireMode.orchestrate,
             ...(importContinuationConsent ? { importContinuationConsent } : {}),
@@ -4975,6 +4978,7 @@ function ChatViewContent(props: ChatViewProps)
         selectedProviderModels: ctxSelectedProviderModels,
         selectedPromptEffort: ctxSelectedPromptEffort,
         selectedModelSelection: ctxSelectedModelSelection,
+        runtimeMode: dispatchRuntimeMode,
       } = sendCtx
 
       const createdAt = new Date().toISOString()
@@ -5014,7 +5018,7 @@ function ChatViewContent(props: ChatViewProps)
           projectId: activeProject.id,
           title: nextThreadTitle,
           modelSelection: nextThreadModelSelection,
-          runtimeMode,
+          runtimeMode: dispatchRuntimeMode,
           interactionMode: implementationWireMode.interactionMode,
           orchestrate: implementationWireMode.orchestrate,
           branch: activeThreadBranch,
@@ -5040,7 +5044,7 @@ function ChatViewContent(props: ChatViewProps)
             },
             modelSelection: ctxSelectedModelSelection,
             titleSeed: nextThreadTitle,
-            runtimeMode,
+            runtimeMode: dispatchRuntimeMode,
             interactionMode: implementationWireMode.interactionMode,
             orchestrate: implementationWireMode.orchestrate,
             sourceProposedPlan: {
@@ -5287,6 +5291,7 @@ function ChatViewContent(props: ChatViewProps)
     () => ({
       environmentId,
       threadRef: activeThreadRef,
+      projectId: activeThread?.projectId ?? null,
       instanceEntries: orchestrateInstanceEntries,
       modelOptionsByInstance: orchestrateModelOptions,
       orchestratePlans: activeThread?.orchestratePlans ?? [],

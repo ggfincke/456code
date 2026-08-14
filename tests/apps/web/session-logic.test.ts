@@ -6,6 +6,7 @@ import {
   MessageId,
   ThreadId,
   TurnId,
+  type OrchestratePlanRevision,
   type OrchestrationThreadActivity,
 } from '@t3tools/contracts'
 import { describe, expect, it } from 'vite-plus/test'
@@ -1861,6 +1862,51 @@ describe('deriveTimelineEntries', () =>
       'work:work-z',
       'work:work-a',
     ])
+  })
+
+  it('promotes persisted orchestrate revisions to first-class timeline rows', () =>
+  {
+    const revision = {
+      runId: 'run-42',
+      revision: 3,
+      turnId: null,
+      workflow: 'implementation',
+      task: 'Ship it',
+      stages: [],
+      totalWorkers: 0,
+      maxWorkers: 0,
+      source: 'tool',
+      leadModelSelection: null,
+      status: 'pending',
+      createdAt: '2026-02-23T00:00:02.000Z',
+      updatedAt: '2026-02-23T00:00:02.000Z',
+    } satisfies OrchestratePlanRevision
+
+    const entries = deriveTimelineEntries(
+      [
+        {
+          id: MessageId.make('message-1'),
+          role: 'assistant',
+          text: 'hello',
+          createdAt: '2026-02-23T00:00:01.000Z',
+          turnId: null,
+          updatedAt: '2026-02-23T00:00:01.000Z',
+          streaming: false,
+        },
+      ],
+      [],
+      [],
+      [],
+      [],
+      [revision],
+    )
+
+    expect(entries.map((entry) => entry.kind)).toEqual(['message', 'orchestrate-plan'])
+    expect(entries[1]).toMatchObject({
+      kind: 'orchestrate-plan',
+      id: 'orchestrate-plan:run-42:3',
+      revision,
+    })
   })
 
   it('derives a dedicated worker verdict row and omits cleared or malformed verdicts', () =>

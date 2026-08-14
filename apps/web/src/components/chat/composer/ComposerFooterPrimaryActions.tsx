@@ -29,6 +29,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
   isConnecting: boolean
   isEnvironmentUnavailable: boolean
   hasSendableContent: boolean
+  showOrchestrate: boolean
   orchestrateReadinessMessage: string | null
   preserveComposerFocusOnPointerDown?: boolean
   onPreviousPendingQuestion: () => void
@@ -63,6 +64,7 @@ export const ComposerFooterPrimaryActions = memo(function ComposerFooterPrimaryA
         isEnvironmentUnavailable={props.isEnvironmentUnavailable}
         isPreparingWorktree={props.isPreparingWorktree}
         hasSendableContent={props.hasSendableContent}
+        showOrchestrate={props.showOrchestrate}
         orchestrateReadinessMessage={props.orchestrateReadinessMessage}
         preserveComposerFocusOnPointerDown={props.preserveComposerFocusOnPointerDown ?? false}
         onPreviousPendingQuestion={props.onPreviousPendingQuestion}
