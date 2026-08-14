@@ -12,7 +12,12 @@ import type {
   EnvironmentShellStatus,
   EnvironmentThreadShell,
 } from '@t3tools/client-runtime/state/shell'
-import { CommandId, type EnvironmentId } from '@t3tools/contracts'
+import {
+  CommandId,
+  normalizeCollaborationMode,
+  toWireInteractionMode,
+  type EnvironmentId,
+} from '@t3tools/contracts'
 import * as Cause from 'effect/Cause'
 import { AsyncResult } from 'effect/unstable/reactivity'
 
@@ -404,14 +409,24 @@ async function sendQueuedMessage(input: {
     settings = resolveQueuedThreadSettings(message, currentThread, threadHasStarted(currentThread))
   }
 
-  if (settings.interactionMode !== currentThread.interactionMode)
+  const currentCollaborationMode = normalizeCollaborationMode(
+    currentThread.interactionMode,
+    currentThread.orchestrate,
+  )
+  if (
+    settings.interactionMode !== currentCollaborationMode.baseMode ||
+    settings.orchestrate !== currentCollaborationMode.orchestrate
+  )
   {
+    const wireInteractionMode = toWireInteractionMode(
+      normalizeCollaborationMode(settings.interactionMode, settings.orchestrate),
+    )
     const result = await commands.setThreadInteractionMode({
       environmentId: message.environmentId,
       input: {
         commandId: settingsCommandId(message, 'interaction-mode'),
         threadId: message.threadId,
-        interactionMode: settings.interactionMode,
+        ...wireInteractionMode,
         createdAt: message.turnStartCreatedAt ?? message.createdAt,
       },
     })
@@ -463,6 +478,9 @@ async function sendQueuedMessage(input: {
     finalThread,
     threadHasStarted(finalThread),
   )
+  const wireInteractionMode = toWireInteractionMode(
+    normalizeCollaborationMode(finalSettings.interactionMode, finalSettings.orchestrate),
+  )
   const result = await commands.startTurn({
     environmentId: message.environmentId,
     input: {
@@ -476,7 +494,7 @@ async function sendQueuedMessage(input: {
       },
       ...(threadHasStarted(finalThread) ? {} : { modelSelection: finalSettings.modelSelection }),
       runtimeMode: finalSettings.runtimeMode,
-      interactionMode: finalSettings.interactionMode,
+      ...wireInteractionMode,
       createdAt: dispatchMessage.turnStartCreatedAt,
     },
   })

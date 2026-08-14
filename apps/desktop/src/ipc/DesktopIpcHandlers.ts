@@ -39,8 +39,10 @@ import {
   getLocalEnvironmentBootstraps,
   getLocalEnvironmentBearerToken,
   getWindowFullscreenState,
+  notifyThreadAttention,
   openExternal,
   pickFolder,
+  setMenuBarState,
   setTheme,
   showContextMenu,
 } from './methods/window.ts'
@@ -87,6 +89,8 @@ export const installDesktopIpcHandlers = Effect.fn('desktop.ipc.installHandlers'
   yield* ipc.handle(setTheme)
   yield* ipc.handle(showContextMenu)
   yield* ipc.handle(openExternal)
+  yield* ipc.handle(setMenuBarState)
+  yield* ipc.handle(notifyThreadAttention)
   yield* ipc.handle(getUpdateState)
   yield* ipc.handle(setUpdateChannel)
   yield* ipc.handle(downloadUpdate)

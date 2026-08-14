@@ -83,7 +83,6 @@ export interface DesktopProtocolRegistrationInput
 {
   readonly scheme: string
   readonly targetOrigin: URL
-  readonly backendOrigin: URL
 }
 
 export class ElectronProtocol extends Context.Service<
@@ -104,8 +103,6 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
   // origins are not known when this response policy is created, so restrict
   // connections by the network schemes the client supports instead of by host.
   const connectSources = ["'self'", 'http:', 'https:', 'ws:', 'wss:']
-  // cartographer frames use the configured environment's supported web scheme
-  const frameSources = ["'self'", 'http:', 'https:']
 
   return [
     "default-src 'self'",
@@ -115,7 +112,7 @@ export function makeDesktopContentSecurityPolicy(input: DesktopProtocolRegistrat
     "style-src 'self' 'unsafe-inline'",
     `font-src 'self' ${input.scheme}: data:`,
     "worker-src 'self' blob:",
-    `frame-src ${frameSources.join(' ')}`,
+    "frame-src 'self'",
     "form-action 'self'",
   ].join('; ')
 }

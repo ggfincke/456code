@@ -8,8 +8,8 @@ import { EnvironmentProject } from '@t3tools/client-runtime/state/shell'
 import { mapAtomCommandResult } from '@t3tools/client-runtime/state/runtime'
 import {
   ThreadId,
+  type CollaborationMode,
   type ModelSelection,
-  type ProviderInteractionMode,
   type RuntimeMode,
 } from '@t3tools/contracts'
 import { buildTemporaryWorktreeBranchName } from '@t3tools/shared/git'
@@ -38,7 +38,7 @@ export function useCreateProjectThread()
       readonly worktreePath: string | null
       readonly startFromOrigin?: boolean
       readonly runtimeMode: RuntimeMode
-      readonly interactionMode: ProviderInteractionMode
+      readonly interactionMode: CollaborationMode
       readonly initialMessageText: string
       readonly initialAttachments: ReadonlyArray<DraftComposerImageAttachment>
       // reuse identifiers from a queued pending task instead of minting new ones.

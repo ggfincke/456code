@@ -18,6 +18,7 @@ import { ControlPillMenu } from '../../../components/ControlPill'
 import { ProjectFavicon } from '../../../components/ProjectFavicon'
 import { cn } from '../../../lib/cn'
 import { relativeTime } from '../../../lib/time'
+import { useNowMinute } from '../../../lib/useNowMinute'
 import { useThemeColor } from '../../../lib/useThemeColor'
 import type { PendingNewTask } from '../../../state/use-pending-new-tasks'
 import { useThreadOutboxFailureReason } from '../../../state/use-thread-outbox'
@@ -530,7 +531,11 @@ export const ThreadListRow = memo(function ThreadListRow(props: {
   const selectedBackgroundColor = useThemeColor('--color-user-bubble')
 
   const { thread, onSelectThread, onArchiveThread, onDeleteThread } = props
-  const status = resolveThreadStatus(thread)
+  // subscribed per row rather than passed down: useNowMinute is one module
+  // timer fanned out through useSyncExternalStore, so a row costs a Set entry
+  // while a prop would re-render the whole list on every tick.
+  const nowMinute = useNowMinute()
+  const status = resolveThreadStatus(thread, { nowMs: Date.parse(`${nowMinute}:00.000Z`) })
   const pr = useThreadPr(thread, props.projectCwd)
   // a queued message that exhausted delivery reports here: the thread may never
   // be opened, and the composer detail surface is only visible once it is.

@@ -1,15 +1,16 @@
 // apps/mobile/src/features/threads/composer/ThreadComposer.tsx
 // renders and controls the mobile thread message composer
 import { isLiquidGlassSupported, LiquidGlassView } from '@callstack/liquid-glass'
-import type {
-  EnvironmentId,
-  MessageId,
-  ModelSelection,
-  OrchestrationThreadShell,
-  ProviderInteractionMode,
-  RuntimeMode,
-  ServerConfig,
-  ServerProviderSkill,
+import {
+  normalizeCollaborationMode,
+  type CollaborationMode,
+  type EnvironmentId,
+  type MessageId,
+  type ModelSelection,
+  type OrchestrationThreadShell,
+  type RuntimeMode,
+  type ServerConfig,
+  type ServerProviderSkill,
 } from '@t3tools/contracts'
 import {
   detectComposerTrigger,
@@ -208,7 +209,7 @@ export interface ThreadComposerProps
   readonly onDiscardQueuedMessage: () => void
   readonly onUpdateModelSelection: (modelSelection: ModelSelection) => void
   readonly onUpdateRuntimeMode: (runtimeMode: RuntimeMode) => void
-  readonly onUpdateInteractionMode: (interactionMode: ProviderInteractionMode) => void
+  readonly onUpdateInteractionMode: (interactionMode: CollaborationMode) => void
   readonly onRetryProviderSwitch: () => void
   readonly onDismissProviderSwitchNotice: () => void
   readonly onReconnectEnvironment: () => void
@@ -406,7 +407,14 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         : 'Send'
   const currentModelSelection = props.selectedThread.modelSelection
   const currentRuntimeMode = props.selectedThread.runtimeMode
-  const currentInteractionMode = props.selectedThread.interactionMode ?? 'default'
+  const currentInteractionMode = useMemo(
+    () =>
+      normalizeCollaborationMode(
+        props.selectedThread.interactionMode ?? 'default',
+        props.selectedThread.orchestrate,
+      ),
+    [props.selectedThread.interactionMode, props.selectedThread.orchestrate],
+  )
   const connectionStatus = composerConnectionStatus({
     connectionError: props.connectionError,
     connectionState: props.connectionState,
@@ -503,7 +511,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
           type: 'slash-command' as const,
           command: 'orchestrate',
           label: '/orchestrate',
-          description: 'Switch to orchestrate mode',
+          description: 'Enable orchestration',
         },
         {
           id: 'cmd:default',
@@ -599,6 +607,8 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       await onSendMessage()
       // defer live activity work until queued-message feedback is visible
       armAgentAwarenessLiveActivityForLocalWork({
+        environmentId: props.environmentId,
+        threadId: props.selectedThread.id,
         threadTitle: props.selectedThread.title,
         projectTitle: props.environmentLabel ?? '456code',
       })
@@ -647,7 +657,13 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
         )
         setComposerSelection({ start: result.cursor, end: result.cursor })
         onChangeDraftMessage(result.text)
-        onUpdateInteractionMode(item.command)
+        onUpdateInteractionMode(
+          item.command === 'default'
+            ? { baseMode: 'default', orchestrate: false }
+            : item.command === 'plan'
+              ? { ...currentInteractionMode, baseMode: 'plan' }
+              : { ...currentInteractionMode, orchestrate: true },
+        )
         return
       }
 
@@ -680,6 +696,7 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     },
     [
       composerTrigger,
+      currentInteractionMode,
       draftMessage,
       onChangeDraftMessage,
       onUpdateInteractionMode,
@@ -763,25 +780,26 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
       {
         id: 'options-interaction',
         title: 'Interaction',
-        subtitle:
-          currentInteractionMode === 'plan'
-            ? 'Plan'
-            : currentInteractionMode === 'orchestrate'
-              ? 'Orchestrate'
-              : 'Default',
+        subtitle: `${currentInteractionMode.baseMode === 'plan' ? 'Plan' : 'Default'}${
+          currentInteractionMode.orchestrate ? ' + Orchestrate' : ''
+        }`,
         subactions: [
-          { id: 'options:interaction:default', title: 'Default' },
-          { id: 'options:interaction:plan', title: 'Plan' },
-          { id: 'options:interaction:orchestrate', title: 'Orchestrate' },
-        ].map((option) =>
-        {
-          const value = option.id.replace('options:interaction:', '')
-          return {
-            id: option.id,
-            title: option.title,
-            state: currentInteractionMode === value ? ('on' as const) : undefined,
-          }
-        }),
+          {
+            id: 'options:interaction:default',
+            title: 'Default',
+            state: currentInteractionMode.baseMode === 'default' ? ('on' as const) : undefined,
+          },
+          {
+            id: 'options:interaction:plan',
+            title: 'Plan',
+            state: currentInteractionMode.baseMode === 'plan' ? ('on' as const) : undefined,
+          },
+          {
+            id: 'options:interaction:orchestrate',
+            title: 'Orchestrate',
+            state: currentInteractionMode.orchestrate ? ('on' as const) : undefined,
+          },
+        ],
       },
     ],
     [currentInteractionMode, currentRuntimeMode, providerOptionDescriptors],
@@ -821,8 +839,15 @@ export const ThreadComposer = memo(function ThreadComposer(props: ThreadComposer
     }
     if (event.startsWith('options:interaction:'))
     {
-      const interactionMode = event.slice('options:interaction:'.length) as ProviderInteractionMode
-      props.onUpdateInteractionMode(interactionMode)
+      const value = event.slice('options:interaction:'.length)
+      props.onUpdateInteractionMode(
+        value === 'orchestrate'
+          ? { ...currentInteractionMode, orchestrate: !currentInteractionMode.orchestrate }
+          : {
+              ...currentInteractionMode,
+              baseMode: value === 'plan' ? 'plan' : 'default',
+            },
+      )
     }
   }
 

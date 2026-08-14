@@ -10,7 +10,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useThemeColor } from '../../../lib/useThemeColor'
 import { useFontFamily } from '../../../lib/useFontFamily'
 
-import { EnvironmentId } from '@t3tools/contracts'
+import { EnvironmentId, normalizeCollaborationMode } from '@t3tools/contracts'
 import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
@@ -670,25 +670,26 @@ export function NewTaskDraftScreen(props: {
       {
         id: 'options-interaction',
         title: 'Interaction',
-        subtitle:
-          flow.interactionMode === 'plan'
-            ? 'Plan'
-            : flow.interactionMode === 'orchestrate'
-              ? 'Orchestrate'
-              : 'Default',
+        subtitle: `${flow.interactionMode.baseMode === 'plan' ? 'Plan' : 'Default'}${
+          flow.interactionMode.orchestrate ? ' + Orchestrate' : ''
+        }`,
         subactions: [
-          { id: 'options:interaction:default', title: 'Default' },
-          { id: 'options:interaction:plan', title: 'Plan' },
-          { id: 'options:interaction:orchestrate', title: 'Orchestrate' },
-        ].map((option) =>
-        {
-          const value = option.id.replace('options:interaction:', '')
-          return {
-            id: option.id,
-            title: option.title,
-            state: flow.interactionMode === value ? ('on' as const) : undefined,
-          }
-        }),
+          {
+            id: 'options:interaction:default',
+            title: 'Default',
+            state: flow.interactionMode.baseMode === 'default' ? ('on' as const) : undefined,
+          },
+          {
+            id: 'options:interaction:plan',
+            title: 'Plan',
+            state: flow.interactionMode.baseMode === 'plan' ? ('on' as const) : undefined,
+          },
+          {
+            id: 'options:interaction:orchestrate',
+            title: 'Orchestrate',
+            state: flow.interactionMode.orchestrate ? ('on' as const) : undefined,
+          },
+        ],
       },
     ],
     [flow.interactionMode, flow.runtimeMode, providerOptionDescriptors],
@@ -818,8 +819,14 @@ export function NewTaskDraftScreen(props: {
     }
     if (event.startsWith('options:interaction:'))
     {
+      const value = event.slice('options:interaction:'.length)
       flow.setInteractionMode(
-        event.slice('options:interaction:'.length) as Parameters<typeof flow.setInteractionMode>[0],
+        value === 'orchestrate'
+          ? { ...flow.interactionMode, orchestrate: !flow.interactionMode.orchestrate }
+          : {
+              ...flow.interactionMode,
+              baseMode: value === 'plan' ? 'plan' : 'default',
+            },
       )
     }
   }
@@ -903,7 +910,10 @@ export function NewTaskDraftScreen(props: {
     const selectedWorktreePath = draft.workspaceSelection?.worktreePath ?? flow.selectedWorktreePath
     const startFromOrigin = draft.workspaceSelection?.startFromOrigin ?? flow.startFromOrigin
     const runtimeMode = draft.runtimeMode ?? flow.runtimeMode
-    const interactionMode = draft.interactionMode ?? flow.interactionMode
+    const interactionMode = normalizeCollaborationMode(
+      draft.interactionMode ?? flow.interactionMode.baseMode,
+      draft.orchestrate ?? flow.interactionMode.orchestrate,
+    )
     const initialMessageText = draft.text.trim()
 
     if (

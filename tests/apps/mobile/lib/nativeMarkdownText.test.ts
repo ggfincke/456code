@@ -212,7 +212,7 @@ describe('nativeMarkdownDocumentRuns', () =>
     ])
   })
 
-  it('keeps headings, paragraphs, and lists in one continuous document', () =>
+  it('keeps headings, paragraphs, and lists in one continuous selectable document', () =>
   {
     const node: MarkdownNode = {
       type: 'document',
@@ -279,6 +279,10 @@ describe('nativeMarkdownDocumentRuns', () =>
       headIndent: 24,
       paragraphSpacing: 2,
     })
+
+    const chunks = nativeMarkdownDocumentChunks(node)
+    expect(chunks).toHaveLength(1)
+    expect(chunks[0]).toMatchObject({ kind: 'selectable' })
   })
 
   it('uses distinct section, heading-content, and body spacing', () =>
@@ -445,57 +449,80 @@ describe('nativeMarkdownListItemBlocks', () =>
 
 describe('nativeMarkdownDocumentChunks', () =>
 {
-  it('keeps headings and plain lists in one selectable document', () =>
+  it.each([
+    {
+      name: 'headings and task/nested lists',
+      document: {
+        type: 'document' as const,
+        children: [
+          {
+            type: 'heading' as const,
+            level: 2,
+            children: [{ type: 'text' as const, content: 'Tasks' }],
+          },
+          {
+            type: 'list' as const,
+            children: [
+              {
+                type: 'task_list_item' as const,
+                checked: true,
+                children: [
+                  {
+                    type: 'paragraph' as const,
+                    children: [{ type: 'text' as const, content: 'Completed' }],
+                  },
+                ],
+              },
+              {
+                type: 'list_item' as const,
+                children: [
+                  {
+                    type: 'paragraph' as const,
+                    children: [{ type: 'text' as const, content: 'Parent' }],
+                  },
+                  {
+                    type: 'list' as const,
+                    children: [
+                      {
+                        type: 'list_item' as const,
+                        children: [
+                          {
+                            type: 'paragraph' as const,
+                            children: [{ type: 'text' as const, content: 'Nested' }],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      } satisfies MarkdownNode,
+      expectedText: 'Tasks\n\n☑︎\tCompleted\n•\tParent\n◦\tNested',
+    },
+    {
+      name: 'a plain list',
+      document: {
+        type: 'document' as const,
+        children: [
+          {
+            type: 'list' as const,
+            ordered: false,
+            children: [
+              {
+                type: 'list_item' as const,
+                children: [{ type: 'text' as const, content: 'First' }],
+              },
+            ],
+          },
+        ],
+      } satisfies MarkdownNode,
+      expectedText: '•\tFirst',
+    },
+  ])('keeps $name in one selectable document', ({ document, expectedText }) =>
   {
-    const document: MarkdownNode = {
-      type: 'document',
-      children: [
-        {
-          type: 'heading',
-          level: 2,
-          children: [{ type: 'text', content: 'Tasks' }],
-        },
-        {
-          type: 'list',
-          children: [
-            {
-              type: 'task_list_item',
-              checked: true,
-              children: [
-                {
-                  type: 'paragraph',
-                  children: [{ type: 'text', content: 'Completed' }],
-                },
-              ],
-            },
-            {
-              type: 'list_item',
-              children: [
-                {
-                  type: 'paragraph',
-                  children: [{ type: 'text', content: 'Parent' }],
-                },
-                {
-                  type: 'list',
-                  children: [
-                    {
-                      type: 'list_item',
-                      children: [
-                        {
-                          type: 'paragraph',
-                          children: [{ type: 'text', content: 'Nested' }],
-                        },
-                      ],
-                    },
-                  ],
-                },
-              ],
-            },
-          ],
-        },
-      ],
-    }
-
     const chunks = nativeMarkdownDocumentChunks(document)
     expect(chunks).toHaveLength(1)
     expect(chunks[0]).toMatchObject({ kind: 'selectable' })
@@ -503,7 +530,7 @@ describe('nativeMarkdownDocumentChunks', () =>
       nativeMarkdownDocumentRuns(chunks[0]?.node ?? document)
         .map((run) => run.text)
         .join(''),
-    ).toBe('Tasks\n\n☑︎\tCompleted\n•\tParent\n◦\tNested')
+    ).toBe(expectedText)
   })
 
   it('aligns ordered markers while keeping the list in one selectable string', () =>
@@ -731,31 +758,6 @@ describe('nativeMarkdownDocumentChunks', () =>
     expect(chunks[1]).toMatchObject({
       kind: 'rich',
       node: { type: 'blockquote' },
-    })
-  })
-
-  it('keeps a plain list in one selectable native text container', () =>
-  {
-    const list: MarkdownNode = {
-      type: 'list',
-      ordered: false,
-      children: [
-        {
-          type: 'list_item',
-          children: [{ type: 'text', content: 'First' }],
-        },
-      ],
-    }
-
-    const chunks = nativeMarkdownDocumentChunks({
-      type: 'document',
-      children: [list],
-    })
-
-    expect(chunks).toHaveLength(1)
-    expect(chunks[0]).toMatchObject({
-      kind: 'selectable',
-      node: { type: 'document', children: [list] },
     })
   })
 

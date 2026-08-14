@@ -61,25 +61,23 @@ describe('parseWslDistroList', () =>
     ])
   })
 
-  it('handles output without BOM', () =>
+  it.each([
+    {
+      encoding: 'utf16le' as const,
+      defaultName: 'Ubuntu',
+    },
+    {
+      encoding: 'utf8' as const,
+      defaultName: 'Debian',
+    },
+  ])('handles $encoding output without requiring a BOM', ({ encoding, defaultName }) =>
   {
     const text = [
       '  NAME            STATE           VERSION',
-      '* Ubuntu           Running         2',
+      `* ${defaultName}           Running         2`,
     ].join('\r\n')
-    const output = Buffer.from(text, 'utf16le')
-    const distros = parseWslDistroList(output)
-    expect(distros).toEqual([{ name: 'Ubuntu', isDefault: true, version: 2 }])
-  })
-
-  it('handles UTF-8 output', () =>
-  {
-    const text = [
-      '  NAME            STATE           VERSION',
-      '* Debian           Running         2',
-    ].join('\r\n')
-    const distros = parseWslDistroList(Buffer.from(text, 'utf8'))
-    expect(distros).toEqual([{ name: 'Debian', isDefault: true, version: 2 }])
+    const distros = parseWslDistroList(Buffer.from(text, encoding))
+    expect(distros).toEqual([{ name: defaultName, isDefault: true, version: 2 }])
   })
 })
 

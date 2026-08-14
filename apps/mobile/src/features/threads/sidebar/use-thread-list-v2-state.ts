@@ -6,6 +6,7 @@ import type { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell
 import type { EnvironmentId, ProjectId } from '@t3tools/contracts'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
+import { useNowMinute } from '../../../lib/useNowMinute'
 import { environmentServerConfigsAtom } from '../../../state/server'
 import {
   buildThreadListV2Items,
@@ -58,15 +59,11 @@ export function useThreadListV2State(input: {
     () => setSettledVisibleCount((count) => count + THREAD_LIST_V2_SETTLED_PAGE_COUNT),
     [],
   )
-  const [nowMinute, setNowMinute] = useState(() => new Date().toISOString().slice(0, 16))
+  // the shared module clock replaces a per-hook interval: every surface that
+  // resolves a minute-quantized state now ticks off the same timer, so a list
+  // and a row can never disagree about which minute it is.
+  const nowMinute = useNowMinute()
   const [snoozeWakeTick, bumpSnoozeWakeTick] = useState(0)
-  useEffect(() =>
-  {
-    if (!input.enabled) return
-    setNowMinute(new Date().toISOString().slice(0, 16))
-    const id = setInterval(() => setNowMinute(new Date().toISOString().slice(0, 16)), 60_000)
-    return () => clearInterval(id)
-  }, [input.enabled])
 
   const serverConfigs = useAtomValue(environmentServerConfigsAtom)
   const settlementEnvironmentIds = useMemo(() =>

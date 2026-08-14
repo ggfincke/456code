@@ -45,7 +45,6 @@ describe('ElectronProtocol', () =>
           yield* protocol.registerDesktopProtocol({
             scheme: 'code456-dev',
             targetOrigin: new URL('http://127.0.0.1:3773/'),
-            backendOrigin: new URL('http://127.0.0.1:3774/'),
           })
           assert.isDefined(handler)
 
@@ -78,10 +77,7 @@ describe('ElectronProtocol', () =>
             response.headers.get('content-security-policy') ?? '',
             "font-src 'self' code456-dev: data:",
           )
-          assert.include(
-            response.headers.get('content-security-policy') ?? '',
-            "frame-src 'self' http: https:",
-          )
+          assert.include(response.headers.get('content-security-policy') ?? '', "frame-src 'self'")
         }),
       )
 
@@ -115,7 +111,6 @@ describe('ElectronProtocol', () =>
           yield* protocol.registerDesktopProtocol({
             scheme: 'code456',
             targetOrigin: new URL('http://127.0.0.1:3773/'),
-            backendOrigin: new URL('http://127.0.0.1:3773/'),
           })
           return yield* Effect.promise(() => handler!(new Request('code456://other/')))
         }),
@@ -145,7 +140,6 @@ describe('ElectronProtocol', () =>
           yield* protocol.registerDesktopProtocol({
             scheme: 'code456-dev',
             targetOrigin: new URL('http://127.0.0.1:5733/'),
-            backendOrigin: new URL('http://127.0.0.1:3773/'),
           })
           return yield* Effect.promise(() => handler!(new Request('code456-dev://app/')))
         }),
@@ -170,7 +164,6 @@ describe('ElectronProtocol', () =>
         protocol.registerDesktopProtocol({
           scheme: 'code456-dev',
           targetOrigin: new URL('http://127.0.0.1:3773/'),
-          backendOrigin: new URL('http://127.0.0.1:3774/'),
         }),
       ).pipe(Effect.flip)
 
@@ -196,7 +189,6 @@ describe('ElectronProtocol', () =>
           protocol.registerDesktopProtocol({
             scheme: 'code456',
             targetOrigin: new URL('http://127.0.0.1:3773/'),
-            backendOrigin: new URL('http://127.0.0.1:3773/'),
           }),
         ),
       )
@@ -218,7 +210,6 @@ describe('ElectronProtocol', () =>
     const policy = ElectronProtocol.makeDesktopContentSecurityPolicy({
       scheme: 'code456',
       targetOrigin: new URL('http://127.0.0.1:3773/'),
-      backendOrigin: new URL('http://127.0.0.1:3773/'),
     })
     const directives = Object.fromEntries(
       policy.split('; ').map((directive) =>
@@ -239,6 +230,6 @@ describe('ElectronProtocol', () =>
       'https:',
     ])
     assert.deepEqual(directives['font-src'], ["'self'", 'code456:', 'data:'])
-    assert.deepEqual(directives['frame-src'], ["'self'", 'http:', 'https:'])
+    assert.deepEqual(directives['frame-src'], ["'self'"])
   })
 })

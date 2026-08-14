@@ -292,16 +292,10 @@ export const layer = Layer.effect(
       // primaries as Windows.
       label: configuration.resolvePrimaryLabel,
       configResolve: configuration.resolvePrimary,
-      // window creation errors propagating out of handleBackendReady must
-      // not block the readiness callback (that would prevent restartAttempt
-      // from being reset), so we absorb them here. The window service only
-      // logs on success, so log the failure here before swallowing it —
-      // otherwise a post-readiness window-open failure vanishes silently and
-      // is near-impossible to diagnose in production.
       onReady: (httpBaseUrl) =>
         desktopWindow.handleBackendReady(httpBaseUrl).pipe(
           Effect.catch((error) =>
-            logBackendPoolWarning('failed to open main window after backend readiness', {
+            logBackendPoolWarning('failed to handle primary backend readiness', {
               error: error.message,
             }),
           ),

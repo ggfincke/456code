@@ -108,6 +108,7 @@ describe('mobile composer drafts', () =>
         },
         runtimeMode: 'approval-required',
         interactionMode: 'plan',
+        orchestrate: false,
         workspaceSelection: {
           mode: 'worktree',
           branch: 'main',
@@ -127,7 +128,7 @@ describe('mobile composer drafts', () =>
         },
       }),
     ).toEqual({
-      'environment-1:thread-1': DRAFT,
+      'environment-1:thread-1': { ...DRAFT, orchestrate: false },
     })
 
     expect(() =>
@@ -141,6 +142,37 @@ describe('mobile composer drafts', () =>
         },
       }),
     ).toThrow()
+  })
+
+  it('persists the orchestration modifier and normalizes legacy orchestrate drafts', () =>
+  {
+    expect(
+      decodePersistedComposerDrafts({
+        schemaVersion: 1,
+        drafts: {
+          'environment-1:thread-1': {
+            ...DRAFT,
+            interactionMode: 'plan',
+            orchestrate: true,
+          },
+          'environment-1:thread-2': {
+            ...DRAFT,
+            interactionMode: 'orchestrate',
+          },
+        },
+      }),
+    ).toEqual({
+      'environment-1:thread-1': {
+        ...DRAFT,
+        interactionMode: 'plan',
+        orchestrate: true,
+      },
+      'environment-1:thread-2': {
+        ...DRAFT,
+        interactionMode: 'default',
+        orchestrate: true,
+      },
+    })
   })
 
   it('clears sent content without clearing the selected model or workspace', () =>
@@ -338,9 +370,14 @@ describe('mobile composer drafts', () =>
   it('writes cleanup as a full document through the persistence queue', async () =>
   {
     const environmentId = EnvironmentId.make('environment-1')
+    const orchestratedDraft: ComposerDraft = {
+      ...DRAFT,
+      interactionMode: 'plan',
+      orchestrate: true,
+    }
     appAtomRegistry.set(composerDraftsAtom, {
       'environment-1:thread-1': DRAFT,
-      'environment-10:thread-1': DRAFT,
+      'environment-10:thread-1': orchestratedDraft,
     })
 
     await clearComposerDraftsEnvironment(environmentId)
@@ -348,7 +385,7 @@ describe('mobile composer drafts', () =>
     expect(persistedDraftFile.writes).toHaveLength(1)
     expect(JSON.parse(persistedDraftFile.writes[0]!)).toEqual({
       schemaVersion: 1,
-      drafts: { 'environment-10:thread-1': DRAFT },
+      drafts: { 'environment-10:thread-1': orchestratedDraft },
     })
   })
 

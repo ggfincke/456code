@@ -3,10 +3,12 @@
 
 import { useAtomValue } from '@effect/atom-react'
 import {
+  DEFAULT_PROVIDER_INTERACTION_MODE,
   ModelSelection as ModelSelectionSchema,
   PROVIDER_SEND_TURN_MAX_ATTACHMENTS,
   ProviderInteractionMode as ProviderInteractionModeSchema,
   RuntimeMode as RuntimeModeSchema,
+  normalizeCollaborationMode,
   type EnvironmentId,
   type ModelSelection,
   type ProviderInteractionMode,
@@ -50,6 +52,7 @@ export interface ComposerDraft
   readonly modelSelection?: ModelSelection
   readonly runtimeMode?: RuntimeMode
   readonly interactionMode?: ProviderInteractionMode
+  readonly orchestrate?: boolean
   readonly workspaceSelection?: ComposerDraftWorkspaceSelection
 }
 
@@ -70,7 +73,7 @@ export interface ComposerDraftWorkspaceSelection
 
 export type ComposerDraftSettingsUpdate = Pick<
   ComposerDraft,
-  'modelSelection' | 'runtimeMode' | 'interactionMode' | 'workspaceSelection'
+  'modelSelection' | 'runtimeMode' | 'interactionMode' | 'orchestrate' | 'workspaceSelection'
 >
 
 const ComposerDraftWorkspaceSelectionSchema = Schema.Struct({
@@ -87,6 +90,7 @@ const ComposerDraftSchema = Schema.Struct({
   modelSelection: Schema.optional(ModelSelectionSchema),
   runtimeMode: Schema.optional(RuntimeModeSchema),
   interactionMode: Schema.optional(ProviderInteractionModeSchema),
+  orchestrate: Schema.optional(Schema.Boolean),
   workspaceSelection: Schema.optional(ComposerDraftWorkspaceSelectionSchema),
 })
 
@@ -140,6 +144,30 @@ function normalizeDraft(draft: ComposerDraft | undefined): ComposerDraft
   }
 }
 
+function normalizeStoredDraft(draft: ComposerDraft): ComposerDraft
+{
+  const collaborationMode = normalizeCollaborationMode(
+    draft.interactionMode ?? DEFAULT_PROVIDER_INTERACTION_MODE,
+    draft.orchestrate,
+  )
+  return {
+    ...draft,
+    ...(draft.interactionMode !== undefined || draft.orchestrate === true
+      ? { interactionMode: collaborationMode.baseMode }
+      : {}),
+    orchestrate: collaborationMode.orchestrate,
+  }
+}
+
+function normalizeDraftForWrite(draft: ComposerDraft): ComposerDraft
+{
+  if (draft.interactionMode === undefined && draft.orchestrate === undefined)
+  {
+    return draft
+  }
+  return normalizeStoredDraft(draft)
+}
+
 export function getComposerDraftSnapshot(draftKey: string): ComposerDraft
 {
   return normalizeDraft(appAtomRegistry.get(composerDraftsAtom)[draftKey])
@@ -158,6 +186,7 @@ function isEmptyDraft(draft: ComposerDraft): boolean
     draft.modelSelection === undefined &&
     draft.runtimeMode === undefined &&
     draft.interactionMode === undefined &&
+    draft.orchestrate !== true &&
     draft.workspaceSelection === undefined
   )
 }
@@ -166,7 +195,9 @@ export function decodePersistedComposerDrafts(value: unknown): Record<string, Co
 {
   const parsed = decodePersistedComposerDraftsDocument(value)
   return Object.fromEntries(
-    Object.entries(parsed.drafts).filter(([, draft]) => !isEmptyDraft(draft)),
+    Object.entries(parsed.drafts)
+      .map(([draftKey, draft]) => [draftKey, normalizeStoredDraft(draft)] as const)
+      .filter(([, draft]) => !isEmptyDraft(draft)),
   )
 }
 
@@ -216,7 +247,9 @@ async function writePersistedComposerDrafts(drafts: Record<string, ComposerDraft
     const file = await getComposerDraftsFile()
     operation = 'encode'
     const nonEmptyDrafts = Object.fromEntries(
-      Object.entries(drafts).filter(([, draft]) => !isEmptyDraft(draft)),
+      Object.entries(drafts)
+        .map(([draftKey, draft]) => [draftKey, normalizeDraftForWrite(draft)] as const)
+        .filter(([, draft]) => !isEmptyDraft(draft)),
     )
     const document = {
       schemaVersion: COMPOSER_DRAFTS_SCHEMA_VERSION,

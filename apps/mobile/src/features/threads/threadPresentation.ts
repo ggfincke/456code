@@ -2,8 +2,13 @@
 // expose thread sort value
 
 import type { StatusTone } from '../../components/StatusPill'
-import type { OrchestrationLatestTurn, OrchestrationSession } from '@t3tools/contracts'
+import {
+  normalizeCollaborationMode,
+  type OrchestrationLatestTurn,
+  type OrchestrationSession,
+} from '@t3tools/contracts'
 import { EnvironmentThreadShell } from '@t3tools/client-runtime/state/shell'
+import { isThreadAwarenessStale } from '@t3tools/shared/agentAwareness'
 
 export function threadSortValue(thread: EnvironmentThreadShell): number
 {
@@ -12,7 +17,13 @@ export function threadSortValue(thread: EnvironmentThreadShell): number
 }
 
 export type ThreadStatusKind =
-  'pending-approval' | 'awaiting-input' | 'working' | 'connecting' | 'error' | 'plan-ready'
+  | 'pending-approval'
+  | 'awaiting-input'
+  | 'working'
+  | 'stale'
+  | 'connecting'
+  | 'error'
+  | 'plan-ready'
 
 export interface ThreadStatusPresentation extends StatusTone
 {
@@ -47,6 +58,7 @@ function isLatestTurnSettled(
 // mirrors `resolveThreadStatusPill` in apps/web/src/components/Sidebar.logic.ts.
 export function resolveThreadStatus(
   thread: EnvironmentThreadShell,
+  options?: { readonly nowMs?: number | undefined },
 ): ThreadStatusPresentation | null
 {
   if (thread.hasPendingApprovals)
@@ -77,6 +89,20 @@ export function resolveThreadStatus(
 
   if (thread.session?.status === 'running')
   {
+    // same amber as the pending-approval branch and the Live Activity's stale
+    // tint, so a thread that stopped reporting reads the same on every surface.
+    if (options?.nowMs !== undefined && isThreadAwarenessStale(thread, options.nowMs))
+    {
+      return {
+        kind: 'stale',
+        label: 'Stalled',
+        pillClassName: 'bg-amber-500/12 dark:bg-amber-500/16',
+        textClassName: 'text-amber-700 dark:text-amber-300',
+        iconColor: '#ff9f0a',
+        iconBackground: 'rgba(255,159,10,0.22)',
+        pulse: false,
+      }
+    }
     return {
       kind: 'working',
       label: 'Working',
@@ -115,7 +141,7 @@ export function resolveThreadStatus(
   }
 
   const hasPlanReadyPrompt =
-    thread.interactionMode === 'plan' &&
+    normalizeCollaborationMode(thread.interactionMode, thread.orchestrate).baseMode === 'plan' &&
     isLatestTurnSettled(thread.latestTurn, thread.session) &&
     thread.hasActionableProposedPlan
   if (hasPlanReadyPrompt)

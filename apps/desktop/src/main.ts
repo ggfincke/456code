@@ -29,16 +29,20 @@ import * as DesktopIpc from './ipc/DesktopIpc.ts'
 import * as ElectronApp from './electron/ElectronApp.ts'
 import * as ElectronDialog from './electron/ElectronDialog.ts'
 import * as ElectronMenu from './electron/ElectronMenu.ts'
+import * as ElectronNotifications from './electron/ElectronNotifications.ts'
 import * as ElectronProtocol from './electron/ElectronProtocol.ts'
 import * as ElectronSafeStorage from './electron/ElectronSafeStorage.ts'
 import * as ElectronShell from './electron/ElectronShell.ts'
 import * as ElectronTheme from './electron/ElectronTheme.ts'
+import * as ElectronTray from './electron/ElectronTray.ts'
 import * as ElectronUpdater from './electron/ElectronUpdater.ts'
 import * as ElectronWindow from './electron/ElectronWindow.ts'
 import * as DesktopApp from './app/DesktopApp.ts'
 import * as DesktopAppIdentity from './app/DesktopAppIdentity.ts'
 import * as DesktopConnectionCatalogStore from './app/DesktopConnectionCatalogStore.ts'
 import * as DesktopApplicationMenu from './window/DesktopApplicationMenu.ts'
+import * as DesktopMenuBar from './window/DesktopMenuBar.ts'
+import * as DesktopNotifications from './window/DesktopNotifications.ts'
 import * as DesktopAssets from './app/DesktopAssets.ts'
 import * as DesktopBackendConfiguration from './backend/DesktopBackendConfiguration.ts'
 import * as DesktopBackendPool from './backend/DesktopBackendPool.ts'
@@ -121,10 +125,12 @@ const electronLayer = Layer.mergeAll(
   ElectronApp.layer,
   ElectronDialog.layer,
   ElectronMenu.layer,
+  ElectronNotifications.layer,
   ElectronProtocol.layer,
   ElectronSafeStorage.layer,
   ElectronShell.layer,
   ElectronTheme.layer,
+  ElectronTray.layer,
   ElectronUpdater.layer,
   ElectronWindow.layer,
   DesktopIpc.layer(Electron.ipcMain),
@@ -183,6 +189,8 @@ const desktopLocalEnvironmentAuthLayer = DesktopLocalEnvironmentAuth.layer.pipe(
 const desktopApplicationLayer = Layer.mergeAll(
   DesktopLifecycle.layer,
   DesktopApplicationMenu.layer,
+  DesktopMenuBar.layer,
+  DesktopNotifications.layer,
   DesktopShellEnvironment.layer,
   desktopSshLayer,
 ).pipe(

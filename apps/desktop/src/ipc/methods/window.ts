@@ -5,7 +5,9 @@ import {
   ContextMenuItemSchema,
   DesktopAppBrandingSchema,
   DesktopEnvironmentBootstrapSchema,
+  DesktopMenuBarStateSchema,
   DesktopThemeSchema,
+  DesktopThreadAttentionSchema,
   PickFolderOptionsSchema,
   PRIMARY_LOCAL_ENVIRONMENT_ID,
   type DesktopEnvironmentBootstrap,
@@ -25,6 +27,8 @@ import * as ElectronMenu from '../../electron/ElectronMenu.ts'
 import * as ElectronShell from '../../electron/ElectronShell.ts'
 import * as ElectronTheme from '../../electron/ElectronTheme.ts'
 import * as ElectronWindow from '../../electron/ElectronWindow.ts'
+import * as DesktopMenuBar from '../../window/DesktopMenuBar.ts'
+import * as DesktopNotifications from '../../window/DesktopNotifications.ts'
 import * as IpcChannels from '../channels.ts'
 import * as DesktopIpc from '../DesktopIpc.ts'
 import {
@@ -68,6 +72,33 @@ export const getWindowFullscreenState = DesktopIpc.makeSyncIpcMethod({
     const electronWindow = yield* ElectronWindow.ElectronWindow
     const window = yield* electronWindow.currentMainOrFirst
     return Option.isSome(window) && window.value.isFullScreen()
+  }),
+})
+
+export const setMenuBarState = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.SET_MENU_BAR_STATE_CHANNEL,
+  payload: DesktopMenuBarStateSchema,
+  result: Schema.Void,
+  handler: Effect.fn('desktop.ipc.window.setMenuBarState')(function* (state)
+  {
+    const menuBar = yield* DesktopMenuBar.DesktopMenuBar
+    const notifications = yield* DesktopNotifications.DesktopNotifications
+    yield* menuBar.setState(state)
+    // the badge rides this channel rather than the edge-triggered notification
+    // one because it has to CLEAR: an edge channel only ever fires when
+    // attention appears, so a badge fed from it would never come back down.
+    yield* notifications.setAttentionCount(state.attentionCount ?? 0)
+  }),
+})
+
+export const notifyThreadAttention = DesktopIpc.makeIpcMethod({
+  channel: IpcChannels.NOTIFY_THREAD_ATTENTION_CHANNEL,
+  payload: DesktopThreadAttentionSchema,
+  result: Schema.Void,
+  handler: Effect.fn('desktop.ipc.window.notifyThreadAttention')(function* (attention)
+  {
+    const notifications = yield* DesktopNotifications.DesktopNotifications
+    yield* notifications.notifyThreadAttention(attention)
   }),
 })
 
