@@ -2,8 +2,8 @@
 
 ## vscode-icons
 
-The custom file icon symbols distributed by this application come from
-`@t3tools/shared/pierreFileIcons` and are adapted from the
+The generated file-icon PNGs in `assets/file-icons/` use custom symbols from
+`@t3tools/shared/pierreFileIcons` adapted from the
 [`vscode-icons`](https://github.com/vscode-icons/vscode-icons) project. Source
 ownership and the canonical notice live in `packages/shared/THIRD_PARTY_NOTICES.md`.
 
