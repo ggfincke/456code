@@ -55,6 +55,44 @@ jobs:
           test -f apps/desktop/dist-electron/preload.cjs
           grep -nE "desktopBridge|getLocalEnvironmentBootstrap|PICK_FOLDER_CHANNEL|wsUrl" apps/desktop/dist-electron/preload.cjs
 
+  cartographer:
+    name: Cartographer (node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      # engine-floor lanes: cartographer-core advertises ^22.16 || ^23.11 || >=24.10,
+      # so the bounded job runs the floor, the odd line, and the repo default
+      matrix:
+        node: ["22.16", "23.11", "24"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version: ${{ matrix.node }}
+          cache: true
+          run-install: true
+
+      - name: Build Cartographer core
+        run: vp run --filter @t3tools/cartographer-core build
+
+      - name: Test Cartographer core
+        working-directory: packages/cartographer-core
+        run: vp test run
+
+      - name: Run standalone acceptance
+        working-directory: packages/cartographer-core
+        run: |
+          node scripts/standaloneAcceptance.mjs
+          node scripts/proposalConcurrencyAcceptance.mjs
+          node scripts/patchPerformanceAcceptance.mjs
+
+      - name: Smoke-test the Cartographer MCP server
+        run: node scripts/smoke-cartographer-mcp.ts
+
   test:
     name: Test
     runs-on: ubuntu-24.04
@@ -73,8 +111,24 @@ jobs:
       - name: Ensure Electron runtime is installed
         run: vp run --filter @t3tools/desktop ensure:electron
 
+      # new workspace packages with test scripts must be added explicitly; Cartographer stays in its bounded job
       - name: Test
-        run: vp run test
+        run: |
+          vp run \
+            --filter @t3tools/desktop \
+            --filter @t3tools/mobile \
+            --filter 456code \
+            --filter @t3tools/web \
+            --filter @t3tools/client-runtime \
+            --filter @t3tools/contracts \
+            --filter effect-acp \
+            --filter effect-codex-app-server \
+            --filter @t3tools/shared \
+            --filter @t3tools/ssh \
+            --filter @t3tools/tailscale \
+            --filter @t3tools/oxlint-plugin-456code \
+            --filter @t3tools/scripts \
+            test
 
   mobile_native_static_analysis:
     name: Mobile Native Static Analysis
@@ -100,7 +154,7 @@ jobs:
   release_smoke:
     name: Release Smoke
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -114,3 +168,29 @@ jobs:
 
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
+
+  release_smoke_windows:
+    name: Release Smoke (Windows package shims)
+    runs-on: windows-2025
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Vite+
+        uses: voidzero-dev/setup-vp@v1
+        with:
+          node-version-file: package.json
+          cache: true
+          run-install: |
+            args:
+              - --filter=456code...
+              - --filter=@t3tools/cartographer-core...
+              - --filter=@t3tools/web...
+              - --filter=@t3tools/scripts...
+
+      - name: Build CLI release graph
+        run: vp run --filter 456code build
+
+      - name: Exercise exact packed CLI through Windows shims
+        run: node apps/server/scripts/cli.ts publish --dry-run --app-version 9.9.9-smoke.0 --verbose

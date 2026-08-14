@@ -24,8 +24,11 @@ This document covers the unified release workflow for stable and nightly desktop
 - Publishes the CLI package (`apps/server`, npm package `456code`) with OIDC trusted publishing from the same workflow file:
   - stable releases publish npm dist-tag `latest`
   - nightly releases publish npm dist-tag `nightly`
-  - publishing runs through `node apps/server/scripts/cli.ts publish`, which wraps
-    `vp pm publish --filter 456code`
+  - publishing runs through `node apps/server/scripts/cli.ts publish`, which builds one temporary
+    npm package containing the private Cartographer runtime, validates that exact tarball in clean
+    npm and pnpm consumers, and passes the same tarball to `npm publish`
+  - the Cartographer payload contains the analysis/query engine plus CLI and MCP entries; it does
+    not contain the retired browser workbench or a static Atlas web bundle
 - Deploys the hosted web app to Vercel only after a release is published:
   - stable releases are aliased to the `latest` hosted app channel
   - nightly releases are aliased to the `nightly` hosted app channel
@@ -176,21 +179,25 @@ guidance when those environments are available.
 ## 0) npm OIDC trusted publishing setup (CLI)
 
 The workflow publishes the CLI through `node apps/server/scripts/cli.ts publish` after aligning the
-package version to the release tag version. That command temporarily prepares publish metadata and
-runs `vp pm publish --filter 456code` from the workspace root.
+package version to the release tag version. The server build first builds Cartographer core and the
+web client. The publish command then creates a temporary package, embeds the private
+Cartographer package and its lockfile-backed production dependency closure, runs `npm pack`, and
+validates the exact archive through installed CLI, MCP, Architecture-query, and server entrypoints.
+Only that validated archive is passed to `npm publish`; the live workspace manifest and build
+outputs are not rewritten for packaging.
 
 Checklist:
 
 1. Confirm npm org/user owns package `456code` (or rename package first if needed).
 2. In npm package settings, configure Trusted Publisher:
    - Provider: GitHub Actions
-   - Repository: this repo
-   - Workflow file: `.github/workflows/release.yml`
+   - Repository: `ggfincke/456code`
+   - Workflow file: `release.yml`
    - Environment (if used): match your npm trusted publishing config
 3. Ensure npm account and org policies allow trusted publishing for the package.
 4. Create release tag `vX.Y.Z` and push; workflow will:
    - set `apps/server/package.json` version to `X.Y.Z`
-   - build web + server
+   - build Cartographer core + web + server
    - run the CLI publish command with `--tag latest`
 5. Nightly runs from the same workflow file use the same CLI publish command with `--tag nightly`.
 

@@ -10,6 +10,8 @@ import * as NodeURL from 'node:url'
 import * as Console from 'effect/Console'
 import * as Effect from 'effect/Effect'
 
+import { withPreservedBuildOutputs } from './lib/preserved-build-outputs.ts'
+
 const repoRoot = NodePath.resolve(NodePath.dirname(NodeURL.fileURLToPath(import.meta.url)), '..')
 
 const workspaceFiles = [
@@ -26,6 +28,7 @@ const workspaceFiles = [
   'apps/mobile/modules/code456-terminal/package.json',
   'oxlint-plugin-456code/package.json',
   'packages/client-runtime/package.json',
+  'packages/cartographer-core/package.json',
   'packages/contracts/package.json',
   'packages/shared/package.json',
   'packages/ssh/package.json',
@@ -198,6 +201,36 @@ function assertMissing(path: string, message: string): void
   {
     throw new Error(message)
   }
+}
+
+function runReleaseArtifactSmoke(): void
+{
+  const outputPaths = ['apps/server/dist', 'apps/web/dist', 'packages/cartographer-core/dist'].map(
+    (relativePath) => NodePath.resolve(repoRoot, relativePath),
+  )
+
+  withPreservedBuildOutputs(outputPaths, () =>
+  {
+    NodeChildProcess.execFileSync('vp', ['run', '--filter', '456code', 'build'], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+    })
+    NodeChildProcess.execFileSync(
+      process.execPath,
+      [
+        NodePath.resolve(repoRoot, 'apps/server/scripts/cli.ts'),
+        'publish',
+        '--dry-run',
+        '--app-version',
+        '9.9.9-smoke.0',
+        '--verbose',
+      ],
+      {
+        cwd: repoRoot,
+        stdio: 'inherit',
+      },
+    )
+  })
 }
 
 const tempRoot = NodeFS.mkdtempSync(NodePath.join(NodeOS.tmpdir(), 't3-release-smoke-'))
@@ -414,6 +447,8 @@ try
     winDebugX64Path,
     'Windows release smoke unexpectedly removed the x64 builder debug fixture.',
   )
+
+  runReleaseArtifactSmoke()
 
   Effect.runSync(Console.log('Release smoke checks passed.'))
 }

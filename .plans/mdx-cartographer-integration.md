@@ -1,7 +1,17 @@
 # MDX viewing (mdx-forge) + codebase explorer (cartographer) integration
 
-Status: all five approved phases implemented; final focused gates and integrated acceptance recorded
-below
+## Historical supersession note (2026-08-09)
+
+The SafeDocument MDX boundary and immutable proposal model remain current. The later native
+architecture integration supersedes phases 3-5 of the Cartographer presentation and lifecycle:
+456code now renders Proposal Impact, Repository Atlas, and Architecture Scope as ordinary native
+resources backed by bounded RPC projections. No iframe, authenticated context URL, or standalone
+Atlas sub-app ships. The hosted-sub-app details below are retained as historical implementation
+evidence; [`docs/integrations/cartographer.md`](../docs/integrations/cartographer.md) is the current
+product and runtime contract.
+
+Historical status: all five originally approved phases were implemented; their focused gates and
+integrated acceptance are recorded below.
 Date: 2026-07-27
 Evidence: Codex Desktop synthesis thread `019f9c6c-8525-7662-a47b-b55c74fb9e16` (6 read-only codex
 research workers over 456code), plus independent Claude worker-broker reports on cartographer
@@ -15,7 +25,7 @@ every load-bearing claim against live code (anchors below).
    HTML emission, no executable JS. Chat, plans, and `.md` keep the existing `ChatMarkdown` path.
    `compileSafe()` (HTML; not a complete sanitizer — the VS Code reference host re-sanitizes with
    DOMPurify) and `compileTrusted()` (evaluates via `new Function()`) are rejected for v1.
-2. **Hosted cartographer sub-app boundary.** A native `ExplorerPanel` right-panel shell embeds a
+2. **Hosted cartographer sub-app boundary (superseded).** A native `ExplorerPanel` right-panel shell embeds a
    supervised Cartographer atlas proxied by the 456code server. No direct import of `src/web` into
    `apps/web` (private app: own React root, history ownership, module-global zustand, global
    Tailwind). The installed Cartographer build is trusted server software; the iframe is lifecycle

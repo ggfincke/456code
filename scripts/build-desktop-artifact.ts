@@ -8,6 +8,7 @@ import { resolveSpawnCommand } from '@t3tools/shared/shell'
 import rootPackageJson from '../package.json' with { type: 'json' }
 import desktopPackageJson from '../apps/desktop/package.json' with { type: 'json' }
 import serverPackageJson from '../apps/server/package.json' with { type: 'json' }
+import cartographerCorePackageJson from '../packages/cartographer-core/package.json' with { type: 'json' }
 
 import { applyWebBrandAssets } from './apply-web-brand-assets.ts'
 import {
@@ -70,6 +71,12 @@ export function resolveDesktopProductName(version: string): string
 
 const LINUX_ICON_SIZES = [16, 22, 24, 32, 48, 64, 128, 256, 512] as const
 const DESKTOP_APP_ID = 'com.ggfincke.456code'
+const CARTOGRAPHER_CORE_REQUIRED_BUILD_FILES = [
+  'server.js',
+  'cli/index.js',
+  'mcp/bin.js',
+  'mcp/server.js',
+] as const
 
 const WorkspaceConfig = Schema.Struct({
   catalog: Schema.optional(Schema.Record(Schema.String, Schema.String)),
@@ -409,6 +416,34 @@ export class WslNodePtyManifestReadError extends Schema.TaggedErrorClass<WslNode
   override get message(): string
   {
     return `Could not read node-pty version from ${this.manifestPath}.`
+  }
+}
+
+export class CartographerCoreBuildOutputMissingError extends Schema.TaggedErrorClass<CartographerCoreBuildOutputMissingError>()(
+  'CartographerCoreBuildOutputMissingError',
+  {
+    distPath: Schema.String,
+    missingFiles: Schema.Array(Schema.String),
+  },
+)
+{
+  override get message(): string
+  {
+    return `Cartographer core build output is incomplete at ${this.distPath}: ${this.missingFiles.join(', ')}. Run 'vp run --filter @t3tools/cartographer-core build'.`
+  }
+}
+
+export class CartographerCorePackOutputError extends Schema.TaggedErrorClass<CartographerCorePackOutputError>()(
+  'CartographerCorePackOutputError',
+  {
+    packDirectory: Schema.String,
+    archiveFiles: Schema.Array(Schema.String),
+  },
+)
+{
+  override get message(): string
+  {
+    return `Expected one Cartographer core package archive in ${this.packDirectory}; found ${this.archiveFiles.length}.`
   }
 }
 
@@ -1296,6 +1331,7 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
   const stageAppDir = path.join(stageRoot, 'app')
   const stageResourcesDir = path.join(stageAppDir, 'apps/desktop/resources')
   const distDirs = {
+    cartographerCoreDist: path.join(repoRoot, 'packages/cartographer-core/dist'),
     desktopDist: path.join(repoRoot, 'apps/desktop/dist-electron'),
     desktopResources: path.join(repoRoot, 'apps/desktop/resources'),
     serverDist: path.join(repoRoot, 'apps/server/dist'),
@@ -1313,6 +1349,23 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
       }),
       { label: 'vp run build:desktop', verbose: options.verbose },
     )
+    yield* Effect.log('[desktop-artifact] Building Cartographer core artifacts...')
+    const cartographerBuildCommand = yield* resolveSpawnCommand('vp', [
+      'run',
+      '--filter',
+      '@t3tools/cartographer-core',
+      'build',
+    ])
+    yield* runCommand(
+      ChildProcess.make(cartographerBuildCommand.command, cartographerBuildCommand.args, {
+        cwd: repoRoot,
+        shell: cartographerBuildCommand.shell,
+      }),
+      {
+        label: 'vp run --filter @t3tools/cartographer-core build',
+        verbose: options.verbose,
+      },
+    )
   }
 
   const requiredBuildInputs = [
@@ -1329,6 +1382,22 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
         buildCommand: 'vp run build:desktop',
       })
     }
+  }
+
+  const missingCartographerCoreFiles: string[] = []
+  for (const relativePath of CARTOGRAPHER_CORE_REQUIRED_BUILD_FILES)
+  {
+    if (!(yield* fs.exists(path.join(distDirs.cartographerCoreDist, relativePath))))
+    {
+      missingCartographerCoreFiles.push(relativePath)
+    }
+  }
+  if (missingCartographerCoreFiles.length > 0)
+  {
+    return yield* new CartographerCoreBuildOutputMissingError({
+      distPath: distDirs.cartographerCoreDist,
+      missingFiles: missingCartographerCoreFiles,
+    })
   }
 
   if (!(yield* fs.exists(bundledClientEntry)))
@@ -1367,6 +1436,66 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
   // electron-builder is filtering out stageResourcesDir directory in the AppImage for production
   yield* fs.copy(stageResourcesDir, path.join(stageAppDir, 'apps/desktop/prod-resources'))
 
+  const cartographerPackageRoot = yield* fs.makeTempDirectoryScoped({
+    prefix: '456code-cartographer-core-package-',
+  })
+  const cartographerPackageManifest = {
+    name: cartographerCorePackageJson.name,
+    version: cartographerCorePackageJson.version,
+    private: true,
+    description: cartographerCorePackageJson.description,
+    license: cartographerCorePackageJson.license,
+    type: cartographerCorePackageJson.type,
+    files: ['dist', 'LICENSE'],
+    bin: cartographerCorePackageJson.bin,
+    exports: {
+      './package.json': './package.json',
+      './server': cartographerCorePackageJson.exports['./server'],
+    },
+    dependencies: resolveCatalogDependencies(
+      cartographerCorePackageJson.dependencies,
+      workspaceCatalog,
+      'packages/cartographer-core',
+    ),
+    engines: cartographerCorePackageJson.engines,
+  }
+  const cartographerPackageManifestString = yield* encodeJsonString(cartographerPackageManifest)
+  yield* fs.writeFileString(
+    path.join(cartographerPackageRoot, 'package.json'),
+    `${cartographerPackageManifestString}\n`,
+  )
+  yield* fs.copy(distDirs.cartographerCoreDist, path.join(cartographerPackageRoot, 'dist'))
+  yield* fs.copyFile(
+    path.join(repoRoot, 'packages/cartographer-core/LICENSE'),
+    path.join(cartographerPackageRoot, 'LICENSE'),
+  )
+
+  const cartographerPackDirectory = path.join(stageAppDir, 'vendor/cartographer-core')
+  yield* fs.makeDirectory(cartographerPackDirectory, { recursive: true })
+  const cartographerPackCommand = yield* resolveSpawnCommand('pnpm', [
+    'pack',
+    '--pack-destination',
+    cartographerPackDirectory,
+  ])
+  yield* runCommand(
+    ChildProcess.make(cartographerPackCommand.command, cartographerPackCommand.args, {
+      cwd: cartographerPackageRoot,
+      shell: cartographerPackCommand.shell,
+    }),
+    { label: 'pnpm pack @t3tools/cartographer-core', verbose: options.verbose },
+  )
+  const cartographerPackageArchives = (yield* fs.readDirectory(cartographerPackDirectory)).filter(
+    (entry) => entry.endsWith('.tgz'),
+  )
+  if (cartographerPackageArchives.length !== 1)
+  {
+    return yield* new CartographerCorePackOutputError({
+      packDirectory: cartographerPackDirectory,
+      archiveFiles: cartographerPackageArchives,
+    })
+  }
+  const cartographerCoreDependency = `file:./vendor/cartographer-core/${cartographerPackageArchives[0]}`
+
   const stageDependencies = {
     ...resolvedServerDependencies,
     ...resolvedDesktopRuntimeDependencies,
@@ -1386,6 +1515,7 @@ const buildDesktopArtifact = Effect.fn('buildDesktopArtifact')(function* (
           serverPackageJson.dependencies['@ff-labs/fff-node'],
         )
       : {}),
+    [cartographerCorePackageJson.name]: cartographerCoreDependency,
   }
   const stagePatchedDependencies = createStagePatchedDependencies(
     workspacePatchedDependencies,

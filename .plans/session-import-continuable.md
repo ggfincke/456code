@@ -19,7 +19,7 @@ source provider can prove that it still owns the native session.
 | Discovery, identity, import, and continuation | Complete | Configured-source ownership, canonical-path validation, native-ID matching, atomic import serialization, exact binding, repair/reverify, and deadline behavior are covered by focused unit and integration tests. |
 | Web import and continuation UX | Complete | Settings scan/import, provider selection, imported grouping, consent blocking/focus, rendering, repair, reload, and restart were exercised in an isolated authenticated browser environment. |
 | Resource and adversarial hardening | Complete | Independent persistence/client and provider-identity audits found no remaining confirmed issue. Raw and normalized budgets, traversal limits, fair deadlines, compensated archive replacement, process cleanup, payload compaction, and fail-closed provider authority are in place. |
-| Final acceptance | Complete with documented native-mobile boundary | Final server matrix: 41 files / 739 tests. Final client matrix: 15 files / 320 tests. Seven package typechecks, 186-file format checks, targeted lint/diff checks, authenticated WS coverage, and a clean isolated browser import/reload/restart/reverify pass are green. The iOS native build passed, but simulator behavior remained blocked by the host Expo module registry/toolchain failure recorded below. |
+| Final acceptance | Complete with import-specific iOS interaction pending | Final server matrix: 41 files / 739 tests. Final client matrix: 15 files / 320 tests. Seven package typechecks, 186-file format checks, targeted lint/diff checks, authenticated WS coverage, and a clean isolated browser import/reload/restart/reverify pass are green. The repository-level native boot blocker was repaired and a fresh iOS app booted and paired, but this plan's imported-session consent/send interaction was not rerun on the simulator. |
 
 ## Supported sources: all five
 
@@ -205,10 +205,16 @@ data, command fields, summaries, statuses, and details used by the existing rend
 
 - The representative iOS Simulator native build completed successfully, as did installation, launch,
   and Metro bundling.
-- Runtime behavior could not reach app registration because the host environment reported missing
-  native Expo modules (`ExponentConstants` and `ExpoAsset`); XcodeBuildMCP also could not execute
-  `/usr/bin/xcrun`. The imported-session mobile send block is therefore accepted through focused
-  automated tests and typecheck, not a completed simulator interaction.
+- The prior missing `ExponentConstants` / `ExpoAsset` report was not a missing pod or host-toolchain
+  registry failure. Swift sanitizes the numeric iOS target module `456codeDev` to `_56codeDev`, while
+  Expo looked up `ExpoModulesProvider` through the unsanitized `CFBundleName`. The tracked Expo config
+  now emits Swift-safe names (`_56codeDev`, `_56codePreview`, and `_56code`), allowing the fresh app to
+  register native modules, boot, and pair normally. React 19.2.3 alignment and Hermes-compatible
+  array-copy operations closed the additional runtime compatibility failures found during that run.
+- The completed simulator pass exercised the exact-run mobile worktree policy, not this plan's
+  imported-session continuation prompt or blocked Send behavior. That import-specific interaction
+  remains accepted through focused automated tests and typecheck until a dedicated simulator flow is
+  run; it is no longer attributed to a host or Expo-module blocker.
 
 ## Residual limitations
 

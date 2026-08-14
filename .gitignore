@@ -29,6 +29,10 @@ squashfs-root/
 .vercel
 .gstack/
 dev-docs/
+# orchestrate run checkpoints are per-run scratch; tracking them would falsify
+# the .plans/README.md inventory of durable, numerically ordered design plans
+.plans/runs/
+tmp/
 dist-electron/
 .electron-runtime/
 .showcase/

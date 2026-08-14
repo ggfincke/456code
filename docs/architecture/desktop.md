@@ -47,9 +47,8 @@ instance identifiers and owns the lifetime of every registered child scope.
 5. The backend receives a schema-validated bootstrap envelope over a dedicated file descriptor on
    the native path or standard input through `wsl.exe`. The desktop waits for
    `/.well-known/t3/environment` before marking that instance ready.
-6. Primary readiness refreshes the Atlas request interceptor and opens the main window. The window
-   always loads the desktop protocol URL; the shared connection runtime connects it to the ready
-   backend.
+6. Primary readiness opens the main window. The window always loads the desktop protocol URL; the
+   shared connection runtime connects it to the ready backend.
 7. When enabled, the WSL reconciler registers and starts a secondary instance without blocking
    primary readiness.
 
@@ -67,21 +66,13 @@ The desktop protocol keeps the renderer on a stable secure origin even though it
 differs between development and packaged builds. External navigation goes through the native shell
 allowlist instead of granting the renderer general process access.
 
-## Atlas Authentication
+## Architecture Resources
 
-Atlas is served by the 456code backend under `/atlas/ctx/<context-id>`. The desktop renderer uses a
-custom origin rather than the browser cookie origin used by ordinary web clients, so Electron
-injects the local-environment bearer token only when all of these conditions hold:
-
-- the request targets the current primary backend origin;
-- the path is under `/atlas/ctx/`;
-- the method is `GET` or `HEAD`.
-
-The interceptor's origin is refreshed after a backend restart or fallback changes the primary
-endpoint. A refresh failure is logged without preventing the otherwise-ready main window from
-opening, and a later readiness cycle retries it. Secondary WSL and remote Atlas iframe navigation
-remain outside this primary-origin interceptor contract; see
-[Cartographer and Atlas](../integrations/cartographer.md).
+Architecture resources use the same authenticated Effect RPC connection as the rest of the shared
+web client. Electron does not inject credentials into a separate architecture iframe or maintain an
+architecture-specific request interceptor. Primary, WSL, and saved remote environments therefore
+follow the connection runtime's normal authentication and environment-selection boundary; see
+[Cartographer architecture analysis](../integrations/cartographer.md).
 
 ## Failure and Restart Behavior
 
@@ -115,7 +106,7 @@ desktop application that owns it. See [Server Update Architecture](./server-upda
 - Backend configuration and supervision: `apps/desktop/src/backend/DesktopBackendConfiguration.ts`,
   `DesktopBackendManager.ts`, and `DesktopBackendPool.ts`
 - Optional WSL lifecycle: `apps/desktop/src/wsl/DesktopWslBackend.ts`
-- Renderer protocol and Atlas bearer injection: `apps/desktop/src/electron/ElectronProtocol.ts`
+- Renderer protocol: `apps/desktop/src/electron/ElectronProtocol.ts`
 - Window readiness and creation: `apps/desktop/src/window/DesktopWindow.ts`
 - Native bridge: `apps/desktop/src/preload.ts` and `apps/desktop/src/ipc/DesktopIpcHandlers.ts`
 - Update state machine: `apps/desktop/src/updates/DesktopUpdates.ts`
