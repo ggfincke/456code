@@ -7,13 +7,17 @@
 
 Implementation checkpoint. Approval units 1 and 3-5 were completed on
 2026-08-02. Approval unit 2 terminal / right-panel / interrupt / provider-switch
-seams landed 2026-08-02; send/retry closed in Phase 3c (2026-08-06, uncommitted)
-via `ChatSendPorts` on `useChatDispatchController`.
+seams landed 2026-08-02; send/retry closed in Phase 3c on 2026-08-06 via
+`ChatSendPorts` on `useChatDispatchController`. The Phase 3c send/retry work is
+committed as `e8d528caae0069978a3abdc96bb179e2a4b50d81` and reached the current
+history through merge commit `40a2b10267bf9df970eadc45d69f14e6b45229aa`.
 
-**Phase 3c ChatView send/retry (2026-08-06, uncommitted):** `runSend` /
+**Phase 3c ChatView send/retry (2026-08-06, committed):** `runSend` /
 `dispatchSend` / `onSend` moved into `useChatDispatchController` via typed
-`ChatSendPorts` (explicit named fields; no React context). Live sizes:
-`ChatView.tsx` **5759**, controller **1430**. Default `ChatView` export and
+`ChatSendPorts` (explicit named fields; no React context). Phase 3c closeout
+sizes were `ChatView.tsx` **5759** and controller **1430**; at the refreshed
+`756068c1e` baseline they are **6008** and **1507** after later feature work.
+Default `ChatView` export and
 plan 23 stop conditions for identity / promotion / scroll / context were
 honored. Integrated `test-t3-app` send/retry pass **deferred (AFK)**. Further
 `ws.ts` assembly and ClaudeAdapter session/finalizer HOLDs remain binding.
@@ -338,8 +342,9 @@ Timeline scroll effects and optimistic-preview promotion effects stay in
 composer/session suites (**170** passed). `test-t3-app` integrated pass
 deferred (AFK).
 
-1. **ChatView send/retry** — **Done** (uncommitted); shell **5759**,
-   controller **1430**.
+1. **ChatView send/retry** — **Done and committed** (`e8d528caa`); shell
+   **5759**, controller **1430**. The integrated `test-t3-app` pass remains
+   deferred (AFK).
 2. **ws / Claude further units** — **Hold** assembly and session/finalizer
    ownership; optional terminal/workers handler aggregates only if staffing
-   justifies thinning (`ws.ts` **1208**, `ClaudeAdapter.ts` **3923**).
+   justifies thinning (current `ws.ts` **1431**, `ClaudeAdapter.ts` **4149**).

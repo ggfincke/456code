@@ -3,11 +3,6 @@
   "layering": "strict",
   "groups": [
     {
-      "match": "apps/atlas/**",
-      "name": "Atlas SPA",
-      "description": "Cartographer's browser-based architecture atlas."
-    },
-    {
       "match": "apps/desktop/**",
       "name": "Desktop Client",
       "description": "Electron shell, native integrations, and desktop packaging."
@@ -205,22 +200,6 @@
       }
     },
     {
-      "id": "atlas-core-public-surface",
-      "from": "apps/atlas/src/**",
-      "to": "packages/cartographer-core/src/**",
-      "verdict": "allow-only",
-      "allowVia": [
-        "apps/atlas/src/features/analysis/**",
-        "apps/atlas/src/features/bootstrap/**",
-        "apps/atlas/src/features/changes/**",
-        "apps/atlas/src/shared/**"
-      ],
-      "why": "Only Atlas graph and data adapters consume Cartographer's public browser and contracts surfaces.",
-      "enforcedBy": {
-        "mechanism": "none"
-      }
-    },
-    {
       "id": "cartographer-core-stays-standalone",
       "from": "packages/cartographer-core/src/**",
       "to": "packages/shared/src/**",
@@ -241,16 +220,6 @@
       "key": "server",
       "label": "456code Server",
       "roots": ["apps/server/src/bin.ts"]
-    },
-    {
-      "key": "atlas-browser",
-      "label": "Atlas Browser",
-      "roots": ["apps/atlas/src/app/main.tsx"]
-    },
-    {
-      "key": "atlas-worker",
-      "label": "Atlas Worker",
-      "roots": ["apps/atlas/src/workers/atlas.worker.ts"]
     },
     {
       "key": "cartographer-cli",
@@ -322,5 +291,5 @@
       ]
     }
   ],
-  "exclude": [".repos"]
+  "exclude": [".repos", "dist-electron"]
 }

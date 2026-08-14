@@ -1,3 +1,6 @@
+# .github/workflows/release.yml
+# publish tagged and nightly application releases
+
 name: Release
 
 on:
@@ -549,7 +552,7 @@ jobs:
     needs: [preflight, relay_public_config, build]
     if: ${{ !failure() && !cancelled() && needs.preflight.result == 'success' && needs.relay_public_config.result == 'success' && needs.build.result == 'success' }}
     runs-on: ubuntu-24.04 # blacksmith-8vcpu-ubuntu-2404
-    timeout-minutes: 10
+    timeout-minutes: 25
     permissions:
       contents: read
       id-token: write
@@ -571,14 +574,12 @@ jobs:
           run-install: |
             args:
               - --filter=456code...
+              - --filter=@t3tools/cartographer-core...
               - --filter=@t3tools/web...
               - --filter=@t3tools/scripts...
 
       - name: Align package versions to release version
         run: node scripts/update-release-package-versions.ts "${{ needs.preflight.outputs.version }}"
-
-      - name: Build web package
-        run: vp run --filter @t3tools/web build
 
       - name: Build CLI package
         run: vp run --filter 456code build

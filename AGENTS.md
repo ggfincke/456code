@@ -16,11 +16,14 @@
 
 ## Package Roles
 
-- `apps/server`: Node.js WebSocket server. Wraps Codex app-server (JSON-RPC over stdio), serves the React web app, and manages provider sessions.
-- `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, and client-side state. Connects to the server via WebSocket.
+- `apps/server`: Node.js HTTP/WebSocket server. Wraps Codex app-server (JSON-RPC over stdio), serves the React web app, manages provider sessions, and publishes authorized bounded architecture projections.
+- `apps/web`: React/Vite UI. Owns session UX, conversation/event rendering, native architecture resources, and client-side state. Connects to the server via WebSocket.
+- `apps/mobile`: Expo client for iOS and Android. Reuses the shared client runtime while owning native navigation, notifications, and platform integration.
+- `apps/desktop`: Electron host. Supervises one primary 456code server backend and optional WSL backends, loads the shared web client, and owns desktop IPC, updates, previews, and native lifecycle.
 - `packages/contracts`: Shared effect/Schema schemas and TypeScript contracts for provider events, WebSocket protocol, and model/session types. Keep this package schema-only — no runtime logic.
 - `packages/shared`: Shared runtime utilities consumed by both server and client applications. Uses explicit subpath exports (e.g. `@t3tools/shared/git`) — no barrel index.
 - `packages/client-runtime`: Shared runtime package for sharing client code across web and mobile.
+- `packages/cartographer-core`: Local-first repository analysis, graph, storage, query, CLI, and MCP implementation. The server consumes its explicit engine surfaces; UI and application ownership remain outside the package.
 
 ## Documentation Ownership
 

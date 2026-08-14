@@ -131,10 +131,9 @@ export default defineConfig({
               group: [
                 '@t3tools/cartographer-core/*',
                 '!@t3tools/cartographer-core/contracts',
-                '!@t3tools/cartographer-core/browser',
                 '!@t3tools/cartographer-core/server',
               ],
-              message: 'Use only the contracts, browser, or server Cartographer subpath exports.',
+              message: 'Use only the contracts or server Cartographer subpath exports.',
             },
           ],
         },

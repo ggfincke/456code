@@ -35,15 +35,18 @@ unapproved plan without guessing that it started.
 | [20-version-control-phase-2-source-control-provider-foundation.md](20-version-control-phase-2-source-control-provider-foundation.md) | proposed | Provider foundation design has migration steps but no execution ledger. |
 | [21-style-comments-and-structure-modernization.md](21-style-comments-and-structure-modernization.md) | completed | Phases 0-4 are complete; the remaining high-risk follow-ups continue under active plan 23. |
 | [22-core-review-remediation.md](22-core-review-remediation.md) | proposed | Durable remediation groups are preserved but remain re-verification and approval gated. |
-| [23-high-risk-large-file-boundaries.md](23-high-risk-large-file-boundaries.md) | active | `ChatView` terminal + send/retry slices complete (send uncommitted); WebSocket assembly and Claude session/finalizer remain gated. |
-| [24-layout-execution-designs.md](24-layout-execution-designs.md) | active | Phase 3b designs; ChatView send/retry + Group K **done** (Phase 3c, uncommitted); remaining 3c bodies: Group N, D5. |
+| [23-high-risk-large-file-boundaries.md](23-high-risk-large-file-boundaries.md) | active | `ChatView` terminal + send/retry slices are committed; WebSocket assembly and Claude session/finalizer remain gated, and integrated send/retry acceptance is deferred. |
+| [24-layout-execution-designs.md](24-layout-execution-designs.md) | active | All implementable Phase 3c bodies are committed; explicit ws, Claude, decider/projector, and GitVcsDriver façade HOLDs plus deferred web/mobile acceptance remain open. |
+| [25-t3code-upstream-selective-porting.md](25-t3code-upstream-selective-porting.md) | proposed | Implementation-ready manual adaptation plan for all 17 accepted commits from the 35-commit upstream t3code review window. |
+| [26-cartographer-absorption.md](26-cartographer-absorption.md) | completed / presentation superseded | Preserves the original absorption and remediation record; native resources retired the iframe, context URL, and browser-origin acceptance surface. |
+| [27-native-architecture-impact.md](27-native-architecture-impact.md) | completed / presentation superseded | Preserves the intermediate native Impact plus Advanced Atlas release; the maintained integration is now fully native and iframe-free. |
 | [README.md](README.md) | active | Maintained inventory and status index for the tracked planning surface. |
 | [branch-environment-picker-in-chatview-input.md](branch-environment-picker-in-chatview-input.md) | historical | Legacy renderer UX proposal with obsolete package paths and no closeout state. |
 | [effect-atom.md](effect-atom.md) | proposed | AtomRpc migration phases are specified without an implementation ledger. |
 | [git-flows-integration-tests.md](git-flows-integration-tests.md) | historical | Legacy desktop test plan uses obsolete source and command paths. |
 | [git-flows-test-plan.md](git-flows-test-plan.md) | historical | Legacy renderer test plan uses obsolete source and command paths. |
 | [git-integration-branch-picker-worktrees.md](git-integration-branch-picker-worktrees.md) | historical | Legacy desktop/renderer implementation proposal with no closeout state. |
-| [mdx-cartographer-integration.md](mdx-cartographer-integration.md) | completed | All five approved phases and focused acceptance are explicitly recorded complete. |
+| [mdx-cartographer-integration.md](mdx-cartographer-integration.md) | partially superseded | SafeDocument MDX and immutable proposals remain current; native architecture resources supersede the hosted Cartographer phases. |
 | [orchestrate-core-workflow-review.md](orchestrate-core-workflow-review.md) | active | Implementation report leaves visual polish and two broker follow-ups open. |
 | [session-import-continuable.md](session-import-continuable.md) | completed | Execution ledger records every phase and focused acceptance complete. |
 | [spec-1-1-cutover-plan.md](spec-1-1-cutover-plan.md) | historical | Hard-cutover sequence has no maintained completion ledger. |

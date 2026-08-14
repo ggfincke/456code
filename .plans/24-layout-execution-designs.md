@@ -1,21 +1,24 @@
 <!-- .plans/24-layout-execution-designs.md -->
-<!-- Phase 3b design packs for plan 23, Group N, D5, and Group K -->
+<!-- phase 3b design packs for plan 23, Group N, D5, and Group K -->
 
 # Plan: Layout Execution Designs (Phase 3b)
 
 ## Status
 
-**Campaign execution complete for implementable items** (Phase 3c closeout,
-2026-08-06, uncommitted WT). Phase 3b designs below remain the ownership
-record; bodies for §1 / F-D8 / N / D5 / K **shipped dirty**. **HOLDs remain:**
-ws assembly, Claude session/finalizer (and standing holds outside these
-designs: contracts soft-split, Migrations, Layers/Services pairs, UI
-primitives, routes, scripts CLIs, decider/projector, GitVcsDriver façade).
+**Campaign execution complete and committed for implementable items.** Phase 3b
+designs below remain the ownership record. The Phase 3c bodies landed as
+`e8d528caae0069978a3abdc96bb179e2a4b50d81` (§1 and F-D8),
+`03a379c013597bc945dbe9b19f78d4b0ab3306f6` (Group N and D5), and
+`53e11fcaa9301f0652ca5a931942ee847c4d2304` (Group K), all reachable through
+merge commit `40a2b10267bf9df970eadc45d69f14e6b45229aa`. **HOLDs remain:** ws assembly,
+Claude session/finalizer (and standing holds outside these designs: contracts
+soft-split, Migrations, Layers/Services pairs, UI primitives, routes, scripts
+CLIs, decider/projector, GitVcsDriver façade).
 
-Closeout census (review master tables): **60** ≥1000 / **41** 800–999 (was
-**73** / **35**). Integrated `test-t3-app` / `test-t3-mobile` deferred. **No
-commits from this closeout** per user (local `main` may already be ahead of
-`origin` from other slices).
+Historical 2026-08-06 closeout census (review master tables): **60** ≥1000 /
+**41** 800–999 (was **73** / **35**). Integrated `test-t3-app` /
+`test-t3-mobile` remain deferred; commit history does not replace those
+runtime-acceptance gates.
 
 **Sources of truth**
 
@@ -25,30 +28,30 @@ commits from this closeout** per user (local `main` may already be ahead of
 - Plan 23: `.plans/23-high-risk-large-file-boundaries.md`
 - Locked decisions D5 / D7 / D8 in the architecture review
 
-**Live line counts** (filesystem census, 2026-08-06 Phase 3c closeout):
+**Current line counts** (filesystem census at `756068c1e`, 2026-08-08):
 
 | Surface | Path | Lines |
 | --- | --- | ---: |
-| ChatView shell | `apps/web/src/components/ChatView.tsx` | **5759** |
-| Dispatch controller | `apps/web/src/components/chat/useChatDispatchController.ts` | **1430** |
-| Right-panel controller | `apps/web/src/components/chat/useChatRightPanelController.ts` | **598** |
-| WS assembly | `apps/server/src/ws.ts` | **1208** (HOLD) |
-| Claude adapter | `apps/server/src/provider/Layers/ClaudeAdapter.ts` | **3923** (HOLD) |
-| GitVcsDriverCore | `apps/server/src/vcs/GitVcsDriverCore.ts` | **2805** (N done) |
+| ChatView shell | `apps/web/src/components/ChatView.tsx` | **6008** |
+| Dispatch controller | `apps/web/src/components/chat/useChatDispatchController.ts` | **1507** |
+| Right-panel controller | `apps/web/src/components/chat/useChatRightPanelController.ts` | **607** |
+| WS assembly | `apps/server/src/ws.ts` | **1431** (HOLD) |
+| Claude adapter | `apps/server/src/provider/Layers/ClaudeAdapter.ts` | **4149** (HOLD) |
+| GitVcsDriverCore | `apps/server/src/vcs/GitVcsDriverCore.ts` | **2871** (N done) |
 | ExactGitSnapshot | `apps/server/src/vcs/ExactGitSnapshot.ts` | **1619** (N done) |
-| GitManager | `apps/server/src/git/GitManager.ts` | **1986** (N done) |
-| Terminal Manager | `apps/server/src/terminal/Manager.ts` | **2487** (N done) |
-| ProjectionSnapshotQuery | `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts` | **2545** (N done) |
-| ProjectionPipeline | `apps/server/src/orchestration/Layers/ProjectionPipeline.ts` | **2590** (N done) |
-| ProviderCommandReactor | `apps/server/src/orchestration/Layers/ProviderCommandReactor.ts` | **2961** (N done) |
-| CheckpointReactor | `apps/server/src/orchestration/Layers/CheckpointReactor.ts` | **1921** (N done) |
+| GitManager | `apps/server/src/git/GitManager.ts` | **1985** (N done) |
+| Terminal Manager | `apps/server/src/terminal/Manager.ts` | **2463** (N done) |
+| ProjectionSnapshotQuery | `apps/server/src/orchestration/Layers/ProjectionSnapshotQuery.ts` | **2613** (N done) |
+| ProjectionPipeline | `apps/server/src/orchestration/Layers/ProjectionPipeline.ts` | **2645** (N done) |
+| ProviderCommandReactor | `apps/server/src/orchestration/Layers/ProviderCommandReactor.ts` | **2972** (N done) |
+| CheckpointReactor | `apps/server/src/orchestration/Layers/CheckpointReactor.ts` | **2609** (N done) |
 | ProviderRuntimeIngestion | `apps/server/src/orchestration/Layers/ProviderRuntimeIngestion.ts` | **1397** (N done) |
-| orchestrationHandlers | `apps/server/src/ws/handlers/orchestrationHandlers.ts` | **578** (exited ≥1000) |
-| GitVcsDriver façade | `apps/server/src/vcs/GitVcsDriver.ts` | **1322** (HOLD) |
-| gitRefParse (D5 leaf) | `apps/server/src/vcs/gitRefParse.ts` | (was `git/remoteRefs`) |
-| GitWorkflowService | `apps/server/src/git/GitWorkflowService.ts` | **328** |
+| orchestrationHandlers | `apps/server/src/ws/handlers/orchestrationHandlers.ts` | **594** (exited ≥1000) |
+| GitVcsDriver façade | `apps/server/src/vcs/GitVcsDriver.ts` | **1348** (HOLD) |
+| gitRefParse / GitStatusReader (D5 leaves) | `apps/server/src/vcs/{gitRefParse,GitStatusReader}.ts` | **88** / **33** |
+| GitWorkflowService | `apps/server/src/git/GitWorkflowService.ts` | **252** |
 | VcsStatusBroadcaster | `apps/server/src/vcs/VcsStatusBroadcaster.ts` | **608** |
-| decider / projector | `orchestration/decider.ts` / `projector.ts` | **1854** / **1321** (HOLD) |
+| decider / projector | `orchestration/decider.ts` / `projector.ts` | **1952** / **1342** (HOLD) |
 
 Plan 23 planning baselines were ChatView ~7280 / ws ~3280 / Claude ~4590.
 Remaining gates bind on ownership, not line count.
@@ -57,13 +60,13 @@ Remaining gates bind on ownership, not line count.
 
 | Design | Recommendation | Status |
 | --- | --- | --- |
-| 1. ChatView send/retry | **Done (uncommitted)** | `ChatSendPorts` + `runSend`; integrated web deferred |
+| 1. ChatView send/retry | **Done (`e8d528caa`)** | `ChatSendPorts` + `runSend`; integrated web deferred |
 | 2a. ws further units | **Hold** | Do not move `WsRpcGroup.of` |
 | 2b. ClaudeAdapter further | **Hold** | Session Map + sole `Effect.addFinalizer` stay |
-| 3. Group N (listed files) | **Done (uncommitted)** | Designed clusters split; hold decider/projector + GitVcsDriver façade |
-| 4. D5 git↔vcs | **Done leaf (uncommitted)** | `gitRefParse` + `GitStatusReader`; one-way workflow→driver |
-| 5. Group K | **Done (uncommitted)** | Nested behind export façades; 25 `./state/*` keys stable |
-| 6. Group F chat (D8) | **Done (uncommitted)** | `composer/` `model-picker/` `messages-timeline/` `orchestrate-plan/` nests |
+| 3. Group N (listed files) | **Done (`03a379c01`)** | Designed clusters split; hold decider/projector + GitVcsDriver façade |
+| 4. D5 git↔vcs | **Done leaf (`03a379c01`)** | `gitRefParse` + `GitStatusReader`; one-way workflow→driver |
+| 5. Group K | **Done (`53e11fcaa`)** | Nested behind export façades; 25 `./state/*` keys stable |
+| 6. Group F chat (D8) | **Done (`e8d528caa`)** | `composer/` `model-picker/` `messages-timeline/` `orchestrate-plan/` nests |
 
 ---
 
@@ -71,8 +74,9 @@ Remaining gates bind on ownership, not line count.
 
 ### Recommendation
 
-**Done (Phase 3c, uncommitted, 2026-08-06).** Missing half of plan 23 approval
-unit 2 closed via explicit `ChatSendPorts` — no context bag.
+**Done (Phase 3c, committed as `e8d528caa`, 2026-08-06).** Missing half of plan
+23 approval unit 2 closed via explicit `ChatSendPorts` — no context bag. The
+integrated web pass remains deferred.
 
 ### Current ownership
 
@@ -82,7 +86,7 @@ unit 2 closed via explicit `ChatSendPorts` — no context bag.
 | Composer content | `composerDraftStore` (not React state) |
 | Terminal layout | `terminalUiStateStore` + `PersistentThreadTerminals.tsx` |
 | Right panel | `rightPanelStore` + `useChatRightPanelController` |
-| Draft-error promotion, interrupt, provider-switch, **send/retry** | `useChatDispatchController` (**1430** lines) via `ChatSendPorts` |
+| Draft-error promotion, interrupt, provider-switch, **send/retry** | `useChatDispatchController` (**1507** lines) via `ChatSendPorts` |
 | Timeline scroll-follow / anchoring refs | Stored in `ChatView.tsx`; mutated by controller `runSend` |
 | Optimistic user rows + blob preview handoff | Setters/refs owned in `ChatView.tsx`; send mutations via ports |
 | Local dispatch busy/worktree chrome | `beginLocalDispatch` / `resetLocalDispatch` in `ChatView.tsx` (ported) |
@@ -217,10 +221,11 @@ each cluster independently clears that bar without a service bag.
 
 #### Current ownership (evidence)
 
-- Approval unit 3 complete: `ws/rpcAuthorization.ts` (**237**) + five
-  aggregates under `ws/handlers/` (workspace **365**, proposal **314**, VCS
-  **155**, preview **132**, orchestration **1304**).
-- `ws.ts` (**1208**, was ~3280) still owns:
+- Approval unit 3 complete: `ws/rpcAuthorization.ts` (**245**) + five
+  aggregates under `ws/handlers/` (workspace **365**, proposal **373**, VCS
+  **155**, preview **132**, orchestration **594**).
+- `ws.ts` (**1431** at the refreshed baseline; **1208** at Phase 3c closeout,
+  was ~3280 at the Plan 23 planning baseline) still owns:
   - `makeWsRpcLayer` service yields
   - handler factory wiring
   - remaining inline RPC methods
@@ -259,13 +264,14 @@ Already extracted under `apps/server/src/provider/claude/`:
 
 | Module | Lines | Owns |
 | --- | ---: | --- |
-| `ClaudeTokenUsage.ts` | 293 | Pure token/context normalization |
-| `ClaudeToolProjection.ts` | 400 | Pure tool/task/plan projection |
+| `ClaudeTokenUsage.ts` | 327 | Pure token/context normalization |
+| `ClaudeToolProjection.ts` | 427 | Pure tool/task/plan projection |
 | `ClaudeSdkMessages.ts` | 324 | Pure SDK decode/diagnostics |
-| `ClaudePrompt.ts` | 93 | Pure prompt/image construction |
+| `ClaudePrompt.ts` | 100 | Pure prompt/image construction |
 | `ClaudeSessionRuntime.ts` | 128 | Bounded query resource helper only |
 
-`ClaudeAdapter.ts` (**3923**) still owns:
+`ClaudeAdapter.ts` (**4149** at the refreshed baseline; **3923** at Phase 3c
+closeout) still owns:
 
 - `sessions: Map<ThreadId, ClaudeSessionContext>` (constructed in
   `makeClaudeAdapter`)
@@ -291,8 +297,8 @@ distributed.
 
 ### Recommendation
 
-**Implement** one cluster per PR after go-ahead, behind stable Layer/Context /
-handler façades. **Exclude** Claude session/finalizer and `ws.ts` assembly.
+**Implemented** behind stable Layer/Context/handler façades in `03a379c01`.
+**Exclude** Claude session/finalizer and `ws.ts` assembly.
 **Hold** `orchestration/decider.ts` and `orchestration/projector.ts`
 (intentional tables). **Hold** `GitVcsDriver.ts` façade merge/split (keep as
 façade over Core). Coordinate ExactGitSnapshot / GitManager / Core work with
@@ -308,7 +314,7 @@ Shared invariants for every N cluster:
 - Stop if ordering, cancellation, cleanup, or projection correctness would
   change
 
-### 3.1 `GitVcsDriverCore.ts` (**3123**) — Implement
+### 3.1 `GitVcsDriverCore.ts` (**3123** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -320,7 +326,7 @@ Shared invariants for every N cluster:
 | **Stop** | If cache TTL/coalesce semantics must change to split; if Core must import workflow. |
 | **Risks** | Cache key drift; interaction with D5 remoteRefs move. Prefer D5 leaf extract before or with Core refs work. |
 
-### 3.2 `ExactGitSnapshot.ts` (**2049**, live under `vcs/`) — Implement
+### 3.2 `ExactGitSnapshot.ts` (**2049** design baseline, under `vcs/`) — Implemented
 
 | | |
 | --- | --- |
@@ -331,7 +337,7 @@ Shared invariants for every N cluster:
 | **Stop** | If AbortSignal/timeout behavior would diverge across helpers. |
 | **Risks** | Byte-limit and path-validation order is security-adjacent — preserve call order. |
 
-### 3.3 `GitManager.ts` (**2449**) — Implement
+### 3.3 `GitManager.ts` (**2449** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -342,7 +348,7 @@ Shared invariants for every N cluster:
 | **Stop** | If split requires new public Context tags; if D5 cycle break is in-flight on same files. |
 | **Risks** | Cycle with `vcs/GitVcsDriver` — sequence after or with D5 leaf step. |
 
-### 3.4 `terminal/Manager.ts` (**2852**) — Implement
+### 3.4 `terminal/Manager.ts` (**2852** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -353,7 +359,7 @@ Shared invariants for every N cluster:
 | **Stop** | If session map or event sequence ownership would split across layers. |
 | **Risks** | Attach snapshot dedupe and sequence counters are easy to break — keep on façade. |
 
-### 3.5 `ProjectionSnapshotQuery.ts` (**2914**) — Implement
+### 3.5 `ProjectionSnapshotQuery.ts` (**2914** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -364,7 +370,7 @@ Shared invariants for every N cluster:
 | **Stop** | If split forces duplicate schema copies that can drift. |
 | **Risks** | SQL/projector name coupling — keep projector name list with assembly. |
 
-### 3.6 `ProjectionPipeline.ts` (**2823**) — Implement
+### 3.6 `ProjectionPipeline.ts` (**2823** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -375,7 +381,7 @@ Shared invariants for every N cluster:
 | **Stop** | If retain helpers need live DB transactions (must stay with pipeline). |
 | **Risks** | Revert retention order bugs → silent history loss. |
 
-### 3.7 `ProviderCommandReactor.ts` (**2984**) — Implement
+### 3.7 `ProviderCommandReactor.ts` (**2984** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -389,7 +395,7 @@ Shared invariants for every N cluster:
 | **Stop** | If prep needs reactor-internal mutable maps. |
 | **Risks** | Handoff delivery markers and stale pending-request classification. |
 
-### 3.8 `CheckpointReactor.ts` (**2012**) — Implement
+### 3.8 `CheckpointReactor.ts` (**2012** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -400,7 +406,7 @@ Shared invariants for every N cluster:
 | **Stop** | If revert execute splits without preserving operation id prefix semantics. |
 | **Risks** | Rollback journal detail drift across provider adapters. |
 
-### 3.9 `ProviderRuntimeIngestion.ts` (**1646**) — Implement
+### 3.9 `ProviderRuntimeIngestion.ts` (**1646** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -411,7 +417,7 @@ Shared invariants for every N cluster:
 | **Stop** | If buffer eviction policy would change; if strict lifecycle guard location moves. |
 | **Risks** | Assistant segment message ids / proposed plan ids must stay deterministic. |
 
-### 3.10 `orchestrationHandlers.ts` (**1304**) — Implement
+### 3.10 `orchestrationHandlers.ts` (**1304** design baseline) — Implemented
 
 | | |
 | --- | --- |
@@ -438,11 +444,11 @@ Shared invariants for every N cluster:
 
 ### Recommendation
 
-**Implement** in Phase 3c as a dedicated PR **before** large GitManager /
-GitVcsDriverCore moves that touch the same edges. Matches locked D5:
-leaf extract first, then one-way `workflow → driver`.
+**Implemented** in `03a379c01` before the large GitManager/GitVcsDriverCore
+moves that touched the same edges. The landed order matches locked D5: leaf
+extract first, then one-way `workflow → driver`.
 
-### Current cycle (live edges)
+### Pre-implementation cycle (historical edges)
 
 ```text
 git/GitManager.ts          → vcs/GitVcsDriver
@@ -521,7 +527,7 @@ lives on the `git` side of the cycle while Core (vcs) imports it.
 
 ### Recommendation
 
-**Done (Phase 3c, uncommitted).** Nested **internally** only; every
+**Done (Phase 3c, committed as `53e11fcaa`).** Nested **internally** only; every
 `@t3tools/client-runtime/state/*` subpath preserved via re-export façades at
 the current `package.json` targets (old paths are thin re-exports). Live
 package has **25** `./state/*` export keys (design draft said 26).
@@ -687,16 +693,15 @@ after nest):
 
 ---
 
-## Phase 3c suggested PR order (post-approval)
+## Phase 3c execution order and remaining holds
 
-1. ChatView send/retry → `useChatDispatchController` (§1) + integrated web pass
-2. D5 leaf `remoteRefs`/DTO + broadcaster inversion (§4)
-3. Group N clusters one-at-a-time (§3), preferring non-cycle files first
-   (Projection\*, Provider\*, Checkpoint\*, terminal, orchestrationHandlers)
-   then Git\* after D5
-4. Optional ws terminal/workers handler aggregates (§2a) — only if still valuable
-5. ~~Group K last (§5)~~ **Done** (Phase 3c, uncommitted)
-6. ~~Group F chat directory regroup after §1 (D8)~~ **Done** (Phase 3c, uncommitted)
+1. ChatView send/retry and Group F chat regrouping landed in `e8d528caa`; the
+   integrated web pass remains deferred.
+2. D5 leaf extraction, broadcaster inversion, and Group N clusters landed in
+   `03a379c01` in the required dependency order.
+3. Group K landed behind stable export façades in `53e11fcaa`.
+4. Optional ws terminal/workers handler aggregates remain on hold unless a new
+   current-state design shows that they are still valuable.
 
 ---
 
@@ -704,19 +709,19 @@ after nest):
 
 | Blocker | Blocks | Resolution |
 | --- | --- | --- |
-| Design approval + Phase 3b go-ahead | All 3c body work | Human approve this pack |
+| Design approval + Phase 3b go-ahead | All 3c body work | Resolved; committed implementation is recorded above |
 | Plan 23 stop conditions | ChatView / ws / Claude | Still binding; §1 shows explicit-port path |
-| D5 vs Group N Git\* overlap | GitManager / Core PRs | Do §4 before those N clusters |
-| D7 “later” | Group K | App-local dumps first |
-| Uncommitted Phase 2/3a product work from other agents | Merge conflicts | Do not revert; rebase designs only |
-| Integrated web env for send/retry | §1 verification | `test-t3-app` at implementation time |
+| D5 vs Group N Git\* overlap | GitManager / Core PRs | Resolved in `03a379c01`; D5 landed first within the change |
+| D7 “later” | Group K | Resolved before `53e11fcaa` landed |
+| Integrated web env for send/retry | §1 verification | Still deferred; run `test-t3-app` before claiming runtime acceptance |
 
 ---
 
 ## Document control
 
 - Written: 2026-08-06 (Phase 3b)
-- Companion review ledger: update Group N / K / plan-23 / D5 rows to
-  **Designed (Phase 3b)** when this file lands
+- Refreshed: 2026-08-08 after the Phase 3c commits and merge were verified in
+  the current history
 - Plan 23 remains the historical checkpoint log; this file is the execution
-  design addendum for remaining gated work
+  design and committed execution record. Its explicit HOLDs and deferred
+  integrated client passes remain open.
