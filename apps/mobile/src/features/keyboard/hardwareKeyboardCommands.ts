@@ -57,8 +57,10 @@ export function dispatchHardwareKeyboardCommand(command: HardwareKeyboardCommand
 {
   const commandHandlers = handlers.get(command)
   if (!commandHandlers) return false
-  for (const handler of [...commandHandlers].toReversed())
+  const orderedHandlers = [...commandHandlers]
+  for (let index = orderedHandlers.length - 1; index >= 0; index -= 1)
   {
+    const handler = orderedHandlers[index]
     if (handler() !== false) return true
   }
   return false

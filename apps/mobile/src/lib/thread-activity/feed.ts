@@ -403,7 +403,7 @@ export function sortThreadActivities(
   activities: ReadonlyArray<OrchestrationThreadActivity>,
 ): ReadonlyArray<OrchestrationThreadActivity>
 {
-  return [...activities].toSorted(compareOrchestrationThreadActivities)
+  return [...activities].sort(compareOrchestrationThreadActivities)
 }
 export function buildThreadFeed(
   thread: OrchestrationThread,

@@ -67,6 +67,7 @@ const RELEASE_ASSETS = {
 const VARIANT_CONFIG = {
   development: {
     appName: '456code Dev',
+    iosModuleName: '_56codeDev',
     scheme: 'code456-dev',
     iosBundleIdentifier: 'com.ggfincke.code456.dev',
     androidPackage: 'com.ggfincke.code456.dev',
@@ -74,6 +75,7 @@ const VARIANT_CONFIG = {
   },
   preview: {
     appName: '456code Preview',
+    iosModuleName: '_56codePreview',
     scheme: 'code456-preview',
     iosBundleIdentifier: 'com.ggfincke.code456.preview',
     androidPackage: 'com.ggfincke.code456.preview',
@@ -81,6 +83,7 @@ const VARIANT_CONFIG = {
   },
   production: {
     appName: '456code',
+    iosModuleName: '_56code',
     scheme: 'code456',
     iosBundleIdentifier: 'com.ggfincke.code456',
     androidPackage: 'com.ggfincke.code456',
@@ -191,6 +194,9 @@ const config: ExpoConfig = {
     // sign in with Apple, or push notification entitlements).
     appleTeamId: 'ARK85ZXQ4Z',
     infoPlist: {
+      // swift prefixes module names that start with a digit. Expo resolves its
+      // generated module provider through CFBundleName, so keep both names exact.
+      CFBundleName: variant.iosModuleName,
       NSAppTransportSecurity: {
         NSAllowsArbitraryLoads: true,
       },

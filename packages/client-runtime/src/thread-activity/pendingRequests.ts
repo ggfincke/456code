@@ -136,7 +136,7 @@ export function derivePendingApprovals(
 ): PendingApproval[]
 {
   const openByRequestId = new Map<ApprovalRequestId, PendingApproval>()
-  const ordered = [...activities].toSorted(compareOrchestrationThreadActivities)
+  const ordered = [...activities].sort(compareOrchestrationThreadActivities)
 
   for (const activity of ordered)
   {
@@ -204,7 +204,7 @@ export function derivePendingApprovals(
     })
   }
 
-  return [...openByRequestId.values()].toSorted((left, right) =>
+  return [...openByRequestId.values()].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt),
   )
 }
@@ -214,7 +214,7 @@ export function derivePendingUserInputs(
 ): PendingUserInput[]
 {
   const openByRequestId = new Map<ApprovalRequestId, PendingUserInput>()
-  const ordered = [...activities].toSorted(compareOrchestrationThreadActivities)
+  const ordered = [...activities].sort(compareOrchestrationThreadActivities)
 
   for (const activity of ordered)
   {
@@ -256,7 +256,7 @@ export function derivePendingUserInputs(
     }
   }
 
-  return [...openByRequestId.values()].toSorted((left, right) =>
+  return [...openByRequestId.values()].sort((left, right) =>
     left.createdAt.localeCompare(right.createdAt),
   )
 }

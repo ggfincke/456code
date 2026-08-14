@@ -887,7 +887,7 @@ function retainMessagesAfterRevert(
           !retainedMessageIds.has(message.id) &&
           (message.turnId === null || retainedTurnIds.has(message.turnId)),
       )
-      .toSorted(
+      .sort(
         (left, right) =>
           left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id),
       )
