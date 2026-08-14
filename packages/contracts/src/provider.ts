@@ -89,16 +89,15 @@ export const ProviderRuntimeCapabilities = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed([] as const)),
   ),
 }).check(
-  Schema.makeFilter(
-    (capabilities) =>
-      capabilities.orchestrateInstructionDelivery === 'unsupported'
-        ? capabilities.orchestrateBaseModes.length === 0 ||
-          'Unsupported orchestrate delivery must advertise no orchestrate base modes.'
-        : (capabilities.orchestrateBaseModes.length > 0 &&
-            capabilities.orchestrateBaseModes.every((mode) =>
-              capabilities.supportedInteractionModes.includes(mode),
-            )) ||
-          'Orchestrate base modes must be non-empty and supported interaction modes.',
+  Schema.makeFilter((capabilities) =>
+    capabilities.orchestrateInstructionDelivery === 'unsupported'
+      ? capabilities.orchestrateBaseModes.length === 0 ||
+        'Unsupported orchestrate delivery must advertise no orchestrate base modes.'
+      : (capabilities.orchestrateBaseModes.length > 0 &&
+          capabilities.orchestrateBaseModes.every((mode) =>
+            capabilities.supportedInteractionModes.includes(mode),
+          )) ||
+        'Orchestrate base modes must be non-empty and supported interaction modes.',
   ),
 )
 export type ProviderRuntimeCapabilities = typeof ProviderRuntimeCapabilities.Type

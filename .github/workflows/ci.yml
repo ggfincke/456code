@@ -91,7 +91,7 @@ jobs:
           node scripts/patchPerformanceAcceptance.mjs
 
       - name: Smoke-test the Cartographer MCP server
-        run: node scripts/smoke-cartographer-mcp.ts
+        run: node --experimental-strip-types scripts/smoke-cartographer-mcp.ts
 
   test:
     name: Test
@@ -166,6 +166,13 @@ jobs:
           cache: true
           run-install: true
 
+      - name: Expose pnpm
+        run: |
+          pnpm_version="$(node --print "require('./package.json').packageManager.split('@').pop()")"
+          vp_pnpm_bin="$HOME/.vite-plus/package_manager/pnpm/$pnpm_version/pnpm/bin"
+          echo "$vp_pnpm_bin" >> "$GITHUB_PATH"
+          "$vp_pnpm_bin/pnpm" --version
+
       - name: Exercise release-only workflow steps
         run: node scripts/release-smoke.ts
 
@@ -188,6 +195,14 @@ jobs:
               - --filter=@t3tools/cartographer-core...
               - --filter=@t3tools/web...
               - --filter=@t3tools/scripts...
+
+      - name: Expose pnpm
+        shell: pwsh
+        run: |
+          $pnpmVersion = node --print "require('./package.json').packageManager.split('@').pop()"
+          $vpPnpmBin = Join-Path $env:USERPROFILE ".vite-plus/package_manager/pnpm/$pnpmVersion/pnpm/bin"
+          $vpPnpmBin | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          & (Join-Path $vpPnpmBin "pnpm.cmd") --version
 
       - name: Build CLI release graph
         run: vp run --filter 456code build
